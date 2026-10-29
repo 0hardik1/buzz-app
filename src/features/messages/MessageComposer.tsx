@@ -2953,7 +2953,7 @@ function Composer({
           (key) =>
             !session.agentChoices
               .snapshot()
-              .selectable.some((agent) => agent.pubkey === key),
+              .admissible.some((agent) => agent.pubkey === key),
         )
       )
         throw new Error(
