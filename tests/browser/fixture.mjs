@@ -37,6 +37,7 @@ export const test = base.extend({
   openingAdminSetup: [false, { option: true }],
   enabledPlugins: [[], { option: true }],
   builderlab: [{}, { option: true }],
+  relayPolicy: [undefined, { option: true, scope: "worker" }],
   /** The production broker's live setup deadline. It runs in Node, so the
    * page clock cannot hold it; a test that keeps EOSE pending sets it longer. */
   liveSetupTimeoutMs: [undefined, { option: true }],
@@ -147,6 +148,7 @@ export const test = base.extend({
       openingAdminSetup,
       enabledPlugins,
       builderlab,
+      relayPolicy,
       liveSetupTimeoutMs,
       liveDraw,
       actionProfile,
@@ -2650,6 +2652,7 @@ export const test = base.extend({
                 });
                 const broker = relayBrokerPlugin({
                   builderlab,
+                  relayPolicy,
                   archiveFile: ":memory:",
                   relayUrl: fixtureRelayUrl,
                   communityAliases: fixtureAliases,
