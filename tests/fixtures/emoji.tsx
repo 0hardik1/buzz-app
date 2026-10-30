@@ -55,6 +55,8 @@ const participantProfiles = new Map([
 const report = {
   publications: [] as { community: string; event: RelayEvent }[],
   reads: [] as string[],
+  /** Authors of each profile read, in order. */
+  profileReads: [] as string[][],
   reactionStarted: false,
 };
 const sessions = ["a", "b"].map((community) => {
@@ -158,6 +160,8 @@ const sessions = ["a", "b"].map((community) => {
           }
           return [catalog];
         }
+        if (filters[0]?.kinds?.includes(0))
+          report.profileReads.push(filters[0].authors ?? []);
         return [
           roster(relay, "c", [viewer.pubkey], 1),
           metadata(relay, "c", "Test", 1),
