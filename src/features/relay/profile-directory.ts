@@ -59,6 +59,10 @@ export interface ProfileQueries {
    * background reads asked for before the release. A view that requested names
    * once and skips repeats must request again after it moves. */
   evictions?(): number;
+  /** Moves only when a shrink cancels pending background reads, whose ensure
+   * then resolves without them. Unlike evictions(), no read moves it: a view
+   * whose names outgrow the byte budget evicts some of them with each read. */
+  cancellations?(): number;
   /** The community's current verified-profile authority, or undefined while
    * it advertises none. Subscribers are notified when it changes. */
   verifiedAuthority?(): VerifiedProfileAuthority | undefined;
@@ -593,6 +597,7 @@ export function createProfileDirectory(
     reserve,
     limit: () => opened,
     evictions: () => events.evictions + cancelled,
+    cancellations: () => cancelled,
     verifiedAuthority: () => verified?.authority(),
     // Held evidence and its projection become visible in the same publication.
     verifiedHeld: (pubkey: string) => publishedVerifiedHeads.has(pubkey),
