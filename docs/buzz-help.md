@@ -75,6 +75,17 @@ if that desktop app is up and running.
 
 ## Getting started
 
+- **Welcome channel**: on relays that support it, a community can choose a
+  public channel that new members join and open first. It starts with a
+  welcome card for everyone, showing the community's message or a default one.
+  The card isn't a message: it can't be replied to, deleted or dismissed. While
+  a new member's channels arrive, Messages says it is opening them. If none
+  arrive, **Try again** reconnects. Owners and admins choose the channel and edit
+  the message, up to 1,000 characters of plain text, in **Settings → Community
+  admin → Welcome**. That card appears only when the relay supports a welcome
+  channel. People already in the community keep their channels when the welcome
+  channel changes.
+
 - **First launch.** Sign in with an account, or use **Other options** to join
   a community by its address or an invite link, or to bring an existing key.
   Someone who used an older Buzz on this computer can bring that identity over.

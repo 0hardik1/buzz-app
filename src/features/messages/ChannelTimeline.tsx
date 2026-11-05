@@ -228,6 +228,9 @@ export type ChannelTimelineProps = {
   chatPresentation?: boolean | undefined;
   /** False: rows open existing threads but offer none to start; see MessageRow. */
   startsThreads?: boolean | undefined;
+  /** Shown above the first message once all history is loaded; it is not a
+   * message and replaces the empty-conversation notice. */
+  start?: ReactNode;
   onOpenLink(url: string, origin?: MessageLinkOrigin): boolean;
   canOpenLink?: ((target: string) => boolean) | undefined;
   revealMessageId?: string | undefined;
@@ -294,6 +297,7 @@ function Timeline({
   onOpenMediaReview,
   chatPresentation = false,
   startsThreads = true,
+  start,
 }: ChannelTimelineProps) {
   useMessageSelectionCopy();
   const shownIntro =
@@ -950,6 +954,12 @@ function Timeline({
       window.error)
   )
     setReserveHistorySpace(true);
+  // The measured edge carries the start content, so Virtua offsets rows below it.
+  const atStart =
+    !!start &&
+    window.status === "ready" &&
+    !window.hasMore &&
+    !window.historyLimited;
   const handle = useRef<VirtualizerHandle>(null);
   const [size, setSize] = useState({ width: 0, height: 0, edgeHeight: 0 });
   const width = size.width;
@@ -2180,9 +2190,11 @@ function Timeline({
         className={styles.edge}
         data-history-space={reserveHistorySpace || undefined}
         data-intro={!!shownIntro || undefined}
+        data-start={atStart || undefined}
       >
         {shownIntro}
         {edgeError && <span role="alert">{edgeError}</span>}
+        {atStart && start}
         {window.historyLimited ? (
           <span>History window limit reached</span>
         ) : window.hasMore && queries.channels.cachedOnly ? (
@@ -2423,6 +2435,7 @@ function Timeline({
       )}
       {!rows.length &&
         !shownIntro &&
+        !atStart &&
         !window.hasMore &&
         window.status === "ready" &&
         !window.error &&

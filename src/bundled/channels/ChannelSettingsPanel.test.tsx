@@ -409,6 +409,8 @@ function lifecycle(available = true) {
     subscribe: () => () => {},
     observeRemoval: () => () => {},
     refreshVisibility: async () => {},
+    readLanding: vi.fn(),
+    setLanding: vi.fn(),
   } satisfies ChannelLifecycleCapability;
 }
 function membership(role: Role | undefined) {
