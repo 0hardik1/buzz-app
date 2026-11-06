@@ -399,6 +399,8 @@ export function WorkflowEditor({
                 />
               </Field>
               {enableSwitch}
+              {/* Definitions Form mode can't show have no Trigger settings. */}
+              {webhook}
               {details}
             </div>
           )}
