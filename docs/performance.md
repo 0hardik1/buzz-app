@@ -79,7 +79,8 @@ the two commits, collect a new baseline.
 ## Thread scrolling
 
 `thread-scroll` scrolls a 5,000-reply weekly-update thread from 40 authors
-(`tests/browser/perf/thread-corpus.mjs`, signed once per worker), with the
+(`tests/browser/perf/thread-corpus.mjs`, signed once per worker), each reply opening
+with its position in the thread ("Message #142"), with the
 panel's window of ten pages (460 replies) filled at the newest end first.
 `thread-scroll-deep-page` reads one older page into a window that has slid ten
 pages deep and reports its cadence, `readingShiftPx` (how far the row being read
