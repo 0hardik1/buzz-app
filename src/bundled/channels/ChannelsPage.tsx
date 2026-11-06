@@ -144,6 +144,14 @@ import { channelHasUnread } from "./useSidebarFilters";
 import { inFieldOutsideComposer } from "./conversation-rows";
 import styles from "./Channels.module.css";
 import type { CommunityReader } from "../../features/communities/service";
+import {
+  PinnedWelcome,
+  WelcomeMessage,
+} from "../../features/communities/WelcomeCard";
+import {
+  recordWelcomeFirstOpen,
+  usePinnedWelcome,
+} from "../../features/communities/welcome-pin";
 import type { CommunityInfo } from "../../features/communities/api";
 import { communityFromScope } from "../../features/relay/gifs";
 import { avatarMedia } from "../../shared/avatar-source";
@@ -451,7 +459,10 @@ function ChannelWorkspace({
     // Start the optional catalog afterward so opening Messages cannot strand it.
     if (list.status === "ready") queries.channelKit.ensure();
   }, [queries, list.status]);
+  // The join notice's height, or the pinned welcome's: never both at once.
   const [joinNoticeHeight, setJoinNoticeHeight] = useState(0);
+  // Before any passive effect, so the pinned welcome's first read has it.
+  useLayoutEffect(() => recordWelcomeFirstOpen(scope), [scope]);
   const [contentReadyChannel, setContentReadyChannel] = useState<string>();
   const [composerFocus, setComposerFocus] = useState(0);
   const [trackSoloMove, soloMoveNotices] = useSoloMoveRecovery(queries);
@@ -2566,6 +2577,18 @@ function ChannelWorkspace({
     current?.readOnly && !current.cached && current.viewerRole !== "guest"
       ? "This channel is archived and read-only."
       : "This channel is archived. It's read-only and hidden from your sidebar.";
+  const composes =
+    !!current &&
+    !current.archived &&
+    current.viewerRole !== "guest" &&
+    (!current.readOnly || !!current.cached);
+  const welcome = usePinnedWelcome({
+    session: queries,
+    scope,
+    channelId: current?.id,
+    // A member of the welcome channel, with its composer.
+    member: !!current?.landing && current.channelType === "stream" && composes,
+  });
   useChannelHistoryFocus(
     historyContainer,
     navigation,
@@ -2621,10 +2644,6 @@ function ChannelWorkspace({
             revealMessageId={
               sent?.channelId === current.id ? sent.id : undefined
             }
-            landing={current.landing && current.channelType === "stream"}
-            welcomeMessage={current.welcome}
-            welcomeTitle={current.welcomeTitle}
-            communities={communities}
           />
         ) : removed ? null : noChannels ? (
           <div className={styles.failed}>
@@ -2694,6 +2713,30 @@ function ChannelWorkspace({
               />
             )}
           </ChannelJoinNotice>
+        )}
+        {current && welcome.shown && (
+          <PinnedWelcome
+            key={`welcome:${current.id}`}
+            communities={communities}
+            scope={scope}
+            title={current.welcomeTitle}
+            onDismiss={(focused) => {
+              welcome.dismiss();
+              // Dismiss leaves with the card; typing is what comes next.
+              if (focused) setComposerFocus((value) => value + 1);
+            }}
+            onHeightChange={setJoinNoticeHeight}
+          >
+            <WelcomeMessage
+              message={current.welcome}
+              session={queries}
+              scope={scope}
+              channelId={current.id}
+              extensions={extensions}
+              onOpenLink={openLink}
+              canOpenLink={canOpenLink}
+            />
+          </PinnedWelcome>
         )}
       </section>
       {!cached && (
@@ -2833,9 +2876,10 @@ function ChannelWorkspace({
           className={`${styles.conversation}${solo ? ` ${styles.soloConversation}` : ""}`}
           style={
             {
-              "--channel-preview-inset": channelNotice
-                ? `calc(${joinNoticeHeight}px + var(--space-3))`
-                : "0px",
+              "--channel-preview-inset":
+                channelNotice || welcome.shown
+                  ? `calc(${joinNoticeHeight}px + var(--space-3))`
+                  : "0px",
             } as React.CSSProperties
           }
           data-attachment-drop-zone=""
