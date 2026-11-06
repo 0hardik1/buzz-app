@@ -59,6 +59,7 @@ export function WorkflowEditor({
   runs,
   details,
   status,
+  webhook,
   children,
   create = false,
   chooseChannel = false,
@@ -82,6 +83,7 @@ export function WorkflowEditor({
   runs?: ReactNode;
   details?: ReactNode;
   status?: ReactNode;
+  webhook?: ReactNode;
   children?: ReactNode;
   create?: boolean;
   chooseChannel?: boolean;
@@ -328,6 +330,7 @@ export function WorkflowEditor({
               disabled={disabled}
               selection={selection}
               onSelect={setSelection}
+              webhook={webhook}
               overview={
                 <div className="workflow-form">
                   <Field
