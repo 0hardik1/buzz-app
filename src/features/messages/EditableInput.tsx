@@ -453,6 +453,9 @@ export type EditableInputProps = Omit<
   acceptRecipient?(pubkey: string): MentionRecipient | null;
   /** Right-click or Mod+. on a shown annotation. Without it, marks are inert. */
   onAnnotationMenu?: ((request: AnnotationMenuRequest) => void) | undefined;
+  /** The source to insert for pasted text. Raw pastes and code blocks keep
+   * the text as copied. */
+  pastedText?(text: string): string;
 };
 
 const tableComponents: typeof sharedComponents = {
@@ -515,6 +518,7 @@ export function EditableInput({
   onSemanticPaste,
   acceptRecipient,
   onAnnotationMenu,
+  pastedText,
   ...events
 }: EditableInputProps & {
   draft: MentionDraft;
@@ -539,6 +543,7 @@ export function EditableInput({
     onSemanticPaste,
     acceptRecipient,
     onAnnotationMenu,
+    pastedText,
     disabled,
     placeholder,
     autocorrect,
@@ -557,6 +562,7 @@ export function EditableInput({
     onSemanticPaste,
     acceptRecipient,
     onAnnotationMenu,
+    pastedText,
     disabled,
     placeholder,
     autocorrect,
@@ -2807,6 +2813,8 @@ export function EditableInput({
                   externalLinkMarkdown(html, hasPlain ? plain : undefined))) ||
               plain ||
               "";
+            if (!code && current.current.pastedText)
+              text = current.current.pastedText(text);
             if (!text) return true;
             // A bare URL pasted over selected text links the selection, as other
             // editors do. editLink() owns the guards (code, resources, unsafe
