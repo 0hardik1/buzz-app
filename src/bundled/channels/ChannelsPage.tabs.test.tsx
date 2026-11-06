@@ -481,7 +481,8 @@ it.each(["side", "main"] as const)(
 
 /** A page over `events` with no saved selection and no registered panels.
  * A read waits for the promise `hold` returns for its filters, if any; the
- * relay's welcome-channel support is read from `landing`, if given. */
+ * relay's welcome-channel support is read from `landing`, if given. A history
+ * window is served only for a channel whose 39006 bounds are in `events`. */
 function workspace(
   events: RelayEvent[],
   viewer = keypair(),
@@ -617,6 +618,8 @@ it("opens the community's welcome channel before its auto-join channel and pins 
         ["welcome", "Say **hi**\nand introduce yourself."],
         ["welcome_title", "Hello, newcomer"],
       ]),
+      // Beta's history is empty.
+      bounds(authority, "beta", "head", { has_more: false, next_cursor: null }),
     ],
     viewer,
     authority,
