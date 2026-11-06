@@ -3665,6 +3665,7 @@ test("lifecycle uses dedicated shape-limited host routes, never the message writ
           ["h", id],
           ["landing", "false"],
           ["welcome", ""],
+          ["welcome_title", ""],
         ],
       },
       {
@@ -3674,6 +3675,16 @@ test("lifecycle uses dedicated shape-limited host routes, never the message writ
           ["h", id],
           ["landing", "true"],
           ["welcome", "a\rb"],
+          ["welcome_title", ""],
+        ],
+      },
+      {
+        ...template,
+        kind: 9002,
+        tags: [
+          ["h", id],
+          ["landing", "true"],
+          ["welcome", ""],
         ],
       },
       {
