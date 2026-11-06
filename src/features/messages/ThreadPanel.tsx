@@ -670,6 +670,12 @@ function ThreadMessages({
   const strict = snapshot.direction === "older";
   const walked = !snapshot.canLoadMore || snapshot.limited;
   const detached = strict && !!snapshot.canLoadBack;
+  // Only a window holding the whole thread counts newer rows as arrivals: a
+  // page read at either edge is history the reader scrolled to.
+  const complete =
+    snapshot.status === "ready" &&
+    !snapshot.canLoadMore &&
+    !snapshot.canLoadBack;
   const activitySnapshot = useActivityHistorySnapshot(
     session.agentActivity,
     channelId,
@@ -841,7 +847,7 @@ function ThreadMessages({
       0,
       ...snapshot.replies.map((reply) => reply.createdAt),
     ),
-    complete: snapshot.status === "ready" && walked,
+    complete,
   });
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [newMessageCount, setNewMessageCount] = useState(0);
@@ -1430,7 +1436,6 @@ function ThreadMessages({
   }, [view, snapshot, walked]);
   useLayoutEffect(() => {
     const previous = previousReplies.current;
-    const complete = snapshot.status === "ready" && walked;
     // Initial traversal has no baseline. Once complete, retain the last
     // observed replies through reconnect loading so recovery can reconcile them.
     if (!complete && !previous.complete) return;
@@ -1453,7 +1458,7 @@ function ThreadMessages({
       };
     if (arrivals > 0 && !follow.current)
       setNewMessageCount((count) => count + arrivals);
-  }, [snapshot.status, walked, snapshot.replies]);
+  }, [complete, snapshot.replies]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Rendered rows/profiles change scroll height; sending is explicit navigation intent.
   useLayoutEffect(() => {
     const element = scroller.current;
