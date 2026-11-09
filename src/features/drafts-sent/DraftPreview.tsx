@@ -95,7 +95,8 @@ export function DraftPreview({
     mode === "draft" && sent && received === sent ? sent : undefined;
   const reportSent = useEffectEvent(onSent);
   useEffect(() => {
-    if (delivered && flushPendingDraft(session.scope, entry.id)) reportSent(delivered);
+    if (delivered && flushPendingDraft(session.scope, entry.id))
+      reportSent(delivered);
   }, [delivered, session.scope, entry.id]);
   // The composer's draft cleanup usually precedes the receipt, but a failed
   // save is retried by hand, possibly after it, and then asks again. Only the
@@ -104,7 +105,12 @@ export function DraftPreview({
   // on an earlier send's receipt.
   // biome-ignore lint/correctness/useExhaustiveDependencies: only a cleanup asks again.
   useEffect(() => {
-    if (delivered && cleaned?.sent === delivered && flushPendingDraft(session.scope, entry.id)) reportSent(delivered);
+    if (
+      delivered &&
+      cleaned?.sent === delivered &&
+      flushPendingDraft(session.scope, entry.id)
+    )
+      reportSent(delivered);
   }, [cleaned]);
   const draftCleaned = (sent: string | undefined) => setCleaned({ sent });
   const sentMessage = (id: string) => {
