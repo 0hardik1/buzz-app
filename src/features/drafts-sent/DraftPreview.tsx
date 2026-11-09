@@ -65,14 +65,15 @@ export function DraftPreview({
   onOpen(): void;
   /** A thread's link to its conversation, opened there beside its root. */
   onOpenChannel(): void;
-  /** Once per draft send the relay confirms; the preview stays on its
-   * conversation, where the sent message now shows. */
-  onSent(): void;
+  /** A draft send the relay confirmed, once its draft is cleaned up; the
+   * preview stays on its conversation, where the sent message now shows. */
+  onSent(id: string): void;
 }) {
   const region = useRef<HTMLElement>(null);
   const [sent, setSent] = useState<string>();
   const sending = useRef<string | undefined>(undefined);
   const [received, setReceived] = useState<string>();
+  const [cleaned, setCleaned] = useState(0);
   // Receipts include fast echoes already retired from the pending outbox.
   // Observe delivery only; the composer still owns saving and recovery.
   useEffect(() => {
@@ -87,12 +88,16 @@ export function DraftPreview({
   }, [session]);
   // The relay has this draft's latest send. The preview stays open on its
   // conversation, which now shows it, and leaves focus alone; a newer send
-  // waits for its own receipt.
-  const delivered = mode === "draft" && !!sent && received === sent;
+  // waits for its own receipt. The composer's draft cleanup usually precedes
+  // the receipt, but a failed save is retried by hand, possibly after it.
+  const delivered =
+    mode === "draft" && sent && received === sent ? sent : undefined;
   const reportSent = useEffectEvent(onSent);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a cleanup landing after the receipt asks again.
   useEffect(() => {
-    if (delivered && flushPendingDraft(session.scope, entry.id)) reportSent();
-  }, [delivered, session.scope, entry.id]);
+    if (delivered && flushPendingDraft(session.scope, entry.id)) reportSent(delivered);
+  }, [delivered, cleaned, session.scope, entry.id]);
+  const draftCleaned = () => setCleaned((count) => count + 1);
   const sentMessage = (id: string) => {
     sending.current = id;
     setSent(id);
@@ -228,6 +233,7 @@ export function DraftPreview({
               requireReadyRoot={mode === "draft"}
               autoFocus={autoFocus && mode === "draft"}
               onSend={sentMessage}
+              onDraftSaved={draftCleaned}
               active={mode === "sent"}
               parent={{ label: parentLabel, open: onOpenChannel }}
             />
@@ -239,6 +245,7 @@ export function DraftPreview({
               writable={!!writable}
               autoFocus={autoFocus && mode === "draft"}
               onSend={sentMessage}
+              onDraftSaved={draftCleaned}
             />
           )}
         </ConversationChannel>
@@ -276,6 +283,7 @@ function DraftChannel({
   writable,
   autoFocus,
   onSend,
+  onDraftSaved,
 }: {
   title: string;
   target?: Entry | undefined;
@@ -283,6 +291,7 @@ function DraftChannel({
   writable: boolean;
   autoFocus: boolean;
   onSend(id: string): void;
+  onDraftSaved(): void;
 }) {
   const { session, channelId } = useConversation();
   const channelWindow = useChannelWindow(session.channels, channelId);
@@ -420,6 +429,7 @@ function DraftChannel({
               setOutgoing(id);
               onSend(id);
             }}
+            onDraftSaved={onDraftSaved}
           />
         )}
       </div>
