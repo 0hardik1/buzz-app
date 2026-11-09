@@ -35,6 +35,7 @@ import {
   keypair,
   message,
   metadata,
+  profile,
   roster,
   signed,
 } from "../relay/testing";
@@ -43,6 +44,7 @@ import { readView, writeView } from "../../shared/view-state";
 
 // jsdom has no measured viewport. Keep real rows/composer/services, replacing
 // only virtualization geometry; browser acceptance covers actual layout.
+const virtua = vi.hoisted(() => ({ scrollToIndex: vi.fn() }));
 vi.mock("virtua", async () => {
   const { forwardRef, useImperativeHandle } = await import("react");
   return {
@@ -55,10 +57,10 @@ vi.mock("virtua", async () => {
         scrollSize: 600,
         findItemIndex: () => 0,
         getItemOffset: () => 0,
-        scrollToIndex() {},
+        scrollToIndex: virtua.scrollToIndex,
         scrollTo() {},
       }));
-      return <div>{children}</div>;
+      return <div data-virtual-list="">{children}</div>;
     }),
   };
 });
@@ -74,7 +76,10 @@ afterEach(() => {
 });
 function fixture(
   upload?: () => Promise<UploadedAttachment>,
-  { privateRoom = false } = {},
+  {
+    privateRoom = false,
+    dm = [],
+  }: { privateRoom?: boolean; dm?: readonly string[] } = {},
 ) {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
@@ -91,7 +96,27 @@ function fixture(
     other = keypair(),
     relayKey = keypair();
   const root = message(other, "room", "Discuss launch", 20);
+  // A DM with these people and a thread to reply in. Discovery orders
+  // participants by key, so names follow key order: the page lists them so.
+  const people = dm
+    .map(() => keypair())
+    .sort((a, b) => (a.pubkey < b.pubkey ? -1 : 1))
+    .map((key, index) => ({ key, name: dm[index] }));
+  const dmRoot = message(people[0]?.key ?? other, "dm", "Lunch plans?", 20);
   const events: RelayEvent[] = [
+    ...(people.length
+      ? [
+          metadata(relayKey, "dm", "dm", 10, [["t", "dm"]]),
+          roster(
+            relayKey,
+            "dm",
+            [viewer.pubkey, ...people.map((person) => person.key.pubkey)],
+            10,
+          ),
+          ...people.map((person) => profile(person.key, { name: person.name })),
+          dmRoot,
+        ]
+      : []),
     metadata(relayKey, "room", "Design", 10, [
       ["t", "stream"],
       ...(privateRoom ? [["private"]] : []),
@@ -328,6 +353,7 @@ function fixture(
     panels,
     host: { panels, relay, navigation: { open } as unknown as Navigation },
     root,
+    dmRoot,
     published,
     publish,
     open,
@@ -555,6 +581,33 @@ it("reopens a saved task draft, edits it, and sends in the task branch", async (
   expect(mentionDraft(readView(h.session.scope, key, "")).text).toBe("");
   expect(mentionDraft(readView(h.session.scope, ordinaryKey, "")).text).toBe(
     "Ordinary source draft",
+  );
+});
+
+it("names a DM's thread as thread tabs do, while the page keeps its own names", async () => {
+  const h = fixture(undefined, { dm: ["Zed", "Amy", "Mia", "Bob"] });
+  writeView(h.session.scope, `draft:dm:thread:${h.dmRoot.id}`, "Noon works");
+  h.render();
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Continue draft.*Noon works/ }),
+  );
+  const region = await screen.findByRole("region", {
+    name: "Draft for Zed, Amy, Mia +1",
+  });
+  const thread = await within(region).findByRole("complementary", {
+    name: "Thread",
+  });
+  const link = await within(thread).findByRole("button", {
+    name: "DM · Amy, Bob, Mia +1",
+  });
+  expect(link.closest("p")).toHaveTextContent("In DM · Amy, Bob, Mia +1");
+  fireEvent.click(link);
+  expect(h.open).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      channelId: "dm",
+      threadRootId: h.dmRoot.id,
+      context: "channel",
+    }),
   );
 });
 
@@ -955,6 +1008,7 @@ it.each([
     const props = {
       entry: { id: "draft:room", channelId: "room", text: "Keep this" },
       title: "#Design",
+      parentLabel: "#Design",
       session: h.session,
       host: h.host,
       autoFocus: false,
@@ -1017,6 +1071,49 @@ it("clears the live announcement between two sends from the same open preview", 
     "Second",
   ]);
 });
+
+it.each([
+  { control: "row", neighbor: true },
+  { control: "clear button", neighbor: false },
+])(
+  "moves focus off the sent draft's $control as its row leaves (neighbor=$neighbor)",
+  async ({ control, neighbor }) => {
+    const h = fixture();
+    const release = h.hold();
+    writeView(h.session.scope, "draft:room", "Slow send");
+    if (neighbor) writeView(h.session.scope, "draft:other", "Other draft");
+    h.render();
+    try {
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: /Continue draft.*Slow send/,
+        }),
+      );
+      const region = screen.getByRole("region", { name: "Draft for #Design" });
+      await within(region).findByRole("textbox");
+      fireEvent.click(
+        within(region).getByRole("button", { name: "Send message" }),
+      );
+      await waitFor(() => expect(h.publish).toHaveBeenCalled());
+      // Back in the list while the send is still on its way.
+      (control === "row"
+        ? draftButton("Empty draft")
+        : screen.getByRole("button", {
+            name: /Clear draft in #Design: Empty draft/,
+          })
+      ).focus();
+    } finally {
+      await act(async () => release());
+    }
+    await screen.findByText("Sent to #Design.");
+    expect(
+      screen.queryByRole("button", { name: /Continue draft in #Design/ }),
+    ).toBeNull();
+    expect(
+      neighbor ? draftButton("Other draft") : screen.getByRole("searchbox"),
+    ).toHaveFocus();
+  },
+);
 
 it("closes to a draft written again after a send", async () => {
   const h = fixture();
@@ -1192,6 +1289,58 @@ it("opens a cold sent channel preview with an empty composer and locates the mes
     ).toBeInTheDocument(),
   );
   expect(within(region).queryByText(/could not be found/)).toBeNull();
+});
+
+it("reveals a draft's send to a reader scrolled above the latest message", async () => {
+  const h = fixture();
+  h.seedHistory(false);
+  writeView(h.session.scope, "draft:room", "Sent from above");
+  h.render();
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: /Continue draft.*Sent from above/,
+    }),
+  );
+  const region = screen.getByRole("region", { name: "Draft for #Design" });
+  const history = await within(region).findByRole("region", {
+    name: "Channel message history",
+  });
+  await waitFor(() =>
+    expect(history.querySelector("[data-message-id]")).not.toBeNull(),
+  );
+  // Read from the bottom, then scroll up, away from the latest message.
+  let offset = 4400;
+  Object.defineProperty(history, "scrollHeight", { get: () => 5000 });
+  Object.defineProperty(history, "scrollTop", {
+    get: () => offset,
+    set: (next: number) => {
+      offset = next;
+    },
+  });
+  fireEvent.scroll(history);
+  fireEvent.wheel(history, { deltaY: -600 });
+  offset = 1000;
+  fireEvent.scroll(history);
+  virtua.scrollToIndex.mockClear();
+  fireEvent.click(within(region).getByRole("button", { name: "Send message" }));
+  await within(region).findByText("Sent to #Design.");
+  const sent = h.published.find((event) => event.content === "Sent from above");
+  const row = await waitFor(() => {
+    const found = history.querySelector(`[data-message-id="${sent?.id}"]`);
+    expect(found).not.toBeNull();
+    return found as HTMLElement;
+  });
+  const items = [
+    ...(history.querySelector("[data-virtual-list]")?.children ?? []),
+  ];
+  const index = items.findIndex((item) => item.contains(row));
+  expect(index).toBeGreaterThan(0);
+  await waitFor(() =>
+    expect(virtua.scrollToIndex).toHaveBeenCalledWith(
+      index,
+      expect.objectContaining({ align: "end" }),
+    ),
+  );
 });
 
 it("reveals and highlights an off-screen Sent reply in its visible preview", async () => {
@@ -1391,6 +1540,7 @@ it.each([false, true])(
         }}
         mode="sent"
         title="#Design"
+        parentLabel="#Design"
         channel={h.session.channels.get?.("room")}
         session={h.session}
         host={h.host}
