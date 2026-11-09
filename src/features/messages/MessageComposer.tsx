@@ -250,6 +250,9 @@ type AcceptedDraft = {
   revision: string | null | undefined;
   retirementCursor: number | undefined;
   retiredByOwner?: boolean;
+  /** The accepted message, once published. A background send clears its
+   * draft first, so its cleanup may run before the id is known. */
+  sent?: string;
 };
 // Failed post-acceptance cleanup survives composer remounts within this session.
 // This is recovery evidence only, not another persistent draft inventory.
@@ -383,8 +386,10 @@ export type MessageComposerProps = {
   onCommand?:
     | ((command: string, signal: AbortSignal) => boolean | Promise<boolean>)
     | undefined;
-  /** Inbox may retire only after saving the replacement or confirming no draft remains. */
-  onDraftSaved?: (() => void) | undefined;
+  /** Inbox may retire only after saving the replacement or confirming no
+   * draft remains. Receives the id of the send the cleanup followed, if it
+   * was published by then: a background send is cleaned up before it is. */
+  onDraftSaved?: ((sent: string | undefined) => void) | undefined;
   /** Before a focused form detaches, its host can hand focus to retained content. */
   onFocusedRemoval?: (() => void) | undefined;
   /** Threads supply their own retained rows; channels use the shared window. */
@@ -2010,7 +2015,7 @@ function Composer({
     }
     dirty.current = false;
     edited.current = false;
-    onDraftSaved?.();
+    onDraftSaved?.(pending.sent);
   }
   useEffect(() => {
     if (outbox?.supports(9)) void session.emoji.ensure();
@@ -3637,6 +3642,11 @@ function Composer({
         );
       };
       let id: string | undefined;
+      const pending: AcceptedDraft = {
+        next: mentionDraft(""),
+        revision: savedRevision,
+        retirementCursor,
+      };
       if (capturedAttachments.length && !fullSession(session)) {
         setSending(true);
         const uploaded = await attachments.store.prepareForSend(attempt.signal);
@@ -3671,6 +3681,7 @@ function Composer({
             // Report a synchronous publication before the new row can render.
             const result = publish(uploaded);
             const sent = typeof result === "string" ? result : await result;
+            if (sent) pending.sent = sent;
             if (sent && live.current) onSend?.(sent);
           },
           (files, preparationError) => {
@@ -3767,12 +3778,8 @@ function Composer({
       // in memory, and any composer here, on any device, seeds them from the
       // sent message once it lands (see seedMentions).
       const followUp = next;
-      const pending = {
-        next: mentionDraft(""),
-        revision: savedRevision,
-        retirementCursor,
-        retiredByOwner,
-      };
+      pending.retiredByOwner = retiredByOwner;
+      if (id) pending.sent = id;
       recoveryFor(session).set(recoveryKey, pending);
       setAccepted(pending);
       attachments.store.clear();
