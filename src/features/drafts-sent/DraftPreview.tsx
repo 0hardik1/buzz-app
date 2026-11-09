@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   ConversationChannel,
   ConversationComposer,
@@ -14,10 +8,6 @@ import {
 } from "../conversation/Conversation";
 import type { ConversationHostServices } from "../conversation/ConversationHost";
 import type { ConversationExtensions } from "../conversation/contracts";
-import {
-  attachmentDraftCount,
-  subscribeAttachmentDraftCounts,
-} from "../messages/attachment-draft";
 import { ChannelJoinNotice } from "../messages/ChannelJoinNotice";
 import { MessageEditScope } from "../messages/MessageEditScope";
 import { mentionDraft } from "../messages/mention-draft";
@@ -25,7 +15,7 @@ import type { RelaySession } from "../relay/session";
 import type { ChannelSummary } from "../relay/contracts";
 import { useChannelWindow } from "../relay/react";
 import { flushPendingDraft } from "../messages/MessageComposer";
-import { readView, viewRevision } from "../../shared/view-state";
+import { readView } from "../../shared/view-state";
 import { writeClipboardText } from "../../shared/clipboard";
 import { Button } from "../../shared/design-system/ui/Button";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
@@ -56,7 +46,8 @@ export function DraftPreview({
   autoFocus,
   onClose,
   onOpen,
-  onSaved,
+  onOpenChannel,
+  onSent,
 }: {
   entry: Entry;
   mode?: "draft" | "sent";
@@ -69,19 +60,16 @@ export function DraftPreview({
   autoFocus: boolean;
   onClose(): void;
   onOpen(): void;
-  onSaved(restoreFocus: boolean): void;
+  /** A thread's link to its conversation, opened there beside its root. */
+  onOpenChannel(): void;
+  /** Once per draft send the relay confirms; the preview stays on its
+   * conversation, where the sent message now shows. */
+  onSent(): void;
 }) {
   const region = useRef<HTMLElement>(null);
   const [sent, setSent] = useState<string>();
   const sending = useRef<string | undefined>(undefined);
   const [received, setReceived] = useState<string>();
-  const attachmentCount = useSyncExternalStore(
-    useCallback(
-      (notify) => subscribeAttachmentDraftCounts(session, notify),
-      [session],
-    ),
-    () => attachmentDraftCount(session, `${session.scope}:${entry.id}`),
-  );
   // Receipts include fast echoes already retired from the pending outbox.
   // Observe delivery only; the composer still owns saving and recovery.
   useEffect(() => {
@@ -94,39 +82,18 @@ export function DraftPreview({
       stop?.();
     };
   }, [session]);
-  const [cleaned, setCleaned] = useState<{
-    revision: string | null | undefined;
-  }>();
+  // The relay has this draft's latest send. The preview stays open on its
+  // conversation, which now shows it, and leaves focus alone; a newer send
+  // waits for its own receipt.
+  const delivered = mode === "draft" && !!sent && received === sent;
+  const reportSent = useEffectEvent(onSent);
   useEffect(() => {
-    if (
-      mode === "draft" &&
-      cleaned &&
-      sent &&
-      received === sent &&
-      attachmentCount === 0 &&
-      flushPendingDraft(session.scope, entry.id) &&
-      viewRevision(session.scope, entry.id) === cleaned.revision
-    )
-      onSaved(
-        document.activeElement === document.body ||
-          !!region.current?.contains(document.activeElement),
-      );
-  }, [
-    cleaned,
-    sent,
-    received,
-    session,
-    entry.id,
-    onSaved,
-    mode,
-    attachmentCount,
-  ]);
+    if (delivered && flushPendingDraft(session.scope, entry.id)) reportSent();
+  }, [delivered, session.scope, entry.id]);
   const sentMessage = (id: string) => {
     sending.current = id;
     setSent(id);
   };
-  const draftSaved = () =>
-    setCleaned({ revision: viewRevision(session.scope, entry.id) });
   const close = useRef<HTMLButtonElement>(null);
   const back = useRef<HTMLButtonElement>(null);
   const [copyStatus, setCopyStatus] = useState("");
@@ -257,9 +224,16 @@ export function DraftPreview({
               revealFocus={false}
               requireReadyRoot={mode === "draft"}
               autoFocus={autoFocus && mode === "draft"}
-              onDraftSaved={draftSaved}
               onSend={sentMessage}
               active={mode === "sent"}
+              // Named as thread tabs name their conversation; opens it there.
+              parent={{
+                label:
+                  channel.channelType === "dm"
+                    ? `DM · ${title}`
+                    : `#${channel.name}`,
+                open: onOpenChannel,
+              }}
             />
           ) : (
             <DraftChannel
@@ -268,7 +242,6 @@ export function DraftPreview({
               channel={channel}
               writable={!!writable}
               autoFocus={autoFocus && mode === "draft"}
-              onSaved={draftSaved}
               onSend={sentMessage}
             />
           )}
@@ -292,6 +265,9 @@ export function DraftPreview({
           </p>
         </div>
       )}
+      <p role="status" className="sr-only">
+        {delivered ? `Sent to ${title}.` : ""}
+      </p>
     </section>
   );
 }
@@ -303,7 +279,6 @@ function DraftChannel({
   channel,
   writable,
   autoFocus,
-  onSaved,
   onSend,
 }: {
   title: string;
@@ -311,7 +286,6 @@ function DraftChannel({
   channel: ChannelSummary;
   writable: boolean;
   autoFocus: boolean;
-  onSaved(): void;
   onSend(id: string): void;
 }) {
   const { session, channelId } = useConversation();
@@ -383,6 +357,9 @@ function DraftChannel({
               window={channelWindow}
               transient
               inlineTarget={reveal}
+              // A Sent preview's reveal follows its reply; a draft's send shows
+              // as a channel's does, even to a reader scrolled up.
+              revealMessageId={target ? undefined : outgoing}
             />
           )}
           {channelWindow.status === "error" || channelWindow.error ? (
@@ -443,7 +420,6 @@ function DraftChannel({
           <ConversationComposer
             label={`Message ${title}`}
             autoFocus={autoFocus}
-            onDraftSaved={onSaved}
             onSend={(id) => {
               setOutgoing(id);
               onSend(id);
