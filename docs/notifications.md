@@ -216,16 +216,21 @@ revoked-access rejection. A macOS pass is not Windows/Linux acceptance.
 
 ## macOS Dock unread badge
 
-The host projects one dot from the selected community's existing unread selectors:
-observed unread messages (including thread replies) or explicit channel-unread
-intent. It is not an exact message count or evidence of complete history. Unknown
-and observed-zero both omit the dot. Existing bounded evidence/read-state owns
+The host projects one badge from the selected community's existing unread
+selectors. A number sums the channels' observed `directCount` and `mentionCount`:
+unread direct messages and messages that mention the viewer, one per message.
+Otherwise a dot marks other observed unread messages, including relevant thread
+replies, or explicit channel-unread intent. The number is observed evidence, not
+an exact relay total or evidence of complete history: bounded evidence can
+undercount after a long absence, and missing markers can overcount. Unknown and
+observed-zero both omit the badge. Existing bounded evidence/read-state owns
 startup and updates; this projection adds no relay reads, network subscriptions,
-or storage. Confirmed channel mutes count as the sidebar row shows them: a muted channel
-lights the dot only for a mention of you or manual unread, and a muted DM still
-lights it. Muting removes no retained unread evidence, so unmuting can restore
-the dot. The dot
-stays clear while mute preferences are unresolved. Personal space,
+or storage. Confirmed channel mutes follow the sidebar rows for the dot: a muted
+channel lights it only for a mention of you or manual unread, and a muted DM
+still lights it. The count takes only a muted conversation's mentions
+(`mentionCount` never includes DMs). Muting removes no retained unread evidence,
+so unmuting can restore the badge. The badge stays clear while mute preferences
+are unresolved. Personal space,
 account/session changes, access loss and host disposal clear or recompute the
 indicator. Disabling Channels does not stop host ownership. Desktop alert
 preferences do not alter this unread indicator.
@@ -249,7 +254,7 @@ Badge for a fresh NotDetermined identity. **Set up Dock badges** explicitly requ
 Badge alone when an already Authorized identity reports NotSupported. Startup,
 focus, and **Check Dock permission** only read settings; they never register or
 repair permissions. Denied authorization and explicitly Disabled badges are never
-re-requested. macOS System Settings controls badge opt-out. Errors withhold the dot
+re-requested. macOS System Settings controls badge opt-out. Errors withhold the badge
 and are shown; a later focus or explicit check can retry a failed read.
 
 This permission capability requires an actual macOS `.app` bundle. Unbundled

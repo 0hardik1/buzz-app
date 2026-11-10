@@ -12,8 +12,13 @@ export type UnreadGates = Readonly<{
 }>;
 
 /** One community's unread, as its sidebar rows show it. `attention` counts
- * the rows' mentions, DMs and followed-thread replies. */
-export type CommunityUnread = Readonly<{ unread: boolean; attention: number }>;
+ * the rows' mentions, DMs and followed-thread replies. `count`, for the Dock
+ * badge, sums unread mentions and unmuted direct messages; absent when zero. */
+export type CommunityUnread = Readonly<{
+  unread: boolean;
+  attention: number;
+  count?: number;
+}>;
 
 /** Observes one community session's existing unread evidence, never a new read
  * owner. `publish` gets `undefined` until confirmed mutes are known, so an
@@ -44,6 +49,7 @@ export function observeCommunityUnread(
     const muted = new Set(preferences.data?.muted ?? []);
     let unread = false;
     let attention = 0;
+    let count = 0;
     let observed = 0;
     for (const channelId of channels.keys()) {
       const snapshot = session.unread.snapshot({ kind: "channel", channelId });
@@ -56,9 +62,11 @@ export function observeCommunityUnread(
       if (rowUnread(snapshot, dms.has(channelId), muted.has(channelId)))
         unread = true;
       attention += (snapshot.row ?? snapshot).attentionCount ?? 0;
+      count += snapshot.mentionCount ?? 0;
+      if (!muted.has(channelId)) count += snapshot.directCount ?? 0;
     }
     if (known && !observed) return publish(undefined);
-    publish({ unread, attention });
+    publish({ unread, attention, ...(count ? { count } : {}) });
   };
   const roster = () => {
     if (closed) return;

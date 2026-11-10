@@ -641,8 +641,12 @@ and are asked to sign in again in Buzz.
   you. Unmute restores ordinary unread emphasis and dots. Manual **Mark as unread**
   can still make the name bold. Muted rows show no unread dots, including thread
   dots, and do not contribute to the sidebar’s floating **N unread** buttons or
-  their avatar previews. The macOS Dock unread dot follows the rows: a muted channel
-  lights it only for a mention of you or **Mark as unread**, and a muted DM still lights it.
+  their avatar previews. On macOS, the Dock badge counts unread direct messages
+  and mentions of you in the selected community, or shows a dot for other unread
+  messages, following the sidebar rows. A muted channel adds only mentions to the
+  count and lights the dot only for a mention or **Mark as unread**; a muted DM
+  shows a dot but no count. The count reflects what Buzz has loaded, not an exact
+  server total.
   Muting does not mark messages or threads as read.
 - **Hidden DMs**: **Close conversation** and **Hide conversation** take a DM out
   of the sidebar without leaving it. To find one again, start a **New message**
@@ -1659,7 +1663,7 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   **Open plugin** shows it in Manage plugins, where you can delete it first.
 - **Focus**, when its optional plugin is on, is in the profile menu. For a
   chosen time it shows only Solo chats in the sidebar and lets only Solo chats
-  in the selected community show banners, play sounds or light the Dock dot. Links and search still open
+  in the selected community show banners, play sounds or light the Dock badge. Links and search still open
   any conversation. Other alerts are not shown or saved, and those
   conversations keep their unread state. Focus sets 🔭 Focusing as the status
   in the selected community. When Focus ends there, the earlier status comes

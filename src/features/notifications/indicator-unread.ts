@@ -2,26 +2,31 @@ import type { Communities } from "../communities/service";
 import type { RelaySession } from "../relay/session";
 import { communityDestination } from "../communities/destination";
 import { observeCommunityUnread, type UnreadGates } from "./community-unread";
+import { NO_BADGE, type UnreadBadge } from "./indicator";
 
 /** Notification gates: only conversations they allow light the indicator. */
 export type IndicatorGates = UnreadGates;
 
-/** A host projection of the selected community's existing evidence, never a
- * count or a new read owner. */
+/**
+ * A host projection of existing evidence, never a new read owner. The count
+ * is observed unread direct messages and mentions of the viewer; muted
+ * conversations contribute only their mentions. It is not an exact relay total.
+ */
 export function bindUnreadIndicator(
   communities: Communities,
-  project: (unread: boolean) => void,
+  project: (badge: UnreadBadge) => void,
   gates?: IndicatorGates,
 ) {
   let closed = false;
   let session: RelaySession | undefined;
   let identity = "";
-  let previous: boolean | undefined;
+  let previous: UnreadBadge | undefined;
   let stopObserving = () => {};
-  const publish = (unread: boolean) => {
-    if (unread === previous) return;
-    previous = unread;
-    project(unread);
+  const publish = (badge: UnreadBadge) => {
+    if (badge.unread === previous?.unread && badge.count === previous.count)
+      return;
+    previous = badge;
+    project(badge);
   };
   const update = () => {
     if (closed) return;
@@ -40,13 +45,18 @@ export function bindUnreadIndicator(
     stopObserving = () => {};
     session = owned;
     identity = next;
-    publish(false);
+    publish(NO_BADGE);
     if (!owned) return;
     stopObserving = observeCommunityUnread(
       owned,
       client.viewer as string,
       communityDestination(client.selected as string).url,
-      (state) => publish(!!state?.unread),
+      (state) => {
+        const count = state?.count ?? 0;
+        publish(
+          state ? { unread: state.unread || count > 0, count } : NO_BADGE,
+        );
+      },
       gates,
     );
   };
@@ -60,6 +70,6 @@ export function bindUnreadIndicator(
     stopRelay();
     stopObserving();
     session = undefined;
-    publish(false);
+    publish(NO_BADGE);
   };
 }
