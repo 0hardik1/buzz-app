@@ -1,6 +1,6 @@
 import {
   membershipFilter,
-  MEMBERSHIP_TYPES,
+  validMembershipTypes,
   membershipText,
   MEMBERSHIP_BYTES,
   admitMembershipSnapshot,
@@ -2598,13 +2598,7 @@ export function relayBrokerPlugin({
               !filters ||
               Object.keys(filters).length !== 1 ||
               !Array.isArray(types) ||
-              !types.length ||
-              types.length > MEMBERSHIP_TYPES.length ||
-              types.some(
-                (type, index) =>
-                  !MEMBERSHIP_TYPES.includes(type) ||
-                  (index > 0 && types[index - 1] >= type),
-              )
+              !validMembershipTypes(types)
             )
               return json(res, 400, { error: "Invalid membership types" });
             if ((inflight.get(relay) ?? 0) >= MAX_INFLIGHT)
@@ -2620,7 +2614,7 @@ export function relayBrokerPlugin({
               ]);
               const result = await admitMembershipSnapshot(
                 admissions(relay, viewer).api,
-                async () => {
+                AsyncLocalStorage.bind(async () => {
                   signal.throwIfAborted();
                   const body = JSON.stringify(membershipFilter(viewer, types));
                   const auth = finalizeEvent(
@@ -2660,7 +2654,7 @@ export function relayBrokerPlugin({
                       origin: new URL(relay).origin,
                     },
                   };
-                },
+                }),
                 signal,
                 req.headers["x-buzz-read-priority"] === "background"
                   ? "background"
