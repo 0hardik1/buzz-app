@@ -275,6 +275,9 @@ const mcpTools = (row: McpRow): HarnessMcpTool[] =>
     name,
     ...(description ? { description } : {}),
   }));
+/** Plugin hooks' budget for a native hook other than Interrupt, inside
+ * Codex's 30 s hook limit. */
+export const PLUGIN_HOOK_MS = 25_000;
 /** Codex's model-visible name for a name: other characters become `_`. */
 const modelName = (text: string) => text.replace(/[^A-Za-z0-9_]/g, "_");
 /** The server, and the tool where known, behind a hook's `mcp__<server>__<tool>`
@@ -411,6 +414,8 @@ export class CodexRuntime {
   private memoryReads = new MemoryReads();
   /** Each agent's servers as its last thread's status showed them. */
   private mcpRows = new Map<AgentKey, readonly McpRow[]>();
+  /** Each gated thread's own status, for naming the tools its calls use. */
+  private threadRows = new Map<string, readonly McpRow[]>();
   /** A failed turn's notice as the thread reads it, such as where to sign
    * Codex in again. */
   explain: (notice: string) => string = (notice) => notice;
@@ -432,11 +437,14 @@ export class CodexRuntime {
       "",
     private readonly hooks?: {
       serve: NonNullable<Host["serveMcp"]>;
+      /** `milliseconds`: what is left of the hook's budget, when less than
+       * the usual. */
       run(
         agent: string,
         session: string,
         event: string,
         input: unknown,
+        milliseconds?: number,
       ): Promise<Record<string, unknown>>;
     },
     private readonly execution?: Agents["execution"],
@@ -1235,6 +1243,7 @@ export class CodexRuntime {
             threadId,
           });
           server.threads.delete(threadId);
+          this.threadRows.delete(threadId);
         }
     })();
     return stopped;
@@ -2315,6 +2324,7 @@ export class CodexRuntime {
       if (threadId && server.threads.get(threadId) === agent.key) {
         await this.terminals(server.rpc, threadId).catch(() => undefined);
         server.threads.delete(threadId);
+        this.threadRows.delete(threadId);
         await server.rpc
           .request("thread/unsubscribe", { threadId })
           .catch(() => undefined);
@@ -2896,11 +2906,30 @@ export class CodexRuntime {
     const bridge = hookAdapter
       ? await openHookBridge(
           hookAdapter.serve,
-          async (session, event, input) =>
-            // With a choice in play, a native MCP call is put to the kit first.
-            (applied &&
-              (await this.gate(agent.key, session, event, input, applied))) ||
-            hookAdapter.run(agent.key, session, event, input),
+          async (session, event, input) => {
+            // With a choice in play, a native MCP call is put to the kit
+            // first. Plugin hooks get what is left of the hook's budget, so
+            // the two together stay inside Codex's limit.
+            if (!applied)
+              return hookAdapter.run(agent.key, session, event, input);
+            const began = Date.now();
+            const gated = await this.gate(
+              agent.key,
+              session,
+              event,
+              input,
+              applied,
+            );
+            if (gated) return gated;
+            const spent = Date.now() - began;
+            return hookAdapter.run(
+              agent.key,
+              session,
+              event,
+              input,
+              spent > 0 ? Math.max(PLUGIN_HOOK_MS - spent, 0) : undefined,
+            );
+          },
           // A subagent of this thread is gated under it; any other thread's
           // native MCP call has no record, so it is denied.
           applied &&
@@ -2981,6 +3010,7 @@ export class CodexRuntime {
       )
     ).flatMap(({ data }) => data);
     this.mcpRows.set(agent.key, rows);
+    this.threadRows.set(threadId, rows);
     this.mcp.started(
       agent,
       threadId,
@@ -3033,7 +3063,7 @@ export class CodexRuntime {
       // The hook gives only Codex's model-visible name; the raw names are
       // matched from it, and a call that matches no single server is denied.
       const found = mcpCallOf(name, Object.keys(applied), (server) =>
-        this.mcpRows.get(key)?.find((row) => row.name === server),
+        this.threadRows.get(session)?.find((row) => row.name === server),
       );
       if (!found || typeof id !== "string")
         return block("Buzz could not tell which MCP server this call is for");
