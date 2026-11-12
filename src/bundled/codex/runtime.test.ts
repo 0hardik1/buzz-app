@@ -8303,6 +8303,12 @@ describe("harness MCP report and inspect", () => {
       agentOf(plain, { protection: { provider: "p", policy: {} } }),
     );
     expect(protectedReport?.servers).toEqual([]);
+    await expect(
+      plain.runtime.inspectMcp(
+        agentOf(plain, { protection: { provider: "p", policy: {} } }),
+        "alpha",
+      ),
+    ).rejects.toThrow("protected");
     expect(plain.sent.map((wire) => wire.method)).not.toContain("config/read");
   });
 
