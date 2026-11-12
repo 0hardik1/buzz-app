@@ -2890,6 +2890,7 @@ export class CodexRuntime {
           name: row.name,
           tools: mcpTools(row).map((t) => t.name),
         })),
+      choice,
     );
   }
   /** Shared thread setup; a voice seat retains it between delegated turns. */
