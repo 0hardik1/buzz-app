@@ -286,6 +286,9 @@
   .buzz-button[data-variant="outline"] {
     box-shadow: inset 0 0 0 1px var(--interaction-border);
   }
+  .buzz-button[data-outline-subtle] {
+    --interaction-border: var(--border-standard);
+  }
 
   /* Only the dashes travel around the overdue outline; its geometry stays still. */
   .buzz-button[data-variant="attention"] {
@@ -2131,6 +2134,23 @@
   .navigation-item-trailing {
     flex: 0 0 auto;
     color: var(--text-metadata);
+  }
+
+  .buzz-badge {
+    @apply text-caption;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    min-height: var(--space-5);
+    padding: var(--space-half) var(--space-1h);
+    border-radius: var(--radius-pill);
+    background: var(--affordance-subtle);
+    color: var(--text-subtle);
+    white-space: nowrap;
+  }
+  .buzz-badge[data-tone="success"] {
+    background: var(--surface-categorical-green);
+    color: var(--text-categorical-green);
   }
 
   /* Quiet count: a circle for one digit, a pill for more. */

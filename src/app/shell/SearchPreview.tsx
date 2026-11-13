@@ -3,9 +3,9 @@ import type { RelaySession } from "../../features/relay/session";
 import type { ReadFilter } from "../../features/relay/events";
 import { MatchedLabel } from "../../features/search/MatchedLabel";
 import { termMatches } from "../../features/search/snippet";
-import { avatarMedia } from "../../shared/avatar-source";
 import { formatItemTimestamp } from "../../shared/datetime";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
+import { MessageRow } from "../../features/messages/MessageRow";
 import type { SearchDestination, SearchTone } from "./SearchChoices";
 import { SEARCH_KINDS, searchText } from "./useSearchMessages";
 
@@ -196,8 +196,6 @@ export function SearchPreview({
   if (!row) return <p className="search-peek-empty">Nothing highlighted</p>;
   const message = target?.kind === "message" ? target : undefined;
   const Icon = (message ? row.detailIcon : undefined) ?? row.icon;
-  const pictureOf = (pubkey: string) =>
-    avatarMedia(profiles.get(pubkey)?.picture, session.media);
   // The hit stands in while its neighbours load.
   const shown: readonly Line[] =
     lines ??
@@ -272,34 +270,48 @@ export function SearchPreview({
                 data-hit={hit || undefined}
                 data-context={(!!message && !hit) || undefined}
               >
-                <Avatar
-                  alt=""
-                  fallback={nameOf(line.authorId, line.channelId)}
-                  src={pictureOf(line.authorId)}
-                  size="small"
-                  shape="circle"
+                {target?.kind === "person" && (
+                  <div className="text-caption text-subtle">
+                    {whereOf(line.channelId)}
+                  </div>
+                )}
+                <MessageRow
+                  row={{
+                    id: line.id,
+                    channelId: line.channelId,
+                    authorId: line.authorId,
+                    createdAt: line.createdAt,
+                    content: text,
+                    mentions: [],
+                    attachments: [],
+                    reactions: [],
+                    replyCount: 0,
+                    participants: [],
+                  }}
+                  bodyContent={
+                    <div className="search-peek-text text-message">
+                      <MatchedLabel
+                        label={text}
+                        positions={
+                          hit || !message ? termMatches(text, terms) : undefined
+                        }
+                      />
+                    </div>
+                  }
+                  profile={{
+                    ...profiles.get(line.authorId),
+                    name: nameOf(line.authorId, line.channelId),
+                  }}
+                  references={session}
+                  viewer={session.viewer}
+                  media={session.media}
+                  onOpenLink={() => false}
+                  canOpenLink={() => false}
+                  day={false}
+                  retry={undefined}
+                  layout="thread"
+                  fullWidth
                 />
-                <div className="min-w-0">
-                  <div className="search-peek-line-head text-caption">
-                    <span className="search-peek-author">
-                      {nameOf(line.authorId, line.channelId)}
-                    </span>
-                    {target?.kind === "person" && (
-                      <span className="truncate text-subtle">
-                        {whereOf(line.channelId)}
-                      </span>
-                    )}
-                    <time className="text-subtle">{when(line.createdAt)}</time>
-                  </div>
-                  <div className="search-peek-text text-body-sm">
-                    <MatchedLabel
-                      label={text}
-                      positions={
-                        hit || !message ? termMatches(text, terms) : undefined
-                      }
-                    />
-                  </div>
-                </div>
               </li>
             );
           })}

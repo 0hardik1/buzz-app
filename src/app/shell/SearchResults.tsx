@@ -1616,10 +1616,10 @@ export function SearchResults({
   };
   const hints = asking ? (
     <div className="search-peek-hints">
-      <button
-        type="button"
+      <Button
+        variant="outline-subtle"
+        size="xs"
         tabIndex={-1}
-        className="search-peek-ask-chip text-body-sm"
         aria-label={`Remove Ask ${askAgent?.name ?? "your agent"}`}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
@@ -1630,7 +1630,7 @@ export function SearchResults({
         <SparklesIcon size={14} aria-hidden="true" />
         Ask {askAgent?.name ?? "your agent"}
         <XIcon size={12} aria-hidden="true" />
-      </button>
+      </Button>
       <span className="text-body-sm text-subtle">
         {askAgent?.name ?? "Your agent"} searches Buzz for you in a new chat
       </span>
@@ -1639,23 +1639,24 @@ export function SearchResults({
     <div className="search-peek-hints">
       {(
         [
-          ["from:", "person", "person"],
-          ["in:", "channel", "channel"],
-          ["during:", "date", "page"],
-          ["ask:", askAgent?.name ?? "agent", "agent"],
+          ["from:", "person"],
+          ["in:", "channel"],
+          ["during:", "date"],
+          ["ask:", askAgent?.name ?? "agent"],
         ] as const
-      ).map(([operator, what, tone]) => (
-        <button
+      ).map(([operator, what]) => (
+        <Button
           key={operator}
-          type="button"
+          variant="outline-subtle"
+          size="xs"
           tabIndex={-1}
-          className="search-peek-hint"
-          data-tone={tone}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => addOperator(operator)}
         >
-          {operator} <span>{what}</span>
-        </button>
+          <span>
+            {operator} {what}
+          </span>
+        </Button>
       ))}
     </div>
   ) : undefined;

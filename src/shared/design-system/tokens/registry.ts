@@ -485,6 +485,13 @@ export const ROLE_GROUPS: RoleGroup[] = [
         use: "A recessed region inside a panel.",
         status: "core",
       },
+      {
+        token: "bg-surface-inset-subtle",
+        variable: "--surface-inset-subtle",
+        pointsAt: "50% surface-panel / 50% surface-inset in both modes",
+        use: "Quiet recessed reading panes, including global search previews.",
+        status: "core",
+      },
     ],
   },
   {

@@ -4,19 +4,21 @@ import {
   useRef,
   useEffect,
   useState,
+  useId,
   type RefObject,
   type ReactNode,
 } from "react";
 import {
   CaretRightIcon,
-  ClockIcon,
-  MagnifyingGlassIcon,
   type ChatCircleIcon,
 } from "../../shared/design-system/icons/index";
 import type { PeekTarget } from "./SearchPreview";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
+import { Button } from "../../shared/design-system/ui/Button";
+import { Badge } from "../../shared/design-system/ui/Badge";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { SearchField } from "../../shared/design-system/ui/SearchField";
+import { Tabs } from "../../shared/design-system/ui/Tabs";
 import { isApplePlatform } from "../../features/shortcuts/format";
 import { MatchedLabel } from "../../features/search/MatchedLabel";
 import { useSearchHighlight } from "../../features/search/use-search-highlight";
@@ -230,6 +232,9 @@ export function SearchChoices({
   peek?: SearchPeek | undefined;
 }) {
   const palette = useRef<HTMLDivElement>(null);
+  const peekPanelPrefix = useId();
+  const peekPanelId = (label: string | undefined) =>
+    `${peekPanelPrefix}-group-${encodeURIComponent(label ?? "")}`;
   const resultsViewport = useRef<HTMLDivElement>(null);
   const resultsContent = useRef<HTMLDivElement>(null);
   // Peek fills its dialog; only a palette sized by its results eases height.
@@ -330,14 +335,14 @@ export function SearchChoices({
               total: /^\d+$/.test(count) ? Number(count) : -1,
             };
           });
-  const showScope = (label: string | undefined) => {
+  const showScope = (label: string | undefined, focusInput = true) => {
     setPeekScope(label);
     const first = (
       label ? ranked.find((group) => group.label === label) : ranked[0]
     )?.destinations[0]?.key;
     if (first) highlight.select(first);
     if (resultsContent.current) resultsContent.current.scrollTop = 0;
-    input.current?.focus();
+    if (focusInput) input.current?.focus();
   };
   const hasControls = groups.some((group) =>
     group.destinations.some((row) => row.content),
@@ -559,504 +564,561 @@ export function SearchChoices({
           {scopeAction}
         </div>
       )}
-      <SearchField
-        variant="palette"
-        prefix={
-          chips?.length ? (
-            <span className="search-palette-author-prefix">
-              {chips.map((chip) => (
-                <button
-                  key={chip.operand}
-                  type="button"
-                  className="search-palette-author-chip"
-                  aria-label={chip.label}
-                  title={chip.title}
-                  onClick={() => onRemoveChip?.(chip)}
-                >
-                  <span aria-hidden="true">×</span> {chip.text}
-                </button>
-              ))}
-            </span>
-          ) : undefined
-        }
-        inputRef={input}
-        role="combobox"
-        aria-controls={highlight.listId}
-        aria-expanded="true"
-        aria-autocomplete="list"
-        aria-haspopup={hasControls ? "grid" : "listbox"}
-        {...highlight.fieldProps}
-        label={label}
-        placeholder="Search people, channels, plugins and messages"
-        value={displayQuery ?? query}
-        onValueChange={onDisplayQueryChange ?? onQueryChange}
-        spellCheck={false}
-        autoCorrect="off"
-        autoCapitalize="off"
-        autoComplete="off"
-        maxLength={256}
-        onKeyDown={(event) => {
-          const shortcutNumber = /^Digit([1-9])$/.exec(event.code)?.[1];
-          if (
-            !event.nativeEvent.isComposing &&
-            event.nativeEvent.keyCode !== 229 &&
-            !event.altKey &&
-            event.shiftKey &&
-            event.metaKey === apple &&
-            event.ctrlKey !== apple &&
-            shortcutNumber
-          ) {
-            const destination = destinations[Number(shortcutNumber) - 1];
-            if (destination) {
-              event.preventDefault();
-              if (!event.repeat) highlight.choose(destination.key);
+      <div className="search-palette-controls">
+        <SearchField
+          variant="palette"
+          prefix={
+            chips?.length ? (
+              <span className="search-palette-author-prefix">
+                {chips.map((chip) => (
+                  <button
+                    key={chip.operand}
+                    type="button"
+                    className="search-palette-author-chip"
+                    aria-label={chip.label}
+                    title={chip.title}
+                    onClick={() => onRemoveChip?.(chip)}
+                  >
+                    <span aria-hidden="true">×</span> {chip.text}
+                  </button>
+                ))}
+              </span>
+            ) : undefined
+          }
+          inputRef={input}
+          role="combobox"
+          aria-controls={highlight.listId}
+          aria-expanded="true"
+          aria-autocomplete="list"
+          aria-haspopup={hasControls ? "grid" : "listbox"}
+          {...highlight.fieldProps}
+          label={label}
+          placeholder="Search"
+          value={displayQuery ?? query}
+          onValueChange={onDisplayQueryChange ?? onQueryChange}
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
+          autoComplete="off"
+          maxLength={256}
+          onKeyDown={(event) => {
+            const shortcutNumber = /^Digit([1-9])$/.exec(event.code)?.[1];
+            if (
+              !event.nativeEvent.isComposing &&
+              event.nativeEvent.keyCode !== 229 &&
+              !event.altKey &&
+              event.shiftKey &&
+              event.metaKey === apple &&
+              event.ctrlKey !== apple &&
+              shortcutNumber
+            ) {
+              const destination = destinations[Number(shortcutNumber) - 1];
+              if (destination) {
+                event.preventDefault();
+                if (!event.repeat) highlight.choose(destination.key);
+              }
+              return;
             }
-            return;
-          }
-          if (
-            event.key === "Backspace" &&
-            chips?.length &&
-            event.currentTarget.selectionStart === 0 &&
-            event.currentTarget.selectionEnd === 0
-          ) {
-            event.preventDefault();
-            onEditLastChip?.();
-            return;
-          }
-          if (event.key === "ArrowDown" || event.key === "ArrowUp")
-            restore.current = 0;
-          if (
-            ranked.length > 0 &&
-            event.key === "Tab" &&
-            !event.ctrlKey &&
-            !event.metaKey &&
-            !event.altKey
-          ) {
-            event.preventDefault();
-            const order = [undefined, ...ranked.map(({ label }) => label)];
-            const index = order.indexOf(scoped?.label);
-            showScope(
-              order[
-                (index + (event.shiftKey ? -1 : 1) + order.length) %
-                  order.length
-              ],
-            );
-            return;
-          }
-          // Escape from one group returns to Top results, not out of search.
-          if (event.key === "Escape" && scoped) {
-            event.preventDefault();
-            event.stopPropagation();
-            showScope(undefined);
-            return;
-          }
-          if (
-            switchView &&
-            event.key === "Tab" &&
-            event.ctrlKey &&
-            !event.metaKey &&
-            !event.altKey
-          ) {
-            event.preventDefault();
-            switchView(event.shiftKey ? -1 : 1);
-            return;
-          }
-          highlight.keyDown(event);
-        }}
-      />
-      {peek?.hints}
+            if (
+              event.key === "Backspace" &&
+              chips?.length &&
+              event.currentTarget.selectionStart === 0 &&
+              event.currentTarget.selectionEnd === 0
+            ) {
+              event.preventDefault();
+              onEditLastChip?.();
+              return;
+            }
+            if (event.key === "ArrowDown" || event.key === "ArrowUp")
+              restore.current = 0;
+            if (
+              ranked.length > 0 &&
+              event.key === "Tab" &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !event.altKey
+            ) {
+              event.preventDefault();
+              const order = [undefined, ...ranked.map(({ label }) => label)];
+              const index = order.indexOf(scoped?.label);
+              showScope(
+                order[
+                  (index + (event.shiftKey ? -1 : 1) + order.length) %
+                    order.length
+                ],
+              );
+              return;
+            }
+            // Escape from one group returns to Top results, not out of search.
+            if (event.key === "Escape" && scoped) {
+              event.preventDefault();
+              event.stopPropagation();
+              showScope(undefined);
+              return;
+            }
+            if (
+              switchView &&
+              event.key === "Tab" &&
+              event.ctrlKey &&
+              !event.metaKey &&
+              !event.altKey
+            ) {
+              event.preventDefault();
+              switchView(event.shiftKey ? -1 : 1);
+              return;
+            }
+            highlight.keyDown(event);
+          }}
+        />
+        {peek?.hints}
+      </div>
       {views?.tabs && <div className="search-palette-views">{views.tabs}</div>}
-      <div className={peek?.ranked ? "search-peek-body" : "contents"}>
+      <div className={peek?.ranked ? "search-peek-workspace" : "contents"}>
+        {peek?.ranked && ranked.length > 0 && (
+          <div className="search-peek-rail">
+            <Tabs
+              variant="panel"
+              label="Result groups"
+              value={scoped?.label ?? ""}
+              onValueChange={(value) => showScope(value || undefined, false)}
+              items={[undefined, ...ranked].map((group, index) => ({
+                value: group?.label ?? "",
+                label:
+                  group?.label ??
+                  (query.trim() ? "Top results" : "Jump back in"),
+                panelId: peekPanelId(group?.label),
+                trailing: (
+                  <>
+                    <span className="search-peek-count">
+                      {group
+                        ? countOf(group)
+                        : `${ranked.reduce(
+                            (sum, item) =>
+                              sum + (item.browse ? 0 : resultRows(item).length),
+                            0,
+                          )}${ranked.some((item) => !item.browse && item.count?.endsWith("+")) ? "+" : ""}`}
+                    </span>
+                    {index === 1 && !!query.trim() && (
+                      <Badge size="xs" tone="success">
+                        Best match
+                      </Badge>
+                    )}
+                  </>
+                ),
+              }))}
+            />
+          </div>
+        )}
         <div
-          ref={resultsViewport}
-          className="search-palette-height"
-          {...(views?.panelId
+          className={peek?.ranked ? "search-peek-body" : "contents"}
+          {...(peek?.ranked && ranked.length > 0
             ? {
                 role: "tabpanel",
-                id: views.panelId,
-                "aria-labelledby": `${views.panelId}-tab`,
+                id: peekPanelId(scoped?.label),
+                "aria-labelledby": `${peekPanelId(scoped?.label)}-tab`,
               }
             : {})}
         >
           <div
-            ref={resultsContent}
-            className="search-palette-scroll"
-            onWheel={() => {
-              restore.current = 0;
-            }}
-            onPointerDown={() => {
-              restore.current = 0;
-            }}
-            onScroll={(event) => {
-              if (restore.current) return;
-              // Enter never chooses a row scrolled out of sight.
-              if (selected && !inView(selected)) highlight.clear();
-              if (!place) return;
-              place.top = event.currentTarget.scrollTop;
-              keepPlace();
-            }}
+            ref={resultsViewport}
+            className="search-palette-height"
+            {...(views?.panelId
+              ? {
+                  role: "tabpanel",
+                  id: views.panelId,
+                  "aria-labelledby": `${views.panelId}-tab`,
+                }
+              : {})}
           >
-            {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: Both grid and listbox support an accessible label. */}
             <div
-              id={highlight.listId}
-              role={hasControls ? "grid" : "listbox"}
-              aria-label={resultsLabel}
-              aria-busy={peek?.busy || undefined}
-              className="search-palette-results interaction-panel"
+              ref={resultsContent}
+              className="search-palette-scroll"
+              onWheel={() => {
+                restore.current = 0;
+              }}
+              onPointerDown={() => {
+                restore.current = 0;
+              }}
+              onScroll={(event) => {
+                if (restore.current) return;
+                // Enter never chooses a row scrolled out of sight.
+                if (selected && !inView(selected)) highlight.clear();
+                if (!place) return;
+                place.top = event.currentTarget.scrollTop;
+                keepPlace();
+              }}
             >
-              {groups
-                .filter(
-                  ({ destinations, empty, headingStatus }) =>
-                    destinations.length || empty !== undefined || headingStatus,
-                )
-                .map(
-                  ({
-                    label,
-                    hideLabel,
-                    destinations,
-                    empty,
-                    notice,
-                    headingStatus,
-                    why,
-                    tone,
-                    icon: GroupIcon = destinations[0]?.icon,
-                    multiline,
-                  }) => (
-                    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: Both grid rowgroups and listbox groups are named.
-                    <div
-                      key={label}
-                      role={hasControls ? "rowgroup" : "group"}
-                      aria-label={label}
-                      // A status-only group has no rows yet; busy states why.
-                      aria-busy={
-                        (!!headingStatus && !destinations.length) || undefined
-                      }
-                      className="search-palette-group"
-                      data-tone={tone}
-                    >
-                      <div className="navigation-section" data-buzz-ui="">
-                        {!hideLabel && (
-                          <div
-                            className="navigation-section-heading"
-                            aria-hidden={hasControls || undefined}
-                          >
-                            <h2
-                              className={`navigation-section-label text-body text-secondary${headingStatus ? " truncate" : ""}`}
+              {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: Both grid and listbox support an accessible label. */}
+              <div
+                id={highlight.listId}
+                role={hasControls ? "grid" : "listbox"}
+                aria-label={resultsLabel}
+                aria-busy={peek?.busy || undefined}
+                className="search-palette-results interaction-panel"
+              >
+                {groups
+                  .filter(
+                    ({ destinations, empty, headingStatus }) =>
+                      destinations.length ||
+                      empty !== undefined ||
+                      headingStatus,
+                  )
+                  .map(
+                    ({
+                      label,
+                      hideLabel,
+                      destinations,
+                      empty,
+                      notice,
+                      headingStatus,
+                      why,
+                      tone,
+                      multiline,
+                    }) => (
+                      // biome-ignore lint/a11y/useAriaPropsSupportedByRole: Both grid rowgroups and listbox groups are named.
+                      <div
+                        key={label}
+                        role={hasControls ? "rowgroup" : "group"}
+                        aria-label={label}
+                        // A status-only group has no rows yet; busy states why.
+                        aria-busy={
+                          (!!headingStatus && !destinations.length) || undefined
+                        }
+                        className="search-palette-group"
+                        data-tone={tone}
+                      >
+                        <div className="navigation-section" data-buzz-ui="">
+                          {!hideLabel && (
+                            <div
+                              className="navigation-section-heading"
+                              aria-hidden={hasControls || undefined}
                             >
-                              {peek?.ranked && GroupIcon && (
-                                <span
-                                  className="search-peek-tile"
-                                  data-tone={tone}
-                                  aria-hidden="true"
-                                >
-                                  <GroupIcon size={12} />
+                              <h2
+                                className={`navigation-section-label text-body text-secondary${headingStatus ? " truncate" : ""}`}
+                              >
+                                <span className="search-peek-group-label text-label-sm">
+                                  {label}
                                 </span>
-                              )}
-                              <span className="search-peek-group-label">
-                                {label}
-                              </span>
-                              {peek?.ranked &&
-                                ranked.some(
-                                  (group) => group.label === label,
-                                ) && (
+                                {peek?.ranked &&
+                                  ranked.some(
+                                    (group) => group.label === label,
+                                  ) && (
+                                    <span
+                                      className="search-peek-count"
+                                      aria-hidden="true"
+                                    >
+                                      {" "}
+                                      {countOf(
+                                        ranked.find(
+                                          (group) => group.label === label,
+                                        ) ?? { label, destinations },
+                                      )}
+                                    </span>
+                                  )}
+                                {why && (
                                   <span
-                                    className="search-peek-count"
+                                    className="search-peek-why"
                                     aria-hidden="true"
                                   >
                                     {" "}
+                                    · {why}
+                                  </span>
+                                )}
+                                {headingStatus && (
+                                  <span aria-hidden="true">
+                                    {" "}
+                                    · {headingStatus}
+                                  </span>
+                                )}
+                              </h2>
+                              {truncated.has(label) && (
+                                <span className="search-peek-see-all">
+                                  <Button
+                                    variant="plain"
+                                    size="inline"
+                                    tabIndex={-1}
+                                    onMouseDown={(event) =>
+                                      event.preventDefault()
+                                    }
+                                    onClick={() => showScope(label)}
+                                  >
+                                    See all{" "}
                                     {countOf(
                                       ranked.find(
                                         (group) => group.label === label,
-                                      ) ?? { label, destinations },
+                                      ) ?? {
+                                        label,
+                                        destinations,
+                                      },
                                     )}
-                                  </span>
-                                )}
-                              {why && (
-                                <span
-                                  className="search-peek-why"
-                                  aria-hidden="true"
-                                >
-                                  {" "}
-                                  · {why}
+                                    {/* Names the group; flex drops the space. */}{" "}
+                                    <span className="sr-only">{label}</span>
+                                    <CaretRightIcon
+                                      size={12}
+                                      aria-hidden="true"
+                                    />
+                                  </Button>
                                 </span>
                               )}
-                              {headingStatus && (
-                                <span aria-hidden="true">
-                                  {" "}
-                                  · {headingStatus}
-                                </span>
-                              )}
-                            </h2>
-                            {truncated.has(label) && (
-                              <button
-                                type="button"
-                                tabIndex={-1}
-                                className="search-peek-see-all text-body-sm"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => showScope(label)}
-                              >
-                                See all{" "}
-                                {countOf(
-                                  ranked.find(
-                                    (group) => group.label === label,
-                                  ) ?? {
-                                    label,
-                                    destinations,
-                                  },
-                                )}
-                                {/* Names the group; flex drops the space. */}{" "}
-                                <span className="sr-only">{label}</span>
-                                <CaretRightIcon size={12} aria-hidden="true" />
-                              </button>
-                            )}
-                          </div>
-                        )}
-                        <div className="navigation-section-rows">
-                          {destinations.map(
-                            ({
-                              content,
-                              key,
-                              label,
-                              detail,
-                              detailIcon: DetailIcon,
-                              detailIconLabel,
-                              trailing,
-                              matches,
-                              icon,
-                              image,
-                              avatar,
-                              kind,
-                            }) =>
-                              content ? (
-                                // biome-ignore lint/a11y/useSemanticElements: Interactive search grid, not a data table.
-                                <div
-                                  key={key}
-                                  {...highlight.rowProps(key)}
-                                  role="row"
-                                  aria-label={[label, detail]
-                                    .filter(Boolean)
-                                    .join(" — ")}
-                                  aria-selected={selected === key}
-                                  tabIndex={-1}
-                                  className="search-control-row"
-                                  data-highlighted={
-                                    selected === key || undefined
-                                  }
-                                  onClick={(event) => {
-                                    if (
-                                      !event.currentTarget.contains(
-                                        event.target as Node,
-                                      )
-                                    )
-                                      return;
-                                    if (
-                                      (event.target as HTMLElement).closest(
-                                        "button, input, label, [role=switch], [role=combobox]",
-                                      )
-                                    )
-                                      return;
-                                    highlight.choose(key);
-                                  }}
-                                  onKeyDownCapture={(event) => {
-                                    const target = event.target as HTMLElement;
-                                    if (
-                                      target !== event.currentTarget &&
-                                      event.currentTarget.contains(target) &&
-                                      !target.closest(
-                                        '[role="combobox"][aria-expanded="true"]',
-                                      )
-                                    )
-                                      highlight.rowProps(key).onKeyDown(event);
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.target !== event.currentTarget)
-                                      return;
-                                    if (
-                                      event.key === "Enter" ||
-                                      event.key === " "
-                                    ) {
-                                      event.preventDefault();
-                                      highlight.choose(key);
-                                    } else
-                                      highlight.rowProps(key).onKeyDown(event);
-                                  }}
-                                >
-                                  {/* biome-ignore lint/a11y/useSemanticElements: Interactive search grid, not a data table. */}
-                                  <div id={key} role="gridcell" tabIndex={-1}>
-                                    {content}
-                                  </div>
-                                </div>
-                              ) : (
-                                // biome-ignore lint/a11y/useAriaPropsSupportedByRole: Selection and label apply only to the grid row.
-                                // biome-ignore lint/a11y/noStaticElementInteractions: Keyboard handling applies only to the grid row.
-                                <div
-                                  key={key}
-                                  {...(hasControls
-                                    ? highlight.rowProps(key)
-                                    : {})}
-                                  role={hasControls ? "row" : "presentation"}
-                                  aria-label={
-                                    hasControls
-                                      ? [
-                                          label,
-                                          detail && detailIconLabel
-                                            ? `${detailIconLabel}, ${detail}`
-                                            : detail,
-                                        ]
-                                          .filter(Boolean)
-                                          .join(" — ")
-                                      : undefined
-                                  }
-                                  aria-selected={
-                                    hasControls ? selected === key : undefined
-                                  }
-                                  tabIndex={hasControls ? -1 : undefined}
-                                  data-search-result={
-                                    hasControls ? "" : undefined
-                                  }
-                                  data-search-key={watching ? key : undefined}
-                                  data-highlighted={
-                                    (hasControls && selected === key) ||
-                                    undefined
-                                  }
-                                  onKeyDown={
-                                    hasControls
-                                      ? (event) => {
-                                          if (
-                                            event.target ===
-                                              event.currentTarget &&
-                                            event.key === "Enter"
-                                          ) {
-                                            event.preventDefault();
-                                            highlight.choose(key);
-                                          } else
-                                            highlight
-                                              .rowProps(key)
-                                              .onKeyDown(event);
-                                        }
-                                      : undefined
-                                  }
-                                >
+                            </div>
+                          )}
+                          <div className="navigation-section-rows">
+                            {destinations.map(
+                              ({
+                                content,
+                                key,
+                                label,
+                                detail,
+                                detailIcon: DetailIcon,
+                                detailIconLabel,
+                                trailing,
+                                matches,
+                                icon,
+                                image,
+                                avatar,
+                                kind,
+                              }) =>
+                                content ? (
+                                  // biome-ignore lint/a11y/useSemanticElements: Interactive search grid, not a data table.
                                   <div
-                                    role={
-                                      hasControls ? "gridcell" : "presentation"
+                                    key={key}
+                                    {...highlight.rowProps(key)}
+                                    role="row"
+                                    aria-label={[label, detail]
+                                      .filter(Boolean)
+                                      .join(" — ")}
+                                    aria-selected={selected === key}
+                                    tabIndex={-1}
+                                    className="search-control-row"
+                                    data-highlighted={
+                                      selected === key || undefined
+                                    }
+                                    onClick={(event) => {
+                                      if (
+                                        !event.currentTarget.contains(
+                                          event.target as Node,
+                                        )
+                                      )
+                                        return;
+                                      if (
+                                        (event.target as HTMLElement).closest(
+                                          "button, input, label, [role=switch], [role=combobox]",
+                                        )
+                                      )
+                                        return;
+                                      highlight.choose(key);
+                                    }}
+                                    onKeyDownCapture={(event) => {
+                                      const target =
+                                        event.target as HTMLElement;
+                                      if (
+                                        target !== event.currentTarget &&
+                                        event.currentTarget.contains(target) &&
+                                        !target.closest(
+                                          '[role="combobox"][aria-expanded="true"]',
+                                        )
+                                      )
+                                        highlight
+                                          .rowProps(key)
+                                          .onKeyDown(event);
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (event.target !== event.currentTarget)
+                                        return;
+                                      if (
+                                        event.key === "Enter" ||
+                                        event.key === " "
+                                      ) {
+                                        event.preventDefault();
+                                        highlight.choose(key);
+                                      } else
+                                        highlight
+                                          .rowProps(key)
+                                          .onKeyDown(event);
+                                    }}
+                                  >
+                                    {/* biome-ignore lint/a11y/useSemanticElements: Interactive search grid, not a data table. */}
+                                    <div id={key} role="gridcell" tabIndex={-1}>
+                                      {content}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  // biome-ignore lint/a11y/useAriaPropsSupportedByRole: Selection and label apply only to the grid row.
+                                  // biome-ignore lint/a11y/noStaticElementInteractions: Keyboard handling applies only to the grid row.
+                                  <div
+                                    key={key}
+                                    {...(hasControls
+                                      ? highlight.rowProps(key)
+                                      : {})}
+                                    role={hasControls ? "row" : "presentation"}
+                                    aria-label={
+                                      hasControls
+                                        ? [
+                                            label,
+                                            detail && detailIconLabel
+                                              ? `${detailIconLabel}, ${detail}`
+                                              : detail,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(" — ")
+                                        : undefined
+                                    }
+                                    aria-selected={
+                                      hasControls ? selected === key : undefined
+                                    }
+                                    tabIndex={hasControls ? -1 : undefined}
+                                    data-search-result={
+                                      hasControls ? "" : undefined
+                                    }
+                                    data-search-key={watching ? key : undefined}
+                                    data-highlighted={
+                                      (hasControls && selected === key) ||
+                                      undefined
+                                    }
+                                    onKeyDown={
+                                      hasControls
+                                        ? (event) => {
+                                            if (
+                                              event.target ===
+                                                event.currentTarget &&
+                                              event.key === "Enter"
+                                            ) {
+                                              event.preventDefault();
+                                              highlight.choose(key);
+                                            } else
+                                              highlight
+                                                .rowProps(key)
+                                                .onKeyDown(event);
+                                          }
+                                        : undefined
                                     }
                                   >
-                                    <NavigationItem
-                                      variant="search"
-                                      key={key}
-                                      {...(!hasControls
-                                        ? highlight.rowProps(key)
-                                        : {})}
-                                      role={hasControls ? "button" : "option"}
-                                      aria-selected={
+                                    <div
+                                      role={
                                         hasControls
-                                          ? undefined
-                                          : selected === key
+                                          ? "gridcell"
+                                          : "presentation"
                                       }
-                                      {...(!hasControls && positions.get(key))}
-                                      tabIndex={-1}
-                                      aria-current={false}
-                                      multiline={!!multiline}
-                                      highlighted={selected === key}
-                                      data-search-result={
-                                        !hasControls ? "" : undefined
-                                      }
-                                      aria-keyshortcuts={
-                                        shortcutNumbers.has(key)
-                                          ? `Shift+${apple ? "Meta" : "Control"}+${shortcutNumbers.get(key)}`
-                                          : undefined
-                                      }
-                                      icon={
-                                        <span
-                                          className="search-row-icon grid size-6 shrink-0 items-center justify-items-start"
-                                          data-tile={
-                                            (!avatar && !image) || undefined
-                                          }
-                                          data-tone={kind}
-                                        >
-                                          {avatar ? (
-                                            <Avatar
-                                              alt=""
-                                              fallback={avatar.name ?? label}
-                                              src={avatar.src}
-                                              size="small"
-                                              shape={avatar.shape}
-                                            />
-                                          ) : (
-                                            <PageIcon
-                                              icon={icon}
-                                              image={image}
-                                              size={21}
-                                            />
-                                          )}
-                                        </span>
-                                      }
-                                      label={
-                                        <>
-                                          <span className="block truncate text-body-sm">
-                                            <MatchedLabel
-                                              label={label}
-                                              positions={matches}
-                                            />
+                                    >
+                                      <NavigationItem
+                                        variant="search"
+                                        key={key}
+                                        {...(!hasControls
+                                          ? highlight.rowProps(key)
+                                          : {})}
+                                        role={hasControls ? "button" : "option"}
+                                        aria-selected={
+                                          hasControls
+                                            ? undefined
+                                            : selected === key
+                                        }
+                                        {...(!hasControls &&
+                                          positions.get(key))}
+                                        tabIndex={-1}
+                                        aria-current={false}
+                                        multiline={!!multiline}
+                                        highlighted={selected === key}
+                                        data-search-result={
+                                          !hasControls ? "" : undefined
+                                        }
+                                        aria-keyshortcuts={
+                                          shortcutNumbers.has(key)
+                                            ? `Shift+${apple ? "Meta" : "Control"}+${shortcutNumbers.get(key)}`
+                                            : undefined
+                                        }
+                                        icon={
+                                          <span
+                                            className="search-row-icon grid size-6 shrink-0 place-items-center"
+                                            data-tile={
+                                              (!avatar && !image) || undefined
+                                            }
+                                            data-tone={kind}
+                                          >
+                                            {avatar ? (
+                                              <Avatar
+                                                alt=""
+                                                fallback={avatar.name ?? label}
+                                                src={avatar.src}
+                                                size="small"
+                                                shape={avatar.shape}
+                                              />
+                                            ) : (
+                                              <PageIcon
+                                                icon={icon}
+                                                image={image}
+                                                size={peek && !image ? 15 : 21}
+                                              />
+                                            )}
                                           </span>
-                                          {detail && (
-                                            <span
-                                              className={`block text-body-sm text-subtle ${multiline ? "whitespace-pre-wrap" : "truncate"}`}
-                                            >
-                                              {/* Read in place of the icon. jsdom (dom-accessibility-api) trims
+                                        }
+                                        label={
+                                          <>
+                                            <span className="block truncate text-body-sm">
+                                              <MatchedLabel
+                                                label={label}
+                                                positions={matches}
+                                              />
+                                            </span>
+                                            {detail && (
+                                              <span
+                                                className={`block text-body-sm text-subtle ${multiline ? "whitespace-pre-wrap" : "truncate"}`}
+                                              >
+                                                {/* Read in place of the icon. jsdom (dom-accessibility-api) trims
                                                 each element's text, so the space sits outside the span;
                                                 browsers don't trim it. Shown, the space collapses at the
                                                 line's start. */}
-                                              {detailIconLabel && (
-                                                <>
-                                                  <span className="sr-only">{`${detailIconLabel},`}</span>{" "}
-                                                </>
-                                              )}
-                                              {/* Text-sized and spaced as LinkLabel shows a channel mention's icon. */}
-                                              {DetailIcon && (
-                                                <DetailIcon
-                                                  className={channelIconClass(
-                                                    DetailIcon,
-                                                  )}
-                                                />
-                                              )}
-                                              {detail}
-                                            </span>
-                                          )}
-                                        </>
-                                      }
-                                      trailing={trailing}
-                                      onClick={() => highlight.choose(key)}
-                                    />
+                                                {detailIconLabel && (
+                                                  <>
+                                                    <span className="sr-only">{`${detailIconLabel},`}</span>{" "}
+                                                  </>
+                                                )}
+                                                {/* Text-sized and spaced as LinkLabel shows a channel mention's icon. */}
+                                                {DetailIcon && (
+                                                  <DetailIcon
+                                                    className={channelIconClass(
+                                                      DetailIcon,
+                                                    )}
+                                                  />
+                                                )}
+                                                {detail}
+                                              </span>
+                                            )}
+                                          </>
+                                        }
+                                        trailing={trailing}
+                                        onClick={() => highlight.choose(key)}
+                                      />
+                                    </div>
                                   </div>
+                                ),
+                            )}
+                            {(notice ||
+                              (!destinations.length && !headingStatus)) && (
+                              <div role={hasControls ? "row" : "presentation"}>
+                                <div
+                                  role={
+                                    hasControls ? "gridcell" : "presentation"
+                                  }
+                                >
+                                  {notice}
+                                  {!destinations.length && (
+                                    <p className="search-palette-group-empty">
+                                      {empty ?? "No matching results."}
+                                    </p>
+                                  )}
                                 </div>
-                              ),
-                          )}
-                          {(notice ||
-                            (!destinations.length && !headingStatus)) && (
-                            <div role={hasControls ? "row" : "presentation"}>
-                              <div
-                                role={hasControls ? "gridcell" : "presentation"}
-                              >
-                                {notice}
-                                {!destinations.length && (
-                                  <p className="search-palette-group-empty">
-                                    {empty ?? "No matching results."}
-                                  </p>
-                                )}
                               </div>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ),
-                )}
+                    ),
+                  )}
+              </div>
+              {children && (
+                <div className="search-palette-status">{children}</div>
+              )}
             </div>
-            {children && (
-              <div className="search-palette-status">{children}</div>
-            )}
           </div>
         </div>
         {peek?.ranked && (
@@ -1080,73 +1142,10 @@ export function SearchChoices({
                 );
               })()}
             </div>
-            {ranked.length > 0 && (
-              <nav className="search-peek-rail" aria-label="Result groups">
-                <div className="search-peek-rail-head text-body-sm text-subtle">
-                  <span>{query.trim() ? "Show" : "Browse"}</span>
-                  <kbd>Tab</kbd>
-                </div>
-                {[undefined, ...ranked].map((group, index) => {
-                  const Icon = group
-                    ? (group.icon ?? group.destinations[0]?.icon)
-                    : query.trim()
-                      ? MagnifyingGlassIcon
-                      : ClockIcon;
-                  const shown = (scoped?.label ?? undefined) === group?.label;
-                  return (
-                    <button
-                      key={group?.label ?? ""}
-                      // A long rail scrolls; the group shown stays in sight.
-                      ref={
-                        shown
-                          ? (item) =>
-                              item?.scrollIntoView?.({ block: "nearest" })
-                          : undefined
-                      }
-                      type="button"
-                      tabIndex={-1}
-                      className="search-peek-rail-item text-body-sm"
-                      aria-pressed={shown}
-                      title={group?.why}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => showScope(group?.label)}
-                    >
-                      {Icon && (
-                        <span
-                          className="search-peek-tile"
-                          data-tone={group?.tone}
-                          aria-hidden="true"
-                        >
-                          <Icon size={12} />
-                        </span>
-                      )}
-                      <span className="search-peek-rail-label">
-                        {group?.label ??
-                          (query.trim() ? "Top results" : "Jump back in")}
-                        {index === 1 && !!query.trim() && (
-                          <small className="search-peek-best">
-                            <span className="sr-only">, </span>Best match
-                          </small>
-                        )}
-                      </span>
-                      <span className="search-peek-count">
-                        {group
-                          ? countOf(group)
-                          : `${ranked.reduce(
-                              (sum, item) =>
-                                sum +
-                                (item.browse ? 0 : resultRows(item).length),
-                              0,
-                            )}${ranked.some((item) => !item.browse && item.count?.endsWith("+")) ? "+" : ""}`}
-                      </span>
-                    </button>
-                  );
-                })}
-              </nav>
-            )}
           </aside>
         )}
       </div>
+
       {footer && <div className="search-palette-footer">{footer}</div>}
       {peek?.ranked && (
         <div
