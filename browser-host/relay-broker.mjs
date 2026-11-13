@@ -41,6 +41,7 @@ import { validChannelCommand } from "./channel-commands.mjs";
 import {
   adminReason,
   claimReason,
+  iconCommand,
   inviteRequest,
   memberCommand,
 } from "../src/features/communities/admin-protocol.ts";
@@ -2469,6 +2470,7 @@ export function relayBrokerPlugin({
               "/api/relay/accept-policy",
               "/api/relay/invite",
               "/api/relay/member",
+              "/api/relay/icon",
               "/api/relay/leave",
               "/api/relay/gifs",
               "/api/relay/profile-search",
@@ -2779,7 +2781,9 @@ export function relayBrokerPlugin({
           const claim = route === "/api/relay/claim";
           const policy = route === "/api/relay/accept-policy";
           const invite = route === "/api/relay/invite";
-          const member = route === "/api/relay/member";
+          // A community icon change is a relay admin command like a member change.
+          const icon = route === "/api/relay/icon";
+          const member = route === "/api/relay/member" || icon;
           const leave = route === "/api/relay/leave";
           const gifs = route === "/api/relay/gifs";
           const profileSearch = route === "/api/relay/profile-search";
@@ -2801,7 +2805,11 @@ export function relayBrokerPlugin({
               filters = invite
                 ? inviteRequest(filters)
                 : finalizeEvent(
-                    leave ? leaveRequestTemplate() : memberCommand(filters),
+                    leave
+                      ? leaveRequestTemplate()
+                      : icon
+                        ? iconCommand(filters)
+                        : memberCommand(filters),
                     key,
                   );
             } catch (error) {
@@ -3403,9 +3411,11 @@ export function relayBrokerPlugin({
                 return json(res, 502, {
                   error: leave
                     ? "Leave request could not be confirmed"
-                    : member
-                      ? "Member change could not be confirmed"
-                      : "Profile publication could not be confirmed",
+                    : icon
+                      ? "Icon change could not be confirmed"
+                      : member
+                        ? "Member change could not be confirmed"
+                        : "Profile publication could not be confirmed",
                 });
             }
             res.writeHead(200, {
