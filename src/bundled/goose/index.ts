@@ -39,7 +39,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     agents.relay,
     (key, signal) => agents.core(key, signal),
     localStorage,
-    () => agents.tools(),
+    (agent) => agents.toolsFor(agent),
     repositoriesContext,
     agents.storage,
     recommended,

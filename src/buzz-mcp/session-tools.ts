@@ -12,14 +12,14 @@ import {
   ownerInstructions,
   pluginInstructions,
 } from "../features/agent-harness/plugin-instructions";
-import type { AgentHandle } from "../features/agents/service";
+import type { Agent, AgentHandle } from "../features/agents/service";
 import {
   ATTENTION_TOOLS,
   callAttentionTool,
   isAttentionTool,
 } from "./attention";
 import { BESTIE_TOOLS, callBestieTool, isBestieTool } from "./bestie";
-import type { BuzzClient, Context } from "./client";
+import { type BuzzClient, type Context, protectionSession } from "./client";
 import {
   callToolOperation,
   type AgentToolOperation,
@@ -40,13 +40,19 @@ import {
   type Tool,
 } from "./tools";
 
-/** A tool a plugin adds to every agent session in the app, listed after
- * the Buzz tools under the same server and loaded on search. Its name should
- * start with its plugin's, as `notes_get` does; no two tools share one. */
+/** A tool a plugin adds to every agent session in the app, or to those of
+ * the agents `when` accepts, listed after the Buzz tools under the same
+ * server and loaded on search. Its name should start with its plugin's, as
+ * `notes_get` does; no two tools share one. */
 export type AddedTool = Readonly<{
   name: string;
   description: string;
   inputSchema: Readonly<Record<string, unknown>>;
+  /** Whether the agent's sessions get the tool; absent, every agent's do.
+   * Asked as a session starts, before each turn and on each call, so it
+   * must answer at once from what the plugin already knows. Only `true`
+   * admits; a `when` that throws leaves out only this tool. */
+  when?: (agent: Agent) => boolean;
   /** A provider operation checked with these exact tool arguments. */
   operation?: AgentToolOperation;
   /** Runs as the agent in `context`. Use `client.signal` to cancel waits and
@@ -176,7 +182,7 @@ export async function callSessionTool(
   if (!client) throw new Error("Buzz is not ready yet. Try again.");
   const operation = added.find((tool) => tool.name === name && tool.operation);
   if (operation) {
-    const session = JSON.stringify(context);
+    const session = protectionSession(context);
     try {
       const reply = await callToolOperation(client, context, args, operation);
       await client.protect?.({ kind: "tool-result", session, content: reply });
@@ -190,7 +196,7 @@ export async function callSessionTool(
     context = structuredClone(context);
     args = structuredClone(args);
   }
-  const session = JSON.stringify(context);
+  const session = protectionSession(context);
   // A natively gated call was reviewed with these exact arguments; it is
   // reviewed again only when a captured file changes what it sends.
   const reviewed = client.nativeToolGate && JSON.stringify(args);

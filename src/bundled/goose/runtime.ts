@@ -180,8 +180,10 @@ export class GooseRuntime {
     /** The agent's `core` memory as the host keeps it (`Agents.core`). */
     private readonly core: Agents["core"],
     private readonly storage: Storage = globalThis.localStorage,
-    /** The tools plugins add to every session now. */
-    private readonly added: () => readonly AddedTool[] = () => [],
+    /** The tools plugins add to the agent's sessions now. */
+    private readonly added: (
+      agent?: AgentKey,
+    ) => readonly AddedTool[] = () => [],
     /** Desktop-local repository instructions; standalone hosts keep their own layout. */
     private readonly repositories: (scope: string | undefined) => string = () =>
       "",
@@ -917,7 +919,7 @@ export class GooseRuntime {
           remembered: () => this.forget(agent),
         });
       const context = (conversation && entry.contexts.get(conversation)) || {};
-      return respond(client, context, message, this.added());
+      return respond(client, context, message, this.added(agent));
     };
     const get = (): Promise<GooseProcess> => {
       const protection = entry.handle?.protection;
@@ -976,7 +978,7 @@ export class GooseRuntime {
           entry.config.provider.trim() ? 0 : this.defaultsRevision,
           entry.config.workspace,
           entry.config.scope,
-          addedKey(this.added()),
+          addedKey(this.added(agent)),
         ]),
       launch: async () => {
         const { workspace, instructions, scope } = entry.config;
