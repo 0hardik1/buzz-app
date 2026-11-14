@@ -24,6 +24,7 @@ import {
 export const composerSchema = new Schema<
   | "doc"
   | "paragraph"
+  | "heading"
   | "blockquote"
   | "code_block"
   | "bullet_list"
@@ -49,6 +50,25 @@ export const composerSchema = new Schema<
       whitespace: "pre",
       toDOM: () => ["p", 0],
       parseDOM: [{ tag: "p" }, { tag: "div" }],
+    },
+    heading: {
+      group: "block",
+      content: "inline*",
+      defining: true,
+      attrs: {
+        level: {
+          default: 1,
+          validate: (value) => {
+            if (!Number.isInteger(value) || value < 1 || value > 6)
+              throw new RangeError("Invalid heading level");
+          },
+        },
+      },
+      toDOM: (node) => [`h${node.attrs.level}`, 0],
+      parseDOM: [1, 2, 3, 4, 5, 6].map((level) => ({
+        tag: `h${level}`,
+        attrs: { level },
+      })),
     },
     blockquote: {
       group: "block",

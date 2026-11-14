@@ -29,7 +29,6 @@ it("loads formatting into the existing editor and retains its meaning on save", 
   );
 });
 it.each([
-  "# Heading\n\nParagraph",
   "~~removed~~",
   "**`code`**",
   ">",
@@ -66,6 +65,13 @@ const semanticTree = (value: unknown): unknown =>
       : value;
 
 it.each([
+  "# Heading\n\nParagraph",
+  "## Second **bold** and [link](https://example.com)",
+  "### Third\n\n#### Fourth\n\n##### Fifth\n\n###### Sixth",
+  "Setext heading\n===\n\nSecond\n---",
+  "> ## Quoted heading\n>\n> Text",
+  "- Item\n\n  ### Nested heading",
+  "# Escaped closing \\#\n\n# \\*literal\\* &amp; `code`",
   "> First point\n>\n> Second point\n\nEnd",
   "> > Nested first\n> >\n> > Nested second\n>\n> Outer last",
   "- First item\n\n  Second paragraph\n\n- Next item",
@@ -85,7 +91,7 @@ it.each([
   "> First\\\n> Second `code`",
   "- First\\\n  Second `code`",
 ])(
-  "preserves CommonMark paragraph and hard-break structure: %s",
+  "preserves CommonMark heading, paragraph and hard-break structure: %s",
   (markdown) => {
     expect(
       semanticTree(

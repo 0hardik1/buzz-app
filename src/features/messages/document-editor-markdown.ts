@@ -67,6 +67,11 @@ export function documentEditorDraft(markdown: string) {
     return text(raw(node), marks);
   };
   const block = (node: RootContent): EditorNode => {
+    if (node.type === "heading")
+      return schema.nodes.heading.create(
+        { level: node.depth },
+        node.children.flatMap((child) => inline(child)),
+      );
     if (node.type === "paragraph")
       return schema.nodes.paragraph.create(
         null,

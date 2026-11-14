@@ -22,6 +22,7 @@ import {
   documentEditorMarkdown,
 } from "./document-editor-markdown";
 import styles from "./DocumentEditor.module.css";
+import markdownStyles from "../markdown/Markdown.module.css";
 
 const noDecorations = () => [];
 
@@ -204,7 +205,7 @@ export function DocumentEditor({
               }}
             />
           ) : (
-            <div className="text-body">
+            <div className={`text-body ${markdownStyles.documentScale}`}>
               <EditableInput
                 ref={input}
                 draft={draft}

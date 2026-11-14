@@ -373,6 +373,7 @@ function paragraphMarkdown(
     return parts;
   });
   if (
+    block.type.name !== "heading" &&
     !hardBreaks.length &&
     !literals.length &&
     ranges.every((spans) => !spans.length)
@@ -744,7 +745,13 @@ function paragraphMarkdown(
   const tree: Root = {
     type: "root",
     children: [
-      { type: "paragraph", children: content(0, text.length, 0, false) },
+      block.type.name === "heading"
+        ? {
+            type: "heading",
+            depth: block.attrs.level,
+            children: content(0, text.length, 0, false),
+          }
+        : { type: "paragraph", children: content(0, text.length, 0, false) },
     ],
   };
   // Root adds exactly one final line ending; authored trailing newlines stay.

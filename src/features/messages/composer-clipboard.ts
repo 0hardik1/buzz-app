@@ -84,6 +84,7 @@ function tokenLink(
 const serializer = new DOMSerializer(
   {
     paragraph: () => ["p", 0],
+    heading: (node) => [`h${node.attrs.level}`, 0],
     blockquote: () => ["blockquote", 0],
     code_block: (node) => [
       "pre",

@@ -99,6 +99,29 @@ it("round-trips rich formatting into controlled source and accepts external repl
   ).toHaveTextContent("replacement");
 });
 
+it("renders all heading levels and retains their structure when formatting text", async () => {
+  const initialValue = [1, 2, 3, 4, 5, 6]
+    .map((level) => `${"#".repeat(level)} Heading ${level}`)
+    .join("\n\n");
+  const h = mount({}, { initialValue });
+  for (const level of [1, 2, 3, 4, 5, 6])
+    expect(
+      screen.getByRole("heading", { level, name: `Heading ${level}` }),
+    ).toBeVisible();
+  expect(h.change).not.toHaveBeenCalled();
+  const input = screen.getByRole("textbox", {
+    name: "Document body",
+  }) as ComposerInputElement;
+  act(() => {
+    input.focus();
+    input.setSelectionRange(0, 7);
+  });
+  await userEvent.click(screen.getByRole("button", { name: /^Bold$/ }));
+  expect(h.change).toHaveBeenLastCalledWith(
+    initialValue.replace("# Heading 1", "# **Heading** 1"),
+  );
+});
+
 it.each([
   ["{Enter}", "First\n\nSecond"],
   ["{Shift>}{Enter}{/Shift}", "First\\\nSecond"],
@@ -398,6 +421,7 @@ const clipboardTree = (value: unknown): unknown =>
 
 it.each(
   [
+    "# Heading\n\n## **Second**\n\nParagraph",
     "First\\\nSecond",
     "First\n\nSecond\n\n> Quote first\n>\n> Quote second",
     "- First\n\n- Second",
