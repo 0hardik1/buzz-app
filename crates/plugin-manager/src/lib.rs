@@ -526,6 +526,8 @@ pub fn bundled_manifests() -> Vec<Manifest> {
             "../../../src/bundled/relay-notes/manifest.json"
         ))
         .expect("relay notes manifest"),
+        serde_json::from_str(include_str!("../../../src/bundled/pages/manifest.json"))
+            .expect("pages manifest"),
         serde_json::from_str(include_str!("../../../src/bundled/typesafe/manifest.json"))
             .expect("typesafe manifest"),
         serde_json::from_str(include_str!(
@@ -544,7 +546,8 @@ pub fn bundled_manifests() -> Vec<Manifest> {
 fn enabled_by_default(id: &str) -> bool {
     matches!(
         id,
-        "buzz.channels"
+        "com.squareup.pages"
+            | "buzz.channels"
             | "buzz.feedback"
             | "buzz.diffs"
             | "buzz.mermaid"

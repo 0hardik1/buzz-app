@@ -83,6 +83,7 @@ async function page(
   routed = false,
   appComponent?: RegisteredPanel["component"],
   soloPreferences?: RelaySession["soloPreferences"],
+  linkedPanel?: Partial<RegisteredPanel>,
 ) {
   const viewer = keypair(),
     authority = keypair();
@@ -186,6 +187,7 @@ async function page(
     keepOpen: true,
     matches: (target) => target === "https://app.example/",
     component: appComponent ?? (() => <p>App content</p>),
+    ...linkedPanel,
   };
   const available = [panel, app];
   let handleOpen: ((request: PanelOpenRequest) => boolean) | undefined;
@@ -263,6 +265,48 @@ async function page(
     present: (request: PageNavigation) => mounted.rerender(view(request)),
   };
 }
+
+it.each([
+  { owner: "example.documents", addressable: true, panel: true },
+  { owner: "example.documents", addressable: undefined, panel: false },
+  { owner: "another.plugin", addressable: true, panel: false },
+])(
+  "keeps a plugin page beside the conversation only for its addressable owner: %o",
+  async ({ owner, addressable, panel }) => {
+    const host = createNavigationController(createMemoryHistory());
+    const url =
+      "buzz://plugin?id=example.documents&page=documents&route.id=plan";
+    const open = vi.fn(host.navigation.open);
+    const h = await page(
+      "stream",
+      { ...host.navigation, open },
+      false,
+      undefined,
+      undefined,
+      {
+        pluginId: owner,
+        ...(addressable ? { addressable: true as const } : {}),
+        matches: (target) => target === url,
+      },
+    );
+    act(() => {
+      expect(h.panels.requestOpen({ channelId: "alpha", target: url })).toBe(
+        true,
+      );
+    });
+    if (panel) {
+      expect(screen.getByText("App content")).toBeVisible();
+      expect(open).not.toHaveBeenCalled();
+    } else {
+      expect(open.mock.calls.at(-1)?.[0]).toMatchObject({
+        kind: "plugin",
+        pluginId: "example.documents",
+        pageId: "documents",
+      });
+      expect(screen.queryByText("App content")).not.toBeInTheDocument();
+    }
+  },
+);
 
 it.each([
   { link: "channel", direction: "Back" },
