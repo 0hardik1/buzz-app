@@ -57,7 +57,11 @@ export type {
   Panels,
   ChannelPanelContext,
   ChannelLauncherProps,
+  PanelWorkspaceItem,
+  PanelWorkspaceProps,
 } from "../features/panels/service";
+export type { PanelSplit } from "../features/panels/usePanelSplit";
+export type { MarkdownProps } from "../features/messages/PluginMarkdown";
 export type { Conversation } from "../features/conversation/service";
 export type { ChannelMembersDialogProps } from "../bundled/channels/ChannelMembersDialog";
 export type {
@@ -65,6 +69,11 @@ export type {
   GeneralAccessPolicy,
 } from "../bundled/channels/ChannelGeneralAccess";
 export type { MemberChange } from "../features/channel-members/administration-protocol";
+export type {
+  DocumentEditorProps,
+  DocumentEditorHandle,
+  DocumentEditorSelection,
+} from "../features/messages/DocumentEditor";
 export type {
   ConversationWorkspaceProps,
   PageTabTarget,
