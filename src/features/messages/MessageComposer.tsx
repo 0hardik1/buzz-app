@@ -205,7 +205,7 @@ import {
   useGuestAgentMentions,
   type UnheardAgent,
 } from "./useGuestAgentMentions";
-import { guestKeys, useChannelGuests } from "../channel-members/guests";
+import { guestKeys, useChannelRoles } from "../channel-members/guests";
 import { askInSolo } from "./solo-ask";
 import { ChatNotStarted } from "../relay/channel-writes";
 
@@ -1126,8 +1126,9 @@ function Composer({
   const unheard = useGuestAgentMentions(() => {
     if (permitted.current) input.current?.focus();
   });
-  // Reads this channel's roles so a send knows who is Viewing only.
-  useChannelGuests(
+  // Reads this channel's roles so a send can offer to make a Viewing-only
+  // agent a member.
+  useChannelRoles(
     session,
     soloConversation || ownSoloConversation ? undefined : channelId,
   );
@@ -2981,7 +2982,7 @@ function Composer({
           here.channelType !== "dm" &&
           here.channelType !== "solo"
         ) {
-          const guests = guestKeys(session.memberAdministration, channelId);
+          const guests = guestKeys(here);
           const known = session.profiles.snapshot();
           const agentsHere = captured.recipients.flatMap(
             (person): UnheardAgent[] => {
