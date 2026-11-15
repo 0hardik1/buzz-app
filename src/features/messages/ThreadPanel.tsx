@@ -849,25 +849,26 @@ function ThreadMessages({
       };
     };
   }, [messageId, navigation?.signal]);
-  const selectedOffset = useCallback(() => {
+  // Where the selected row sits in the viewport. A browser can clamp the
+  // scroll offset while a late ancestor reparents the row, so the row's place
+  // on screen is what a correction restores, never an offset from the old one.
+  const selectedTop = useCallback(() => {
     const row = selectedRow();
     const container = scroller.current;
     return row && container
-      ? row.getBoundingClientRect().top -
-          container.getBoundingClientRect().top +
-          container.scrollTop
+      ? row.getBoundingClientRect().top - container.getBoundingClientRect().top
       : undefined;
   }, [selectedRow]);
   const completeTarget = useCallback(() => {
     // Exact lookup can finish before context. Preserve this row's reading
     // position through prepended history without refocusing it after opening.
-    targetAnchor.current = selectedOffset();
+    targetAnchor.current = selectedTop();
     setInitialPositioned(true);
     captureResizePosition();
     readingSettled.current = true;
     readingPositioned(scroller.current);
     navigation?.complete({ status: "opened" });
-  }, [captureResizePosition, navigation, selectedOffset]);
+  }, [captureResizePosition, navigation, selectedTop]);
   const prepareTarget = useCallback(() => {
     readingIntent.current++;
     follow.current = false;
@@ -1416,10 +1417,11 @@ function ThreadMessages({
       }
     }
     if (targetAnchor.current !== undefined) {
-      const offset = selectedOffset();
-      if (offset !== undefined) {
-        correctScrollTop(element, offset - targetAnchor.current);
-        targetAnchor.current = offset;
+      const top = selectedTop();
+      if (top !== undefined) {
+        correctScrollTop(element, top - targetAnchor.current);
+        // The scroll range may not reach that place; hold where it landed.
+        targetAnchor.current = selectedTop();
         follow.current = false;
       }
       if (snapshot.status !== "loading" && !snapshot.canLoadMore)
@@ -1463,7 +1465,7 @@ function ThreadMessages({
     rootTarget,
     returning,
     revealed,
-    selectedOffset,
+    selectedTop,
     tree,
     expanded,
   ]);
@@ -1555,7 +1557,7 @@ function ThreadMessages({
       // Exact-history restoration must start from this corrected geometry,
       // rather than applying the same child-only height delta a second time.
       if (targetAnchor.current !== undefined)
-        targetAnchor.current = selectedOffset();
+        targetAnchor.current = selectedTop();
       if (olderAnchor.current) {
         const row = element.querySelector<HTMLElement>(
           `[data-message-id="${olderAnchor.current.id}"]`,
@@ -1568,7 +1570,7 @@ function ThreadMessages({
     observer.observe(content);
     observer.observe(end);
     return () => observer.disconnect();
-  }, [active, initialPositioned, captureResizePosition, selectedOffset]);
+  }, [active, initialPositioned, captureResizePosition, selectedTop]);
   const jumpToLatest = () => {
     readingIntent.current++;
     const element = scroller.current;
