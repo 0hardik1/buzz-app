@@ -131,7 +131,6 @@ export function Tabs<Value extends string>({
   if (renaming !== undefined && !items.some((item) => item.value === renaming))
     setRenaming(undefined);
   const list = useScrollEdges("inline");
-  const buttonStrip = useButtonStrip(variant === "buttons", value, list);
   const tabStrip = (
     <>
       {leadingAction}
@@ -323,9 +322,9 @@ export function Tabs<Value extends string>({
   );
   const strip =
     variant === "buttons" ? (
-      <div ref={buttonStrip} className="buzz-tabs-scroll-strip">
+      <ButtonStrip value={value} edges={list}>
         {tabStrip}
-      </div>
+      </ButtonStrip>
     ) : (
       tabStrip
     );
@@ -583,11 +582,15 @@ function TabRename({
  * pointer no longer makes: WebKit keeps `:hover` on the button that scrolled
  * away until the pointer moves again.
  */
-function useButtonStrip(
-  active: boolean,
-  value: string | null,
-  edges: (element: HTMLElement | null) => void,
-) {
+function ButtonStrip({
+  value,
+  edges,
+  children,
+}: {
+  value: string | null;
+  edges: (element: HTMLElement | null) => void;
+  children: ReactNode;
+}) {
   const [strip, setStrip] = useState<HTMLDivElement | null>(null);
   const ref = useCallback(
     (element: HTMLDivElement | null) => {
@@ -597,7 +600,7 @@ function useButtonStrip(
     [edges],
   );
   useLayoutEffect(() => {
-    if (!active || !strip || value === null) return;
+    if (!strip || value === null) return;
     const tab = strip.querySelector<HTMLElement>(
       `[data-tab-value="${CSS.escape(value)}"]`,
     );
@@ -612,9 +615,9 @@ function useButtonStrip(
       strip.scrollLeft -= bounds.left + start - box.left;
     else if (box.right > bounds.right - end)
       strip.scrollLeft += box.right - (bounds.right - end);
-  }, [active, strip, value]);
+  }, [strip, value]);
   useEffect(() => {
-    if (!active || !strip) return;
+    if (!strip) return;
     const scrolled = () => strip.toggleAttribute("data-scrolled", true);
     const moved = () => strip.toggleAttribute("data-scrolled", false);
     strip.addEventListener("scroll", scrolled, { passive: true });
@@ -626,8 +629,12 @@ function useButtonStrip(
       strip.removeEventListener("pointerleave", moved);
       strip.removeAttribute("data-scrolled");
     };
-  }, [active, strip]);
-  return ref;
+  }, [strip]);
+  return (
+    <div ref={ref} className="buzz-tabs-scroll-strip">
+      {children}
+    </div>
+  );
 }
 
 /** Restart only the paint layer, never the focused tab or retained panel. */
