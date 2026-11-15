@@ -360,7 +360,7 @@ test("Team's All is a feed: a thread is its own row and never moves its channel"
   message("a", 9);
   expect(index.keys(feed)).toEqual(["c:a", "e:a:r1", "c:b", "c:dm"]);
 
-  // A top-level mention is the channel's latest message: the mention shows it.
+  // A mention is in Mentions; the feed keeps the channel's own row.
   message("b", 12);
   const mention = {
     id: "m1",
@@ -373,7 +373,7 @@ test("Team's All is a feed: a thread is its own row and never moves its channel"
     manual: false,
   };
   inbox([{ ...mention, mention }]);
-  expect(index.keys(feed)).toEqual(["e:m1", "c:a", "e:a:r1", "c:dm"]);
+  expect(index.keys(feed)).toEqual(["c:b", "c:a", "e:a:r1", "c:dm"]);
   expect(index.keys({ ...feed, filter: "mentions" })).toEqual(["e:m1"]);
 
   reactions([
@@ -397,7 +397,7 @@ test("Team's All is a feed: a thread is its own row and never moves its channel"
   ]);
   const keys = index.keys(feed);
   expect(keys.map((key) => key.slice(0, 2))).toEqual([
-    "e:",
+    "c:",
     "r:",
     "c:",
     "e:",
@@ -406,7 +406,7 @@ test("Team's All is a feed: a thread is its own row and never moves its channel"
   expect(index.reaction((keys[1] as string).slice(2))?.message.id).toBe("mine");
   // Reactions are context: Unread leaves them out.
   expect(index.keys({ ...feed, unread: true })).toEqual([
-    "e:m1",
+    "c:b",
     "c:a",
     "e:a:r1",
   ]);
