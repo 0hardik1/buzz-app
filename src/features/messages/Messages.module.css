@@ -101,7 +101,12 @@
   align-items: stretch;
 }
 .edge[data-history-space] {
-  min-height: calc(var(--size-control) + var(--space-4));
+  /* The shared stylesheet pads this row below a floating header. */
+  min-height: calc(
+    var(--history-header-inset, 0px) +
+    var(--size-control) +
+    var(--space-4)
+  );
 }
 .feed[data-chat-presentation] .edge:not([data-history-space]) {
   min-height: var(--space-1);

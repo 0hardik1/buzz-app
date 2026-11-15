@@ -80,7 +80,12 @@ type Arrangement = {
   /** Takes an entry out of a section a person put it in. */
   unplace(entry: RailEntry, section: string): void;
   reorder(id: string, over: string): void;
-  create(entry: RailEntry, from?: string): void;
+  /** `opener` finds the row whose menu asked, to take focus back on cancel. */
+  create(
+    entry: RailEntry,
+    from?: string,
+    opener?: () => HTMLElement | null | undefined,
+  ): void;
   rename(id: string, title: string): void;
   remove(id: string): void;
   renderEntry(entry: RailEntry, section?: string): ReactNode;
@@ -230,6 +235,7 @@ function Arrangement({
   const [creating, setCreating] = useState<{
     entry?: RailEntry;
     from?: string | undefined;
+    opener?: (() => HTMLElement | null | undefined) | undefined;
   }>();
   const newSectionButton = useRef<HTMLButtonElement>(null);
   const groups: Group[] = [
@@ -281,7 +287,7 @@ function Arrangement({
         ),
       );
     },
-    create: (entry, from) => setCreating({ entry, from }),
+    create: (entry, from, opener) => setCreating({ entry, from, opener }),
     rename: (id, title) => {
       saved(rename(id, title));
     },
@@ -431,7 +437,11 @@ function Arrangement({
         {creating && (
           <CreateSidebarSection
             channelName={creating.entry?.label}
-            finalFocus={creating.entry ? false : newSectionButton}
+            finalFocus={
+              creating.entry
+                ? () => creating.opener?.() ?? false
+                : newSectionButton
+            }
             writable
             refreshing={false}
             retry={async () => {}}
@@ -726,6 +736,8 @@ export function RailGroup({
       <ContextMenuTrigger
         onContextMenu={() => setMenuAnchor(undefined)}
         onKeyDown={(event) => {
+          // A row inside the card already opened its own menu.
+          if (event.defaultPrevented) return;
           if (
             event.key === "ContextMenu" ||
             (event.shiftKey && event.key === "F10")
@@ -842,9 +854,7 @@ export function RailDestinationRow({
           section={section}
           listed={listed}
           close={() => setMenuOpen(false)}
-          focus={() =>
-            drag.node.current?.querySelector<HTMLElement>("button")?.focus()
-          }
+          row={() => drag.node.current?.querySelector<HTMLElement>("button")}
         />
       </MenuPopup>
     </ContextMenuRoot>
@@ -856,14 +866,16 @@ function RowMenu({
   section,
   listed,
   close,
-  focus,
+  row,
 }: {
   entry: RailEntry;
   section: string;
   listed: boolean;
   close(): void;
-  focus(): void;
+  /** The row's own control, which takes focus back from what its menu opens. */
+  row(): HTMLElement | null | undefined;
 }) {
+  const focus = () => row()?.focus();
   const arrangement = useContext(ArrangementContext);
   const pinned = !!arrangement?.isPinned(entry);
   const page = entry.kind === "page";
@@ -901,7 +913,7 @@ function RowMenu({
             arrangement?.groups.some((group) => ownSection(group.id))) && (
             <MenuSeparator />
           )}
-          <MenuItem onClick={() => arrangement?.create(entry, from)}>
+          <MenuItem onClick={() => arrangement?.create(entry, from, row)}>
             New section…
           </MenuItem>
         </MenuSubmenuPopup>

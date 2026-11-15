@@ -1,4 +1,4 @@
-import { openPage } from "./navigation.mjs";
+import { openChannel, openPage } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { wheel, open, settle, anchor, expectAnchor } from "./timeline.mjs";
 
@@ -44,7 +44,7 @@ async function bottom(page, app, label) {
   expect(metrics.gap, label).toBeLessThan(4);
 }
 async function select(page, name) {
-  await page.getByRole("button", { name, exact: true }).click();
+  await openChannel(page, name.toLowerCase());
   await expect(
     page.getByRole("textbox", { name: `Message #${name}`, exact: true }),
   ).toBeVisible();
@@ -65,6 +65,7 @@ sized(
     await openPage(page, "Workflows");
     await page.reload();
     await openPage(page, "Team");
+    await select(page, "Alpha");
     await bottom(page, app, "persisted bottom Alpha");
     await select(page, "Beta");
     await bottom(page, app, "persisted bottom Beta");
@@ -119,6 +120,7 @@ readingTest(
     await openPage(page, "Workflows");
     await page.reload();
     await openPage(page, "Team");
+    await select(page, "Alpha");
     await settle(page);
     await expectAnchor(page, reading);
   },
@@ -182,10 +184,9 @@ activityHead(
     };
     for (const visit of ["cold", "reloaded"]) {
       if (visit === "cold") await open(page, app);
-      else {
-        await page.reload();
-        await openPage(page, "Team");
-      }
+      // A reload returns to the open channel. Opening it again would start a
+      // second visit, with its own read of older history.
+      else await page.reload();
       await expect(latest).toBeVisible();
       await expect
         .poll(() => app.pending.length, {

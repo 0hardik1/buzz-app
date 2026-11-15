@@ -13,6 +13,7 @@ import {
   issuerMayAnswerAgain,
 } from "../../features/federated-identity/CommunitySignIn";
 import { Button } from "../../shared/design-system/ui/Button";
+import { ToastNotice } from "../../shared/design-system/ui/Toast";
 
 /** The rail's connection and sign-in notices: relay outages recover through
  * one automatic owner and a community's refusal says what fixes it, each in
@@ -35,6 +36,16 @@ export function ConnectionNotices({
       <>
         {!connection.cached && (
           <RecoveryNotice recovery={connection.session.recovery} />
+        )}
+        {connection.cached && connection.error && (
+          <ToastNotice
+            title="Offline"
+            description="Showing saved conversations."
+          >
+            <Button onClick={() => communities.relay.tryAgain()}>
+              Retry connection
+            </Button>
+          </ToastNotice>
         )}
         <LiveSignIn
           session={connection.session}

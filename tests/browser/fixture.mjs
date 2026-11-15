@@ -2678,6 +2678,20 @@ export const test = base.extend({
         },
         presenceThread,
         inboxWindow,
+        deleteInboxAnchor(event) {
+          const deletion = sign(
+            5,
+            [
+              ["h", inboxWindow.channelId],
+              ["e", event.id],
+            ],
+            "",
+            peerKey,
+            event.created_at + 100,
+          );
+          targetEvents.push(deletion);
+          relay.publish("primary", deletion);
+        },
         exact,
         ownerAgentMessage,
         searchTarget,

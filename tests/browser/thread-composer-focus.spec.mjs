@@ -6,7 +6,8 @@ test.use({
   readState: true,
   threadUnread: true,
   pluginFixtures: true,
-  historyCounts: { alpha: 20, beta: 1 },
+  // Beta's list row previews its newest message; an older root stays unread.
+  historyCounts: { alpha: 20, beta: 3 },
 });
 
 // Browser-only: prove opener → retained portal → native editor focus, including
@@ -64,8 +65,10 @@ test("opening and reopening a thread resumes typing", async ({ page, app }) => {
 
 // Beta has never been opened, so its root cannot seed the reply editor from the
 // timeline cache. Hold its read until a real gesture cancels the focus request.
-for (const owner of [undefined, "menu", "dialog"]) {
-  test(`a late-mounted thread ${owner ? `preserves a later ${owner}` : "focuses its reply composer"}`, async ({
+// An address names its message, so the visit reveals it and leaves the reply
+// editor unfocused; only the gestures remain to prove.
+for (const owner of ["menu", "dialog"]) {
+  test(`a late-mounted thread preserves a later ${owner}`, async ({
     page,
     app,
   }) => {
@@ -99,6 +102,7 @@ for (const owner of [undefined, "menu", "dialog"]) {
             version: 1,
             kind: "conversation",
             channelId: "beta",
+            messageId: threadRootId,
             threadRootId,
             context: "thread",
             scope: { viewer, communityOrigin: "https://primary.example" },
@@ -133,7 +137,7 @@ for (const owner of [undefined, "menu", "dialog"]) {
       // The dialog correctly hides the workspace from the accessibility tree;
       // observe the retained editor DOM as the read-completion barrier.
       await expect(reply).toHaveCount(1);
-      await expect(target ?? reply).toBeFocused();
+      await expect(target).toBeFocused();
     } finally {
       release();
     }

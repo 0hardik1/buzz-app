@@ -35,6 +35,8 @@ export function routedSection(target: OpenTarget) {
   if (target.kind !== "page" || !listsConversations(target)) return;
   if (!target.route || activityAddress(target)) return "messages";
   const params = target.route.params;
+  // Nothing is open to offer the list from: the empty page shows Team's.
+  if (params === "empty") return "messages";
   return isSidebarSectionRoute(params) ? params.section : undefined;
 }
 
@@ -116,14 +118,16 @@ export function useListColumn(navigator: Navigation | undefined) {
     if (request && (request.from !== entryId || request.attempt !== attemptId))
       asked.current = undefined;
   }, [entryId, attemptId]);
-  const setOpen = useCallback(
-    (open: boolean, animate = false) =>
-      setState((current) => ({
-        ...current,
-        list: { ...current.list, open, animate },
-      })),
-    [],
-  );
+  const setOpen = useCallback((open: boolean, animate = false) => {
+    // A toggle while an open is in flight is the later choice.
+    const request = asked.current;
+    if (request)
+      asked.current = { ...request, list: { ...request.list, open } };
+    setState((current) => ({
+      ...current,
+      list: { ...current.list, open, animate },
+    }));
+  }, []);
   const latest = useRef({ entryId, list });
   useLayoutEffect(() => {
     latest.current = { entryId, list };

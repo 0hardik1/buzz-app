@@ -1,5 +1,4 @@
 import { test, expect } from "./fixture.mjs";
-import { channelRow } from "./navigation.mjs";
 import { openInView } from "./rail-helpers.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 
@@ -16,27 +15,12 @@ test.use({
 });
 
 // Real paint geometry: DOM emulators cannot detect padding or baseline drift.
-test("a presence badge preserves the Team row avatar center and header insets", async ({
+test("a panel header keeps its insets across themes, text sizes and widths", async ({
   page,
   app,
 }) => {
   await page.goto(app.origin);
   await openInView(page, "dms", "dm-peer");
-  const row = channelRow(page, "dm-peer");
-  await expect
-    .poll(() =>
-      app.report.presenceSnapshots.some((snapshot) =>
-        snapshot.filter.authors.includes(app.participants[0]),
-      ),
-    )
-    .toBe(true);
-  // Snapshot admission precedes the separate live presence REQ.
-  await expect
-    .poll(() => app.relay.hasPresenceRoute("primary", app.participants[0]))
-    .toBe(true);
-  app.presence("away");
-  const avatar = row.locator(".buzz-avatar-status");
-  await expect(avatar).toHaveAttribute("data-status", "away");
   await page
     .getByRole("button", { name: /^Manage members of /, exact: true })
     .click();
@@ -56,26 +40,9 @@ test("a presence badge preserves the Team row avatar center and header insets", 
       },
       { mode, fontSize },
     );
-    await expect
-      .poll(() =>
-        avatar.evaluate((element) => {
-          const row = element
-            .closest("[data-conversation-row]")
-            .getBoundingClientRect();
-          const image = element
-            .querySelector(".buzz-avatar")
-            .getBoundingClientRect();
-          const dot = element
-            .querySelector(".buzz-avatar-status-dot")
-            .getBoundingClientRect();
-          return {
-            offset: image.y + image.height / 2 - row.y - row.height / 2,
-            square: dot.width === dot.height,
-          };
-        }),
-      )
-      .toEqual({ offset: 0, square: true });
-    for (const header of await headers.all()) {
+    // The conversation's own header floats over its history; only the panel
+    // header is a band its tab centers in.
+    for (const header of [headers.last()]) {
       await expect
         .poll(() =>
           header.evaluate((element) => {

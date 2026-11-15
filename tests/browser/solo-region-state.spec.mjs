@@ -76,10 +76,12 @@ test.describe("disabled plugin chat fallback", () => {
   }) => {
     await page.goto(`${app.origin}/?solo-region-fixture`);
     await newChat(page);
-    await page.evaluate(async (id) => {
-      await window.fixtureSoloRegion.createWorkspace();
-      await window.fixtureSoloRegion.classify(id);
-    }, alpha);
+    // Workspaces are refused, before anything is written, until the saved
+    // ones have loaded from the relay.
+    await expect(() =>
+      page.evaluate(() => window.fixtureSoloRegion.createWorkspace()),
+    ).toPass();
+    await page.evaluate((id) => window.fixtureSoloRegion.classify(id), alpha);
 
     const row = soloRow(page, alpha);
     await expect(row).toHaveCount(1);

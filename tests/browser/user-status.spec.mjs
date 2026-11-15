@@ -294,11 +294,14 @@ test("statuses edit, synchronize, clear, reject stale traffic and retain failed 
         .toEqual({ clipped: true, fits: true, ink: "visible", author: false });
     }
     // A multi-word name wraps at spaces, so it must keep every pixel, staying
-    // on one line, while the status is still above its 2.5-emoji floor.
+    // on one line, while the status is still above its 2.5-emoji floor. The
+    // byline reaches the row's end, so a narrower column makes the squeeze:
+    // one in the middle of the widths that clip the status above its floor,
+    // since text measures differently on each platform.
     await page.goto(
       new URL("?name=Alexandra Kowalski-Nguyen", page.url()).href,
     );
-    await page.setViewportSize({ width: 1440, height: 950 });
+    await page.setViewportSize({ width: 680, height: 950 });
     await page
       .getByRole("button", { name: "Free-text Bob", exact: true })
       .click();
@@ -319,6 +322,8 @@ test("statuses edit, synchronize, clear, reject stale traffic and retain failed 
         }),
       )
       .toEqual({ clipped: true, aboveFloor: true, wrapped: false });
+    // Narrow enough that the long name wraps however the platform measures it.
+    await page.setViewportSize({ width: 700, height: 950 });
     await page.goto(
       new URL(
         "?name=Bob with a very long display name that needs to fade in the byline",

@@ -525,6 +525,8 @@ function OwnedThreadPanel({
     <ThreadLoading />
   );
 }
+const EDITABLE =
+  '[role="textbox"], [role="combobox"], input, textarea, select, [contenteditable="true"]';
 function ThreadMessages({
   intro,
   session,
@@ -961,11 +963,45 @@ function ThreadMessages({
   }, [revealSelected, revealRequest]);
   const revealSignal =
     inlineReveal ?? (positionedVisit ? undefined : navigation?.signal);
+  // The opening's own focus request, until the reader acts on it.
+  const openingFocus = useRef(false);
+  // Where focus was when this reveal was asked for.
+  const revealOrigin = useRef<{
+    signal: AbortSignal | undefined;
+    focused: Element | null;
+  }>({ signal: undefined, focused: null });
+  if (revealOrigin.current.signal !== revealSignal)
+    revealOrigin.current = {
+      signal: revealSignal,
+      focused: revealSignal ? document.activeElement : null,
+    };
+  // The editor the reader last clicked or typed in: theirs, whenever a reveal
+  // that was asked for before they got there arrives.
+  const editing = useRef<Element | null>(null);
+  useEffect(() => {
+    const editor = (node: EventTarget | null) =>
+      node instanceof Element ? node.closest(EDITABLE) : null;
+    const act = (event: Event) => {
+      editing.current = editor(event.target);
+    };
+    document.addEventListener("pointerdown", act, true);
+    document.addEventListener("beforeinput", act, true);
+    return () => {
+      document.removeEventListener("pointerdown", act, true);
+      document.removeEventListener("beforeinput", act, true);
+    };
+  }, []);
   const canFocusTarget = useCallback(() => {
-    // Exact-target composers do not autofocus. Editing begun while its row is
-    // loading supersedes the reveal's eventual focus, not its position or cue.
-    return !scroller.current?.ownerDocument.activeElement?.closest(
-      '[role="textbox"], [role="combobox"], input, textarea, select, [contenteditable="true"]',
+    // Editing begun while its row is loading supersedes the reveal's eventual
+    // focus, not its position or cue. An editor the reader opened from, or one
+    // the opening itself focused, is not that until the reader clicks or types
+    // in it.
+    const focused = scroller.current?.ownerDocument.activeElement;
+    const editor = focused?.closest(EDITABLE);
+    return (
+      !editor ||
+      (editor !== editing.current &&
+        (openingFocus.current || focused === revealOrigin.current.focused))
     );
   }, []);
   const revealed = useMessageReveal({
@@ -1120,6 +1156,7 @@ function ThreadMessages({
     if (focusRequest) setReplyFocus((value) => value + 1);
   }, [focusRequest]);
   const pendingReplyFocus = usePendingRequest(replyFocus);
+  openingFocus.current = !!pendingReplyFocus;
   const [mediaSeek, setMediaSeek] = useState<{
     seconds: number;
     request: number;

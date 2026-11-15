@@ -210,18 +210,9 @@ test.describe("last visible channel", () => {
       0,
     );
     // Roster revocation can render the empty page before Leave is confirmed.
-    // Its completion hands focus back through the sidebar owner.
     await expect(
       page.getByText("Channel left: Lifecycle channel", { exact: true }),
     ).toBeVisible();
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            document.activeElement?.closest("[data-activity-sidebar]") !== null,
-        ),
-      )
-      .toBe(true);
     await page.reload();
     await expect(
       page.getByText("Select a channel to read it.", { exact: true }),

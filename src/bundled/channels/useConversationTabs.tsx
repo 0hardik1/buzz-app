@@ -174,9 +174,14 @@ export function useConversationTabs({
       ? (splitTrigger.current ?? fallbackFocus?.current)
       : uncovered;
     focusSplit.current = false;
-    const cover = target?.closest("[inert]");
-    if (cover) focusDock(cover.parentElement);
-    else target?.focus({ preventScroll: true });
+    const land = (target: HTMLElement | null | undefined) => {
+      const cover = target?.closest("[inert]");
+      if (cover) focusDock(cover.parentElement);
+      else target?.focus({ preventScroll: true });
+      return !!cover || document.activeElement === target;
+    };
+    // A toggle folded into the header's closed actions cannot take focus.
+    if (target && !land(target)) land(fallbackFocus?.current);
   });
   const panelTrigger = useRef<HTMLElement | null>(null);
   const mounted = useRef(false);

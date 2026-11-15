@@ -2,6 +2,7 @@ import { test, expect } from "./fixture.mjs";
 import { channelRow, rail } from "./navigation.mjs";
 import { openSoloList, showChannels } from "./rail-helpers.mjs";
 import { virtuaIdle } from "./timeline.mjs";
+import { animationsSettled } from "./animations.mjs";
 import { holdMenuExit, opened } from "./menu-motion.mjs";
 
 const chatId = "33333333-3333-4333-8333-333333333333";
@@ -76,7 +77,7 @@ test("navigation menus do not highlight labels while message text and editors re
 
   // Rail section titles have their own style, outside NavigationItem.
   const section = rail(page)
-    .locator('[data-rail-section="team"]')
+    .locator('[data-rail-section="messages"]')
     .getByRole("button", { name: "Team", exact: true });
   await expectNoSelection(page, section);
   await section.click({
@@ -85,6 +86,9 @@ test("navigation menus do not highlight labels while message text and editors re
   });
   expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("");
   await page.keyboard.press("Escape");
+  // The title opened Team's whole list; return to the conversation.
+  await channel.click();
+  await expect(composer).toBeVisible();
 
   const event = app.append("primary", "alpha", "Selectable message content");
   const message = page
@@ -124,17 +128,6 @@ test("navigation menus do not highlight labels while message text and editors re
   await page.keyboard.press("Escape");
   await expect(chatMenu).toHaveCount(0);
   expect(app.report.detailsPublications ?? []).toHaveLength(0);
-
-  const heading = rail(page)
-    .locator('[data-rail-section="solo"]')
-    .getByRole("button", { name: "Solo", exact: true });
-  await expectNoSelection(page, heading);
-  await heading.click({
-    button: "right",
-    position: await textPosition(heading),
-  });
-  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("");
-  await page.keyboard.press("Escape");
 });
 
 // Browser-only: a modal menu removes native hover, and its exit is asynchronous.
@@ -159,6 +152,8 @@ test("context menus appear immediately and retain their source highlight through
       source.evaluate((element) => getComputedStyle(element).backgroundColor);
     await source.hover();
     await expect.poll(background).not.toBe("rgba(0, 0, 0, 0)");
+    // The fill fades in; compare against where it comes to rest.
+    await animationsSettled(source);
     const hover = await background();
     // Capture paint on mounting and state changes, before entrance could finish.
     await page.evaluate(() => {
@@ -234,7 +229,7 @@ test("context menus appear immediately and retain their source highlight through
     await source.press("Shift+F10");
     await opened(menu);
     await menu.getByRole("menuitem").first().focus();
-    expect(await background()).toBe(hover);
+    await expect.poll(background).toBe(hover);
     await menu.press("Escape");
     await exit.held(menu);
     await exit.release();

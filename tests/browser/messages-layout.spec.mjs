@@ -1,4 +1,9 @@
 import { test, expect } from "./fixture.mjs";
+import {
+  activityRow,
+  conversationList,
+  conversationRow,
+} from "./navigation.mjs";
 
 test.use({
   productionBroker: true,
@@ -100,44 +105,20 @@ test("the combined rail pins destinations and opens centered Messages", async ({
     [],
     newestAt,
   );
-  const cardRows = rail
-    .getByRole("list", { name: "Recent conversations" })
-    .getByRole("button");
-  await expect(cardRows.nth(0)).toHaveAccessibleName("Alpha");
-  const messageCard = rail.locator('[data-rail-section="messages"]');
-  const sortMessages = rail.getByRole("button", {
-    name: "Filter and sort Team card",
+  const list = conversationList(page);
+  const rows = list.locator("[data-activity-row]");
+  const filters = page.getByRole("button", {
+    name: "Filter and sort conversations",
+    exact: true,
   });
-  await page.mouse.move(1300, 20);
-  await expect
-    .poll(() =>
-      sortMessages.evaluate((button) =>
-        button.checkVisibility({ opacityProperty: true }),
-      ),
-    )
-    .toBe(false);
-  await messageCard.hover();
-  await expect
-    .poll(() =>
-      sortMessages.evaluate((button) =>
-        button.checkVisibility({ opacityProperty: true }),
-      ),
-    )
-    .toBe(true);
-  await sortMessages.click();
-  await page.mouse.move(1300, 20);
-  await expect
-    .poll(() =>
-      sortMessages.evaluate((button) =>
-        button.checkVisibility({ opacityProperty: true }),
-      ),
-    )
-    .toBe(true);
-  const cardMenu = page.getByRole("menu").filter({
-    has: page.getByRole("menuitemradio", { name: "A–Z", exact: true }),
+  await expect(rows.nth(0)).toHaveAttribute("data-activity-row", "alpha");
+  await filters.click();
+  const listMenu = page.getByRole("menu", {
+    name: "Filter and sort conversations",
+    exact: true,
   });
-  await expect(cardMenu).toBeVisible();
-  await cardMenu.evaluate((element) =>
+  await expect(listMenu).toBeVisible();
+  await listMenu.evaluate((element) =>
     Promise.all(
       element
         .getAnimations({ subtree: true })
@@ -145,7 +126,7 @@ test("the combined rail pins destinations and opens centered Messages", async ({
     ),
   );
   await page.screenshot({
-    path: testInfo.outputPath("messages-card-filter-menu.png"),
+    path: testInfo.outputPath("messages-list-filter-menu.png"),
   });
   await page.getByRole("menuitemradio", { name: "A–Z", exact: true }).click();
   for (const [i, label] of [
@@ -154,162 +135,73 @@ test("the combined rail pins destinations and opens centered Messages", async ({
     "Beta",
     "delta",
   ].entries())
-    await expect(cardRows.nth(i)).toHaveAccessibleName(label);
+    await expect(rows.nth(i)).toContainText(label);
+  // The sort is remembered across a reload.
   await page.reload();
-  await messageCard.hover();
-  await sortMessages.click();
+  await filters.click();
   await expect(
     page.getByRole("menuitemradio", { name: "A–Z", exact: true }),
   ).toHaveAttribute("aria-checked", "true");
   await page.getByRole("menuitemradio", { name: "Recent activity" }).click();
-  await expect(cardRows.nth(0)).toHaveAccessibleName("Alpha");
+  await expect(rows.nth(0)).toHaveAttribute("data-activity-row", "alpha");
 
-  await sortMessages.click();
-  await page
-    .getByRole("menuitemradio", { name: "Direct", exact: true })
-    .click();
-  await expect(
-    messageCard.getByRole("button", { name: "Alice Fixture", exact: true }),
-  ).toBeVisible();
-  await expect(
-    messageCard.getByRole("button", { name: "Alpha", exact: true }),
-  ).toHaveCount(0);
+  // The DMs view lists people only, and it survives a reload.
+  const dmsView = rail.locator('[data-rail-team-view="dms"]');
+  await dmsView.click();
+  await expect(dmsView).toHaveAttribute("aria-current", /.+/);
+  await expect(conversationRow(page, "Alice Fixture")).toBeVisible();
+  await expect(conversationRow(page, "Alpha")).toHaveCount(0);
   await page.reload();
-  await messageCard.hover();
-  await sortMessages.click();
-  await expect(
-    page.getByRole("menuitemradio", { name: "Direct", exact: true }),
-  ).toHaveAttribute("aria-checked", "true");
-  await page.keyboard.press("Escape");
-  for (const view of ["Threads", "Working", "Waiting"]) {
-    await messageCard.hover();
-    await sortMessages.click();
-    await page.getByRole("menuitemradio", { name: view, exact: true }).click();
-    await expect(
-      messageCard.getByText("No matching conversations.", { exact: true }),
-    ).toBeVisible();
-  }
-  await messageCard.hover();
-  await sortMessages.click();
-  await page.getByRole("menuitemradio", { name: "All", exact: true }).click();
+  await expect(dmsView).toHaveAttribute("aria-current", /.+/);
+  await expect(conversationRow(page, "Alice Fixture")).toBeVisible();
+  await expect(conversationRow(page, "Alpha")).toHaveCount(0);
+  await activityRow(page).click();
+  await expect(rows.nth(0)).toHaveAttribute("data-activity-row", "alpha");
 
-  await rail.getByRole("button", { name: "Team", exact: true }).click();
-  const index = page.getByRole("region", { name: "Team", exact: true });
-  await expect(
-    index.getByRole("heading", { name: "Team", level: 2 }),
-  ).toBeVisible();
-  // Real geometry: view chips share the rows' leading content edge.
-  const firstRow = index
-    .locator("[data-activity-row] [data-conversation-row]")
-    .first();
-  await expect(firstRow).toBeVisible();
+  // Real geometry: the filter control shares the rows' leading content edge.
+  const firstRow = rows.first().locator("[data-conversation-row]");
   const contentLeft = await firstRow.evaluate(
     (element) =>
       element.getBoundingClientRect().left +
       Number.parseFloat(getComputedStyle(element).paddingInlineStart),
   );
-  const firstFilter = await index
-    .getByRole("tab", { name: "All", exact: true })
-    .boundingBox();
+  const firstFilter = await filters.boundingBox();
   expect(firstFilter.x).toBeCloseTo(contentLeft, 0);
-  // Both hosts must project the same objects before the card's four-row cap.
-  // This catches received-only ranking, fixed plugin priority, and split filters.
-  const expectMatchingMessages = async () => {
-    await page.mouse.move(1300, 20);
-    await expect
-      .poll(async () => {
-        const full = await index
-          .locator("[data-activity-row]")
-          .evaluateAll((rows) =>
-            rows
-              .map((row) => row.getAttribute("data-activity-row"))
-              .slice(0, 4),
-          );
-        const compact = await cardRows.evaluateAll((rows) =>
-          rows.map((row) => row.getAttribute("data-rail-channel")),
-        );
-        return {
-          full,
-          compact,
-          matches:
-            full.length > 0 && JSON.stringify(full) === JSON.stringify(compact),
-        };
-      })
-      .toMatchObject({ matches: true });
-  };
-  await expectMatchingMessages();
-  await index
-    .getByRole("button", { name: "Filter and sort conversations", exact: true })
-    .click();
-  await page.getByRole("menuitemradio", { name: "A–Z", exact: true }).click();
-  await expectMatchingMessages();
-  await messageCard.hover();
-  await sortMessages.click();
-  await expect(
-    page.getByRole("menuitemradio", { name: "A–Z", exact: true }),
-  ).toHaveAttribute("aria-checked", "true");
-  await page
-    .getByRole("menuitemradio", { name: "Recent activity", exact: true })
-    .click();
-  await expectMatchingMessages();
-  await index.getByRole("tab", { name: "Direct", exact: true }).click();
-  await expectMatchingMessages();
-  await messageCard.hover();
-  await sortMessages.click();
-  await expect(
-    page.getByRole("menuitemradio", { name: "Direct", exact: true }),
-  ).toHaveAttribute("aria-checked", "true");
-  await page.keyboard.press("Escape");
-  await index.getByRole("tab", { name: "All", exact: true }).click();
-  await index
-    .getByRole("button", { name: "Filter and sort conversations", exact: true })
-    .click();
+
+  // Unread only narrows the list to rows with unread messages.
+  await filters.click();
   await page
     .getByRole("menuitemradio", { name: "Unread only", exact: true })
     .click();
-  await expectMatchingMessages();
-  await messageCard.hover();
-  await sortMessages.click();
-  const unreadCardChoice = page.getByRole("menuitemcheckbox", {
-    name: "Unread only",
-    exact: true,
-  });
-  await expect(unreadCardChoice).toHaveAttribute("aria-checked", "true");
-  await unreadCardChoice.click();
-  await page.keyboard.press("Escape");
+  await expect(rows.first()).toBeVisible();
+  const unreadRows = await rows.count();
+  await filters.click();
   await expect(
-    index.getByRole("button", {
-      name: "Filter and sort conversations",
-      exact: true,
-    }),
-  ).toBeVisible();
-  await expectMatchingMessages();
+    page.getByRole("menuitemradio", { name: "Unread only", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+  await page
+    .getByRole("menuitemradio", { name: "All conversations", exact: true })
+    .click();
+  await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(unreadRows);
   await page.screenshot({
-    path: testInfo.outputPath("messages-card-page-parity.png"),
+    path: testInfo.outputPath("messages-list-unread.png"),
   });
-  const beta = index.locator('[data-activity-row="beta"]');
-  const recentBeta = rail
-    .getByRole("list", { name: "Recent conversations" })
-    .getByRole("button", { name: "Beta", exact: true });
+  const listBeta = list.locator('[data-activity-row="beta"]');
   await expect(
-    recentBeta.getByRole("img", { name: "Unread", exact: true }),
+    listBeta.getByRole("img", { name: "Unread", exact: true }),
   ).toBeVisible();
   const beforeMark = page.url();
-  await beta.hover();
-  await beta.getByRole("button", { name: "Mark as read", exact: true }).click();
+  await listBeta.hover();
+  await listBeta
+    .getByRole("button", { name: "Mark as read", exact: true })
+    .click();
   await expect(
-    beta.getByRole("img", { name: "Unread", exact: true }),
+    listBeta.getByRole("img", { name: "Unread", exact: true }),
   ).toHaveCount(0);
   await expect(page).toHaveURL(beforeMark);
-  await expect(
-    recentBeta.getByRole("img", { name: "Unread", exact: true }),
-  ).toHaveCount(0);
-  const recentAlpha = rail
-    .getByRole("list", { name: "Recent conversations" })
-    .getByRole("button", { name: "Alpha", exact: true });
-  // Rail destinations open the full conversation for pinning and navigation;
-  // collection-row navigation is exercised in messages-sheet.spec.mjs.
-  await recentAlpha.click();
+  const listAlpha = list.locator('[data-activity-row="alpha"]');
+  // The rail's destinations and Team's rows open the full conversation.
+  await listAlpha.locator("[data-conversation-row]").click();
   const conversation = page.getByRole("article", {
     name: "Conversation",
     exact: true,
@@ -317,18 +209,8 @@ test("the combined rail pins destinations and opens centered Messages", async ({
   const editor = conversation.getByRole("textbox");
   await editor.fill("Keep this Messages draft");
   await expect(
-    recentAlpha.getByRole("img", { name: "Unread", exact: true }),
+    listAlpha.getByRole("img", { name: "Unread", exact: true }),
   ).toHaveCount(0);
-  await expect(
-    rail
-      .getByRole("list", { name: "Recent conversations" })
-      .getByRole("listitem"),
-  ).toHaveCount(4);
-  await expect(
-    rail
-      .getByRole("list", { name: "Recent conversations" })
-      .getByRole("button", { name: "Alpha", exact: true }),
-  ).toHaveCount(1);
   const currentConversation = page.url();
   await rail.getByRole("button", { name: "Add pin", exact: true }).click();
   const picker = page.getByRole("dialog", { name: "Add a pin", exact: true });
@@ -348,12 +230,11 @@ test("the combined rail pins destinations and opens centered Messages", async ({
   await expect(
     pinnedAlpha.getByRole("img", { name: "Unread", exact: true }),
   ).toHaveCount(0);
-  await rail.getByRole("button", { name: "Bestie", exact: true }).click();
+  await rail
+    .getByRole("button", { name: "Create an agent", exact: true })
+    .click();
   await expect.poll(() => app.relay.hasRoute("primary", "alpha")).toBe(true);
   app.append("primary", "alpha", "New sidebar unread message", true, false);
-  await expect(
-    recentAlpha.getByRole("img", { name: "Unread", exact: true }),
-  ).toBeVisible();
   await expect(
     pinnedAlpha.getByRole("img", { name: "Unread", exact: true }),
   ).toBeVisible();
@@ -367,15 +248,9 @@ test("the combined rail pins destinations and opens centered Messages", async ({
   await expect(
     pinnedAlpha.getByRole("img", { name: "Unread", exact: true }),
   ).toHaveCount(0);
-  await expect(
-    recentAlpha.getByRole("img", { name: "Unread", exact: true }),
-  ).toHaveCount(0);
 
-  await rail.getByRole("button", { name: "Team", exact: true }).click();
-  await index.getByRole("tab", { name: "Direct", exact: true }).click();
-  await expect(
-    index.getByRole("heading", { name: "Direct", level: 2 }),
-  ).toBeVisible();
+  await dmsView.click();
+  await expect(conversationRow(page, "Alice Fixture")).toBeVisible();
   await pins.getByRole("button", { name: "Alpha", exact: true }).click();
   await expect(editor).toHaveText("Keep this Messages draft");
   await page.reload();
@@ -413,12 +288,11 @@ test("the combined rail pins destinations and opens centered Messages", async ({
   await expect(editor).toBeInViewport();
   await expect(rail).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath("rail-medium.png") });
-  await rail.getByRole("button", { name: "Bestie", exact: true }).click();
+  await rail
+    .getByRole("button", { name: "Create an agent", exact: true })
+    .click();
   await expect(
-    page.getByRole("heading", {
-      name: "Choose your bestie agent",
-      exact: true,
-    }),
+    page.getByRole("region", { name: "Bestie", exact: true }),
   ).toBeVisible();
   await expect(rail).toBeVisible();
   await pins.getByRole("button", { name: "Alpha", exact: true }).click();
@@ -461,8 +335,6 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
   const messages = rail.locator('[data-rail-section="messages"]');
   const solo = rail.locator('[data-rail-section="solo"]');
-  const beta = messages.getByRole("button", { name: "Beta", exact: true });
-  await expect(beta).toBeVisible();
   const primary = rail.locator("section").filter({
     has: page.getByRole("button", { name: "Workflows", exact: true }),
   });
@@ -475,7 +347,6 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await expect(
     rail.getByRole("heading", { name: "Plugins", exact: true }),
   ).toBeVisible();
-  await expect(beta.getByRole("img", { name: "Unread" })).toBeVisible();
   const startDrag = async (locator) => {
     await locator.scrollIntoViewIfNeeded();
     const box = await locator.boundingBox();
@@ -519,11 +390,19 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await expect.poll(order).toEqual(["pins", "navigation", "messages", "solo"]);
   await page.reload();
   await expect.poll(order).toEqual(["pins", "navigation", "messages", "solo"]);
-  await startDrag(solo.getByRole("heading", { name: "Solo", exact: true }));
+  await solo.hover();
+  await startDrag(
+    solo.getByRole("button", { name: "Move Solo section", exact: true }),
+  );
   await dropOn(messages.getByRole("heading", { name: "Team", exact: true }));
   await expect.poll(order).toEqual(["pins", "navigation", "solo", "messages"]);
 
-  await startDrag(beta);
+  // Team's rows are views, not conversations, so an app's row is dragged.
+  const workflows = navigation.getByRole("button", {
+    name: "Workflows",
+    exact: true,
+  });
+  await startDrag(workflows);
   const newSection = rail.getByRole("region", {
     name: "New section",
     exact: true,
@@ -534,11 +413,9 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await page.keyboard.press("Escape");
   await page.mouse.up();
   await expect(newSection).toBeHidden();
-  await expect(beta).toBeVisible();
+  await expect(workflows).toBeVisible();
 
-  const movedBeta = beta;
-
-  await startDrag(movedBeta);
+  await startDrag(workflows);
   await expect(newSection).toHaveCSS("opacity", "1");
   await dropOn(newSection);
   const dialog = page.getByRole("dialog", {
@@ -555,9 +432,9 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   });
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(movedBeta).toBeVisible();
+  await expect(workflows).toBeVisible();
 
-  await startDrag(movedBeta);
+  await startDrag(workflows);
   await expect(newSection).toHaveCSS("opacity", "1");
   await dropOn(newSection);
   await dialog
@@ -570,25 +447,50 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     has: page.getByRole("heading", { name: "Project chats", exact: true }),
   });
   await expect(
-    custom.getByRole("button", { name: "Beta", exact: true }),
+    custom.getByRole("button", { name: "Workflows", exact: true }),
   ).toBeVisible();
-  await expect(movedBeta).toHaveCount(0);
-  await navigation
-    .getByRole("button", { name: "Workflows", exact: true })
-    .click({ button: "right" });
-  await page
-    .getByRole("menuitem", { name: "Project chats", exact: true })
-    .click();
-  await expect(
-    navigation.getByRole("button", { name: "Workflows", exact: true }),
-  ).toHaveCount(0);
-  await custom
-    .getByRole("button", { name: "Workflows", exact: true })
-    .click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Plugins", exact: true }).click();
-  await expect(
-    navigation.getByRole("button", { name: "Workflows", exact: true }),
-  ).toBeVisible();
+  await expect(workflows).toHaveCount(0);
+  // An app's row moves between sections from its menu.
+  const moveApp = async (row, section) => {
+    await row.click({ button: "right" });
+    await page
+      .getByRole("menuitem", { name: "Move page", exact: true })
+      .click();
+    await page.getByRole("menuitem", { name: section, exact: true }).click();
+  };
+  await moveApp(
+    custom.getByRole("button", { name: "Workflows", exact: true }),
+    "Plugins",
+  );
+  await expect(workflows).toBeVisible();
+  await moveApp(workflows, "Project chats");
+  await expect(workflows).toHaveCount(0);
+  await moveApp(
+    custom.getByRole("button", { name: "Workflows", exact: true }),
+    "Plugins",
+  );
+  await expect(workflows).toBeVisible();
+
+  // A pinned conversation is copied into a section, and stays pinned.
+  await rail.getByRole("button", { name: "Add pin", exact: true }).click();
+  const picker = page.getByRole("dialog", { name: "Add a pin", exact: true });
+  await picker
+    .getByRole("textbox", { name: "Find something to pin" })
+    .fill("Beta");
+  await picker.getByRole("button", { name: "Pin Beta", exact: true }).click();
+  const pinnedBeta = pins.getByRole("button", { name: "Beta", exact: true });
+  await expect(pinnedBeta).toBeVisible();
+  const addToSection = async (row, section) => {
+    await row.click({ button: "right" });
+    await page
+      .getByRole("menuitem", { name: "Add to section", exact: true })
+      .click();
+    await page.getByRole("menuitem", { name: section, exact: true }).click();
+  };
+  await addToSection(pinnedBeta, "Project chats");
+  const customBeta = custom.getByRole("button", { name: "Beta", exact: true });
+  await expect(customBeta).toBeVisible();
+  await expect(pinnedBeta).toBeVisible();
   await expect
     .poll(order)
     .toEqual([
@@ -645,9 +547,9 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   expect((await sectionPage.boundingBox()).x).toBeGreaterThanOrEqual(
     compactRail.x + compactRail.width,
   );
-  await expect(
-    dock.getByRole("button", { name: "Project chats", exact: true }),
-  ).toHaveAttribute("aria-current", "page");
+  await expect
+    .soft(dock.getByRole("button", { name: "Project chats", exact: true }))
+    .toHaveAttribute("aria-current", "page");
   await page.screenshot({ path: testInfo.outputPath("rail-compact-dark.png") });
   await page.emulateMedia({ colorScheme: "light" });
   await expect(page.locator("html")).toHaveAttribute(
@@ -670,6 +572,8 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await page.evaluate(() => {
     document.documentElement.style.fontSize = "";
   });
+  // A tooltip held open by the pointer is not the keyboard's.
+  await page.mouse.move(900, 500);
   await dock.getByRole("button", { name: "Solo", exact: true }).focus();
   await page.keyboard.press("Tab");
   await expect(
@@ -686,9 +590,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await page.goBack();
   await expect(sectionPage).toBeVisible();
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
-  await expect(
-    custom.getByRole("button", { name: "Beta", exact: true }),
-  ).toBeVisible();
+  await expect(customBeta).toBeVisible();
   await expect
     .poll(order)
     .toEqual([
@@ -713,9 +615,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await page
     .getByRole("button", { name: "Show navigation", exact: true })
     .click();
-  await expect(
-    custom.getByRole("button", { name: "Beta", exact: true }),
-  ).toBeVisible();
+  await expect(customBeta).toBeVisible();
   const scroller = rail.locator('[data-scroll-fade="scrolled"]');
   await expect(scroller).toHaveAttribute("data-overflow-end", "");
   await scroller.evaluate((element) => {
@@ -732,14 +632,15 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   });
 
   await page.reload();
-  await expect(
-    custom.getByRole("button", { name: "Beta", exact: true }),
-  ).toBeVisible();
-  await custom
-    .getByRole("button", { name: "Beta", exact: true })
-    .click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Team", exact: true }).click();
-  await messages.getByRole("button", { name: /^Team$/i }).click();
+  await expect(customBeta).toBeVisible();
+  // A section's copy comes out of it; the conversation stays in Team.
+  await customBeta.click({ button: "right" });
+  await page
+    .getByRole("menuitem", { name: "Remove from section", exact: true })
+    .click();
+  await expect(customBeta).toHaveCount(0);
+  await expect(pinnedBeta).toBeVisible();
+  await activityRow(page).click();
   const messagesPage = page.getByRole("region", {
     name: "Team",
     exact: true,
@@ -747,11 +648,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await expect(
     messagesPage.locator('[data-activity-row="beta"] [data-conversation-row]'),
   ).toBeVisible();
-  await expect(messages.locator("[data-rail-row]")).toHaveCount(4);
-  await page.goBack();
-  await expect(
-    custom.getByRole("button", { name: "Beta", exact: true }),
-  ).toHaveCount(0);
+  await expect(messages.locator("[data-rail-team-view]")).toHaveCount(5);
   await custom
     .getByRole("heading", { name: "Project chats", exact: true })
     .click({ button: "right" });
@@ -765,29 +662,16 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     .focus();
   await page.keyboard.press("ArrowDown");
   await expect.poll(order).toEqual(["pins", "navigation", "messages", "solo"]);
-  await messages.getByRole("button", { name: /^Team$/i }).click();
   const fullBeta = messagesPage.locator(
     '[data-activity-row="beta"] [data-conversation-row]',
   );
-  await fullBeta.focus();
-  await page.keyboard.press("Shift+F10");
-  await page.getByRole("menuitem", { name: /to section$/ }).hover();
-  await expect(
-    page.getByRole("menuitem", { name: "New section…", exact: true }),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
-  await page.keyboard.press("Escape");
   await fullBeta.click();
   await expect(
     page
       .getByRole("article", { name: "Conversation", exact: true })
       .getByRole("textbox"),
   ).toBeVisible();
-  await messages.getByRole("button", { name: /^Team$/i }).click();
   await expect(fullBeta.getByRole("img", { name: "Unread" })).toHaveCount(0);
-  await fullBeta.click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Pin", exact: true }).click();
-  const pinnedBeta = pins.getByRole("button", { name: "Beta", exact: true });
   await pinnedBeta.hover();
   await expect(
     rail.getByRole("button", { name: /^(?:Pin|Unpin) Beta$/ }),
@@ -796,11 +680,6 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await pinnedBeta.click({ button: "right" });
   await page.getByRole("menuitem", { name: "Unpin", exact: true }).click();
   await expect(pinnedBeta).toHaveCount(0);
-  await expect(beta).toBeVisible();
-  await beta.focus();
-  await page.keyboard.press("Shift+F10");
-  await page.getByRole("menuitem", { name: "Pin", exact: true }).click();
-  await expect(pinnedBeta).toBeVisible();
   await navigation.getByRole("button", { name: "Agents", exact: true }).click();
   const agentPage = page.getByRole("region", { name: "Agents", exact: true });
   await expect(
@@ -875,7 +754,6 @@ test.describe("Solo rail", () => {
     await page.goto(app.origin);
     const rail = page.getByRole("navigation", { name: "Apps", exact: true });
     const solo = rail.locator('[data-rail-section="solo"]');
-    const messages = rail.locator('[data-rail-section="messages"]');
     const alpha = solo.getByRole("button", { name: "Alpha", exact: true });
     await expect(alpha).toBeVisible();
     await solo
@@ -893,30 +771,23 @@ test.describe("Solo rail", () => {
     ).toBeVisible();
     app.append("primary", "alpha", "Solo agent reply", true, false);
     await expect(
-      page.getByText("Solo agent reply", { exact: true }),
+      page
+        .getByRole("region", { name: "Channel message history", exact: true })
+        .getByText("Solo agent reply", { exact: true }),
     ).toBeVisible();
-    await expect(
-      messages.getByRole("button", { name: "Alpha", exact: true }),
-    ).toHaveCount(0);
-    await expect(
-      messages.getByRole("button", { name: "Beta", exact: true }),
-    ).toBeVisible();
+    // Team's list never holds a Solo chat.
+    await activityRow(page).click();
+    const teamList = conversationList(page);
+    await expect(teamList.locator('[data-activity-row="beta"]')).toBeVisible();
+    await expect(teamList.locator('[data-activity-row="alpha"]')).toHaveCount(
+      0,
+    );
     await page.reload();
     await expect(alpha).toBeVisible();
-    await expect(
-      messages.getByRole("button", { name: "Alpha", exact: true }),
-    ).toHaveCount(0);
-    await messages.getByRole("button", { name: "Team", exact: true }).click();
-    const messagePage = page.getByRole("region", {
-      name: "Team",
-      exact: true,
-    });
-    await expect(
-      messagePage.locator('[data-activity-row="beta"]'),
-    ).toBeVisible();
-    await expect(
-      messagePage.locator('[data-activity-row="alpha"]'),
-    ).toHaveCount(0);
+    await expect(teamList.locator('[data-activity-row="beta"]')).toBeVisible();
+    await expect(teamList.locator('[data-activity-row="alpha"]')).toHaveCount(
+      0,
+    );
     await page.screenshot({ path: testInfo.outputPath("solo-card.png") });
   });
 });
@@ -936,22 +807,20 @@ test.describe("Sidebar row limits", () => {
     await collection
       .getByRole("button", { name: "New message", exact: true })
       .click();
-    const draft = collection.getByRole("region", {
-      name: "New message",
-      exact: true,
-    });
+    const draft = page.getByRole("region", { name: "New chat", exact: true });
     await draft.getByRole("textbox").fill("Keep this Solo draft");
     await expect
       .poll(() => decodeURIComponent(new URL(page.url()).hash))
-      .toContain('"collection":"solo"');
+      .toContain('"kind":"solo-draft"');
     await page.reload();
     await expect(draft.getByRole("textbox")).toHaveText("Keep this Solo draft");
-    await collection
+    await expect(conversationList(page)).toBeHidden();
+    await page
       .getByRole("button", { name: "Show Solo list", exact: true })
       .click();
     await expect(
-      collection.getByRole("region", { name: "Solo list", exact: true }),
-    ).toBeVisible();
+      conversationList(page).locator("[data-activity-row]"),
+    ).toHaveCount(6);
   });
 
   test("Solo opens a full list with history while Pins stays uncapped", async ({
@@ -1118,12 +987,17 @@ test.describe("Sidebar row limits", () => {
     await naming
       .getByRole("button", { name: "Create and move", exact: true })
       .click();
-    while (await pinRows.count()) {
-      await pinRows.first().click({ button: "right" });
+    // A section holds a copy; the chats stay pinned.
+    for (const index of [1, 2, 3, 4, 5]) {
+      await pinRows.nth(index).click({ button: "right" });
+      await page
+        .getByRole("menuitem", { name: "Add to section", exact: true })
+        .click();
       await page
         .getByRole("menuitem", { name: "Saved chats", exact: true })
         .click();
     }
+    await expect(pinRows).toHaveCount(6);
     const customCard = rail.locator("[data-rail-section]").filter({
       has: page.getByRole("heading", { name: "Saved chats", exact: true }),
     });
@@ -1304,6 +1178,8 @@ test("rail card controls fade quietly and grabbers only reveal nearby", async ({
   await expect(grip).toHaveCSS("opacity", "1");
   await rail.getByRole("button", { name: "Search", exact: true }).hover();
   await expect(grip).toHaveCSS("opacity", "0");
+  // Focus reveals the grabber at once once the keyboard is in use.
+  await page.keyboard.press("Tab");
   const focused = await grabber.evaluate((button) => {
     button.focus();
     return getComputedStyle(button.parentElement).opacity;

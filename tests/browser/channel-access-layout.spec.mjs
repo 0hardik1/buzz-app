@@ -1,5 +1,5 @@
 import { test, expect } from "./fixture.mjs";
-import { openPage } from "./navigation.mjs";
+import { openChannel, openPage } from "./navigation.mjs";
 import { animationsSettled } from "./animations.mjs";
 
 test.use({
@@ -45,10 +45,7 @@ test("general access starts the member list and footer actions stay reachable wi
   });
   await page.goto(app.origin);
   await openPage(page, "Team");
-  await page
-    .getByRole("navigation", { name: "Subscribed channels" })
-    .getByRole("button", { name: "Lifecycle channel", exact: true })
-    .click();
+  await openChannel(page, "11111111-1111-4111-8111-111111111111");
   await page
     .getByRole("button", { name: /^Manage members of /, exact: true })
     .click();
@@ -308,10 +305,7 @@ for (const outcome of ["rejected", "uncertain"]) {
     );
     await page.goto(app.origin);
     await openPage(page, "Team");
-    await page
-      .getByRole("navigation", { name: "Subscribed channels" })
-      .getByRole("button", { name: "Lifecycle channel", exact: true })
-      .click();
+    await openChannel(page, "11111111-1111-4111-8111-111111111111");
     const manage = page.getByRole("button", {
       name: /^Manage members of /,
       exact: true,

@@ -1694,24 +1694,6 @@
         8.5, 11.4
       ]
     },
-    "tests/browser/navigation-group-icons.spec.mjs": {
-      "group icons resolve custom media without overlapping labels, and the move dialog fits narrow widths": [
-        4.5, 7.9
-      ],
-      "section labels fade on overflow and recover when widened": [4.4, 10.3]
-    },
-    "tests/browser/navigation-group-order.spec.mjs": {
-      "dragging a group header moves the whole group, keeps its state, and persists": [
-        7.8, 15.9
-      ],
-      "group landing edge follows list order when text size changes during a drag": [
-        2.8, 5
-      ],
-      "group move recovery keeps keyboard focus on the group header": [
-        3.4, 8.3
-      ],
-      "saved groups accept gap drops in both directions": [5.7, 10.8]
-    },
     "tests/browser/navigation-group-rename.spec.mjs": {
       "renaming a saved group from its menu persists and keeps its channels": [
         5.4, 9.4
@@ -1808,32 +1790,6 @@
         4.2, 11.5
       ]
     },
-    "tests/browser/navigation-scroll-intent.spec.mjs": {
-      "delayed sidebar restoration respects returned to top viewport (cached startup: false)": [
-        9.9, 19.2
-      ],
-      "delayed sidebar restoration respects returned to top viewport (cached startup: true)": [
-        9.8, 23.3
-      ],
-      "delayed sidebar restoration respects scroll event pending viewport (cached startup: false)": [
-        10.8, 21
-      ],
-      "delayed sidebar restoration respects scroll event pending viewport (cached startup: true)": [
-        9.9, 22
-      ],
-      "delayed sidebar restoration respects scrolled viewport (cached startup: false)": [
-        10.1, 21.4
-      ],
-      "delayed sidebar restoration respects scrolled viewport (cached startup: true)": [
-        10.8, 20.2
-      ],
-      "delayed sidebar restoration respects untouched viewport (cached startup: false)": [
-        10, 20.4
-      ],
-      "delayed sidebar restoration respects untouched viewport (cached startup: true)": [
-        10.6, 20.9
-      ]
-    },
     "tests/browser/navigation-selection.spec.mjs": {
       "context menus appear immediately and retain their source highlight through dismissal": [
         5.1, 15.7
@@ -1881,50 +1837,6 @@
         6.5, 9.4
       ],
       "sidebar view state does not leak across communities": [7.8, 10]
-    },
-    "tests/browser/navigation-sorting.spec.mjs": {
-      "cold sidebar presentation \u203a reveals saved placement and Recent together without blocking the conversation": [
-        1.8, 3.9
-      ],
-      "distant channel motion \u203a fades a distant jump at its endpoints without a long slide": [
-        3.6, 6.2
-      ],
-      "keeps a stationary selected row visible while its neighbors exchange places": [
-        3.7, 8.8
-      ],
-      "live reduced-motion preference \u203a updates an already-mounted list when reduced motion changes": [
-        3.9, 6.3
-      ],
-      "live sidebar motion: no-preference \u203a slides a live reorder without replacing the focused row": [
-        3.4, 8.4
-      ],
-      "live sidebar motion: reduce \u203a slides a live reorder without replacing the focused row": [
-        2.9, 5
-      ],
-      "membership changes after layout changes \u203a keeps retained rows still and fades additions/removals after Solo to Team": [
-        5.1, 11.3
-      ],
-      "membership changes after layout changes \u203a keeps retained rows still and fades additions/removals after interface text size": [
-        4.5, 12.9
-      ],
-      "nearby motion after layout changes \u203a starts a nearby reorder at the live positions after Solo to Team": [
-        3.8, 7
-      ],
-      "nearby motion after layout changes \u203a starts a nearby reorder at the live positions after interface text size": [
-        3.6, 7.1
-      ],
-      "retargets an unfinished slide without jumping or losing focus": [
-        4.6, 7.7
-      ],
-      "retires Recent failures on A\u2013Z and recovers selected ordering on retry": [
-        5, 16.5
-      ],
-      "section sort applies immediately, rolls back on failure, and persists retry independently": [
-        8.2, 15.4
-      ],
-      "sorting with lifecycle visibility \u203a archive and DM hide preserve Recent ordering through reload": [
-        9.5, 21.1
-      ]
     },
     "tests/browser/navigation-thread-history.spec.mjs": {
       " \u203a a covered conversation keeps its reading position through a resize and a new message": [
@@ -2023,9 +1935,6 @@
       "touch branch controls \u203a expands with a visible touch target and removes it once open": [
         5, 7.8
       ]
-    },
-    "tests/browser/new-menu-layout.spec.mjs": {
-      "New remains clickable beside enlarged navigation filters": [3.5, 4.4]
     },
     "tests/browser/new-message-boundary.spec.mjs": {
       "keeps the first unread boundary stable through reading and live appends": [
@@ -2566,29 +2475,6 @@
         8.2, 16
       ]
     },
-    "tests/browser/sidebar-unread.spec.mjs": {
-      "DM hide control removes a row and a new message restores it": [
-        21.3, 38.5
-      ],
-      "DM preview wiring \u203a production sidebar wires only 1:1 avatars and preserves their shape and overlap": [
-        5.2, 8.8
-      ],
-      "channel establishment preserves an in-flight unread batch and its sidebar badges": [
-        9.7, 14.4
-      ],
-      "edge controls follow scroll and reveal the nearest unread without selection or reads; focus retains existing preparation": [
-        13.3, 19.2
-      ],
-      "priority dots stay aligned and use the prominent mark color in both modes": [
-        9, 16.3
-      ],
-      "resizing, collapsed groups and new unread evidence update only the displayed roster": [
-        14.8, 36.1
-      ],
-      "session changes discard the previous sidebar targets and manual unread still participates": [
-        14.9, 27.8
-      ]
-    },
     "tests/browser/sidenav-polish.spec.mjs": {
       "Inbox and Bestie pages retain companion layout across navigation and resize": [
         6.9, 12.7
@@ -2798,11 +2684,6 @@
     },
     "tests/browser/tab-close-others.spec.mjs": {
       "a tab's Close other tabs keeps only that tab": [7.3, 13.8]
-    },
-    "tests/browser/terminal-motion.spec.mjs": {
-      "terminal drawer shares panel motion without delaying close or losing the session": [
-        4.7, 3.9
-      ]
     },
     "tests/browser/terminal-renderer.spec.mjs": {
       "focused terminal follows rebind, restore and reset without swallowing the chord or writing it to the shell": [

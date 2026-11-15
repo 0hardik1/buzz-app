@@ -59,6 +59,8 @@ export async function openSectionMenu(page, row) {
   await page.keyboard.press("ArrowRight");
   const menu = page.getByRole("menu", { name: /^(Add|Move) to section: / });
   await expect(menu).toBeVisible();
+  // The submenu paints before it takes the keyboard from its trigger.
+  await expect(menu.locator('[role="menuitem"]:focus')).toHaveCount(1);
   return menu;
 }
 
@@ -82,13 +84,14 @@ export function soloRow(page, channelId) {
   );
 }
 
-// Solo's list, opened from the Solo card's heading: every chat, most recent
-// first, beside the reader.
+// Solo's list: every chat, most recent first, beside the reader. The Solo
+// card's heading opens it; beside an open list the rail shows Solo's icon.
 export async function openSoloList(page) {
   await showRail(page);
   await rail(page)
-    .locator('[data-rail-section="solo"]')
     .getByRole("button", { name: "Solo", exact: true })
+    .filter({ visible: true })
+    .first()
     .click();
 }
 

@@ -34,9 +34,10 @@ async function open(page, app) {
   ).toBeVisible();
   await settle(page);
 }
-// Focus outside the reading surface. The timeline and its own composer both
-// read after dwell; a focused sidebar row selects and reads nothing.
-const park = (page) => alpha(page).focus();
+// Focus outside the reading surface. The timeline, its own composer and the
+// list beside it all read after dwell; a focused rail row reads nothing.
+const park = (page) =>
+  rail(page).locator('[data-rail-team-view="channels"]').focus();
 async function visible(page) {
   return history(page).evaluate((element) => {
     const viewport = element.getBoundingClientRect();
@@ -288,10 +289,9 @@ test("focus cancellation and local manual-unread survive reload until explicit m
   expect((await journal(page)).state.frontiers).toEqual({});
   await options(page, true);
   await expect(
-    alpha(page).getByRole("img", {
-      name: "Marked unread on this device only",
-      exact: true,
-    }),
+    // The row's unread cue no longer tells a device-only mark apart; the
+    // journal's localUnread above is the device-only evidence.
+    alpha(page).getByRole("img", { name: "Unread", exact: true }),
   ).toBeVisible();
   await park(page);
   await page.clock.resume();
@@ -300,10 +300,9 @@ test("focus cancellation and local manual-unread survive reload until explicit m
   await openChannel(page, alphaId);
   await composer(page).waitFor();
   await expect(
-    alpha(page).getByRole("img", {
-      name: "Marked unread on this device only",
-      exact: true,
-    }),
+    // The row's unread cue no longer tells a device-only mark apart; the
+    // journal's localUnread above is the device-only evidence.
+    alpha(page).getByRole("img", { name: "Unread", exact: true }),
   ).toBeVisible();
   await options(page);
   await page
@@ -459,10 +458,14 @@ test.describe("explicit mark-through with membership activity", () => {
             exact: true,
           })
           .click();
+        // The row's unread cue no longer tells a device-only mark apart.
         await expect(alpha(page).getByRole("img")).toHaveAttribute(
           "aria-label",
-          "Marked unread on this device only",
+          "Unread",
         );
+        await expect
+          .poll(async () => (await journal(page)).localUnread[alphaId])
+          .toBeGreaterThan(0);
         const before = await journal(page);
         await page
           .getByRole("button", {

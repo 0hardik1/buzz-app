@@ -493,6 +493,10 @@ function createConversationIndex(session: RelaySession): ConversationIndex {
     const activity = session.agentActivity.snapshot();
     for (const turn of activity.turns)
       if (turn.state === "working" && turn.channelId) next.add(turn.channelId);
+    // A local agent's received request counts before its first step.
+    for (const row of activity.local ?? [])
+      if (row.state === "waiting" || row.state === "working")
+        next.add(row.channelId);
     for (const entry of activity.typing) next.add(entry.channelId);
     for (const entry of session.typing.snapshot())
       if (entry.pubkey !== session.viewer) next.add(entry.channelId);
@@ -560,7 +564,11 @@ function createConversationIndex(session: RelaySession): ConversationIndex {
         !kind ||
         channel.archived ||
         channel.huddle ||
-        channel.metadataPending
+        channel.metadataPending ||
+        // A hidden channel is reached by its address, not listed.
+        (channel.hidden &&
+          channel.channelType !== "dm" &&
+          channel.channelType !== "solo")
       )
         continue;
       present.add(channel.id);

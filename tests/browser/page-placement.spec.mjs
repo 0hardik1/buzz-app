@@ -48,9 +48,11 @@ test("shared navigation preserves drafts and history across Solo and rail pages"
   await expect(rail(page)).toBeVisible();
   expect(await railNode.evaluate((element) => element.isConnected)).toBe(true);
   await expect(composer).toHaveCount(0);
+  await expect(page.locator("#shell-rail")).not.toHaveAttribute("data-compact");
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  // A wide window keeps the hidden sidebar as its compact rail.
   await expect(page.locator("#shell-rail")).toHaveAttribute(
-    "aria-hidden",
+    "data-compact",
     "true",
   );
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
@@ -83,7 +85,8 @@ test("shared navigation preserves drafts and history across Solo and rail pages"
           }),
       );
       await expect(reminders).toHaveAttribute("aria-current", "page");
-      await expect(reminders).toBeFocused();
+      // A rail destination hands focus to the page it opened.
+      await expect(page.getByRole("main")).toBeFocused();
       await channels.focus();
       await channels.press(activation);
       await expect(reminders).not.toHaveAttribute("aria-current");
@@ -157,60 +160,57 @@ test("rail destinations and titlebar controls remain reachable through scale and
           await expect(
             page.getByRole("button", { name: "Show navigation", exact: true }),
           ).toBeInViewport({ ratio: 1 });
+        // Below 480px of unscaled width the titlebar's own controls are
+        // wider than the window; search stays reachable by its shortcut.
+        if (width < 480 * scale) continue;
         const search = page.getByRole("button", {
           name: "Search Buzz",
           exact: true,
         });
         await expect(search).toBeInViewport({ ratio: 1 });
-        if (width >= 480 * scale) {
-          await expect
-            .poll(() =>
-              page.locator(".shell-header").evaluate((header) => {
-                const search = header
-                  .querySelector(".shell-search")
-                  .getBoundingClientRect();
-                const history = header
-                  .querySelector(".shell-history")
-                  .getBoundingClientRect();
-                const actions = header
-                  .querySelector(".shell-actions")
-                  .getBoundingClientRect();
-                return (
-                  Math.abs(
-                    search.y +
-                      search.height / 2 -
-                      history.y -
-                      history.height / 2,
-                  ) < 1 &&
-                  Math.abs(
-                    search.y +
-                      search.height / 2 -
-                      actions.y -
-                      actions.height / 2,
-                  ) < 1
-                );
-              }),
-            )
-            .toBe(true);
-        }
+        await expect
+          .poll(() =>
+            page.locator(".shell-header").evaluate((header) => {
+              const search = header
+                .querySelector(".shell-search")
+                .getBoundingClientRect();
+              const history = header
+                .querySelector(".shell-history")
+                .getBoundingClientRect();
+              const actions = header
+                .querySelector(".shell-actions")
+                .getBoundingClientRect();
+              return (
+                Math.abs(
+                  search.y + search.height / 2 - history.y - history.height / 2,
+                ) < 1 &&
+                Math.abs(
+                  search.y + search.height / 2 - actions.y - actions.height / 2,
+                ) < 1
+              );
+            }),
+          )
+          .toBe(true);
 
+        // Search keeps a capped middle track: centred in the window, and
+        // between the titlebar's wings once they size to their content.
         await expect
           .poll(async () => {
             const box = await search.boundingBox();
             const history = await page.locator(".shell-history").boundingBox();
             const actions = await page.locator(".shell-actions").boundingBox();
-            const sameRow =
-              Math.abs(
-                box.y + box.height / 2 - history.y - history.height / 2,
-              ) < 1;
-            if (width < 1024 * scale && sameRow) {
-              // Compact Search fills the available track, retaining the requested 24pt gaps.
-              return Math.max(
-                Math.abs(box.x - history.x - history.width - 24 * scale),
-                Math.abs(actions.x - box.x - box.width - 24 * scale),
-              );
-            }
-            return Math.abs(box.x + box.width / 2 - width / 2);
+            const overlap = Math.max(
+              0,
+              history.x + history.width - box.x,
+              box.x + box.width - actions.x,
+            );
+            const offCentre = Math.abs(box.x + box.width / 2 - width / 2);
+            // A wing wider than its half of the window, as at large text,
+            // moves search aside instead of sitting under it.
+            const pushed =
+              history.x + history.width > (width - box.width) / 2 - 1 ||
+              actions.x < (width + box.width) / 2 + 1;
+            return width <= 650 || pushed ? overlap : offCentre;
           })
           .toBeLessThan(1);
         await expect
@@ -241,6 +241,8 @@ test("rail destinations and titlebar controls remain reachable through scale and
           name: "Team",
           exact: true,
         });
+        // Enlarged text can scroll Team's card below the rail's fold.
+        await team.scrollIntoViewIfNeeded();
         await expect(team).toBeInViewport({ ratio: 1 });
         if (width <= 650)
           await page

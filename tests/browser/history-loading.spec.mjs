@@ -1,4 +1,4 @@
-import { openPage } from "./navigation.mjs";
+import { openChannel, openPage } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import {
   anchor,
@@ -75,11 +75,11 @@ test("returning to the top continues history loading on wheel without a button",
   await settle(page);
   // Navigate away while a real cursor request is in flight, then return to the
   // saved top before releasing it; this must remain an ordinary scroll journey.
-  await page.getByRole("button", { name: "Beta", exact: true }).click();
+  await openChannel(page, "beta");
   await expect(
     page.getByRole("textbox", { name: "Message #Beta", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Alpha", exact: true }).click();
+  await openChannel(page, "alpha");
   await expect(
     page.getByRole("textbox", { name: "Message #Alpha", exact: true }),
   ).toBeVisible();
@@ -123,6 +123,7 @@ test("saved top resumes automatic history on an upward gesture after remount", a
   await page.reload();
   app.pending.shift().release();
   await openPage(page, "Team");
+  await openChannel(page, "alpha");
   await expect(history(page)).toBeVisible();
   await expect(
     page.getByRole("dialog", {
@@ -782,7 +783,7 @@ test("cancelled navigation keeps relay reads usable in the same document", async
   });
   await (await dialog).dismiss();
   // This must be the same session, not a replacement that bypasses a stuck gate.
-  await page.getByRole("button", { name: "Beta", exact: true }).click();
+  await openChannel(page, "beta");
   await expect(
     page.getByRole("textbox", { name: "Message #Beta", exact: true }),
   ).toBeVisible();

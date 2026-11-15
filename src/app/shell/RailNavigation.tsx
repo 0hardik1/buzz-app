@@ -5,6 +5,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -33,9 +34,13 @@ import { resumeSoloDraftTarget } from "../../features/channel-navigation/routes"
 import { useSoloNavigation } from "../../features/channel-navigation/solo-navigation-react";
 import { hiddenSoloChats } from "../../features/channel-navigation/solo-navigation-model";
 import { soloDraftInput } from "../../features/solo/SoloDraft";
-import { soloNeighbors } from "../../features/channel-navigation/solo-successor";
+import {
+  soloNeighbors,
+  soloSuccessor,
+} from "../../features/channel-navigation/solo-successor";
 import { routedSection } from "./list-column";
 import type { OpenTarget } from "../../features/navigation/targets";
+import type { ChannelSummary } from "../../features/relay/contracts";
 import {
   sidebarSectionTarget,
   isSidebarSectionRoute,
@@ -67,7 +72,10 @@ import { OwnedContribution } from "../../plugins/OwnedContribution";
 import { PageNavigation } from "./PageNavigation";
 import { RailConversationList } from "./RailConversationList";
 import { useRailPins, type RailEntry } from "./rail-pins";
-import { useChannelNavigation } from "../../features/channel-navigation/ChannelNavigationState";
+import {
+  useChannelNavigation,
+  type ChannelMenuSurface,
+} from "../../features/channel-navigation/ChannelNavigationState";
 import { MenuIcon, MenuItem } from "../../shared/design-system/ui/Menu";
 import { ChannelCopyLinkMenuItem } from "../../bundled/channels/ChannelCopyLinkMenuItem";
 import { ChannelLifecycleMenu } from "../../bundled/channels/ChannelLifecycleMenu";
@@ -76,6 +84,7 @@ import { ChannelReadMenuItem } from "../../bundled/channels/ChannelReadMenuItem"
 import styles from "./RailNavigation.module.css";
 import {
   useConversationCount,
+  conversationIndex,
   useConversationKeys,
   type ConversationFilter,
   type ConversationQuery,
@@ -100,6 +109,7 @@ export function RailNavigation({
   sidebarScope,
   section: pageSection,
   openInSection,
+  listedSection,
   compact = false,
 }: {
   session: RelaySession;
@@ -120,6 +130,8 @@ export function RailNavigation({
   section?: string | undefined;
   /** Opens a conversation with the list showing the section it was opened from. */
   openInSection?: ((section: string, target: OpenTarget) => void) | undefined;
+  /** The section whose list is showing beside the cards. */
+  listedSection?: string | undefined;
   compact?: boolean;
 }) {
   const partition = `${scope.communityOrigin}:${scope.viewer}`;
@@ -471,6 +483,172 @@ export function RailNavigation({
       if (neighborsRef.current === neighbors) neighborsRef.current = undefined;
     };
   }, [neighborsRef, soloChats, pageSection]);
+  // Mute, read state and the link: the rail's row menus show them, and so
+  // does the open conversation's header through the published actions.
+  const channelActions = (
+    channel: ChannelSummary,
+    whole: boolean,
+    close: () => void,
+    focus: () => void,
+    surface?: ChannelMenuSurface,
+  ) => {
+    if (!channelNavigation) return [];
+    const intent = channelNavigation.mute.intents.get(channel.id);
+    const muted = intent?.pending
+      ? intent.muted
+      : !!preferences.data?.muted.includes(channel.id);
+    return [
+      session.sidebarPreferences.muteWritable && preferences.data && (
+        <MenuItem
+          key="mute"
+          onClick={() => {
+            closeMuteMenu.current = close;
+            channelNavigation.mute.change(channel.id, channel.name, !muted);
+            close();
+            focus();
+          }}
+        >
+          <MenuIcon>
+            {muted ? <BellIcon size={14} /> : <BellSlashIcon size={14} />}
+          </MenuIcon>
+          {muted ? "Unmute" : "Mute"}
+        </MenuItem>
+      ),
+      whole && session.unread.sync().capability === "frontier-sync" && (
+        <ChannelReadMenuItem
+          key="read"
+          unread={session.unread}
+          channelId={channel.id}
+          pending={surface?.pending ?? false}
+          closeOnClick={!surface}
+          run={
+            surface?.runRead ??
+            ((action) =>
+              action().then(
+                () => {},
+                () => setError("Read state couldn’t be saved. Try again."),
+              ))
+          }
+        />
+      ),
+      whole && (
+        <ChannelCopyLinkMenuItem key="copy-link" channelId={channel.id} />
+      ),
+    ];
+  };
+  const publishActions = useRef(channelActions);
+  publishActions.current = channelActions;
+  const menuActions =
+    channelNavigation?.session === session
+      ? channelNavigation.menuActions
+      : undefined;
+  const intents = channelNavigation?.mute.intents;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mute and read changes republish the header's items.
+  useLayoutEffect(() => {
+    if (!menuActions || pageSection) return;
+    menuActions.publish((channel, surface) =>
+      channel.cached
+        ? []
+        : publishActions.current(
+            channel,
+            true,
+            () => surface.close(),
+            () => surface.focus(),
+            surface,
+          ),
+    );
+    return () => menuActions.publish(undefined);
+  }, [menuActions, pageSection, preferences, intents]);
+  // What follows a channel's confirmation: Cancel returns to the control that
+  // opened it, and leaving or deleting the open conversation opens the row
+  // that takes its place.
+  const lifecycleDialog =
+    channelNavigation?.session === session
+      ? channelNavigation.lifecycleDialog
+      : undefined;
+  const lifecycleCallbacks = channelNavigation?.lifecycleCallbacks;
+  const listed = useRef(channels);
+  const lifecycleNeighbors = useRef<{ id: string; ids: string[] }>(undefined);
+  listed.current = channels;
+  useLayoutEffect(() => {
+    if (!lifecycleCallbacks || pageSection || !lifecycleDialog) return;
+    const { channel, action, trigger, focusFallback } = lifecycleDialog;
+    const solo = channel.channelType === "solo";
+    // Captured while it is still listed: completion can arrive after the
+    // roster has dropped it.
+    const rows = conversationIndex(session)
+      .keys(
+        solo
+          ? soloView
+          : {
+              // Its own kind: a row every list showing it also shows.
+              filter: channel.channelType === "dm" ? "dms" : "channels",
+              unread: false,
+              home: "team",
+            },
+      )
+      .flatMap((key) => (key.startsWith("c:") ? [key.slice(2)] : []));
+    const at = rows.indexOf(channel.id);
+    if (at >= 0)
+      lifecycleNeighbors.current = {
+        id: channel.id,
+        ids: [...rows.slice(at + 1), ...rows.slice(0, at).reverse()],
+      };
+    const neighbors =
+      lifecycleNeighbors.current?.id === channel.id
+        ? lifecycleNeighbors.current.ids
+        : rows;
+    const focus = () =>
+      (trigger?.isConnected
+        ? trigger
+        : focusFallback?.isConnected
+          ? focusFallback
+          : document.querySelector<HTMLElement>(
+              `#shell-rail [data-rail-channel="${CSS.escape(channel.id)}"]`,
+            )
+      )?.focus({ preventScroll: true });
+    const callbacks = {
+      close: focus,
+      depart: () => {
+        // Archive changes visibility, not access or the current destination.
+        if (action === "archive" || action === "unarchive") return focus();
+        const target = navigator.snapshot().entry.target;
+        if (target.kind !== "conversation" || target.channelId !== channel.id)
+          return;
+        if (solo)
+          return void navigator.open(
+            soloSuccessor(session.scope, listed.current, neighbors, channel.id),
+          );
+        const next = neighbors.find(
+          (id) =>
+            id !== channel.id && listed.current.some((row) => row.id === id),
+        );
+        void navigator.open(
+          next
+            ? { version: 1, kind: "conversation", scope, channelId: next }
+            : {
+                version: 1,
+                kind: "page",
+                pluginId: "buzz.channels",
+                pageId: "channels",
+                route: { version: 1, params: "empty" },
+              },
+        );
+      },
+    };
+    lifecycleCallbacks.current = callbacks;
+    return () => {
+      if (lifecycleCallbacks.current === callbacks)
+        lifecycleCallbacks.current = undefined;
+    };
+  }, [
+    lifecycleCallbacks,
+    lifecycleDialog,
+    pageSection,
+    session,
+    scope,
+    navigator,
+  ]);
   const visited = navigation.entry.target;
   const currentChannel =
     visited.kind === "conversation"
@@ -478,6 +656,10 @@ export function RailNavigation({
       : undefined;
   const activeDockSection =
     selectedSection ??
+    // A section a person made has no address: its open list marks it.
+    (listedSection && listedSection !== "messages" && listedSection !== "solo"
+      ? listedSection
+      : undefined) ??
     (currentChannel?.channelType === "solo" ||
     (sectionRoute &&
       typeof sectionRoute === "object" &&
@@ -854,53 +1036,9 @@ export function RailNavigation({
             destination.kind === "conversation" &&
             !destination.threadRootId &&
             !destination.messageId;
-          const intent = channelNavigation.mute.intents.get(channel.id);
-          const muted = intent?.pending
-            ? intent.muted
-            : !!preferences.data?.muted.includes(channel.id);
           return (
             <>
-              {session.sidebarPreferences.muteWritable && preferences.data && (
-                <MenuItem
-                  disabled={intent?.pending}
-                  onClick={() => {
-                    closeMuteMenu.current = close;
-                    channelNavigation.mute.change(
-                      channel.id,
-                      channel.name,
-                      !muted,
-                    );
-                    close();
-                    focus();
-                  }}
-                >
-                  <MenuIcon>
-                    {muted ? (
-                      <BellIcon size={14} />
-                    ) : (
-                      <BellSlashIcon size={14} />
-                    )}
-                  </MenuIcon>
-                  {muted ? "Unmute" : "Mute"}
-                </MenuItem>
-              )}
-              {whole &&
-                session.unread.sync().capability === "frontier-sync" && (
-                  <ChannelReadMenuItem
-                    unread={session.unread}
-                    channelId={channel.id}
-                    pending={false}
-                    closeOnClick
-                    run={(action) =>
-                      action().then(
-                        () => {},
-                        () =>
-                          setError("Read state couldn’t be saved. Try again."),
-                      )
-                    }
-                  />
-                )}
-              {whole && <ChannelCopyLinkMenuItem channelId={channel.id} />}
+              {channelActions(channel, whole, close, focus)}
               {whole &&
                 (!channel.readOnly || channel.viewerRole === "guest") &&
                 !channel.cached &&

@@ -3873,6 +3873,18 @@ export function createChannelStore(
         return;
       }
       const state = windows.get(channelId);
+      // Rows shown from a list preview have no page below them until their
+      // head is read; a failed head read is what there is to retry.
+      if (
+        state?.snapshot.status === "ready" &&
+        state.snapshot.error &&
+        !state.cursor &&
+        !state.controller
+      ) {
+        setWindow(state, { error: undefined });
+        void loadPage(state, null);
+        return;
+      }
       if (
         state?.snapshot.status !== "ready" ||
         !state.snapshot.hasMore ||

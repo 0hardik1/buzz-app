@@ -33,7 +33,9 @@ const gap = (page) =>
   history(page).evaluate(
     (node) => node.scrollHeight - node.clientHeight - node.scrollTop,
   );
-// A reveal puts its row at the top of the timeline and focuses it.
+// A reveal puts its row at the top of the timeline and focuses it. The
+// conversation header floats over the history; its scroll padding keeps the
+// row clear of it.
 async function expectRevealed(page, id) {
   const row = history(page).locator(`[data-message-id="${id}"]`);
   await expect(row).toBeFocused();
@@ -41,7 +43,9 @@ async function expectRevealed(page, id) {
     await history(page).evaluate(
       (node, id) =>
         node.querySelector(`[data-message-id="${id}"]`).getBoundingClientRect()
-          .top - node.getBoundingClientRect().top,
+          .top -
+        node.getBoundingClientRect().top -
+        Number.parseFloat(getComputedStyle(node).scrollPaddingBlockStart),
       id,
     ),
   ).toBeLessThan(4);
@@ -93,9 +97,14 @@ const sampleFrames = (page, linked) =>
       );
       const view = node?.getBoundingClientRect();
       const rows = node ? [...node.querySelectorAll("[data-message-id]")] : [];
+      // Rows under the floating conversation header are not in view.
+      const top =
+        view &&
+        view.top +
+          Number.parseFloat(getComputedStyle(node).scrollPaddingBlockStart);
       const inView = (row) => {
         const rect = row.getBoundingClientRect();
-        return rect.bottom > view.top + 1 && rect.top < view.bottom - 1;
+        return rect.bottom > top + 1 && rect.top < view.bottom - 1;
       };
       const first = rows.find(inView);
       if (first)

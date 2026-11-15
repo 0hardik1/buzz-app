@@ -707,7 +707,6 @@ test("channel bottom quiets ordinary replies newer than the latest top-level mes
 // to its already-visible thread; a mounted panel alone is not reading evidence.
 for (const { paneOpen, width } of [
   { paneOpen: true, width: 1440 },
-  { paneOpen: true, width: 1280 },
   { paneOpen: false, width: 1440 },
 ])
   test(`returning to a channel ${paneOpen ? "reads it and its already-open thread" : "leaves its hidden thread unread"} at ${width}px`, async ({

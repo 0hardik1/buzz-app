@@ -182,9 +182,9 @@ test("channel menu mute/read persist without selecting the row; failed mute rema
   await markUnread.click();
   await expect(menu).toHaveCount(0);
   await expect(beta).toBeFocused();
-  // A mark is unread even in a muted channel.
+  // A mark is unread even in a muted channel, and marking does not open it.
   await unread(beta);
-  await expect(alpha).toHaveAttribute("aria-current", "page");
+  await expect(beta).not.toHaveAttribute("aria-current", "page");
   // Marked unread survives a reload whose read state is still on its way.
   const reads = holdResponse(page, "**/read-state-decode");
   await reads.ready;
@@ -200,10 +200,12 @@ test("channel menu mute/read persist without selecting the row; failed mute rema
     await menu
       .getByRole("menuitem", { name: "Mark as read", exact: true })
       .click();
-    await expect(menu.getByRole("status")).toHaveText("Saving…");
-    reads.release();
+    // The menu closes at once; the read waits for read state to arrive.
     await expect(menu).toHaveCount(0);
     await expect(beta).toBeFocused();
+    const decoded = page.waitForResponse("**/read-state-decode");
+    reads.release();
+    await decoded;
   } finally {
     reads.release();
     await page.unroute("**/read-state-decode");

@@ -382,6 +382,9 @@ function AppShellContent({
           sidebarScope={searchServices.sidebarScope}
           navigator={railNavigator}
           openInSection={openInSection}
+          listedSection={
+            listColumn.list.open ? listSection?.section : undefined
+          }
           pages={pages}
           selected={selected}
           onSelect={onSelect}

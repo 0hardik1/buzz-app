@@ -403,20 +403,23 @@ test("community picker stays available across pages and restores focus after joi
   ).toBeFocused();
 });
 
-test("Team's list view does not leak across communities", async ({
+// The list's width is view state saved per community, as the sidebar's
+// collapsed groups were.
+test("Team's list width does not leak across communities", async ({
   page,
   app,
 }) => {
-  await page.goto(app.origin);
-  await showChannels(page);
-  // The rail marks the list's view; each community keeps its own.
-  const view = (name) => rail(page).locator(`[data-rail-team-view="${name}"]`);
-  await expect(view("channels")).toHaveAttribute("aria-current", "page");
+  await open(page, app);
+  const handle = page.getByRole("separator", { name: "Resize sidebar" });
+  const list = handle.locator("xpath=preceding-sibling::div[1]");
+  const width = async () => (await list.boundingBox())?.width;
+  await handle.press("Home");
+  await expect.poll(width).toBeCloseTo(220, 0);
   await selectCommunity(page, "Secondary");
   await expect(button(page, "Community switcher: Secondary")).toBeVisible();
-  await expect(view("all")).toHaveAttribute("aria-current", "page");
+  await expect.poll(width).toBeCloseTo(352, 0);
   await selectCommunity(page, "Primary");
-  await expect(view("channels")).toHaveAttribute("aria-current", "page");
+  await expect.poll(width).toBeCloseTo(220, 0);
 });
 
 test("an invalid saved list width falls back", async ({ page, app }) => {

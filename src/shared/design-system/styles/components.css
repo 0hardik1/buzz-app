@@ -1674,6 +1674,12 @@
     padding-block-start: var(--history-header-inset, 0px);
     scroll-padding-block-start: var(--history-header-inset, 0px);
   }
+  /* Paging controls sit below a header that floats over the history. */
+  .conversation-history-viewport
+    > [data-message-scroller]
+    [data-history-space] {
+    padding-block-start: var(--history-header-inset, 0px);
+  }
   .panel-header[data-variant="conversation"] > .panel-header-title {
     grid-area: 1 / 2;
     flex-direction: column;
@@ -1779,6 +1785,9 @@
     flex: 1 1 auto;
     min-width: 0;
     align-items: center;
+    /* A section's title is a control, not selectable document text. */
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   .navigation-section-heading-actions {
@@ -2213,11 +2222,12 @@
     }
   }
 
-  .navigation-item[data-highlighted]:not(
-    [data-selected],
-    [data-disabled],
-    :disabled
-  ) {
+  /* A row keeps its fill while its context menu is present: the modal menu
+     takes native hover away from it. */
+  :is(
+    .navigation-item[data-highlighted],
+    [data-rail-row][data-context-menu-present] .navigation-item
+  ):not([data-selected], [data-disabled], :disabled) {
     --text-subtle: var(--interaction-row-text);
     --text-metadata: var(--interaction-row-metadata);
     background: var(--interaction-row-hover);

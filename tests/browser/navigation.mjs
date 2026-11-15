@@ -40,13 +40,21 @@ export function channelRow(page, channelId) {
 // A conversation opened directly, as from a link, collapses its list.
 export async function showConversationList(page) {
   const show = page.getByRole("button", { name: /^Show .+ list$/ });
+  const list = conversationList(page);
+  // Right after a load neither the list nor its toggle is shown yet.
+  await expect
+    .poll(async () => (await show.isVisible()) || (await list.isVisible()))
+    .toBe(true);
   if (await show.isVisible()) await show.click();
-  await expect(conversationList(page)).toBeVisible();
+  await expect(list).toBeVisible();
 }
 // A narrow detail column lays the list over the reader, and an open from the
 // list keeps it open; close it as a reader would to reach the conversation.
-export async function hideNarrowConversationList(page) {
+// Pass `resized` after shrinking the window: the column turns narrow only once
+// the new size is measured.
+export async function hideNarrowConversationList(page, resized = false) {
   const narrow = page.locator("[data-detail-workspace][data-narrow]");
+  if (resized) await expect(narrow).toHaveCount(1);
   if (!(await narrow.count())) return;
   const hide = page.getByRole("button", { name: /^Hide .+ list$/ }).first();
   if (await hide.isVisible()) await hide.click();
@@ -295,6 +303,8 @@ export async function settleDialogMotion(dialog) {
 }
 
 export async function openCommunityPicker(page) {
+  // A narrow window keeps the switcher in the rail's drawer.
+  await revealRail(page);
   await page.getByRole("button", { name: /^Community switcher:/ }).click();
   const picker = page.getByRole("dialog", {
     name: "Switch community",
@@ -312,6 +322,7 @@ export async function selectCommunity(page, name) {
       exact: true,
     })
     .click();
+  await revealRail(page);
   await expect(
     page.getByRole("button", {
       name: `Community switcher: ${name}`,

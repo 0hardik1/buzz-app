@@ -80,6 +80,7 @@ import { useIdentityNames } from "../../features/identity-names/react";
 import type { ReadTarget } from "../relay/read-state-model";
 import { shortTime } from "../../shared/relative-timestamp";
 import { ReactionRow } from "./ReactionRow";
+import { clientMetrics } from "../developer/client-metrics";
 import { useToastNotification } from "../../shared/design-system/ui/Toast";
 
 /** A list's saved choices: the query fields a person picks. */
@@ -417,7 +418,10 @@ export function ConversationList({
   // Rows keep one handler for as long as they are mounted.
   const opener = useRef<Open>(() => {});
   useLayoutEffect(() => {
-    opener.current = (channelId, options = {}) =>
+    opener.current = (channelId, options = {}) => {
+      // The open's timing starts at the press that asked for it.
+      if (!options.threadRootId)
+        clientMetrics.channelIntent(channelId, window.event);
       void navigator.open({
         version: 1,
         kind: "conversation",
@@ -429,6 +433,7 @@ export function ConversationList({
           ? { threadRootId: options.threadRootId, context: "thread" as const }
           : {}),
       });
+    };
   });
   const open = useCallback<Open>(
     (channelId, options) => opener.current(channelId, options),
@@ -447,7 +452,17 @@ export function ConversationList({
     keep:
       unreadOnly && !selected?.threadRootId ? selected?.channelId : undefined,
   });
-  const order = useFrozenOrder(keys);
+  const hiddenDms = useHiddenDms(session, ready);
+  const shownKeys = useMemo(
+    () =>
+      hiddenDms.length
+        ? keys.filter(
+            (key) => !key.startsWith("c:") || !hiddenDms.includes(key.slice(2)),
+          )
+        : keys,
+    [keys, hiddenDms],
+  );
+  const order = useFrozenOrder(shownKeys);
   // Waiting and a sender filter judge each conversation's latest author, so
   // an empty answer means nothing until every head has been read.
   const headsRead = useSyncExternalStore(session.channelHeads.subscribe, () => {
@@ -752,6 +767,41 @@ const EventRow = memo(function EventRow({
  * Keeps rows where they are while the pointer or keyboard is in the list, so a
  * new message doesn't move a row out from under a click. New rows go at the end.
  */
+/** The DMs this viewer hid, as the relay holds them: a new message or an
+ * open shows one again. */
+function useHiddenDms(session: RelaySession, ready: boolean) {
+  const lifecycle = session.channelLifecycle;
+  const hidden = useSyncExternalStore(
+    lifecycle.subscribe,
+    () => lifecycle.snapshot().hidden,
+  );
+  // A roster refresh also refreshes visibility; a recent read answers repeats.
+  const asOf = useSyncExternalStore(
+    session.channels.subscribeList,
+    () => session.channels.list().asOf,
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each roster commit is a trigger.
+  useEffect(() => {
+    if (!ready) return;
+    const request = new AbortController();
+    void lifecycle.refreshVisibility(request.signal, { ifStale: true });
+    return () => request.abort();
+  }, [lifecycle, ready, asOf]);
+  // A confirmed open asks the relay to unhide its DM.
+  useEffect(() => {
+    const request = new AbortController();
+    const stop = session.directMessages.subscribeOpened(
+      () =>
+        void lifecycle.refreshVisibility(request.signal, { trailing: true }),
+    );
+    return () => {
+      stop();
+      request.abort();
+    };
+  }, [session, lifecycle]);
+  return hidden;
+}
+
 function useFrozenOrder(keys: readonly string[]) {
   // Either holds the order on its own: focus moving to the reader on a click
   // must not release rows the pointer is still over.

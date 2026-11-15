@@ -72,6 +72,15 @@ test("a section address opens its list, and other visits leave it as it is", () 
   expect(t.list()).toMatchObject({ open: false, animate: false });
 });
 
+test("a list closed while an open from it is in flight stays closed", () => {
+  const t = harness();
+  t.go("team", team);
+  act(() => t.column().ask("keep"));
+  act(() => t.column().setOpen(false));
+  t.go("alpha", conversation("alpha"));
+  expect(t.list()).toMatchObject({ open: false, section: "messages" });
+});
+
 test("Back and Forward restore what each visit last showed", () => {
   const t = harness();
   t.go("team", team);

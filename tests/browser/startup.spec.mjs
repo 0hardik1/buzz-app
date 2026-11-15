@@ -97,7 +97,9 @@ test("reload restores the selected conversation/groups before handshake and upda
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect.poll(() => requested).toBe(true);
     await expect(history).toContainText("primary beta message 39");
-    await expect(channelRow(page, "beta")).toBeVisible();
+    // The restored visit collapses Team's list beside it; its cached row is
+    // still rendered.
+    await expect(channelRow(page, "beta")).toBeAttached();
     await expect(
       page.getByText("Loading your sidebar…", { exact: true }),
     ).toHaveCount(0);
@@ -729,7 +731,8 @@ test.describe("pending startup navigation", () => {
     try {
       await page.reload({ waitUntil: "domcontentloaded" });
       await expect.poll(() => requested).toBe(true);
-      await expect(channelRow(page, "alpha")).toBeVisible();
+      // The restored visit collapses Team's list; its cached row is rendered.
+      await expect(channelRow(page, "alpha")).toBeAttached();
       await expect(page.getByText("Reconnecting…")).toHaveCount(0);
       await page.evaluate((viewer) => {
         window.startupNavigation = undefined;

@@ -1,4 +1,9 @@
-import { channelRow, rail, selectCommunity } from "./navigation.mjs";
+import {
+  channelRow,
+  conversationList,
+  rail,
+  selectCommunity,
+} from "./navigation.mjs";
 import { openPage } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
@@ -149,8 +154,7 @@ test("a refused account is explained once, as access", async ({
   await expect(main.getByText(/Check your connection/)).toHaveCount(0);
   const notice = page.getByRole("dialog", { name: access });
   await expect(notice).toBeVisible();
-  const sidebar = page.getByRole("complementary", { name: "Sidebar" });
-  await expect(sidebar.getByText(/have access/)).toHaveCount(0);
+  await expect(conversationList(page).getByText(/have access/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
   const refusals = app.report.relayFailures.length;
   await button(notice, "Check again").click();

@@ -375,6 +375,17 @@ test("closing a profile beside a thread preserves the thread destination", async
     .toBe(true);
 });
 
+// The fixture renders the Channels page without the shell's rail; open a
+// channel as a rail row does, through navigation.
+async function openFixtureChannel(page, channelId) {
+  await page.waitForFunction(() => !!window.profilesFixture);
+  await page.evaluate((channelId) => {
+    const { navigation } = window.profilesFixture;
+    const { scope } = navigation.snapshot().entry.target;
+    navigation.open({ version: 1, kind: "conversation", scope, channelId });
+  }, channelId);
+}
+
 // Close returns through native history, which lands a task or more later, and
 // the dock keeps its exit motion. Hold both so a reopen arrives before them.
 async function holdCloseReturn(page) {
@@ -883,10 +894,10 @@ test("contextual panel callbacks retire with opening, channel, contribution and 
     )
     .click();
   await capture();
-  await page.locator('[data-channel-id="two"]').click();
+  await openFixtureChannel(page, "two");
   await expect(panel).toHaveCount(0);
   expect(await invoke()).toBe(false);
-  await page.locator('[data-channel-id="one"]').click();
+  await openFixtureChannel(page, "one");
   await capture();
   await page.evaluate(() =>
     window.profilesFixture.change("disable", "context.probe"),
@@ -1383,7 +1394,7 @@ test("profile preview stays inside a Solo conversation beside another pane", asy
   page,
 }) => {
   await page.goto("/tests/fixtures/profiles.html?solo");
-  await page.getByRole("button", { name: "One", exact: true }).click();
+  await openFixtureChannel(page, "one");
   await expect(
     page.getByRole("button", { name: "Share access to One", exact: true }),
   ).toBeVisible();
@@ -1463,9 +1474,9 @@ test("profile preview fits enlarged text and stops its status with reduced motio
     exact: true,
   });
   await expect(panel).toBeVisible();
-  // At 390 px the hero column fits only the emoji. Widen it so the long status
-  // shows and ends in an ellipsis inside the hero.
-  await page.setViewportSize({ width: 600, height: 600 });
+  // The fixture has no rail, so the panel takes the window's width. Widen it
+  // part way: the long status still ends in an ellipsis inside the hero.
+  await page.setViewportSize({ width: 480, height: 600 });
   const status = panel.getByText("Working EST hours until Oct 23", {
     exact: true,
   });

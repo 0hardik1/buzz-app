@@ -217,8 +217,8 @@ test("activating a panel from a linked thread retires the navigation-owned threa
     page.getByRole("complementary", { name: "Wrong panel", exact: true }),
   ).toBeVisible();
   await expect(thread).toHaveCount(0);
-  // Exactly the sidebar plus one panel: the thread does not survive alongside it.
-  await expect(page.getByRole("complementary")).toHaveCount(2);
+  // Exactly one panel: the thread does not survive alongside it.
+  await expect(page.getByRole("complementary")).toHaveCount(1);
 });
 
 // The context menu shares its trigger with the hover preview and the page's
@@ -565,7 +565,7 @@ test("thread and detail tabs preserve drafts, scroll, focus and local-detail lif
   await expect(thread).toHaveCount(0);
   expect(await originalHistory.evaluate((el) => el.isConnected)).toBe(true);
   const header = dock.locator("header.panel-header");
-  expect((await header.boundingBox()).height).toBe(40);
+  const headerHeight = (await header.boundingBox()).height;
   const profileDraft = page.getByRole("textbox", { name: "Panel draft" });
   await profileDraft.fill("Keep profile state");
   const profileInput = await profileDraft.elementHandle();
@@ -612,7 +612,7 @@ test("thread and detail tabs preserve drafts, scroll, focus and local-detail lif
     await expect(threadTab).toBeInViewport();
     await details.nth(1).click();
     await expect(details.nth(1)).toBeInViewport();
-    expect((await header.boundingBox()).height).toBe(40);
+    expect((await header.boundingBox()).height).toBe(headerHeight);
   }
   // A newly opened tab and its close control must reveal themselves in an overflowing strip.
   await button(page, "Open child detail").click();

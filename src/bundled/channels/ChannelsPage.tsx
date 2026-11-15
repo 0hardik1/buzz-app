@@ -1151,6 +1151,26 @@ function ChannelWorkspace({
     );
   };
   const channelConversation = useRef<HTMLDivElement>(null);
+  // Where focus returns when a closed pane's opener is gone: the header's
+  // actions menu, else its identity, else the history.
+  const closeFallback = useMemo(
+    () => ({
+      get current() {
+        const workspace = channelConversation.current?.closest(
+          "[data-main-workspace]",
+        );
+        return (
+          settingsTrigger.current ??
+          workspace?.querySelector<HTMLElement>("[data-header-tools]") ??
+          workspace?.querySelector<HTMLElement>(
+            "[data-workspace-identity] button",
+          ) ??
+          historyContainer.current
+        );
+      },
+    }),
+    [],
+  );
   const highlightReturn = useReturnHighlight(channelConversation, currentId);
   const returnFocus = useRef<
     { trigger: HTMLElement; channelId: string | undefined } | undefined
@@ -1399,7 +1419,7 @@ function ChannelWorkspace({
     isLive: () => !destination.current.navigation?.signal.aborted,
     openLink: (url) => openLink(url, { fromThread: true }),
     // A Solo conversation has no channel menu; its history takes focus instead.
-    fallbackFocus: solo ? historyContainer : settingsTrigger,
+    fallbackFocus: solo ? historyContainer : closeFallback,
     openMembers: () => setMembersOpen(true),
     eligible: (entry) =>
       !entry.panel.channelMenu ||
@@ -2052,6 +2072,21 @@ function ChannelWorkspace({
     (current.archived ||
       (current.readOnly &&
         (!current.cached || current.viewerRole === "guest")));
+  // With no composer to take it, focus left on the shell while history was
+  // loading moves to the messages once they show.
+  const historyShown = !!currentId && contentReadyChannel === currentId;
+  useEffect(() => {
+    const history = historyContainer.current;
+    if (
+      channelNotice &&
+      historyShown &&
+      history &&
+      document.activeElement === history
+    )
+      history
+        .querySelector<HTMLElement>("[data-message-scroller]")
+        ?.focus({ preventScroll: true });
+  }, [channelNotice, historyShown]);
   useChannelHistoryFocus(
     historyContainer,
     navigation,

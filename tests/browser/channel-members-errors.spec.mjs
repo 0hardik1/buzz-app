@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { getPublicKey } from "nostr-tools";
 import { test, expect } from "./fixture.mjs";
-import { openPage } from "./navigation.mjs";
+import { openChannel, openPage } from "./navigation.mjs";
 
 const channelId = "11111111-1111-4111-8111-111111111111";
 const keyFor = (name) =>
@@ -55,10 +55,7 @@ test("member action errors stay in view above a long roster", async ({
   });
   await page.goto(app.origin);
   await openPage(page, "Team");
-  await page
-    .getByRole("navigation", { name: "Subscribed channels" })
-    .getByRole("button", { name: "Lifecycle channel", exact: true })
-    .click();
+  await openChannel(page, channelId);
   await page.getByRole("button", { name: /^Manage members of / }).click();
   const dialog = page.getByRole("dialog", {
     name: "Manage members",

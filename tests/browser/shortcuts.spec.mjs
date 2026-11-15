@@ -332,11 +332,26 @@ test.describe("scaled history", () => {
       exact: true,
     });
     await expect(older).toHaveCSS("min-height", "80px");
-    expect(
-      await older.evaluate(
-        (el) => el.parentElement.getBoundingClientRect().height,
-      ),
-    ).toBe(112);
+    // The edge keeps its scaled reserve (control plus spacing). Its leading
+    // inset clears the floating conversation header, so the reserve sits
+    // inside that padding and the control fills the row below it.
+    const edgeBox = await older.evaluate((el) => {
+      const edge = el.parentElement;
+      const style = getComputedStyle(edge);
+      const box = edge.getBoundingClientRect();
+      const control = el.getBoundingClientRect();
+      return {
+        minHeight: style.minHeight,
+        height: box.height,
+        paddingTop: Number.parseFloat(style.paddingTop),
+        controlTop: control.top - box.top,
+        controlBottom: box.bottom - control.bottom,
+      };
+    });
+    expect(Number.parseFloat(edgeBox.minHeight)).toBe(edgeBox.paddingTop + 112);
+    expect(edgeBox.height).toBeGreaterThanOrEqual(edgeBox.paddingTop + 112);
+    expect(edgeBox.controlTop).toBeGreaterThanOrEqual(edgeBox.paddingTop);
+    expect(edgeBox.controlBottom).toBeGreaterThanOrEqual(0);
     const sidebar = page.locator("#shell-rail");
     const handle = page.getByRole("separator", {
       name: "Resize app sidebar",

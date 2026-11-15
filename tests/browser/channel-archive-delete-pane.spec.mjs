@@ -4,6 +4,7 @@ import {
   conversationList,
   openChannel,
   openPage,
+  showConversationList,
 } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { animationsSettled } from "./animations.mjs";
@@ -260,6 +261,7 @@ for (const action of ["archive", "delete"]) {
           })
           .click();
         // Leave intentionally, then prove the explicit search return path.
+        await showConversationList(page);
         await channelRow(page, "alpha").click();
       } else await expect(destination).toBeVisible();
       await expect(row).toHaveCount(0);
@@ -394,6 +396,7 @@ for (const action of ["archive", "delete"]) {
           page.getByRole("button", { name: "Send message", exact: true }),
         ).toBeEnabled();
         await page.reload();
+        await showConversationList(page);
         await expect(row).toBeVisible();
         await expect(composer).toBeVisible();
         await expect(composer).toBeEditable();
