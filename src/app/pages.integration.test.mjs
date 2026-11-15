@@ -84,6 +84,7 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
       assert.equal(
         plugin.enabledByDefault,
         ![
+          "buzz.catch-up",
           "buzz.pi",
           "buzz.todos",
           "buzz.usage",
@@ -101,6 +102,7 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
       );
     }
     for (const id of [
+      "buzz.catch-up",
       "buzz.reminders",
       "buzz.workflows",
       "buzz.drafts-and-sent",

@@ -5,6 +5,6 @@
   "description": "Triage unread conversations one at a time without reading them until you choose.",
   "discovery": {
     "category": "communication",
-    "tags": ["unread", "productivity"]
+    "tags": ["tasks"]
   }
 }

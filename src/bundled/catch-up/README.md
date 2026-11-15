@@ -1,5 +1,7 @@
 # Catch up
 
+## Getting started
+
 Opt-in unread conversation triage. Enable **Catch up** in Settings → Plugins,
 then open **Catch up** from navigation.
 
