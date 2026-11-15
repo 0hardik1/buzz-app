@@ -16,7 +16,7 @@ import { apply } from "./index";
 
 afterEach(cleanup);
 const scope = { viewer: "viewer", communityOrigin: "https://example.org" };
-function setup() {
+function setup(dm = false) {
   const listeners = new Set<() => void>();
   const state = new Map<string, UnreadSnapshot>(
     ["one", "two"].map((id) => [
@@ -36,7 +36,8 @@ function setup() {
     channels: [
       {
         id: "one",
-        name: "First",
+        name: dm ? "Direct message" : "First",
+        ...(dm ? { channelType: "dm", participants: ["alice"] } : {}),
         preview: "First preview",
         members: ["viewer"],
         lastActivityAt: 2,
@@ -62,7 +63,13 @@ function setup() {
     capability: "unsupported",
     completeness: "snapshot",
   };
+  const profiles = new Map([["alice", { pubkey: "alice", name: "Alice" }]]);
   const session = {
+    profiles: {
+      snapshot: () => profiles,
+      subscribe: () => () => {},
+      ensure: vi.fn(async () => {}),
+    },
     channels: {
       ensureList: vi.fn(),
       list: () => list,
@@ -98,7 +105,7 @@ function setup() {
 }
 async function ready() {
   await waitFor(() =>
-    expect(screen.queryByText("Checking unread conversations…")).toBeNull(),
+    expect(document.querySelector('[aria-busy="true"]')).toBeNull(),
   );
 }
 
@@ -211,4 +218,13 @@ it("shows unread repair failures returned through snapshots, including with an e
   );
   expect(screen.queryByText("No unread conversations observed")).toBeNull();
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+});
+
+it("identifies unread DMs by their participants", async () => {
+  setup(true);
+  await ready();
+  expect(
+    screen.getByRole("article", { name: "Unread conversation: Alice" }),
+  ).toBeTruthy();
+  expect(screen.queryByText("Direct message")).toBeNull();
 });

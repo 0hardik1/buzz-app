@@ -22,7 +22,9 @@ test("Catch up keeps previews unread and reads only on request", async ({
   await openPage(page, "Catch up");
   const card = page.getByRole("article", { name: /^Unread conversation:/ });
   await expect(card).toBeVisible();
-  await expect(page.getByText("Checking unread conversations…")).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Mark as read", exact: true }),
+  ).toBeEnabled();
   const before = await channelUnread(page, "alpha");
   expect(before.observedCount).toBeGreaterThan(0);
   for (const mode of ["light", "dark"]) {
@@ -55,7 +57,9 @@ test("Catch up keeps previews unread and reads only on request", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "Check again", exact: true }).click();
   await expect(card).toBeVisible();
-  await expect(page.getByText("Checking unread conversations…")).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Mark as read", exact: true }),
+  ).toBeEnabled();
   await page.getByRole("button", { name: "Mark as read", exact: true }).click();
   await expect(
     page.getByText("No unread conversations observed", { exact: true }),

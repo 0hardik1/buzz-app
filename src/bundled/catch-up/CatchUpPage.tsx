@@ -13,11 +13,13 @@ import type { RelaySession } from "../../features/relay/session";
 import { CheckIcon } from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
 import { EmptyState } from "../../shared/design-system/ui/EmptyState";
+import { LoadingRegion } from "../../shared/design-system/ui/LoadingRegion";
 import { FullPageSurface } from "../../shared/design-system/ui/FullPageSurface";
 import {
   PanelHeader,
   PanelHeaderLabel,
 } from "../../shared/design-system/ui/PanelHeader";
+import { useChannelLabels } from "../channels/useChannelLabels";
 import styles from "./CatchUpPage.module.css";
 
 export function CatchUpPage({
@@ -68,6 +70,11 @@ export function CatchUpView({
   navigator: Navigation;
 }) {
   const list = useChannelList(session.channels);
+  const { channels } = useChannelLabels(
+    list.channels,
+    session.profiles,
+    session.names,
+  );
   const unread = session.unread;
   const sync = useSyncExternalStore(
     unread.subscribeSync,
@@ -123,7 +130,7 @@ export function CatchUpView({
       current = false;
     };
   }, [unread]);
-  const candidates = list.channels
+  const candidates = channels
     .filter((channel) => {
       if (
         channel.archived ||
@@ -186,6 +193,12 @@ export function CatchUpView({
       if (alive.current) setChecking(false);
     }
   }
+  const restart = useRef<HTMLButtonElement>(null);
+  const hadCard = useRef(false);
+  useEffect(() => {
+    if (hadCard.current && !channel && !loading) restart.current?.focus();
+    hadCard.current = !!channel;
+  }, [channel, loading]);
   return (
     <div className={styles.body}>
       <p className="text-body text-subtle">
@@ -203,11 +216,9 @@ export function CatchUpView({
           </Button>
         </div>
       )}
-      {loading && (
-        <p className="text-body text-subtle" role="status">
-          Checking unread conversations…
-        </p>
-      )}
+      <LoadingRegion pending={loading} label="Checking unread conversations…">
+        {null}
+      </LoadingRegion>
       {channel ? (
         <article
           className={styles.preview}
@@ -291,6 +302,7 @@ export function CatchUpView({
             }
             action={
               <Button
+                ref={restart}
                 onClick={() => {
                   setSkipped(new Set());
                   void refresh();
