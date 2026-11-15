@@ -336,12 +336,12 @@ test("threads are events: newest first, unchanged ones keep their identity", () 
   expect(index.keys(threads)).toEqual(["e:b:r2", "e:a:r1"]);
   expect(index.keys({ ...threads, unread: true })).toEqual(["e:b:r2"]);
   expect(index.event("a:r1")).toBe(first);
-  // A thread you're in moves and marks its channel.
-  expect(index.keys(all)).toEqual(["c:b", "c:a"]);
-  expect(index.record("b")).toMatchObject({ at: 7, unread: true });
+  // A thread you're in marks its channel and leaves it where it was.
+  expect(index.keys(all)).toEqual(["c:a", "c:b"]);
+  expect(index.record("b")).toMatchObject({ at: 0, unread: true });
 });
 
-test("Team's All is a feed: a channel's row gives way to the event showing its message", () => {
+test("Team's All is a feed: a thread is its own row and never moves its channel", () => {
   const { session, thread, message, inbox, reactions } = fixture([
     { id: "a" },
     { id: "b" },
@@ -352,11 +352,11 @@ test("Team's All is a feed: a channel's row gives way to the event showing its m
   index.watch(feed, () => {});
   expect(index.keys(feed)).toEqual(["c:a", "c:b", "c:dm"]);
 
-  // The thread's reply is the newest thing in its channel: one row, the thread.
+  // A reply in a thread you're in ranks the thread, not its channel.
   thread("a", { rootId: "r1", createdAt: 7, unreadCount: 1 });
-  expect(index.keys(feed)).toEqual(["e:a:r1", "c:b", "c:dm"]);
+  expect(index.keys(feed)).toEqual(["e:a:r1", "c:a", "c:b", "c:dm"]);
 
-  // A newer top-level message brings the channel's own row back above it.
+  // A newer top-level message moves the channel's row above it.
   message("a", 9);
   expect(index.keys(feed)).toEqual(["c:a", "e:a:r1", "c:b", "c:dm"]);
 
@@ -412,7 +412,7 @@ test("Team's All is a feed: a channel's row gives way to the event showing its m
   ]);
 });
 
-test("a mention that started a thread is one row in the feed, the thread", () => {
+test("a mention that started a thread is one event in the feed, the thread", () => {
   const { session, thread, inbox } = fixture([{ id: "a" }]);
   const index = conversationIndex(session);
   index.watch(feed, () => {});
@@ -430,7 +430,7 @@ test("a mention that started a thread is one row in the feed, the thread", () =>
   };
   inbox([{ ...mention, mention }]);
 
-  expect(index.keys(feed)).toEqual(["e:a:r1"]);
+  expect(index.keys(feed)).toEqual(["e:a:r1", "c:a"]);
   expect(index.keys({ ...feed, filter: "mentions" })).toEqual(["e:a:r1"]);
 });
 
@@ -460,7 +460,9 @@ test("a sender filter keeps what people, or agents, sent", () => {
 
   profile("stranger", { name: "Sam" });
   thread("c", { rootId: "r2", createdAt: 2, unreadCount: 0, authorId: "ann" });
-  expect(index.keys(from("humans"))).toEqual(["c:a", "e:c:r2"]);
+  // The channel's own row follows its latest top-level message, not the
+  // agent's newer thread reply.
+  expect(index.keys(from("humans"))).toEqual(["c:c", "c:a", "e:c:r2"]);
 });
 
 test("a DM is labelled by its people, and again when their names arrive", () => {

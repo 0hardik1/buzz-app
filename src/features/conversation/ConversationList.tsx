@@ -649,7 +649,6 @@ const IndexedRow = memo(function IndexedRow({
               ? []
               : conversationPeople(record.channel, row.session.viewer)),
             ...(record.latest?.authorId ? [record.latest.authorId] : []),
-            ...(record.thread ? [record.thread.authorId] : []),
           ]),
         ].join(":")
       : "",
@@ -864,21 +863,16 @@ const ChannelActivityRow = memo(function ChannelActivityRow({
   onOpen(channelId: string): void;
 }) {
   const notify = useToastNotification();
-  const { channel, kind, latest, thread, at, unread, working, label } = record;
+  const { channel, kind, latest, at, unread, working, label } = record;
   const dm = kind === "dm";
   const solo = kind === "solo";
   const people = dm || solo ? conversationPeople(channel, session.viewer) : [];
-  // The latest event: a thread reply you're in, when it is newer.
-  const replyIsNewest = !!thread && thread.createdAt > (latest?.createdAt ?? 0);
-  const preview = replyIsNewest
-    ? messagePreview(thread.preview)
-    : latest
-      ? messagePreview(latest.content)
-      : channel.preview
-        ? messagePreview(channel.preview)
-        : "";
-  const poster =
-    dm || solo ? undefined : replyIsNewest ? thread.authorId : latest?.authorId;
+  const preview = latest
+    ? messagePreview(latest.content)
+    : channel.preview
+      ? messagePreview(channel.preview)
+      : "";
+  const poster = dm || solo ? undefined : latest?.authorId;
   const content = (
     <ConversationRow
       layout="feed"

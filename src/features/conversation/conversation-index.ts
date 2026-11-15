@@ -11,7 +11,6 @@ import type { ChannelSummary } from "../relay/contracts";
 import type { InboxItem } from "../relay/inbox";
 import type { InboxReaction } from "../relay/inbox-reactions";
 import type { LatestMessage } from "../relay/channel-heads";
-import type { ThreadActivityItem } from "../relay/unread";
 import { channelUnread } from "../../bundled/channels/UnreadBadge";
 import { dmLabel } from "./dm-label";
 import { reactionRows } from "./reaction-rows";
@@ -38,12 +37,9 @@ export type ConversationRecord = Readonly<{
   label: string;
   /** Newest top-level message, from the roster's heads and live traffic. */
   latest: LatestMessage | undefined;
-  /** Team: the newest thread you're in, at its latest reply. */
-  thread: ThreadActivityItem | undefined;
   /**
-   * Channels rank by what is relevant to you: top-level messages, threads you
-   * are in, and your mentions and replies. Other people's thread chatter does
-   * not move a channel. Solo chats and DMs rank by any message.
+   * Every conversation ranks by its newest top-level message. A thread reply
+   * moves its thread's row, never the conversation's.
    */
   at: number;
   /** The channel or one of its threads is unread; a muted channel is quiet. */
@@ -157,7 +153,6 @@ function createConversationIndex(session: RelaySession): ConversationIndex {
   let observed = false;
   let ensured = false;
   let revision = 0;
-  let inboxAt = new Map<string, number>();
   let muted: ReadonlySet<string> = new Set();
   let working: ReadonlySet<string> = new Set();
   /** A channel's threads you're in, from its own activity. */
@@ -261,29 +256,15 @@ function createConversationIndex(session: RelaySession): ConversationIndex {
     });
     const latest = session.channelHeads.latest(id);
     const items = session.unread.activity(id).items ?? [];
-    let thread: ThreadActivityItem | undefined;
-    if (kind === "team")
-      for (const item of items)
-        if (!thread || item.createdAt > thread.createdAt) thread = item;
     return {
       channel,
       kind,
       label: labelOf(channel, kind),
       latest,
-      thread,
       at:
-        kind === "team"
-          ? Math.max(
-              latest?.createdAt ?? 0,
-              inboxAt.get(id) ?? 0,
-              thread?.createdAt ?? 0,
-            )
-          : Math.max(
-              latest?.createdAt ?? 0,
-              // A chat nobody has written in yet ranks by when it was made.
-              channel.lastActivityAt ?? channel.createdAt ?? 0,
-              snapshot.latestMessage?.createdAt ?? 0,
-            ),
+        latest?.createdAt ??
+        // A chat nobody has written in yet ranks by when it was made.
+        (kind === "team" ? 0 : (channel.createdAt ?? 0)),
       unread:
         channelUnread(snapshot, kind === "dm", muted.has(id)) ||
         items.some((item) => item.unreadCount > 0),
@@ -291,17 +272,10 @@ function createConversationIndex(session: RelaySession): ConversationIndex {
     };
   }
 
-  /** The message a conversation's row shows: a newer thread reply, or its latest. */
-  const shownMessage = (record: ConversationRecord) =>
-    record.thread && record.thread.createdAt > (record.latest?.createdAt ?? 0)
-      ? { id: record.thread.latestMessageId, authorId: record.thread.authorId }
-      : record.latest;
-
   function conversationRow(view: View, record: ConversationRecord) {
     const { query } = view;
     const { filter } = query;
     const { kind, latest, working } = record;
-    const shown = shownMessage(record);
     if (
       !placed(query, record) ||
       (filter === "dms" && kind !== "dm") ||
@@ -311,9 +285,9 @@ function createConversationIndex(session: RelaySession): ConversationIndex {
       // Waiting: no agent is on it and the other side spoke last.
       (filter === "waiting" &&
         (working || !latest?.authorId || latest.authorId === session.viewer)) ||
-      !sent(query, shown?.authorId) ||
+      !sent(query, latest?.authorId) ||
       (query.unread && !record.unread && query.keep !== record.channel.id) ||
-      (kind === "team" && !!shown?.id && view.shown.has(shown.id))
+      (kind === "team" && !!latest?.id && view.shown.has(latest.id))
     )
       return;
     return {
@@ -466,16 +440,6 @@ function createConversationIndex(session: RelaySession): ConversationIndex {
 
   function readInbox() {
     const items = session.unread.inbox().items;
-    const next = new Map<string, number>();
-    for (const item of items)
-      next.set(
-        item.channelId,
-        Math.max(next.get(item.channelId) ?? 0, item.createdAt),
-      );
-    const previous = inboxAt;
-    inboxAt = next;
-    for (const id of new Set([...previous.keys(), ...next.keys()]))
-      if (previous.get(id) !== next.get(id)) touch(id);
     readEvents(items);
   }
   function readMuted() {

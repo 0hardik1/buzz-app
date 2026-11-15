@@ -42,7 +42,10 @@ test.describe("signed newest-first Inbox windows", () => {
     await page.goto(app.origin);
     await openPage(page, "Activity");
 
-    const rows = conversationList(page).getByRole("listitem");
+    // The thread's own row; the channel's row previews its top-level posts.
+    const rows = conversationList(page).locator(
+      `[data-activity-event$=":${root.id}"]`,
+    );
     const row = rows.filter({ hasText: "Window room" });
     await row.locator("[data-conversation-row]").click();
     const detail = page.getByRole("region", {

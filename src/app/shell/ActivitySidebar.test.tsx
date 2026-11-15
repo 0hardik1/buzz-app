@@ -263,14 +263,21 @@ test("Working answers at once without waiting for heads", async () => {
   expect(screen.getByText("No agent is working right now")).toBeInTheDocument();
 });
 
-test("All interleaves chats, DMs, and channels by their newest activity", () => {
-  setup();
-  // old-news has an older top-level message but a newer thread reply, which
-  // becomes its preview.
-  expect(rowNames()).toEqual(["dm", "old", "solo", "new"]);
+test("All interleaves chats, DMs, and channels by their newest top-level message", () => {
+  setup([], {
+    dm: { createdAt: 450, content: "a direct message" },
+    solo: { createdAt: 300, content: "a chat message" },
+    new: { createdAt: 200, content: "hello there" },
+    old: { createdAt: 100, content: "ancient" },
+  });
+  // old-news has a newer thread reply; that moves its thread's row, not the
+  // channel, and is not the channel's preview.
+  expect(rowNames()).toEqual(["dm", "solo", "new", "old"]);
   expect(screen.queryByRole("tab", { name: "Solo" })).not.toBeInTheDocument();
   expect(screen.queryByRole("tab", { name: "Team" })).not.toBeInTheDocument();
-  expect(screen.getByText("a reply in the old channel")).toBeInTheDocument();
+  expect(
+    screen.queryByText("a reply in the old channel"),
+  ).not.toBeInTheDocument();
 });
 
 test("a thread row opens the thread on its own", async () => {
@@ -302,7 +309,7 @@ test("Unread filters the combined list and can restore every kind of conversatio
   await userEvent.click(
     await screen.findByRole("menuitemradio", { name: "All conversations" }),
   );
-  expect(rowNames()).toEqual(["dm", "old", "solo", "new"]);
+  expect(rowNames()).toEqual(["dm", "new", "solo", "old"]);
   expect(screen.getByRole("tab", { name: "All" })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -358,7 +365,7 @@ test("a Team row previews its latest top-level message, without its author", () 
     old: { createdAt: 600, content: "a new post" },
     new: { createdAt: 150, content: "older post" },
   });
-  expect(rowNames()).toEqual(["old", "dm", "solo", "new"]);
+  expect(rowNames()).toEqual(["old", "new", "dm", "solo"]);
   expect(screen.getByText("a new post")).toBeInTheDocument();
   const row = document.querySelector<HTMLElement>('[data-activity-row="old"]');
   if (!row) throw new Error("Conversation row missing");
@@ -435,13 +442,13 @@ test.each([
     if (!waitingRows.length)
       expect(screen.getByText("Nothing is waiting on you")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "All" }));
-    expect(rowNames()).toEqual(["dm", "old", "solo", "new"]);
+    expect(rowNames()).toEqual(["solo", "dm", "new", "old"]);
   },
 );
 
 test("your newest chat message moves it ahead of channels and DMs", () => {
   setup([], { solo: { createdAt: 600, content: "go", authorId: viewer } });
-  expect(rowNames()).toEqual(["solo", "dm", "old", "new"]);
+  expect(rowNames()).toEqual(["solo", "dm", "new", "old"]);
 });
 
 /** The initial a row's avatar shows, standing in for the picture. */
