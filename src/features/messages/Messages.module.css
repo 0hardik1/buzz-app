@@ -214,10 +214,22 @@
 /* Long bubbles stop 32px before the opposite avatar's visible inner edge.
    Avatars sit space-1 from their body, including the wider timeline gutter. */
 .message:has(> .messageGutter) > .messageBody {
-  /* The rem-based clearance grows with enlarged text; keep a readable floor. */
+  /* The rem-based clearance grows with enlarged text; keep a readable floor.
+     A row no wider than 50rem keeps the sender gutter but reclaims the
+     opposite avatar's reservation: the last term is 100% up to that width and
+     negative past it. It is arithmetic rather than a container query because
+     Chromium takes seconds over one layout when the workspace animates its
+     columns across a query on every row. */
   max-width: max(
     60%,
-    calc(100% - 2 * var(--message-side-space) + var(--space-1) - var(--space-8))
+    calc(
+      100% -
+      2 *
+      var(--message-side-space) +
+      var(--space-1) -
+      var(--space-8)
+    ),
+    min(100%, calc((50rem - 100% + 0.01px) * 100000))
   );
 }
 .message[data-viewer-message] > .messageBody {
@@ -1020,14 +1032,6 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   /* Older-history corrections hide overflow for a task (scroll-correction.ts). */
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-}
-/* Each message row measures its own available width in main and split views.
-   Keep the sender gutter, but reclaim the opposite avatar reservation when
-   the reading area is narrow. */
-@container message-row (max-width: 50rem) {
-  .message:has(> .messageGutter) > .messageBody {
-    max-width: 100%;
-  }
 }
 /* Compact gives conversations the window's full width, as list layouts do. */
 :where(html[data-message-density="compact"]) :is(.feed, .threadHistory) {
