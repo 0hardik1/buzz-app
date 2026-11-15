@@ -426,14 +426,19 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     name: "Move to new section",
     exact: true,
   });
-  await expect(dialog).toBeVisible();
-  await dialog.evaluate(async (element) => {
-    await Promise.all(
-      element
-        .getAnimations({ subtree: true })
-        .map((animation) => animation.finished),
-    );
-  });
+  // The drag clears any text selection for a moment after the drop, so the
+  // dialog is used once it has finished opening, as a person would.
+  const opened = async () => {
+    await expect(dialog).toBeVisible();
+    await dialog.evaluate(async (element) => {
+      await Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished),
+      );
+    });
+  };
+  await opened();
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(workflows).toBeVisible();
@@ -441,6 +446,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await startDrag(workflows);
   await expect(newSection).toHaveCSS("opacity", "1");
   await dropOn(newSection);
+  await opened();
   await dialog
     .getByRole("textbox", { name: "Section name" })
     .fill("Project chats");
