@@ -2496,11 +2496,11 @@
     padding-block: calc(var(--space-1) - 0.5px) 0;
   }
   .panel-header .buzz-tabs[data-variant="navigation"] .buzz-tabs-list {
-    height: auto;
-    min-height: calc(var(--size-control-sm) + 2 * var(--space-1));
-    align-items: center;
+    /* A fixed height with the lower inset left as free space: WebKit's
+       scrollbar takes its track from that space, not from the header. */
+    height: calc(var(--size-control-sm) + 2 * var(--space-1));
     /* Keep capsule edges and elevation inside the scrollport's clip. */
-    padding: var(--space-1);
+    padding: var(--space-1) var(--space-1) 0;
   }
   .buzz-tabs[data-variant="navigation"] .buzz-tabs-item {
     @apply glass-secondary;
