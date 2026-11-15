@@ -165,6 +165,10 @@ test("the combined rail pins destinations and opens centered Messages", async ({
       element.getBoundingClientRect().left +
       Number.parseFloat(getComputedStyle(element).paddingInlineStart),
   );
+  // The strip may have scrolled to keep an earlier selection in view.
+  await filters.evaluate((element) => {
+    element.closest(".buzz-tabs-scroll-strip").scrollLeft = 0;
+  });
   const firstFilter = await filters.boundingBox();
   expect(firstFilter.x).toBeCloseTo(contentLeft, 0);
 
