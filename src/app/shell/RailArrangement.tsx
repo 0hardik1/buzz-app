@@ -1,4 +1,4 @@
-import { holdsCopy, ownSection, railSections } from "./rail-sections";
+import { accepts, holdsCopy, ownSection, railSections } from "./rail-sections";
 import { motion, useReducedMotion } from "motion/react";
 import {
   DndContext,
@@ -323,7 +323,7 @@ function Arrangement({
       const from = data.movable ? data.source : undefined;
       if (over.id === "rail:new-section")
         setCreating({ entry: data.entry, from });
-      else if (over.id !== data.source)
+      else if (over.id !== data.source && accepts(data.entry, String(over.id)))
         value.move(data.entry, String(over.id), from);
     }
   };
@@ -470,6 +470,7 @@ export function RailGroup({
   avatarGrid = id === "pins",
   leadingEntryIds = [],
   views,
+  icons,
   trailingEntryId,
   sortEntries,
   pageContent,
@@ -485,6 +486,8 @@ export function RailGroup({
   leadingEntryIds?: readonly string[];
   /** Rows that open this section's views, under its leading entries. */
   views?: ReactNode;
+  /** The card collapsed to one row of icons, in place of its rows. */
+  icons?: ReactNode;
   trailingEntryId?: string;
   sortEntries?: (a: RailEntry, b: RailEntry) => number;
   pageContent?: ReactNode;
@@ -530,7 +533,10 @@ export function RailGroup({
   const movableGroups = arrangement?.groups ?? [];
   const index = movableGroups.findIndex((group) => group.id === id);
   const sectionDrag = !!active?.data.current?.section;
-  const target = drop.isOver && active?.data.current?.section !== id;
+  const target =
+    drop.isOver &&
+    active?.data.current?.section !== id &&
+    (!active?.data.current?.entry || accepts(active.data.current.entry, id));
   const sourceIndex = movableGroups.findIndex(
     (group) => group.id === active?.data.current?.section,
   );
@@ -700,34 +706,40 @@ export function RailGroup({
         }
         action={action && <span data-rail-card-actions="">{action}</span>}
       >
-        {leading}
-        {views}
-        {avatarGrid ? (
-          <div
-            className={styles.avatarGrid}
-            data-pins-grid={id === "pins" ? "" : undefined}
-          >
-            {shown}
-          </div>
+        {icons ? (
+          icons
         ) : (
-          shown
+          <>
+            {leading}
+            {views}
+            {avatarGrid ? (
+              <div
+                className={styles.avatarGrid}
+                data-pins-grid={id === "pins" ? "" : undefined}
+              >
+                {shown}
+              </div>
+            ) : (
+              shown
+            )}
+            {notes}
+            {more &&
+              (renderOpen ? (
+                renderOpen(
+                  preview.slice(shown.length).map((row) => row.props.entry),
+                  () => arrangement?.openSection(id),
+                )
+              ) : (
+                <NavigationItem
+                  label={`Open ${title}`}
+                  data-rail-view-more=""
+                  aria-label={`Open ${title}`}
+                  icon={<ArrowRightIcon size={18} />}
+                  onClick={() => arrangement?.openSection(id)}
+                />
+              ))}
+          </>
         )}
-        {notes}
-        {more &&
-          (renderOpen ? (
-            renderOpen(
-              preview.slice(shown.length).map((row) => row.props.entry),
-              () => arrangement?.openSection(id),
-            )
-          ) : (
-            <NavigationItem
-              label={`Open ${title}`}
-              data-rail-view-more=""
-              aria-label={`Open ${title}`}
-              icon={<ArrowRightIcon size={18} />}
-              onClick={() => arrangement?.openSection(id)}
-            />
-          ))}
       </NavigationSection>
     </div>
   );
@@ -899,7 +911,10 @@ function RowMenu({
         </MenuSubmenuTrigger>
         <MenuSubmenuPopup aria-label={`${label}: ${entry.label}`}>
           {arrangement?.groups
-            .filter((group) => page || ownSection(group.id))
+            .filter(
+              (group) =>
+                (page || ownSection(group.id)) && accepts(entry, group.id),
+            )
             .map((group) => (
               <MenuItem
                 key={group.id}

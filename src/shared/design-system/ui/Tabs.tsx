@@ -13,6 +13,8 @@ import {
 import { XIcon } from "../icons";
 import { useScrollEdges } from "./useScrollEdges";
 import {
+  useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -129,6 +131,7 @@ export function Tabs<Value extends string>({
   if (renaming !== undefined && !items.some((item) => item.value === renaming))
     setRenaming(undefined);
   const list = useScrollEdges("inline");
+  const buttonStrip = useButtonStrip(variant === "buttons", value, list);
   const tabStrip = (
     <>
       {leadingAction}
@@ -320,7 +323,7 @@ export function Tabs<Value extends string>({
   );
   const strip =
     variant === "buttons" ? (
-      <div ref={list} className="buzz-tabs-scroll-strip">
+      <div ref={buttonStrip} className="buzz-tabs-scroll-strip">
         {tabStrip}
       </div>
     ) : (
@@ -573,6 +576,58 @@ function TabRename({
       />
     </span>
   );
+}
+
+/**
+ * A button strip keeps its selected button in view, and drops a hover the
+ * pointer no longer makes: WebKit keeps `:hover` on the button that scrolled
+ * away until the pointer moves again.
+ */
+function useButtonStrip(
+  active: boolean,
+  value: string | null,
+  edges: (element: HTMLElement | null) => void,
+) {
+  const [strip, setStrip] = useState<HTMLDivElement | null>(null);
+  const ref = useCallback(
+    (element: HTMLDivElement | null) => {
+      edges(element);
+      setStrip(element);
+    },
+    [edges],
+  );
+  useLayoutEffect(() => {
+    if (!active || !strip || value === null) return;
+    const tab = strip.querySelector<HTMLElement>(
+      `[data-tab-value="${CSS.escape(value)}"]`,
+    );
+    if (!tab) return;
+    // Scroll only the strip, never the page or list around it.
+    const style = getComputedStyle(strip);
+    const start = parseFloat(style.scrollPaddingInlineStart) || 0;
+    const end = parseFloat(style.scrollPaddingInlineEnd) || 0;
+    const bounds = strip.getBoundingClientRect();
+    const box = tab.getBoundingClientRect();
+    if (box.left < bounds.left + start)
+      strip.scrollLeft -= bounds.left + start - box.left;
+    else if (box.right > bounds.right - end)
+      strip.scrollLeft += box.right - (bounds.right - end);
+  }, [active, strip, value]);
+  useEffect(() => {
+    if (!active || !strip) return;
+    const scrolled = () => strip.toggleAttribute("data-scrolled", true);
+    const moved = () => strip.toggleAttribute("data-scrolled", false);
+    strip.addEventListener("scroll", scrolled, { passive: true });
+    strip.addEventListener("pointermove", moved, { passive: true });
+    strip.addEventListener("pointerleave", moved, { passive: true });
+    return () => {
+      strip.removeEventListener("scroll", scrolled);
+      strip.removeEventListener("pointermove", moved);
+      strip.removeEventListener("pointerleave", moved);
+      strip.removeAttribute("data-scrolled");
+    };
+  }, [active, strip]);
+  return ref;
 }
 
 /** Restart only the paint layer, never the focused tab or retained panel. */

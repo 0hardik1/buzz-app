@@ -158,9 +158,9 @@ async function shellFits(page, width, bestieLabel = "Create an agent") {
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(dock.x + dock.width);
   }
   // Pages that sit with Team, such as the bundled Drafts & sent, stay in its
-  // card instead of Plugins. Its draft count may follow the label.
+  // card instead of Plugins, as a row or as one of its icons.
   const drafts = rail(page).getByRole("button", { name: /^Drafts & sent/ });
-  await expect(drafts).toHaveText(/^Drafts & sent(?:\d+)?$/);
+  await expect(drafts).toBeVisible();
   await drafts.scrollIntoViewIfNeeded();
   const draftsBounds = await box(drafts);
   expect(draftsBounds.x).toBeGreaterThanOrEqual(dock.x);

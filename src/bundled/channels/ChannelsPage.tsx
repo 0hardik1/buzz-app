@@ -705,6 +705,11 @@ function ChannelWorkspace({
     navigation?.target.kind === "conversation"
       ? navigation.target.threadRootId
       : undefined;
+  // A mention list shows a top-level message in the timeline, even a root
+  // with replies, where an ordinary exact open would show its thread.
+  const timelineOnly =
+    navigation?.target.kind === "conversation" &&
+    navigation.target.context === "timeline";
   const membersRequested =
     navigation?.target.kind === "conversation" &&
     navigation.target.panel === "members";
@@ -999,6 +1004,7 @@ function ChannelWorkspace({
       !navigation ||
       !requestedMessage ||
       requestedThread === requestedMessage ||
+      timelineOnly ||
       !currentId ||
       navigation.signal.aborted
     )
@@ -1025,6 +1031,7 @@ function ChannelWorkspace({
     navigation,
     requestedMessage,
     requestedThread,
+    timelineOnly,
     currentId,
     queries,
   ]);
@@ -1034,17 +1041,22 @@ function ChannelWorkspace({
     () =>
       cached || current?.cached
         ? undefined
-        : navigation && requestedMessage && requestedThread === requestedMessage
-          ? { request: navigation, inTimeline: false }
-          : exactOpening?.request === navigation
-            ? exactOpening
-            : undefined,
+        : navigation && requestedMessage && timelineOnly
+          ? { request: navigation, inTimeline: true }
+          : navigation &&
+              requestedMessage &&
+              requestedThread === requestedMessage
+            ? { request: navigation, inTimeline: false }
+            : exactOpening?.request === navigation
+              ? exactOpening
+              : undefined,
     [
       cached,
       current?.cached,
       navigation,
       requestedMessage,
       requestedThread,
+      timelineOnly,
       exactOpening,
     ],
   );

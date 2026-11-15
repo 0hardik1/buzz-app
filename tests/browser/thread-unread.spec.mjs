@@ -67,6 +67,33 @@ test.describe("mentioned reply priority", () => {
       await expect(items.filter({ hasText: preview })).toHaveCount(1);
   });
 
+  test("opening a thread mention from Mentions shows the thread alone and reads it at once", async ({
+    page,
+    app,
+  }) => {
+    // Hold the clock and focus so only the open itself can read the mention.
+    await page.clock.install();
+    await holdReadingFocus(page);
+    await open(page, app);
+    await teamView(page, "mentions");
+    // The selected view scrolls into the strip, even the last ones.
+    const strip = page.getByRole("tablist", { name: "Conversation view" });
+    const selected = strip.locator('[data-tab-value="mentions"]');
+    await expect(selected).toHaveAttribute("aria-selected", "true");
+    await expect(selected).toBeInViewport({ ratio: 1 });
+    const row = conversationList(page)
+      .locator("[data-activity-event]")
+      .filter({ hasText: "Unread reply 1" })
+      .locator("[data-conversation-row]");
+    await expect(row).toHaveAttribute("data-state", "unread");
+    await row.click();
+    await expect(
+      page.getByRole("complementary", { name: "Thread", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator("[data-thread-alone]")).toHaveCount(1);
+    await expect(row).toHaveAttribute("data-state", "read");
+  });
+
   test("opening an already-open thread from Activity reads it", async ({
     page,
     app,
@@ -853,6 +880,40 @@ test("opening a message link reads the channel but not its already-open thread",
   expect(await unread()).toBeGreaterThan(0);
 });
 
+// Mentions opens a top-level mention this way (ConversationList.tsx): an
+// ordinary exact open of a root with replies shows its thread instead.
+test("a timeline open shows a root with replies in its channel, not its thread", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  await go(page, "beta");
+  await expect(
+    page.getByRole("textbox", { name: "Message #Beta", exact: true }),
+  ).toBeVisible();
+  const root = app.histories
+    .get("primary/alpha")
+    .find((row) => row.content === "Thread root 1");
+  await page.evaluate(
+    (messageId) =>
+      window.fixtureNavigation.open({
+        version: 1,
+        kind: "conversation",
+        scope: window.fixtureNavigation.snapshot().entry.target.scope,
+        channelId: "alpha",
+        messageId,
+        context: "timeline",
+      }),
+    root.id,
+  );
+  await expect(
+    page.locator(`[data-channel-timeline] [data-message-id="${root.id}"]`),
+  ).toBeInViewport();
+  await expect(
+    page.getByRole("complementary", { name: "Thread", exact: true }),
+  ).toHaveCount(0);
+});
+
 test.describe("top-level mention activity", () => {
   test.use({ historyCounts: { alpha: 20, beta: 0 } });
   // Team's Mentions view lists each mention as its own row.
@@ -909,6 +970,36 @@ test.describe("top-level mention activity", () => {
         ),
       )
       .toBe(false);
+    await expect(row).toHaveAttribute("data-state", "read");
+  });
+
+  test("a top-level mention opens from Mentions in its channel, never its thread", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    // Beta's window has never loaded: an exact open would show the message
+    // as a thread rather than wait for it.
+    const mention = app.append(
+      "primary",
+      "beta",
+      "Can you look at this, with replies?",
+      true,
+      false,
+      undefined,
+      undefined,
+      [["p", app.viewer]],
+    );
+    app.append("primary", "beta", "A reply below it", true, false, mention.id);
+    const row = await mentionRow(page, "Can you look at this, with replies?");
+    await expect(row).toHaveAttribute("data-state", "unread");
+    await row.click();
+    await expect(
+      page.locator(`[data-channel-timeline] [data-message-id="${mention.id}"]`),
+    ).toBeInViewport();
+    await expect(
+      page.getByRole("complementary", { name: "Thread", exact: true }),
+    ).toHaveCount(0);
     await expect(row).toHaveAttribute("data-state", "read");
   });
 

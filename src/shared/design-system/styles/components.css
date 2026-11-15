@@ -1482,6 +1482,18 @@
   .buzz-tabs[data-variant="buttons"] .buzz-tabs-list {
     gap: var(--space-2);
   }
+  /* After a scroll, until the pointer moves, WebKit keeps the hover on the
+     button that scrolled out from under it. Show its resting fill instead. */
+  .buzz-tabs[data-variant="buttons"]
+    .buzz-tabs-scroll-strip[data-scrolled]
+    .buzz-button[data-variant="subtle"]:hover {
+    background: var(--interaction-fill);
+  }
+  .buzz-tabs[data-variant="buttons"]
+    .buzz-tabs-scroll-strip[data-scrolled]
+    .buzz-button[data-variant="prominent"]:hover {
+    background: var(--affordance-prominent);
+  }
 
   /* --- panel: an underline on a plain surface ---------------- */
 

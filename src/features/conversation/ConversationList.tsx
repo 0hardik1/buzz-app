@@ -377,7 +377,7 @@ export type ConversationListEntry = {
 
 type Open = (
   channelId: string,
-  options?: { messageId?: string; threadRootId?: string },
+  options?: { messageId?: string; threadRootId?: string; timeline?: boolean },
 ) => void;
 type WrapRow =
   | ((entry: ConversationListEntry, row: ReactNode) => ReactNode)
@@ -431,7 +431,9 @@ export function ConversationList({
         // A thread opens on its own; its header offers the channel beside it.
         ...(options.threadRootId
           ? { threadRootId: options.threadRootId, context: "thread" as const }
-          : {}),
+          : options.messageId && options.timeline
+            ? { context: "timeline" as const }
+            : {}),
       });
     };
   });
@@ -499,6 +501,7 @@ export function ConversationList({
               unreadOnly={unreadOnly}
               selected={selected}
               onOpen={open}
+              readOnOpen={filter === "mentions"}
               need={need}
               wrapRow={wrapRow}
             />
@@ -666,6 +669,7 @@ const EventRow = memo(function EventRow({
   unreadOnly,
   selected,
   onOpen,
+  readOnOpen,
   need,
   wrapRow,
 }: {
@@ -677,6 +681,8 @@ const EventRow = memo(function EventRow({
   unreadOnly: boolean;
   selected: Extract<OpenTarget, { kind: "conversation" }> | undefined;
   onOpen: Open;
+  /** Mentions: opening one reads it at once, as its Mark read would. */
+  readOnOpen: boolean;
   need: Need;
   wrapRow?: WrapRow;
 }) {
@@ -698,12 +704,16 @@ const EventRow = memo(function EventRow({
         selected?.channelId === event.channelId &&
         selected.threadRootId === event.rootId
       }
-      onClick={() =>
+      onClick={() => {
+        // A top-level mention shows in its channel, never in a thread.
         onOpen(event.channelId, {
           messageId: event.messageId,
-          ...(event.rootId ? { threadRootId: event.rootId } : {}),
-        })
-      }
+          ...(event.rootId
+            ? { threadRootId: event.rootId }
+            : { timeline: true }),
+        });
+        if (readOnOpen && event.unread) void markEventRead(session, event);
+      }}
       onPointerEnter={() => session.channels.prepare?.(event.channelId)}
       onFocus={() => session.channels.prepare?.(event.channelId)}
       avatar={
