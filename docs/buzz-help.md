@@ -199,6 +199,10 @@ For a Git-installed plugin, an agent's update request or a pinned install link
 can switch the tracked branch even when the code is unchanged. Review and
 confirm the update to save the new source; no reinstall is needed.
 
+To share a plugin installed from Git, choose **Copy install link** in its
+menu and paste the link in a message. Agents can make the same link for a
+GitHub repository. Nothing installs until the person opening it confirms.
+
 A plugin runs with the same reach as Buzz itself, with no sandbox. Install
 one only if you trust its author with your account and your computer.
 
