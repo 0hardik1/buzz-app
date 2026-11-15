@@ -128,6 +128,12 @@
 :where(html[data-message-density="compact"]) .day {
   margin-block: var(--space-3);
 }
+/* A timeline message that opens with a day divider contains the divider's
+   margin, so the message's own box starts at the top of its virtual row. A
+   resize restores the reading position from that box. */
+[data-channel-timeline] [data-message-id]:where(:has(> .day:first-child)) {
+  display: flow-root;
+}
 .day::before,
 .day::after {
   content: "";
