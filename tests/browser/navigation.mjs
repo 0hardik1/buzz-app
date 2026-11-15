@@ -39,10 +39,7 @@ export function channelRow(page, channelId) {
 // the list.
 // A conversation opened directly, as from a link, collapses its list.
 export async function showConversationList(page) {
-  // The rail's Team card has a control of the same name for its own views.
-  const show = page
-    .locator("[data-detail-workspace]")
-    .getByRole("button", { name: /^Show .+ list$/ });
+  const show = page.getByRole("button", { name: /^Show .+ list$/ });
   const list = conversationList(page);
   // Right after a load neither the list nor its toggle is shown yet.
   await expect

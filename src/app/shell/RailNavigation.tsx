@@ -991,7 +991,10 @@ export function RailNavigation({
           <>
             <Tooltip content={teamExpanded ? "Show icons" : "Show list"}>
               <IconButton
-                aria-label={teamExpanded ? "Show Team icons" : "Show Team list"}
+                aria-label={
+                  teamExpanded ? "Collapse Team views" : "Expand Team views"
+                }
+                aria-expanded={teamExpanded}
                 data-rail-team-expand=""
                 icon={
                   teamExpanded ? (
