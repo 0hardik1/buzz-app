@@ -85,7 +85,6 @@ function fixture(lane?: ReturnType<typeof createApiAdmission>) {
     legacy = { ...legacy, starred: starred ? [channelId] : [] };
     return legacy.starred;
   });
-  const sort = vi.fn(async () => ({}));
   const publish = vi.fn(async (event: RelayEvent) => {
     events.push(event);
   });
@@ -108,7 +107,6 @@ function fixture(lane?: ReturnType<typeof createApiAdmission>) {
       writeSidebarAssignment: assignment,
       removeSidebarSection: removal,
       writeSidebarStar: star,
-      writeSidebarSort: sort,
       channelKit: {
         decode: async (rows) =>
           rows.map((event) => ({
@@ -131,7 +129,6 @@ function fixture(lane?: ReturnType<typeof createApiAdmission>) {
     admitted,
     assignment,
     removal,
-    sort,
     star,
     publish,
     prepare,

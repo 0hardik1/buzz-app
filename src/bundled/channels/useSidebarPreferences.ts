@@ -33,11 +33,5 @@ export function useSidebarPreferences(
     starWritable: queries.starWritable,
     setStar: queries.setStar,
     reload: queries.refresh,
-    sortWritable: queries.sortWritable,
-    setSort: queries.setSort,
-    dismissSortError: queries.dismissSortError,
-    filterWritable: queries.filterWritable,
-    setFilter: queries.setFilter,
-    dismissFilterError: queries.dismissFilterError,
   };
 }

@@ -6,7 +6,6 @@ import {
   nip44,
 } from "nostr-tools";
 import { createSidebarPreferencesStore } from "../src/features/relay/sidebar-preferences-store.ts";
-import { sidebarSections } from "../src/bundled/channels/sidebar-sections.ts";
 import {
   decodeSidebarPreferences,
   mutateSidebarAssignment,
@@ -112,11 +111,6 @@ it.each([true, false])(
       expect(restored.assignments).toEqual({ beta: "work" });
       expect(restored.starred).toEqual([]);
       expect(h.prefs.snapshot().data).toEqual(restored);
-      expect(
-        sidebarSections([{ id: "alpha", name: "Alpha" }], restored).map(
-          ({ key }) => key,
-        ),
-      ).toEqual(["group:work", "channels", "dms"]);
     } finally {
       h.owner.dispose();
     }
@@ -130,11 +124,6 @@ it("moves directly from Starred into a saved group and retains other assignments
     const restored = await h.read();
     expect(restored.assignments).toEqual({ alpha: "work", beta: "work" });
     expect(restored.starred).toEqual([]);
-    expect(
-      sidebarSections([{ id: "alpha", name: "Alpha" }], restored).map(
-        ({ key }) => key,
-      ),
-    ).toEqual(["group:work", "channels", "dms"]);
   } finally {
     h.owner.dispose();
   }

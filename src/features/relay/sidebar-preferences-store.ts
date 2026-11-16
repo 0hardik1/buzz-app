@@ -12,11 +12,6 @@ import type {
   SidebarStarMutator,
   SidebarMuteMutator,
   SidebarPreferences,
-  SidebarSortMode,
-  SidebarSortMutator,
-  SidebarFilterMode,
-  SidebarFilterMutator,
-  SidebarFilterSettings,
 } from "./sidebar-preferences";
 
 type MoveDestination =
@@ -28,17 +23,6 @@ type MoveIntent = Readonly<{
   destination: MoveDestination;
 }>;
 type MoveFailure = MoveIntent & Readonly<{ error: string }>;
-type SortFailure = Readonly<{
-  group: string;
-  mode: SidebarSortMode;
-  error: string;
-}>;
-type FilterFailure = Readonly<{
-  group: string;
-  mode: SidebarFilterMode;
-  activeWindowSeconds?: number | null;
-  error: string;
-}>;
 type OrderFailure = Readonly<{
   sectionId: string;
   sectionIds: readonly string[];
@@ -51,8 +35,6 @@ type Snapshot = Readonly<{
   /** Set with an error that a later retry can fix; see isTransientFailure. */
   transient?: true;
   cached?: true;
-  sortErrors?: readonly SortFailure[];
-  filterErrors?: readonly FilterFailure[];
   moves?: readonly (MoveIntent & { pending: boolean; error?: string })[];
   orderError?: OrderFailure;
 }>;
@@ -66,14 +48,12 @@ export function createSidebarPreferencesStore({
   writeStar,
   notify = (listener: () => void) => listener(),
   writeMute,
-  writeSort,
   persistence,
   removeSection,
   renameSection,
   groupsOnly = false,
   writeOrder,
   createSection,
-  writeFilter,
 }: Readonly<{
   read: (signal?: AbortSignal) => Promise<SidebarPreferences>;
   /** Fresh authoritative reconciliation after writes or live invalidation. */
@@ -85,7 +65,6 @@ export function createSidebarPreferencesStore({
   writeStar?: SidebarStarMutator | undefined;
   notify?: ((listener: () => void) => void) | undefined;
   writeMute?: SidebarMuteMutator | undefined;
-  writeSort?: SidebarSortMutator | undefined;
   persistence?: HeadPersistence | undefined;
   removeSection?: SidebarSectionRemovalMutator | undefined;
   renameSection?: SidebarSectionRenameMutator | undefined;
@@ -93,7 +72,6 @@ export function createSidebarPreferencesStore({
   groupsOnly?: boolean | undefined;
   writeOrder?: SidebarSectionOrderMutator | undefined;
   createSection?: SidebarSectionCreationMutator | undefined;
-  writeFilter?: SidebarFilterMutator | undefined;
 }>) {
   const listeners = new Set<() => void>();
   const empty = (): Snapshot =>
@@ -196,72 +174,6 @@ export function createSidebarPreferencesStore({
     return { ...data, sections, assignments, starred: [...starred] };
   };
   let generation = 0;
-  let nextSortMutation = 0;
-  const latestSort = new Map<string, number>();
-  const failedSorts = new Map<string, SortFailure>();
-  const pendingSorts = new Map<
-    number,
-    { group: string; mode: SidebarSortMode }
-  >();
-  const withSort = (
-    sort: Readonly<Record<string, SidebarSortMode>>,
-    group: string,
-    mode: SidebarSortMode,
-  ) => {
-    const next = { ...sort };
-    if (mode === "alpha") delete next[group];
-    else next[group] = mode;
-    return next;
-  };
-  const withPendingSorts = (
-    sort: Readonly<Record<string, SidebarSortMode>>,
-  ) => {
-    let next = sort;
-    for (const pending of pendingSorts.values())
-      next = withSort(next, pending.group, pending.mode);
-    return next;
-  };
-
-  let nextFilterMutation = 0;
-  const latestFilter = new Map<string, number>();
-  const failedFilters = new Map<string, FilterFailure>();
-  const pendingFilters = new Map<
-    number,
-    {
-      group: string;
-      mode: SidebarFilterMode;
-      activeWindowSeconds?: number | null;
-    }
-  >();
-  const withFilter = (
-    filters: Readonly<Record<string, SidebarFilterMode>>,
-    group: string,
-    mode: SidebarFilterMode,
-  ) => {
-    const next = { ...filters };
-    if (mode === "all") delete next[group];
-    else next[group] = mode;
-    return next;
-  };
-  const withPendingFilters = (
-    filters: Readonly<Record<string, SidebarFilterMode>>,
-  ) => {
-    let next = filters;
-    for (const pending of pendingFilters.values())
-      next = withFilter(next, pending.group, pending.mode);
-    return next;
-  };
-
-  const withPendingWindows = () => {
-    const windows = { ...confirmed?.activeWindowSeconds };
-    for (const pending of pendingFilters.values()) {
-      if (pending.activeWindowSeconds === null) delete windows[pending.group];
-      else if (pending.activeWindowSeconds !== undefined)
-        windows[pending.group] = pending.activeWindowSeconds;
-    }
-    return windows;
-  };
-
   const retained = (data: SidebarPreferences): SidebarPreferences =>
     Object.freeze({
       sections: Object.freeze(
@@ -270,22 +182,9 @@ export function createSidebarPreferencesStore({
       assignments: Object.freeze({ ...data.assignments }),
       starred: Object.freeze([...data.starred]),
       muted: Object.freeze([...data.muted]),
-      ...(data.sort ? { sort: Object.freeze({ ...data.sort }) } : {}),
-      ...(data.filters ? { filters: Object.freeze({ ...data.filters }) } : {}),
-      ...(data.activeWindowSeconds
-        ? {
-            activeWindowSeconds: Object.freeze({ ...data.activeWindowSeconds }),
-          }
-        : {}),
     });
   const publish = (next: Snapshot) => {
-    const {
-      moves: _moves,
-      sortErrors: _errors,
-      filterErrors: _filterErrors,
-      orderError: _order,
-      ...state
-    } = next;
+    const { moves: _moves, orderError: _order, ...state } = next;
     const moves = [
       ...Array.from(pendingMoves.values(), (intent) => ({
         ...intent,
@@ -298,12 +197,6 @@ export function createSidebarPreferencesStore({
     ];
     snapshot = Object.freeze({
       ...state,
-      ...(failedSorts.size
-        ? { sortErrors: Object.freeze([...failedSorts.values()]) }
-        : {}),
-      ...(failedFilters.size
-        ? { filterErrors: Object.freeze([...failedFilters.values()]) }
-        : {}),
       ...(moves.length ? { moves: Object.freeze(moves) } : {}),
       ...(failedOrder ? { orderError: failedOrder } : {}),
     });
@@ -328,20 +221,7 @@ export function createSidebarPreferencesStore({
             error: readFailure,
             ...(readTransient ? { transient: true as const } : {}),
           }),
-      data: retained(
-        withPendingMoves({
-          ...confirmed,
-          ...(pendingSorts.size
-            ? { sort: withPendingSorts(confirmed.sort ?? {}) }
-            : {}),
-          ...(pendingFilters.size
-            ? {
-                filters: withPendingFilters(confirmed.filters ?? {}),
-                activeWindowSeconds: withPendingWindows(),
-              }
-            : {}),
-        }),
-      ),
+      data: retained(withPendingMoves(confirmed)),
     });
   };
   function refresh(quiet = false): Promise<void> {
@@ -538,8 +418,7 @@ export function createSidebarPreferencesStore({
       !confirmed ||
       readFailure !== undefined ||
       snapshot.cached ||
-      !removeSection ||
-      !writeSort
+      !removeSection
     )
       throw new Error("Sidebar section removal is unavailable");
     const writeGeneration = generation;
@@ -557,37 +436,6 @@ export function createSidebarPreferencesStore({
         writeSignal.throwIfAborted();
         if (!confirmed?.sections.some(({ id }) => id === sectionId))
           throw new Error("Sidebar section no longer exists");
-        const group = `section:${sectionId}`;
-        // Local Alpha can be stale while another device has saved an override.
-        // Reset while the section is live, so a failed write leaves removal
-        // retryable and cannot strand a live override beyond the decoder cap.
-        const sort = await writeSort(
-          group,
-          "alpha",
-          confirmed.sections.map(({ id }) => id),
-          writeSignal,
-        );
-        if (closed || generation !== writeGeneration)
-          throw new Error("Sidebar section removal is unavailable");
-        writeSignal.throwIfAborted();
-        if (!confirmed)
-          throw new Error("Sidebar section removal is unavailable");
-        confirmed = { ...confirmed, sort };
-        if (writeFilter) {
-          const settings = await writeFilter(
-            group,
-            "all",
-            confirmed.sections.map(({ id }) => id),
-            writeSignal,
-            null,
-          );
-          if (closed || generation !== writeGeneration || !confirmed)
-            throw new Error("Sidebar section removal is unavailable");
-          writeSignal.throwIfAborted();
-          confirmed = { ...confirmed, ...settings };
-        }
-        mutation++;
-        project();
         const next = await removeSection(sectionId, writeSignal);
         if (closed || generation !== writeGeneration || !confirmed)
           throw new Error("Sidebar section removal is unavailable");
@@ -598,7 +446,6 @@ export function createSidebarPreferencesStore({
           sections: next.sections,
           assignments: next.assignments,
         };
-        failedFilters.delete(group);
         project();
         return retained(confirmed);
       })
@@ -645,15 +492,6 @@ export function createSidebarPreferencesStore({
         { version: 1, sections: data.sections, assignments: data.assignments },
         rows(data.starred, "starred"),
         rows(data.muted, "muted"),
-        { version: 1, groups: data.sort ?? {} },
-        undefined,
-        data.filters === undefined && data.activeWindowSeconds === undefined
-          ? undefined
-          : {
-              version: 1,
-              groups: data.filters ?? {},
-              activeWindowSeconds: data.activeWindowSeconds,
-            },
       );
       // Display-only: do not initialize the confirmed mutation base from disk.
       publish({
@@ -820,183 +658,6 @@ export function createSidebarPreferencesStore({
         failedOrder = undefined;
         publish(snapshot);
       },
-      dismissSortError(group: string) {
-        failedSorts.delete(group);
-        publish(snapshot);
-      },
-      get sortWritable() {
-        return !!writeSort && !snapshot.cached;
-      },
-      setSort(
-        group: string,
-        mode: SidebarSortMode,
-        sectionIds: readonly string[],
-        signal?: AbortSignal,
-      ) {
-        if (closed || !writeSort || !snapshot.data || snapshot.cached)
-          return Promise.reject(
-            new Error("Sidebar sorting is read-only in this host"),
-          );
-        const writeGeneration = generation;
-        const writeSignal = AbortSignal.any([
-          writeLifetime.signal,
-          ...(signal ? [signal] : []),
-        ]);
-        if (writeSignal.aborted) return Promise.reject(writeSignal.reason);
-        const id = ++nextSortMutation;
-        pendingSorts.set(id, { group, mode });
-        latestSort.set(group, id);
-        failedSorts.delete(group);
-        mutation++;
-        project();
-        const settle = (sort?: Readonly<Record<string, SidebarSortMode>>) => {
-          if (closed || generation !== writeGeneration || !confirmed) return;
-          confirmed = {
-            ...confirmed,
-            sort: { ...(sort ?? confirmed.sort ?? {}) },
-          };
-          pendingSorts.delete(id);
-          project();
-        };
-        const run = writeQueue
-          .catch(() => {})
-          .then(async () => {
-            if (closed || generation !== writeGeneration)
-              throw new Error("Sidebar sorting is unavailable");
-            try {
-              writeSignal.throwIfAborted();
-              const sort = await writeSort(
-                group,
-                mode,
-                sectionIds,
-                writeSignal,
-              );
-              if (closed || generation !== writeGeneration)
-                throw new Error("Sidebar sorting is unavailable");
-              writeSignal.throwIfAborted();
-              mutation++;
-              settle(sort);
-              return sort;
-            } catch (error) {
-              if (!closed && generation === writeGeneration) {
-                mutation++;
-                if (!writeSignal.aborted && latestSort.get(group) === id)
-                  failedSorts.set(group, {
-                    group,
-                    mode,
-                    error:
-                      error instanceof Error ? error.message : String(error),
-                  });
-              }
-              settle();
-              throw error;
-            }
-          });
-        writeQueue = run.then(
-          () => undefined,
-          () => undefined,
-        );
-        return run;
-      },
-      dismissFilterError(group: string) {
-        failedFilters.delete(group);
-        publish(snapshot);
-      },
-      get filterWritable() {
-        return (
-          !closed &&
-          !!writeFilter &&
-          !!confirmed &&
-          readFailure === undefined &&
-          !snapshot.cached
-        );
-      },
-      setFilter(
-        group: string,
-        mode: SidebarFilterMode,
-        sectionIds: readonly string[],
-        signal?: AbortSignal,
-        activeWindowSeconds?: number | null,
-      ) {
-        if (
-          closed ||
-          !writeFilter ||
-          !confirmed ||
-          readFailure !== undefined ||
-          snapshot.cached
-        )
-          return Promise.reject(
-            new Error("Sidebar filtering is read-only in this host"),
-          );
-        const writeGeneration = generation;
-        const writeSignal = AbortSignal.any([
-          writeLifetime.signal,
-          ...(signal ? [signal] : []),
-        ]);
-        if (writeSignal.aborted) return Promise.reject(writeSignal.reason);
-        const id = ++nextFilterMutation;
-        pendingFilters.set(id, {
-          group,
-          mode,
-          ...(activeWindowSeconds === undefined ? {} : { activeWindowSeconds }),
-        });
-        latestFilter.set(group, id);
-        failedFilters.delete(group);
-        mutation++;
-        project();
-        const settle = (settings?: SidebarFilterSettings) => {
-          if (closed || generation !== writeGeneration || !confirmed) return;
-          confirmed = {
-            ...confirmed,
-            ...(settings ?? {}),
-          };
-          pendingFilters.delete(id);
-          project();
-        };
-        const run = writeQueue
-          .catch(() => {})
-          .then(async () => {
-            if (closed || generation !== writeGeneration)
-              throw new Error("Sidebar filtering is unavailable");
-            try {
-              writeSignal.throwIfAborted();
-              const settings = await writeFilter(
-                group,
-                mode,
-                sectionIds,
-                writeSignal,
-                activeWindowSeconds,
-              );
-              if (closed || generation !== writeGeneration)
-                throw new Error("Sidebar filtering is unavailable");
-              writeSignal.throwIfAborted();
-              mutation++;
-              settle(settings);
-              return settings;
-            } catch (error) {
-              if (!closed && generation === writeGeneration) {
-                mutation++;
-                if (!writeSignal.aborted && latestFilter.get(group) === id)
-                  failedFilters.set(group, {
-                    group,
-                    mode,
-                    ...(activeWindowSeconds === undefined
-                      ? {}
-                      : { activeWindowSeconds }),
-                    error:
-                      error instanceof Error ? error.message : String(error),
-                  });
-              }
-              settle();
-              throw error;
-            }
-          });
-        writeQueue = run.then(
-          () => undefined,
-          () => undefined,
-        );
-        return run;
-      },
       get muteWritable() {
         return !!writeMute && !snapshot.cached;
       },
@@ -1063,8 +724,7 @@ export function createSidebarPreferencesStore({
           !!confirmed &&
           readFailure === undefined &&
           !snapshot.cached &&
-          !!removeSection &&
-          !!writeSort
+          !!removeSection
         );
       },
       get starWritable() {
@@ -1100,12 +760,6 @@ export function createSidebarPreferencesStore({
       invalidation = reconciled = 0;
       scheduled = false;
       confirmed = undefined;
-      pendingSorts.clear();
-      latestSort.clear();
-      failedSorts.clear();
-      pendingFilters.clear();
-      latestFilter.clear();
-      failedFilters.clear();
       readFailure = undefined;
       pendingMoves.clear();
       failedMoves.clear();
@@ -1126,12 +780,6 @@ export function createSidebarPreferencesStore({
       invalidation = reconciled = 0;
       scheduled = false;
       confirmed = undefined;
-      pendingSorts.clear();
-      latestSort.clear();
-      failedSorts.clear();
-      pendingFilters.clear();
-      latestFilter.clear();
-      failedFilters.clear();
       readFailure = undefined;
       pendingMoves.clear();
       failedMoves.clear();

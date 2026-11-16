@@ -37,7 +37,6 @@ const preferences: SidebarPreferences = {
   assignments: { alpha: "work" },
   starred: [],
   muted: [],
-  sort: {},
 };
 function deferred<T>() {
   let resolve!: (value: T) => void, reject!: (error: unknown) => void;
@@ -387,7 +386,7 @@ describe("device-local startup", () => {
   );
 
   it.each([false, true])(
-    "keeps viewer layout across a real channel revocation without restoring denied content (saved duration: %s)",
+    "keeps viewer layout across a real channel revocation without restoring denied content (older saved filter: %s)",
     async (withWindow) => {
       const storage = disk();
       const participant = keypair();
@@ -399,9 +398,10 @@ describe("device-local startup", () => {
         roster(relay, "beta", [viewer.pubkey]),
         metadata(relay, "beta", "Beta"),
       ];
+      const restored = { ...preferences, starred: ["beta"] };
+      // Earlier versions also saved filter choices; restore drops them.
       const layout = {
-        ...preferences,
-        starred: ["beta"],
+        ...restored,
         ...(withWindow
           ? {
               filters: { "section:work": "active" as const },
@@ -458,7 +458,7 @@ describe("device-local startup", () => {
         next.channels.list().channels.map((channel) => channel.id),
       ).toEqual(["beta"]);
       expect(next.owner.session.sidebarPreferences.snapshot().data).toEqual(
-        layout,
+        restored,
       );
       expect(next.channels.window("alpha").rows).toEqual([]);
     },
@@ -1437,13 +1437,11 @@ describe("device-local startup", () => {
   });
   it("restores preference display without a writable base; fresh response replaces it", async () => {
     const fresh = deferred<typeof preferences>();
-    const sort = vi.fn(),
-      mute = vi.fn();
+    const mute = vi.fn();
     const store = createSidebarPreferencesStore({
       read: () => fresh.promise,
       available: true,
       writeMute: mute,
-      writeSort: sort,
       persistence: disk(),
     });
     try {
@@ -1453,12 +1451,7 @@ describe("device-local startup", () => {
         data: { sections: preferences.sections },
       });
       expect(store.queries.writable).toBe(false);
-      expect(store.queries.sortWritable).toBe(false);
-      await expect(
-        store.queries.setSort("channels", "recent", ["alpha"]),
-      ).rejects.toThrow();
       await expect(store.queries.setMute("alpha", true)).rejects.toThrow();
-      expect(sort).not.toHaveBeenCalled();
       expect(mute).not.toHaveBeenCalled();
       const loading = store.queries.ensure();
       fresh.resolve({ ...preferences, sections: [], assignments: {} });

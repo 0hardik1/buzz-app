@@ -14,7 +14,6 @@ import {
 } from "./testing";
 import type { LiveCallbacks } from "./live";
 import type { RelayEvent } from "./events";
-import type { SidebarSortMode } from "./sidebar-sort";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -49,8 +48,6 @@ function setup() {
       ),
   );
   const publish = vi.fn(async (_event: RelayEvent) => {});
-  const sort: Record<string, SidebarSortMode> = {};
-  const filters: Record<string, "active" | "unreads"> = {};
   const owner = createRelaySession(
     {
       ...wire.transport,
@@ -64,18 +61,7 @@ function setup() {
         assignments: {},
         starred: [],
         muted: [],
-        sort: {},
       }),
-      writeSidebarSort: async (group, mode) => {
-        if (mode === "alpha") delete sort[group];
-        else sort[group] = mode;
-        return { ...sort };
-      },
-      writeSidebarFilter: async (group, mode) => {
-        if (mode === "all") delete filters[group];
-        else filters[group] = mode;
-        return { filters: { ...filters }, activeWindowSeconds: {} };
-      },
       subscribe(callbacks) {
         live = callbacks;
         return { update() {}, dispose() {}, retry() {} };
@@ -121,7 +107,7 @@ function setup() {
     initial,
   };
 }
-it("reads every roster channel's head once, whatever the sidebar sorts or filters by", async () => {
+it("reads every roster channel's head once", async () => {
   clocked();
   const h = setup();
   try {
@@ -146,11 +132,6 @@ it("reads every roster channel's head once, whatever the sidebar sorts or filter
     });
     expect(h.channels.list()).toBe(first);
     expect(h.owner.session.channelHeads.settled("alpha")).toBe(true);
-    // No sort or filter asks again.
-    await h.preferences.setSort("channels", "recent", []);
-    await h.preferences.setFilter("channels", "active", []);
-    await h.preferences.setSort("channels", "alpha", []);
-    await h.preferences.setFilter("channels", "all", []);
     await headsStart();
     expect(h.activity).toHaveBeenCalledOnce();
   } finally {

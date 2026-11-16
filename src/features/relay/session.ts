@@ -2042,22 +2042,6 @@ export function createRelaySession(
             )
         : undefined;
     })(),
-    writeSort: (() => {
-      const write = transport?.writeSidebarSort;
-      return write
-        ? (group, mode, sectionIds, signal) =>
-            write(
-              group,
-              mode,
-              sectionIds,
-              AbortSignal.any([
-                lifetime.signal,
-                AbortSignal.timeout(20_000),
-                signal,
-              ]),
-            )
-        : undefined;
-    })(),
     persistence: options.persistence,
     removeSection: (() => {
       const write = transport?.removeSidebarSection;
@@ -2098,23 +2082,6 @@ export function createRelaySession(
                 AbortSignal.timeout(20_000),
                 signal,
               ]),
-            )
-        : undefined;
-    })(),
-    writeFilter: (() => {
-      const write = transport?.writeSidebarFilter;
-      return write
-        ? (group, mode, sectionIds, signal, activeWindowSeconds) =>
-            write(
-              group,
-              mode,
-              sectionIds,
-              AbortSignal.any([
-                lifetime.signal,
-                AbortSignal.timeout(20_000),
-                signal,
-              ]),
-              activeWindowSeconds,
             )
         : undefined;
     })(),

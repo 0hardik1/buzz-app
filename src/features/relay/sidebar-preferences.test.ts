@@ -84,7 +84,7 @@ it("decodes four individually bounded populated preferences beyond the former ag
   expect(Object.keys(projected.assignments)).toHaveLength(1000);
   expect(projected.starred).toHaveLength(500);
   expect(projected.muted).toHaveLength(500);
-  expect(projected.sort).toEqual({ channels: "recent" });
+  expect(projected).not.toHaveProperty("sort");
   key.fill(0);
 });
 
@@ -198,7 +198,6 @@ it("reads legacy preferences through the production session, transport, and boun
     expect(await owner.session.sidebarPreferences.read()).toEqual({
       ...expected,
       muted: ["general"],
-      sort: { channels: "recent" },
     });
     const calls = upstream.mock.calls.length;
     const corrupt = { ...records[0], sig: "0".repeat(128) };
@@ -735,36 +734,4 @@ it("admits only the complete bounded sidebar batch beyond the normal reader limi
         ...filters.slice(1),
       ]),
     ).toBe(false);
-});
-
-it("projects bounded optional activity windows without changing legacy mode decoding", () => {
-  const project = (activeWindowSeconds?: unknown) =>
-    projectSidebarPreferences(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      ["work"],
-      { version: 1, groups: { channels: "active" }, activeWindowSeconds },
-    );
-  expect(project().filters).toEqual({ channels: "active" });
-  expect(project().activeWindowSeconds).toEqual({});
-  expect(
-    project({
-      channels: 604800,
-      "section:work": 31536000,
-      "section:removed": 86400,
-    }).activeWindowSeconds,
-  ).toEqual({ channels: 604800, "section:work": 31536000 });
-  for (const value of [0, -86400, 86401, 1.5, "604800", null, 31622400])
-    expect(() => project({ channels: value })).toThrow(
-      "Invalid sidebar activity window",
-    );
-  expect(() =>
-    project(
-      Object.fromEntries(
-        Array.from({ length: 105 }, (_, i) => [`section:${i}`, 86400]),
-      ),
-    ),
-  ).toThrow("Invalid sidebar activity window");
 });

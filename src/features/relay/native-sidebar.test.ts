@@ -154,8 +154,8 @@ it("decodes four self-encrypted coordinates through the narrow IPC command", asy
     sections: [],
     starred: [],
     muted: [],
-    sort: {},
   });
+  expect(result).not.toHaveProperty("sort");
   expect(invoke).toHaveBeenCalledWith("relay_decode_sidebar", {
     events: [...records.values()],
   });
@@ -279,7 +279,7 @@ it("prepends a drag-created section through native encrypted readback", async ()
   expect(groups?.assignments).toEqual({ c1: id });
 });
 
-it("creates a section, moves a channel, stars, mutes and sorts with encrypted readback", async () => {
+it("creates a section, moves a channel, stars and mutes with encrypted readback", async () => {
   const transport = await connectNativeTransport(community);
   const id = "12345678-1234-1234-1234-123456789abc";
   const groups = await transport.writeSidebarAssignment?.(
@@ -301,9 +301,6 @@ it("creates a section, moves a channel, stars, mutes and sorts with encrypted re
     ),
   ).toEqual(["c1"]);
   expect(
-    await transport.writeSidebarSort?.(`section:${id}`, "recent", [id], signal),
-  ).toEqual({ [`section:${id}`]: "recent" });
-  expect(
     await transport.writeSidebarStar?.(
       { channelId: "c1", starred: false },
       signal,
@@ -322,17 +319,14 @@ it("creates a section, moves a channel, stars, mutes and sorts with encrypted re
   };
   expect(star.channels.c1?.starred).toBe(false); // tombstone retained
   expect(
-    await transport.writeSidebarSort?.(`section:${id}`, "alpha", [id], signal),
-  ).toEqual({});
-  expect(
     await transport.writeSidebarAssignment?.({ channelId: "c1" }, signal),
   ).toMatchObject({ assignments: {} });
-  expect(records.size).toBe(4);
+  expect(records.size).toBe(3);
   expect(
     vi
       .mocked(invoke)
       .mock.calls.filter(([command]) => command === "relay_sign_sidebar"),
-  ).toHaveLength(8);
+  ).toHaveLength(6);
 });
 
 it("does not report a competing write as saved", async () => {
@@ -425,14 +419,12 @@ it("native writers update authoritative registers and preserve unrelated tombsto
       meta,
     }),
   );
-  records.set(
-    "channel-sort",
-    signedRecord("channel-sort", {
-      version: 1,
-      groups: {},
-      meta: { v: 1, g: { channels: stamp("recent"), forums: stamp(null) } },
-    }),
-  );
+  const sort = signedRecord("channel-sort", {
+    version: 1,
+    groups: {},
+    meta: { v: 1, g: { channels: stamp("recent"), forums: stamp(null) } },
+  });
+  records.set("channel-sort", sort);
   const transport = await connectNativeTransport(community);
   expect(
     await transport.writeSidebarAssignment?.(
@@ -458,25 +450,7 @@ it("native writers update authoritative registers and preserve unrelated tombsto
     },
     sections: [{ id: "work", name: "Work", order: 0 }],
   });
-  expect(
-    await transport.writeSidebarSort?.("channels", "alpha", [], signal),
-  ).toEqual({});
-  const sort = decode([...records.values()])["channel-sort"];
-  expect(sort).toEqual({
-    version: 1,
-    groups: {},
-    meta: {
-      v: 1,
-      g: {
-        channels: [
-          2_000_000_000_001,
-          expect.stringMatching(/^[0-9a-f]{16}$/),
-          null,
-        ],
-        forums: stamp(null),
-      },
-    },
-  });
+  expect(records.get("channel-sort")).toBe(sort);
 });
 
 it("reads all coordinates with oversized deleted-section text but refuses to rewrite it", async () => {
@@ -518,7 +492,6 @@ it("reads all coordinates with oversized deleted-section text but refuses to rew
     assignments: { c1: "work" },
     starred: ["c1"],
     muted: ["c2"],
-    sort: { channels: "recent" },
   });
   await expect(
     transport.writeSidebarAssignment?.(
@@ -728,9 +701,6 @@ it("rejects invalid sidebar intents before native reads or signing", async () =>
       signal,
     ),
   ).rejects.toThrow("Invalid sidebar assignment intent");
-  await expect(
-    transport.writeSidebarSort?.("section:missing", "recent", [], signal),
-  ).rejects.toThrow("Invalid sidebar sort intent");
   expect(invoke).not.toHaveBeenCalled();
 });
 
@@ -954,119 +924,6 @@ it.each([
       });
   },
 );
-
-it.each(["channels", "section:work"])(
-  "confirms native plugin sort choices for %s through encrypted readback",
-  async (group) => {
-    const transport = await connectNativeTransport(community);
-    await transport.writeSidebarSort?.("forums", "recent", [], signal);
-    for (const mode of [
-      "plugin:example.plugin/rows/reverse",
-      "plugin:example.plugin/rows/other",
-      "recent",
-      "alpha",
-    ] as const) {
-      await expect(
-        transport.writeSidebarSort?.(group, mode, ["work"], signal),
-      ).resolves.toEqual(
-        mode === "alpha"
-          ? { forums: "recent" }
-          : { forums: "recent", [group]: mode },
-      );
-    }
-  },
-);
-
-it("uses the native filter signer and confirmed writer without changing sort", async () => {
-  const transport = await connectNativeTransport(community);
-  await transport.writeSidebarSort?.("channels", "recent", [], signal);
-  const sort = records.get("channel-sort");
-  expect(
-    await transport.writeSidebarFilter?.(
-      "section:work",
-      "unreads",
-      ["work"],
-      signal,
-    ),
-  ).toEqual({
-    filters: { "section:work": "unreads" },
-    activeWindowSeconds: {},
-  });
-  expect(
-    await transport.writeSidebarFilter?.(
-      "channels",
-      "active",
-      ["work"],
-      signal,
-      7 * 86400,
-    ),
-  ).toEqual({
-    filters: { "section:work": "unreads", channels: "active" },
-    activeWindowSeconds: { channels: 7 * 86400 },
-  });
-  expect(
-    await transport.writeSidebarFilter?.(
-      "section:work",
-      "all",
-      ["work"],
-      signal,
-    ),
-  ).toEqual({
-    filters: { channels: "active" },
-    activeWindowSeconds: { channels: 7 * 86400 },
-  });
-  expect(records.get("channel-sort")).toEqual(sort);
-  const record = records.get("channel-filter");
-  expect(record).toBeDefined();
-  expect(decode(record ? [record] : [])["channel-filter"]).toMatchObject({
-    meta: {
-      g: { "section:work": [expect.any(Number), expect.any(String), null] },
-    },
-  });
-  await expect(
-    transport.writeSidebarFilter?.("section:missing", "active", [], signal),
-  ).rejects.toThrow("Invalid sidebar filter intent");
-});
-
-it("rejects a same-mode native readback with a conflicting duration", async () => {
-  const transport = await connectNativeTransport(community);
-  records.set(
-    "channel-filter",
-    signedRecord("channel-filter", {
-      version: 1,
-      groups: { channels: "active" },
-    }),
-  );
-  const original = vi.mocked(invoke).getMockImplementation();
-  vi.mocked(invoke).mockImplementation(async (command, args) => {
-    const result = await original?.(command, args);
-    if (
-      command === "relay_http" &&
-      (args as { path: string }).path === "/events"
-    )
-      records.set(
-        "channel-filter",
-        signedRecord(
-          "channel-filter",
-          {
-            version: 1,
-            groups: { channels: "active" },
-            activeWindowSeconds: { channels: 90 * 86400 },
-          },
-          2_000_000_000,
-        ),
-      );
-    return result;
-  });
-  await expect(
-    transport.writeSidebarFilter?.("channels", "active", [], signal, 7 * 86400),
-  ).rejects.toThrow("changed on another device");
-  const before = vi.mocked(invoke).mock.calls.length;
-  await expect(
-    transport.writeSidebarFilter?.("channels", "active", [], signal, 86401),
-  ).rejects.toThrow("Invalid sidebar filter intent");
-  expect(vi.mocked(invoke).mock.calls).toHaveLength(before);
-});
 
 it("creates an empty Team section and confirms retry without touching placements or stars", async () => {
   records.set(

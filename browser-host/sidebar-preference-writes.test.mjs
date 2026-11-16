@@ -465,44 +465,29 @@ it("rejects malformed removal intents before accessing the relay", async () => {
   expect(h.calls).toEqual([]);
 });
 
-// All four routes share body handling; sort alone retains its larger budget.
-it("accepts split UTF-8 sort intents above the other routes' 2 KiB budget", async () => {
-  const h = await harness(1);
-  const sectionIds = Array.from(
-    { length: 20 },
-    (_, i) => `${i}-${"é".repeat(100)}`,
-  );
-  const group = `section:${sectionIds[0]}`;
-  const intent = { group, mode: "recent", sectionIds };
-  expect(Buffer.byteLength(JSON.stringify(intent))).toBeGreaterThan(2048);
-  expect(Buffer.byteLength(JSON.stringify(intent))).toBeLessThan(32 * 1024);
-  const response = await h.post(intent, undefined, "sidebar-sort");
-  expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ groups: { [group]: "recent" } });
-  expect(h.calls.map(({ url }) => new URL(url).pathname)).toEqual([
-    "/query",
-    "/events",
-    "/query",
-  ]);
-});
-
 it("serializes different sidebar endpoints through one relay queue", async () => {
   const h = await harness();
   const held = h.holdNextQuery();
   const star = h.post({ channelId: "alpha", starred: true });
   await held.started.promise;
-  const sort = h.post(
-    { group: "channels", mode: "recent", sectionIds: [] },
+  const assign = h.post(
+    {
+      channelId: "alpha",
+      createSection: {
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "Work",
+      },
+    },
     undefined,
-    "sidebar-sort",
+    "sidebar-assignment",
   );
   try {
     // Both HTTP requests have reached the broker before the first read completes.
-    await h.received("sidebar-sort");
+    await h.received("sidebar-assignment");
   } finally {
     held.release.resolve();
   }
-  const responses = await Promise.all([star, sort]);
+  const responses = await Promise.all([star, assign]);
   expect(responses.map(({ status }) => status)).toEqual([200, 200]);
   await Promise.all(responses.map((response) => response.json()));
   expect(
@@ -516,9 +501,9 @@ it("serializes different sidebar endpoints through one relay queue", async () =>
     ["/query", "channel-stars"],
     ["/events", "channel-stars"],
     ["/query", "channel-stars"],
-    ["/query", "channel-sort"],
-    ["/events", "channel-sort"],
-    ["/query", "channel-sort"],
+    ["/query", "channel-sections"],
+    ["/events", "channel-sections"],
+    ["/query", "channel-sections"],
   ]);
 });
 

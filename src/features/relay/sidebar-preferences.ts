@@ -1,13 +1,10 @@
-import { isSidebarSortMode, type SidebarSortMode } from "./sidebar-sort.ts";
-export type { SidebarSortMode } from "./sidebar-sort.ts";
-import {
-  projectSidebarRecord,
-  projectSidebarSort,
-} from "./sidebar-registers.ts";
+import { projectSidebarRecord } from "./sidebar-registers.ts";
 import type { ReadFilter } from "./events.ts";
 import type { RelayEvent } from "./events.ts";
 import type { RelayReader } from "./reader.ts";
 
+/** The account's sidebar records, read as one batch. Earlier clients still
+ * write sort and filter; this one ignores them. */
 export const SIDEBAR_COORDINATES = [
   "channel-sections",
   "channel-stars",
@@ -59,35 +56,6 @@ export type SidebarGroups = Readonly<{
   }>[];
   assignments: Readonly<Record<string, string>>;
 }>;
-export type SidebarFilterMode = "all" | "unreads" | "active";
-export const DEFAULT_ACTIVE_WINDOW_SECONDS = 30 * 86400;
-export const MAX_ACTIVE_WINDOW_SECONDS = 365 * 86400;
-export function validActiveWindow(value: unknown): value is number {
-  return (
-    typeof value === "number" &&
-    Number.isSafeInteger(value) &&
-    value >= 86400 &&
-    value <= MAX_ACTIVE_WINDOW_SECONDS &&
-    value % 86400 === 0
-  );
-}
-export type SidebarFilterSettings = Readonly<{
-  filters: Readonly<Record<string, SidebarFilterMode>>;
-  activeWindowSeconds: Readonly<Record<string, number>>;
-}>;
-export type SidebarFilterMutator = (
-  group: string,
-  mode: SidebarFilterMode,
-  sectionIds: readonly string[],
-  signal: AbortSignal,
-  activeWindowSeconds?: number | null,
-) => Promise<SidebarFilterSettings>;
-export type SidebarSortMutator = (
-  group: string,
-  mode: SidebarSortMode,
-  sectionIds: readonly string[],
-  signal: AbortSignal,
-) => Promise<Readonly<Record<string, SidebarSortMode>>>;
 export type SidebarMuteMutator = (
   intent: Readonly<{ channelId: string; muted: boolean }>,
   signal: AbortSignal,
@@ -96,9 +64,6 @@ export type SidebarPreferences = SidebarGroups &
   Readonly<{
     starred: readonly string[];
     muted: readonly string[];
-    sort?: Readonly<Record<string, SidebarSortMode>>;
-    filters?: Readonly<Record<string, SidebarFilterMode>>;
-    activeWindowSeconds?: Readonly<Record<string, number>>;
   }>;
 export type SidebarAssignmentIntent = Readonly<{
   /** Omit only when creating an empty section. */
@@ -150,17 +115,11 @@ export function projectSidebarPreferences(
   sections: unknown,
   stars: unknown,
   mutes?: unknown,
-  sort?: unknown,
-  sortSectionIds?: readonly string[],
-  filters?: unknown,
 ): SidebarPreferences {
   const result: {
     sections: { id: string; name: string; icon?: string; order: number }[];
     assignments: Record<string, string>;
     starred: string[];
-    sort?: Record<string, SidebarSortMode>;
-    filters?: Record<string, SidebarFilterMode>;
-    activeWindowSeconds?: Record<string, number>;
     muted: string[];
   } = {
     sections: [],
@@ -169,7 +128,7 @@ export function projectSidebarPreferences(
     muted: [],
   };
   if (sections !== undefined) {
-    const data = projectSidebarRecord("channel-sections", object(sections));
+    const data = projectSidebarRecord(object(sections));
     if (
       data.version !== 1 ||
       !Array.isArray(data.sections) ||
@@ -222,86 +181,6 @@ export function projectSidebarPreferences(
         throw new Error("Invalid sidebar star");
       if (entry.starred) result.starred.push(id);
     }
-  }
-  if (sort !== undefined) {
-    const data = object(sort);
-    if (data.version !== 1) throw new Error("Unsupported sidebar sort");
-    const entries = Object.entries(projectSidebarSort(data));
-    const fixed = new Set(["starred", "channels", "forums", "dms"]);
-    const liveSections = new Set(
-      (sortSectionIds ?? []).map((id) => `section:${id}`),
-    );
-    result.sort = Object.fromEntries(
-      entries
-        .filter((entry): entry is [string, SidebarSortMode] =>
-          isSidebarSortMode(entry[1]),
-        )
-        .map(([key, mode]) => [text(key, 264), mode] as const)
-        .filter(
-          ([key]) =>
-            fixed.has(key) ||
-            liveSections.has(key) ||
-            (sortSectionIds === undefined &&
-              key.startsWith("section:") &&
-              key.length > 8),
-        ),
-    );
-  }
-  if (filters !== undefined) {
-    const data = projectSidebarRecord("channel-filter", object(filters));
-    if (data.version !== 1) throw new Error("Unsupported sidebar filter");
-    const entries = Object.entries(object(data.groups));
-    if (entries.length > 104) throw new Error("Sidebar filter budget exceeded");
-    const fixed = new Set(["starred", "channels", "forums", "dms"]);
-    const liveSections = new Set(
-      (sortSectionIds ?? []).map((id) => `section:${id}`),
-    );
-    if (
-      entries.some(
-        ([, mode]) => mode !== "all" && mode !== "unreads" && mode !== "active",
-      )
-    )
-      throw new Error("Invalid sidebar filter mode");
-    const windows = Object.entries(
-      object(
-        data.activeWindowSeconds === undefined ? {} : data.activeWindowSeconds,
-      ),
-    );
-    if (
-      windows.length > 104 ||
-      windows.some(([, value]) => !validActiveWindow(value))
-    )
-      throw new Error("Invalid sidebar activity window");
-    result.activeWindowSeconds = Object.fromEntries(
-      windows
-        .map(([key, value]) => [text(key, 264), value as number] as const)
-        .filter(
-          ([key]) =>
-            fixed.has(key) ||
-            liveSections.has(key) ||
-            (sortSectionIds === undefined &&
-              key.startsWith("section:") &&
-              key.length > 8),
-        ),
-    );
-    result.filters = Object.fromEntries(
-      entries
-        .filter(
-          (entry): entry is [string, SidebarFilterMode] =>
-            entry[1] === "all" ||
-            entry[1] === "unreads" ||
-            entry[1] === "active",
-        )
-        .map(([key, mode]) => [text(key, 264), mode] as const)
-        .filter(
-          ([key]) =>
-            fixed.has(key) ||
-            liveSections.has(key) ||
-            (sortSectionIds === undefined &&
-              key.startsWith("section:") &&
-              key.length > 8),
-        ),
-    );
   }
   if (mutes !== undefined) {
     const data = object(mutes);

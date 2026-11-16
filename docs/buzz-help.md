@@ -1090,7 +1090,7 @@ and are asked to sign in again in Buzz.
   Conversation details stay with their conversation when you navigate away and
   return, until closed. Reloading Buzz does not restore their retained workspace.
   Terminal closes when you leave the conversation.
-- Saved sidebar groups, stars, mutes, sorting and filters from another device or
+- Saved sidebar groups, stars and mutes from another device or
   a paired CLI update the open sidebar automatically while connected, in hosts
   that support saved sidebar preferences. A CLI section-only move keeps a
   starred channel in Starred until you unstar it.

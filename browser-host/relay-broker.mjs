@@ -13,12 +13,6 @@ import { validTypingTemplate } from "../src/features/relay/typing-protocol.ts";
 import { memoryFilter, decodeAgentMemory } from "./agent-memory.mjs";
 import { memoryResponseText } from "../src/features/agents/memory.ts";
 import { prepareMedia } from "./media-preparation.mjs";
-import {
-  assertSidebarSortIntent,
-  mutateSidebarSort,
-  assertSidebarFilterIntent,
-  mutateSidebarFilter,
-} from "./sidebar-sort.mjs";
 import { readProjectGit } from "./project-git.mjs";
 import {
   communityGitRepository,
@@ -1394,8 +1388,6 @@ export function relayBrokerPlugin({
               "/api/relay/sidebar-section-order",
               "/api/relay/sidebar-section-rename",
               "/api/relay/sidebar-star",
-              "/api/relay/sidebar-sort",
-              "/api/relay/sidebar-filter",
               "/api/relay/sidebar-mute",
               "/api/relay/rail-layout",
             ].includes(route) &&
@@ -1427,16 +1419,6 @@ export function relayBrokerPlugin({
                 assertSidebarStarIntent,
                 mutateSidebarStar,
               ],
-              "/api/relay/sidebar-filter": [
-                "channel-filter",
-                assertSidebarFilterIntent,
-                mutateSidebarFilter,
-              ],
-              "/api/relay/sidebar-sort": [
-                "channel-sort",
-                assertSidebarSortIntent,
-                mutateSidebarSort,
-              ],
               "/api/relay/sidebar-mute": [
                 "channel-mutes",
                 assertSidebarMuteIntent,
@@ -1448,12 +1430,9 @@ export function relayBrokerPlugin({
                 mutateRailLayout,
               ],
             }[route];
-            const sorting =
-              coordinate === "channel-sort" || coordinate === "channel-filter";
             const muting = coordinate === "channel-mutes";
-            // Sort and order intents carry up to 100 section IDs.
-            const listing =
-              sorting || route === "/api/relay/sidebar-section-order";
+            // Order intents carry up to 100 section IDs.
+            const listing = route === "/api/relay/sidebar-section-order";
             const arranging = coordinate === "rail-layout";
             const chunks = [];
             let bytes = 0;
@@ -1583,20 +1562,7 @@ export function relayBrokerPlugin({
                       "Sidebar preference publication was not accepted",
                     );
                 };
-                const result = await mutate(
-                  intent,
-                  key,
-                  readHead,
-                  publishEvent,
-                );
-                return coordinate === "channel-filter"
-                  ? {
-                      groups: result.filters,
-                      activeWindowSeconds: result.activeWindowSeconds,
-                    }
-                  : sorting
-                    ? { groups: result }
-                    : result;
+                return mutate(intent, key, readHead, publishEvent);
               });
             sidebarMutations.set(relay, mutation);
             try {
@@ -1711,8 +1677,6 @@ export function relayBrokerPlugin({
               projectGit: true,
               attachmentUploads: true,
               sidebarPreferences: true,
-              sidebarSortWrites: true,
-              sidebarFilterWrites: true,
               channelActivity: true,
               sidebarMuteWrites: true,
               railLayout: true,

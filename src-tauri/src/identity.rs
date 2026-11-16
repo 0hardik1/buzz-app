@@ -565,39 +565,6 @@ fn validate_sidebar_payload(coordinate: &str, value: &serde_json::Value) -> Resu
                 }
             }
         }
-        "channel-sort" | "channel-filter" => {
-            let groups = data
-                .get("groups")
-                .and_then(|v| v.as_object())
-                .ok_or_else(invalid)?;
-            if coordinate == "channel-filter" {
-                if let Some(windows) = data.get("activeWindowSeconds") {
-                    let windows = windows.as_object().ok_or_else(invalid)?;
-                    if windows.len() > 104
-                        || windows.iter().any(|(group, value)| {
-                            group.trim().is_empty()
-                                || group.encode_utf16().count() > 264
-                                || !value.as_u64().is_some_and(|seconds| {
-                                    (86400..=31536000).contains(&seconds) && seconds % 86400 == 0
-                                })
-                        })
-                    {
-                        return Err(invalid());
-                    }
-                }
-            }
-            if groups.len() > 104
-                || groups.iter().any(|(group, mode)| {
-                    group.encode_utf16().count() > 264
-                        || !mode.is_string()
-                        || (coordinate == "channel-filter"
-                            && !matches!(mode.as_str(), Some("all" | "unreads" | "active")))
-                })
-            {
-                return Err(invalid());
-            }
-        }
-
         "main-agent" => {
             let agent = data.get("agent").ok_or_else(invalid)?;
             if data.len() != 2
@@ -646,12 +613,9 @@ fn validate_sidebar_payload(coordinate: &str, value: &serde_json::Value) -> Resu
         _ => return Err(invalid()),
     }
     if let Some(meta) = data.get("meta") {
-        if matches!(
-            coordinate,
-            "channel-sections" | "channel-sort" | "channel-filter"
-        ) {
-            validate_sidebar_meta(coordinate, meta, false)?;
-            let projection = project_sidebar_meta(coordinate, meta);
+        if coordinate == "channel-sections" {
+            validate_sidebar_meta(meta)?;
+            let projection = project_sidebar_meta(meta);
             let projected = projection.as_object().ok_or_else(invalid)?;
             if projected
                 .iter()
@@ -661,28 +625,12 @@ fn validate_sidebar_payload(coordinate: &str, value: &serde_json::Value) -> Resu
             }
         }
     }
-    if coordinate == "channel-sort" {
-        if let Some(choices) = data.get("pluginSort") {
-            if !choices
-                .get("g")
-                .and_then(|v| v.as_object())
-                .is_some_and(|g| g.len() <= 104)
-            {
-                return Err(invalid());
-            }
-            validate_sidebar_meta(coordinate, choices, true)?;
-        }
-    }
     Ok(())
 }
 
 // The signer admits only the bounded Desktop register schema, not arbitrary
 // renderer-controlled trees. Retained tombstones share the plaintext byte budget.
-fn validate_sidebar_meta(
-    coordinate: &str,
-    value: &serde_json::Value,
-    plugin_sort: bool,
-) -> Result<()> {
+fn validate_sidebar_meta(value: &serde_json::Value) -> Result<()> {
     use serde_json::Value;
     const MAX_SAFE: u64 = 9_007_199_254_740_991;
     fn text(value: &Value, max: usize) -> bool {
@@ -716,84 +664,38 @@ fn validate_sidebar_meta(
     }
     let invalid = || "Invalid sidebar metadata".to_owned();
     let meta = value.as_object().ok_or_else(invalid)?;
-    let allowed: &[&str] = if coordinate == "channel-sections" {
-        &["v", "s", "a"]
-    } else {
-        &["v", "g"]
-    };
     if meta.get("v").and_then(Value::as_u64) != Some(1)
-        || meta.keys().any(|key| !allowed.contains(&key.as_str()))
+        || meta
+            .keys()
+            .any(|key| !["v", "s", "a"].contains(&key.as_str()))
     {
         return Err(invalid());
     }
-    let valid = if matches!(coordinate, "channel-sort" | "channel-filter") {
-        map(meta.get("g"), 264, |v| {
-            reg(v, |v| {
-                if plugin_sort {
-                    v.as_str().is_some_and(valid_plugin_sidebar_sort_mode)
-                } else {
-                    v.is_null()
-                        || if coordinate == "channel-filter" {
-                            matches!(v.as_str(), Some("unreads" | "active"))
-                        } else {
-                            matches!(v.as_str(), Some("alpha" | "recent"))
-                        }
-                }
-            })
-        })
-    } else {
-        map(meta.get("a"), 256, |v| {
-            reg(v, |v| v.is_null() || text(v, 256))
-        }) && map(meta.get("s"), 256, |v| {
-            v.as_object().is_some_and(|fields| {
-                fields.iter().all(|(field, value)| {
-                    reg(value, |v| match field.as_str() {
-                        "name" => text(v, 256),
-                        "icon" => v.is_null() || text(v, 128),
-                        "live" => v.is_boolean(),
-                        "order" => v.as_i64().is_some_and(|n| n.unsigned_abs() <= MAX_SAFE),
-                        _ => false,
-                    })
+    let valid = map(meta.get("a"), 256, |v| {
+        reg(v, |v| v.is_null() || text(v, 256))
+    }) && map(meta.get("s"), 256, |v| {
+        v.as_object().is_some_and(|fields| {
+            fields.iter().all(|(field, value)| {
+                reg(value, |v| match field.as_str() {
+                    "name" => text(v, 256),
+                    "icon" => v.is_null() || text(v, 128),
+                    "live" => v.is_boolean(),
+                    "order" => v.as_i64().is_some_and(|n| n.unsigned_abs() <= MAX_SAFE),
+                    _ => false,
                 })
             })
         })
-    };
+    });
     if !valid {
         return Err(invalid());
     }
     Ok(())
 }
 
-fn valid_plugin_sidebar_sort_mode(value: &str) -> bool {
-    let Some(value) = value.strip_prefix("plugin:").filter(|_| value.len() <= 512) else {
-        return false;
-    };
-    let parts: Vec<_> = value.split('/').collect();
-    parts.len() == 3
-        && parts.iter().all(|part| {
-            part.as_bytes()
-                .first()
-                .is_some_and(u8::is_ascii_alphanumeric)
-                && part
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
-        })
-}
-
 // Called only after shape validation. Requiring these exact fields also binds
 // metadata's live counts to the existing projection limits above.
-fn project_sidebar_meta(coordinate: &str, meta: &serde_json::Value) -> serde_json::Value {
+fn project_sidebar_meta(meta: &serde_json::Value) -> serde_json::Value {
     use serde_json::{json, Value};
-    if matches!(coordinate, "channel-sort" | "channel-filter") {
-        let groups: serde_json::Map<_, _> = meta["g"]
-            .as_object()
-            .into_iter()
-            .flatten()
-            .filter(|(_, reg)| !reg[2].is_null())
-            .map(|(key, reg)| (key.clone(), reg[2].clone()))
-            .collect();
-        return json!({"groups": groups});
-    }
     let mut sections: Vec<_> = meta["s"].as_object().into_iter().flatten()
         .filter(|(_, node)| node["live"][2] == true && node["name"][2].is_string())
         .map(|(id, node)| {
@@ -826,6 +728,7 @@ fn project_sidebar_meta(coordinate: &str, meta: &serde_json::Value) -> serde_jso
     result
 }
 
+/// Sort and filter are still read with the others; nothing signs them.
 pub(crate) fn sidebar_coordinate(value: &str) -> bool {
     matches!(
         value,
@@ -1037,6 +940,39 @@ impl IdentityHost {
                 192 * 1024,
             )
         })
+        .await
+    }
+
+    /// A record as an earlier client wrote it, skipping the checks `sign_sidebar`
+    /// applies, so tests can read records this app no longer writes.
+    #[cfg(test)]
+    pub(crate) async fn sign_earlier_sidebar(
+        &self,
+        coordinate: &str,
+        payload: serde_json::Value,
+        created_at: u64,
+    ) -> Result<serde_json::Value> {
+        let plaintext = payload.to_string();
+        let content = self
+            .with_key(move |secret, _| {
+                let secret = NostrSecretKey::from_slice(secret).map_err(|_| "Invalid key")?;
+                let public = Keys::new(secret.clone()).public_key();
+                nip44::encrypt(&secret, &public, &plaintext, nip44::Version::V2)
+                    .map_err(|_| "Could not encrypt sidebar preferences".to_owned())
+            })
+            .await?;
+        self.sign_bounded(
+            EventTemplate {
+                kind: 30078,
+                created_at,
+                content,
+                tags: vec![
+                    vec!["d".into(), coordinate.into()],
+                    vec!["t".into(), coordinate.into()],
+                ],
+            },
+            192 * 1024,
+        )
         .await
     }
 

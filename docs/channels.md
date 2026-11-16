@@ -96,7 +96,7 @@ connection generation. This resets their session-owned state on switching or
 reconnecting, not unrelated page drafts;
 drafts, channel selection and reading geometry retain their stable scope keys.
 
-Saved sidebar groups, ordering, assignments, stars, mutes and sorting live in the
+Saved sidebar groups, ordering, assignments, stars and mutes live in the
 session's `sidebarPreferences` snapshot, not in the mounted Messages page. `ensure()` shares
 one initial read; `refresh()` explicitly reloads/retries while retaining the last
 good snapshot through loading/errors. Page exits neither restart nor cancel that
@@ -117,8 +117,7 @@ Unrelated fields and explicit unmute tombstones survive. Invalid, unreadable, or
 can seed a record. Same-host writes serialize per relay. This is confirmed
 whole-record replacement, not atomic cross-device merging or a durable outbox;
 simultaneous writers on different hosts can still race. Failure requires explicit
-retry. Group/star writes use their separate narrow commands;
-[section sorting](#sidebar-sort-persistence) uses its separate preference coordinate.
+retry. Group/star writes use their separate narrow commands.
 
 Rows expose mute/read actions through right-click/long-press, Shift+F10, or the
 Context Menu key. They extend the persistent sidebar’s existing menu after
@@ -142,9 +141,10 @@ preferences relocated it during the transaction. Read actions require
 The packaged host decodes verified self-encrypted sidebar records and signs
 only validated sidebar coordinates; it uses its signed HTTP writer and confirms
 via readback. Sidebar records and channel recipes share kind 30078, so that
-writer selects the admission contract by the event's `d` coordinate: the five
-sidebar coordinates must match what the sidebar signer produces, and every
-other coordinate must satisfy the recipe contract.
+writer selects the admission contract by the event's `d` coordinate: sidebar
+coordinates must match what the sidebar signer produces, and every other
+coordinate must satisfy the recipe contract. The signer refuses the
+[sort and filter records](#sidebar-sort-and-filter-records) earlier clients wrote.
 
 Move channel, Create new, exclusive Starred placement and startup presentation also
 belong to this persistent sidebar. Rows in saved groups, **Starred** and **Channels**
@@ -182,15 +182,15 @@ messages take no part in dragging, and the row menu remains the keyboard path.
 A saved group also drags by its header, expanded or collapsed, onto another saved
 group; an accent line shows where it lands, and Escape cancels. Its section menu's
 **Move up** and **Move down** are the keyboard and single-pointer path. Each move
-rewrites every live section's `order` register with one stamp, so channels, sort
+rewrites every live section's `order` register with one stamp, so channels
 and collapsed state stay with the group's id; the order shows optimistically and
 a failure rolls back with the same move notice and Retry. **Rename section**
 in the same menu rewrites only that group's `name` register (a dialog keeps the
-entry and shows the error if the save fails), so its channels, order and sort stay
+entry and shows the error if the save fails), so its channels and order stay
 put. The
-session serializes placement, sort and mute writes through one queue, retaining
+session serializes placement and mute writes through one queue, retaining
 one confirmed preferences snapshot beneath
-pending Move and Sort projections. Each confirmation updates only its owned fields
+pending Move projections. Each confirmation updates only its owned fields
 before reapplying pending intent; failure cannot roll back unrelated confirmed
 state. Field-only confirmations cannot recover a failed full preference read or
 hide its Retry. Move stays gated until that read succeeds. Mute optimism remains
@@ -202,25 +202,7 @@ repeat that action. Collapsed section keys and sidebar scroll remain separate, s
 They survive page switches in the same mounted sidebar, are saved when that
 sidebar exits its session, and restore before paint when the roster and groups
 are available; navigation history does not own them. Search lives in the top-bar
-palette; legacy sidebar filters are ignored. Each section's ellipsis menu offers
-**Filter → All, Unreads, Active in the last**. Unreads shows channels with observed or
-manually marked unread messages or unread thread activity. Muted channels with retained unread backlog remain eligible even when their ordinary sidebar cues are quiet: mute does not mark messages read. Active in the last opens a compact,
-content-sized dialog with visible 1-, 7-, 30-, and 90-day text-only radio tiles in two columns.
-Apply saves the selected rolling window and activates the filter;
-Cancel leaves the saved choice unchanged. The dialog retains its draft after a
-failed save, and the menu shows the selected window. Activity uses verified timestamps, including your own messages once the relay accepts them. Channels with unknown activity remain visible until their activity is read. Activity applies in one update when a read finishes; a read that fails partway still applies what it read, and channels it did not reach stay available alongside the activity Retry warning. These filters are encrypted account preferences on the current relay, using a
-separate kind-30078 `channel-filter` record. They leave saved sorting and section
-membership unchanged; earlier device-only filter choices are ignored, not automatically published.
-Filtered sections with no visible channels show only their header, retaining their expanded/collapsed state and menu access to hidden channels.
-The currently open channel remains visible in its section regardless of its filter,
-however it was opened. Navigating away removes that exception. When a filter hides
-channels, the **Filter** submenu appends those eligible channels below its three
-options and a separator, in the existing section order; choosing one opens
-the section and channel without changing the filter. Choices reuse the sidebar's
-channel-type icons, unread emphasis, attention/thread dots and working-agent
-indicators. The temporarily visible open channel is excluded. Empty filtered sections retain
-their header and menu so the filter can be changed or a hidden row opened.
-Read-only hosts disable the filter choices while keeping hidden-channel navigation available. The saved-groups
+palette. The saved-groups
 browser regression records every visible return frame and holds the redundant
 decode path, so eventual restoration cannot conceal a fallback-group/scroll jump.
 
@@ -257,33 +239,18 @@ only newly prepared DMs until confirmation; leaving New message or replacing the
 session clears that handoff. Timeline readers and reading leases stay in visible
 conversation content and unmount when leaving Messages.
 
-## Sidebar sort persistence
+## Sidebar sort and filter records
 
-Each sidebar section can independently select **A–Z** (the default) or **Recent**.
-The development broker and packaged native host save these choices in the desktop-compatible encrypted
-kind-30078 `channel-sort` record: `{ version: 1, groups: { ... }, meta: { v: 1, g: { ... } } }`.
-A–Z writes a null register and removes that group's legacy override.
-Filters use the same bounded group-register shape in a separate `channel-filter`
-coordinate: Unreads is `unreads`, Active in the last is `active`, and All
-writes a null reset tombstone. An optional top-level `activeWindowSeconds` map
-stores each group’s duration in whole-day seconds; absence means 30 days. Presets
-and custom values share this representation. Apply publishes mode and duration
-in one encrypted update, and both hosts confirm both values on readback. Other
-modes preserve the last duration; section removal clears it. Older fixed-window
-clients still read `active` as 30 days until upgraded. Keeping this record separate leaves older clients'
-sort records unchanged. Both hosts validate, encrypt, publish and confirm filter
-writes through the existing preference queue. The UI projects pending choices,
-rolls back a failed save, and offers explicit Retry/Dismiss; a confirmed full read
-is required before writes. Removing a saved section resets its filter before
-removing the section. A saved startup copy is display-only until relay reads recover.
-Like sorting, this is whole-record last-write-wins; another client sees changes
-when it loads or refreshes preferences, without a new automatic reconciliation loop.
+Earlier clients also saved per-section sorting and filters as encrypted
+kind-30078 `channel-sort` and `channel-filter` records. The app still reads them
+in the same batch as the other sidebar records, so batch admission is unchanged,
+but it ignores their contents and never writes, overwrites or deletes them.
 
 Sections use
 `meta: { v: 1, s: { ... }, a: { ... } }`: per-section name/icon/order/live registers
 and per-channel assignments. Upgraded readers project metadata as authoritative;
 writers regenerate the legacy fields and preserve unrelated registers, including
-section deletion (`live=false`) and assignment/sort reset (`null`) tombstones.
+section deletion (`live=false`) and assignment reset (`null`) tombstones.
 Stars and mutes keep their existing `updatedAt` entries, not this register schema.
 
 A register is `[version, device, value]`, with a nonnegative safe-integer millisecond
@@ -301,7 +268,7 @@ Actual rewrites still reject
 out-of-policy retained values rather than dropping or truncating them.
 Unsupported/malformed metadata fails closed, including unknown fields;
 this is not general forward-schema salvage. Live projection caps remain 100
-sections, 1,000 assignments and 104 overrides per section-choice record; retained tombstones are bounded
+sections and 1,000 assignments; retained tombstones are bounded
 by the existing 128 KiB plaintext budget, not live counts. Native signing/admission
 additionally requires legacy fields to equal the validated register projection.
 
@@ -315,15 +282,9 @@ winning replacement can silently erase the other device's choice even when both
 saves report success. The broker's mutation queue serializes its own writes only.
 Read-back checks the requested section at that moment; it cannot detect an unseen
 choice overwritten in another section or guarantee preservation against later
-writes. “Independent” describes selecting a mode per section, not simultaneous
-cross-device save guarantees. Retaining the shared record preserves compatibility
+writes. Retaining the shared record preserves compatibility
 with existing desktop writers; convergence across unseen heads would require a
 separately designed reconciliation lifecycle or atomic relay support.
-
-`browser-host/sidebar-sort.test.mjs` deterministically exercises that accepted limitation
-through the real mutation helper: another section saves and confirms between a
-read and publication, then the stale whole-record replacement wins and also
-confirms. This is contract coverage, not a concurrency fix.
 
 ## Starting a direct message
 

@@ -64,8 +64,6 @@ export const test = base.extend({
   ownSoloChannels: [[], { option: true }],
   soloAgentNames: [[], { option: true }],
   soloOutsideAgentNames: [[], { option: true }],
-  sortingSidebar: [false, { option: true }],
-  initialSidebarSort: [{}, { option: true }],
   channelLifecycle: [false, { option: true }],
   leaveRosterBeforeAck: [false, { option: true }],
   guestPermalinks: [false, { option: true }],
@@ -153,8 +151,6 @@ export const test = base.extend({
       ownSoloChannels,
       soloAgentNames,
       soloOutsideAgentNames,
-      sortingSidebar,
-      initialSidebarSort,
       channelLifecycle,
       leaveRosterBeforeAck,
       guestPermalinks,
@@ -345,7 +341,6 @@ export const test = base.extend({
           : inboxDm
             ? ["dm-peer"]
             : [];
-    const sortingIds = sortingSidebar ? ["cedar", "maple", "willow"] : [];
     const renamedChannels = new Map();
     const lifecycleRows = channelLifecycle
       ? [
@@ -371,7 +366,6 @@ export const test = base.extend({
       ...new Set([
         ...channels,
         ...dmIds,
-        ...sortingIds,
         ...lifecycleRows
           .filter(
             (row) => row.id !== guestChannelId || lifecycleRole !== "nonmember",
@@ -417,7 +411,6 @@ export const test = base.extend({
               channels: { alpha: { starred: true, updatedAt: 1 } },
             },
           ],
-          ["channel-sort", { version: 1, groups: initialSidebarSort }],
         ]) {
           records.set(
             coordinate,
@@ -559,17 +552,6 @@ export const test = base.extend({
     for (const community of ["primary", "secondary"])
       for (const id of [...dmIds, ...lifecycleRows.map((row) => row.id)])
         histories.set(`${community}/${id}`, []);
-    for (const community of ["primary", "secondary"])
-      for (const [index, id] of sortingIds.entries())
-        histories.set(`${community}/${id}`, [
-          sign(
-            9,
-            [["h", id]],
-            `Activity in ${id}`,
-            userKey,
-            1700000200 + index,
-          ),
-        ]);
     const targetEvents = [];
     // Enough newer roots to put the permalink outside the initial history page.
     if (guestChannelId)
@@ -947,8 +929,6 @@ export const test = base.extend({
         readState,
         sidebarUnread,
         savedSidebar,
-        sortingSidebar,
-        initialSidebarSort,
         dmLabels,
         agentPeers,
         tallMessages,
@@ -2074,8 +2054,6 @@ export const test = base.extend({
           "channel-mutes",
           "channel-sections",
           "channel-stars",
-          "channel-sort",
-          "channel-filter",
           "rail-layout",
         ].includes(sidebarCoordinate) ||
         (ownSoloChannels.length > 0 &&
@@ -2991,7 +2969,6 @@ export const test = base.extend({
       // Recovery journeys inject specific failed host requests. Match
       // each exact URL once, not every 502 or every console error in the test.
       const sidebarFailures = [
-        ...(report.sidebarSortFailures ?? []),
         ...(report.sidebarMuteFailures ?? []),
         ...(report.sidebarStarFailures ?? []),
         ...(report.sidebarAssignmentFailures ?? []),

@@ -62,9 +62,6 @@ export function decodeSidebarPreferences(events, secret) {
       decoded.get("channel-sections"),
       decoded.get("channel-stars"),
       decoded.get("channel-mutes"),
-      decoded.get("channel-sort"),
-      undefined,
-      decoded.get("channel-filter"),
     );
   } finally {
     key.fill(0);
@@ -132,7 +129,7 @@ function parseSectionsEvent(events, secret) {
     const blob = JSON.parse(plaintext);
     projectSidebarPreferences(blob, undefined);
     return {
-      blob: projectSidebarRecord("channel-sections", blob),
+      blob: projectSidebarRecord(blob),
       createdAt: event.created_at,
     };
   } finally {

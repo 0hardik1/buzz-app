@@ -7,13 +7,9 @@ import {
   validSidebarSectionOrder,
   validSidebarSectionRemoval,
   validSidebarSectionRename,
-  editSidebarSort,
-  editSidebarFilter,
   editSidebarToggle,
   validSidebarAssignment,
   validSidebarChannelId,
-  validSidebarSort,
-  validSidebarFilter,
 } from "./sidebar-edits";
 import { invoke } from "@tauri-apps/api/core";
 import { eventDto, type RelayEvent } from "./events";
@@ -21,8 +17,6 @@ import {
   projectSidebarPreferences,
   type SidebarAssignmentIntent,
   type SidebarGroups,
-  type SidebarSortMode,
-  type SidebarFilterMode,
 } from "./sidebar-preferences";
 import { RailLayoutConflict, type ReadTransport } from "./transport";
 
@@ -30,8 +24,6 @@ const coordinates = [
   "channel-sections",
   "channel-stars",
   "channel-mutes",
-  "channel-sort",
-  "channel-filter",
   "main-agent",
   "rail-layout",
 ] as const;
@@ -44,9 +36,7 @@ const empty = (coordinate: Coordinate): Record<string, unknown> =>
       ? { version: 1 }
       : coordinate === "channel-sections"
         ? { version: 1, sections: [], assignments: {} }
-        : coordinate === "channel-sort" || coordinate === "channel-filter"
-          ? { version: 1, groups: {} }
-          : { version: 1, channels: {} };
+        : { version: 1, channels: {} };
 const agentKey = /^[0-9a-f]{64}$/;
 /** The main agent the viewer chose. A null one, written by development
  * builds that cleared it, is read as none. */
@@ -79,9 +69,6 @@ export function nativeSidebar(transport: ReadTransport) {
       raw["channel-sections"],
       raw["channel-stars"],
       raw["channel-mutes"],
-      raw["channel-sort"],
-      undefined,
-      raw["channel-filter"],
     );
   }
   async function head(
@@ -116,26 +103,15 @@ export function nativeSidebar(transport: ReadTransport) {
     else if (coordinate !== "rail-layout") project(coordinate, value);
     return {
       payload:
-        coordinate === "channel-sections" ||
-        coordinate === "channel-sort" ||
-        coordinate === "channel-filter"
-          ? projectSidebarRecord(coordinate, value)
-          : value,
+        coordinate === "channel-sections" ? projectSidebarRecord(value) : value,
       createdAt: events[0]?.created_at ?? 0,
     };
   }
-  function project(
-    coordinate: Coordinate,
-    value: unknown,
-    sectionIds?: readonly string[],
-  ) {
+  function project(coordinate: Coordinate, value: unknown) {
     return projectSidebarPreferences(
       coordinate === "channel-sections" ? value : undefined,
       coordinate === "channel-stars" ? value : undefined,
       coordinate === "channel-mutes" ? value : undefined,
-      coordinate === "channel-sort" ? value : undefined,
-      sectionIds,
-      coordinate === "channel-filter" ? value : undefined,
     );
   }
   async function mutate<T>(
@@ -382,80 +358,6 @@ export function nativeSidebar(transport: ReadTransport) {
         intent,
         signal,
         "Sidebar mutes changed on another device; reload and try again",
-      );
-    },
-    async writeSidebarSort(
-      group: string,
-      mode: SidebarSortMode,
-      sectionIds: readonly string[],
-      signal: AbortSignal,
-    ) {
-      if (!validSidebarSort(group, mode, sectionIds))
-        throw new Error("Invalid sidebar sort intent");
-      const prepare = (current: Record<string, unknown>, createdAt: number) => {
-        const next = editSidebarSort(
-          current,
-          createdAt,
-          group,
-          mode,
-          Date.now(),
-        );
-        return {
-          next,
-          result: project("channel-sort", next, sectionIds).sort ?? {},
-        };
-      };
-      return mutate(
-        "channel-sort",
-        signal,
-        prepare,
-        (value) =>
-          (project("channel-sort", value, sectionIds).sort?.[group] ??
-            "alpha") === mode,
-        "Sidebar sort changed on another device; reload and try again",
-      );
-    },
-    async writeSidebarFilter(
-      group: string,
-      mode: SidebarFilterMode,
-      sectionIds: readonly string[],
-      signal: AbortSignal,
-      activeWindowSeconds?: number | null,
-    ) {
-      if (!validSidebarFilter(group, mode, sectionIds, activeWindowSeconds))
-        throw new Error("Invalid sidebar filter intent");
-      const prepare = (current: Record<string, unknown>, createdAt: number) => {
-        const next = editSidebarFilter(
-          current,
-          createdAt,
-          group,
-          mode,
-          Date.now(),
-          activeWindowSeconds,
-        );
-        const settings = project("channel-filter", next, sectionIds);
-        return {
-          next,
-          result: {
-            filters: settings.filters ?? {},
-            activeWindowSeconds: settings.activeWindowSeconds ?? {},
-          },
-        };
-      };
-      return mutate(
-        "channel-filter",
-        signal,
-        prepare,
-        (value) =>
-          editSidebarFilter(
-            value,
-            0,
-            group,
-            mode,
-            Date.now(),
-            activeWindowSeconds,
-          ) === value,
-        "Sidebar filter changed on another device; reload and try again",
       );
     },
   };

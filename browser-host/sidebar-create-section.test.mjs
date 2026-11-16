@@ -190,7 +190,6 @@ it("decodes all encrypted preferences despite oversized deleted text without rew
     assignments: { alpha: "work" },
     starred: ["alpha"],
     muted: ["beta"],
-    sort: { channels: "recent" },
   });
   expect(() => prepareSidebarAssignment([head], intent, secret)).toThrow(
     "Invalid sidebar register",
