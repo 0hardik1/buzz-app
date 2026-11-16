@@ -52,6 +52,7 @@ export function sameRoster(a: ChannelList, b: ChannelList) {
     b.status === "ready" &&
     a.coverage === b.coverage &&
     a.asOf === b.asOf &&
+    a.rosterAsOf === b.rosterAsOf &&
     a.channels.length === b.channels.length &&
     a.channels.every((channel, index) =>
       sameRosterEntry(channel, b.channels[index]),

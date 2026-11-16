@@ -2386,6 +2386,17 @@
     color: var(--text-subtle);
     font-variant-numeric: tabular-nums;
   }
+  .buzz-count-badge[data-dot] {
+    min-inline-size: var(--space-2);
+    inline-size: var(--space-2);
+    block-size: var(--space-2);
+    padding: 0;
+  }
+  .buzz-count-badge[data-variant="rail"] {
+    background: var(--affordance-accent-prominent);
+    color: var(--text-on-accent);
+    box-shadow: 0 0 0 1.5px var(--surface-rail-card);
+  }
   .buzz-tabs[data-variant="dock"] .buzz-count-badge {
     background: var(--surface-dock-count);
     color: var(--text-dock-count);
@@ -2506,6 +2517,9 @@
     /* Split the header’s separator evenly to keep controls centered.
        The scrollbar track reserves that separator pixel in scrollbars.css. */
     padding-block: calc(var(--space-1) - 0.5px) 0;
+  }
+  .panel-header-title:has(> .buzz-tabs[data-variant="navigation"]) {
+    overflow: visible;
   }
   .panel-header .buzz-tabs[data-variant="navigation"] .buzz-tabs-list {
     /* A fixed height with the lower inset left as free space: WebKit's
