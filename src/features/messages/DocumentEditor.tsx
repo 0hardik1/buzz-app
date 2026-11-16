@@ -166,6 +166,7 @@ export function DocumentEditor({
     <fieldset className={styles.editorToolbar} aria-label="Document formatting">
       <ComposerFormattingTools
         persistent
+        markdownMode="document"
         disabled={disabled || !editing}
         activeFormats={formats}
         toggleFormat={(format) => input.current?.toggleFormat(format)}

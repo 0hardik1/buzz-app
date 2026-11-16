@@ -1426,6 +1426,8 @@ export function EditableInput({
     };
     const toggleFormat = (format: ComposerFormat) => {
       if (!editable() || composing.current || editor.composing) return;
+      if (current.current.markdownMode === "document" && format === "spoiler")
+        return;
       flushTokens();
       // Formatting operates on textblock contents, not the document's outer edges.
       if (editor.state.selection instanceof AllSelection) {
@@ -2168,7 +2170,11 @@ export function EditableInput({
           const format =
             primary &&
             composerFormats.find((item) => formatBindings(item).some(pressed));
-          if (format) {
+          if (
+            format &&
+            (current.current.markdownMode !== "document" ||
+              format.mark !== "spoiler")
+          ) {
             if (!event.repeat) toggleFormat(format.mark);
             return true;
           }

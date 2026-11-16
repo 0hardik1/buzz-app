@@ -142,6 +142,40 @@ it("shows CommonMark soft breaks as spaces in rich mode", () => {
   ).toBe("First Second");
 });
 
+it("omits Spoiler from the document formatting controls", () => {
+  mount();
+  expect(screen.queryByRole("button", { name: "Spoiler" })).toBeNull();
+});
+
+it("ignores document spoiler commands while retaining literal pipe source", () => {
+  const value = "Keep ||literal|| source";
+  const h = mount({}, { initialValue: value });
+  const input = screen.getByRole("textbox", {
+    name: "Document body",
+  }) as ComposerInputElement;
+  act(() => {
+    input.focus();
+    input.setSelectionRange(0, 4);
+  });
+  for (const modifier of ["ctrlKey", "metaKey"])
+    expect(
+      fireEvent.keyDown(input, {
+        key: "P",
+        code: "KeyP",
+        shiftKey: true,
+        [modifier]: true,
+      }),
+    ).toBe(true);
+  act(() => input.toggleFormat("spoiler"));
+  expect(h.change).not.toHaveBeenCalled();
+  expect(input.querySelector("[data-spoiler]")).toBeNull();
+  act(() => {
+    h.ref.current?.focusEnd();
+    input.insertText("!");
+  });
+  expect(h.change).toHaveBeenLastCalledWith(`${value}!`);
+});
+
 it.each([15999, 16001])(
   "retains rich structure when loading or crossing the chat limit from %i characters",
   (length) => {
