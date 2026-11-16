@@ -281,7 +281,7 @@ test("under Unread, a neighbor's ✓ keeps the open draft and Undo restores it",
   const rows = eventRows(page);
   const thread = rows.filter({ hasText: "Inbox strict reply" });
   const next = rows.filter({ hasText: "Unread neighbor" });
-  await expect(rows).toHaveCount(2);
+  await expect(thread).toHaveCount(1);
   await thread.locator("[data-conversation-row]").click();
   const editor = conversations(page).getByRole("textbox");
   // Let the reader settle first: typing in the composer's first instant can be
@@ -295,6 +295,8 @@ test("under Unread, a neighbor's ✓ keeps the open draft and Undo restores it",
   await editor.evaluate((el) => {
     el.dataset.retentionMarker = "original-editor";
   });
+  // The neighbor is a mention: Mentions lists it beside the open thread.
+  await chooseView(page, "Mentions");
   await choose(page, "Unread only");
   await expect(unreadDots(next)).toBeVisible();
   await expect(next).toHaveCount(1);
@@ -345,7 +347,7 @@ test("with Unread off, an unselected row's ✓ reads it in place and preserves t
   const rows = eventRows(page);
   const thread = rows.filter({ hasText: "Inbox strict reply" });
   const next = rows.filter({ hasText: "Unread neighbor" });
-  await expect(rows).toHaveCount(2);
+  await expect(thread).toHaveCount(1);
   await thread.locator("[data-conversation-row]").click();
   const target = conversations(page).locator(
     `[data-message-id="${app.inboxWindow.replies[0].id}"]`,
@@ -366,6 +368,8 @@ test("with Unread off, an unselected row's ✓ reads it in place and preserves t
   });
   // The open conversation is read, so only the neighbor offers a ✓.
   await expect(markRead(thread)).toHaveCount(0);
+  // The neighbor is a mention: Mentions lists it beside the open thread.
+  await chooseView(page, "Mentions");
   await markRead(next).focus();
   await page.keyboard.press("Enter");
   await expect
@@ -374,14 +378,10 @@ test("with Unread off, an unselected row's ✓ reads it in place and preserves t
         (await readJournal(page)).state.frontiers[`msg:${neighbor.id}`],
     )
     .toBe(neighbor.created_at);
-  await expect(rows).toHaveCount(2);
+  await expect(next).toHaveCount(1);
   await expect(unreadDots(next)).toHaveCount(0);
   await expect(markRead(next)).toHaveCount(0);
   await expect(next.locator("[data-conversation-row]")).not.toHaveAttribute(
-    "aria-current",
-    "page",
-  );
-  await expect(thread.locator("[data-conversation-row]")).toHaveAttribute(
     "aria-current",
     "page",
   );
