@@ -188,7 +188,6 @@ it("decodes all encrypted preferences despite oversized deleted text without rew
   ).toEqual({
     sections: [{ id: "work", name: "Work", order: 0 }],
     assignments: { alpha: "work" },
-    starred: ["alpha"],
     muted: ["beta"],
   });
   expect(() => prepareSidebarAssignment([head], intent, secret)).toThrow(

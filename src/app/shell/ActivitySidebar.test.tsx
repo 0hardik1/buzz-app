@@ -132,7 +132,7 @@ function setup(
   const markChannelRead = vi.fn(async () => ({}) as never);
   const sidebar = {
     status: "ready" as const,
-    data: { sections: [], assignments: {}, starred: [], muted: [] },
+    data: { sections: [], assignments: {}, muted: [] },
   };
   const session: RelaySession = {
     ...base,

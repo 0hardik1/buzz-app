@@ -53,8 +53,6 @@ import {
   artifactSyncFilter,
 } from "../src/features/relay/artifact-sync-filter.ts";
 import {
-  assertSidebarStarIntent,
-  mutateSidebarStar,
   assertSidebarMuteIntent,
   mutateSidebarMute,
 } from "./sidebar-toggle.mjs";
@@ -1387,7 +1385,6 @@ export function relayBrokerPlugin({
               "/api/relay/sidebar-section-removal",
               "/api/relay/sidebar-section-order",
               "/api/relay/sidebar-section-rename",
-              "/api/relay/sidebar-star",
               "/api/relay/sidebar-mute",
               "/api/relay/rail-layout",
             ].includes(route) &&
@@ -1413,11 +1410,6 @@ export function relayBrokerPlugin({
                 "channel-sections",
                 assertSidebarAssignmentIntent,
                 mutateSidebarAssignment,
-              ],
-              "/api/relay/sidebar-star": [
-                "channel-stars",
-                assertSidebarStarIntent,
-                mutateSidebarStar,
               ],
               "/api/relay/sidebar-mute": [
                 "channel-mutes",
@@ -1687,7 +1679,6 @@ export function relayBrokerPlugin({
               sidebarSectionRemoval: true,
               sidebarSectionOrder: true,
               sidebarSectionRename: true,
-              sidebarStarWrites: true,
               agentLibrary: true,
               agentLogProof: true,
               gitAuthorization: true,

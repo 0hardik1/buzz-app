@@ -911,7 +911,6 @@ it("keeps a side tab's failed move recoverable after switching tabs", async () =
     data: {
       sections: [{ id: "work", name: "Work", order: 0 }],
       assignments: {},
-      starred: [],
       muted: [],
     },
   } as unknown as ReturnType<RelaySession["soloPreferences"]["snapshot"]>;
@@ -997,7 +996,6 @@ it("keeps a newer header move recoverable after an earlier one succeeds", async 
         { id: "home", name: "Home", order: 1 },
       ],
       assignments: {},
-      starred: [],
       muted: [],
     },
   } as unknown as ReturnType<RelaySession["soloPreferences"]["snapshot"]>;

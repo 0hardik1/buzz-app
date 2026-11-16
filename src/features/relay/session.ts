@@ -2013,20 +2013,6 @@ export function createRelaySession(
             )
         : undefined;
     })(),
-    writeStar: (() => {
-      const write = transport?.writeSidebarStar;
-      return write
-        ? (intent, signal) =>
-            write(
-              intent,
-              AbortSignal.any([
-                lifetime.signal,
-                AbortSignal.timeout(20_000),
-                signal,
-              ]),
-            )
-        : undefined;
-    })(),
     notify,
     writeMute: (() => {
       const write = transport?.writeSidebarMute;
@@ -2171,9 +2157,6 @@ export function createRelaySession(
             if (!setup) return;
             parseLineup({ ...setup, teamIds: [] });
             if (
-              (setup.starred !== undefined &&
-                typeof setup.starred !== "boolean") ||
-              (setup.starred && !!setup.groupId) ||
               typeof setup.groupId !== "string" ||
               setup.groupId.length > 256 ||
               (setup.groupId !== "" && !setup.groupId.trim()) ||
@@ -2192,9 +2175,7 @@ export function createRelaySession(
               ...(setup.agents.length
                 ? [agentChoices.refresh("templates")]
                 : []),
-              ...(setup.groupId || setup.starred
-                ? [sidebarPreferences.queries.refresh()]
-                : []),
+              ...(setup.groupId ? [sidebarPreferences.queries.refresh()] : []),
             ]);
             lifetime.signal.throwIfAborted();
             if (setup.agents.length) {
@@ -2222,10 +2203,6 @@ export function createRelaySession(
                   `Selected agents are unavailable in this community: ${unavailable.map(npubEncode).join(", ")}. Refresh agents or remove them before creating the channel.`,
                 );
             }
-            if (setup.starred && !sidebarPreferences.queries.starWritable)
-              throw new Error(
-                "Starred placement is unavailable; refresh your sidebar before creating the channel",
-              );
             if (setup.groupId) {
               const state = sidebarPreferences.queries.snapshot();
               if (
@@ -2236,18 +2213,6 @@ export function createRelaySession(
                   "The destination group is unavailable; refresh your sidebar before creating the channel",
                 );
             }
-          },
-          async star(id) {
-            await settledPreferences();
-            if (!sidebarPreferences.queries.starWritable)
-              throw new Error(
-                "Starred placement is unavailable; keep the partial channel and star it separately",
-              );
-            if (
-              sidebarPreferences.queries.snapshot().data?.starred.includes(id)
-            )
-              return;
-            await sidebarPreferences.queries.setStar(id, true);
           },
           async place(id, groupId) {
             await settledPreferences();
@@ -3494,14 +3459,14 @@ export function createRelaySession(
     publishLive();
     warmRoster();
   };
-  /** Warm every channel's head before it is opened: starred first, then the
-   * rest by recency. The account preferences own the starred set, so warming
-   * waits for them to settle; a slow read delays warmth, never demand loading. */
+  /** Warm every channel's head before it is opened, by recency. Warming waits
+   * for the account preferences to settle; a slow read delays warmth, never
+   * demand loading. */
   const warmRoster = () => {
     if (closed || !options.warm) return;
     const prefs = sidebarPreferences.queries.snapshot();
     if (prefs.status === "idle" || prefs.status === "loading") return;
-    channels.queries.warm?.(prefs.data?.starred ?? []);
+    channels.queries.warm?.([]);
   };
   // A few replaceable heads; live payloads are hints, never decoded authority.
   const sidebarHeads = new Map<string, Pick<RelayEvent, "id" | "created_at">>();
@@ -3539,8 +3504,8 @@ export function createRelaySession(
     }
   };
   const stopWarmPreferences = sidebarPreferences.queries.subscribe(warmRoster);
-  // Starred-first warming needs the account preferences without waiting for
-  // the sidebar page to mount and observe them.
+  // Warming needs the account preferences without waiting for the sidebar
+  // page to mount and observe them.
   if (options.warm) void sidebarPreferences.queries.ensure();
   let refreshedGeneration = -1;
   /** When unread was last asked for a full repair: a connection's first

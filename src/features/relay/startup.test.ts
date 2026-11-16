@@ -35,7 +35,6 @@ const head = (content: string) => [
 const preferences: SidebarPreferences = {
   sections: [{ id: "work", name: "Work", order: 0 }],
   assignments: { alpha: "work" },
-  starred: [],
   muted: [],
 };
 function deferred<T>() {
@@ -398,10 +397,11 @@ describe("device-local startup", () => {
         roster(relay, "beta", [viewer.pubkey]),
         metadata(relay, "beta", "Beta"),
       ];
-      const restored = { ...preferences, starred: ["beta"] };
-      // Earlier versions also saved filter choices; restore drops them.
+      const restored = preferences;
+      // Earlier versions also saved stars and filter choices; restore drops them.
       const layout = {
         ...restored,
+        starred: ["beta"],
         ...(withWindow
           ? {
               filters: { "section:work": "active" as const },

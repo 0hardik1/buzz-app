@@ -4,7 +4,6 @@ import { createSidebarPreferencesStore } from "./sidebar-preferences-store";
 import { flush, keypair, scriptedTransport } from "./testing";
 import type {
   SidebarAssignmentMutator,
-  SidebarStarMutator,
   SidebarMuteMutator,
   SidebarPreferences,
 } from "./sidebar-preferences";
@@ -29,7 +28,6 @@ it.each([
       read: async () => ({
         sections: [],
         assignments: {},
-        starred: [],
         muted: [],
       }),
       available: true,
@@ -48,13 +46,11 @@ it.each([
 const data: SidebarPreferences = {
   sections: [{ id: "work", name: "Work", order: 0 }],
   assignments: { alpha: "work" },
-  starred: ["beta"],
   muted: [],
 };
 function setup(
   decode = vi.fn(async (): Promise<SidebarPreferences> => data),
   write?: SidebarAssignmentMutator,
-  writeStar?: SidebarStarMutator,
   writeSidebarMute?: SidebarMuteMutator,
 ) {
   const wire = scriptedTransport(keypair().pubkey, keypair().pubkey);
@@ -62,26 +58,7 @@ function setup(
     ...wire.transport,
     decodeSidebarPreferences: decode,
     ...(writeSidebarMute ? { writeSidebarMute } : {}),
-    ...(write || writeStar
-      ? {
-          writeSidebarAssignment:
-            write ??
-            (async ({ channelId, sectionId }) => {
-              const assignments = { ...data.assignments };
-              if (channelId !== undefined) {
-                if (sectionId) assignments[channelId] = sectionId;
-                else delete assignments[channelId];
-              }
-              return { sections: data.sections, assignments };
-            }),
-          writeSidebarStar:
-            writeStar ??
-            (async ({ channelId, starred }) => [
-              ...data.starred.filter((id) => id !== channelId),
-              ...(starred ? [channelId] : []),
-            ]),
-        }
-      : {}),
+    ...(write ? { writeSidebarAssignment: write } : {}),
   });
   return { wire, owner, preferences: owner.session.sidebarPreferences, decode };
 }
@@ -117,7 +94,6 @@ it("applies a confirmed assignment to the retained session snapshot", async () =
           { id: "later", name: "Later", order: 1 },
         ],
         assignments: { alpha: "later" },
-        starred: ["beta"],
         muted: [],
       },
     });
@@ -344,7 +320,7 @@ it("replacement viewer/community sessions do not reuse another session's groups"
   }
 });
 
-it("serializes mute writes without changing saved groups or stars", async () => {
+it("serializes mute writes without changing saved groups", async () => {
   const gate = deferred<readonly string[]>();
   const started = deferred<void>();
   const mute = vi
@@ -354,12 +330,7 @@ it("serializes mute writes without changing saved groups or stars", async () => 
       return gate.promise;
     })
     .mockResolvedValueOnce(["alpha", "beta"]);
-  const { wire, owner, preferences } = setup(
-    undefined,
-    undefined,
-    undefined,
-    mute,
-  );
+  const { wire, owner, preferences } = setup(undefined, undefined, mute);
   try {
     const initial = preferences.ensure();
     await flush();
@@ -387,12 +358,7 @@ it("failed Mute retains the confirmed snapshot and a retry can unmute", async ()
     .fn<SidebarMuteMutator>()
     .mockRejectedValueOnce(new Error("publish rejected"))
     .mockResolvedValueOnce([]);
-  const { wire, owner, preferences } = setup(
-    undefined,
-    undefined,
-    undefined,
-    mute,
-  );
+  const { wire, owner, preferences } = setup(undefined, undefined, mute);
   try {
     const initial = preferences.ensure();
     await flush();
@@ -418,12 +384,10 @@ it.each(["success", "failure"])(
     const decode = vi
       .fn(async () => data)
       .mockImplementationOnce(async () => data);
-    const { wire, owner, preferences } = setup(
-      decode,
-      undefined,
-      undefined,
-      async () => ["alpha", "beta"],
-    );
+    const { wire, owner, preferences } = setup(decode, undefined, async () => [
+      "alpha",
+      "beta",
+    ]);
     try {
       const initial = preferences.ensure();
       await flush();
@@ -461,12 +425,7 @@ it.each(["clearCache", "dispose", "cancel"] as const)(
       started.resolve(signal);
       return gate.promise;
     });
-    const { wire, owner, preferences } = setup(
-      undefined,
-      undefined,
-      undefined,
-      mute,
-    );
+    const { wire, owner, preferences } = setup(undefined, undefined, mute);
     const caller = new AbortController();
     try {
       const initial = preferences.ensure();
@@ -498,7 +457,7 @@ it.each(["clearCache", "dispose", "cancel"] as const)(
 
 it("does not mutate before a successful initial preference read or without host capability", async () => {
   const mute = vi.fn<SidebarMuteMutator>(async () => []);
-  const { owner, preferences } = setup(undefined, undefined, undefined, mute);
+  const { owner, preferences } = setup(undefined, undefined, mute);
   try {
     await expect(preferences.setMute("alpha", true)).rejects.toThrow(
       "unavailable",
@@ -515,136 +474,20 @@ it("does not mutate before a successful initial preference read or without host 
   }
 });
 
-it("serializes confirmed assignment and star writes without losing either projection", async () => {
-  const gate = deferred<readonly string[]>();
-  const started = deferred<void>();
-  const star = vi.fn<SidebarStarMutator>(async ({ starred }) => {
-    if (!starred) return ["alpha"];
-    started.resolve();
-    return gate.promise;
-  });
-  const assign = vi.fn<SidebarAssignmentMutator>(async () => ({
-    sections: data.sections,
-    assignments: { alpha: "work", beta: "work" },
-  }));
-  const { wire, owner, preferences } = setup(undefined, assign, star);
-  try {
-    const initial = preferences.ensure();
-    await flush();
-    wire.next().respond([]);
-    await initial;
-    const pending = preferences.setStar("alpha", true);
-    await started.promise;
-    const queued = preferences.assign("beta", "work");
-    expect(preferences.snapshot().data).toEqual({
-      ...data,
-      assignments: { alpha: "work", beta: "work" },
-      starred: ["alpha"],
-    });
-    expect(assign).not.toHaveBeenCalled();
-    gate.resolve(["alpha", "beta"]);
-    await Promise.all([pending, queued]);
-    expect(preferences.snapshot()).toEqual({
-      status: "ready",
-      data: {
-        ...data,
-        assignments: { alpha: "work", beta: "work" },
-        starred: ["alpha"],
-      },
-    });
-    expect(Object.isFrozen(preferences.snapshot().data?.starred)).toBe(true);
-    expect(star).toHaveBeenCalledWith(
-      { channelId: "alpha", starred: true },
-      expect.any(AbortSignal),
-    );
-  } finally {
-    gate.resolve([]);
-    owner.dispose();
-  }
-});
-
-it("failed Star retains the confirmed snapshot and a retry can unstar", async () => {
-  const star = vi
-    .fn<SidebarStarMutator>()
-    .mockRejectedValueOnce(new Error("publish rejected"))
-    .mockResolvedValueOnce([]);
-  const { wire, owner, preferences } = setup(undefined, undefined, star);
-  try {
-    const initial = preferences.ensure();
-    await flush();
-    wire.next().respond([]);
-    await initial;
-    const retained = preferences.snapshot();
-    await expect(preferences.setStar("beta", false)).rejects.toThrow(
-      "publish rejected",
-    );
-    expect(preferences.snapshot().data).toEqual(retained.data);
-    expect(preferences.snapshot().moves).toEqual([
-      expect.objectContaining({ pending: false, error: "publish rejected" }),
-    ]);
-    await preferences.retryMove("beta");
-    expect(preferences.snapshot().data).toEqual({ ...data, starred: [] });
-  } finally {
-    owner.dispose();
-  }
-});
-
-it.each(["clearCache", "dispose", "cancel"] as const)(
-  "%s aborts Star and fences active and queued writes",
-  async (action) => {
-    const gate = deferred<readonly string[]>();
-    const started = deferred<AbortSignal>();
-    const star = vi.fn<SidebarStarMutator>(async (_intent, signal) => {
-      started.resolve(signal);
-      return gate.promise;
-    });
-    const { wire, owner, preferences } = setup(undefined, undefined, star);
-    const caller = new AbortController();
-    try {
-      const initial = preferences.ensure();
-      await flush();
-      wire.next().respond([]);
-      await initial;
-      const pending = preferences.setStar("alpha", true, caller.signal);
-      const activeSignal = await started.promise;
-      const queued = preferences.setStar("beta", false, caller.signal);
-      const result = Promise.allSettled([pending, queued]);
-      if (action === "cancel") caller.abort();
-      else await owner[action]();
-      expect(activeSignal.aborted).toBe(true);
-      gate.resolve(["alpha", "beta"]);
-      expect((await result).map((entry) => entry.status)).toEqual([
-        "rejected",
-        "rejected",
-      ]);
-      expect(star).toHaveBeenCalledOnce();
-      expect(preferences.snapshot().data).toEqual(
-        action === "cancel" ? data : undefined,
-      );
-    } finally {
-      gate.resolve([]);
-      owner.dispose();
-    }
-  },
-);
-
 it("does not mutate before a successful initial preference read or without host capability", async () => {
-  const star = vi.fn<SidebarStarMutator>(async () => []);
   const assign = vi.fn<SidebarAssignmentMutator>(async () => data);
-  const { owner, preferences } = setup(undefined, assign, star);
+  const { owner, preferences } = setup(undefined, assign);
   try {
-    await expect(preferences.setStar("alpha", true)).rejects.toThrow(
+    await expect(preferences.assign("alpha", "work")).rejects.toThrow(
       "unavailable",
     );
-    await expect(preferences.assign("alpha", "work")).rejects.toThrow();
-    expect(star).not.toHaveBeenCalled();
     expect(assign).not.toHaveBeenCalled();
   } finally {
     owner.dispose();
   }
   const readonly = setup();
   try {
-    expect(readonly.preferences.starWritable).toBe(false);
+    expect(readonly.preferences.writable).toBe(false);
   } finally {
     readonly.owner.dispose();
   }
@@ -652,8 +495,7 @@ it("does not mutate before a successful initial preference read or without host 
 
 it("retains confirmed placement but gates moves after a failed refresh until a successful retry", async () => {
   const write = vi.fn<SidebarAssignmentMutator>(async () => data);
-  const star = vi.fn<SidebarStarMutator>(async () => data.starred);
-  const { wire, owner, preferences, decode } = setup(undefined, write, star);
+  const { wire, owner, preferences, decode } = setup(undefined, write);
   try {
     const initial = preferences.ensure();
     await flush();
@@ -667,11 +509,7 @@ it("retains confirmed placement but gates moves after a failed refresh until a s
     await failed;
     expect(preferences.snapshot().data).toBe(retained);
     expect(preferences.writable).toBe(false);
-    expect(preferences.starWritable).toBe(false);
     await expect(preferences.assign("alpha", "work")).rejects.toThrow(
-      /unavailable/,
-    );
-    await expect(preferences.setStar("alpha", true)).rejects.toThrow(
       /unavailable/,
     );
     await expect(
@@ -681,18 +519,15 @@ it("retains confirmed placement but gates moves after a failed refresh until a s
     await flush();
     const request = wire.next();
     expect(preferences.writable).toBe(false);
-    await expect(preferences.setStar("alpha", true)).rejects.toThrow(
+    await expect(preferences.assign("alpha", "work")).rejects.toThrow(
       /unavailable/,
     );
     expect(write).not.toHaveBeenCalled();
-    expect(star).not.toHaveBeenCalled();
     request.respond([]);
     await retry;
     expect(preferences.writable).toBe(true);
-    expect(preferences.starWritable).toBe(true);
     await preferences.assign("alpha", "work");
     expect(write).toHaveBeenCalledOnce();
-    expect(star).toHaveBeenCalledOnce();
   } finally {
     owner.dispose();
   }
@@ -760,7 +595,6 @@ it("waits for local moves and reconciles hints without losing other preference f
     readAfterWrite: strong,
     available: true,
     write: () => write.promise,
-    writeStar: async () => data.starred,
   });
   try {
     await store.queries.ensure();
@@ -913,7 +747,6 @@ it("keeps mounted data and controls usable during a live reconciliation", async 
       return pending.promise;
     },
     write: async () => data,
-    writeStar: async () => data.starred,
   });
   try {
     await store.queries.ensure();

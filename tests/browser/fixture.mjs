@@ -404,13 +404,6 @@ export const test = base.extend({
               assignments: { beta: "work" },
             },
           ],
-          [
-            "channel-stars",
-            {
-              version: 1,
-              channels: { alpha: { starred: true, updatedAt: 1 } },
-            },
-          ],
         ]) {
           records.set(
             coordinate,
@@ -2050,12 +2043,9 @@ export const test = base.extend({
       expect(event.kind).toBe(30078);
       const sidebarCoordinate = event.tags.find(([name]) => name === "d")?.[1];
       if (
-        [
-          "channel-mutes",
-          "channel-sections",
-          "channel-stars",
-          "rail-layout",
-        ].includes(sidebarCoordinate) ||
+        ["channel-mutes", "channel-sections", "rail-layout"].includes(
+          sidebarCoordinate,
+        ) ||
         (ownSoloChannels.length > 0 &&
           sidebarCoordinate?.startsWith("buzz-me-kit-v1:"))
       ) {
@@ -2970,7 +2960,6 @@ export const test = base.extend({
       // each exact URL once, not every 502 or every console error in the test.
       const sidebarFailures = [
         ...(report.sidebarMuteFailures ?? []),
-        ...(report.sidebarStarFailures ?? []),
         ...(report.sidebarAssignmentFailures ?? []),
         ...(report.sidebarRemovalFailures ?? []),
         ...(report.sidebarPreferenceFailures ?? []),

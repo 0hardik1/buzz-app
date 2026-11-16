@@ -7,7 +7,7 @@ import {
   validSidebarSectionOrder,
   validSidebarSectionRemoval,
   validSidebarSectionRename,
-  editSidebarToggle,
+  editSidebarMute,
   validSidebarAssignment,
   validSidebarChannelId,
 } from "./sidebar-edits";
@@ -22,7 +22,6 @@ import { RailLayoutConflict, type ReadTransport } from "./transport";
 
 const coordinates = [
   "channel-sections",
-  "channel-stars",
   "channel-mutes",
   "main-agent",
   "rail-layout",
@@ -67,7 +66,6 @@ export function nativeSidebar(transport: ReadTransport) {
     cancelled(signal);
     return projectSidebarPreferences(
       raw["channel-sections"],
-      raw["channel-stars"],
       raw["channel-mutes"],
     );
   }
@@ -110,7 +108,6 @@ export function nativeSidebar(transport: ReadTransport) {
   function project(coordinate: Coordinate, value: unknown) {
     return projectSidebarPreferences(
       coordinate === "channel-sections" ? value : undefined,
-      coordinate === "channel-stars" ? value : undefined,
       coordinate === "channel-mutes" ? value : undefined,
     );
   }
@@ -336,68 +333,26 @@ export function nativeSidebar(transport: ReadTransport) {
         "Sidebar groups changed on another device; reload and try again",
       );
     },
-    async writeSidebarStar(
-      intent: { channelId: string; starred: boolean },
-      signal: AbortSignal,
-    ) {
-      return writeToggle(
-        "channel-stars",
-        "starred",
-        intent,
-        signal,
-        "Sidebar stars changed on another device; reload and try again",
-      );
-    },
     async writeSidebarMute(
-      intent: { channelId: string; muted: boolean },
+      { channelId, muted }: { channelId: string; muted: boolean },
       signal: AbortSignal,
     ) {
-      return writeToggle(
+      if (!validSidebarChannelId(channelId) || typeof muted !== "boolean")
+        throw new Error("Invalid sidebar mute intent");
+      const prepare = (current: Record<string, unknown>) => {
+        const next = editSidebarMute(current, channelId, muted);
+        return { next, result: project("channel-mutes", next).muted };
+      };
+      return mutate(
         "channel-mutes",
-        "muted",
-        intent,
         signal,
+        prepare,
+        // An unmute must leave its explicit tombstone, not disappear on readback.
+        (value) =>
+          (value.channels as Record<string, Record<string, unknown>>)[channelId]
+            ?.muted === muted,
         "Sidebar mutes changed on another device; reload and try again",
       );
     },
   };
-  async function writeToggle(
-    coordinate: "channel-stars" | "channel-mutes",
-    field: "starred" | "muted",
-    intent: { channelId: string; starred?: boolean; muted?: boolean },
-    signal: AbortSignal,
-    conflict: string,
-  ) {
-    const { channelId } = intent;
-    const enabled = intent[field];
-    if (!validSidebarChannelId(channelId) || typeof enabled !== "boolean")
-      throw new Error(
-        `Invalid sidebar ${field === "starred" ? "star" : "mute"} intent`,
-      );
-    const prepare = (current: Record<string, unknown>) => {
-      const next = editSidebarToggle(current, channelId, field, enabled);
-      return {
-        next,
-        result: project(coordinate, next)[
-          field === "starred" ? "starred" : "muted"
-        ],
-      };
-    };
-    return mutate(
-      coordinate,
-      signal,
-      prepare,
-      (value) => {
-        const entry = (
-          value.channels as Record<string, Record<string, unknown>>
-        )[channelId];
-        // An unmute must leave its explicit tombstone, not disappear on readback.
-        return (
-          entry?.[field] === enabled ||
-          (field === "starred" && !enabled && entry === undefined)
-        );
-      },
-      conflict,
-    );
-  }
 }

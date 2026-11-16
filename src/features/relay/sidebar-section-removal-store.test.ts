@@ -8,7 +8,6 @@ import type {
 const data: SidebarPreferences = {
   sections: [{ id: "work", name: "Work", order: 0 }],
   assignments: { alpha: "work" },
-  starred: ["alpha"],
   muted: ["beta"],
 };
 const removed = { sections: [], assignments: {} };
@@ -209,7 +208,6 @@ it.each([true, false])(
         if (!succeeds) throw new Error("creation failed");
         return next;
       },
-      writeStar: async () => data.starred,
       removeSection: remove,
     });
     try {

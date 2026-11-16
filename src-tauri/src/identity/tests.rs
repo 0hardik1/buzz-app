@@ -723,10 +723,14 @@ async fn closing_refuses_every_key_operation_including_a_sign_started_before_it(
 }
 
 #[tokio::test]
-async fn sidebar_signer_reads_but_never_writes_sort_or_filter() {
+async fn sidebar_signer_reads_but_never_writes_stars_sort_or_filter() {
     use serde_json::json;
     let host = super::IdentityHost::fixture();
     for (coordinate, payload) in [
+        (
+            "channel-stars",
+            json!({"version":1,"channels":{"channel":{"starred":true,"updatedAt":1}}}),
+        ),
         (
             "channel-sort",
             json!({"version":1,"groups":{"channels":"recent"}}),

@@ -116,7 +116,6 @@ export function createSoloPreferences(kit: ChannelKit, lifetime: AbortSignal) {
   const store = createSidebarPreferencesStore({
     read: async (signal) => ({
       ...project((await current(signal, false)).value),
-      starred: [],
       muted: [],
     }),
     available: kit.available,

@@ -8,9 +8,7 @@ import {
   verifyEvent,
 } from "nostr-tools";
 import { prepareSidebarAssignment } from "./sidebar-preferences.mjs";
-import { SIDEBAR_HEAD_BYTES } from "./sidebar-preferences.mjs";
 import { relayBrokerPlugin } from "./relay-broker.mjs";
-import { prepareSidebarStar } from "./sidebar-toggle.mjs";
 import { connectBrokerTransport } from "../src/features/relay/transport.ts";
 import { createRelaySession } from "../src/features/relay/session.ts";
 import { fixtureRelayUrl, fixtureAliases } from "../tests/relay-config.ts";
@@ -139,7 +137,7 @@ async function harness(chunkBytes) {
     conflict() {
       conflict = true;
     },
-    post(value, origin, route = "sidebar-star") {
+    post(value, origin, route = "sidebar-mute") {
       return fetch(`${base}/api/relay/${route}`, {
         method: "POST",
         headers: {
@@ -211,96 +209,24 @@ it.each([false, true])(
   },
 );
 
-it("real broker Star roundtrip signs scoped requests and confirms before projecting", async () => {
-  const h = await harness(),
-    signal = new AbortController().signal;
-  h.heads.set(
-    "channel-stars",
-    prepareSidebarStar([], { channelId: "other", starred: true }, h.key).event,
-  );
-  expect(
-    await h.transport.writeSidebarStar(
-      { channelId: "alpha", starred: true },
-      signal,
-    ),
-  ).toEqual(["other", "alpha"]);
-  expect(h.calls.map((call) => new URL(call.url).pathname)).toEqual([
-    "/query",
-    "/events",
-    "/query",
-  ]);
-  expect(h.calls[0].body).toEqual([
-    {
-      kinds: [30078],
-      authors: [h.viewer],
-      "#d": ["channel-stars"],
-      limit: 1,
-      consistency: "strong",
-    },
-  ]);
-  expect(
-    await h.transport.writeSidebarStar(
-      { channelId: "alpha", starred: false },
-      signal,
-    ),
-  ).toEqual(["other"]);
-  expect(h.calls.filter((call) => call.url.endsWith("/events"))).toHaveLength(
-    2,
-  );
-  await h.transport.writeSidebarStar(
-    { channelId: "alpha", starred: false },
-    signal,
-  );
-  expect(h.calls.filter((call) => call.url.endsWith("/events"))).toHaveLength(
-    2,
-  );
-  const queries = h.calls.filter(({ url }) => url.endsWith("/query"));
-  expect(queries).toHaveLength(5);
-  for (const { body } of queries) expect(body).toEqual(h.calls[0].body);
-});
 it("refuses invalid intent and foreign origins without upstream requests", async () => {
   const h = await harness();
-  expect((await h.post({ channelId: "alpha", starred: "true" })).status).toBe(
+  expect((await h.post({ channelId: "alpha", muted: "true" })).status).toBe(
     400,
   );
   expect(
     (
       await h.post(
-        { channelId: "alpha", starred: true },
+        { channelId: "alpha", muted: true },
         "https://foreign.invalid",
       )
     ).status,
   ).toBe(403);
   expect(
-    (await h.post({ channelId: "x".repeat(2100), starred: true })).status,
+    (await h.post({ channelId: "x".repeat(2100), muted: true })).status,
   ).toBe(413);
   expect(h.calls).toEqual([]);
 });
-it.each(["query", "oversized", "publication", "receipt", "conflict"])(
-  "does not claim a saved Star after %s failure",
-  async (failure) => {
-    const h = await harness();
-    if (failure === "query")
-      h.failQuery(new Response("failed", { status: 503 }));
-    if (failure === "oversized")
-      h.failQuery(new Response(`[${" ".repeat(SIDEBAR_HEAD_BYTES)}]`));
-    if (failure === "publication")
-      h.failPublication(new Response("failed", { status: 503 }));
-    if (failure === "receipt")
-      h.failPublication(Response.json({ accepted: false, event_id: "wrong" }));
-    if (failure === "conflict") h.conflict();
-    await expect(
-      h.transport.writeSidebarStar(
-        { channelId: "alpha", starred: true },
-        new AbortController().signal,
-      ),
-    ).rejects.toThrow();
-    if (["query", "oversized"].includes(failure))
-      expect(h.calls.filter((call) => call.url.endsWith("/events"))).toEqual(
-        [],
-      );
-  },
-);
 
 it("real broker creates and assigns a section through the signed, confirmed narrow command", async () => {
   const h = await harness();
@@ -373,7 +299,6 @@ it("preserves split UTF-8 section names in the published record and response", a
   };
   expect.soft(await response.json()).toEqual({
     ...expected,
-    starred: [],
     muted: [],
   });
   expect(h.calls.map(({ url }) => new URL(url).pathname)).toEqual([
@@ -397,7 +322,7 @@ it("preserves split UTF-8 section names in the published record and response", a
   }
 });
 
-it.each(["sidebar-assignment", "sidebar-star"])(
+it.each(["sidebar-assignment", "sidebar-mute"])(
   "%s rejects split UTF-8 bodies over the byte budget before any upstream request",
   async (route) => {
     const h = await harness(1);
@@ -467,27 +392,27 @@ it("rejects malformed removal intents before accessing the relay", async () => {
 
 it("serializes different sidebar endpoints through one relay queue", async () => {
   const h = await harness();
+  const id = "11111111-1111-4111-8111-111111111111";
   const held = h.holdNextQuery();
-  const star = h.post({ channelId: "alpha", starred: true });
-  await held.started.promise;
   const assign = h.post(
-    {
-      channelId: "alpha",
-      createSection: {
-        id: "11111111-1111-4111-8111-111111111111",
-        name: "Work",
-      },
-    },
+    { channelId: "alpha", createSection: { id, name: "Work" } },
     undefined,
     "sidebar-assignment",
   );
+  await held.started.promise;
+  // The rename only succeeds once the queued creation has been confirmed.
+  const rename = h.post(
+    { sectionId: id, name: "Renamed" },
+    undefined,
+    "sidebar-section-rename",
+  );
   try {
     // Both HTTP requests have reached the broker before the first read completes.
-    await h.received("sidebar-assignment");
+    await h.received("sidebar-section-rename");
   } finally {
     held.release.resolve();
   }
-  const responses = await Promise.all([star, assign]);
+  const responses = await Promise.all([assign, rename]);
   expect(responses.map(({ status }) => status)).toEqual([200, 200]);
   await Promise.all(responses.map((response) => response.json()));
   expect(
@@ -498,9 +423,9 @@ it("serializes different sidebar endpoints through one relay queue", async () =>
         : body.tags.find(([name]) => name === "d")[1],
     ]),
   ).toEqual([
-    ["/query", "channel-stars"],
-    ["/events", "channel-stars"],
-    ["/query", "channel-stars"],
+    ["/query", "channel-sections"],
+    ["/events", "channel-sections"],
+    ["/query", "channel-sections"],
     ["/query", "channel-sections"],
     ["/events", "channel-sections"],
     ["/query", "channel-sections"],

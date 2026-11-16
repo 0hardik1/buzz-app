@@ -29,7 +29,6 @@ it("reads metadata rather than stale legacy projections and preserves deletion r
   expect(projectSidebarPreferences(current, undefined)).toEqual({
     sections: [{ id: "live", name: "Work", order: 0 }],
     assignments: { a: "live" },
-    starred: [],
     muted: [],
   });
   const next = editSidebarRecord(current, 1, [[["a", "a"], null]], 50);

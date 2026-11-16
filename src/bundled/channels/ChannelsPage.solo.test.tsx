@@ -202,7 +202,6 @@ function fixture({
     data: {
       sections: [{ id: "work", name: "Work", order: 0 }],
       assignments: {},
-      starred: [],
       muted: [],
     },
   };

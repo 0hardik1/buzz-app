@@ -1090,10 +1090,9 @@ and are asked to sign in again in Buzz.
   Conversation details stay with their conversation when you navigate away and
   return, until closed. Reloading Buzz does not restore their retained workspace.
   Terminal closes when you leave the conversation.
-- Saved sidebar groups, stars and mutes from another device or
+- Saved sidebar groups and mutes from another device or
   a paired CLI update the open sidebar automatically while connected, in hosts
-  that support saved sidebar preferences. A CLI section-only move keeps a
-  starred channel in Starred until you unstar it.
+  that support saved sidebar preferences.
 - **Plugin channel rows**: a plugin can open a channel from its Solo row and keep
   that row selected. The sidebar then keeps its scope, scroll position, and open
   sections. When a plugin is explicitly disabled, its existing chats appear as

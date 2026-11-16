@@ -156,30 +156,25 @@ export function editSidebarAssignment(
   return editSidebarRecord(current, createdAt, writes, now);
 }
 
-export function editSidebarToggle(
+export function editSidebarMute(
   current: Record<string, unknown>,
   channelId: string,
-  field: "starred" | "muted",
-  enabled: boolean,
+  muted: boolean,
   now = Date.now(),
 ): Record<string, unknown> {
   const channels = current.channels as Record<string, Record<string, unknown>>;
   const previous = Object.hasOwn(channels, channelId)
     ? channels[channelId]
     : undefined;
-  // Absent unstars are satisfied; unmute must persist its explicit tombstone.
-  if (
-    previous?.[field] === enabled ||
-    (!previous && !enabled && field === "starred")
-  )
-    return current;
+  // Unmute must persist its explicit tombstone.
+  if (previous?.muted === muted) return current;
   return {
     ...current,
     channels: {
       ...channels,
       [channelId]: {
         ...previous,
-        [field]: enabled,
+        muted,
         updatedAt: Math.max(now, Number(previous?.updatedAt ?? 0) + 1),
       },
     },

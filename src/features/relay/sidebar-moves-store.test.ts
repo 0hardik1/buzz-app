@@ -23,7 +23,6 @@ async function setup() {
       { id: "later", name: "Later", order: 1 },
     ],
     assignments: { alpha: "work", beta: "work" },
-    starred: ["alpha"],
     muted: [],
   };
   const read = vi.fn(async () => data);
@@ -52,15 +51,6 @@ async function setup() {
     data = { ...data, sections, assignments };
     return { sections, assignments };
   });
-  const star = vi.fn(
-    async (intent: { channelId: string; starred: boolean }) => {
-      const stars = new Set(data.starred);
-      if (intent.starred) stars.add(intent.channelId);
-      else stars.delete(intent.channelId);
-      data = { ...data, starred: [...stars] };
-      return data.starred;
-    },
-  );
   const mute = vi.fn<SidebarMuteMutator>(async ({ channelId, muted }) => {
     const mutes = new Set(data.muted);
     if (muted) mutes.add(channelId);
@@ -73,7 +63,6 @@ async function setup() {
     readAfterWrite,
     available: true,
     write: assignment,
-    writeStar: star,
     writeMute: mute,
   });
   await owner.queries.ensure();
@@ -81,54 +70,46 @@ async function setup() {
     owner,
     prefs: owner.queries,
     assignment,
-    star,
     read,
     readAfterWrite,
     mute,
   };
 }
 
-it("moves immediately, keeps later intent through older failure, and serializes both records", async () => {
+it("moves immediately and keeps a later intent through an older failure", async () => {
   const h = await setup();
-  const gate = deferred<readonly string[]>();
-  h.star.mockImplementationOnce(() => gate.promise);
+  const gate = deferred<Awaited<ReturnType<typeof h.assignment>>>();
+  h.assignment.mockImplementationOnce(() => gate.promise);
   try {
     const first = h.prefs.assign("alpha", "later");
     const failed = expect(first).rejects.toThrow("offline");
     expect(h.prefs.snapshot().data?.assignments.alpha).toBe("later");
-    expect(h.prefs.snapshot().data?.starred).toEqual([]);
-    await flush(); // assignment confirmed, Star clear held
+    await flush(); // the first write is held
     expect(h.assignment).toHaveBeenCalledOnce();
-    const second = h.prefs.setStar("alpha", true);
+    const second = h.prefs.assign("alpha");
     const other = h.prefs.assign("beta", "later");
-    expect(h.prefs.snapshot().data).toMatchObject({
-      assignments: { alpha: "later", beta: "later" },
-      starred: ["alpha"],
-    });
+    expect(h.prefs.snapshot().data?.assignments).toEqual({ beta: "later" });
     gate.reject(new Error("offline"));
     await failed;
     await Promise.all([second, other]);
     expect(h.prefs.snapshot().moves).toBeUndefined(); // stale failure offers no stale retry
-    expect(h.prefs.snapshot().data).toMatchObject({
-      assignments: { beta: "later" },
-      starred: ["alpha"],
-    });
+    expect(h.prefs.snapshot().data?.assignments).toEqual({ beta: "later" });
   } finally {
-    gate.resolve([]);
+    gate.resolve({ sections: [], assignments: {} });
     h.owner.dispose();
   }
 });
 
 it("failure rolls back just its channel, persists a retry across refresh, and clears retry after success", async () => {
   const h = await setup();
-  h.star.mockRejectedValueOnce(new Error("offline"));
+  h.assignment.mockRejectedValueOnce(new Error("offline"));
   try {
     const first = h.prefs.assign("alpha", "later");
     const failed = expect(first).rejects.toThrow("offline");
     const other = h.prefs.assign("beta", "later");
     await failed;
     await other;
-    expect(h.prefs.snapshot().data?.starred).toEqual(["alpha"]);
+    expect(h.prefs.snapshot().data?.assignments.alpha).toBe("work");
     expect(h.prefs.snapshot().data?.assignments.beta).toBe("later");
     expect(h.prefs.snapshot().moves).toEqual([
       expect.objectContaining({
@@ -140,7 +121,7 @@ it("failure rolls back just its channel, persists a retry across refresh, and cl
     await h.prefs.refresh();
     expect(h.prefs.snapshot().moves).toHaveLength(1);
     const retry = h.prefs.retryMove("alpha");
-    expect(h.prefs.snapshot().data?.starred).toEqual([]);
+    expect(h.prefs.snapshot().data?.assignments.alpha).toBe("later");
     expect(h.prefs.snapshot().moves?.[0]?.pending).toBe(true);
     await retry;
     expect(h.prefs.snapshot().moves).toBeUndefined();
@@ -174,12 +155,11 @@ it.each([undefined, "first"] as const)(
         section.id,
       );
       expect(h.prefs.snapshot().data?.assignments.alpha).toBe(section.id);
-      expect(h.prefs.snapshot().data?.starred).toEqual([]);
       await flush();
       gate.reject(new Error("offline"));
       await failed;
       expect(h.prefs.snapshot().data?.sections).toHaveLength(2);
-      expect(h.prefs.snapshot().data?.starred).toEqual(["alpha"]);
+      expect(h.prefs.snapshot().data?.assignments.alpha).toBe("work");
       await h.prefs.retryMove("alpha");
       expect(
         h.assignment.mock.calls.map(([intent]) => intent.createSection?.id),
@@ -198,13 +178,13 @@ it.each(["clear", "dispose"] as const)(
   "%s clears optimistic placement/errors and rejects late repopulation",
   async (action) => {
     const h = await setup();
-    const gate = deferred<readonly string[]>();
-    h.star.mockImplementationOnce(() => gate.promise);
+    const gate = deferred<Awaited<ReturnType<typeof h.assignment>>>();
+    h.assignment.mockImplementationOnce(() => gate.promise);
     const moving = h.prefs.assign("alpha", "later");
     const failed = expect(moving).rejects.toThrow("unavailable");
     await flush();
     h.owner[action]();
-    gate.resolve([]);
+    gate.resolve({ sections: [], assignments: {} });
     await failed;
     expect(h.prefs.snapshot().data).toBeUndefined();
     expect(h.prefs.snapshot().moves).toBeUndefined();
@@ -238,7 +218,6 @@ it.each(["success", "failure"])(
       expect(h.assignment).not.toHaveBeenCalled();
       expect(h.prefs.snapshot().data).toMatchObject({
         assignments: { alpha: "later" },
-        starred: [],
         muted: [],
       });
       muteGate.resolve(["alpha"]);
@@ -246,7 +225,6 @@ it.each(["success", "failure"])(
       await moveStarted.promise;
       expect(h.prefs.snapshot().data).toMatchObject({
         assignments: { alpha: "later" },
-        starred: [],
         muted: ["alpha"],
       });
       expect(Object.isFrozen(h.prefs.snapshot().data?.muted)).toBe(true);
@@ -265,7 +243,6 @@ it.each(["success", "failure"])(
           outcome === "success"
             ? { ...before.assignments, alpha: "later" }
             : before.assignments,
-        starred: outcome === "success" ? [] : before.starred,
         muted: ["alpha"],
       });
     } finally {
@@ -283,9 +260,9 @@ it.each(["success", "failure"])(
   "Move %s cannot overwrite a later confirmed Mute",
   async (outcome) => {
     const h = await setup();
-    const gate = deferred<readonly string[]>();
+    const gate = deferred<Awaited<ReturnType<typeof h.assignment>>>();
     const started = deferred<void>();
-    h.star.mockImplementationOnce(async () => {
+    h.assignment.mockImplementationOnce(async () => {
       started.resolve();
       return gate.promise;
     });
@@ -297,8 +274,12 @@ it.each(["success", "failure"])(
       await started.promise;
       const muting = h.prefs.setMute("beta", true);
       expect(h.mute).not.toHaveBeenCalled();
-      if (outcome === "success") gate.resolve([]);
-      else gate.reject(new Error("star clear rejected"));
+      if (outcome === "success")
+        gate.resolve({
+          sections: before.sections,
+          assignments: { ...before.assignments, alpha: "later" },
+        });
+      else gate.reject(new Error("move rejected"));
       await result;
       await muting;
       expect(h.prefs.snapshot().data).toEqual({
@@ -307,11 +288,13 @@ it.each(["success", "failure"])(
           outcome === "success"
             ? { ...before.assignments, alpha: "later" }
             : before.assignments,
-        starred: outcome === "success" ? [] : before.starred,
         muted: ["beta"],
       });
     } finally {
-      gate.resolve([]);
+      gate.resolve({
+        sections: before.sections,
+        assignments: before.assignments,
+      });
       h.owner.dispose();
     }
   },
@@ -343,7 +326,6 @@ it.each(["clear", "dispose", "cancel"] as const)(
         "rejected",
       ]);
       expect(h.assignment).not.toHaveBeenCalled();
-      expect(h.star).not.toHaveBeenCalled();
       expect(h.prefs.snapshot().data).toEqual(
         action === "cancel" ? before : undefined,
       );
@@ -406,7 +388,7 @@ it.each([false, true])(
   },
 );
 
-it("creates an empty section through the queued writer without altering stars or assignments", async () => {
+it("creates an empty section through the queued writer without altering assignments", async () => {
   const h = await setup();
   const section = {
     id: "12345678-1234-1234-1234-123456789abc",
@@ -419,12 +401,11 @@ it("creates an empty section through the queued writer without altering stars or
       { createSection: section },
       expect.any(AbortSignal),
     );
-    expect(h.prefs.snapshot().data).toMatchObject({
-      assignments: { alpha: "work", beta: "work" },
-      starred: ["alpha"],
+    expect(h.prefs.snapshot().data?.assignments).toEqual({
+      alpha: "work",
+      beta: "work",
     });
     expect(h.prefs.snapshot().data?.sections.at(-1)).toMatchObject(section);
-    expect(h.star).not.toHaveBeenCalled();
   } finally {
     h.owner.dispose();
   }
@@ -517,13 +498,12 @@ it.each(["clear", "dispose"] as const)(
       read.resolve({
         sections: [{ id: "accepted", name: "Launch", order: 2 }],
         assignments: {},
-        starred: [],
         muted: [],
       });
       await result;
       expect(h.prefs.snapshot().data).toBeUndefined();
     } finally {
-      read.resolve({ sections: [], assignments: {}, starred: [], muted: [] });
+      read.resolve({ sections: [], assignments: {}, muted: [] });
       h.owner.dispose();
     }
   },

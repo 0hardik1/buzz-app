@@ -3733,7 +3733,7 @@ export function createChannelStore(
       if (!persistence?.readStartup) void discover(true, strong);
       else void restore().then(() => discover(true, strong));
     },
-    /** Background roster warm. The caller supplies preferred ids (e.g. starred);
+    /** Background roster warm. The caller supplies preferred ids;
      * the rest follow by recency of their retained head, never-fetched last. */
     warm(preferred: readonly string[]) {
       if (disposed || !transport || list.status !== "ready") return;

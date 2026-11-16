@@ -2037,14 +2037,14 @@ function ChannelWorkspace({
       <Button type="button" onClick={() => queries.channels.refreshList?.()}>
         Refresh channels
       </Button>
-      {preferences.error && <p>Saved groups and stars: {preferences.error}</p>}
+      {preferences.error && <p>Saved groups and mutes: {preferences.error}</p>}
       {preferences.status !== "unsupported" && (
         <Button
           type="button"
           disabled={preferences.status === "loading"}
           onClick={preferences.reload}
         >
-          Refresh groups and stars
+          Refresh groups and mutes
         </Button>
       )}
       {current && (

@@ -38,7 +38,6 @@ import {
   type SidebarSectionOrderMutator,
   type SidebarSectionRenameMutator,
   type SidebarSectionRemovalMutator,
-  type SidebarStarMutator,
   type SidebarDecoder,
   type SidebarMuteMutator,
   type SidebarPreferences,
@@ -181,7 +180,6 @@ export interface ReadTransport {
   readonly removeSidebarSection?: SidebarSectionRemovalMutator;
   readonly writeSidebarSectionOrder?: SidebarSectionOrderMutator;
   readonly renameSidebarSection?: SidebarSectionRenameMutator;
-  readonly writeSidebarStar?: SidebarStarMutator;
   /** The account's saved app sidebar arrangement, private to its devices.
    * `payload` is undefined and `createdAt` 0 when there is no record. */
   readRailLayout?(signal: AbortSignal): Promise<RailLayoutHead>;
@@ -559,7 +557,6 @@ export async function connectBrokerTransport(
     sidebarSectionRemoval?: boolean;
     sidebarSectionOrder?: boolean;
     sidebarSectionRename?: boolean;
-    sidebarStarWrites?: boolean;
     agentLibrary?: boolean;
     agentMemories?: boolean;
     agentLogProof?: boolean;
@@ -1023,11 +1020,8 @@ export async function connectBrokerTransport(
             });
             if (!result.ok)
               throw new Error((await readApiFailure(result)).error);
-            return projectSidebarPreferences(
-              undefined,
-              undefined,
-              await result.json(),
-            ).muted;
+            return projectSidebarPreferences(undefined, await result.json())
+              .muted;
           },
         }
       : {}),
@@ -1091,14 +1085,11 @@ export async function connectBrokerTransport(
             if (!response.ok)
               throw new Error((await readApiFailure(response)).error);
             const value = await response.json();
-            const { sections, assignments } = projectSidebarPreferences(
-              {
-                version: 1,
-                sections: value.sections,
-                assignments: value.assignments,
-              },
-              undefined,
-            );
+            const { sections, assignments } = projectSidebarPreferences({
+              version: 1,
+              sections: value.sections,
+              assignments: value.assignments,
+            });
             return { sections, assignments };
           },
         }
@@ -1119,14 +1110,11 @@ export async function connectBrokerTransport(
             if (!response.ok)
               throw new Error((await readApiFailure(response)).error);
             const value = await response.json();
-            const { sections, assignments } = projectSidebarPreferences(
-              {
-                version: 1,
-                sections: value.sections,
-                assignments: value.assignments,
-              },
-              undefined,
-            );
+            const { sections, assignments } = projectSidebarPreferences({
+              version: 1,
+              sections: value.sections,
+              assignments: value.assignments,
+            });
             return { sections, assignments };
           },
         }
@@ -1147,14 +1135,11 @@ export async function connectBrokerTransport(
             if (!response.ok)
               throw new Error((await readApiFailure(response)).error);
             const value = await response.json();
-            const { sections, assignments } = projectSidebarPreferences(
-              {
-                version: 1,
-                sections: value.sections,
-                assignments: value.assignments,
-              },
-              undefined,
-            );
+            const { sections, assignments } = projectSidebarPreferences({
+              version: 1,
+              sections: value.sections,
+              assignments: value.assignments,
+            });
             return { sections, assignments };
           },
         }
@@ -1174,35 +1159,15 @@ export async function connectBrokerTransport(
               throw new Error(failure.error);
             }
             const value = (await result.json()) as SidebarPreferences;
-            const groups = projectSidebarPreferences(
-              {
-                version: 1,
-                sections: value.sections,
-                assignments: value.assignments,
-              },
-              undefined,
-            );
+            const groups = projectSidebarPreferences({
+              version: 1,
+              sections: value.sections,
+              assignments: value.assignments,
+            });
             return {
               sections: groups.sections,
               assignments: groups.assignments,
             };
-          },
-        }
-      : {}),
-    ...(session.sidebarStarWrites
-      ? {
-          async writeSidebarStar(intent, signal) {
-            const result = await fetch(`${endpoint}/sidebar-star`, {
-              method: "POST",
-              credentials: "same-origin",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(intent),
-              signal,
-            });
-            if (!result.ok)
-              throw new Error((await readApiFailure(result)).error);
-            return projectSidebarPreferences(undefined, await result.json())
-              .starred;
           },
         }
       : {}),

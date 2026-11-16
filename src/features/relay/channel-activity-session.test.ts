@@ -59,7 +59,6 @@ function setup() {
       decodeSidebarPreferences: async () => ({
         sections: [],
         assignments: {},
-        starred: [],
         muted: [],
       }),
       subscribe(callbacks) {

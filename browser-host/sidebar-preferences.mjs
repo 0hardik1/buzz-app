@@ -60,7 +60,6 @@ export function decodeSidebarPreferences(events, secret) {
     }
     return projectSidebarPreferences(
       decoded.get("channel-sections"),
-      decoded.get("channel-stars"),
       decoded.get("channel-mutes"),
     );
   } finally {
@@ -127,7 +126,7 @@ function parseSectionsEvent(events, secret) {
     if (Buffer.byteLength(plaintext) > 128 * 1024)
       throw new Error("Sidebar plaintext budget exceeded");
     const blob = JSON.parse(plaintext);
-    projectSidebarPreferences(blob, undefined);
+    projectSidebarPreferences(blob);
     return {
       blob: projectSidebarRecord(blob),
       createdAt: event.created_at,
@@ -236,7 +235,7 @@ function prepareSections(events, secret, now, edit) {
   const viewer = getPublicKey(secret);
   const current = parseSectionsEvent(events, secret);
   const blob = edit(current);
-  const groups = projectSidebarPreferences(blob, undefined);
+  const groups = projectSidebarPreferences(blob);
   if (Buffer.byteLength(JSON.stringify(blob)) > 128 * 1024)
     throw new Error("Sidebar plaintext budget exceeded");
   if (blob === current.blob) return { groups };

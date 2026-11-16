@@ -1420,14 +1420,14 @@ async fn discovery_body_is_bounded_for_length_and_chunked_transfer() {
 async fn sidebar_ipc_only_decodes_verified_self_coordinates_and_signs_valid_payloads() {
     let host = IdentityHost::fixture();
     let payload =
-        serde_json::json!({"version":1,"channels":{"channel":{"starred":true,"updatedAt":1}}});
+        serde_json::json!({"version":1,"channels":{"channel":{"muted":true,"updatedAt":1}}});
     let event = host
-        .sign_sidebar("channel-stars".into(), payload.clone(), 1)
+        .sign_sidebar("channel-mutes".into(), payload.clone(), 1)
         .await
         .unwrap();
     verify(&event);
     assert_eq!(
-        host.decode_sidebar(vec![event.clone()]).await.unwrap()["channel-stars"],
+        host.decode_sidebar(vec![event.clone()]).await.unwrap()["channel-mutes"],
         payload
     );
     assert!(host
@@ -1445,7 +1445,14 @@ async fn sidebar_ipc_only_decodes_verified_self_coordinates_and_signs_valid_payl
         .sign_sidebar("other".into(), payload.clone(), 1)
         .await
         .is_err());
-    assert!(host.sign_sidebar("channel-stars".into(), serde_json::json!({"version":1,"channels":{"c":{"starred":"not boolean","updatedAt":1}}}), 1).await.is_err());
+    assert!(host
+        .sign_sidebar(
+            "channel-mutes".into(),
+            serde_json::json!({"version":1,"channels":{"c":{"muted":"not boolean","updatedAt":1}}}),
+            1
+        )
+        .await
+        .is_err());
     let other = IdentityHost::fixture()
         .sign_earlier_sidebar(
             "channel-sort",
@@ -1470,10 +1477,6 @@ async fn event_writer_admits_sidebar_records_and_recipes_by_their_own_coordinate
             serde_json::json!({"version":1,"sections":[{"id":"group","name":"Group","order":0}],"assignments":{"channel":"group"}}),
         ),
         (
-            "channel-stars",
-            serde_json::json!({"version":1,"channels":{"channel":{"starred":true,"updatedAt":1}}}),
-        ),
-        (
             "channel-mutes",
             serde_json::json!({"version":1,"channels":{"channel":{"muted":true,"updatedAt":1}}}),
         ),
@@ -1484,8 +1487,12 @@ async fn event_writer_admits_sidebar_records_and_recipes_by_their_own_coordinate
             .unwrap();
         admit_app_data(&host, &event, community).await.unwrap();
     }
-    // Earlier clients' sort and filter records are read, never published from here.
+    // Earlier clients' star, sort and filter records are read, never published from here.
     for (coordinate, payload) in [
+        (
+            "channel-stars",
+            serde_json::json!({"version":1,"channels":{"channel":{"starred":true,"updatedAt":1}}}),
+        ),
         (
             "channel-sort",
             serde_json::json!({"version":1,"groups":{"channels":"recent"}}),
@@ -1593,31 +1600,6 @@ async fn sidebar_signer_matches_projection_lengths_and_preserves_other_clients_e
 #[tokio::test]
 async fn sidebar_signer_supports_large_records_without_expanding_general_signing() {
     let host = IdentityHost::fixture();
-    let channels: serde_json::Map<String, serde_json::Value> = (0..500)
-        .map(|i| {
-            (
-                format!("{i:08x}-1234-1234-1234-123456789abc"),
-                serde_json::json!({"starred":true,"updatedAt":1700000000000_u64}),
-            )
-        })
-        .collect();
-    let event = host
-        .sign_sidebar(
-            "channel-stars".into(),
-            serde_json::json!({"version":1,"channels":channels}),
-            1,
-        )
-        .await
-        .unwrap();
-    verify(&event);
-    assert!(event["content"].as_str().unwrap().len() > 64 * 1024);
-    assert_eq!(
-        host.decode_sidebar(vec![event]).await.unwrap()["channel-stars"]["channels"]
-            .as_object()
-            .unwrap()
-            .len(),
-        500
-    );
     let muted: serde_json::Map<String, serde_json::Value> = (0..500)
         .map(|i| {
             (
@@ -1654,6 +1636,7 @@ async fn sidebar_signer_supports_large_records_without_expanding_general_signing
         "version":1,"sections":[{"id":"group","name":"Work","order":0}],"assignments":assignments
     }), 1).await.unwrap();
     verify(&event);
+    assert!(event["content"].as_str().unwrap().len() > 64 * 1024);
     assert_eq!(
         host.decode_sidebar(vec![event]).await.unwrap()["channel-sections"]["assignments"]
             .as_object()
@@ -1726,17 +1709,24 @@ async fn sidebar_decoder_accepts_broker_extended_length_sections_alongside_other
         .sign_sidebar("channel-sections".into(), sections.clone(), 1)
         .await
         .unwrap()];
-    for coordinate in ["channel-stars", "channel-mutes"] {
-        events.push(
-            host.sign_sidebar(
-                coordinate.into(),
-                serde_json::json!({"version":1,"channels":{}}),
-                1,
-            )
-            .await
-            .unwrap(),
-        );
-    }
+    events.push(
+        host.sign_sidebar(
+            "channel-mutes".into(),
+            serde_json::json!({"version":1,"channels":{}}),
+            1,
+        )
+        .await
+        .unwrap(),
+    );
+    events.push(
+        host.sign_earlier_sidebar(
+            "channel-stars",
+            serde_json::json!({"version":1,"channels":{}}),
+            1,
+        )
+        .await
+        .unwrap(),
+    );
     events.push(
         host.sign_earlier_sidebar(
             "channel-sort",
@@ -1775,15 +1765,17 @@ async fn sidebar_decoder_accepts_four_maximum_plaintext_records_and_bounds_total
         let overhead = serde_json::to_vec(&value).unwrap().len();
         value["future"] = serde_json::json!("x".repeat(128 * 1024 - overhead));
         assert_eq!(serde_json::to_vec(&value).unwrap().len(), 128 * 1024);
-        events.push(if coordinate == "channel-sort" {
-            host.sign_earlier_sidebar(coordinate, value, 1)
-                .await
-                .unwrap()
-        } else {
-            host.sign_sidebar(coordinate.into(), value, 1)
-                .await
-                .unwrap()
-        });
+        events.push(
+            if coordinate == "channel-sort" || coordinate == "channel-stars" {
+                host.sign_earlier_sidebar(coordinate, value, 1)
+                    .await
+                    .unwrap()
+            } else {
+                host.sign_sidebar(coordinate.into(), value, 1)
+                    .await
+                    .unwrap()
+            },
+        );
     }
     let request_len = serde_json::to_vec(&events).unwrap().len();
     assert!(request_len > 512 * 1024 && request_len < 768 * 1024);
@@ -1830,14 +1822,13 @@ async fn sidebar_decoder_loads_four_populated_bounded_coordinates() {
                 )
             })
             .collect();
-        let event = host
-            .sign_sidebar(
-                coordinate.into(),
-                serde_json::json!({"version":1,"channels":channels}),
-                1,
-            )
-            .await
-            .unwrap();
+        let payload = serde_json::json!({"version":1,"channels":channels});
+        let event = if coordinate == "channel-stars" {
+            host.sign_earlier_sidebar(coordinate, payload, 1).await
+        } else {
+            host.sign_sidebar(coordinate.into(), payload, 1).await
+        }
+        .unwrap();
         assert_eq!(
             host.decode_sidebar(vec![event.clone()]).await.unwrap()[coordinate]["channels"]
                 .as_object()
@@ -3533,7 +3524,7 @@ async fn preference_batches_reject_invalid_ciphertext_after_signature_verificati
         .as_secs();
     let sidebar = host
         .sign_sidebar(
-            "channel-stars".into(),
+            "channel-mutes".into(),
             serde_json::json!({"version":1,"channels":{}}),
             now,
         )

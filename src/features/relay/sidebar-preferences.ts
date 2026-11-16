@@ -4,7 +4,7 @@ import type { RelayEvent } from "./events.ts";
 import type { RelayReader } from "./reader.ts";
 
 /** The account's sidebar records, read as one batch. Earlier clients still
- * write sort and filter; this one ignores them. */
+ * write stars, sort and filter; this one ignores them. */
 export const SIDEBAR_COORDINATES = [
   "channel-sections",
   "channel-stars",
@@ -62,7 +62,6 @@ export type SidebarMuteMutator = (
 ) => Promise<readonly string[]>;
 export type SidebarPreferences = SidebarGroups &
   Readonly<{
-    starred: readonly string[];
     muted: readonly string[];
   }>;
 export type SidebarAssignmentIntent = Readonly<{
@@ -92,10 +91,6 @@ export type SidebarSectionCreationMutator = (
   section: Readonly<{ id: string; name: string }>,
   signal: AbortSignal,
 ) => Promise<SidebarGroups>;
-export type SidebarStarMutator = (
-  intent: Readonly<{ channelId: string; starred: boolean }>,
-  signal: AbortSignal,
-) => Promise<readonly string[]>;
 export type SidebarDecoder = (
   events: readonly RelayEvent[],
   signal: AbortSignal,
@@ -113,18 +108,15 @@ function text(value: unknown, max = 256): string {
 /** Read-only legacy projection. Never merge, migrate, or publish account preferences. */
 export function projectSidebarPreferences(
   sections: unknown,
-  stars: unknown,
   mutes?: unknown,
 ): SidebarPreferences {
   const result: {
     sections: { id: string; name: string; icon?: string; order: number }[];
     assignments: Record<string, string>;
-    starred: string[];
     muted: string[];
   } = {
     sections: [],
     assignments: {},
-    starred: [],
     muted: [],
   };
   if (sections !== undefined) {
@@ -163,24 +155,6 @@ export function projectSidebarPreferences(
         .map(([id, section]) => [text(id), text(section)])
         .filter(([, section]) => ids.has(section as string)),
     );
-  }
-  if (stars !== undefined) {
-    const data = object(stars);
-    if (data.version !== 1) throw new Error("Unsupported sidebar stars");
-    const entries = Object.entries(object(data.channels));
-    if (entries.length > 500) throw new Error("Sidebar star budget exceeded");
-    for (const [id, raw] of entries) {
-      text(id);
-      const entry = object(raw);
-      if (
-        typeof entry.starred !== "boolean" ||
-        typeof entry.updatedAt !== "number" ||
-        !Number.isFinite(entry.updatedAt) ||
-        entry.updatedAt < 0
-      )
-        throw new Error("Invalid sidebar star");
-      if (entry.starred) result.starred.push(id);
-    }
   }
   if (mutes !== undefined) {
     const data = object(mutes);

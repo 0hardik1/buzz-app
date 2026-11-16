@@ -197,7 +197,6 @@ async function setup(
         return Response.json({
           sections: [],
           assignments: {},
-          starred: [],
           muted: [],
         });
       if (url.endsWith("/sidebar-mute") && muteWrite)

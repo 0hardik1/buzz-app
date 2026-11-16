@@ -538,7 +538,7 @@ fn validate_sidebar_payload(coordinate: &str, value: &serde_json::Value) -> Resu
                 return Err(invalid());
             }
         }
-        "channel-stars" | "channel-mutes" => {
+        "channel-mutes" => {
             let channels = data
                 .get("channels")
                 .and_then(|v| v.as_object())
@@ -546,16 +546,11 @@ fn validate_sidebar_payload(coordinate: &str, value: &serde_json::Value) -> Resu
             if channels.len() > 500 {
                 return Err(invalid());
             }
-            let field = if coordinate == "channel-stars" {
-                "starred"
-            } else {
-                "muted"
-            };
             for (id, entry) in channels {
                 let entry = entry.as_object().ok_or_else(invalid)?;
                 if id.trim().is_empty()
                     || id.encode_utf16().count() > 256
-                    || !entry.get(field).is_some_and(|v| v.is_boolean())
+                    || !entry.get("muted").is_some_and(|v| v.is_boolean())
                     || !entry
                         .get("updatedAt")
                         .and_then(|v| v.as_f64())
@@ -728,7 +723,7 @@ fn project_sidebar_meta(meta: &serde_json::Value) -> serde_json::Value {
     result
 }
 
-/// Sort and filter are still read with the others; nothing signs them.
+/// Stars, sort and filter are still read with the others; nothing signs them.
 pub(crate) fn sidebar_coordinate(value: &str) -> bool {
     matches!(
         value,
