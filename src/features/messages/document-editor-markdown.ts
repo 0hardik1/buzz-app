@@ -79,6 +79,26 @@ export function documentEditorDraft(markdown: string) {
       );
     return text(raw(node), marks);
   };
+  // A descendant's source slice still includes continuation-line quote/list
+  // prefixes. Fall back at the root container so serialization cannot add them
+  // a second time. Fully supported containers keep their rich structure.
+  const supportedBlock = (node: RootContent): boolean =>
+    (node.type === "paragraph" &&
+      node.children
+        .flatMap((child) => inline(child))
+        .every(
+          (child) => !child.isText || !child.textContent.includes("\n"),
+        )) ||
+    node.type === "code" ||
+    (node.type === "blockquote" && node.children.every(supportedBlock)) ||
+    (node.type === "list" &&
+      node.children.every(
+        (item) =>
+          item.checked == null &&
+          item.children[0]?.type === "paragraph" &&
+          item.children.every(supportedBlock),
+      ) &&
+      !/^\s*[-*+]\s+\[[ xX]\]/m.test(raw(node)));
   const block = (node: RootContent): EditorNode => {
     if (node.type === "paragraph")
       return schema.nodes.paragraph.create(
@@ -97,14 +117,7 @@ export function documentEditorDraft(markdown: string) {
           ? node.children.map(block)
           : schema.nodes.paragraph.create(),
       );
-    if (
-      node.type === "list" &&
-      !node.children.some(
-        (item) =>
-          item.checked != null || item.children[0]?.type !== "paragraph",
-      ) &&
-      !/^\s*[-*+]\s+\[[ xX]\]/m.test(raw(node))
-    )
+    if (node.type === "list")
       return schema.nodes[node.ordered ? "ordered_list" : "bullet_list"].create(
         {
           ...(node.ordered ? { order: node.start ?? 1 } : {}),
@@ -119,7 +132,11 @@ export function documentEditorDraft(markdown: string) {
       );
     return schema.nodes.paragraph.create(null, text(raw(node)));
   };
-  const blocks = tree.children.map(block);
+  const blocks = tree.children.map((node) =>
+    supportedBlock(node)
+      ? block(node)
+      : schema.nodes.paragraph.create(null, text(raw(node))),
+  );
   const doc = schema.nodes.doc.create(
     null,
     blocks.length ? blocks : schema.nodes.paragraph.create(),
