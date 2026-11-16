@@ -95,6 +95,7 @@ import {
   type ConversationQuery,
 } from "../../features/conversation/conversation-index";
 import { useChannelRoster } from "../../features/relay/react";
+import { selectProfiles } from "../../features/relay/profile-selection";
 import {
   CollectionCreationAction,
   CollectionFilters,
@@ -190,10 +191,6 @@ export function RailNavigation({
   const list = useChannelRoster(session.channels);
   // Solo's chats, most recent first: the index keeps them in order.
   const soloOrder = useConversationKeys(session, soloView);
-  const profiles = useSyncExternalStore(
-    session.profiles.subscribe,
-    session.profiles.snapshot,
-  );
   const agents = useAgentChoices(session, true, true);
   const archives = useSyncExternalStore(
     session.archives.subscribe,
@@ -245,6 +242,36 @@ export function RailNavigation({
   const channelsById = useMemo(
     () => new Map(channels.map((channel) => [channel.id, channel])),
     [channels],
+  );
+  // The rail names DM participants and pinned people, so only their
+  // profiles draw it; the open picker lists everyone known. Each row's
+  // artwork follows its own people.
+  const named = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...channels.flatMap((channel) =>
+            channel.channelType === "dm" ? (channel.participants ?? []) : [],
+          ),
+          ...pins.flatMap((pin) =>
+            pin.target.kind === "person" ? [pin.target.pubkey] : [],
+          ),
+        ]),
+      ]
+        .sort()
+        .join(":"),
+    [channels, pins],
+  );
+  const shownProfiles = useMemo(
+    () =>
+      picker
+        ? session.profiles
+        : selectProfiles(session.profiles, named ? named.split(":") : []),
+    [session.profiles, picker, named],
+  );
+  const profiles = useSyncExternalStore(
+    shownProfiles.subscribe,
+    shownProfiles.snapshot,
   );
   const channelEntries = useMemo(
     (): RailEntry[] =>
@@ -454,7 +481,6 @@ export function RailNavigation({
       selected={isSelected(entry)}
       session={session}
       channelsById={channelsById}
-      profiles={profiles}
       resolveName={resolveName}
       identities={agents.identities}
       agentEntries={agentEntries}
