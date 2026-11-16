@@ -161,7 +161,14 @@ export function syncRail(session: RelaySession, scope: string, viewer: string) {
     }
   };
   const stopLocal = subscribeView(scope, (key) => {
-    if (applying || (key && key !== LAYOUT && key !== PINS && key !== TEAM))
+    // Only a write to the arrangement is a change to send. A notice that
+    // names no key, or a key that was removed, is this device forgetting
+    // what it kept, as when it leaves the community.
+    if (
+      applying ||
+      (key !== LAYOUT && key !== PINS && key !== TEAM) ||
+      viewRevision(scope, key) == null
+    )
       return;
     writeView(scope, SYNC, { ...state(), dirty: true });
     void run();

@@ -2,7 +2,12 @@
 import { beforeEach, expect, test, vi } from "vitest";
 import { RailLayoutConflict } from "../../features/relay/transport";
 import type { RelaySession } from "../../features/relay/session";
-import { readView, writeView } from "../../shared/view-state";
+import {
+  clearView,
+  clearViewScope,
+  readView,
+  writeView,
+} from "../../shared/view-state";
 import { syncRail } from "./rail-sync";
 
 const viewer = "a".repeat(64);
@@ -143,5 +148,17 @@ test("an account with nothing saved starts from its earlier sections, once", asy
     }),
   );
   expect(saved.railLayout.write).toHaveBeenCalledTimes(1);
+  stop();
+});
+
+test("forgetting what this device kept is not a change to save", async () => {
+  const saved = account(record());
+  const stop = syncRail(saved.session, scope, viewer);
+  await settled();
+  clearView(scope, "draft:a", "draft:b");
+  clearViewScope(scope);
+  await Promise.resolve();
+  expect(saved.railLayout.write).not.toHaveBeenCalled();
+  expect(saved.head().payload).toEqual(record());
   stop();
 });
