@@ -9,10 +9,10 @@ import type { RelaySession } from "../../features/relay/session";
 import type { ReadFilter } from "../../features/relay/events";
 import { MatchedLabel } from "../../features/search/MatchedLabel";
 import { termMatches } from "../../features/search/snippet";
-import { avatarMedia } from "../../shared/avatar-source";
 import { SEARCH_DEBOUNCE_MS } from "../../shared/search-debounce";
 import { formatItemTimestamp } from "../../shared/datetime";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
+import { MessageRow } from "../../features/messages/MessageRow";
 import type { SearchDestination, SearchTone } from "./SearchChoices";
 import { SEARCH_KINDS, searchText } from "./useSearchMessages";
 
@@ -261,8 +261,6 @@ export function SearchPreview({
   if (!row) return <p className="search-peek-empty">Nothing highlighted</p>;
   const message = target?.kind === "message" ? target : undefined;
   const Icon = (message ? row.detailIcon : undefined) ?? row.icon;
-  const pictureOf = (pubkey: string) =>
-    avatarMedia(profiles.get(pubkey)?.picture, session.media);
   // The hit stands in while its neighbours load, below room held for the two
   // before it, so it doesn't move when they arrive.
   const loading = !!message && !lines && !failed;
@@ -279,39 +277,84 @@ export function SearchPreview({
           },
         ].filter(readable)
       : []);
+  const lineRow = (line: Line, hit: boolean) => {
+    const text = line.text.slice(0, 1600);
+    return (
+      <MessageRow
+        row={{
+          id: line.id,
+          channelId: line.channelId,
+          authorId: line.authorId,
+          createdAt: line.createdAt,
+          content: text,
+          mentions: [],
+          attachments: [],
+          reactions: [],
+          replyCount: 0,
+          participants: [],
+        }}
+        bodyContent={
+          <div className="search-peek-text text-message">
+            <MatchedLabel
+              label={text}
+              positions={hit || !message ? termMatches(text, terms) : undefined}
+            />
+          </div>
+        }
+        profile={{
+          ...profiles.get(line.authorId),
+          name: nameOf(line.authorId, line.channelId),
+        }}
+        references={session}
+        viewer={session.viewer}
+        media={session.media}
+        onOpenLink={() => false}
+        canOpenLink={() => false}
+        day={false}
+        retry={undefined}
+        layout="thread"
+        fullWidth
+      />
+    );
+  };
   return (
     <div ref={card} className="search-peek-card">
-      <div className="search-peek-head">
-        {row.avatar && !message ? (
-          <Avatar
-            alt=""
-            fallback={row.avatar.name ?? row.label}
-            src={row.avatar.src}
-            size="default"
-            shape={row.avatar.shape}
-          />
-        ) : (
-          <span
-            className="search-peek-tile"
-            data-size="large"
-            data-tone={message ? "channel" : tone}
-            aria-hidden="true"
-          >
-            {Icon && <Icon size={18} />}
-          </span>
-        )}
-        <div className="min-w-0">
-          <div className="search-peek-title text-label">
-            {message ? (
-              whereOf(message.channelId)
-            ) : (
-              <MatchedLabel label={row.label} positions={row.matches} />
-            )}
-          </div>
-          <div className="truncate text-caption text-subtle">
-            {message ? when(message.createdAt) : row.detail}
+      <div className="search-peek-summary">
+        <div className="search-peek-head">
+          {row.avatar && !message ? (
+            <Avatar
+              alt=""
+              fallback={row.avatar.name ?? row.label}
+              src={row.avatar.src}
+              size="default"
+              shape={row.avatar.shape}
+            />
+          ) : (
+            <span
+              className="search-peek-tile"
+              data-size="large"
+              data-tone={message ? "channel" : tone}
+              aria-hidden="true"
+            >
+              {Icon && <Icon size={18} />}
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="search-peek-title truncate text-label">
+              {message ? (
+                whereOf(message.channelId)
+              ) : (
+                <MatchedLabel label={row.label} positions={row.matches} />
+              )}
+            </div>
+            <div className="truncate text-caption text-subtle">
+              {message ? when(message.createdAt) : row.detail}
+            </div>
           </div>
         </div>
+        {target?.kind === "channel" && target.about && (
+          <p className="search-peek-about text-body-sm">{target.about}</p>
+        )}
       </div>
       {!target && row.action && (
         <p className="search-peek-start m-0 text-body-sm text-subtle">
@@ -320,12 +363,6 @@ export function SearchPreview({
           </span>{" "}
           {row.action}
         </p>
-      )}
-      {target?.kind === "channel" && target.about && (
-        <p className="search-peek-about text-body-sm">{target.about}</p>
-      )}
-      {target && !message && shown.length > 0 && (
-        <div className="text-caption text-subtle">Latest</div>
       )}
       {shown.length > 0 && (
         <ol className="search-peek-lines">
@@ -340,18 +377,11 @@ export function SearchPreview({
                 data-slot=""
                 aria-hidden="true"
               >
-                <Avatar alt="" fallback="" size="small" shape="circle" />
-                <div className="min-w-0">
-                  <div className="search-peek-line-head text-caption">
-                    <span className="search-peek-author">{" "}</span>
-                  </div>
-                  <div className="search-peek-text text-body-sm">{" "}</div>
-                </div>
+                {lineRow({ ...message, id: slot, text: "\u00a0" }, false)}
               </li>
             ))}
           {shown.map((line) => {
             const hit = !!message && line.id === message.messageId;
-            const text = line.text.slice(0, 1600);
             return (
               <li
                 key={line.id}
@@ -359,34 +389,12 @@ export function SearchPreview({
                 data-hit={hit || undefined}
                 data-context={(!!message && !hit) || undefined}
               >
-                <Avatar
-                  alt=""
-                  fallback={nameOf(line.authorId, line.channelId)}
-                  src={pictureOf(line.authorId)}
-                  size="small"
-                  shape="circle"
-                />
-                <div className="min-w-0">
-                  <div className="search-peek-line-head text-caption">
-                    <span className="search-peek-author">
-                      {nameOf(line.authorId, line.channelId)}
-                    </span>
-                    {target?.kind === "person" && (
-                      <span className="truncate text-subtle">
-                        {whereOf(line.channelId)}
-                      </span>
-                    )}
-                    <time className="text-subtle">{when(line.createdAt)}</time>
+                {target?.kind === "person" && (
+                  <div className="text-caption text-subtle">
+                    {whereOf(line.channelId)}
                   </div>
-                  <div className="search-peek-text text-body-sm">
-                    <MatchedLabel
-                      label={text}
-                      positions={
-                        hit || !message ? termMatches(text, terms) : undefined
-                      }
-                    />
-                  </div>
-                </div>
+                )}
+                {lineRow(line, hit)}
               </li>
             );
           })}

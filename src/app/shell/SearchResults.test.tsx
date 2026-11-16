@@ -62,6 +62,7 @@ beforeEach(() => {
     "ResizeObserver",
     class {
       observe() {}
+      unobserve() {}
       disconnect() {}
     },
   );
@@ -6190,7 +6191,7 @@ it("lets the newest choice win over a DM that is still opening", async () => {
     ).toBeVisible();
     // Top results omits that action; the whole Messages group holds it.
     fireEvent.click(
-      await screen.findByRole("button", { name: /See all.*Messages/ }),
+      await screen.findByRole("button", { name: "Show all Messages" }),
     );
     fireEvent.click(
       await screen.findByRole("option", { name: "Show more messages" }),
@@ -7234,9 +7235,9 @@ it.each([
       expect(groups.indexOf(group)).toBeLessThan(groups.indexOf("Settings"));
       const input = screen.getByRole("combobox", { name: "Search Buzz" });
       // The group label still finds its sections, after the name match. Top
-      // results shows three of them; See all shows the rest.
+      // results shows three of them; the heading shows the rest.
       const seeAll = screen.queryByRole("button", {
-        name: /See all.*Settings/,
+        name: "Show all Settings",
       });
       if (seeAll) fireEvent.click(seeAll);
       expect(

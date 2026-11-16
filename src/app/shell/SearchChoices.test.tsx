@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ChatCircleIcon } from "../../shared/design-system/icons";
@@ -341,7 +347,7 @@ it("draws a long group Peek shows whole near the view, keeping the highlighted r
       ]}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: /^Channels/ }));
+  fireEvent.click(screen.getByRole("tab", { name: /^Channels/ }));
   const field = screen.getByRole("combobox");
   for (let press = 0; press < 80; press++)
     fireEvent.keyDown(field, { key: "ArrowDown" });
@@ -355,4 +361,27 @@ it("draws a long group Peek shows whole near the view, keeping the highlighted r
   expect(highlighted).toHaveTextContent("channel-80");
   expect(highlighted).toHaveAttribute("aria-posinset", "81");
   expect(highlighted).toHaveAttribute("aria-setsize", "120");
+});
+
+it("opens the whole result group from its header while keeping typing focus", () => {
+  render(
+    <SearchChoices
+      query="channel"
+      onQueryChange={() => {}}
+      input={createRef<HTMLInputElement>()}
+      groups={[{ label: "Channels", destinations: destinations.slice(0, 6) }]}
+      peek={{ ranked: true, preview: () => null }}
+    />,
+  );
+  const field = screen.getByRole("combobox");
+  field.focus();
+  expect(screen.getAllByRole("option")).toHaveLength(5);
+  const header = within(
+    screen.getByRole("group", { name: "Channels" }),
+  ).getByRole("heading");
+  fireEvent.click(
+    within(header).getByRole("button", { name: "Show all Channels" }),
+  );
+  expect(screen.getAllByRole("option")).toHaveLength(6);
+  expect(field).toHaveFocus();
 });
