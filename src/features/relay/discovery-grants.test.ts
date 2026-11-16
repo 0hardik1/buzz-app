@@ -107,22 +107,16 @@ it("ends access on a confirmed denial, and on release without denying", () => {
   expect(forgotten.get(id)?.viewerRole).toBeUndefined();
 });
 
-it("leaves the viewer's other access as it was when a hold ends", () => {
+it("leaves a suspended preview suspended when a hold ends", () => {
   const publicId = "00000000-0000-8000-8000-00000000000b";
   const state = new DiscoveryState(viewer.pubkey, relay.pubkey);
   state.accept(metadata(relay, publicId, "Open", 1, [["public"]]));
-  state.accept(conversation());
-  state.accept(roster("member", 2));
   state.retain(new Set(), new Map());
-  // A revoked public preview, and a member the relay then refused.
   expect(state.suspend(publicId)).toBe(true);
-  state.deny(id);
-  for (const held of [publicId, id]) {
-    state.hold(held, { post: true, joined: false, role: "member" });
-    expect(state.canAccess(held)).toBe(true);
-    state.release(held);
-    expect(state.canAccess(held)).toBe(false);
-  }
+  state.hold(publicId, { post: true, joined: false, role: "member" });
+  expect(state.canAccess(publicId)).toBe(true);
+  state.release(publicId);
+  expect(state.canAccess(publicId)).toBe(false);
 });
 
 it("never lists an artifact conversation, even for a member", () => {
@@ -130,4 +124,35 @@ it("never lists an artifact conversation, even for a member", () => {
   state.accept(roster("member", 2));
   expect(state.get(id)).toMatchObject({ channelType: "artifact" });
   expect(state.channels()).toEqual([]);
+});
+
+// Dana is removed from #launch; the relay's "ask again" reaches her before
+// her updated membership does.
+it("keeps Dana's confirmed removal from #launch after she closes it", () => {
+  const state = new DiscoveryState(viewer.pubkey, relay.pubkey);
+  state.accept(metadata(relay, id, "launch", 1, [["private"]]));
+  state.accept(roster("member", 2));
+  state.retain(new Set(), new Map());
+  expect(state.channels().map((channel) => channel.name)).toEqual(["launch"]);
+  expect(state.canAccess(id)).toBe(true);
+  state.hold(id, { post: true, joined: true, role: "member" });
+  state.deny(id);
+  state.release(id);
+  // Not because time passed or the view closed: the stale roster can't
+  // bring it back.
+  expect(state.canAccess(id)).toBe(false);
+  expect(state.get(id)).toBeUndefined();
+  expect(state.channels()).toEqual([]);
+  // Newer membership is newer evidence.
+  state.accept(roster("member", 3));
+  expect(state.channels().map((channel) => channel.name)).toEqual(["launch"]);
+});
+
+it("lets a fresh relay answer end an earlier denial", () => {
+  const state = known();
+  state.accept(roster("member", 2));
+  state.deny(id);
+  state.hold(id, { post: false, joined: true, role: "guest" });
+  state.release(id);
+  expect(state.canAccess(id)).toBe(true);
 });

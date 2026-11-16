@@ -211,17 +211,20 @@ export class DiscoveryState {
     // A read can race the chat's own creation; only abandon() or a signed
     // roster ends a start.
     if (this.undecided(id)) return;
-    if (this.held.has(id)) {
-      this.hold(id, null);
-      return;
-    }
+    // A confirmed denial outlasts a hold: released, the conversation stays
+    // denied until fresh evidence, never readable again from older records.
+    const held = this.held.get(id);
+    this.held.delete(id);
     // A relay denial outranks an omission that a later read could undo.
     this.absent.delete(id);
-    if (!this.canAccess(id) && !this.suspended.has(id)) return;
-    this.accessRevision++;
-    this.suspended.delete(id);
-    this.confirmedPreviews.delete(id);
-    this.denied.add(id);
+    const readable = this.canAccess(id) || this.suspended.has(id);
+    if (readable) {
+      this.suspended.delete(id);
+      this.confirmedPreviews.delete(id);
+      this.denied.add(id);
+    }
+    if (held !== undefined) this.held.set(id, null);
+    if (readable || held) this.accessRevision++;
   }
   /** A CLOSED preview is unreadable pending fresh evidence, not permanently denied. */
   suspend(id: string): boolean {
@@ -239,6 +242,8 @@ export class DiscoveryState {
   hold(id: string, access: ChannelAccess | null): boolean {
     const readable = this.canAccess(id);
     const previous = this.held.get(id);
+    // The relay's fresh answer is newer evidence than an earlier denial.
+    if (access) this.denied.delete(id);
     this.held.set(id, access);
     if (readable && !access) this.accessRevision++;
     return (
