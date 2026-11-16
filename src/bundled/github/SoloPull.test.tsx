@@ -62,11 +62,13 @@ it("stands in for the chat icon with the pull request's state, in words too", ()
   const icon = container.querySelector("[data-tone]");
   expect(icon).toHaveAttribute("data-tone", "failure");
   // Hovering says it too; the dot marks checks on a still-open icon.
-  expect(icon).toHaveAttribute(
+  // Only on the hidden glyph, so a screen reader hears the words once.
+  expect(icon?.querySelector('[aria-hidden="true"][title]')).toHaveAttribute(
     "title",
     "Pull request, open, checks failing, conflicts",
   );
-  expect(icon?.querySelector("svg + [aria-hidden]")).toBeInTheDocument();
+  expect(icon).not.toHaveAttribute("title");
+  expect(icon?.querySelector("svg + span")).toBeInTheDocument();
   for (const [state, words, tone] of [
     [{ state: "merged" }, "Pull request, merged:", "merged"],
     [
@@ -89,7 +91,7 @@ it("stands in for the chat icon with the pull request's state, in words too", ()
       tone,
     );
     expect(
-      container.querySelector("[data-tone] > svg + [aria-hidden]"),
+      container.querySelector("[data-tone] svg + span"),
     ).not.toBeInTheDocument();
   }
   rerender(<SoloPullIcon pulls={pulls} channelId={team} fallback="bubble" />);
