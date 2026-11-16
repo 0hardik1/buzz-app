@@ -3,6 +3,7 @@ import {
   channelAccessCapability,
   channelAccessRequest,
   createChannelAccessReader,
+  isBanned,
   parseChannelAccess,
 } from "./channel-access";
 import { readErrorKind } from "./errors";
@@ -60,8 +61,55 @@ describe("channel access answer", () => {
       [{ id: a, read: true, post: "yes", joined: true, role: "member" }],
       [{ id: a, read: true, post: true, joined: true, role: "bot" }],
       [{ id: a, read: true, post: true, joined: false, role: "guest" }],
+      [
+        {
+          ...{ id: a, read: true, post: true, joined: true, role: "member" },
+          timed_out_until: 1_900_000_000,
+        },
+      ],
+      [
+        {
+          ...{ id: a, read: true, post: false, joined: true, role: "member" },
+          timed_out_until: "soon",
+        },
+      ],
     ])
       expect(() => parseChannelAccess(body, [a, b])).toThrow();
+  });
+
+  it("carries a timeout's end, so the app knows when to ask again", () => {
+    const answer = parseChannelAccess(
+      [
+        {
+          ...{ id: a, read: true, post: false, joined: true, role: "member" },
+          timed_out_until: 1_900_000_000,
+        },
+      ],
+      [a],
+    );
+    expect(answer.get(a)).toEqual({
+      post: false,
+      joined: true,
+      role: "member",
+      until: 1_900_000_000,
+    });
+  });
+
+  it("takes the relay's refusal of a banned viewer as a denial", async () => {
+    const read = createChannelAccessReader(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: "blocked: you are banned from this community",
+          }),
+          { status: 403 },
+        ),
+    );
+    const error = await read([a], new AbortController().signal).catch(
+      (failure: unknown) => failure,
+    );
+    expect(isBanned(error)).toBe(true);
+    expect(readErrorKind(error)).toBe("denied");
   });
 
   it("treats a failed request as couldn't check, never as denial", async () => {

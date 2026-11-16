@@ -1,5 +1,10 @@
 import { afterEach, expect, it, vi } from "vitest";
-import type { ChannelAccess, ChannelAccessAnswer } from "./channel-access";
+import {
+  BANNED,
+  type ChannelAccess,
+  type ChannelAccessAnswer,
+} from "./channel-access";
+import { ReadError } from "./errors";
 import { type LiveCallbacks, subscribeRelayTraffic } from "./live";
 import { createRelaySession } from "./session";
 import type { RelayEvent } from "./events";
@@ -209,6 +214,28 @@ async function setup() {
       }),
     ]);
   };
+  /** The relay's "ask again" about the viewer's own access. */
+  const personal = async () => {
+    const subscription = socket
+      .requests()
+      .filter((request) =>
+        (request.slice(2) as { kinds: number[] }[]).some((filter) =>
+          filter.kinds.includes(20005),
+        ),
+      )
+      .at(-1);
+    expect(subscription).toBeDefined();
+    await socket.receive([
+      "EVENT",
+      subscription?.[1],
+      signed(relay, {
+        kind: 20005,
+        content: "",
+        created_at: 1_700_000_300,
+        tags: [["p", viewer.pubkey]],
+      }),
+    ]);
+  };
   const rows = () =>
     owner.session.channels
       .window(conversation)
@@ -223,6 +250,7 @@ async function setup() {
     named,
     open,
     hint,
+    personal,
     rows,
     answer,
     publishes,
@@ -525,6 +553,69 @@ it("stays hidden after a failed recheck until the relay itself answers", async (
     expect(() =>
       h.owner.session.messages.send(conversation, "Too soon"),
     ).toThrow();
+  } finally {
+    h.owner.dispose();
+  }
+});
+
+const timedOut = (until: number): ChannelAccess => ({
+  post: false,
+  joined: false,
+  role: "member",
+  until,
+});
+
+it("gives posting back when a timeout ends, with no push", async () => {
+  const h = await setup();
+  try {
+    const handle = h.owner.session.channels.reach?.(conversation);
+    (await h.ask()).answer(timedOut(Math.floor(Date.now() / 1000) + 60));
+    await h.named();
+    expect(handle?.snapshot()).toMatchObject({ status: "open", post: false });
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(h.asks).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    (await h.ask()).answer(member);
+    await h.named();
+    expect(handle?.snapshot()).toMatchObject({ status: "open", post: true });
+  } finally {
+    h.owner.dispose();
+  }
+});
+
+it("asks again about every held conversation when the viewer's own access changes", async () => {
+  const h = await setup();
+  try {
+    const handle = h.owner.session.channels.reach?.(conversation);
+    (await h.ask()).answer(member);
+    await h.named();
+    await h.open();
+    // A timeout starts.
+    await h.personal();
+    (await h.ask()).answer(timedOut(Math.floor(Date.now() / 1000) + 3600));
+    await h.named();
+    expect(handle?.snapshot()).toMatchObject({ status: "open", post: false });
+    // It is lifted early.
+    await h.personal();
+    (await h.ask()).answer(member);
+    await h.named();
+    expect(handle?.snapshot()).toMatchObject({ status: "open", post: true });
+    expect(h.rows()).toEqual(["First comment"]);
+  } finally {
+    h.owner.dispose();
+  }
+});
+
+it("says a banned viewer is banned, not that the check failed", async () => {
+  const h = await setup();
+  try {
+    const handle = h.owner.session.channels.reach?.(conversation);
+    (await h.ask()).fail(new ReadError("denied", BANNED, 403));
+    await settle();
+    expect(handle?.snapshot()).toEqual({
+      status: "unavailable",
+      reason: "banned",
+    });
   } finally {
     h.owner.dispose();
   }

@@ -5,7 +5,10 @@ import {
   type VerifiedProfileSink,
 } from "./verified-profile.ts";
 import { getLogger } from "../developer/logging.ts";
-import { ACCESS_CHANGED_KIND } from "./channel-access.ts";
+import {
+  ACCESS_CHANGED_KIND,
+  VIEWER_ACCESS_CHANGED_KIND,
+} from "./channel-access.ts";
 import { CHANNEL_KINDS } from "./channel-kinds.ts";
 import { logSocketFrame, relayLabel } from "../developer/traffic.ts";
 
@@ -1339,6 +1342,8 @@ export function subscribeRelayTraffic(
                   // NIP-CL: the relay sends a system channel's notices only
                   // to a filter that asks for them with #t.
                   { kinds: [44100, 44101], "#p": [viewer], "#t": ["system"] },
+                  // The relay's "ask again" about the viewer's own access.
+                  { kinds: [VIEWER_ACCESS_CHANGED_KIND], "#p": [viewer] },
                 ];
       send([
         "REQ",

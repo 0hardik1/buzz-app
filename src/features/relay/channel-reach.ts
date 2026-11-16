@@ -6,7 +6,11 @@
 // Each view holds its own handle; the last release forgets the grant. Reading
 // and posting then use the session's ordinary windows, threads and messages,
 // which the grant admits through the one discovery access check.
-import type { ChannelAccess, ChannelAccessAnswer } from "./channel-access";
+import {
+  type ChannelAccess,
+  type ChannelAccessAnswer,
+  isBanned,
+} from "./channel-access";
 import { readErrorKind } from "./errors";
 
 export type ChannelReachState =
@@ -15,8 +19,12 @@ export type ChannelReachState =
   | Readonly<{ status: "open"; post: boolean; joined: boolean }>
   /** `unavailable`: the relay's complete answer left it out. Private, deleted
    * and never-existed look the same. `failed`: the relay could not be asked
-   * or did not answer; content and posting wait, and `retry` may help. */
-  | Readonly<{ status: "unavailable"; reason: "unavailable" | "failed" }>;
+   * or did not answer; content and posting wait, and `retry` may help.
+   * `banned`: the relay refused the viewer outright; asking again won't help. */
+  | Readonly<{
+      status: "unavailable";
+      reason: "unavailable" | "failed" | "banned";
+    }>;
 
 export type ChannelReach = Readonly<{
   snapshot(): ChannelReachState;
@@ -53,10 +61,12 @@ export type ChannelReachHost = {
   signal: AbortSignal;
 };
 
-type Result = "loading" | "open" | "unavailable" | "failed";
+type Result = "loading" | "open" | "unavailable" | "failed" | "banned";
 type Record = {
   holders: number;
   result: Result;
+  /** When a timeout in the relay's answer ends (Unix seconds). */
+  until?: number | undefined;
   checking?: AbortController | undefined;
   again: boolean;
   listeners: Set<() => void>;
@@ -72,13 +82,44 @@ const failed: ChannelReachState = Object.freeze({
   status: "unavailable",
   reason: "failed",
 });
+const banned: ChannelReachState = Object.freeze({
+  status: "unavailable",
+  reason: "banned",
+});
+/** The longest delay a timer can hold; a later end is waited for in steps. */
+const LONGEST_WAIT = 2 ** 31 - 1;
 
 export function createChannelReach(host: ChannelReachHost) {
   const records = new Map<string, Record>();
+  // One timer for the session: the earliest timeout end among held answers.
+  // The relay sends nothing when a timeout runs out, so the app asks again.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  function schedule() {
+    clearTimeout(timer);
+    timer = undefined;
+    let next = Infinity;
+    for (const record of records.values())
+      if (record.until !== undefined) next = Math.min(next, record.until);
+    if (next === Infinity || host.signal.aborted) return;
+    timer = setTimeout(
+      () => {
+        timer = undefined;
+        const now = Date.now() / 1000;
+        for (const [id, record] of records)
+          if (record.until !== undefined && record.until <= now) {
+            record.until = undefined;
+            void check(id);
+          }
+        schedule();
+      },
+      Math.min(LONGEST_WAIT, Math.max(0, next * 1000 - Date.now())),
+    );
+  }
 
   function project(id: string, record: Record): ChannelReachState {
     if (record.result === "loading") return loading;
     if (record.result === "failed") return failed;
+    if (record.result === "banned") return banned;
     if (record.result === "unavailable") return unavailable;
     // Any other confirmed denial (a revoked live route, a refused read) also
     // reaches the shared check; it outranks the answer this handle last saw.
@@ -113,7 +154,7 @@ export function createChannelReach(host: ChannelReachHost) {
 
   type Outcome =
     | { result: "open"; access?: ChannelAccess }
-    | { result: "unavailable" | "failed"; access?: undefined };
+    | { result: "unavailable" | "failed" | "banned"; access?: undefined };
   const readOnly: ChannelAccess = Object.freeze({ post: false, joined: false });
 
   /** Asks without changing anything, so a newer question can discard it. */
@@ -135,6 +176,7 @@ export function createChannelReach(host: ChannelReachHost) {
     } catch (error) {
       signal.throwIfAborted();
       // Couldn't check is never a denial: it waits, and stays retryable.
+      if (isBanned(error)) return { result: "banned" };
       return readErrorKind(error) === "denied"
         ? { result: "unavailable" }
         : { result: "failed" };
@@ -167,7 +209,10 @@ export function createChannelReach(host: ChannelReachHost) {
     if (records.get(id) !== record) return;
     // The result first, so the change it causes is read against it.
     record.result = outcome.result;
-    if (outcome.result === "unavailable") host.deny(id);
+    record.until = outcome.access?.until;
+    schedule();
+    if (outcome.result === "unavailable" || outcome.result === "banned")
+      host.deny(id);
     else if (outcome.result === "failed") host.suspend([id]);
     else if (outcome.access) host.grant(id, outcome.access);
     else host.forget(id);
@@ -216,6 +261,7 @@ export function createChannelReach(host: ChannelReachHost) {
           if (--held.holders > 0) return;
           held.checking?.abort();
           records.delete(id);
+          schedule();
           host.forget(id);
         },
       });
@@ -223,7 +269,11 @@ export function createChannelReach(host: ChannelReachHost) {
     /** Held and not confirmed unavailable: its sends are this owner's. */
     holds(id: string) {
       const record = records.get(id);
-      return !!record && record.result !== "unavailable";
+      return (
+        !!record &&
+        record.result !== "unavailable" &&
+        record.result !== "banned"
+      );
     },
     /** Asks again about held channels: the relay said access changed, the
      * connection came back, a live route closed, or a post was refused. */
@@ -243,6 +293,7 @@ export function createChannelReach(host: ChannelReachHost) {
     },
     dispose() {
       stopHost();
+      clearTimeout(timer);
       for (const record of records.values()) record.checking?.abort();
       records.clear();
     },

@@ -1,4 +1,7 @@
-import { ACCESS_CHANGED_KIND } from "./channel-access";
+import {
+  ACCESS_CHANGED_KIND,
+  VIEWER_ACCESS_CHANGED_KIND,
+} from "./channel-access";
 import { createChannelReach } from "./channel-reach";
 import type { LocalAgentSource } from "../agents/local-activity";
 // FOUNDATION: One relay session owns reads, local intent, delivery and shared views.
@@ -910,7 +913,22 @@ export function createRelaySession(
       channels.acceptDiscovery(events);
     // The relay's "ask again" about who may read or post: a hint, never
     // access itself, so only the held channels it names are rechecked.
-    if (channelTraffic && transport)
+    // The viewer's own restriction changed (a timeout or ban): every held
+    // channel's answer may have.
+    if (
+      channelTraffic &&
+      transport &&
+      events.some(
+        (event) =>
+          event.kind === VIEWER_ACCESS_CHANGED_KIND &&
+          event.pubkey === transport.relayAuthor &&
+          event.tags.some(
+            ([name, value]) => name === "p" && value === transport.viewer,
+          ),
+      )
+    )
+      reach?.recheck();
+    else if (channelTraffic && transport)
       reach?.recheck(
         events.flatMap((event) => {
           const id =
@@ -929,6 +947,7 @@ export function createRelaySession(
           event.kind !== OBSERVER_KIND &&
           event.kind !== 20002 &&
           event.kind !== ACCESS_CHANGED_KIND &&
+          event.kind !== VIEWER_ACCESS_CHANGED_KIND &&
           event.kind !== PRODUCT_FEEDBACK_KIND,
       )
       .filter(visibility(events, true));
