@@ -5,7 +5,7 @@ import {
   type VerifiedProfileSink,
 } from "./verified-profile.ts";
 import { getLogger } from "../developer/logging.ts";
-import { ACCESS_CHANGED_KIND } from "./channel-access";
+import { ACCESS_CHANGED_KIND } from "./channel-access.ts";
 import { CHANNEL_KINDS } from "./channel-kinds.ts";
 import { logSocketFrame, relayLabel } from "../developer/traffic.ts";
 

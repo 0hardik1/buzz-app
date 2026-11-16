@@ -2,7 +2,7 @@
 // (`buzz-channel-access`): one entry per readable channel, from the same
 // decision the relay makes on every read and post. It is a snapshot; the
 // relay still checks every post.
-import { ReadError } from "./errors";
+import { ReadError } from "./errors.ts";
 
 /** Relay NIP-11 `supported_extensions` entry for the access answer. */
 export const CHANNEL_ACCESS_EXTENSION = "buzz-channel-access";
