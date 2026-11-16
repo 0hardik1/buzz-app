@@ -30,7 +30,7 @@ const discoveryIdentity = (source: PluginInfo["updateSource"], pinned = true) =>
           source.repository,
           source.reference,
           source.path,
-          pinned ? source.commit : undefined,
+          pinned ? source.commit?.toLowerCase() : undefined,
         ]
       : source,
   );
@@ -49,8 +49,11 @@ export function pluginUpdateCheck(
   const result = snapshot[plugin.manifest.id];
   return samePluginRelease(result?.installedRelease, plugin) &&
     result?.source === identity(plugin) &&
-    (discoverySource === undefined ||
-      result.discoverySource === discoveryIdentity(discoverySource))
+    result.discoverySource ===
+      discoveryIdentity(
+        discoverySource ?? plugin.updateSource,
+        discoverySource !== undefined,
+      )
     ? result
     : undefined;
 }
