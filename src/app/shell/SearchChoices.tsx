@@ -332,16 +332,17 @@ export function SearchChoices({
   // Peek turned off (a filter such as `in:` added) lets it go too.
   if (peekScope && (!peek?.ranked || (!chosen && !awaited)))
     setPeekScope(undefined);
-  const landing =
+  const held =
     peek?.ranked && peekScope && !chosen && awaited
-      ? {
-          ...(merged.find((group) => group.label === peekScope) ?? {
-            label: peekScope,
-            destinations: [],
-          }),
-          empty: peek.unsearched?.[peekScope],
-        }
+      ? (merged.find((group) => group.label === peekScope) ?? {
+          label: peekScope,
+          destinations: [],
+        })
       : undefined;
+  const landing = held && {
+    ...held,
+    empty: held.empty ?? peek?.unsearched?.[held.label],
+  };
   const scoped = chosen ?? landing;
   const tabs = landing ? [...ranked, landing] : ranked;
   const countOf = (group: SearchGroup) =>
