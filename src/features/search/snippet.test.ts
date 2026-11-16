@@ -32,3 +32,11 @@ it("highlights where the match is when lowercasing lengthens earlier text", () =
   const text = "İİ remote";
   expect(marked(text, termMatches(text, ["remote"]))).toBe("remote");
 });
+
+it.each(["ΟΔΟΣ", "οδος"])(
+  "highlights a word ending in a capital sigma when searching %s",
+  (query) => {
+    const text = "ΟΔΟΣ τώρα";
+    expect(marked(text, termMatches(text, searchTerms(query)))).toBe("ΟΔΟΣ");
+  },
+);

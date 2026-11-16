@@ -1586,3 +1586,25 @@ it("keeps an empty search's place only while unread does not lead it", async () 
     await t.dispose();
   }
 });
+
+it("goes back to Top results on Escape from a clicked group tab, and closes on the next", async () => {
+  const t = memorySearch();
+  try {
+    await t.open();
+    await userEvent.type(t.field(), "design");
+    const shown = () => screen.getByRole("tab", { selected: true });
+    await userEvent.click(
+      await screen.findByRole("tab", { name: /^Channels/ }),
+    );
+    expect(shown()).toHaveAccessibleName(/^Channels/);
+    expect(shown()).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Search Buzz" })).toBeVisible();
+    expect(shown()).toHaveAccessibleName(/^Top results/);
+    expect(t.field()).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    await t.closed();
+  } finally {
+    await t.dispose();
+  }
+});

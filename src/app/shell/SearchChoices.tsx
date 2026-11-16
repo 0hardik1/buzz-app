@@ -841,7 +841,18 @@ export function SearchChoices({
       </div>
       <div className={peek?.ranked ? "search-peek-workspace" : "contents"}>
         {peek?.ranked && ranked.length > 0 && (
-          <div className="search-peek-rail">
+          // Escape from one group returns to Top results, from a group tab
+          // as from the field, not out of search.
+          // biome-ignore lint/a11y/noStaticElementInteractions: Handles keys bubbling from its tabs.
+          <div
+            className="search-peek-rail"
+            onKeyDown={(event) => {
+              if (event.key !== "Escape" || !scoped) return;
+              event.preventDefault();
+              event.stopPropagation();
+              showScope(undefined);
+            }}
+          >
             <Tabs
               variant="panel"
               label="Result groups"
