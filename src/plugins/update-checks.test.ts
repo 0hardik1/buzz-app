@@ -405,3 +405,48 @@ it("rejects a late observed result when only the installed publisher changes", (
     repaired,
   );
 });
+
+it.each([false, true])(
+  "bounds folder reads independently of Git and drains after failure=%s",
+  async (fail) => {
+    const finishes: Array<(failed?: boolean) => void> = [];
+    const checkFolder = vi.fn(
+      () =>
+        new Promise((resolve, reject) => {
+          finishes.push((failed) =>
+            failed
+              ? reject(new Error("folder unavailable"))
+              : resolve({ revision: "new" }),
+          );
+        }),
+    );
+    const checkGit = vi.fn(async () => preview("new"));
+    const checks = createPluginUpdateChecks({
+      checkFolder,
+      checkGit,
+    } as unknown as PluginImports);
+    const folders = [0, 1, 2, 3].map((index) => ({
+      ...plugin(`folder.${index}`),
+      updateSource: { root: "/plugins", path: `${index}` },
+    }));
+    const reads = folders.map((item) => checks.check(item));
+    try {
+      await checks.check(plugin());
+      expect(checkGit).toHaveBeenCalledOnce();
+      expect(checkFolder).toHaveBeenCalledTimes(2);
+      finishes[0]?.(fail);
+      await vi.waitFor(() => expect(checkFolder).toHaveBeenCalledTimes(3));
+      finishes[1]?.();
+      await vi.waitFor(() => expect(checkFolder).toHaveBeenCalledTimes(4));
+      finishes[2]?.();
+      finishes[3]?.();
+      await Promise.all(reads);
+      expect(pluginUpdateCheck(checks.snapshot(), folders[0])?.error).toBe(
+        fail ? "Error: folder unavailable" : null,
+      );
+    } finally {
+      for (const finish of finishes) finish();
+      await Promise.all(reads);
+    }
+  },
+);
