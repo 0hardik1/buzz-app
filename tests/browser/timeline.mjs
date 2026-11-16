@@ -1,5 +1,4 @@
 import { expect } from "@playwright/test";
-import { openPage } from "./navigation.mjs";
 const rowSelector = "[data-message-id]";
 const history = (page) =>
   page.getByRole("region", { name: "Channel message history" });
@@ -206,7 +205,9 @@ export async function end(page) {
 }
 export async function open(page, app) {
   await page.goto(app.origin);
-  await openPage(page, "Messages");
+  // The tab, not search: a search result's preview would read Alpha early,
+  // and these journeys start from its cold timeline.
+  await page.getByRole("tab", { name: "Messages", exact: true }).click();
   await composer(page, "Alpha").waitFor();
   await expect(history(page).locator(rowSelector).first()).toBeVisible();
   await settle(page);
