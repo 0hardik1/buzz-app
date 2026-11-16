@@ -257,6 +257,32 @@ function mount(bottom = false, revealOnMount = false, anchorLoaded = true) {
   };
 }
 
+it("shows dates only for populated days through empty windows and history prepends", () => {
+  const h = boundaryFixture();
+  const mounted = render(h.tree("c", []));
+  const days = () =>
+    [...mounted.container.querySelectorAll<HTMLElement>("[data-day]")].map(
+      (node) => node.dataset.day,
+    );
+  expect(days()).toEqual([]);
+
+  const at = (day: number) => new Date(2026, 10, day, 12).getTime() / 1000;
+  const first = h.row(message(h.peer, "c", "First populated day", at(13)));
+  const latest = h.row(message(h.peer, "c", "Latest populated day", at(16)));
+  mounted.rerender(h.tree("c", [first, latest], true));
+  expect(days()).toEqual(["2026-11-13", "2026-11-16"]);
+  expect(screen.getByText("First populated day")).toBeTruthy();
+  expect(screen.getByText("Latest populated day")).toBeTruthy();
+
+  const older = h.row(message(h.peer, "c", "Earlier on the same day", at(13) - 60));
+  const oldest = h.row(message(h.peer, "c", "Older populated day", at(10)));
+  mounted.rerender(h.tree("c", [oldest, older, first, latest]));
+  expect(days()).toEqual(["2026-11-10", "2026-11-13", "2026-11-16"]);
+
+  mounted.rerender(h.tree("c", []));
+  expect(days()).toEqual([]);
+});
+
 /** `reading`: this list's own dwell can mark rows read, as the real store would. */
 type HeadReadState = "pending" | "verified" | "deferred" | "error";
 function boundaryFixture({ reading = false } = {}) {
