@@ -6,6 +6,7 @@ import { uuidv5 } from "../../features/agents/agent-config-artifacts";
 import type { ReadFilter } from "../../features/relay/events";
 import { createRelaySession } from "../../features/relay/session";
 import { keypair } from "../../features/relay/testing";
+import { PublishRejected } from "../../features/relay/outbox";
 import type { GitHubCli } from "./gh";
 import { createPullStates, PULL_REFRESH_MS } from "./pull-states";
 import {
@@ -265,6 +266,15 @@ it("shows a state the shared store moved to while the chat was not shown", async
   stopOther();
 });
 
+it("prefers a forked head that links pull requests over an empty one", async () => {
+  const relay = session([revision(chat, []), revision(chat, [second])]);
+  const pulls = pullsOver(relay.session);
+  pulls.watch(chat, () => {});
+  await vi.waitFor(() =>
+    expect(pulls.get(chat)?.map((item) => item.url)).toEqual([second]),
+  );
+});
+
 it("reads links within the session reader's limit, only the link artifacts", async () => {
   const query = vi.fn(async (_filters: readonly ReadFilter[]) => []);
   const owner = createRelaySession({
@@ -399,12 +409,20 @@ it("applies this app's changes to one chat in turn, keeping each", async () => {
 });
 
 it("reads the head again once when another device saved first", async () => {
+  const third = "https://github.com/block/buzz/pull/10";
   const relay = session([revision(chat, pull)]);
+  // The other device's revision is what the second read finds.
+  relay.snapshotRead
+    .mockResolvedValueOnce([revision(chat, pull)])
+    .mockResolvedValueOnce([revision(chat, [pull, third])]);
   relay.publish
-    .mockRejectedValueOnce(new Error("conflict: stale revision"))
+    .mockRejectedValueOnce(
+      new PublishRejected("Not saved", "conflict: stale revision"),
+    )
     .mockResolvedValue("");
   expect(await writeLinks(relay.session, chat, linkPull(second))).toEqual([
     pull,
+    third,
     second,
   ]);
   expect(relay.snapshotRead).toHaveBeenCalledTimes(2);

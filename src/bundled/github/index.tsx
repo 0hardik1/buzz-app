@@ -176,11 +176,19 @@ export const apply: PluginModule["apply"] = (ctx) => {
           description:
             "Unlink url instead, or every linked pull request without one",
         },
+        replace: {
+          type: "boolean",
+          description:
+            "Link url in place of every pull request linked now, such as when the work moved to a new one",
+        },
       },
       additionalProperties: false,
     },
     async call(client, context, args) {
       const unlink = args.unlink === true;
+      const replace = args.replace === true;
+      if (unlink && replace)
+        throw new Error("unlink and replace cannot be combined");
       const url =
         typeof args.url === "string" ? parseGitHubReference(args.url) : null;
       if (
@@ -204,6 +212,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
       let was: readonly string[] = [];
       const urls = await writeLinks(session, channel, (current) => {
         was = current;
+        if (replace) return [link as string];
         return (unlink ? unlinkPull(link) : linkPull(link as string))(current);
       });
       pullsFor(session).linked(channel, urls);
@@ -213,6 +222,12 @@ export const apply: PluginModule["apply"] = (ctx) => {
         pullsFor(shown.session).linked(channel, urls);
       const others = urls.filter((item) => item !== link);
       const rest = others.length ? ` Still linked: ${others.join(", ")}.` : "";
+      if (replace) {
+        const gone = was.filter((item) => item !== link);
+        return `Linked ${link}. The sidebar shows its state for this chat.${
+          gone.length ? ` Unlinked: ${gone.join(", ")}.` : ""
+        }`;
+      }
       if (!unlink)
         return `Linked ${link}. The sidebar shows its state for this chat.${rest}`;
       if (!link)

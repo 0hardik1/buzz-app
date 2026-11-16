@@ -229,13 +229,26 @@ it("gives agents a github_link_pr tool for the Solo chat they work in", async ()
   expect(
     await tool?.call(client, { channel: chat }, { unlink: true, url: second }),
   ).toBe(`${second} wasn't linked to this chat. Still linked: ${pull}.`);
+  // Replacing links one in place of the rest.
+  expect(
+    await tool?.call(client, { channel: chat }, { url: second, replace: true }),
+  ).toBe(
+    `Linked ${second}. The sidebar shows its state for this chat. Unlinked: ${pull}.`,
+  );
+  await expect(
+    tool?.call(
+      client,
+      { channel: chat },
+      { url: pull, replace: true, unlink: true },
+    ),
+  ).rejects.toThrow("cannot be combined");
   expect(await tool?.call(client, { channel: chat }, { unlink: true })).toBe(
     "Unlinked this chat's pull requests.",
   );
   expect(
     await tool?.call(client, { channel: chat }, { unlink: true, url: null }),
   ).toBe("This chat had no linked pull requests.");
-  expect(sign).toHaveBeenCalledTimes(2);
+  expect(sign).toHaveBeenCalledTimes(3);
 });
 
 it("offers unlink only for a linked owned chat and clears the link after publication", async () => {

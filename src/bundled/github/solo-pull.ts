@@ -7,6 +7,8 @@ import {
 } from "../../features/agents/agent-config-artifacts";
 import type { EventData } from "../../features/relay/events";
 import type { RelaySession } from "../../features/relay/session";
+import { PublishRejected } from "../../features/relay/outbox";
+import { refusal } from "../../features/agents/agent-config-artifacts";
 import type { PullState, PullStates } from "./pull-states";
 import { parseGitHubReference } from "./references";
 
@@ -96,15 +98,13 @@ async function readLinks(
       ],
       { signal },
     );
-    const seen = new Set<string>();
     for (const channel of page) links.set(channel, []);
+    // Where heads fork, the first that links any pull request wins.
     for (const event of events) {
       const channel = tag(event, "h");
       const urls = linksOf(event);
-      if (channel && links.has(channel) && !seen.has(channel) && urls) {
-        seen.add(channel);
+      if (channel && urls?.length && links.get(channel)?.length === 0)
         links.set(channel, urls);
-      }
     }
   }
   return links;
@@ -122,14 +122,19 @@ export function writeLinks(
   session: RelaySession,
   channel: string,
   change: (current: readonly string[]) => readonly string[],
-  signal = AbortSignal.timeout(20_000),
+  signal?: AbortSignal,
 ): Promise<readonly string[]> {
-  const write = () =>
-    writeOnce(session, channel, change, signal).catch((error: unknown) => {
-      if (error instanceof Error && error.message.startsWith("conflict:"))
-        return writeOnce(session, channel, change, signal);
-      throw error;
-    });
+  // The time limit starts when this change's turn comes, not while it waits.
+  const write = () => {
+    const bounded = signal ?? AbortSignal.timeout(20_000);
+    return writeOnce(session, channel, change, bounded).catch(
+      (error: unknown) => {
+        if (conflicted(error))
+          return writeOnce(session, channel, change, bounded);
+        throw error;
+      },
+    );
+  };
   const done = (writing.get(channel) ?? Promise.resolve()).then(write, write);
   const settled = done.catch(() => {});
   writing.set(channel, settled);
@@ -138,6 +143,14 @@ export function writeLinks(
   });
   return done;
 }
+
+/** Whether the relay refused a revision because another saved first. */
+const conflicted = (error: unknown) =>
+  error instanceof Error &&
+  refusal(
+    (error instanceof PublishRejected ? error.reason : undefined) ??
+      error.message,
+  ) === "conflict";
 
 async function writeOnce(
   session: RelaySession,
