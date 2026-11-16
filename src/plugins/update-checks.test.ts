@@ -406,51 +406,6 @@ it("rejects a late observed result when only the installed publisher changes", (
   );
 });
 
-it.each([false, true])(
-  "bounds folder reads independently of Git and drains after failure=%s",
-  async (fail) => {
-    const finishes: Array<(failed?: boolean) => void> = [];
-    const checkFolder = vi.fn(
-      () =>
-        new Promise((resolve, reject) => {
-          finishes.push((failed) =>
-            failed
-              ? reject(new Error("folder unavailable"))
-              : resolve({ revision: "new" }),
-          );
-        }),
-    );
-    const checkGit = vi.fn(async () => preview("new"));
-    const checks = createPluginUpdateChecks({
-      checkFolder,
-      checkGit,
-    } as unknown as PluginImports);
-    const folders = [0, 1, 2, 3].map((index) => ({
-      ...plugin(`folder.${index}`),
-      updateSource: { root: "/plugins", path: `${index}` },
-    }));
-    const reads = folders.map((item) => checks.check(item));
-    try {
-      await checks.check(plugin());
-      expect(checkGit).toHaveBeenCalledOnce();
-      expect(checkFolder).toHaveBeenCalledTimes(2);
-      finishes[0]?.(fail);
-      await vi.waitFor(() => expect(checkFolder).toHaveBeenCalledTimes(3));
-      finishes[1]?.();
-      await vi.waitFor(() => expect(checkFolder).toHaveBeenCalledTimes(4));
-      finishes[2]?.();
-      finishes[3]?.();
-      await Promise.all(reads);
-      expect(pluginUpdateCheck(checks.snapshot(), folders[0])?.error).toBe(
-        fail ? "Error: folder unavailable" : null,
-      );
-    } finally {
-      for (const finish of finishes) finish();
-      await Promise.all(reads);
-    }
-  },
-);
-
 it.each([
   { reference: "policy" },
   { path: "policy" },
@@ -483,3 +438,37 @@ it("matches equivalent managed commit pins regardless of case", () => {
   ).toBe("policy-new");
 });
 
+it("lets a healthy folder finish while two other folders remain stalled", async () => {
+  const finishes: Array<() => void> = [];
+  const checkFolder = vi.fn((id: string) =>
+    id === "folder.2"
+      ? Promise.resolve({ revision: "new" })
+      : new Promise((resolve) =>
+          finishes.push(() => resolve({ revision: "new" })),
+        ),
+  );
+  const checks = createPluginUpdateChecks({
+    checkFolder,
+  } as unknown as PluginImports);
+  const folders = [0, 1, 2].map((index) => ({
+    ...plugin(`folder.${index}`),
+    updateSource: { root: "/plugins", path: `${index}` },
+  }));
+  const reads = folders.map((item) => checks.check(item));
+  try {
+    await vi.waitFor(() =>
+      expect(pluginUpdateCheck(checks.snapshot(), folders[2])?.checking).toBe(
+        false,
+      ),
+    );
+    expect(
+      pluginUpdateCheck(checks.snapshot(), folders[2])?.release?.revision,
+    ).toBe("new");
+    expect(pluginUpdateCheck(checks.snapshot(), folders[0])?.checking).toBe(
+      true,
+    );
+  } finally {
+    for (const finish of finishes) finish();
+    await Promise.all(reads);
+  }
+});
