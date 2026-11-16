@@ -1329,6 +1329,8 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   Every 30 seconds it scans the last hour in its assigned private channels and submits matching
   PR links through the saved admission and lane rules. A 👀 reaction on the original message
   shows the worker picked it up; check PR details for admission and review outcomes.
+  After deleting a worker-owned submission, post its link again to start a fresh review.
+  Rescanning the earlier message does not undo deletion.
   It manages only its signing identity's
   submissions. Unaccepted assignments rotate after five minutes; accepted reviews get up to
   three five-minute inactivity reminders, then another five minutes to respond before rotation.

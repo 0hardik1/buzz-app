@@ -78,7 +78,8 @@ Logs are JSON on stdout: `submitted`, `reminded`, `assigned`, `exhausted`, `erro
 and `partial`. Repeated identical messages are suppressed for five minutes.
 Monitor errors and exhaustion; there is no server-management UI. A removed config,
 revoked membership, closed/merged PR, deleted submission, or final lane outcome
-stops further actions. Discovery never resurrects a deleted submission. A running
+stops further actions. Rescanning an old link never resurrects a deleted submission. Posting the PR
+again after deletion starts a fresh submission when this worker owns the deleted record. A running
 old reviewer is not killed by reassignment.
 
 A healthy tick runs at 30 seconds plus up to one second of jitter. Startup is

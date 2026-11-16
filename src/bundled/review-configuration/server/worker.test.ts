@@ -137,7 +137,15 @@ async function fixture() {
   saveConfig();
   function message(content: string, created_at = now) {
     add(
-      signed(owner, { kind: 9, created_at, content, tags: [["h", channel]] }),
+      signed(owner, {
+        kind: 9,
+        created_at: Math.floor(created_at),
+        content,
+        tags: [
+          ["h", channel],
+          ["ms", String(Math.round((created_at % 1) * 1000))],
+        ],
+      }),
     );
   }
   message("Please review https://github.com/example-org/project/pull/42");
@@ -819,3 +827,107 @@ it("publishes a pickup intent left sending by a crashed process", async () => {
   await h.tick();
   expect(h.published.filter((e) => e.kind === 7)).toHaveLength(1);
 });
+
+it("submits again from a fresh post after deletion without replaying old messages", async () => {
+  const h = await fixture();
+  await h.tick();
+  const first = must(await h.row());
+  h.advance(5);
+  await h.remove();
+  await h.restart();
+  await h.tick();
+  expect(must(await h.row()).value.deleted).toBe(true);
+  h.advance(5);
+  const lateReply = signed(h.first, {
+    kind: 9,
+    created_at: must(first.updatedAt) + 10,
+    content: "Finished https://github.com/example-org/project/pull/42",
+    tags: [
+      ["h", channel],
+      ["e", must(first.value.threads[0]?.id), "", "reply"],
+    ],
+  });
+  h.events.set(lateReply.id, lateReply);
+  await h.tick();
+  expect(must(await h.row()).value.deleted).toBe(true);
+  h.message(
+    "Please review again https://github.com/example-org/project/pull/42",
+  );
+  await h.tick();
+  const next = must(await h.row());
+  expect(next.value.deleted).toBeUndefined();
+  expect(next.value.generation).not.toBe(first.value.generation);
+  expect(next.value.threads[0]?.delivered).toBe(true);
+  expect(next.value.threads[0]?.id).not.toBe(first.value.threads[0]?.id);
+  await h.restart();
+  await h.tick();
+  expect(h.published.filter((e) => e.kind === 9)).toHaveLength(2);
+  expect(h.published.filter((e) => e.kind === 7)).toHaveLength(2);
+});
+
+it("accepts a fresh post within the deletion second without replaying an earlier post", async () => {
+  const h = await fixture();
+  await h.tick();
+  h.advance(0.1);
+  await h.remove();
+  await h.restart();
+  await h.tick();
+  expect(must(await h.row()).value.deleted).toBe(true);
+  h.advance(0.1);
+  h.message("Review again https://github.com/example-org/project/pull/42");
+  await h.tick();
+  expect(must(await h.row()).value.deleted).toBeUndefined();
+  await h.restart();
+  await h.tick();
+  expect(h.published.filter((e) => e.kind === 9)).toHaveLength(2);
+});
+
+it.each(["tagged", "lane", "overview", "triage"])(
+  "does not resubmit from an old generation outside the scan window (legacy: %s)",
+  async (legacy) => {
+    const h = await fixture();
+    await h.tick();
+    const first = must(await h.row());
+    let root = must(first.value.threads[0]?.id);
+    if (legacy !== "tagged") {
+      const original = must(h.events.get(root));
+      const oldRequest = signed(h.owner, {
+        kind: original.kind,
+        created_at: original.created_at,
+        content: original.content.replace(
+          "**Review request:**",
+          legacy === "overview"
+            ? "Review request:"
+            : legacy === "triage"
+              ? "Triage request:"
+              : "**Review request:**",
+        ),
+        tags: original.tags.filter(([name]) => name !== "t"),
+      });
+      h.events.set(oldRequest.id, oldRequest);
+      root = oldRequest.id;
+    }
+    h.advance(5);
+    await h.remove();
+    h.advance(5);
+    h.message("Review again https://github.com/example-org/project/pull/42");
+    await h.tick();
+    h.advance(5);
+    await h.remove();
+    h.advance(3600);
+    const lateReply = signed(h.first, {
+      kind: 9,
+      created_at: must(first.updatedAt) + 3615,
+      content: "Finished https://github.com/example-org/project/pull/42",
+      tags: [
+        ["h", channel],
+        ["e", root, "", "reply"],
+      ],
+    });
+    h.events.set(lateReply.id, lateReply);
+    await h.restart();
+    await h.tick();
+    expect(must(await h.row()).value.deleted).toBe(true);
+    expect(h.published.filter((e) => e.kind === 9)).toHaveLength(2);
+  },
+);

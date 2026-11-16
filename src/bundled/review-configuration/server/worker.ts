@@ -1,4 +1,5 @@
 import type { RelayEvent } from "../../../features/relay/events";
+import { eventMs } from "../../../features/relay/message-order";
 import {
   ARTIFACT_KIND,
   uuidv5,
@@ -71,6 +72,28 @@ type PollPosition = {
   >;
   retries: Record<string, { count: number; until: number }>;
 };
+function isReviewRequest(message: RelayEvent) {
+  if (
+    message.tags.some(
+      ([name, value]) => name === "t" && value === "buzz.review.request",
+    )
+  )
+    return true;
+  // Older requests predate the topic tag. Their generated subject and body
+  // still distinguish them from a person's posted PR link.
+  if (
+    !message.content.startsWith("Triage request: https://github.com/") &&
+    !message.content.startsWith("Review request: https://github.com/") &&
+    !message.content.startsWith("**Review request:** https://github.com/")
+  )
+    return false;
+  return discoverPulls(message.content).some(({ repository, pr }) =>
+    message.tags.some(
+      ([name, value]) =>
+        name === "subject" && value?.startsWith(`${repository}#${pr} · `),
+    ),
+  );
+}
 /** A serial finite tick. The process supervisor owns cadence/backoff and storage. */
 export async function reviewTick(
   worker: ReviewWorker,
@@ -202,6 +225,7 @@ export async function reviewTick(
         string,
         ReturnType<typeof discoverPulls>[number] & { messages: RelayEvent[] }
       >();
+      const reviewRoots = new Set<string>();
       let before: { until: number; before_id: string } | undefined;
       for (let page = 0; page < 4; page++) {
         const messages = await read(
@@ -218,6 +242,7 @@ export async function reviewTick(
           { signal },
         );
         for (const message of messages) {
+          if (isReviewRequest(message)) reviewRoots.add(message.id);
           if (
             message.kind !== 9 ||
             message.created_at < now - 3600 ||
@@ -253,8 +278,8 @@ export async function reviewTick(
         if (!oldest) throw new Error("Missing channel history cursor.");
         before = { until: oldest.created_at, before_id: oldest.id };
       }
-      // Existing records, including tombstones and other submitters, are never
-      // redispatched by discovery. Recovery is separately scoped to this signer/device.
+      // Active records are deduplicated. Deleted records require a fresh post
+      // after deletion; only their original signer can submit them again.
       const discovered = [...candidates.entries()].sort(([a], [b]) =>
         a.localeCompare(b),
       );
@@ -268,6 +293,32 @@ export async function reviewTick(
         const job = `${channel}:discover:${candidate}`;
         if ((position.retries[job]?.until ?? 0) > now) continue;
         try {
+          // A reply can refer to an older review generation outside the scan window.
+          const roots = [
+            ...new Set(
+              pull.messages.flatMap((message) =>
+                message.tags
+                  .filter(([name]) => name === "e")
+                  .map((tag) => tag[1])
+                  .filter((id): id is string => !!id && !reviewRoots.has(id)),
+              ),
+            ),
+          ];
+          for (let offset = 0; offset < roots.length; offset += 500) {
+            const referenced = await read(
+              [
+                {
+                  kinds: [9],
+                  "#h": [channel],
+                  ids: roots.slice(offset, offset + 500),
+                  limit: 500,
+                },
+              ],
+              { signal },
+            );
+            for (const message of referenced)
+              if (isReviewRequest(message)) reviewRoots.add(message.id);
+          }
           const artifact = await uuidv5(
             channel,
             `${REVIEW_SUBMISSION}:${pull.repository}:${pull.pr}`,
@@ -285,11 +336,33 @@ export async function reviewTick(
             { signal },
           );
           if (existing[0]) {
+            const head = existing[0];
+            // Legacy tombstones have only second precision; don't replay a source
+            // from that ambiguous second. New deletions carry the standard ms tag.
+            const deletedAt = head.tags.some(([name]) => name === "ms")
+              ? eventMs(head)
+              : head.created_at * 1000 + 999;
             const row = await decodeSubmission(existing[0], channel);
-            if (!row.value.deleted && row.value.submitter === viewer)
-              await pickup(row);
-            continue;
+            for (const thread of [
+              ...row.value.threads,
+              row.value.triage?.thread,
+            ])
+              if (thread?.id) reviewRoots.add(thread.id);
+            pull.messages = pull.messages.filter(isSource);
+            if (!row.value.deleted) {
+              if (row.value.submitter === viewer) await pickup();
+              continue;
+            }
+            if (row.value.submitter !== viewer) continue;
+            // A fresh channel post is a new Submit intent. Replaying the old
+            // source must never undo a deletion.
+            pull.messages = pull.messages.filter(
+              (message) => eventMs(message) > deletedAt,
+            );
+            if (!pull.messages.length) continue;
           }
+          pull.messages = pull.messages.filter(isSource);
+          if (!pull.messages.length) continue;
           const status = await worker.readStatus(
             pull.repository,
             pull.pr,
@@ -350,22 +423,9 @@ export async function reviewTick(
         } catch (error) {
           recordError(channel, error, pull.pr, job);
         }
-        async function pickup(record?: SavedSubmission) {
+        async function pickup() {
           if (!worker.pickup) return;
-          const roots = new Set(
-            [
-              ...(record?.value.threads.map((thread) => thread.id) ?? []),
-              record?.value.triage?.thread.id,
-            ].filter(Boolean),
-          );
           for (const message of pull.messages) {
-            if (
-              roots.has(message.id) ||
-              message.tags.some(
-                ([name, value]) => name === "e" && roots.has(value),
-              )
-            )
-              continue;
             try {
               await worker.pickup(message, signal);
             } catch (error) {
@@ -379,6 +439,14 @@ export async function reviewTick(
               });
             }
           }
+        }
+        function isSource(message: RelayEvent) {
+          return (
+            !reviewRoots.has(message.id) &&
+            !message.tags.some(
+              ([name, value]) => name === "e" && reviewRoots.has(value ?? ""),
+            )
+          );
         }
       }
       async function submit(

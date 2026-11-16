@@ -445,13 +445,15 @@ export async function writeSubmission(
   if (!writer) throw new Error("This connection cannot save submissions.");
   signal.throwIfAborted();
   const artifactId = await identity(channel, value.config.repository, value.pr);
+  const now = Date.now();
   const event = await writer.sign(
     {
       kind: ARTIFACT_KIND,
-      created_at: Math.floor(Date.now() / 1000),
+      created_at: Math.floor(now / 1000),
       content: JSON.stringify(value),
       tags: [
         ["ar", "1"],
+        ...(value.deleted ? [["ms", String(now % 1000)]] : []),
         ["d", artifactId],
         ["h", channel],
         ["type", TYPE],
@@ -569,6 +571,7 @@ export function threadMessage(
       kind: 9,
       tags: [
         ["h", channel],
+        ["t", "buzz.review.request"],
         ["subject", `${value.config.repository}#${value.pr} · Triage`],
         ["p", triage.agent],
       ],
@@ -581,6 +584,7 @@ export function threadMessage(
     kind: 9,
     tags: [
       ["h", channel],
+      ["t", "buzz.review.request"],
       ["subject", title],
       ...(lane ? [["p", lane.reviewers[0] ?? ""]] : []),
     ],
