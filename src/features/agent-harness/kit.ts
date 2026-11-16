@@ -103,7 +103,9 @@ export type HarnessKit = Readonly<{
    * the file an upload names; without it, uploads of local files fail.
    * `direct` and `folder` go to plugins' tools as `Context.direct` (the
    * owner's own message started the run and nothing else joined it) and
-   * `Context.folder` (where the conversation works). */
+   * `Context.folder` (where the conversation works). Core does not check
+   * `direct`, and tools may allow more on it: give it only from the owner's
+   * own signed message, as Pi does. */
   tools(
     agent: AgentHandle,
     conversation?: HarnessConversation,

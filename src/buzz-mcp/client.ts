@@ -210,7 +210,10 @@ export type Context = Readonly<{
   topLevel?: boolean;
   wholeChannel?: boolean;
   /** The owner's own message started the run and nothing else joined it.
-   * Absent where the harness does not tell: treat it as false. */
+   * Absent where the harness does not tell: treat it as false. Core passes
+   * on what the harness gives and does not check it, so a tool that allows
+   * more on it trusts it only from a harness that works it out from the
+   * owner's own signed message, as Pi does. */
   direct?: boolean;
   /** The folder the conversation works in, as the agent's settings give it
    * (it may start with `~/`). Absent where the harness does not tell. */

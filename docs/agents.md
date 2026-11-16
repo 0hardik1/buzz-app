@@ -484,8 +484,11 @@ A tool's `context` names where the agent is working. Pi and the harness kit
 (when its harness passes them) also give `direct`, true while the owner's own
 message started the run and nothing else joined it, and `folder`, where the
 conversation works, as the agent's settings give it. A harness that does not
-tell leaves them out, and a tool treats a missing `direct` as false. Neither is
-part of the protection checker's session, which stays the destination.
+tell leaves them out, and a tool treats a missing `direct` as false. Core passes
+`direct` on as the harness gives it and does not check it, so a tool that allows
+more on it trusts it only from a harness that works it out from the owner's own
+signed message, as Pi does. Neither is part of the protection checker's
+session, which stays the destination.
 
 The GitHub plugin keeps one store of pull request data (`pull-states.ts`), and
 it is the only place the plugin reads pull requests from GitHub. Links, the Solo
