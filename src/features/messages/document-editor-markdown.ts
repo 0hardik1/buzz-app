@@ -31,6 +31,15 @@ export function documentEditorDraft(markdown: string) {
     );
   const text = (value: string, marks: readonly Mark[] = []) =>
     value ? [schema.text(value, marks)] : [];
+  // Link labels serialize as escaped text. Keep the whole source link when a
+  // label needs syntax that the link mark cannot represent (code or images).
+  const linkLabel = (node: RootContent): boolean =>
+    node.type === "text" ||
+    node.type === "break" ||
+    ((node.type === "strong" ||
+      node.type === "emphasis" ||
+      node.type === "delete") &&
+      node.children.every(linkLabel));
   const inline = (
     node: RootContent,
     marks: readonly Mark[] = [],
@@ -60,7 +69,11 @@ export function documentEditorDraft(markdown: string) {
       return node.children.flatMap((child) =>
         inline(child, [...marks, mark.create()]),
       );
-    if (node.type === "link" && composerLinkUrl(node.url))
+    if (
+      node.type === "link" &&
+      composerLinkUrl(node.url) &&
+      node.children.every(linkLabel)
+    )
       return node.children.flatMap((child) =>
         inline(child, [...marks, schema.marks.link.create({ href: node.url })]),
       );

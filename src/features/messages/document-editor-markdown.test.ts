@@ -38,6 +38,8 @@ it.each([
   "| Column | Value |\n| --- | --- |\n| A | B |",
   "- [x] Completed\n- [ ] Pending",
   "![Image](https://example.com/image.png)",
+  "Before [`code`](https://example.com) after",
+  "[![Image](https://example.com/image.png)](https://example.com)",
   "[reference][id]\n\n[id]: https://example.com",
   "<script>alert(1)</script>",
   "[Unsafe](javascript:alert%281%29)",
