@@ -25,11 +25,34 @@ const ToastHost = createContext<ToastHostState | undefined>(undefined);
 
 /** How far each mounted docked surface reaches up from the window's bottom. */
 const clearances = new Map<object, number>();
-const publishClearance = () =>
-  document.documentElement.style.setProperty(
-    "--buzz-toast-clearance",
-    `${Math.max(0, ...clearances.values())}px`,
-  );
+/** Each mounted toast host's always-present Sonner section. */
+const viewports = new Set<HTMLElement>();
+// Scoped to the toast host, not the root: a root custom property restyles the
+// whole document, and the next layout read in that commit pays for it.
+let publishQueued = false;
+const writeClearance = (viewport: HTMLElement) => {
+  const value = `${Math.max(0, ...clearances.values())}px`;
+  if (viewport.style.getPropertyValue("--buzz-toast-clearance") !== value)
+    viewport.style.setProperty("--buzz-toast-clearance", value);
+};
+// Publish once a commit's effects settle, so a surface replaced by one of the
+// same height (switching channels) writes nothing.
+const publishClearance = () => {
+  if (publishQueued) return;
+  publishQueued = true;
+  queueMicrotask(() => {
+    publishQueued = false;
+    viewports.forEach(writeClearance);
+  });
+};
+const attachViewport = (viewport: HTMLElement | null) => {
+  if (!viewport) return;
+  viewports.add(viewport);
+  writeClearance(viewport);
+  return () => {
+    viewports.delete(viewport);
+  };
+};
 
 /** Keeps the toast stack above a surface docked at the bottom of the window,
  * such as a composer, while it is mounted, so notices never cover its
@@ -99,6 +122,7 @@ export function ToastProvider({
     <ToastHost value={host}>
       {createPortal(
         <Toaster
+          ref={attachViewport}
           id={id}
           position="bottom-right"
           swipeDirections={["left", "right"]}
@@ -120,6 +144,8 @@ export function ToastProvider({
 type ToastCardProps = {
   title: string;
   description?: string | undefined;
+  /** Optional supporting detail between the message and its actions. */
+  details?: ReactNode;
   children?: ReactNode;
   tone: Tone;
   closeLabel?: string;
@@ -130,6 +156,7 @@ type ToastCardProps = {
 function ToastCard({
   title,
   description,
+  details,
   children,
   tone,
   closeLabel = "Dismiss notification",
@@ -153,6 +180,9 @@ function ToastCard({
           className="buzz-toast-open"
           aria-label={navigation.label}
           title={navigation.label}
+          // WebKit Tabs past a button without an explicit tabindex unless the
+          // OS enables full keyboard access; the body action is keyboard-first.
+          tabIndex={0}
           onClick={navigation.open}
         />
       )}
@@ -178,6 +208,7 @@ function ToastCard({
           </div>
         )}
       </div>
+      {details}
       {children && <div className="buzz-toast-actions">{children}</div>}
     </div>
   );
@@ -217,6 +248,7 @@ function NoticeContent({
 export function ToastNotice({
   title,
   description,
+  details,
   children,
   onDismiss,
   closeLabel = "Dismiss notification",
@@ -226,6 +258,7 @@ export function ToastNotice({
 }: {
   title: string;
   description?: string;
+  details?: ReactNode;
   children?: ReactNode;
   onDismiss?: () => void;
   closeLabel?: string;
@@ -237,7 +270,7 @@ export function ToastNotice({
   const id = useId();
   const toasterId = useContext(ToastHost)?.id ?? "";
   const [source] = useState(() =>
-    noticeContent({ title, description, tone, children }),
+    noticeContent({ title, description, details, tone, children }),
   );
   const dismissed = useEffectEvent(() => onDismiss?.());
   const dismissible = timeout > 0 || !!onDismiss;
@@ -275,6 +308,7 @@ export function ToastNotice({
     source.update({
       title,
       description,
+      details,
       tone,
       children,
       closeLabel,
@@ -290,6 +324,7 @@ export function ToastNotice({
     id,
     title,
     description,
+    details,
     tone,
     children,
     closeLabel,

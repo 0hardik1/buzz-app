@@ -30,8 +30,12 @@ export type OpenTarget =
       version: 1;
       kind: "settings";
       section?: string;
+      /** Plugin-owned presentation data for a contributed Settings card. */
+      route?: Readonly<{ version: number; params: JsonValue }>;
       /** Nested provider controls within Agent setup; presentation only. */
       provider?: string;
+      /** Where Identity opens, in view and focused; presentation only. */
+      part?: "organization-sign-in";
       scope?: NavigationScope | null;
       pluginImport?: PluginLinkSource;
       pluginId?: string;
@@ -268,6 +272,17 @@ function json(input: unknown, depth = 0, budget = { nodes: 1024 }): JsonValue {
   return Object.freeze(result);
 }
 
+function parseRoute(input: unknown) {
+  const raw = record(input);
+  fields(raw, ["version", "params"]);
+  if (!Number.isSafeInteger(raw.version) || (raw.version as number) < 1)
+    throw invalid();
+  return Object.freeze({
+    version: raw.version as number,
+    params: json(raw.params),
+  });
+}
+
 /** All bound ingresses use this parser. A valid address is not authorization. */
 export function parseOpenTarget(input: unknown): OpenTarget {
   try {
@@ -284,12 +299,20 @@ export function parseOpenTarget(input: unknown): OpenTarget {
           "version",
           "kind",
           "section",
+          "route",
           "provider",
+          "part",
           "scope",
           "pluginImport",
           "pluginId",
         ]);
         if (value.provider !== undefined && value.section !== "agents")
+          throw invalid();
+        if (
+          value.part !== undefined &&
+          (value.section !== "identity" ||
+            value.part !== "organization-sign-in")
+        )
           throw invalid();
         if (value.pluginImport !== undefined && value.section !== "plugins")
           throw invalid();
@@ -303,8 +326,14 @@ export function parseOpenTarget(input: unknown): OpenTarget {
           ...(value.section !== undefined
             ? { section: text(value.section, section) }
             : {}),
+          ...(value.route !== undefined
+            ? { route: parseRoute(value.route) }
+            : {}),
           ...(value.provider !== undefined
             ? { provider: text(value.provider, provider) }
+            : {}),
+          ...(value.part === "organization-sign-in"
+            ? { part: value.part }
             : {}),
           ...(value.scope !== undefined
             ? { scope: value.scope === null ? null : boundScope(value.scope) }
@@ -326,17 +355,6 @@ export function parseOpenTarget(input: unknown): OpenTarget {
           "scope",
           "route",
         ]);
-        let route: { version: number; params: JsonValue } | undefined;
-        if (value.route !== undefined) {
-          const raw = record(value.route);
-          fields(raw, ["version", "params"]);
-          if (!Number.isSafeInteger(raw.version) || (raw.version as number) < 1)
-            throw invalid();
-          route = Object.freeze({
-            version: raw.version as number,
-            params: json(raw.params),
-          });
-        }
         target = {
           version: 1,
           kind: "page",
@@ -345,7 +363,9 @@ export function parseOpenTarget(input: unknown): OpenTarget {
           ...(value.scope !== undefined
             ? { scope: value.scope === null ? null : boundScope(value.scope) }
             : {}),
-          ...(route ? { route } : {}),
+          ...(value.route !== undefined
+            ? { route: parseRoute(value.route) }
+            : {}),
         };
         break;
       }

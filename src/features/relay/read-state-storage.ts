@@ -39,9 +39,22 @@ export type ReadJournal = Readonly<{
   /** The frontiers this installation advanced: all it publishes, never a
    * peer's value. Message marks stay local (frontier-only sync). */
   own?: Readonly<Record<string, number>>;
+  /** Local recovery points for decoded peer generations awaiting committed ingest. */
+  peerOverlaps?: readonly Readonly<{
+    coordinate: string;
+    key: string;
+    set: number;
+    baseline: number;
+    version: Readonly<{ id: string; created_at: number }>;
+  }>[];
   /** Further slots this installation owns after `slot`, in placement order. */
   spill?: readonly string[];
+  /** Conditional captured-read inverse; any later durable save retires it. */
+  capturedReadUndo?: string;
   revision: number;
+  /** Saves among `revision` that read nothing (row `seen:` marks), from any
+   * window, so unread intent is `revision - quiet`. */
+  quiet?: number;
   acceptedRevision: number;
   lastCreatedAt: number;
   pending?: Readonly<{ event: RelayEvent; revision: number }>;
@@ -53,6 +66,9 @@ export interface ReadStateStorage {
   ): Promise<ReadJournal>;
   /** The latest saved record, read without writing; undefined before first use. */
   read?(): Promise<ReadJournal | undefined>;
+  /** Reserves a journal snapshot synchronously, before later transactions, on
+   * an initialized connection. Rejects rather than deferring that reservation. */
+  capture(): Promise<ReadJournal | undefined>;
   close(): void;
 }
 export const newSlotId = () => crypto.randomUUID().replaceAll("-", "");
@@ -80,11 +96,16 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     !record(raw.state.overrides) ||
     !record(raw.localUnread) ||
     !uint32(raw.lastCreatedAt) ||
+    (raw.capturedReadUndo !== undefined && !slotId(raw.capturedReadUndo)) ||
     !Number.isSafeInteger(raw.revision) ||
     (raw.revision as number) < 0 ||
     !Number.isSafeInteger(raw.acceptedRevision) ||
     (raw.acceptedRevision as number) < 0 ||
-    (raw.acceptedRevision as number) > (raw.revision as number)
+    (raw.acceptedRevision as number) > (raw.revision as number) ||
+    (raw.quiet !== undefined &&
+      (!Number.isSafeInteger(raw.quiet) ||
+        (raw.quiet as number) < 0 ||
+        (raw.quiet as number) > (raw.revision as number)))
   )
     throw new Error("Invalid saved read state");
   const contexts: Record<string, unknown> = Object.fromEntries(
@@ -165,6 +186,44 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     throw new Error("Invalid saved own read state");
   if (raw.floor !== undefined && !uint32(raw.floor))
     throw new Error("Invalid saved read floor");
+  const peerOverlaps: NonNullable<ReadJournal["peerOverlaps"]>[number][] = [];
+  if (raw.peerOverlaps !== undefined) {
+    if (!Array.isArray(raw.peerOverlaps))
+      throw new Error("Invalid saved read overlaps");
+    const seen = new Set<string>();
+    for (const item of raw.peerOverlaps) {
+      if (
+        !record(item) ||
+        typeof item.coordinate !== "string" ||
+        !/^read-state:[0-9a-f]{32}$/.test(item.coordinate) ||
+        !contextId(item.key) ||
+        !item.key.startsWith("msg:") ||
+        !markMessage(item.key) ||
+        !uint32(item.set) ||
+        !uint32(item.baseline) ||
+        !record(item.version) ||
+        typeof item.version.id !== "string" ||
+        !/^[0-9a-f]{64}$/.test(item.version.id) ||
+        !uint32(item.version.created_at)
+      )
+        throw new Error("Invalid saved read overlap");
+      const id = JSON.stringify([item.coordinate, item.key, item.set]);
+      if (seen.has(id)) throw new Error("Duplicate saved read overlap");
+      seen.add(id);
+      peerOverlaps.push(
+        Object.freeze({
+          coordinate: item.coordinate,
+          key: item.key,
+          set: item.set,
+          baseline: item.baseline,
+          version: Object.freeze({
+            id: item.version.id,
+            created_at: item.version.created_at,
+          }),
+        }),
+      );
+    }
+  }
   const spill = raw.spill ?? [];
   if (
     !Array.isArray(spill) ||
@@ -231,9 +290,16 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     ...(raw.floor ? { floor: raw.floor } : {}),
     own: Object.freeze({ ...own }),
     spill: Object.freeze([...(spill as string[])]),
+    ...(raw.capturedReadUndo !== undefined && {
+      capturedReadUndo: raw.capturedReadUndo as string,
+    }),
     revision: raw.revision as number,
+    ...(raw.quiet !== undefined && { quiet: raw.quiet as number }),
     acceptedRevision: raw.acceptedRevision as number,
     lastCreatedAt: raw.lastCreatedAt,
+    ...(peerOverlaps.length
+      ? { peerOverlaps: Object.freeze(peerOverlaps) }
+      : {}),
     ...(pending ? { pending } : {}),
   };
 }
@@ -276,6 +342,7 @@ export function browserReadStateStorage(
   viewer: string,
 ): ReadStateStorage {
   let database: Promise<IDBDatabase> | undefined;
+  let connection: IDBDatabase | undefined;
   let closed = false;
   // The record this handle last wrote, already validated, under a random
   // token saved with it. Another window or build writes without the token,
@@ -283,8 +350,34 @@ export function browserReadStateStorage(
   let written: { token: string; journal: ReadJournal } | undefined;
   function open() {
     if (closed) return Promise.reject(new Error("Read-state storage closed"));
-    database ??= openDatabase();
+    database ??= openDatabase().then((db) => {
+      connection = db;
+      return db;
+    });
     return database;
+  }
+  function readFrom(db: IDBDatabase): Promise<ReadJournal | undefined> {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("partitions", "readonly");
+      const request = tx.objectStore("partitions").get(scope);
+      let result: ReadJournal | undefined;
+      let error: unknown;
+      request.onsuccess = () => {
+        try {
+          result =
+            request.result === undefined
+              ? undefined
+              : readJournal(request.result, viewer);
+        } catch (cause) {
+          error = cause;
+          tx.abort();
+        }
+      };
+      tx.oncomplete = () => resolve(result);
+      tx.onabort = () =>
+        reject(error ?? tx.error ?? new Error("Read-state load aborted"));
+      tx.onerror = () => reject(tx.error);
+    });
   }
   return {
     async update(change) {
@@ -327,24 +420,12 @@ export function browserReadStateStorage(
     async read() {
       const db = await open();
       if (closed) throw new Error("Read-state storage closed");
-      return new Promise((resolve, reject) => {
-        const request = db
-          .transaction("partitions", "readonly")
-          .objectStore("partitions")
-          .get(scope);
-        request.onsuccess = () => {
-          try {
-            resolve(
-              request.result === undefined
-                ? undefined
-                : readJournal(request.result, viewer),
-            );
-          } catch (error) {
-            reject(error);
-          }
-        };
-        request.onerror = () => reject(request.error);
-      });
+      return readFrom(db);
+    },
+    capture() {
+      return connection && !closed
+        ? readFrom(connection)
+        : Promise.reject(new Error("Read-state storage not ready"));
     },
     close() {
       closed = true;
