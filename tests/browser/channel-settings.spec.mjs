@@ -40,11 +40,10 @@ test("channel settings owns its responsive side panel and returns keyboard focus
   );
   await openChannelDetails(page);
   await expect(panel).toBeVisible();
-  // Joined panels share the workspace frame and keep a token-based header divider.
+  // Joined panels share the workspace frame; its tab header has no divider.
   const tokens = await page.addStyleTag({
     content: `:root, :root[data-color-mode] {
       --surface-panel: rgb(23, 45, 67);
-      --border-standard: rgb(45, 67, 89);
       --radius-panel: 19px;
     }`,
   });
@@ -52,11 +51,10 @@ test("channel settings owns its responsive side panel and returns keyboard focus
     await expect(panel).toHaveCSS("background-color", "rgb(23, 45, 67)");
     await expect(panel).toHaveCSS("border-top-width", "0px");
     await expect(panel).toHaveCSS("border-radius", "0px");
-    expect(
-      await workspace
-        .locator("header.panel-header")
-        .evaluate((header) => getComputedStyle(header).borderBottomColor),
-    ).toBe("rgb(45, 67, 89)");
+    await expect(workspace.locator("header.panel-header")).toHaveAttribute(
+      "data-divider",
+      "hidden",
+    );
   } finally {
     await tokens.evaluate((node) => node.remove());
   }
