@@ -2566,6 +2566,7 @@ mod tests {
             "export function activate() { /* changed */ }",
         )
         .unwrap();
+        sign(&source);
         let revision = check_saved_folder(&manager, "example.checked")
             .unwrap()
             .revision;
@@ -2578,6 +2579,13 @@ mod tests {
             "export function activate() { /* later */ }",
         )
         .unwrap();
+        sign(&source);
+        assert_ne!(
+            check_saved_folder(&manager, "example.checked")
+                .unwrap()
+                .revision,
+            revision
+        );
         let installed = preview
             .install(&manager, &preview.preview.token, "dist")
             .unwrap();
