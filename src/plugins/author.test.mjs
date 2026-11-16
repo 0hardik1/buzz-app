@@ -258,7 +258,7 @@ export function apply(ctx: Context) {
   const React = ctx.react;
   const document: MarkdownProps = { content: "**Hello**", scale: "document", openLink: () => false };
   function Reader() {
-    ctx.panels.ui.useTabTitle("A page");
+    ctx.panels.useTabTitle?.("A page", React.createElement("span", null, "A"));
     return React.createElement(ctx.conversation.ui.Markdown, document);
   }
   function Workspace() {

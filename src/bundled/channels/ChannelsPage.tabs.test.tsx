@@ -190,7 +190,7 @@ async function page(
   const available = [panel, app];
   let handleOpen: ((request: PanelOpenRequest) => boolean) | undefined;
   const panels: Panels = {
-    ui: { Workspace: () => null, useSplit: vi.fn(), useTabTitle: vi.fn() },
+    ui: { Workspace: () => null, useSplit: vi.fn() },
     snapshot: () => available,
     subscribe: () => () => {},
     resolve: (target) => available.find((entry) => entry.matches(target)),
@@ -460,7 +460,7 @@ function workspace(
   };
   const none: RegisteredPanel[] = [];
   const panels: Panels = {
-    ui: { Workspace: () => null, useSplit: vi.fn(), useTabTitle: vi.fn() },
+    ui: { Workspace: () => null, useSplit: vi.fn() },
     snapshot: () => none,
     subscribe: () => () => {},
     resolve: () => undefined,

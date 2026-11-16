@@ -3,7 +3,7 @@ import { Context } from "@deepseek-ai/cordis";
 import { PluginRuntime } from "../../plugins/runtime";
 import { PagesService } from "../pages/service";
 import { PanelsService } from "./service";
-import { PanelWorkspace, usePanelTabTitle } from "./PanelWorkspace";
+import { PanelWorkspace } from "./PanelWorkspace";
 import { usePluginPanelSplit } from "./usePanelSplit";
 import { ConversationService } from "../conversation/service";
 import { SettingsCardsService } from "../settings/service";
@@ -352,7 +352,7 @@ it("injects the host workspace and hooks into installed plugins", async () => {
       expect(ctx.panels.ui).toBe(panels.ui);
       expect(ctx.panels.ui.Workspace).toBe(PanelWorkspace);
       expect(ctx.panels.ui.useSplit).toBe(usePluginPanelSplit);
-      expect(ctx.panels.ui.useTabTitle).toBe(usePanelTabTitle);
+      expect(ctx.panels.useTabTitle).toEqual(expect.any(Function));
       ctx.panels.register({
         id: "reader",
         title: "Reader",

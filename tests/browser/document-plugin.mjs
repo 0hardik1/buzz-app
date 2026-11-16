@@ -3,7 +3,7 @@ export function documentPlugin(ctx) {
   const React = ctx.react;
   const h = React.createElement;
   function Reader({ name, session }) {
-    ctx.panels.ui.useTabTitle(name);
+    ctx.panels.useTabTitle(name);
     return h(
       "article",
       { style: { padding: "var(--space-panel-inset)", overflow: "auto" } },
