@@ -5,7 +5,8 @@ import type { RelaySession } from "../../features/relay/session";
 import { readView, writeView } from "../../shared/view-state";
 import { syncRail } from "./rail-sync";
 
-const scope = "relay:viewer";
+const viewer = "a".repeat(64);
+const scope = `wss://relay.test:${viewer}`;
 const section = { id: "custom:a", title: "Mine" };
 const record = (sections = [section]) => ({
   version: 1,
@@ -54,7 +55,7 @@ beforeEach(() => localStorage.clear());
 
 test("another device's arrangement replaces this one's, and a change here is saved", async () => {
   const saved = account(record());
-  const stop = syncRail(saved.session, scope);
+  const stop = syncRail(saved.session, scope, viewer);
   await settled();
   expect(sections()).toEqual([section]);
   expect(readView(scope, "navigation-team-expanded:v1", false)).toBe(true);
@@ -73,7 +74,7 @@ test("a change that was never sent wins over a newer saved arrangement", async (
   const saved = account(record([]));
   writeView(scope, "navigation-layout:v2", { sections: [section] });
   writeView(scope, "navigation-sync:v1", { base: 3, dirty: true });
-  const stop = syncRail(saved.session, scope);
+  const stop = syncRail(saved.session, scope, viewer);
   await settled();
   expect(saved.head().payload).toMatchObject({ sections: [section] });
   stop();
@@ -81,7 +82,7 @@ test("a change that was never sent wins over a newer saved arrangement", async (
 
 test("a write that lost to another device reads again and retries", async () => {
   const saved = account(record());
-  const stop = syncRail(saved.session, scope);
+  const stop = syncRail(saved.session, scope, viewer);
   await settled();
   saved.railLayout.read.mockResolvedValueOnce({
     payload: record(),
@@ -98,5 +99,49 @@ test("a write that lost to another device reads again and retries", async () => 
   await settled();
   expect(saved.railLayout.write).toHaveBeenCalledTimes(2);
   expect(saved.head().payload).toMatchObject({ pins: [{ id: "p" }] });
+  stop();
+});
+
+test("an account with nothing saved starts from its earlier sections, once", async () => {
+  const saved = account();
+  Object.assign(saved.session, {
+    sidebarPreferences: {
+      subscribe: () => () => {},
+      snapshot: () => ({
+        status: "ready",
+        data: {
+          sections: [
+            { id: "b", name: "Later", order: 2 },
+            { id: "a", name: "Work", order: 1 },
+          ],
+          assignments: { alpha: "a", gone: "missing" },
+        },
+      }),
+    },
+    channels: { list: () => ({ channels: [{ id: "alpha", name: "Alpha" }] }) },
+  });
+  const stop = syncRail(saved.session, scope, viewer);
+  await vi.waitFor(() =>
+    expect(saved.head().payload).toMatchObject({
+      sections: [
+        { id: "custom:a", title: "Work" },
+        { id: "custom:b", title: "Later" },
+      ],
+      placements: [
+        {
+          section: "custom:a",
+          entry: {
+            id: "channel:alpha",
+            label: "Alpha",
+            target: {
+              channelId: "alpha",
+              scope: { viewer },
+            },
+          },
+        },
+      ],
+    }),
+  );
+  expect(saved.railLayout.write).toHaveBeenCalledTimes(1);
   stop();
 });

@@ -181,8 +181,11 @@ function AppShellContent({
   const askList = listColumn.ask;
   const railScope = connection.viewer ? connection.scope : undefined;
   useEffect(
-    () => (railScope ? syncRail(connection.session, railScope) : undefined),
-    [connection.session, railScope],
+    () =>
+      railScope && connection.viewer
+        ? syncRail(connection.session, railScope, connection.viewer)
+        : undefined,
+    [connection.session, railScope, connection.viewer],
   );
   const listSection = useListSection(
     connection.session,

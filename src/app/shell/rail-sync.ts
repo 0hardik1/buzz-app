@@ -47,15 +47,17 @@ const canonical = (value: unknown) =>
  * Keeps this device's sidebar arrangement and the account's saved one the
  * same, until the returned stop. The device's copy is what the sidebar draws:
  * a change made here is sent, and one saved by another device replaces it.
- * A change here that was not sent yet wins over the saved one.
+ * A change here that was not sent yet wins over the saved one. An account
+ * with nothing saved starts from the sections its earlier app made.
  */
-export function syncRail(session: RelaySession, scope: string) {
+export function syncRail(session: RelaySession, scope: string, viewer: string) {
   const remote = session.railLayout;
   if (!remote) return () => {};
   let stopped = false;
   let applying = false;
   let running = false;
   let again = false;
+  let stopEarlier: (() => void) | undefined;
   const state = () =>
     readView<{ base: number; dirty: boolean }>(scope, SYNC, {
       base: 0,
@@ -95,6 +97,50 @@ export function syncRail(session: RelaySession, scope: string) {
           } finally {
             applying = false;
           }
+        } else if (!saved && !mine.sections.length && !state().dirty) {
+          // Nothing saved yet: start from the sections an earlier app made.
+          const earlier = session.sidebarPreferences.snapshot();
+          if (earlier.status !== "ready") {
+            stopEarlier ??= session.sidebarPreferences.subscribe(() => {
+              if (session.sidebarPreferences.snapshot().status !== "ready")
+                return;
+              stopEarlier?.();
+              void run();
+            });
+          } else if (earlier.data?.sections.length) {
+            const names = new Map(
+              session.channels.list().channels.map((row) => [row.id, row.name]),
+            );
+            const ids = new Set(earlier.data.sections.map(({ id }) => id));
+            writeView(scope, LAYOUT, {
+              order: mine.order,
+              sections: [...earlier.data.sections]
+                .sort((a, b) => a.order - b.order)
+                .map(({ id, name }) => ({ id: `custom:${id}`, title: name })),
+              placements: [
+                ...mine.placements,
+                ...Object.entries(earlier.data.assignments)
+                  .filter(([, section]) => ids.has(section))
+                  .map(([channelId, section]) => ({
+                    section: `custom:${section}`,
+                    entry: {
+                      id: `channel:${channelId}`,
+                      label: names.get(channelId) ?? channelId,
+                      kind: "channel",
+                      target: {
+                        version: 1,
+                        kind: "conversation",
+                        scope: {
+                          viewer,
+                          communityOrigin: scope.slice(0, -(viewer.length + 1)),
+                        },
+                        channelId,
+                      },
+                    },
+                  })),
+              ],
+            });
+          }
         } else if (state().dirty) {
           try {
             const base = await remote.write(mine, head.createdAt);
@@ -128,5 +174,6 @@ export function syncRail(session: RelaySession, scope: string) {
     stopped = true;
     stopLocal();
     stopRemote();
+    stopEarlier?.();
   };
 }
