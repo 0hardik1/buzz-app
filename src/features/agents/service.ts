@@ -3553,6 +3553,9 @@ export class AgentsService extends Service implements Agents {
     };
   }
   tools = () => this.addedTools.snapshot();
+  /** Added tools whose `when` threw. Every listing, turn and call asks again,
+   * so each registration warns once; one added again is a new registration. */
+  private readonly whenFailed = new WeakSet<AddedTool>();
   toolsFor = (key?: AgentKey): readonly AddedTool[] => {
     const agent = key === undefined ? undefined : this.agent(key);
     return this.addedTools.snapshot().filter((tool) => {
@@ -3562,7 +3565,10 @@ export class AgentsService extends Service implements Agents {
         // Only true admits it: an async `when` gives a Promise.
         return tool.when(agent) === true;
       } catch (error) {
-        console.warn("Agent tool failed to match", tool.name, error);
+        if (!this.whenFailed.has(tool)) {
+          this.whenFailed.add(tool);
+          console.warn("Agent tool failed to match", tool.name, error);
+        }
         return false;
       }
     });

@@ -12158,11 +12158,11 @@ it("gives a plugin's tool to the agents its when accepts, asked each time", asyn
   plugin.agents.addTool(tool("notes_every"));
   plugin.agents.addTool(tool("notes_echo", (agent) => agent.name === echo));
   plugin.agents.addTool(tool("notes_async", (async () => true) as never));
-  plugin.agents.addTool(
+  const broken = () =>
     tool("notes_broken", () => {
       throw new Error("no");
-    }),
-  );
+    });
+  const removeBroken = plugin.agents.addTool(broken());
   await service.create({ type: "example/echo", name: "Echo" });
   const names = (tools: readonly { name: string }[]) =>
     tools.map(({ name }) => name);
@@ -12183,6 +12183,17 @@ it("gives a plugin's tool to the agents its when accepts, asked each time", asyn
   echo = "Other";
   expect(names(service.toolsFor(bot))).toEqual(["notes_every"]);
   expect(service.tools()).toHaveLength(4);
+  // Every listing asks `when` again, but a registration whose `when` throws
+  // warns once; added again, it warns again.
+  const failed = () =>
+    warn.mock.calls.filter(([text]) => text === "Agent tool failed to match")
+      .length;
+  expect(failed()).toBe(1);
+  removeBroken();
+  await vi.waitFor(() => plugin.agents.addTool(broken()));
+  service.toolsFor(bot);
+  service.toolsFor(bot);
+  expect(failed()).toBe(2);
   warn.mockRestore();
 });
 
