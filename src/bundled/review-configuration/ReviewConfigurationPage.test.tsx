@@ -993,3 +993,39 @@ it("cancels pending deletion when channel membership is lost", async () => {
   }
   expect(test.publish).toHaveBeenCalledTimes(1);
 });
+
+it("defaults minimum reviewers to one, caps choices at the assigned pool, and clamps after removal", async () => {
+  const test = fixture();
+  render(<ReviewConfigurationCommunity session={test.session} />);
+  const user = await openDraft();
+  const minimum = screen.getByRole("combobox", { name: "Minimum reviewers" });
+  expect(minimum.textContent).toContain("1");
+  await user.click(screen.getByRole("combobox", { name: "Agents" }));
+  await user.click(
+    await screen.findByRole("option", { name: /^Backend reviewer/ }),
+  );
+  await user.click(screen.getByRole("combobox", { name: "Agents" }));
+  await user.click(await screen.findByRole("option", { name: /^UI reviewer/ }));
+  await user.click(minimum);
+  expect(screen.queryByRole("option", { name: "3" })).toBeNull();
+  await user.click(await screen.findByRole("option", { name: "2" }));
+  await user.click(screen.getByRole("button", { name: "Save lane" }));
+  await screen.findByText("Saved example-org/project.");
+  expect(
+    JSON.parse(test.publish.mock.calls[0]?.[0].content ?? "{}").lanes[0]
+      .minimumReviewers,
+  ).toBe(2);
+  await user.click(screen.getByRole("button", { name: "Edit General lane" }));
+  await user.click(
+    screen.getByRole("button", { name: "Remove UI reviewer from lane 1" }),
+  );
+  expect(
+    screen.getByRole("combobox", { name: "Minimum reviewers" }).textContent,
+  ).toContain("1");
+  await user.click(screen.getByRole("button", { name: "Save lane" }));
+  await screen.findByText("Saved example-org/project.");
+  expect(
+    JSON.parse(test.publish.mock.calls[1]?.[0].content ?? "{}").lanes[0]
+      .minimumReviewers,
+  ).toBe(1);
+});

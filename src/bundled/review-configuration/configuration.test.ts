@@ -295,7 +295,7 @@ it("validates reviewer identities and reads earlier drafts without reviewers", (
       ...config,
       lanes: [{ ...config.lanes[0], reviewers: ["not-a-key"] }],
     }),
-  ).toThrow("reviewer agents");
+  ).toThrow("reviewers");
   expect(() =>
     validateConfig({
       ...config,

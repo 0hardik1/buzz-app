@@ -74,6 +74,7 @@ async function fixture(sharedOwner = false) {
     tags: [["auth", reviewerOwner.pubkey, "", proof]],
   });
   const heads = new Map<string, EventData>();
+  const revisions: EventData[] = [];
   const messages = new Map<string, EventData>();
   let journal: readonly OutgoingEvent[] = [];
   const publish = vi.fn(async (event: EventData) => {
@@ -100,6 +101,7 @@ async function fixture(sharedOwner = false) {
     if (event.tags.find((tag) => tag[0] === "prev")?.[1] !== previous?.id)
       throw new Error("stale revision");
     heads.set(id, event);
+    revisions.push(event);
     return event.id;
   });
   const session = {
@@ -120,6 +122,21 @@ async function fixture(sharedOwner = false) {
       if (filter.artifact && (filter.consistency || filter.authors))
         throw new Error("unsupported artifact predicate");
       if (filter.kinds?.includes(0)) return [profile];
+      if (filter["#d"]?.includes(config.artifactId))
+        return [
+          {
+            ...signed(owner, {
+              kind: 45010,
+              content: JSON.stringify(config.config),
+              tags: [
+                ["h", channel],
+                ["d", config.artifactId],
+                ["type", "buzz.review.config"],
+              ],
+            }),
+            id: config.revision,
+          },
+        ];
       if (filter.kinds?.includes(9))
         return [...messages.values()].filter(
           (event) =>
@@ -135,13 +152,19 @@ async function fixture(sharedOwner = false) {
                 ),
             ),
         );
-      return [...heads.values()].filter(
-        (event) =>
-          !filter["#d"] ||
-          filter["#d"].includes(
-            event.tags.find((tag) => tag[0] === "d")?.[1] ?? "",
+      return (filter.artifact === "history" ? revisions : [...heads.values()])
+        .filter((event) =>
+          Object.entries(filter).every(
+            ([key, values]) =>
+              !key.startsWith("#") ||
+              (values as string[]).some((value) =>
+                event.tags.some(
+                  (tag) => tag[0] === key.slice(1) && tag[1] === value,
+                ),
+              ),
           ),
-      );
+        )
+        .slice(0, filter.limit);
     }),
     configArtifactWriter: {
       sign: async (template: Parameters<typeof signed>[1]) =>
@@ -314,6 +337,7 @@ it("recovers a send whose artifact update failed before its ID was saved", async
   f.artifactPublish
     .mockImplementationOnce(original)
     .mockImplementationOnce(original)
+    .mockImplementationOnce(original)
     .mockRejectedValueOnce(new Error("save interrupted"));
   await expect(f.run()).rejects.toThrow("save interrupted");
   await f.run("123", undefined, true);
@@ -339,7 +363,11 @@ it("refuses unattested reviewers before saving or sending", async () => {
   const f = await fixture();
   f.changeOwner();
   await expect(f.run()).rejects.toThrow("verified ownership");
-  expect(f.heads.size).toBe(0);
+  expect(
+    [...f.heads.values()].map(
+      (event) => event.tags.find(([name]) => name === "type")?.[1],
+    ),
+  ).toEqual(["buzz.review.activity"]);
   expect(f.publish).not.toHaveBeenCalled();
 });
 
@@ -391,6 +419,7 @@ it("fails closed when a sent message loses its journal before its ID was saved",
   const original = f.artifactPublish.getMockImplementation();
   if (!original) throw new Error("Missing fixture publisher");
   f.artifactPublish
+    .mockImplementationOnce(original)
     .mockImplementationOnce(original)
     .mockImplementationOnce(original)
     .mockRejectedValueOnce(new Error("save interrupted"));
@@ -464,7 +493,11 @@ it("routes to every matching lane and refuses to send when no lane matches", asy
       () => {},
     ),
   ).rejects.toThrow("Load PR details");
-  expect(f.heads.size).toBe(0);
+  expect(
+    [...f.heads.values()].map(
+      (event) => event.tags.find(([name]) => name === "type")?.[1],
+    ),
+  ).toEqual(["buzz.review.activity"]);
   const record = await submitReview(
     f.session,
     channel,
@@ -665,7 +698,11 @@ it("routes fresh facts inside Submit and refuses no-match before writing", async
     ),
   ).rejects.toThrow("No lanes match");
   expect(facts).toHaveBeenCalledOnce();
-  expect(test.artifactPublish).not.toHaveBeenCalled();
+  expect(test.artifactPublish).toHaveBeenCalledOnce();
+  expect(test.artifactPublish.mock.calls[0]?.[0].tags).toContainEqual([
+    "type",
+    "buzz.review.activity",
+  ]);
   expect(test.publish).not.toHaveBeenCalled();
 });
 
@@ -1363,7 +1400,11 @@ it("runs enabled admission checks before creating any submission or thread", asy
     ci: "pass",
   });
   await expect(f.run()).rejects.toThrow("still a draft");
-  expect(f.heads.size).toBe(0);
+  expect(
+    [...f.heads.values()].map(
+      (event) => event.tags.find(([name]) => name === "type")?.[1],
+    ),
+  ).toEqual(["buzz.review.activity"]);
   expect(f.messages.size).toBe(0);
   f.config.config.admission.ready = false;
   await f.run();

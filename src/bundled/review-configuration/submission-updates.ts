@@ -196,8 +196,30 @@ export function createSubmissionUpdates(
               scoped.some(
                 (event) =>
                   event.kind === 45010 &&
-                  (typeof selection === "string" ||
-                    event.pubkey === session.viewer) &&
+                  (state.loading ||
+                    typeof selection === "string" ||
+                    event.pubkey === session.viewer ||
+                    state.rows.some((row) =>
+                      event.tags.some(
+                        ([name, value]) =>
+                          name === "d" && value === row.artifactId,
+                      ),
+                    ) ||
+                    (() => {
+                      try {
+                        const value = JSON.parse(event.content);
+                        return (
+                          Array.isArray(value.config?.lanes) &&
+                          value.config.lanes.some(
+                            (lane: { humanReviewers?: unknown }) =>
+                              Array.isArray(lane.humanReviewers) &&
+                              lane.humanReviewers.includes(session.viewer),
+                          )
+                        );
+                      } catch {
+                        return false;
+                      }
+                    })()) &&
                   event.tags.some(
                     (tag) => tag[0] === "type" && tag[1] === REVIEW_SUBMISSION,
                   ),

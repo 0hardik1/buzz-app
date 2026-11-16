@@ -14,6 +14,7 @@ import {
   pullRepository,
   pullRequest,
   submitReview,
+  submissionLane,
   type SavedSubmission,
 } from "../submissions";
 import { eligibleReviewers } from "../submissions";
@@ -512,9 +513,8 @@ function due(row: SavedSubmission, now: number) {
   return row.value.threads.some((thread, index) => {
     if (!["need_review", "reviewing"].includes(row.reviewStates?.[index] ?? ""))
       return false;
-    const lane =
-      row.value.config.lanes[index - (row.value.version === 1 ? 1 : 0)];
-    const progress = lane && row.value.automation?.[lane.id];
+    const lane = submissionLane(row.value, index);
+    const progress = lane && row.value.automation?.[lane.assignment];
     const latest = Math.max(
       thread.requestedAt ?? row.updatedAt ?? row.value.submittedAt ?? now,
       progress && progress.request === thread.request

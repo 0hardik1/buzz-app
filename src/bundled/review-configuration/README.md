@@ -12,7 +12,7 @@ Submit button. It finds the saved repository in the selected channel, loads curr
 PR metadata, and assigns the first configured reviewer per matching lane. Missing
 configuration, unavailable reviewers, and zero matching lanes produce an error
 without starting threads. Results show assigned reviewers and thread buttons.
-The separate **Pull requests** page opens directly to your submissions across joined channels, including existing open-channel history. **Load more** retrieves older records when available. It shows one compact row per PR with GitHub status, overall review status, a lane-status summary, and an update marker. Click a row (or activate its PR button with the keyboard) to open that PR’s details. **Back to Pull requests** returns to the list. Details retain reviewer identities, lane outcomes, dates, thread links, and actions. Back/Forward and reload restore the selected PR after confirming channel access. The table shows GitHub status (Open, Draft, Closed, or Merged); Reload refreshes it. Remind is disabled for closed, merged, loading, or unavailable PRs and rechecks GitHub before sending. The detail table uses separate **Lane threads**, **Lane status**, and **Lane last message** columns, with one aligned row per lane. **Full message** is an underlined link in **Lane last message** that opens the source message in a popup over that PR’s details; Back closes it, Forward restores it, and explicit Close retires that popup visit. Latest messages include ordinary replies and update while the detail is open. The list shares the status reader but loads no lane-message previews; opening a PR reads only its threads. The submitter can click **Remind** on an individual review lane to notify its saved reviewer in the existing thread, with an optional message included in the reminder, delivery feedback, and retry on failure. Pending retries preserve the originally saved message. Admission Triage has no Remind action. A lane reminder resets only that lane; other lanes keep their status. Finish an interrupted reminder in the same lane and browser profile before starting another. Older interrupted whole-PR batches show **Retry pending reminders**. Incomplete submissions must finish delivery through Submit PR first. Each main-list row has **Delete**. The submitter can confirm **Delete** to remove a submission from the shared list. This does not stop active reviews, delete conversations, or close the GitHub PR. Submitting that URL again applies current routing and creates new reviewer threads.
+The separate **Pull requests** page opens directly to your submissions and assigned human reviews across joined channels, including existing open-channel history. **Load more** retrieves older records when available. It shows one compact row per PR with GitHub status, overall review status, a lane-status summary, and an update marker. Click a row (or activate its PR button with the keyboard) to open that PR’s details. **Back to Pull requests** returns to the list. Details retain reviewer identities, lane outcomes, dates, thread links, and actions. Back/Forward and reload restore the selected PR after confirming channel access. The table shows GitHub status (Open, Draft, Closed, or Merged); Reload refreshes it. Remind is disabled for closed, merged, loading, or unavailable PRs and rechecks GitHub before sending. The detail table uses separate **Lane threads**, **Lane status**, and **Lane last message** columns, with one aligned row per lane/reviewer assignment. **Full message** is an underlined link in **Lane last message** that opens the source message in a popup over that PR’s details; Back closes it, Forward restores it, and explicit Close retires that popup visit. Latest messages include ordinary replies and update while the detail is open. The list shares the status reader but loads no lane-message previews; opening a PR reads only its threads. The submitter can click **Remind** on an individual review lane to notify its saved reviewer in the existing thread, with an optional message included in the reminder, delivery feedback, and retry on failure. Pending retries preserve the originally saved message. Admission Triage has no Remind action. An assignment reminder resets only that row; other reviewers keep their status. Finish an interrupted reminder in the same lane and browser profile before starting another. Older interrupted whole-PR batches show **Retry pending reminders**. Incomplete submissions must finish delivery through Submit PR first. Each main-list row has **Delete**. The submitter can confirm **Delete** to remove a submission from the shared list. This does not stop active reviews, delete conversations, or close the GitHub PR. Submitting that URL again applies current routing and creates new reviewer threads.
 
 Submitting an already-delivered PR sends a reviewer mention in each saved lane
 thread. It preserves the saved reviewers and instructions and creates no new
@@ -293,3 +293,32 @@ Closed/merged PRs, deleted records, removed configurations and finished outcomes
 stop automation. Manual Remind retains its existing behavior of starting a new
 request. Server polling does not cancel an already-running reviewer or revoke an
 external GitHub operation.
+
+## Daily limits, people, and multiple reviewers
+
+Configurations optionally set `maxPrsPerDay` (unlimited when absent). Fresh
+submissions reserve a UTC-day slot using a shared artifact counter and CAS;
+its immutable revisions are idempotency receipts. Counts begin with upgraded
+clients. Unlimited configurations also record usage, so enabling a cap does not
+reset that day's tracked work. Re-review/reminders reuse the submission;
+delete/repost and triage rejection count. An uncertain save retains its slot for
+retry. This is coordination among participating clients, not a relay-enforced
+security quota for arbitrary publishers. A current configuration revision is
+required before reserving.
+
+Each lane has `minimumReviewers` (default 1, at most its pool), a
+`humanReviewers` subset and optional `requireHuman`. Routing snapshots distinct
+selected identities. A required human accompanies a selected agent, counting
+toward a larger minimum. Each selected reviewer has a separate thread/outcome;
+reminders target that assignment. Rotation preserves its human/agent role and
+cannot reuse a selected or previously tried identity. Overall Approved requires
+all assignment rows Approved. People record signed outcomes in their own rows,
+including an explicit confirmation for an approval already performed on GitHub.
+Automatic approval restricts agents; it does not prohibit an explicit human
+approval. Buzz records reports, without independently verifying GitHub reviews.
+
+The on-demand Log reads retained submission revisions and review-thread messages;
+failed submissions append separate activity revisions when connected. Identical
+consecutive failures are coalesced. Pagination exposes the relay's history limit
+rather than claiming a truncated result is complete. Logging has no background
+lifecycle or separate polling loop; failures are awaited by submission callers.

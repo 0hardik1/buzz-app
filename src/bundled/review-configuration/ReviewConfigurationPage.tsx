@@ -1,3 +1,5 @@
+import { Select } from "../../shared/design-system/ui/Select";
+import { HumanReviewers } from "./HumanReviewers";
 import { reviewChannelMember, reviewHistoryMember } from "./access";
 import {
   RepositoryConfigurations,
@@ -801,13 +803,14 @@ export function ChannelConfiguration({
                           />
                           <div className="review-config-reviewers">
                             <span className="text-caption text-subtle">
-                              Agents
+                              Reviewers
                             </span>
                             {lane.reviewers.length ? (
                               lane.reviewers.map((pubkey) => (
                                 <ReviewerIdentity
                                   key={pubkey}
                                   pubkey={pubkey}
+                                  session={session}
                                   choices={choices}
                                 />
                               ))
@@ -841,6 +844,13 @@ export function ChannelConfiguration({
                             </span>
                             <p className="review-config-instructions">
                               {lane.instructions}
+                            </p>
+                            <p>
+                              Minimum reviewers: {lane.minimumReviewers ?? 1}
+                            </p>
+                            <p>
+                              Human review:{" "}
+                              {lane.requireHuman ? "Required" : "Optional"}
                             </p>
                             <p>
                               Automatic approval:{" "}
@@ -984,6 +994,7 @@ function ConfigurationEditor({
         );
       const lanes = previous?.config.lanes ?? [];
       const draft: ReviewConfig = {
+        ...previous?.config,
         version: 1,
         reminderMinutes: 15,
         ...(previous?.config.admission
@@ -1102,10 +1113,53 @@ function ConfigurationEditor({
         </Field>
         <LaneReviewers
           lane={1}
-          reviewers={lane.reviewers}
+          reviewers={lane.reviewers.filter(
+            (key) => !lane.humanReviewers?.includes(key),
+          )}
           choices={choices}
           disabled={busy}
-          onChange={(reviewers) => setLane({ ...lane, reviewers })}
+          onChange={(reviewers) =>
+            setLane({
+              ...lane,
+              reviewers: [...reviewers, ...(lane.humanReviewers ?? [])],
+              minimumReviewers: Math.min(
+                lane.minimumReviewers ?? 1,
+                Math.max(
+                  1,
+                  reviewers.length + (lane.humanReviewers?.length ?? 0),
+                ),
+              ),
+            })
+          }
+        />
+        <Select
+          label="Minimum reviewers"
+          variant="field"
+          value={String(lane.minimumReviewers ?? 1)}
+          disabled={busy || !lane.reviewers.length}
+          groups={[
+            {
+              label: "Reviewers required",
+              options: Array.from(
+                { length: Math.max(1, lane.reviewers.length) },
+                (_, index) => ({
+                  value: String(index + 1),
+                  label: String(index + 1),
+                }),
+              ),
+            },
+          ]}
+          onValueChange={(value) =>
+            setLane({ ...lane, minimumReviewers: Number(value) })
+          }
+          description="Each assigned reviewer gets a separate row and thread. All rows must approve for the PR to be Approved."
+        />
+        <HumanReviewers
+          session={session}
+          channel={channel}
+          lane={lane}
+          disabled={busy}
+          onChange={setLane}
         />
         {choices.pending && <p role="status">Loading reviewer agents…</p>}
         {!choices.pending && !choices.selectable.length && (

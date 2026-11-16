@@ -1,6 +1,7 @@
 import {
   reviewChannel,
   confirmReviewAgents,
+  confirmHumanReviewers,
   confirmReviewChannel,
 } from "./access";
 import { validateRouting, type LaneRouting } from "./routing";
@@ -20,6 +21,9 @@ export type ReviewLane = Readonly<{
   reviewers: readonly string[];
   routing?: LaneRouting;
   autoApprove?: boolean;
+  humanReviewers?: readonly string[];
+  requireHuman?: boolean;
+  minimumReviewers?: number;
 }>;
 export type AdmissionChecks = Readonly<{
   ready: boolean;
@@ -69,6 +73,7 @@ export type ReviewConfig = Readonly<{
   lanes: readonly ReviewLane[];
   reminderMinutes: 15;
   admission?: AdmissionChecks;
+  maxPrsPerDay?: number | undefined;
 }>;
 export type SavedReviewConfig = Readonly<{
   config: ReviewConfig;
@@ -109,6 +114,15 @@ export function validateConfig(value: unknown): ReviewConfig {
     item.lanes.length > 12
   )
     throw new Error("Configure between 1 and 12 review lanes.");
+  if (
+    item.maxPrsPerDay !== undefined &&
+    (!Number.isSafeInteger(item.maxPrsPerDay) ||
+      item.maxPrsPerDay < 1 ||
+      item.maxPrsPerDay > 100000)
+  )
+    throw new Error(
+      "Daily PR limit must be a whole number between 1 and 100,000, or empty for no limit.",
+    );
   const ids = new Set<string>();
   const names = new Set<string>();
   const lanes = item.lanes.map((lane: ReviewLane) => {
@@ -142,8 +156,36 @@ export function validateConfig(value: unknown): ReviewConfig {
       ) ||
       new Set(reviewers).size !== reviewers.length
     )
-      throw new Error("Choose up to 20 distinct reviewer agents per lane.");
+      throw new Error("Choose up to 20 distinct reviewers per lane.");
+    if (
+      lane.minimumReviewers !== undefined &&
+      (!Number.isInteger(lane.minimumReviewers) ||
+        lane.minimumReviewers < 1 ||
+        lane.minimumReviewers > Math.max(1, reviewers.length))
+    )
+      throw new Error(
+        "Minimum reviewers must be between 1 and the number of reviewers in this lane.",
+      );
+    const humans = lane.humanReviewers ?? [];
+    if (
+      !Array.isArray(humans) ||
+      humans.some((key) => !reviewers.includes(key)) ||
+      new Set(humans).size !== humans.length ||
+      (lane.requireHuman !== undefined &&
+        typeof lane.requireHuman !== "boolean") ||
+      (lane.requireHuman && !humans.length)
+    )
+      throw new Error(
+        "A lane requiring a human needs at least one human reviewer.",
+      );
     return {
+      ...(lane.minimumReviewers === undefined
+        ? {}
+        : { minimumReviewers: lane.minimumReviewers }),
+      ...(humans.length ? { humanReviewers: humans } : {}),
+      ...(lane.requireHuman === undefined
+        ? {}
+        : { requireHuman: lane.requireHuman }),
       id: lane.id,
       name,
       instructions: lane.instructions.trim(),
@@ -161,6 +203,9 @@ export function validateConfig(value: unknown): ReviewConfig {
     repository: repositoryName(item.repository),
     lanes,
     reminderMinutes: 15,
+    ...(item.maxPrsPerDay === undefined
+      ? {}
+      : { maxPrsPerDay: item.maxPrsPerDay }),
     ...(item.admission === undefined
       ? {}
       : { admission: validateAdmission(item.admission) }),
@@ -308,9 +353,17 @@ export async function saveConfiguration(
     session,
     channel,
     [
-      ...config.lanes.flatMap((lane) => lane.reviewers),
+      ...config.lanes.flatMap((lane) =>
+        lane.reviewers.filter((key) => !lane.humanReviewers?.includes(key)),
+      ),
       ...(config.admission?.triage ? [config.admission.agent] : []),
     ],
+    signal,
+  );
+  const assertHumans = await confirmHumanReviewers(
+    session,
+    channel,
+    config.lanes.flatMap((lane) => lane.humanReviewers ?? []),
     signal,
   );
   for (const lane of config.lanes) {
@@ -360,6 +413,7 @@ export async function saveConfiguration(
     }
   }
   assertAgents();
+  assertHumans();
   const event = await writer.sign(
     {
       kind: ARTIFACT_KIND,
@@ -378,6 +432,7 @@ export async function saveConfiguration(
     signal,
   );
   assertAgents();
+  assertHumans();
   await writer.publish(event, signal);
   return { config, artifactId, revision: event.id };
 }

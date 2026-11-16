@@ -42,6 +42,23 @@ export type ReviewTarget = Readonly<{
   autoApprove?: boolean;
 }>;
 
+/** Submission snapshots contain the selected reviewers, not the configured pool.
+ * Each reviewer has a separate thread and outcome, including required humans. */
+export function reviewAssignments<
+  T extends {
+    reviewers: readonly string[];
+    humanReviewers?: readonly string[];
+    autoApprove?: boolean;
+  },
+>(lanes: readonly T[]): T[] {
+  return lanes.flatMap((lane) =>
+    lane.reviewers.map((reviewer) => ({
+      ...lane,
+      reviewers: [reviewer],
+    })),
+  );
+}
+
 /** One active review per lane thread. Resolve its current request from the
  * submitter-owned artifact; the model never chooses a target. */
 export async function reviewTarget(
@@ -59,7 +76,15 @@ export async function reviewTarget(
   const index = matches[0];
   const artifact = reviewTag(head, "d");
   const thread = value?.threads?.[index];
-  const lane = value?.config?.lanes?.[index - (value.version === 1 ? 1 : 0)];
+  const lane =
+    Array.isArray(value?.config?.lanes) &&
+    value.config.lanes.every((item: { reviewers?: unknown }) =>
+      Array.isArray(item?.reviewers),
+    )
+      ? reviewAssignments(value.config.lanes)[
+          index - (value.version === 1 ? 1 : 0)
+        ]
+      : undefined;
   if (
     matches.length !== 1 ||
     !artifact ||
@@ -94,7 +119,9 @@ export async function reviewTarget(
     root,
     reviewer,
     index,
-    autoApprove: lane.autoApprove === true,
+    autoApprove:
+      lane.autoApprove === true ||
+      lane.humanReviewers?.includes(reviewer) === true,
   };
 }
 

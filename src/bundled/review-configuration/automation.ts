@@ -63,7 +63,10 @@ export async function advanceReview(
         if (!lane || !thread.id || !thread.request) continue;
         const state = record.reviewStates?.[index];
         if (state !== "need_review" && state !== "reviewing") continue;
-        const old = record.value.automation?.[lane.id];
+        const human =
+          lane.humanReviewers?.includes(lane.reviewers[0] ?? "") === true;
+        const assignment = lane.assignment;
+        const old = record.value.automation?.[assignment];
         const reviewer = lane.reviewers[0];
         if (!reviewer) throw new Error("Review lane has no assigned reviewer.");
         const report = latestReport(record.reviewReports ?? [], {
@@ -72,7 +75,7 @@ export async function advanceReview(
           root: thread.id,
           request: thread.request,
           reviewer,
-          autoApprove: lane.autoApprove === true,
+          autoApprove: lane.autoApprove === true || human,
           index,
         });
         let progress: AutomationLane =
@@ -141,11 +144,24 @@ export async function advanceReview(
               : "assign";
           if (kind === "assign") {
             const pool =
-              configured.config.lanes.find((item) => item.id === lane.id)
-                ?.reviewers ?? [];
+              configured.config.lanes
+                .find((item) => item.id === lane.id)
+                ?.reviewers.filter((key) => {
+                  const poolLane = configured.config.lanes.find(
+                    (item) => item.id === lane.id,
+                  );
+                  return !!poolLane?.humanReviewers?.includes(key) === human;
+                }) ?? [];
             let replacement: string | undefined;
             for (const key of pool.filter(
-              (key) => !progress.tried.includes(key),
+              (key) =>
+                !value.config.lanes
+                  .find((item) => item.id === lane.id)
+                  ?.reviewers.includes(key) &&
+                !Object.values(value.automation ?? {}).some((item) =>
+                  item.tried.includes(key),
+                ) &&
+                !progress.tried.includes(key),
             )) {
               try {
                 await eligibleReviewers(
@@ -155,7 +171,13 @@ export async function advanceReview(
                     ...value,
                     config: {
                       ...value.config,
-                      lanes: [{ ...lane, reviewers: [key] }],
+                      lanes: [
+                        {
+                          ...lane,
+                          reviewers: [key],
+                          humanReviewers: human ? [key] : [],
+                        },
+                      ],
                     },
                   },
                   signal,
@@ -177,7 +199,16 @@ export async function advanceReview(
                 ...value.config,
                 lanes: value.config.lanes.map((item) =>
                   item.id === lane.id
-                    ? { ...item, reviewers: [replacement] }
+                    ? {
+                        ...item,
+                        reviewers: item.reviewers.map((key) =>
+                          key === reviewer ? replacement : key,
+                        ),
+                        humanReviewers:
+                          item.humanReviewers?.map((key) =>
+                            key === reviewer ? replacement : key,
+                          ) ?? [],
+                      }
                     : item,
                 ),
               },
@@ -207,7 +238,7 @@ export async function advanceReview(
             channel,
             {
               ...value,
-              automation: { ...value.automation, [lane.id]: progress },
+              automation: { ...value.automation, [assignment]: progress },
             },
             record,
             signal,
@@ -284,7 +315,7 @@ export async function advanceReview(
                       : item,
                   )
                 : record.value.threads,
-            automation: { ...record.value.automation, [lane.id]: complete },
+            automation: { ...record.value.automation, [assignment]: complete },
           },
           record,
           signal,

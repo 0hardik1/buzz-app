@@ -1,3 +1,5 @@
+import { recordReviewFailure } from "./review-log";
+import { reserveDailyReview } from "./daily-limit";
 import { validateAutomation, type AutomationLane } from "./automation-state";
 import {
   reviewChannel,
@@ -5,6 +7,7 @@ import {
   confirmReviewChannel,
   confirmReviewHistoryChannel,
   confirmReviewAgents,
+  confirmHumanReviewers,
 } from "./access";
 import {
   reviewDevice,
@@ -20,6 +23,7 @@ import {
 } from "../../features/agents/pr-triage";
 import {
   REVIEW_REPORT,
+  reviewAssignments,
   REVIEW_SUBMISSION,
   latestReport,
   reportStatus,
@@ -165,14 +169,26 @@ export async function decodeSubmission(
         value.reminderMessage.length > 4000)) ||
     (value.notifyingLane !== undefined &&
       (!value.notifying ||
-        !config.lanes.some((lane) => lane.id === value.notifyingLane))) ||
+        !reviewAssignments(config.lanes).some(
+          (_, index) =>
+            submissionLane(
+              { ...value, config },
+              index + (value.version === 1 ? 1 : 0),
+            )?.assignment === value.notifyingLane,
+        ))) ||
     (!(value.version === 4 && value.triage?.state !== "admitted") &&
-      config.lanes.some((lane) => lane.reviewers.length !== 1)) ||
+      config.lanes.some(
+        (lane) =>
+          lane.reviewers.length < (lane.minimumReviewers ?? 1) ||
+          (lane.requireHuman &&
+            !lane.reviewers.some((key) => lane.humanReviewers?.includes(key))),
+      )) ||
     !Array.isArray(value.threads) ||
     value.threads.length !==
       (value.version === 4 && value.triage?.state !== "admitted"
         ? 0
-        : config.lanes.length + (value.version === 1 ? 1 : 0)) ||
+        : reviewAssignments(config.lanes).length +
+          (value.version === 1 ? 1 : 0)) ||
     value.threads.some(
       (thread) =>
         !thread ||
@@ -274,20 +290,21 @@ export async function loadSubmissions(
   const results = await Promise.allSettled(
     events
       .slice(0, personal ? events.length : options.artifact ? 1 : 100)
-      .filter((event) => !personal || event.pubkey === session.viewer)
       .map((event) => {
         const channel = tag(event, "h");
-        if (
-          !channel ||
-          !channels.includes(channel) ||
-          (personal && event.pubkey !== session.viewer)
-        )
+        if (!channel || !channels.includes(channel))
           return Promise.reject(new Error("Unexpected submission scope."));
         return decodeSubmission(event, channel);
       }),
   );
   const rows = results.flatMap((result) =>
-    result.status === "fulfilled" && !result.value.value.deleted
+    result.status === "fulfilled" &&
+    !result.value.value.deleted &&
+    (!personal ||
+      result.value.value.submitter === session.viewer ||
+      result.value.value.config.lanes.some((lane) =>
+        lane.humanReviewers?.includes(session.viewer ?? ""),
+      ))
       ? [result.value]
       : [],
   );
@@ -404,7 +421,9 @@ export function applyReviewReports(
       request: thread.request,
       root: thread.id,
       reviewer: lane.reviewers[0] ?? "",
-      autoApprove: lane.autoApprove === true,
+      autoApprove:
+        lane.autoApprove === true ||
+        lane.humanReviewers?.includes(lane.reviewers[0] ?? "") === true,
       index,
     };
     // Earlier rounds in the same assigned thread still establish the review date.
@@ -453,7 +472,7 @@ export async function writeSubmission(
       content: JSON.stringify(value),
       tags: [
         ["ar", "1"],
-        ...(value.deleted ? [["ms", String(now % 1000)]] : []),
+        ["ms", String(now % 1000)],
         ["d", artifactId],
         ["h", channel],
         ["type", TYPE],
@@ -538,7 +557,17 @@ export async function deleteSubmission(
 export { deviceId } from "./session";
 
 export function submissionLane(value: Submission, index: number) {
-  return value.config.lanes[index - (value.version === 1 ? 1 : 0)];
+  let position = index - (value.version === 1 ? 1 : 0);
+  for (const lane of value.config.lanes) {
+    if (position < 0) return;
+    if (position < lane.reviewers.length)
+      return {
+        ...lane,
+        reviewers: [lane.reviewers[position] as string],
+        assignment: position === 0 ? lane.id : `${lane.id}:${position}`,
+      };
+    position -= lane.reviewers.length;
+  }
 }
 
 export function deliveryThreads(value: Submission): Thread[] {
@@ -579,6 +608,21 @@ export function threadMessage(
     };
   }
   const lane = submissionLane(value, index);
+  if (lane?.humanReviewers?.includes(lane.reviewers[0] ?? ""))
+    return {
+      kind: 9,
+      tags: [
+        ["h", channel],
+        ["t", "buzz.review.request"],
+        ["p", lane.reviewers[0] ?? ""],
+        ["review-human", lane.reviewers[0] ?? ""],
+        [
+          "subject",
+          `${value.config.repository}#${value.pr} · ${lane.name} · Human review`,
+        ],
+      ],
+      content: `**Review request:** ${prUrl(value)}\n\n${profileMentionLink(`@${reviewerName}`, `nostr:${npubEncode(lane.reviewers[0] ?? "")}`)} · ${lane.name} · Human review\n\n${lane.instructions}\n\n${value.reminderMessage ? `Reminder: ${value.reminderMessage}\n\n` : ""}Open this PR in Buzz’s Pull requests page to start your review and record Changes requested or Looks good. Reply here with the commit and findings. Recording a Buzz outcome does not approve or merge on GitHub.`,
+    };
   const title = `${value.config.repository}#${value.pr}${lane ? ` · ${lane.name}` : " · Review"}`;
   return {
     kind: 9,
@@ -636,14 +680,38 @@ export async function eligibleReviewers(
     ...new Set(
       value.triage?.state === "pending"
         ? [value.triage.agent]
-        : value.config.lanes.map((lane) => lane.reviewers[0] ?? ""),
+        : value.config.lanes.flatMap((lane) => lane.reviewers),
     ),
   ];
   if (keys.some((key) => choices.archives.archived?.includes(key)))
     throw new Error(
       "A selected reviewer is archived. Update the saved reviewer assignments.",
     );
-  return confirmReviewAgents(session, channel, keys, signal, true);
+  const humans =
+    value.triage?.state === "pending"
+      ? []
+      : value.config.lanes.flatMap((lane) =>
+          (lane.humanReviewers ?? []).filter((key) =>
+            lane.reviewers.includes(key),
+          ),
+        );
+  const assertHumans = await confirmHumanReviewers(
+    session,
+    channel,
+    humans,
+    signal,
+  );
+  const assertAgents = await confirmReviewAgents(
+    session,
+    channel,
+    keys.filter((key) => !humans.includes(key)),
+    signal,
+    true,
+  );
+  return () => {
+    assertHumans();
+    assertAgents();
+  };
 }
 
 export function delivered(
@@ -702,7 +770,12 @@ async function notifyReviewers(
 ) {
   const outbox = session.outbox;
   if (!outbox) throw new Error("Message delivery is unavailable.");
-  if (laneId && !record.value.config.lanes.some((lane) => lane.id === laneId))
+  if (
+    laneId &&
+    !record.value.threads.some(
+      (_, index) => submissionLane(record.value, index)?.assignment === laneId,
+    )
+  )
     throw new Error("Review lane is unavailable. Reload the list.");
   if (record.value.notifying && record.value.notifyingLane !== laneId)
     throw new Error(
@@ -716,9 +789,10 @@ async function notifyReviewers(
           ...record.value,
           config: {
             ...record.value.config,
-            lanes: record.value.config.lanes.filter(
-              (lane) => lane.id === laneId,
-            ),
+            lanes: record.value.threads.flatMap((_, index) => {
+              const assigned = submissionLane(record.value, index);
+              return assigned?.assignment === laneId ? [assigned] : [];
+            }),
           },
         }
       : record.value,
@@ -743,7 +817,8 @@ async function notifyReviewers(
         device,
         threads: record.value.threads.map((thread, index) =>
           submissionLane(record.value, index) &&
-          (!laneId || submissionLane(record.value, index)?.id === laneId)
+          (!laneId ||
+            submissionLane(record.value, index)?.assignment === laneId)
             ? {
                 ...thread,
                 request: crypto.randomUUID(),
@@ -759,7 +834,7 @@ async function notifyReviewers(
   for (const [index, thread] of record.value.threads.entries()) {
     const lane = submissionLane(record.value, index);
     if (!lane || !thread.id) continue; // Older submissions also have an overview.
-    if (laneId && lane.id !== laneId) continue;
+    if (laneId && lane.assignment !== laneId) continue;
     signal.throwIfAborted();
     assertAgents();
     const key = `review-notify:${record.artifactId}:${thread.id}:${thread.request}`;
@@ -797,6 +872,9 @@ async function notifyReviewers(
             ["h", channel],
             ["e", thread.id, "", "reply"],
             ["p", lane.reviewers[0] ?? ""],
+            ...(lane.humanReviewers?.includes(lane.reviewers[0] ?? "")
+              ? [["review-human", lane.reviewers[0] ?? ""]]
+              : []),
           ],
           content: request.content.replace(
             "**Review request:**",
@@ -929,7 +1007,21 @@ function routeConfig(
       const reviewer = reviewers[i];
       if (!reviewer || !lane.reviewers.includes(reviewer))
         throw new Error(`Choose a configured reviewer for ${lane.name}.`);
-      return { ...lane, reviewers: [reviewer] };
+      const human =
+        lane.requireHuman && !lane.humanReviewers?.includes(reviewer)
+          ? lane.humanReviewers?.[0]
+          : undefined;
+      const assigned = human ? [reviewer, human] : [reviewer];
+      for (const candidate of lane.reviewers) {
+        if (assigned.length >= (lane.minimumReviewers ?? 1)) break;
+        if (!assigned.includes(candidate)) assigned.push(candidate);
+      }
+      return {
+        ...lane,
+        reviewers: assigned,
+        humanReviewers:
+          lane.humanReviewers?.filter((key) => assigned.includes(key)) ?? [],
+      };
     }),
   });
 }
@@ -953,7 +1045,7 @@ async function checkAdmission(
 }
 
 /** Submission and owner-side triage recovery share the same lock and outbox journal. */
-export async function submitReview(
+async function performSubmitReview(
   session: ReviewSession,
   channel: string,
   saved: SavedReviewConfig,
@@ -1088,7 +1180,7 @@ export async function submitReview(
           submitter: viewer,
           device,
           threads: Array.from(
-            { length: triaging ? 0 : config.lanes.length },
+            { length: triaging ? 0 : reviewAssignments(config.lanes).length },
             () => ({
               request: crypto.randomUUID(),
               requestedAt: Math.floor(Date.now() / 1000),
@@ -1096,6 +1188,14 @@ export async function submitReview(
           ),
         };
         assertAgents = await eligibleReviewers(session, channel, value, signal);
+        await reserveDailyReview(
+          session,
+          channel,
+          saved,
+          artifactId,
+          previous?.revision,
+          signal,
+        );
         record = await writeSubmission(
           session,
           channel,
@@ -1181,7 +1281,7 @@ export async function submitReview(
               message,
             },
             threads: admitted
-              ? config.lanes.map(() => ({
+              ? reviewAssignments(config.lanes).map(() => ({
                   request: crypto.randomUUID(),
                   requestedAt: Math.floor(Date.now() / 1000),
                 }))
@@ -1397,4 +1497,39 @@ export async function submitReview(
       return record;
     },
   );
+}
+
+/** Failure records share the private channel and are awaited, never fire-and-forget. */
+export async function submitReview(
+  ...args: Parameters<typeof performSubmitReview>
+) {
+  try {
+    return await performSubmitReview(...args);
+  } catch (reason) {
+    const [session, channel, saved, input, , signal] = args;
+    if (signal.aborted) throw reason;
+    const message =
+      reason instanceof Error ? reason.message : "Review submission failed.";
+    let pr: number;
+    try {
+      pr = pullRequest(input, saved.config.repository);
+    } catch {
+      throw reason;
+    }
+    try {
+      await recordReviewFailure(
+        session,
+        channel,
+        saved.config.repository,
+        pr,
+        message,
+        signal,
+      );
+    } catch {
+      throw new Error(
+        `${message} The failure could not be saved to the review log.`,
+      );
+    }
+    throw reason;
+  }
 }

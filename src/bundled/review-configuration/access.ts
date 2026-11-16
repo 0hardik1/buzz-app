@@ -176,3 +176,57 @@ export async function confirmReviewAgents(
   assertCurrent();
   return assertCurrent;
 }
+
+/** Human assignments use channel members with a current non-agent profile.
+ * Profile classification is not an additional permission: membership still gates delivery. */
+export async function confirmHumanReviewers(
+  session: ReviewSession,
+  channel: string,
+  keys: readonly string[],
+  signal: AbortSignal,
+) {
+  if (!keys.length) return () => {};
+  await confirmReviewChannel(session, channel, signal);
+  const unique = [...new Set(keys)];
+  if (!session.snapshotRead)
+    throw new Error("Reviewer profiles are unavailable.");
+  const profiles = await session.snapshotRead(
+    [
+      {
+        kinds: [0],
+        authors: unique,
+        limit: unique.length,
+        consistency: "strong",
+      },
+    ],
+    { signal },
+  );
+  for (const key of unique) {
+    const profile = profiles
+      .filter((event) => event.pubkey === key && event.kind === 0)
+      .sort(
+        (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
+      )[0];
+    if (!profile)
+      throw new Error("Could not confirm a human reviewer's profile.");
+    const body = JSON.parse(profile.content);
+    if (
+      !body ||
+      typeof body !== "object" ||
+      body.is_agent ||
+      body.isAgent ||
+      profile.tags.some(([name]) => name === "auth")
+    )
+      throw new Error("Choose a person, not an agent, as the human reviewer.");
+  }
+  const assertCurrent = () => {
+    signal.throwIfAborted();
+    const current = reviewChannel(session, channel, true);
+    if (unique.some((key) => !current.members?.includes(key)))
+      throw new Error(
+        "Human reviewers must belong to this private review channel.",
+      );
+  };
+  assertCurrent();
+  return assertCurrent;
+}

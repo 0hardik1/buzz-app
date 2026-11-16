@@ -67,7 +67,10 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
-function fixture(scope = "viewer-community", channel = "channel") {
+function fixture(
+  scope = "viewer-community",
+  channel: string | readonly string[] = "channel",
+) {
   const listeners = new Set<LiveListener>();
   const session = {
     scope,
@@ -327,4 +330,33 @@ it("appends older personal pages and resets pagination on reload", async () => {
     expect.any(AbortSignal),
     { offset: 0 },
   );
+});
+
+it("refreshes assignment removal received during the first personal snapshot", async () => {
+  let finish!: (value: Awaited<ReturnType<typeof loadSubmissions>>) => void;
+  vi.mocked(loadSubmissions)
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValue({ rows: [], hasMore: false, warning: "" });
+  const f = fixture("human", ["channel"]);
+  await vi.advanceTimersByTimeAsync(250);
+  expect(loadSubmissions).toHaveBeenCalledTimes(1);
+  f.emit(
+    signed(agent, {
+      kind: 45010,
+      content: "{}",
+      tags: [
+        ["h", "channel"],
+        ["type", "buzz.review.submission"],
+        ["d", row.artifactId],
+      ],
+    }),
+  );
+  finish({ rows: [row], hasMore: false, warning: "" });
+  await vi.advanceTimersByTimeAsync(350);
+  expect(loadSubmissions).toHaveBeenCalledTimes(2);
+  expect(f.store.snapshot().rows).toEqual([]);
 });

@@ -17,7 +17,7 @@ export function validateAutomation(
     !value ||
     typeof value !== "object" ||
     Array.isArray(value) ||
-    Object.keys(value).length > 12
+    Object.keys(value).length > 240
   )
     throw new Error("Invalid review automation state.");
   for (const item of Object.values(value) as AutomationLane[]) {

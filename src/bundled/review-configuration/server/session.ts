@@ -10,7 +10,7 @@ import { delivered } from "../submissions";
 import { messageAuthor } from "../../../features/relay/fold";
 import type { RelayEvent } from "../../../features/relay/events";
 import { reviewChannel } from "../access";
-import { confirmReviewAgents } from "../access";
+import { confirmReviewAgents, confirmHumanReviewers } from "../access";
 import type { ReviewSession } from "../session";
 import type { reviewTransport } from "./transport";
 import type { reviewStorage } from "./storage";
@@ -124,10 +124,14 @@ export async function serverReviewSession(
           throw new Error(
             "Reviewer archive access is unavailable or a reviewer is archived.",
           );
+        const humans = event.tags
+          .filter(([name]) => name === "review-human")
+          .map((tag) => tag[1] ?? "");
+        await confirmHumanReviewers(session, id, humans, attemptSignal);
         return confirmReviewAgents(
           session,
           id,
-          recipients,
+          recipients.filter((key) => !humans.includes(key)),
           attemptSignal,
           true,
         );

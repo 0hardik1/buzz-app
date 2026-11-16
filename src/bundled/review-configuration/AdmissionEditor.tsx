@@ -3,6 +3,7 @@ import { useReviewAgents } from "./use-review-agents";
 import type { RelaySession } from "../../features/relay/session";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Checkbox } from "../../shared/design-system/ui/Checkbox";
+import { Input } from "../../shared/design-system/ui/Input";
 import { Field } from "../../shared/design-system/ui/Field";
 import { InlineHeader } from "../../shared/design-system/ui/Header";
 import { Select } from "../../shared/design-system/ui/Select";
@@ -33,14 +34,19 @@ export function AdmissionEditor({
   const [draft, setDraft] = useState(
     previous.config.admission ?? DEFAULT_ADMISSION,
   );
+  const [limit, setLimit] = useState(
+    String(previous.config.maxPrsPerDay ?? ""),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const operation = useRef<AbortController | undefined>(undefined);
   const dirty =
+    limit !== String(previous.config.maxPrsPerDay ?? "") ||
     JSON.stringify(draft) !==
-    JSON.stringify(previous.config.admission ?? DEFAULT_ADMISSION);
+      JSON.stringify(previous.config.admission ?? DEFAULT_ADMISSION);
   useEffect(() => {
     setDraft(previous.config.admission ?? DEFAULT_ADMISSION);
+    setLimit(String(previous.config.maxPrsPerDay ?? ""));
     setError("");
   }, [previous]);
   useEffect(() => {
@@ -58,7 +64,11 @@ export function AdmissionEditor({
       const next = await saveConfiguration(
         session,
         channel,
-        { ...previous.config, admission: draft },
+        {
+          ...previous.config,
+          admission: draft,
+          maxPrsPerDay: limit.trim() ? Number(limit) : undefined,
+        },
         previous,
         AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
       );
@@ -80,6 +90,21 @@ export function AdmissionEditor({
         subtitle="All enabled checks must pass before lane routing. Changes apply to new submissions."
       />
       <SettingsGroup layout="form">
+        <Field
+          label="Maximum PRs per day"
+          description="Leave empty for no limit. Shared across this repository/channel; resets at midnight UTC. New reviews count once, including triage rejections and delete/repost. Reminders and re-review do not count again."
+        >
+          <Input
+            type="number"
+            min={1}
+            max={100000}
+            step={1}
+            placeholder="No limit"
+            value={limit}
+            disabled={!writable || busy}
+            onValueChange={setLimit}
+          />
+        </Field>
         {(
           [
             ["ready", "Require ready for review (non-draft)"],
@@ -171,6 +196,7 @@ export function AdmissionEditor({
             disabled={!dirty || busy}
             onClick={() => {
               setDraft(previous.config.admission ?? DEFAULT_ADMISSION);
+              setLimit(String(previous.config.maxPrsPerDay ?? ""));
               setError("");
             }}
           >

@@ -1,3 +1,5 @@
+import { useEffect, useSyncExternalStore } from "react";
+import type { RelaySession } from "../../features/relay/session";
 import type { AgentChoicesSnapshot } from "../../features/agents/choices";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -91,19 +93,28 @@ export function LaneReviewers({
 export function ReviewerIdentity({
   pubkey,
   choices,
+  session,
 }: {
   pubkey: string;
   choices: AgentChoicesSnapshot;
+  session?: RelaySession;
 }) {
+  useSyncExternalStore(session?.profiles.subscribe ?? (() => () => {}), () =>
+    session?.profiles.snapshot().get(pubkey),
+  );
+  useEffect(() => {
+    if (session) void session.profiles.ensure([pubkey]).catch(() => {});
+  }, [session, pubkey]);
+  const profile = session?.profiles.snapshot().get(pubkey);
   const agent = choices.identities.find((item) => item.pubkey === pubkey);
-  const name = agent?.managedName ?? agent?.name ?? pubkey;
+  const name = agent?.managedName ?? agent?.name ?? profile?.name ?? pubkey;
   return (
     <div className="review-config-agent-row">
       <Avatar
-        src={agent?.avatar}
+        src={agent?.avatar ?? profile?.picture}
         alt={`${name} avatar`}
         fallback={name}
-        shape="squircle"
+        shape={agent ? "squircle" : "circle"}
         size="small"
       />
       <span title={pubkey}>{name}</span>

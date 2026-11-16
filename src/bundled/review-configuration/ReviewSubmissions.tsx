@@ -1,3 +1,5 @@
+import { ReviewLog } from "./ReviewLog";
+import { HumanReviewActions } from "./HumanReviewActions";
 import { reviewHistoryChannel } from "./access";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { useSubmissionUpdates } from "./submission-updates";
@@ -101,6 +103,10 @@ export function ReviewSubmissions({
 }) {
   const choices = useAgentChoices(session, true, true);
   const [pr, setPr] = useState("");
+  const [logTarget, setLogTarget] = useState<{
+    repository: string;
+    pr: number;
+  }>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
@@ -338,6 +344,7 @@ export function ReviewSubmissions({
     let alreadyComplete: boolean | undefined;
     try {
       const repository = pullRepository(pr);
+      setLogTarget({ repository, pr: pullRequest(pr, repository) });
       if (selectedRepository && repository !== selectedRepository)
         throw new Error(
           "This PR belongs to a different repository. Choose that repository before submitting.",
@@ -425,7 +432,7 @@ export function ReviewSubmissions({
     setError("");
     const name = `${row.value.config.repository}#${row.value.pr}`;
     setStatus(
-      `Reminding reviewers for ${name}${laneId ? ` · ${row.value.config.lanes.find((lane) => lane.id === laneId)?.name}` : ""}…`,
+      `Reminding reviewers for ${name}${laneId ? ` · ${row.value.threads.map((_, index) => submissionLane(row.value, index)).find((lane) => lane?.assignment === laneId)?.name}` : ""}…`,
     );
     try {
       const updated = await remindSubmission(
@@ -467,7 +474,7 @@ export function ReviewSubmissions({
             ),
           );
         setStatus(
-          `Reviewers reminded for ${name}${laneId ? ` · ${row.value.config.lanes.find((lane) => lane.id === laneId)?.name}` : ""}. Status reset to needs review for the reminded lanes.`,
+          `Reviewers reminded for ${name}${laneId ? ` · ${row.value.threads.map((_, index) => submissionLane(row.value, index)).find((lane) => lane?.assignment === laneId)?.name}` : ""}. Status reset to needs review for the reminded lanes.`,
         );
       }
     } catch (reason) {
@@ -775,7 +782,11 @@ export function ReviewSubmissions({
                     ? reviewLabels[row.reviewStates?.[index] ?? "need_review"]
                     : "—",
                   messageId: report?.id ?? thread.id,
-                  laneId: lane?.id,
+                  laneId: lane?.assignment,
+                  human: !!lane?.humanReviewers?.includes(
+                    lane.reviewers[0] ?? "",
+                  ),
+                  reviewIndex: index,
                   updateKey: String(index),
                   reportedAt: report?.created_at,
                 };
@@ -789,14 +800,7 @@ export function ReviewSubmissions({
                     ? laneMessages[lane.thread.id]
                     : undefined;
                   return (
-                    <tr
-                      key={
-                        lane.laneId ??
-                        (lane.name === "Admission Triage"
-                          ? "triage"
-                          : "overview")
-                      }
-                    >
+                    <tr key={lane.updateKey}>
                       {index === 0 && (
                         <>
                           <th scope="rowgroup" rowSpan={lanes.length}>
@@ -861,6 +865,7 @@ export function ReviewSubmissions({
                               key={pubkey}
                               pubkey={pubkey}
                               choices={choices}
+                              session={session}
                             />
                           ))}
                           {lane.thread.id ? (
@@ -968,6 +973,19 @@ export function ReviewSubmissions({
                       </td>
                       <td className="review-config-last-message">
                         <div className="review-config-cell">
+                          {"human" in lane &&
+                            lane.human &&
+                            lane.reviewers.includes(session.viewer ?? "") &&
+                            writable &&
+                            lane.thread.delivered && (
+                              <HumanReviewActions
+                                session={session}
+                                channel={channel}
+                                row={row}
+                                index={lane.reviewIndex}
+                                onSaved={() => setReload((value) => value + 1)}
+                              />
+                            )}
                           {!lane.thread.id ? (
                             "No message yet"
                           ) : !latest ? (
@@ -1089,6 +1107,24 @@ export function ReviewSubmissions({
             >
               Submit PR
             </Button>
+            <Button
+              disabled={busy || !pr.trim()}
+              onClick={() => {
+                try {
+                  const repository = pullRepository(pr);
+                  setLogTarget({ repository, pr: pullRequest(pr, repository) });
+                  setError("");
+                } catch (reason) {
+                  setError(
+                    reason instanceof Error
+                      ? reason.message
+                      : "Enter a PR URL.",
+                  );
+                }
+              }}
+            >
+              View log
+            </Button>
           </div>
           {pr && (
             <Button
@@ -1117,12 +1153,28 @@ export function ReviewSubmissions({
               : status}
         </p>
       )}
+      {mode === "submit" && !result && logTarget && readable && (
+        <ReviewLog
+          key={`${logTarget.repository}:${logTarget.pr}`}
+          session={session}
+          channel={channel}
+          repository={logTarget.repository}
+          pr={logTarget.pr}
+        />
+      )}
       {result && (
         <section className="review-config-form" aria-label="Submission result">
           <InlineHeader
             title={`${result.value.config.repository}#${result.value.pr}`}
           />
           {table([result], false)}
+          <ReviewLog
+            key={result.artifactId}
+            session={session}
+            channel={channel}
+            repository={result.value.config.repository}
+            pr={result.value.pr}
+          />
           {listError && (
             <p role="alert">
               {listError} Open Pull requests and Reload to refresh.
@@ -1185,6 +1237,15 @@ export function ReviewSubmissions({
                     )
                 : rows.length > 0 && compactTable())}
           </LoadingRegion>
+          {readable && selected && (
+            <ReviewLog
+              key={selected.artifactId}
+              session={session}
+              channel={channel}
+              repository={selected.value.config.repository}
+              pr={selected.value.pr}
+            />
+          )}
           {listError && (
             <p role="alert">{listError} Use Reload to try again.</p>
           )}
@@ -1209,7 +1270,7 @@ export function ReviewSubmissions({
       )}
       {reminding && (
         <AlertDialog
-          title={`Remind ${reminding.row.value.config.repository}#${reminding.row.value.pr}${reminding.laneId ? ` · ${reminding.row.value.config.lanes.find((lane) => lane.id === reminding.laneId)?.name}` : ""}`}
+          title={`Remind ${reminding.row.value.config.repository}#${reminding.row.value.pr}${reminding.laneId ? ` · ${reminding.row.value.threads.map((_, index) => submissionLane(reminding.row.value, index)).find((lane) => lane?.assignment === reminding.laneId)?.name}` : ""}`}
           description="Ask the reviewer to look again. Sending resets the selected lane to Needs review."
           pending={busy}
           finalFocus={() =>

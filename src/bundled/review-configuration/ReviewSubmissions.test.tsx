@@ -104,7 +104,15 @@ function fixture(
     archives: { status: "ready" },
   };
   const listeners = new Set<LiveListener>();
+  const profileSnapshot = new Map(
+    agents.map((agent) => [agent.pubkey, { name: agent.name }]),
+  );
   const session = {
+    profiles: {
+      subscribe: () => () => {},
+      snapshot: () => profileSnapshot,
+      ensure: async () => {},
+    },
     subscribeLive: (listener: LiveListener) => {
       listeners.add(listener);
       return () => {
