@@ -68,8 +68,8 @@ export function pluginUpdateAvailable(snapshot: Snapshot, plugin: PluginInfo) {
 export function createPluginUpdateChecks(imports: PluginImports | undefined) {
   let snapshot: Snapshot = {};
   let sequence = 0;
-  let gitReads = 0;
-  const gitQueue: Array<() => void> = [];
+  const gitReads = { count: 0, queue: [] as Array<() => void> };
+  const folderReads = { count: 0, queue: [] as Array<() => void> };
   const installations = new Map<string, string>();
   const listeners = new Set<() => void>();
   const pending = new Map<
@@ -123,12 +123,13 @@ export function createPluginUpdateChecks(imports: PluginImports | undefined) {
     if (!request) {
       const consumers = new Set([active]);
       const promise = (async () => {
-        if ("root" in source) return imports.checkFolder(id);
-        if (gitReads >= 2)
-          await new Promise<void>((resolve) => gitQueue.push(resolve));
-        else gitReads++;
+        const reads = "root" in source ? folderReads : gitReads;
+        if (reads.count >= 2)
+          await new Promise<void>((resolve) => reads.queue.push(resolve));
+        else reads.count++;
         try {
           if (![...consumers].some((active) => active())) return null;
+          if ("root" in source) return await imports.checkFolder(id);
           const signed = await authorize?.(source.repository);
           if (![...consumers].some((active) => active())) return null;
           return await imports.checkGit(
@@ -138,9 +139,9 @@ export function createPluginUpdateChecks(imports: PluginImports | undefined) {
             ...gitScope(undefined, source.path),
           );
         } finally {
-          const next = gitQueue.shift();
+          const next = reads.queue.shift();
           if (next) next();
-          else gitReads--;
+          else reads.count--;
         }
       })().finally(() => pending.delete(key));
       request = { sequence: ++sequence, installations: {}, consumers, promise };
