@@ -141,6 +141,10 @@ drafts, and per-visit list visibility; toggling does not create a history visit.
 `ConversationDetailPane` supplies the companion destination to nested readers,
 so profiles and tools split beside the same mounted conversation. Closing a tool
 keeps the reader and its draft intact.
+Workspace tab headers are borderless and use matching 16px visible insets,
+including settings and contributed detail tabs. Thread tabs reuse
+`PanelHeader historyOverlay` so history scrolls behind the same blur-fade material
+as the main conversation.
 Retained tabs, guarded closers, history and plugin lifetimes stay with their
 existing owners. Transient menus and task/confirmation dialogs keep their own
 shared presentation.

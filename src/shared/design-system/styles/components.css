@@ -1664,6 +1664,7 @@
   }
   .panel-header[data-history-overlay] {
     isolation: isolate;
+    align-items: start;
     height: 0;
     min-height: 0;
     padding-block: 0;
@@ -1672,6 +1673,17 @@
   }
   .panel-header[data-history-overlay] > * {
     margin-block-start: var(--space-4);
+  }
+  .panel-header[data-history-overlay]:where(
+    :not([data-variant="conversation"])
+  ) {
+    padding-inline: var(--space-4);
+  }
+  /* The tab strip adds 4px; align the visible pill with the header's inset. */
+  .panel-header[data-history-overlay]:where(:not([data-variant="conversation"]))
+  > .panel-header-title {
+    margin-block-start: var(--space-3);
+    margin-inline-start: calc(-1 * var(--space-1));
   }
   .panel-header[data-history-overlay] > .panel-header-material {
     --scroll-edge-surface: var(--surface-panel);
@@ -2521,6 +2533,11 @@
   }
   .buzz-tabs[data-variant="navigation"] .buzz-tabs-item:has([data-selected]) {
     background: var(--bg-glass-secondary-hover);
+  }
+  .buzz-tabs[data-variant="navigation"]
+    .navigation-item[aria-selected="false"]
+    :is(.navigation-item-label, .buzz-tabs-icon) {
+    color: var(--text-disabled);
   }
   @media (hover: hover) and (pointer: fine) {
     .buzz-tabs[data-variant="navigation"] .buzz-tabs-item:hover {

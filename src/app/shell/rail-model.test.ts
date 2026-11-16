@@ -4,9 +4,13 @@ import type { RelaySession } from "../../features/relay/session";
 import { railModel } from "./rail-model";
 
 vi.mock("../../features/conversation/conversation-index", () => {
-  const keys = ["c:solo"];
+  const solo = ["c:solo"];
+  const team = ["c:dm", "c:general"];
   return {
-    conversationIndex: () => ({ watch: () => () => {}, keys: () => keys }),
+    conversationIndex: () => ({
+      watch: () => () => {},
+      keys: (query: { home: string }) => (query.home === "team" ? team : solo),
+    }),
   };
 });
 vi.mock("../../features/channel-navigation/solo-navigation", () => ({
@@ -82,6 +86,10 @@ test("watches the session only while something reads it, and builds once for eve
   ]);
   expect(model.snapshot().soloChats.map((channel) => channel.id)).toEqual([
     "solo",
+  ]);
+  expect(model.snapshot().teamChats.map((channel) => channel.id)).toEqual([
+    "dm",
+    "general",
   ]);
   first();
   expect(watching.size).toBe(active);

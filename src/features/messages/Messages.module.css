@@ -1021,7 +1021,11 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   /* Match the main timeline gutter in split threads. */
   padding: 0 var(--space-6);
   /* The original starts space-4 below the header, less its .message padding. */
-  padding-top: calc(var(--space-4) - var(--space-3) - var(--space-half));
+  padding-top: var(
+    --history-header-inset,
+    calc(var(--space-4) - var(--space-3) - var(--space-half))
+  );
+  scroll-padding-block-start: var(--history-header-inset, 0px);
   /* The end spacer below replaces bottom padding, so the jump button's sticky
      offset has no padding to cross. */
   --history-bottom-inset: 0px;

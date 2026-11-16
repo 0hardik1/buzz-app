@@ -2690,6 +2690,9 @@ function ChannelWorkspace({
                 hidden={!!companion && !showingChannelPanel}
               >
                 <PanelWorkspace
+                  historyOverlay={tabState.tabs.some(
+                    (tab) => tab.kind === "thread" && tab.id === selectedTab,
+                  )}
                   key={currentId}
                   leadingActions={
                     threadAlone ? (

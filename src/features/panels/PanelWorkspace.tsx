@@ -117,7 +117,8 @@ export function PanelWorkspace({
   actions,
   leadingActions,
   identity,
-  headerDivider = true,
+  headerDivider = false,
+  historyOverlay = false,
   main = false,
   label = "Panel tabs",
   focusOnMount = true,
@@ -147,6 +148,8 @@ export function PanelWorkspace({
    */
   identity?: ReactNode;
   headerDivider?: boolean;
+  /** Float the tab header over a thread's scrolling history. */
+  historyOverlay?: boolean;
   /**
    * The page's main pane: a lone permanent tab reads as a title, and native
    * Close acts here only while focus is inside (the side pane is the default).
@@ -476,7 +479,10 @@ export function PanelWorkspace({
     >
       {!standaloneIdentity && (
         <PanelHeader
-          divider={headerDivider}
+          divider={headerDivider && !historyOverlay}
+          historyOverlay={
+            historyOverlay && !conversationIdentity && !selectedLocal
+          }
           navigation={leadingActions}
           actions={tools}
           title={

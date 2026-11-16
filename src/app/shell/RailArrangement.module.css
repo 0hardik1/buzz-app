@@ -50,6 +50,14 @@
   padding-block: var(--space-4);
   padding-block-end: calc(var(--space-8) + var(--space-2));
 }
+.rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  gap: var(--space-half);
+}
 .avatarGrid {
   display: grid;
   width: 100%;
@@ -68,6 +76,9 @@
   padding: var(--space-3);
   border-radius: var(--radius-container);
   background: var(--surface-rail-card);
+}
+.group[data-rail-section="team"] {
+  --conversation-row-unread-color: var(--affordance-accent-prominent);
 }
 .group[data-drop-target]:not([data-section-drag]) {
   background: color-mix(

@@ -65,6 +65,8 @@ import { useRelayConnection } from "../../features/relay/react";
 import { macTitleBarDragHandlers } from "./title-bar";
 import { hasIntegratedWindowControls, WindowControls } from "./WindowControls";
 
+const RAIL_MIN_WIDTH = 256;
+
 const macDesktop = isTauri() && /Mac/i.test(navigator.platform);
 const titleBarDragProps = macDesktop ? macTitleBarDragHandlers : {};
 
@@ -252,10 +254,11 @@ function AppShellContent({
         : undefined,
     [connection.viewer, connection.scope],
   );
-  const [railWidth, setRailWidth] = useState(304);
+  const [resizedRailWidth, setRailWidth] = useState(304);
+  const railWidth = Math.max(RAIL_MIN_WIDTH, resizedRailWidth);
   const railWorkspace = useRef<HTMLDivElement>(null);
   const resizeRail = (width: number) => {
-    setRailWidth(Math.min(440, Math.max(240, width)));
+    setRailWidth(Math.min(440, Math.max(RAIL_MIN_WIDTH, width)));
   };
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationToggle = useRef<HTMLButtonElement>(null);
@@ -516,7 +519,7 @@ function AppShellContent({
               <ResizeHandle
                 label="Resize app sidebar"
                 width={railWidth}
-                min={240}
+                min={RAIL_MIN_WIDTH}
                 max={440}
                 target={railWorkspace}
                 property="--shell-rail-width"

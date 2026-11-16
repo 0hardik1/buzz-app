@@ -26,6 +26,12 @@ export const soloView: ConversationQuery = {
   unread: false,
   home: "solo",
 };
+const teamView: ConversationQuery = {
+  filter: "all",
+  unread: false,
+  home: "team",
+  sort: "recent",
+};
 type Inputs = Readonly<{
   pages: readonly RegisteredPage[];
   sidebarSections: SidebarSections | undefined;
@@ -118,6 +124,7 @@ function createRailModel(session: RelaySession) {
         changed();
       }),
       conversationIndex(session).watch(soloView, changed),
+      conversationIndex(session).watch(teamView, changed),
       solo?.subscribe(changed),
       subscribeView(partition, (key) => {
         if (!key || key === LAYOUT_KEY || key === PINS_KEY) changed();
@@ -138,6 +145,7 @@ function createRailModel(session: RelaySession) {
     entries: part<ReturnType<typeof entriesOf>>(),
     sections: part<ReturnType<typeof railSections>>(),
     solo: part<ReturnType<typeof listed>["channels"]>(),
+    team: part<ReturnType<typeof listed>["channels"]>(),
     model: part<ReturnType<typeof modelOf>>(),
   };
   const listed = (list: ChannelList) => {
@@ -250,7 +258,17 @@ function createRailModel(session: RelaySession) {
     pins: readonly RailEntry[],
     sections: ReturnType<typeof railSections>,
     soloChats: ReturnType<typeof listed>["channels"],
-  ) => ({ ...listing, ...built, agents, layout, pins, sections, soloChats });
+    teamChats: ReturnType<typeof listed>["channels"],
+  ) => ({
+    ...listing,
+    ...built,
+    agents,
+    layout,
+    pins,
+    sections,
+    soloChats,
+    teamChats,
+  });
 
   function snapshot() {
     const next = session.channels.list();
@@ -313,9 +331,26 @@ function createRailModel(session: RelaySession) {
         return channel && !hidden.has(channel.id) ? [channel] : [];
       });
     });
+    const teamOrder = conversationIndex(session).keys(teamView);
+    const teamChats = parts.team([teamOrder, listing], () =>
+      teamOrder.flatMap((key) => {
+        const channel = listing.channelsById.get(key.slice(2));
+        return channel ? [channel] : [];
+      }),
+    );
     return parts.model(
-      [listing, built, agents, layout, pins, sections, soloChats],
-      () => modelOf(listing, built, agents, layout, pins, sections, soloChats),
+      [listing, built, agents, layout, pins, sections, soloChats, teamChats],
+      () =>
+        modelOf(
+          listing,
+          built,
+          agents,
+          layout,
+          pins,
+          sections,
+          soloChats,
+          teamChats,
+        ),
     );
   }
 

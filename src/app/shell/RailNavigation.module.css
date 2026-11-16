@@ -74,28 +74,35 @@
   min-width: 0;
 }
 
-/* Team collapsed: one row of round view buttons, counts on their corners. */
-.teamIcons {
+/* Team keeps its view strip above the recent conversation rows. */
+.teamViews {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  padding-block-start: var(--space-1);
+  gap: var(--space-half);
+  flex-wrap: wrap;
+  padding: var(--space-1) var(--space-2);
+  margin-block: var(--space-1) var(--space-2);
+  background: var(--affordance-subtle-hover);
+  border-radius: var(--radius-container);
 }
-/* Capsules of one width, spread evenly across the card. */
-.teamIcon {
+.teamView {
   position: relative;
-  display: flex;
 }
-.teamIcon > button {
-  width: calc(var(--size-control-sm) + var(--space-1h));
-}
-.teamIconCount {
+.teamCount {
   position: absolute;
-  inset-block-start: 0;
-  inset-inline-end: calc(-1 * var(--space-1));
-  transform: translateY(-25%);
+  inset-block-end: var(--space-half);
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+  inline-size: var(--space-1);
+  block-size: var(--space-1);
+  overflow: hidden;
   pointer-events: none;
 }
-.teamIconCount > [role="img"] {
+.teamUnreadMark {
+  display: block;
+  inline-size: var(--space-1);
+  block-size: var(--space-1);
+  border-radius: var(--radius-pill);
   background: var(--affordance-accent-prominent);
-  color: var(--text-on-accent);
 }

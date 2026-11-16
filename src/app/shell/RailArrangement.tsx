@@ -470,7 +470,7 @@ export function RailGroup({
   avatarGrid = id === "pins",
   leadingEntryIds = [],
   views,
-  icons,
+  rowsLabel,
   trailingEntryId,
   sortEntries,
   pageContent,
@@ -486,8 +486,8 @@ export function RailGroup({
   leadingEntryIds?: readonly string[];
   /** Rows that open this section's views, under its leading entries. */
   views?: ReactNode;
-  /** The card collapsed to one row of icons, in place of its rows. */
-  icons?: ReactNode;
+  /** An accessible collection name for conversation previews. */
+  rowsLabel?: string;
   trailingEntryId?: string;
   sortEntries?: (a: RailEntry, b: RailEntry) => number;
   pageContent?: ReactNode;
@@ -706,40 +706,40 @@ export function RailGroup({
         }
         action={action && <span data-rail-card-actions="">{action}</span>}
       >
-        {icons ? (
-          icons
+        {leading}
+        {views}
+        {rowsLabel ? (
+          <ul aria-label={rowsLabel} className={styles.rows}>
+            {shown.map((row) => (
+              <li key={row.key}>{row}</li>
+            ))}
+          </ul>
+        ) : avatarGrid ? (
+          <div
+            className={styles.avatarGrid}
+            data-pins-grid={id === "pins" ? "" : undefined}
+          >
+            {shown}
+          </div>
         ) : (
-          <>
-            {leading}
-            {views}
-            {avatarGrid ? (
-              <div
-                className={styles.avatarGrid}
-                data-pins-grid={id === "pins" ? "" : undefined}
-              >
-                {shown}
-              </div>
-            ) : (
-              shown
-            )}
-            {notes}
-            {more &&
-              (renderOpen ? (
-                renderOpen(
-                  preview.slice(shown.length).map((row) => row.props.entry),
-                  () => arrangement?.openSection(id),
-                )
-              ) : (
-                <NavigationItem
-                  label={`Open ${title}`}
-                  data-rail-view-more=""
-                  aria-label={`Open ${title}`}
-                  icon={<ArrowRightIcon size={18} />}
-                  onClick={() => arrangement?.openSection(id)}
-                />
-              ))}
-          </>
+          shown
         )}
+        {notes}
+        {more &&
+          (renderOpen ? (
+            renderOpen(
+              preview.slice(shown.length).map((row) => row.props.entry),
+              () => arrangement?.openSection(id),
+            )
+          ) : (
+            <NavigationItem
+              label={`Open ${title}`}
+              data-rail-view-more=""
+              aria-label={`Open ${title}`}
+              icon={<ArrowRightIcon size={18} />}
+              onClick={() => arrangement?.openSection(id)}
+            />
+          ))}
       </NavigationSection>
     </div>
   );

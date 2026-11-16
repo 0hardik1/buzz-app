@@ -67,6 +67,7 @@ export function RailEntryArtwork({
   // renders nothing here.
   const own = [
     ...participants.slice(0, 3),
+    ...(person ? [person] : []),
     ...(agent ? [agent.pubkey] : []),
   ].join(":");
   const selection = useMemo(
@@ -78,6 +79,14 @@ export function RailEntryArtwork({
     selection.snapshot,
     selection.snapshot,
   );
+  const isAgent =
+    entry.kind === "agent" ||
+    entry.kind === "chat" ||
+    !!(
+      person &&
+      (profiles.get(person)?.isAgent ||
+        identities.some((agent) => agent.pubkey === person))
+    );
   const avatarArtwork = () => {
     if (avatarOnly && participants.length > 1)
       return (
@@ -95,7 +104,7 @@ export function RailEntryArtwork({
       return (
         <Avatar
           size={avatarOnly ? "fill" : size}
-          shape={entry.kind === "agent" ? "squircle" : "circle"}
+          shape={isAgent ? "squircle" : "circle"}
           src={avatarMedia(entry.picture, session.media)}
           alt=""
           fallback={entry.label}
@@ -123,6 +132,7 @@ export function RailEntryArtwork({
     ) : avatarOnly || size === "fill" ? (
       <Avatar
         size="fill"
+        shape={isAgent ? "squircle" : "circle"}
         alt=""
         fallback={entry.label}
         src={avatarMedia(
@@ -153,7 +163,7 @@ export function RailEntryArtwork({
         <span
           className={styles.pinSelection}
           data-channel={entry.kind === "channel" || undefined}
-          data-agent={entry.kind === "agent" || undefined}
+          data-agent={isAgent || undefined}
           aria-hidden="true"
         >
           <span className={styles.pinSelectionArtwork}>{avatar}</span>

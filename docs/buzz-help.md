@@ -933,10 +933,11 @@ and are asked to sign in again in Buzz.
   The **→ Open Plugins** row at the bottom of the Plugins card opens the plugin catalog.
   Each object card shows up to four rows, then **→ Open [section name]**;
   **Open [section name]** opens a dedicated list in the main content area without expanding
-  the card. Back and Forward return between the list and its items. Pins remains uncapped. The Team card lists
-  **Activity**, **Threads**, **DMs**, **Mentions**, and **Channels**. Each opens the
-  Team list on that view; Activity is the **All** view. Each row shows how many
-  of its conversations are unread, and no number when all are read. The view
+  the card. Back and Forward return between the list and its items. Pins remains uncapped. The Team card keeps
+  **Activity**, **Channels**, **Threads**, **DMs**, **Mentions**, and **Drafts & sent**
+  in an icon strip above up to four recent conversations. Each view opens the
+  Team list; Activity is the **All** view. A small mark below a view indicates
+  unread conversations and disappears when all are read. The view
   you choose is saved locally for this account and community. Bestie conversations
   follow normal ordering; the Bestie plugin also appears under Plugins.
   Team's views keep Solo chats in the Solo collection.
@@ -972,8 +973,8 @@ and are asked to sign in again in Buzz.
   Choose **New section** below the sidebar cards to name and create an empty section.
   While dragging a row, **New section** appears at the bottom; drop there, name
   the section, and choose **Create and move**. Cancel leaves the row in place.
-  Your sections, their order, what you put in them, your pins and whether Team is
-  expanded are saved to your account in that community, so your other devices
+  Your sections, their order, what you put in them, and your pins
+  are saved to your account in that community, so your other devices
   show the same sidebar. A change made offline is saved when Buzz reconnects.
   The first time, sections you made in an earlier version of Buzz are carried over.
   Right-click a row in a card or in a section's list (or press Shift+F10) for
@@ -1066,9 +1067,14 @@ and are asked to sign in again in Buzz.
   grabbers brighten only when the pointer is close and appear immediately under it.
   Hovering elsewhere on the card keeps them hidden. Keyboard focus reveals controls
   immediately, and touch devices show them without waiting.
-- **Team card**: Activity, Threads, DMs, Mentions, and Channels each show an unread count.
-  Drafts & sent and anything you move into Team appear below them. The **Team**
-  heading opens the full conversation list.
+- **Team card**: Activity, Channels, Threads, DMs, and Mentions show an unread mark
+  when their view has unread conversations. Drafts & sent sits beside these views.
+  Right-click a view icon (or focus it and press Shift+F10) to mark that view's
+  items read or unread. Marking unread applies on this device only. Threads and
+  mentions affect their matching threads/messages, not unrelated channel activity.
+  Recent conversations appear below the strip; **Open Team** opens the remaining
+  conversations when more than four are available. The **Team** heading also opens
+  the full conversation list.
   Opening Team this way selects no conversation: the main panel says
   **No conversation selected** until you pick a row, and **+** starts a new
   message. A view with nothing to show says so; with **Unread only** on, it says
@@ -1087,7 +1093,8 @@ and are asked to sign in again in Buzz.
   headers use compact title and action rows.
 - **Expanded details**: Team, Solo, and Activity keep their collection beside the reader.
   Profiles, channel details, split tabs, Terminal and other tools use full-height
-  companion panes beside that reader. Drag the divider to resize a split; narrow
+  companion panes beside that reader. Thread headers float above the scrolling
+  history with a blurred fade. Drag the divider to resize a split; narrow
   windows show the tool over the conversation. Closing a tool leaves the conversation
   and its draft intact. Agents, Notes and Workflows use the same full-height detail
   layout. Existing close guards and unsaved-change confirmations still apply.

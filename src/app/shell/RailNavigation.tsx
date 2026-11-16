@@ -1,3 +1,4 @@
+import { TeamViewMenu } from "./TeamViewMenu";
 import { RailPinPicker } from "./RailPinPicker";
 import { RailEntryArtwork } from "./RailEntryArtwork";
 import {
@@ -39,7 +40,6 @@ import {
   sidebarSectionTarget,
   isSidebarSectionRoute,
 } from "../../features/channel-navigation/sidebar-section-route";
-import { CountBadge } from "../../shared/design-system/ui/CountBadge";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
@@ -48,8 +48,6 @@ import {
   AtIcon,
   BellIcon,
   BellSlashIcon,
-  CaretDownIcon,
-  CaretUpIcon,
   ChatCircleIcon,
   HashIcon,
   MessageReplyIcon,
@@ -70,7 +68,6 @@ import { pagePresentation } from "./presentation";
 import { RailConversationList } from "./RailConversationList";
 import { useRailPins, type RailEntry } from "./rail-pins";
 import { personEntries, soloView, useRailModel } from "./rail-model";
-import { useTeamExpanded } from "./rail-sync";
 import {
   useChannelNavigation,
   type ChannelMenuSurface,
@@ -170,7 +167,6 @@ export function RailNavigation({
   );
   const resolveName = useIdentityNames(session.names);
   const [savedMessageView, setMessageView] = useActivityView(partition);
-  const [teamExpanded, setTeamExpanded] = useTeamExpanded(partition);
   // Team offers no agent views; a saved one shows All.
   const messageView = useMemo(
     () => withoutAgentViews(savedMessageView),
@@ -188,6 +184,7 @@ export function RailNavigation({
     pins,
     sections: membership,
     soloChats,
+    teamChats,
   } = useRailModel(session);
   // Only the shown entry draws the rail. An opening visit's other steps,
   // its start and its settling, change nothing here and render nothing.
@@ -746,12 +743,12 @@ export function RailNavigation({
     const activityPage = teamPages.find(
       (page) => page.key === "buzz.inbox/inbox",
     );
-    const activityEntry = activityPage && byId.get(activityPage.key);
     const teamViews: {
       filter: ConversationFilter;
       label: string;
       icon: ReactElement;
     }[] = [
+      { filter: "all", label: "Activity", icon: <ChatCircleIcon size={18} /> },
       { filter: "channels", label: "Channels", icon: <HashIcon size={18} /> },
       {
         filter: "threads",
@@ -766,140 +763,80 @@ export function RailNavigation({
       setMessageView({ ...messageView, filter });
       void navigator.open(sidebarSectionTarget(scope, "team"));
     };
-    const teamIcon = (
-      key: string,
-      label: string,
-      icon: ReactElement,
-      current: boolean,
-      open: () => void,
-      count?: ReactNode,
-    ) => (
-      <span key={key} className={styles.teamIcon}>
-        <Tooltip content={label}>
-          <IconButton
-            aria-label={label}
-            icon={icon}
-            size="sm"
-            shape="round"
-            variant={current ? "solid" : "inset"}
-            aria-current={current ? "page" : undefined}
-            data-rail-team-view={key}
-            onClick={open}
-          />
-        </Tooltip>
-        <span className={styles.teamIconCount}>{count}</span>
-      </span>
-    );
-    // Collapsed, Team is one row of its views; the list is a click away.
-    const teamIcons = !teamExpanded && (
-      <div className={styles.teamIcons} data-rail-team-icons="">
-        {activityEntry &&
-          teamIcon(
-            "all",
-            "Activity",
-            <ChatCircleIcon size={18} />,
-            teamOpen && messageView.filter === "all",
-            () => openTeamView("all"),
-            teamCount("all"),
-          )}
-        {teamViews.map((item) =>
-          teamIcon(
-            item.filter,
-            item.label,
-            item.icon,
-            teamOpen && messageView.filter === item.filter,
-            () => openTeamView(item.filter),
-            teamCount(item.filter),
-          ),
-        )}
-        {teamPages
-          .filter((page) => page !== activityPage)
-          .map((page) => {
-            const { icon, image, label } = pagePresentation(page);
-            return teamIcon(
-              page.key,
-              label,
-              <PageIcon icon={icon} image={image} size={18} />,
-              selected === page.key,
-              () => onSelect(page.key),
-            );
-          })}
-      </div>
-    );
     const messageCard = shown("team", () => (
       <RailGroup
         id="team"
         title="Team"
-        rows={[
-          ...(activityEntry
-            ? [
-                {
-                  entry: activityEntry,
-                  content: (
-                    <NavigationItem
-                      label="Activity"
-                      icon={<ChatCircleIcon size={18} />}
-                      trailing={teamCount("all")}
-                      data-rail-team-view="all"
-                      // Activity is Team's list on All.
-                      selected={teamOpen && messageView.filter === "all"}
-                      onClick={() => {
-                        setMessageView({ ...messageView, filter: "all" });
-                        void navigator.open(
-                          sidebarSectionTarget(scope, "team"),
-                        );
-                      }}
+        rows={teamChats.flatMap((channel) => {
+          if (hidden.has(channel.id)) return [];
+          const entry = byId.get(`channel:${channel.id}`);
+          return entry ? [sourceRow(entry, "team")] : [];
+        })}
+        rowsLabel="Recent conversations"
+        views={
+          <div className={styles.teamViews} data-rail-team-icons="">
+            {teamViews.map((item) => (
+              <TeamViewMenu
+                key={item.filter}
+                session={session}
+                filter={item.filter}
+              >
+                <span className={styles.teamView}>
+                  <Tooltip content={item.label}>
+                    <IconButton
+                      variant="ghost"
+                      shape="round"
+                      aria-label={item.label}
+                      icon={item.icon}
+                      data-rail-team-view={item.filter}
+                      aria-current={
+                        teamOpen && messageView.filter === item.filter
+                          ? "page"
+                          : undefined
+                      }
+                      aria-pressed={
+                        teamOpen && messageView.filter === item.filter
+                      }
+                      onClick={() => openTeamView(item.filter)}
                     />
-                  ),
-                },
-              ]
-            : []),
-          ...teamPages.filter((page) => page !== activityPage).flatMap(pageRow),
-        ]}
-        leadingEntryIds={["buzz.inbox/inbox"]}
-        views={teamViews.map((item) => (
-          <NavigationItem
-            key={item.filter}
-            label={item.label}
-            icon={item.icon}
-            trailing={teamCount(item.filter)}
-            data-rail-team-view={item.filter}
-            selected={teamOpen && messageView.filter === item.filter}
-            onClick={() => {
-              setMessageView({ ...messageView, filter: item.filter });
-              void navigator.open(sidebarSectionTarget(scope, "team"));
-            }}
-          />
-        ))}
+                  </Tooltip>
+                  <span className={styles.teamCount}>
+                    {teamCount(item.filter)}
+                  </span>
+                </span>
+              </TeamViewMenu>
+            ))}
+            {teamPages
+              .filter((page) => page !== activityPage)
+              .map((page) => {
+                const { icon, image, label } = pagePresentation(page);
+                return (
+                  <Tooltip key={page.key} content={label}>
+                    <IconButton
+                      variant="ghost"
+                      shape="round"
+                      aria-label={label}
+                      icon={<PageIcon icon={icon} image={image} size={18} />}
+                      data-rail-team-view={page.key}
+                      aria-current={selected === page.key ? "page" : undefined}
+                      onClick={() => onSelect(page.key)}
+                    />
+                  </Tooltip>
+                );
+              })}
+          </div>
+        }
         pageContent={sectionPage}
-        // Drafts and sent stays under the views, ahead of what a person adds.
-        sortEntries={(a, b) =>
-          Number(b.id === "buzz.drafts-and-sent/drafts-sent") -
-          Number(a.id === "buzz.drafts-and-sent/drafts-sent")
-        }
-        icons={teamIcons}
-        action={
-          <>
-            <Tooltip content={teamExpanded ? "Show icons" : "Show list"}>
-              <IconButton
-                aria-label={
-                  teamExpanded ? "Collapse Team views" : "Expand Team views"
-                }
-                aria-expanded={teamExpanded}
-                data-rail-team-expand=""
-                icon={
-                  teamExpanded ? (
-                    <CaretUpIcon size={18} />
-                  ) : (
-                    <CaretDownIcon size={18} />
-                  )
-                }
-                onClick={() => setTeamExpanded(!teamExpanded)}
-              />
-            </Tooltip>
-            {creationAction}
-          </>
-        }
+        renderOpen={(hidden, open) => (
+          <RailOpenConversations
+            session={session}
+            channels={channels}
+            hidden={hidden}
+            label="Open Team"
+            onClick={open}
+          />
+        )}
+        action={creationAction}
       />
     ));
     return (
@@ -1247,9 +1184,10 @@ const TeamCount = memo(function TeamCount({
 }) {
   const count = useConversationCount(session, unreadIn[filter]);
   return count ? (
-    <CountBadge
-      count={count}
-      label={`${count} unread conversation${count === 1 ? "" : "s"}`}
+    <span
+      className={styles.teamUnreadMark}
+      role="img"
+      aria-label={`${count} unread conversation${count === 1 ? "" : "s"}`}
     />
   ) : null;
 });
