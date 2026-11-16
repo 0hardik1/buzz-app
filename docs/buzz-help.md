@@ -99,6 +99,8 @@ if that desktop app is up and running.
   such as `https://<community>/channel/<channel>/<message>`, which opens Buzz
   from a browser. In Buzz, a link to the current community opens like any Buzz
   link; a link to another community opens in the browser.
+  The web link needs a relay that serves its page. An agent's `read` tool reads
+  a web link only from its own community.
 - **Pins.** **Pin to channel** (**Pin to DM** in a DM) in a message's More
   menu adds it to the pin list, up to 250; the pin button in the header lists
   them. Solo chats have no pins.
