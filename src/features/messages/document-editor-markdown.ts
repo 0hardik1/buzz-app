@@ -72,6 +72,7 @@ export function documentEditorDraft(markdown: string) {
     if (
       node.type === "link" &&
       composerLinkUrl(node.url) &&
+      node.title == null &&
       node.children.every(linkLabel)
     )
       return node.children.flatMap((child) =>
@@ -89,7 +90,7 @@ export function documentEditorDraft(markdown: string) {
         .every(
           (child) => !child.isText || !child.textContent.includes("\n"),
         )) ||
-    node.type === "code" ||
+    (node.type === "code" && node.meta == null) ||
     (node.type === "blockquote" && node.children.every(supportedBlock)) ||
     (node.type === "list" &&
       node.children.every(
