@@ -157,7 +157,7 @@ for (const reading of [false, true]) {
       .find((row) => row.content === "Thread root 0");
     let last;
     for (let i = 0; i < 120; i++) last = app.reply(root.id, false, false);
-    await open(page, app);
+    await open(page, app, { cold: true });
     const region = page.getByRole("region", {
       name: "Thread messages",
       exact: true,
