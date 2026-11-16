@@ -22,6 +22,8 @@ const LINKS_AGAIN_MS = 5 * 60_000;
  * session reader's cap, leaves room for concurrent revisions. */
 const CHANNELS_PER_READ = 100;
 const LINKS_PER_READ = 500;
+/** Current revisions a write reads, so it sees a forked head the chat shows. */
+const HEADS_PER_WRITE = 20;
 
 /** One of a chat's linked pull requests, and its state once read. */
 export type SoloPull = Readonly<{
@@ -74,6 +76,16 @@ const linkId = (channel: string) => {
   return id;
 };
 
+/** The head a chat shows, from its current revisions: where heads fork, the
+ * first that links any pull request, else the first link revision. Reads and
+ * writes both start from it, so a change applies to what is shown. */
+function shownHead(heads: readonly EventData[]) {
+  return (
+    heads.find((head) => linksOf(head)?.length) ??
+    heads.find((head) => linksOf(head))
+  );
+}
+
 async function readLinks(
   session: RelaySession,
   channels: readonly string[],
@@ -98,13 +110,11 @@ async function readLinks(
       ],
       { signal },
     );
-    for (const channel of page) links.set(channel, []);
-    // Where heads fork, the first that links any pull request wins.
-    for (const event of events) {
-      const channel = tag(event, "h");
-      const urls = linksOf(event);
-      if (channel && urls?.length && links.get(channel)?.length === 0)
-        links.set(channel, urls);
+    for (const channel of page) {
+      const head = shownHead(
+        events.filter((event) => tag(event, "h") === channel),
+      );
+      links.set(channel, (head && linksOf(head)) ?? []);
     }
   }
   return links;
@@ -163,17 +173,19 @@ async function writeOnce(
   if (!read || !writer)
     throw new Error("This community connection can't save pull request links.");
   const d = await linkId(channel);
-  const [head] = await read(
-    [
-      {
-        kinds: [ARTIFACT_KIND],
-        "#h": [channel],
-        "#d": [d],
-        artifact: "current",
-        limit: 1,
-      },
-    ],
-    { signal },
+  const head = shownHead(
+    await read(
+      [
+        {
+          kinds: [ARTIFACT_KIND],
+          "#h": [channel],
+          "#d": [d],
+          artifact: "current",
+          limit: HEADS_PER_WRITE,
+        },
+      ],
+      { signal },
+    ),
   );
   const current = (head && linksOf(head)) ?? [];
   const urls = [...new Set(change(current))];

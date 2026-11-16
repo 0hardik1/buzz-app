@@ -266,6 +266,28 @@ it("shows a state the shared store moved to while the chat was not shown", async
   stopOther();
 });
 
+it("writes on top of the forked head the chat shows", async () => {
+  const forked = () =>
+    session([
+      revision(chat, []),
+      revision(chat, [second], { id: "d".repeat(64) }),
+    ]);
+  const unlink = forked();
+  expect(await writeLinks(unlink.session, chat, unlinkPull(second))).toEqual(
+    [],
+  );
+  const removed = unlink.sign.mock.calls[0]?.[0] as EventData | undefined;
+  expect(removed?.tags).toContainEqual(["prev", "d".repeat(64)]);
+  const link = forked();
+  expect(await writeLinks(link.session, chat, linkPull(pull))).toEqual([
+    second,
+    pull,
+  ]);
+  expect(link.snapshotRead.mock.calls[0]?.[0]).toEqual([
+    expect.objectContaining({ limit: 20 }),
+  ]);
+});
+
 it("prefers a forked head that links pull requests over an empty one", async () => {
   const relay = session([revision(chat, []), revision(chat, [second])]);
   const pulls = pullsOver(relay.session);
