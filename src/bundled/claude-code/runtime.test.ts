@@ -1409,7 +1409,7 @@ it("starts each session from the host's core memory, reading only recent notes f
   core.mockResolvedValueOnce(undefined);
   await mention("2");
   await flush(10);
-  expect(asked("2")).toContain("## Agent Memory");
+  expect(asked("2")).toContain("## Incoming Turn Contract");
   expect(asked("2")).not.toContain("<core-memory>");
 });
 
