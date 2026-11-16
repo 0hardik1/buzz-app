@@ -80,6 +80,11 @@ import {
   type RegisteredSidebarRows,
 } from "../../features/channel-navigation/sidebar-rows-service";
 import { SidebarRowRenderer } from "../../features/channel-navigation/SidebarRowRenderer";
+import {
+  CATCH_UP_WORKSPACE_NAME,
+  hasLegacyCatchUpWorkspaceName,
+  isCatchUpWorkspace,
+} from "../bestie/catch-up-workspace";
 
 const emptyRows: readonly RegisteredSidebarRows[] = [];
 
@@ -360,16 +365,21 @@ export function SoloWorkspaces({
       return next;
     });
   }, [draftProject, scope, toggleWorkspaceSection]);
+  const project = (group: (typeof groups)[number]) => ({
+    ...group,
+    name: hasLegacyCatchUpWorkspaceName(group.name)
+      ? CATCH_UP_WORKSPACE_NAME
+      : group.name,
+    rows: chats.filter((item) => assignmentFor(item) === group.id),
+  });
   const projects = [
-    ...groups.map((group) => ({
-      ...group,
-      rows: chats.filter((item) => assignmentFor(item) === group.id),
-    })),
+    ...groups.filter((group) => !isCatchUpWorkspace(group)).map(project),
     {
       id: "",
       name: "Chats",
       rows: chats.filter((item) => !ids.has(assignmentFor(item) ?? "")),
     },
+    ...groups.filter(isCatchUpWorkspace).map(project),
   ].filter(
     (project) =>
       !workspaceComposition ||
