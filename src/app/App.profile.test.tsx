@@ -265,8 +265,7 @@ it.each([
     const user = await setup(false, write);
     try {
       const rail = await screen.findByRole("navigation", { name: "Apps" });
-      // The Team card lists views, not channels: a pin keeps this one's row
-      // in the sidebar.
+      // Pin this conversation so its recovery action stays available in the rail.
       const scope = { viewer, communityOrigin: origin };
       act(() => {
         writeView(`${origin}:${viewer}`, "navigation-pins:v1", [
@@ -278,7 +277,13 @@ it.each([
           },
         ]);
       });
-      const row = await within(rail).findByRole("button", { name: "Planning" });
+      const pins = rail.querySelector<HTMLElement>(
+        '[data-rail-section="pins"]',
+      );
+      if (!pins) throw new Error("Pins section is missing");
+      const row = await within(pins).findByRole("button", {
+        name: "Planning",
+      });
       expect(row.closest("[data-rail-row]")).toHaveAttribute(
         "data-rail-row",
         `channel:${channelId}`,
@@ -323,7 +328,7 @@ it.each([
             pageId: "channels",
           });
         });
-        const returned = await within(rail).findByRole("button", {
+        const returned = await within(pins).findByRole("button", {
           name: "Planning",
         });
         expect(returned).toBe(row);
