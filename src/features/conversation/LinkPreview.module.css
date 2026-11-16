@@ -72,7 +72,6 @@ html[data-keyboard-navigation] .soloLink:focus-visible {
   /* Content layout; the shared PreviewCard owns surface, border and elevation. */
   width: min(21.25rem, calc(100vw - 1.5rem));
   max-width: calc(100vw - 1.5rem);
-  /* MessageLink clears the message actions for a loading card this tall. */
   max-height: min(20rem, var(--available-height));
   overflow: auto;
   padding: var(--space-3);
@@ -82,6 +81,10 @@ html[data-keyboard-navigation] .soloLink:focus-visible {
   line-height: var(--text-body--line-height);
   letter-spacing: var(--text-body--letter-spacing);
   font-weight: var(--text-body--font-weight);
+}
+.messagePopup {
+  /* A loaded message card fits; MessageLink clears the actions for this height. */
+  max-height: min(10rem, var(--available-height, 10rem));
 }
 .byline {
   display: flex;
