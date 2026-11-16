@@ -203,6 +203,27 @@ export function SidebarSection({
                   )}
                 />
                 <MenuPopup align="end" aria-label={`More actions for ${title}`}>
+                  {browseChannels && (
+                    <>
+                      <MenuItem
+                        onClick={() => {
+                          setMenuOpen(false);
+                          // Search returns focus where it opened from: the
+                          // menu's trigger, not this item as it unmounts.
+                          actionsTrigger.current?.focus();
+                          browseChannels();
+                        }}
+                      >
+                        <MenuIcon>
+                          <MagnifyingGlassIcon size={14} />
+                        </MenuIcon>
+                        Browse channels
+                      </MenuItem>
+                      {(filter || sort || createSection || move) && (
+                        <MenuSeparator />
+                      )}
+                    </>
+                  )}
                   {filter && (
                     <MenuSubmenu>
                       <MenuSubmenuTrigger>
@@ -510,15 +531,6 @@ export function SidebarSection({
                   </p>
                 )}
               </Dialog>
-            )}
-            {browseChannels && (
-              <IconButton
-                size="compact"
-                aria-label="Browse channels"
-                title="Browse channels"
-                onClick={browseChannels}
-                icon={<MagnifyingGlassIcon strokeWidth={2.5} size={15} />}
-              />
             )}
             {createChannel && (
               <IconButton

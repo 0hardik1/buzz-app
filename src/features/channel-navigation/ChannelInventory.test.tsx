@@ -3673,7 +3673,7 @@ it("moves a mounted session-backed sidebar on a CLI hint without clearing stars 
   expect(reads).toHaveLength(2);
 });
 
-it("offers Browse channels on Channels only, asking search to browse them", async () => {
+it("offers Browse channels in the Channels menu only, asking search to browse them", async () => {
   const preferences = createSidebarPreferencesStore({
     read: async () => ({
       sections: [{ id: "laptop", name: "Laptop", icon: "💻", order: 0 }],
@@ -3686,22 +3686,34 @@ it("offers Browse channels on Channels only, asking search to browse them", asyn
     writeStar: async () => [],
   });
   await preferences.queries.ensure();
+  const user = userEvent.setup();
   const h = fixture(preferences.queries);
   const browse = vi.fn();
   window.addEventListener("buzz:browse-channels", browse);
   try {
     render(h.view("alpha"));
     await screen.findByRole("button", { name: /Laptop/ });
-    const browseButtons = screen.getAllByRole("button", {
-      name: "Browse channels",
-    });
-    expect(browseButtons).toHaveLength(1);
+    // No heading button: the sidebar stays free of another search action.
     expect(
-      screen.getByRole("button", { name: "More actions for Channels" })
-        .parentElement,
-    ).toContainElement(browseButtons[0] ?? null);
-    fireEvent.click(browseButtons[0] as HTMLElement);
+      screen.queryByRole("button", { name: "Browse channels" }),
+    ).toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "More actions for Laptop" }),
+    );
+    expect(
+      screen.queryByRole("menuitem", { name: "Browse channels" }),
+    ).toBeNull();
+    await user.keyboard("{Escape}");
+    const trigger = screen.getByRole("button", {
+      name: "More actions for Channels",
+    });
+    await user.click(trigger);
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Browse channels" }),
+    );
     expect(browse).toHaveBeenCalledTimes(1);
+    // Search opens from, and returns focus to, the menu's trigger.
+    expect(trigger).toHaveFocus();
   } finally {
     window.removeEventListener("buzz:browse-channels", browse);
     preferences.dispose();
