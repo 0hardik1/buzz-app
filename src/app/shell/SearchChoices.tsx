@@ -210,6 +210,7 @@ export function SearchChoices({
   highlightEmpty = false,
   onRowsShown,
   peek,
+  fill = false,
 }: SearchInputProps & {
   groups: readonly SearchGroup[];
   children?: ReactNode;
@@ -230,12 +231,16 @@ export function SearchChoices({
    * reading only for the rows someone can see. */
   onRowsShown?: ((keys: readonly string[]) => void) | undefined;
   peek?: SearchPeek | undefined;
+  /** Fill the dialog rather than size to the results, for a long list that
+   * is browsed more than searched. Peek always fills. */
+  fill?: boolean;
 }) {
   const palette = useRef<HTMLDivElement>(null);
   const resultsViewport = useRef<HTMLDivElement>(null);
   const resultsContent = useRef<HTMLDivElement>(null);
-  // Peek fills its dialog; only a palette sized by its results eases height.
-  const fills = !!peek;
+  // Peek and long lists fill their dialog; only a palette sized by its
+  // results eases height.
+  const fills = !!peek || fill;
   useLayoutEffect(() => {
     const viewport = resultsViewport.current;
     const content = resultsContent.current;
@@ -701,6 +706,7 @@ export function SearchChoices({
       data-search-palette=""
       data-search-footer={footer ? "" : undefined}
       data-search-peek={peek ? "" : undefined}
+      data-search-fill={fills ? "" : undefined}
       {...highlight.listProps}
     >
       {(scope || scopeAction) && (

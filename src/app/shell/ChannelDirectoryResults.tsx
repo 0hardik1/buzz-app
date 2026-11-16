@@ -235,20 +235,29 @@ export function ChannelDirectoryResults({
         icon: Icon,
         content: (
           <PreferenceRow
-            variant="search"
+            variant="search-compact"
             icon={<Icon size={21} />}
+            // One line, the name first: details give way at the edge.
             title={
-              <MatchedLabel label={channel.name} positions={match?.positions} />
-            }
-            // Always a second line, so a count arriving doesn't grow the row.
-            subtitle={
-              state?.status === "failed" && !isJoined ? (
-                <span className="text-danger" role="alert">
-                  {state.error}
+              <span className="flex min-w-0 gap-2">
+                <span className="max-w-[60%] shrink-0 truncate">
+                  <MatchedLabel
+                    label={channel.name}
+                    positions={match?.positions}
+                  />
                 </span>
-              ) : (
-                detail || "\u00a0"
-              )
+                {state?.status === "failed" && !isJoined ? (
+                  <span className="min-w-0 truncate text-danger" role="alert">
+                    {state.error}
+                  </span>
+                ) : (
+                  detail && (
+                    <span className="min-w-0 truncate text-subtle">
+                      {detail}
+                    </span>
+                  )
+                )}
+              </span>
             }
             trailing={
               // Membership can show before the Join settles; the button
@@ -259,7 +268,7 @@ export function ChannelDirectoryResults({
                 // after a failure.
                 <span data-search-reveal={state ? undefined : ""}>
                   <Button
-                    size="sm"
+                    size="xs"
                     variant="outline"
                     aria-label={`Join ${channel.name}`}
                     loading={state?.status === "pending"}
@@ -307,6 +316,7 @@ export function ChannelDirectoryResults({
       label="Search channels"
       placeholder="Search channels"
       views={views}
+      fill
       highlightEmpty
       // Counts fill in for the rows in view, after the rows themselves.
       onRowsShown={(keys) => {

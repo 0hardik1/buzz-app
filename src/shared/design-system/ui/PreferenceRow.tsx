@@ -18,7 +18,8 @@ export function PreferenceRow({
   disabled = false,
 }: {
   id?: string;
-  variant?: "default" | "search";
+  /** `search-compact` is one line, for long lists such as Browse channels. */
+  variant?: "default" | "search" | "search-compact";
   icon?: ReactNode;
   title: ReactNode;
   subtitle?: ReactNode;
@@ -31,7 +32,7 @@ export function PreferenceRow({
   const id = useId();
   const titleId = `${id}-title`;
   const subtitleId = subtitle ? `${id}-subtitle` : undefined;
-  const Title = controlId && variant !== "search" ? "label" : "div";
+  const Title = controlId && variant === "default" ? "label" : "div";
   return (
     <div
       id={rowId}

@@ -163,7 +163,7 @@
     background: linear-gradient(to bottom, var(--surface-panel), transparent);
     pointer-events: none;
   }
-  .search-palette:is([data-search-footer], [data-search-peek])
+  .search-palette:is([data-search-footer], [data-search-fill])
     .search-palette-height::before {
     content: "";
     position: absolute;
@@ -220,10 +220,11 @@
 }
 
 @layer components {
-  /* Peek: results beside a preview of the highlighted row and a rail of
-     their groups. Narrow palettes keep the single column. The results fill
-     what the field, hints, footer and key line leave of the dialog. */
-  .search-palette[data-search-peek] {
+  /* Peek (results beside a preview of the highlighted row and a rail of
+     their groups; narrow palettes keep the single column) and long browsed
+     lists: the results fill what the field, hints, footer and key line leave
+     of the dialog. */
+  .search-palette[data-search-fill] {
     display: flex;
     flex: 1;
     flex-direction: column;
@@ -393,13 +394,13 @@
     align-items: stretch;
   }
   .search-peek-body,
-  .search-palette[data-search-peek] .search-palette-height,
-  .search-palette[data-search-peek] .search-palette-scroll {
+  .search-palette[data-search-fill] .search-palette-height,
+  .search-palette[data-search-fill] .search-palette-scroll {
     flex: 1;
     min-height: 0;
     max-height: none;
   }
-  .search-palette[data-search-peek] .search-palette-height {
+  .search-palette[data-search-fill] .search-palette-height {
     display: flex;
     flex-direction: column;
   }

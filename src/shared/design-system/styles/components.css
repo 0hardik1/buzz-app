@@ -3226,23 +3226,35 @@
 }
 
 @layer components {
-  .buzz-preference-row[data-variant="search"] {
+  .buzz-preference-row[data-variant^="search"] {
     padding: var(--space-3);
     gap: var(--space-row-gap);
   }
-  .buzz-preference-row[data-variant="search"] .buzz-preference-row-icon {
+  /* One line per row, for long lists scanned by name: 36px with the icon
+     slot, so about a third more rows fit than the two-line search row. */
+  .buzz-preference-row[data-variant="search-compact"] {
+    padding-block: var(--space-1h);
+  }
+  /* The title column keeps to the row, so its line ellipsizes before the
+     trailing control rather than running under it. */
+  .buzz-preference-row[data-variant="search-compact"]
+  .buzz-preference-row-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .buzz-preference-row[data-variant^="search"] .buzz-preference-row-icon {
     width: var(--space-6);
     height: var(--space-6);
     justify-content: flex-start;
   }
-  .buzz-preference-row[data-variant="search"] .buzz-preference-row-icon > svg {
+  .buzz-preference-row[data-variant^="search"] .buzz-preference-row-icon > svg {
     width: calc(var(--space-5) + 1px);
     height: calc(var(--space-5) + 1px);
   }
-  .buzz-preference-row[data-variant="search"] .buzz-preference-row-content {
+  .buzz-preference-row[data-variant^="search"] .buzz-preference-row-content {
     gap: 0;
   }
-  .buzz-preference-row[data-variant="search"] .buzz-preference-row-description {
+  .buzz-preference-row[data-variant^="search"]
+    .buzz-preference-row-description {
     @apply text-body-sm;
     color: var(--text-subtle);
   }

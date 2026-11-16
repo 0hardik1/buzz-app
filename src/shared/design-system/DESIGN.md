@@ -2224,7 +2224,7 @@ Search result rows use `NavigationItem variant="search"`, with 12px vertical
 and horizontal padding and 21px icons. Their 20px radius follows the modal radius minus
 the 12px gutter, and their hover surfaces align with the input.
 
-Inline search settings use the search variant of PreferenceRow with a gear icon and the same title/subtitle hierarchy as destination rows. Results height transitions for 180ms, disabled with reduced motion. The clear control reserves space to keep input dimensions stable.
+Inline search settings use the search variant of PreferenceRow with a gear icon and the same title/subtitle hierarchy as destination rows. Long lists browsed by name, such as Browse channels, use `search-compact`: one 36px line with 6px vertical padding, the name first and muted details after it, ellipsized before a trailing extra-small control. Results height transitions for 180ms, disabled with reduced motion. The clear control reserves space to keep input dimensions stable.
 
 ### Conversation identity icons (proposed)
 
