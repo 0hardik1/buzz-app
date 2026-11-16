@@ -75,7 +75,11 @@ test("a sign-in that ends mid-session is reported once", async ({
     page.getByRole("textbox", { name: "Message #Alpha", exact: true }),
   ).toBeVisible();
   app.relay.refuseSigned(403, "evidence rejected\n");
-  await channelRow(page, "beta").click();
+  // Opening Beta reads. A background read may meet the refusal first and
+  // take the row away before the click lands; either way it is one notice.
+  void channelRow(page, "beta")
+    .click()
+    .catch(() => {});
   await expect(
     page.getByRole("dialog", {
       name: "This community needs a sign-in Buzz doesn’t support yet",
