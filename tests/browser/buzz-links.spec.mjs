@@ -775,17 +775,13 @@ test.describe("links to channels the reader hasn't joined", () => {
     await expect(card).toContainText("Public channel · Not joined");
   });
 
-  test("link previews open above the message's hover actions", async ({
-    page,
-    app,
-  }) => {
+  // Hovers the open-channel link at the end of a new message's body.
+  const hoverChannelLink = async (page, app, body) => {
     await open(page, app);
-    // A link below the first line puts its preview's default place over the
-    // actions above the message.
     const message = app.append(
       "primary",
       "alpha",
-      `Release notes:\nsee <buzz://channel/${app.openChannelId}>`,
+      `${body}\nsee <buzz://channel/${app.openChannelId}>`,
     );
     const row = page.locator(
       `[data-channel-timeline] [data-message-id="${message.id}"]`,
@@ -801,8 +797,39 @@ test.describe("links to channels the reader hasn't joined", () => {
     await expect(card).toContainText("Public channel · Not joined");
     const actions = row.getByRole("group", { name: "Message actions" });
     await expect(actions).toBeVisible();
+    return { channel, card, actions };
+  };
+
+  test("link previews open above the message's hover actions", async ({
+    page,
+    app,
+  }) => {
+    // A link below the first line puts its preview's default place over the
+    // actions above the message.
+    const { actions } = await hoverChannelLink(page, app, "Release notes:");
     // A trial click fails while the preview covers the action.
     for (const control of await actions.getByRole("button").all())
       await control.click({ trial: true });
+  });
+
+  test("a link low in a long message keeps its preview beside it", async ({
+    page,
+    app,
+  }) => {
+    // The actions above the message are far from this link, so the preview
+    // stays at its default gap instead of rising to the message's top.
+    const { channel, card } = await hoverChannelLink(
+      page,
+      app,
+      Array.from({ length: 12 }, (_, line) => `Line ${line + 1}`).join("\n"),
+    );
+    const link = await channel.boundingBox();
+    await expect
+      .poll(async () => {
+        const box = await card.boundingBox();
+        const gap = box && link && Math.round(link.y - (box.y + box.height));
+        return gap >= 4 && gap <= 12 ? "beside the link" : gap;
+      })
+      .toBe("beside the link");
   });
 });

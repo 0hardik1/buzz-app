@@ -1636,7 +1636,9 @@ The positioned portal owns its layer above dialogs. An optional content anchor
 keeps previews near compact identity content inside wider actionable rows. Identity
 previews prefer above that content (with Base UI collision handling), leaving
 the hovered row’s trailing action unobstructed.
-Message link previews open above the hovered message’s actions, not over them.
+Message link previews open just above the link. They lift past the hovered
+message’s actions only when the card would reach the actions’ row; a card that
+loads its content is measured at its tallest, so it never jumps once open.
 
 ## Menu row corners
 

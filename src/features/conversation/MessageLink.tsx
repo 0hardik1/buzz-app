@@ -71,18 +71,25 @@ export const resolveLink = (
 
 const previewGap = 8;
 
-/** Lift a preview above the hovered message's actions, not over them. */
-function clearMessageActions(link: HTMLElement | null) {
+/** Lift a preview above the hovered message's actions when it would reach them. */
+function clearMessageActions(link: HTMLElement | null, height?: number) {
   const actions = link
     ?.closest("[data-actions-revealed]")
     ?.querySelector("[data-message-actions]");
   if (!link || !actions) return previewGap;
-  return Math.max(
-    previewGap,
-    link.getBoundingClientRect().top -
-      actions.getBoundingClientRect().top +
-      previewGap,
-  );
+  const linkTop = link.getBoundingClientRect().top;
+  const bar = actions.getBoundingClientRect();
+  // A card that can grow as it loads is measured at its tallest (`.popup` in
+  // LinkPreview.module.css), so it never moves from under the pointer later.
+  const tallest =
+    height ??
+    20 *
+      Number.parseFloat(
+        getComputedStyle(link.ownerDocument.documentElement).fontSize,
+      );
+  // A link further down the message leaves the bar clear at the default gap.
+  if (linkTop - previewGap - tallest >= bar.bottom) return previewGap;
+  return Math.max(previewGap, linkTop - bar.top + previewGap);
 }
 
 export function MessageLink({
@@ -436,11 +443,15 @@ export function MessageLink({
           setPreviewOpen(next);
         }}
         side="top"
-        sideOffset={({ side }) => {
+        sideOffset={({ side, positioner }) => {
           if (side !== "top") return previewGap;
           lift.current = Math.max(
             lift.current,
-            clearMessageActions(trigger.current),
+            clearMessageActions(
+              trigger.current,
+              // A channel card opens at its final size.
+              !preview && named ? positioner.height : undefined,
+            ),
           );
           return lift.current;
         }}
