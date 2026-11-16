@@ -109,6 +109,8 @@ test("a write that lost to another device reads again and retries", async () => 
 
 test("an account with nothing saved starts from its earlier sections, once", async () => {
   const saved = account();
+  let listed: (() => void) | undefined;
+  let ready = false;
   Object.assign(saved.session, {
     sidebarPreferences: {
       subscribe: () => () => {},
@@ -119,13 +121,31 @@ test("an account with nothing saved starts from its earlier sections, once", asy
             { id: "b", name: "Later", order: 2 },
             { id: "a", name: "Work", order: 1 },
           ],
-          assignments: { alpha: "a", gone: "missing" },
+          assignments: { alpha: "a", gone: "missing", left: "a", old: "b" },
         },
       }),
     },
-    channels: { list: () => ({ channels: [{ id: "alpha", name: "Alpha" }] }) },
+    // The viewer left `left`, and `old` is archived: neither is carried over.
+    channels: {
+      subscribeList: (listener: () => void) => {
+        listed = listener;
+        return () => {};
+      },
+      list: () => ({
+        status: listed && ready ? "ready" : "loading",
+        channels: [
+          { id: "alpha", name: "Alpha" },
+          { id: "old", name: "Old", archived: true },
+        ],
+      }),
+    },
   });
   const stop = syncRail(saved.session, scope, viewer);
+  // Nothing is carried over before the channel list has loaded.
+  await vi.waitFor(() => expect(listed).toBeDefined());
+  expect(sections()).toBeUndefined();
+  ready = true;
+  listed?.();
   await vi.waitFor(() =>
     expect(saved.head().payload).toMatchObject({
       sections: [

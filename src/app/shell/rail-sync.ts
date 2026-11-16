@@ -99,17 +99,33 @@ export function syncRail(session: RelaySession, scope: string, viewer: string) {
           }
         } else if (!saved && !mine.sections.length && !state().dirty) {
           // Nothing saved yet: start from the sections an earlier app made.
+          // A channel the viewer no longer has is left behind, so both the
+          // sections and the channel list must have loaded.
           const earlier = session.sidebarPreferences.snapshot();
-          if (earlier.status !== "ready") {
-            stopEarlier ??= session.sidebarPreferences.subscribe(() => {
-              if (session.sidebarPreferences.snapshot().status !== "ready")
-                return;
-              stopEarlier?.();
-              void run();
-            });
+          const listed = session.channels.list();
+          const loaded = () =>
+            session.sidebarPreferences.snapshot().status === "ready" &&
+            session.channels.list().status === "ready";
+          if (!loaded()) {
+            if (!stopEarlier) {
+              const retry = () => {
+                if (!loaded()) return;
+                stopEarlier?.();
+                void run();
+              };
+              const stops = [
+                session.sidebarPreferences.subscribe(retry),
+                session.channels.subscribeList(retry),
+              ];
+              stopEarlier = () => {
+                for (const end of stops) end();
+              };
+            }
           } else if (earlier.data?.sections.length) {
             const names = new Map(
-              session.channels.list().channels.map((row) => [row.id, row.name]),
+              listed.channels
+                .filter((row) => !row.archived)
+                .map((row) => [row.id, row.name]),
             );
             const ids = new Set(earlier.data.sections.map(({ id }) => id));
             writeView(scope, LAYOUT, {
@@ -120,12 +136,15 @@ export function syncRail(session: RelaySession, scope: string, viewer: string) {
               placements: [
                 ...mine.placements,
                 ...Object.entries(earlier.data.assignments)
-                  .filter(([, section]) => ids.has(section))
+                  .filter(
+                    ([channelId, section]) =>
+                      ids.has(section) && names.has(channelId),
+                  )
                   .map(([channelId, section]) => ({
                     section: `custom:${section}`,
                     entry: {
                       id: `channel:${channelId}`,
-                      label: names.get(channelId) ?? channelId,
+                      label: names.get(channelId) ?? "",
                       kind: "channel",
                       target: {
                         version: 1,
