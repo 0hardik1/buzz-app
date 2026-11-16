@@ -17,6 +17,8 @@ const KEY = "navigation-layout:v2";
 
 const readLayout = (scope: string) =>
   parseRailLayout(readView<unknown>(scope, KEY, null));
+/** Team's section was once named for its page; saved arrangements still say so. */
+const sectionId = (id: string) => (id === "messages" ? "team" : id);
 export function parseRailLayout(value: unknown): RailLayout {
   const raw = value as Partial<RailLayout> | null;
   const sections = Array.isArray(raw?.sections)
@@ -32,8 +34,8 @@ export function parseRailLayout(value: unknown): RailLayout {
   if (Array.isArray(raw?.placements))
     for (const item of raw.placements) {
       const entry = parseRailEntries([item?.entry])[0];
-      const section = item?.section;
-      if (!entry || typeof section !== "string") continue;
+      if (!entry || typeof item?.section !== "string") continue;
+      const section = sectionId(item.section);
       // An app row has one place; a conversation has one copy per section.
       if (
         !placements.some(
@@ -45,7 +47,11 @@ export function parseRailLayout(value: unknown): RailLayout {
         placements.push({ section, entry });
     }
   const order = Array.isArray(raw?.order)
-    ? [...new Set(raw.order.filter((id) => typeof id === "string"))]
+    ? [
+        ...new Set(
+          raw.order.filter((id) => typeof id === "string").map(sectionId),
+        ),
+      ]
     : [];
   return { order, sections, placements };
 }

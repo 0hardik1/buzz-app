@@ -337,7 +337,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
 }, testInfo) => {
   await page.goto(app.origin, { waitUntil: "domcontentloaded" });
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
-  const messages = rail.locator('[data-rail-section="messages"]');
+  const messages = rail.locator('[data-rail-section="team"]');
   const solo = rail.locator('[data-rail-section="solo"]');
   const primary = rail.locator("section").filter({
     has: page.getByRole("button", { name: "Workflows", exact: true }),
@@ -405,15 +405,15 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await dropOn(
     navigation.getByRole("heading", { name: "Plugins", exact: true }),
   );
-  await expect.poll(order).toEqual(["pins", "navigation", "messages", "solo"]);
+  await expect.poll(order).toEqual(["pins", "navigation", "team", "solo"]);
   await page.reload();
-  await expect.poll(order).toEqual(["pins", "navigation", "messages", "solo"]);
+  await expect.poll(order).toEqual(["pins", "navigation", "team", "solo"]);
   await solo.hover();
   await startDrag(
     solo.getByRole("button", { name: "Move Solo section", exact: true }),
   );
   await dropOn(messages.getByRole("heading", { name: "Team", exact: true }));
-  await expect.poll(order).toEqual(["pins", "navigation", "solo", "messages"]);
+  await expect.poll(order).toEqual(["pins", "navigation", "solo", "team"]);
 
   // Team's rows are views, not conversations, so an app's row is dragged.
   const workflows = navigation.getByRole("button", {
@@ -521,7 +521,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
       "pins",
       "navigation",
       "solo",
-      "messages",
+      "team",
       await custom.getAttribute("data-rail-section"),
     ]);
   await expect(
@@ -621,7 +621,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
       "pins",
       "navigation",
       "solo",
-      "messages",
+      "team",
       await custom.getAttribute("data-rail-section"),
     ]);
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
@@ -685,7 +685,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     .getByRole("button", { name: "Move Solo section", exact: true })
     .focus();
   await page.keyboard.press("ArrowDown");
-  await expect.poll(order).toEqual(["pins", "navigation", "messages", "solo"]);
+  await expect.poll(order).toEqual(["pins", "navigation", "team", "solo"]);
   const fullBeta = messagesPage.locator(
     '[data-activity-row="beta"] [data-conversation-row]',
   );

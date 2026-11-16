@@ -77,7 +77,7 @@ test("navigation menus do not highlight labels while message text and editors re
 
   // Rail section titles have their own style, outside NavigationItem.
   const section = rail(page)
-    .locator('[data-rail-section="messages"]')
+    .locator('[data-rail-section="team"]')
     .getByRole("button", { name: "Team", exact: true });
   await expectNoSelection(page, section);
   await section.click({

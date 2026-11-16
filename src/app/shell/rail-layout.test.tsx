@@ -2,7 +2,7 @@ import { accepts, railSections } from "./rail-sections";
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { useRailLayout } from "./rail-layout";
+import { parseRailLayout, useRailLayout } from "./rail-layout";
 import type { RailEntry } from "./rail-pins";
 
 const entry: RailEntry = {
@@ -64,7 +64,7 @@ test("a saved arrangement survives remounts, stays scoped, and retains confirmed
     expect(
       first.result.current.reorder("solo", "pins", [
         "pins",
-        "messages",
+        "team",
         "solo",
         "custom:project",
       ]),
@@ -79,7 +79,7 @@ test("a saved arrangement survives remounts, stays scoped, and retains confirmed
   expect(restored.result.current.layout.order).toEqual([
     "solo",
     "pins",
-    "messages",
+    "team",
     "custom:project",
   ]);
   expect(restored.result.current.layout.placements).toEqual([
@@ -118,7 +118,7 @@ test("cards, expanded lists, and routing share contributed section membership", 
     "example.plugin/section",
   );
   // The section holds a copy: the conversation stays in its own list.
-  expect(model.entries("messages", [entry])).toEqual([entry]);
+  expect(model.entries("team", [entry])).toEqual([entry]);
   expect(model.entries("example.plugin/section", [])).toEqual([entry]);
   // Disabling the contribution leaves only the conversation's own list.
   const disabled = railSections({
@@ -129,7 +129,7 @@ test("cards, expanded lists, and routing share contributed section membership", 
   expect(
     disabled.owner((candidate) => candidate.id === entry.id),
   ).toBeUndefined();
-  expect(disabled.entries("messages", [entry])).toEqual([entry]);
+  expect(disabled.entries("team", [entry])).toEqual([entry]);
 });
 
 test("a conversation keeps its own list while sections a person made hold copies", () => {
@@ -146,13 +146,13 @@ test("a conversation keeps its own list while sections a person made hold copies
     { section: "custom:work", entry },
     { section: "custom:later", entry },
   ]);
-  expect(copied.entries("messages", [entry])).toEqual([entry]);
+  expect(copied.entries("team", [entry])).toEqual([entry]);
   expect(copied.entries("custom:work", [])).toEqual([entry]);
   expect(copied.entries("custom:later", [])).toEqual([entry]);
   // An arrangement saved earlier could put a conversation in Solo or Plugins.
   const misplaced = saved([{ section: "solo", entry }]);
   expect(misplaced.entries("solo", [])).toEqual([]);
-  expect(misplaced.entries("messages", [entry])).toEqual([entry]);
+  expect(misplaced.entries("team", [entry])).toEqual([entry]);
 });
 
 test("Team keeps to its own pages: another app's row saved there stays out", () => {
@@ -163,18 +163,24 @@ test("Team keeps to its own pages: another app's row saved there stays out", () 
   });
   const agents = page("buzz.agents/agents");
   const drafts = page("buzz.drafts-and-sent/drafts-sent");
-  expect(accepts(agents, "messages")).toBe(false);
-  expect(accepts(drafts, "messages")).toBe(true);
+  expect(accepts(agents, "team")).toBe(false);
+  expect(accepts(drafts, "team")).toBe(true);
   expect(accepts(agents, "pins")).toBe(true);
   const model = railSections({
     order: [],
     sections: [],
     placements: [
-      { section: "messages", entry: agents },
-      { section: "messages", entry: drafts },
+      { section: "team", entry: agents },
+      { section: "team", entry: drafts },
     ],
   });
-  expect(model.entries("messages", [])).toEqual([drafts]);
+  expect(model.entries("team", [])).toEqual([drafts]);
   // The app's row is back in its own section.
   expect(model.entries("navigation", [agents])).toEqual([agents]);
+});
+
+test("an arrangement saved under Team's earlier section id still places it", () => {
+  expect(
+    parseRailLayout({ order: ["solo", "messages"], sections: [] }).order,
+  ).toEqual(["solo", "team"]);
 });

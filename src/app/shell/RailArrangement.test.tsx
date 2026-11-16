@@ -302,9 +302,9 @@ test("a section a person made is renamed by double-clicking its title", async ()
       openSection={() => {}}
       sections={[
         {
-          id: "messages",
+          id: "team",
           title: "Team",
-          content: <RailGroup id="messages" title="Team" />,
+          content: <RailGroup id="team" title="Team" />,
         },
       ]}
     />,
@@ -338,7 +338,7 @@ test("a restriction shows one card under its banner and no way to add sections",
       openSection={() => {}}
       renderEntry={(item) => <NavigationItem label={item.label} />}
       only={only}
-      sections={["messages", "solo"].map((id) => ({
+      sections={["team", "solo"].map((id) => ({
         id,
         title: id === "solo" ? "Solo" : "Team",
         content: <RailGroup id={id} title={id === "solo" ? "Solo" : "Team"} />,

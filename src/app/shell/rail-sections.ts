@@ -5,12 +5,12 @@ type RailSection = { id: string; title: string };
 const builtins: readonly RailSection[] = [
   { id: "navigation", title: "Plugins" },
   { id: "pins", title: "Pins" },
-  { id: "messages", title: "Team" },
+  { id: "team", title: "Team" },
   { id: "solo", title: "Solo" },
 ];
 
 /** A conversation's own list, and where apps live: nothing is copied here. */
-const homes = new Set(["navigation", "messages", "solo"]);
+const homes = new Set(["navigation", "team", "solo"]);
 /**
  * Whether a section holds its own copy of this entry. A conversation always
  * stays in Team or Solo, so a section a person made lists it as well. An
@@ -29,7 +29,7 @@ const teamPages = new Set([
 ]);
 /** Whether a row can be put there: Team keeps to its views and own pages. */
 export const accepts = (entry: RailEntry, section: string) =>
-  section !== "messages" || teamPages.has(entry.id);
+  section !== "team" || teamPages.has(entry.id);
 
 /** Cards, expanded lists and conversation routing share the same membership. */
 export function railSections(

@@ -75,16 +75,14 @@ export function useListSection(
     (selected?.channelType === "solo" ||
     (target.kind === "page" && soloDraft(target.route?.params))
       ? "solo"
-      : "messages");
+      : "team");
   const title = membership.sections.get(section) ?? "Team";
   return {
     section,
     title,
     /** Names the list and its page together. */
     label:
-      section === "messages" || section === "solo"
-        ? title
-        : `${title} workspace`,
+      section === "team" || section === "solo" ? title : `${title} workspace`,
     /** Nothing is selected: a narrow window gives the list the whole width. */
     fill: routedSection(target) !== undefined,
   };

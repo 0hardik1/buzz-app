@@ -354,7 +354,7 @@ export function RailNavigation({
     (): RailEntry[] =>
       pages.map((page) => ({
         id: page.key,
-        label: page.title === "Channels" ? "Team" : page.title,
+        label: page.title,
         kind: "page",
         target: {
           version: 1,
@@ -690,7 +690,7 @@ export function RailNavigation({
   const activeDockSection =
     selectedSection ??
     // A section a person made has no address: its open list marks it.
-    (listedSection && listedSection !== "messages" && listedSection !== "solo"
+    (listedSection && listedSection !== "team" && listedSection !== "solo"
       ? listedSection
       : undefined) ??
     (currentChannel?.channelType === "solo" ||
@@ -704,7 +704,7 @@ export function RailNavigation({
             "buzz.inbox/inbox",
             "buzz.drafts-and-sent/drafts-sent",
           ].includes(selected)
-        ? "messages"
+        ? "team"
         : "navigation");
   const current = entries.find(
     (entry) =>
@@ -849,7 +849,7 @@ export function RailNavigation({
       pages.filter((page) => page.key === key),
     );
     let sectionPage: ReactNode;
-    if (pageSection === "messages" || pageSection === "solo") {
+    if (pageSection === "team" || pageSection === "solo") {
       const membership = railSections(
         railLayout,
         contributed.map((section) => ({
@@ -897,10 +897,10 @@ export function RailNavigation({
       { filter: "dms", label: "DMs", icon: <UsersIcon size={18} /> },
       { filter: "mentions", label: "Mentions", icon: <AtIcon size={18} /> },
     ];
-    const teamOpen = routedSection(navigation.entry.target) === "messages";
+    const teamOpen = routedSection(navigation.entry.target) === "team";
     const openTeamView = (filter: ActivityView["filter"]) => {
       setMessageView({ ...messageView, filter });
-      void navigator.open(sidebarSectionTarget(scope, "messages"));
+      void navigator.open(sidebarSectionTarget(scope, "team"));
     };
     const teamIcon = (
       key: string,
@@ -962,9 +962,9 @@ export function RailNavigation({
           })}
       </div>
     );
-    const messageCard = shown("messages", () => (
+    const messageCard = shown("team", () => (
       <RailGroup
-        id="messages"
+        id="team"
         title="Team"
         rows={[
           ...(activityEntry
@@ -982,7 +982,7 @@ export function RailNavigation({
                       onClick={() => {
                         setMessageView({ ...messageView, filter: "all" });
                         void navigator.open(
-                          sidebarSectionTarget(scope, "messages"),
+                          sidebarSectionTarget(scope, "team"),
                         );
                       }}
                     />
@@ -1003,7 +1003,7 @@ export function RailNavigation({
             selected={teamOpen && messageView.filter === item.filter}
             onClick={() => {
               setMessageView({ ...messageView, filter: item.filter });
-              void navigator.open(sidebarSectionTarget(scope, "messages"));
+              void navigator.open(sidebarSectionTarget(scope, "team"));
             }}
           />
         ))}
@@ -1083,7 +1083,7 @@ export function RailNavigation({
           // A section a person made has no page of its own: open its first
           // conversation beside its list.
           const first =
-            id === "messages" || id === "solo"
+            id === "team" || id === "solo"
               ? undefined
               : railSections(
                   railLayout,
@@ -1246,7 +1246,7 @@ export function RailNavigation({
             )),
           },
           {
-            id: "messages",
+            id: "team",
             title: "Team",
             icon: <ChatCircleIcon size={22} />,
             content: messageCard,

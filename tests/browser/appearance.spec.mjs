@@ -61,7 +61,7 @@ async function expectMode(page, mode, inSettings = false) {
   await expect(
     page
       .getByRole("navigation", { name: "Apps", exact: true })
-      .locator('[data-rail-section="messages"]'),
+      .locator('[data-rail-section="team"]'),
   ).toBeVisible();
   if (collapsed) await button(page, "Hide navigation").click();
 }

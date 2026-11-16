@@ -16,7 +16,7 @@ test("Team card opens its views and list rows drag onto sidebar cards", async ({
   await page.setViewportSize({ width: 1920, height: 950 });
   await page.goto(app.origin);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
-  const card = rail.locator('[data-rail-section="messages"]');
+  const card = rail.locator('[data-rail-section="team"]');
   for (const name of ["Activity", "Threads", "DMs", "Mentions", "Channels"])
     await expect(
       card.getByRole("button", { name: new RegExp(`^${name}`) }),

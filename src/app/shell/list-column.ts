@@ -33,11 +33,13 @@ export function listsConversations(target: OpenTarget) {
  */
 export function routedSection(target: OpenTarget) {
   if (target.kind !== "page" || !listsConversations(target)) return;
-  if (!target.route || activityAddress(target)) return "messages";
+  if (!target.route || activityAddress(target)) return "team";
   const params = target.route.params;
   // Nothing is open to offer the list from: the empty page shows Team's.
-  if (params === "empty") return "messages";
-  return isSidebarSectionRoute(params) ? params.section : undefined;
+  if (params === "empty") return "team";
+  if (!isSidebarSectionRoute(params)) return;
+  // Team's section was once named for its page; saved addresses still say so.
+  return params.section === "messages" ? "team" : params.section;
 }
 
 /** A draft's own section, so its list opens on the collection it adds to. */
@@ -45,7 +47,7 @@ function draftSection(target: OpenTarget) {
   if (target.kind !== "page" || !listsConversations(target)) return;
   const params = target.route?.params;
   return params === "new-message" || params === "compose"
-    ? "messages"
+    ? "team"
     : soloDraft(params)
       ? "solo"
       : undefined;

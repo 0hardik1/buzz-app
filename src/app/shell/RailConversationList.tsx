@@ -42,7 +42,7 @@ export function RailConversationList({
   renderOther(entry: RailEntry): ReactNode;
 }) {
   const [saved, setView] = useActivityView(
-    section === "messages"
+    section === "team"
       ? `${scope.communityOrigin}:${scope.viewer}`
       : `${scope.communityOrigin}:${scope.viewer}:rail-page:${section}`,
   );
@@ -121,7 +121,7 @@ export function RailConversationList({
           view={view}
           within={within}
           home={
-            section === "messages"
+            section === "team"
               ? "team"
               : section === "solo"
                 ? "solo"
