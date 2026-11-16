@@ -972,6 +972,10 @@ and are asked to sign in again in Buzz.
   Choose **New section** below the sidebar cards to name and create an empty section.
   While dragging a row, **New section** appears at the bottom; drop there, name
   the section, and choose **Create and move**. Cancel leaves the row in place.
+  Your sections, their order, what you put in them, your pins and whether Team is
+  expanded are saved to your account in that community, so your other devices
+  show the same sidebar. A change made offline is saved when Buzz reconnects.
+  The first time, sections you made in an earlier version of Buzz are carried over.
   Right-click a row in a card or in a section's list (or press Shift+F10) for
   **Pin**/**Unpin** and a submenu that lists your sections and **New section**.
   A channel, DM or chat always stays in Team or Solo: **Add to section** puts a copy
