@@ -1,5 +1,5 @@
 import type { ChannelSummary } from "../../features/relay/contracts";
-import type { RelaySession } from "../../features/relay/session";
+import type { ReviewSession } from "./session";
 import { attestedOwner } from "../../features/agents/owner-attestation";
 
 /** Review records inherit the relay's private-channel boundary. */
@@ -31,7 +31,7 @@ export function reviewHistoryMember(
 }
 
 export function reviewChannel(
-  session: RelaySession,
+  session: ReviewSession,
   id: string,
   write = false,
 ) {
@@ -50,7 +50,7 @@ export function reviewChannel(
 }
 
 export function reviewHistoryChannel(
-  session: RelaySession,
+  session: ReviewSession,
   id: string,
   write = false,
 ) {
@@ -68,7 +68,7 @@ export function reviewHistoryChannel(
 
 /** Deleting an owned historical submission does not dispatch another review. */
 export async function confirmReviewHistoryChannel(
-  session: RelaySession,
+  session: ReviewSession,
   channel: string,
   signal: AbortSignal,
 ) {
@@ -90,7 +90,7 @@ export async function confirmReviewHistoryChannel(
 
 /** Refresh membership at explicit mutations; subscriptions invalidate presentation. */
 export async function confirmReviewChannel(
-  session: RelaySession,
+  session: ReviewSession,
   channel: string,
   signal: AbortSignal,
 ) {
@@ -114,7 +114,7 @@ export async function confirmReviewChannel(
 
 /** Display hints and local custody are not ownership evidence. */
 export async function reviewAgentOwners(
-  session: RelaySession,
+  session: ReviewSession,
   keys: readonly string[],
   signal: AbortSignal,
 ) {
@@ -150,7 +150,7 @@ export async function reviewAgentOwners(
 }
 
 export async function confirmReviewAgents(
-  session: RelaySession,
+  session: ReviewSession,
   channel: string,
   keys: readonly string[],
   signal: AbortSignal,

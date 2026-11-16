@@ -10,7 +10,7 @@ import {
   uuidv5,
 } from "../../features/agents/agent-config-artifacts";
 import type { EventData } from "../../features/relay/events";
-import type { RelaySession } from "../../features/relay/session";
+import type { ReviewSession } from "./session";
 
 export const REVIEW_CONFIG_TYPE = "buzz.review.config";
 export type ReviewLane = Readonly<{
@@ -178,7 +178,7 @@ const identity = (channel: string, repository: string) =>
   uuidv5(channel, `${REVIEW_CONFIG_TYPE}:${repository}`);
 
 export async function loadRepositoryDirectory(
-  session: RelaySession,
+  session: ReviewSession,
   channels: readonly string[],
   signal: AbortSignal,
 ) {
@@ -236,7 +236,7 @@ export async function loadRepositoryDirectory(
 
 /** One bounded read when the user opens or reloads a channel; never a polling loop. */
 export async function loadConfigurations(
-  session: RelaySession,
+  session: ReviewSession,
   channel: string,
   signal: AbortSignal,
 ): Promise<{
@@ -294,7 +294,7 @@ export async function loadConfigurations(
 
 /** Save against the revision the editor loaded, so concurrent edits cannot be overwritten. */
 export async function saveConfiguration(
-  session: RelaySession,
+  session: ReviewSession,
   channel: string,
   draft: ReviewConfig,
   previous: SavedReviewConfig | undefined,
@@ -384,7 +384,7 @@ export async function saveConfiguration(
 
 /** Remove only the loaded configuration; submissions and conversations have separate identities. */
 export async function deleteConfiguration(
-  session: RelaySession,
+  session: ReviewSession,
   channel: string,
   previous: SavedReviewConfig,
   signal: AbortSignal,

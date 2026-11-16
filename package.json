@@ -13,6 +13,7 @@
     "build": "pnpm typecheck && vite build",
     "preview": "vite preview",
     "author:build": "node scripts/build-author.mjs",
+    "review-worker:build": "vite build --config vite.review-worker.config.ts",
     "buzz-mcp": "vite build --config vite.buzz-mcp.config.ts",
     "typecheck": "tsc --noEmit",
     "format": "biome format --write .",

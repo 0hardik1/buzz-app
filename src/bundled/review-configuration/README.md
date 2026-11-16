@@ -252,7 +252,7 @@ including with its pages closed. It resumes after reconnect/restart using a loca
 list of at most 100 pending entries. Each entry causes one current-artifact read,
 followed by a current-head/report check when work remains. Startup and reconnect
 are jittered; live decisions and saved updates trigger targeted reconciliation.
-No channel-wide recovery scan or polling is added. Local hints cannot authorize
+This app-side coordinator does not poll; the optional server worker below has its own lifecycle. Local hints cannot authorize
 routing: signed current state, submitter/device ownership, Web Locks, artifact
 CAS, and the existing durable outbox are checked before sending. Keep that
 browser profile; missing outbox data stops ambiguous sends. Submissions with
@@ -272,3 +272,24 @@ Reviewers must first report `reviewing` to acknowledge acceptance, including ack
 Configuration rows show lane names and an explicit **Delete** action. Confirmation removes only that repository/channel configuration using the loaded artifact revision; concurrent changes require Reload. Submitted PRs and conversations remain. Registering the repository again restores the artifact with new settings. An unavailable personal default must be replaced before submission.
 
 Each lane has a visible **Delete lane** action beside **Edit lane**. Confirmation removes it from future reviews and preserves prior results. Removing the final lane uses the configuration-delete confirmation. A sole eligible channel is selected automatically without a default picker.
+
+
+## Continuous server worker
+
+The optional [review worker](../../../docs/review-worker.md) reuses submission,
+admission, routing, current status projection and the durable outbox in a Node
+process. It polls assigned private channels every 30 seconds even with Buzz closed.
+Server configuration and credentials are provisioned separately from the plugin.
+The worker manages only submissions authored by its configured signing identity.
+An independent service identity cannot edit another person's submissions.
+
+Unaccepted assignments rotate after five minutes. Accepted reviews receive three
+five-minute inactivity nudges, retaining their request token and Reviewing state;
+a fourth interval without progress rotates to the next eligible configured agent.
+Authenticated reviewer replies count as activity. Response intervals begin after
+confirmed delivery. Previous reviewers are not reused within a submission, so an
+old running turn cannot complete a later assignment. Pool exhaustion is logged.
+Closed/merged PRs, deleted records, removed configurations and finished outcomes
+stop automation. Manual Remind retains its existing behavior of starting a new
+request. Server polling does not cancel an already-running reviewer or revoke an
+external GitHub operation.

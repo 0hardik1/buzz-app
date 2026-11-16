@@ -1,3 +1,4 @@
+import { validateAutomation, type AutomationLane } from "./automation-state";
 import {
   reviewChannel,
   reviewHistoryChannel,
@@ -5,7 +6,13 @@ import {
   confirmReviewHistoryChannel,
   confirmReviewAgents,
 } from "./access";
-import { rememberTriage, forgetTriage } from "./triage-recovery";
+import {
+  reviewDevice,
+  reviewLocks,
+  reviewLockAvailable,
+  rememberReviewTriage,
+  forgetReviewTriage,
+} from "./session";
 import { admissionFailure, type ReadAdmission } from "./admission";
 import {
   TRIAGE_REPORT,
@@ -29,7 +36,7 @@ import {
 } from "../../features/agents/agent-config-artifacts";
 import type { EventData } from "../../features/relay/events";
 import type { Outbox } from "../../features/relay/outbox";
-import type { RelaySession } from "../../features/relay/session";
+import type { ReviewSession } from "./session";
 import {
   repositoryName,
   validateConfig,
@@ -45,6 +52,7 @@ type Thread = {
   started?: true;
   delivered?: true;
   request?: string;
+  requestedAt?: number;
 };
 export type Submission = {
   version: 1 | 2 | 3 | 4;
@@ -71,12 +79,14 @@ export type Submission = {
   notifying?: true;
   notifyingLane?: string;
   reminderMessage?: string;
+  automation?: Record<string, AutomationLane>;
 };
 export type SavedSubmission = {
   channel?: string;
   value: Submission;
   artifactId: string;
   revision: string;
+  updatedAt?: number;
   reviewStates?: ReviewState[];
   reviewReports?: EventData[];
   lastReviewedAt?: number;
@@ -166,6 +176,9 @@ export async function decodeSubmission(
     value.threads.some(
       (thread) =>
         !thread ||
+        (thread.requestedAt !== undefined &&
+          (!Number.isSafeInteger(thread.requestedAt) ||
+            thread.requestedAt <= 0)) ||
         (thread.started !== undefined && thread.started !== true) ||
         (thread.request !== undefined &&
           (typeof thread.request !== "string" ||
@@ -176,6 +189,7 @@ export async function decodeSubmission(
     )
   )
     throw new Error("Invalid review submission.");
+  validateAutomation(value.automation);
   if (value.version === 4) {
     const triage = value.triage;
     if (
@@ -215,12 +229,13 @@ export async function decodeSubmission(
     value: { ...value, config },
     artifactId,
     revision: event.id,
+    updatedAt: event.created_at,
     channel,
   };
 }
 
 export async function loadSubmissions(
-  session: RelaySession,
+  session: ReviewSession,
   selection: string | readonly string[],
   signal: AbortSignal,
   options: { offset?: number; artifact?: string } = {},
@@ -414,8 +429,8 @@ export function applyReviewReports(
   };
 }
 
-async function write(
-  session: RelaySession,
+export async function writeSubmission(
+  session: ReviewSession,
   channel: string,
   value: Submission,
   previous: SavedSubmission | undefined,
@@ -454,7 +469,7 @@ async function write(
     (value.triage.state === "pending" ||
       value.threads.some((thread) => !thread.delivered))
   )
-    rememberTriage(session.scope, { channel, artifact: artifactId });
+    rememberReviewTriage(session, { channel, artifact: artifactId });
   signal.throwIfAborted();
   assertAccess();
   await writer.publish(event, signal);
@@ -465,13 +480,13 @@ async function write(
       (value.triage.state === "admitted" &&
         value.threads.every((thread) => thread.delivered)))
   )
-    forgetTriage(session.scope, artifactId);
-  return { value, artifactId, revision: event.id };
+    forgetReviewTriage(session, artifactId);
+  return { value, artifactId, revision: event.id, updatedAt: event.created_at };
 }
 
 /** Remove from the shared list. A later submission creates fresh lane threads. */
 export async function deleteSubmission(
-  session: RelaySession,
+  session: ReviewSession,
   channel: string,
   previous: SavedSubmission,
   signal: AbortSignal,
@@ -480,9 +495,9 @@ export async function deleteSubmission(
   if (!session.viewer || previous.value.submitter !== session.viewer)
     throw new Error("Only the original submitter can delete this submission.");
   const read = session.snapshotRead;
-  if (!read || !navigator.locks)
+  if (!read || !reviewLockAvailable(session))
     throw new Error("Submission deletion is unavailable.");
-  return navigator.locks.request(
+  return reviewLocks(session).request(
     `buzz.review.submit:${session.scope}`,
     { signal },
     async () => {
@@ -507,7 +522,7 @@ export async function deleteSubmission(
         );
       if (current.revision !== previous.revision)
         throw new Error("Submission changed. Reload the list before deleting.");
-      await write(
+      await writeSubmission(
         session,
         channel,
         { ...current.value, deleted: true },
@@ -518,20 +533,7 @@ export async function deleteSubmission(
   );
 }
 
-/** Device ownership is recovery coordination, never permission. The relay still
- * authorizes every write. Shared Web Locks serialize tabs; artifact create/CAS
- * serializes devices. Losing this profile cannot authorize replacement sends. */
-export function deviceId(scope: string) {
-  const key = `buzz.review.device:${scope}`;
-  let value = localStorage.getItem(key);
-  if (!value) {
-    value = crypto.randomUUID();
-    localStorage.setItem(key, value);
-  }
-  if (!UUID.test(value))
-    throw new Error("Submission recovery storage is unavailable.");
-  return value;
-}
+export { deviceId } from "./session";
 
 export function submissionLane(value: Submission, index: number) {
   return value.config.lanes[index - (value.version === 1 ? 1 : 0)];
@@ -613,8 +615,8 @@ Add your authenticated GitHub account to requested reviewers, preserving others.
   };
 }
 
-async function eligible(
-  session: RelaySession,
+export async function eligibleReviewers(
+  session: ReviewSession,
   channel: string,
   value: Submission,
   signal: AbortSignal,
@@ -640,7 +642,7 @@ async function eligible(
   return confirmReviewAgents(session, channel, keys, signal, true);
 }
 
-function delivered(
+export function delivered(
   outbox: Outbox,
   id: string,
   signal: AbortSignal,
@@ -685,7 +687,7 @@ function delivered(
 /** Explicit resubmission mentions the saved reviewer in each existing lane thread.
  * Keep receipts until the whole batch succeeds so interrupted sends can resume. */
 async function notifyReviewers(
-  session: RelaySession,
+  session: ReviewSession,
   channel: string,
   record: SavedSubmission,
   signal: AbortSignal,
@@ -702,7 +704,7 @@ async function notifyReviewers(
     throw new Error(
       "Finish the pending reminder before reminding another lane.",
     );
-  const assertAgents = await eligible(
+  const assertAgents = await eligibleReviewers(
     session,
     channel,
     laneId
@@ -720,13 +722,13 @@ async function notifyReviewers(
   );
   if (record.value.submitter !== session.viewer)
     throw new Error("Only the original submitter can request another review.");
-  const device = deviceId(session.scope);
+  const device = reviewDevice(session);
   if (record.value.notifying && record.value.device !== device)
     throw new Error(
       "Resume the pending notification from its original browser profile.",
     );
   if (!record.value.notifying)
-    record = await write(
+    record = await writeSubmission(
       session,
       channel,
       {
@@ -738,7 +740,11 @@ async function notifyReviewers(
         threads: record.value.threads.map((thread, index) =>
           submissionLane(record.value, index) &&
           (!laneId || submissionLane(record.value, index)?.id === laneId)
-            ? { ...thread, request: crypto.randomUUID() }
+            ? {
+                ...thread,
+                request: crypto.randomUUID(),
+                requestedAt: Math.floor(Date.now() / 1000),
+              }
             : thread,
         ),
       },
@@ -806,14 +812,28 @@ async function notifyReviewers(
     reminderMessage: _reminderMessage,
     ...value
   } = record.value;
-  const completed = await write(session, channel, value, record, signal);
+  const completed = await writeSubmission(
+    session,
+    channel,
+    {
+      ...value,
+      threads: value.threads.map((thread, index) =>
+        submissionLane(value, index) &&
+        (!laneId || submissionLane(value, index)?.id === laneId)
+          ? { ...thread, requestedAt: Math.floor(Date.now() / 1000) }
+          : thread,
+      ),
+    },
+    record,
+    signal,
+  );
   for (const id of receipts) await outbox.acknowledge(id);
   return completed;
 }
 
 /** An explicit reminder uses only the current, fully delivered submission. */
 export async function remindSubmission(
-  session: RelaySession,
+  session: ReviewSession,
   channel: string,
   previous: SavedSubmission,
   signal: AbortSignal,
@@ -826,12 +846,12 @@ export async function remindSubmission(
     throw new Error("Reminder message must be at most 4,000 characters.");
   const read = session.snapshotRead;
   const outbox = session.outbox;
-  if (!read || !outbox?.supports(9) || !navigator.locks)
+  if (!read || !outbox?.supports(9) || !reviewLockAvailable(session))
     throw new Error("Reviewer reminders are unavailable on this client.");
   await confirmReviewChannel(session, channel, signal);
   if (!session.viewer || previous.value.submitter !== session.viewer)
     throw new Error("Only the original submitter can remind these reviewers.");
-  return navigator.locks.request(
+  return reviewLocks(session).request(
     `buzz.review.submit:${session.scope}`,
     { signal },
     async () => {
@@ -930,7 +950,7 @@ async function checkAdmission(
 
 /** Submission and owner-side triage recovery share the same lock and outbox journal. */
 export async function submitReview(
-  session: RelaySession,
+  session: ReviewSession,
   channel: string,
   saved: SavedReviewConfig,
   input: string,
@@ -949,7 +969,7 @@ export async function submitReview(
 ) {
   const outbox = session.outbox;
   const read = session.snapshotRead;
-  if (!outbox?.supports(9) || !read || !navigator.locks)
+  if (!outbox?.supports(9) || !read || !reviewLockAvailable(session))
     throw new Error(
       "This client cannot submit reviews. Use a client with durable message delivery.",
     );
@@ -958,11 +978,11 @@ export async function submitReview(
   const viewer = session.viewer;
   const pr = pullRequest(input, saved.config.repository);
   const artifactId = await identity(channel, saved.config.repository, pr);
-  return navigator.locks.request(
+  return reviewLocks(session).request(
     `buzz.review.submit:${session.scope}`,
     { signal },
     async () => {
-      const device = deviceId(session.scope);
+      const device = reviewDevice(session);
       await outbox.ready();
       const events = await read(
         [
@@ -988,7 +1008,7 @@ export async function submitReview(
           previous?.value.submitter === viewer &&
           previous.value.device === device
         )
-          forgetTriage(session.scope, artifactId);
+          forgetReviewTriage(session, artifactId);
         throw new Error("Submission was removed. Recovery stopped.");
       }
       if (existing) {
@@ -1001,7 +1021,7 @@ export async function submitReview(
             (record.value.triage?.state === "admitted" &&
               record.value.threads.every((thread) => thread.delivered)))
         ) {
-          forgetTriage(session.scope, artifactId);
+          forgetReviewTriage(session, artifactId);
           return record;
         }
         notifyExisting?.();
@@ -1051,7 +1071,10 @@ export async function submitReview(
                   head: currentFacts.head,
                   base: currentFacts.base,
                   reviewers: [...reviewers],
-                  thread: { request: crypto.randomUUID() },
+                  thread: {
+                    request: crypto.randomUUID(),
+                    requestedAt: Math.floor(Date.now() / 1000),
+                  },
                 },
               }
             : {}),
@@ -1064,11 +1087,18 @@ export async function submitReview(
             { length: triaging ? 0 : config.lanes.length },
             () => ({
               request: crypto.randomUUID(),
+              requestedAt: Math.floor(Date.now() / 1000),
             }),
           ),
         };
-        assertAgents = await eligible(session, channel, value, signal);
-        record = await write(session, channel, value, previous, signal);
+        assertAgents = await eligibleReviewers(session, channel, value, signal);
+        record = await writeSubmission(
+          session,
+          channel,
+          value,
+          previous,
+          signal,
+        );
       }
       if (
         record.value.triage?.state === "pending" &&
@@ -1147,12 +1177,26 @@ export async function submitReview(
               message,
             },
             threads: admitted
-              ? config.lanes.map(() => ({ request: crypto.randomUUID() }))
+              ? config.lanes.map(() => ({
+                  request: crypto.randomUUID(),
+                  requestedAt: Math.floor(Date.now() / 1000),
+                }))
               : [],
           };
           if (admitted)
-            assertAgents = await eligible(session, channel, value, signal);
-          record = await write(session, channel, value, record, signal);
+            assertAgents = await eligibleReviewers(
+              session,
+              channel,
+              value,
+              signal,
+            );
+          record = await writeSubmission(
+            session,
+            channel,
+            value,
+            record,
+            signal,
+          );
         }
       }
       onProgress(record);
@@ -1186,7 +1230,12 @@ export async function submitReview(
           "This PR is already submitted. Resume incomplete delivery from the original browser profile; existing threads remain available here.",
         );
       if (existing)
-        assertAgents = await eligible(session, channel, record.value, signal);
+        assertAgents = await eligibleReviewers(
+          session,
+          channel,
+          record.value,
+          signal,
+        );
       for (const [index, thread] of deliveryThreads(record.value).entries()) {
         assertAgents();
         // Keep legacy recovery keys readable, but isolate each post-delete review.
@@ -1250,7 +1299,7 @@ export async function submitReview(
               throw new Error(
                 "Delivery was started but its recovery journal is missing. Check the channel; no replacement thread was created.",
               );
-            record = await write(
+            record = await writeSubmission(
               session,
               channel,
               replaceDeliveryThread(record.value, index, {
@@ -1289,7 +1338,7 @@ export async function submitReview(
               // Admission can fail before enqueue (for example a full outbox).
               // Only this still-active invocation can prove nothing was queued.
               if (!signal.aborted && !(await outbox.recovery(key))) {
-                record = await write(
+                record = await writeSubmission(
                   session,
                   channel,
                   replaceDeliveryThread(
@@ -1309,7 +1358,7 @@ export async function submitReview(
           if (!sentId)
             throw new Error("Message delivery did not return an identity.");
           if (!thread.id) {
-            record = await write(
+            record = await writeSubmission(
               session,
               channel,
               replaceDeliveryThread(record.value, index, {
@@ -1326,13 +1375,14 @@ export async function submitReview(
         const deliveredId = id;
         if (!deliveredId)
           throw new Error("Missing delivered message identity.");
-        record = await write(
+        record = await writeSubmission(
           session,
           channel,
           replaceDeliveryThread(record.value, index, {
             ...deliveryThreads(record.value)[index],
             id: deliveredId,
             delivered: true,
+            requestedAt: Math.floor(Date.now() / 1000),
           }),
           record,
           signal,
