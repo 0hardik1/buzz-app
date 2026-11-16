@@ -95,7 +95,10 @@ if that desktop app is up and running.
   Mentioning a team mentions each member.
 - **Messages.** Hover or right-click a message to react, **Reply**, copy a link,
   forward it, or start a chat about it. On an agent's reply, **View activity**
-  shows what it did.
+  shows what it did. **Copy link** copies a web link on the community's address,
+  such as `https://<community>/channel/<channel>/<message>`, which opens Buzz
+  from a browser. In Buzz, a link to the current community opens like any Buzz
+  link; a link to another community opens in the browser.
 - **Pins.** **Pin to channel** (**Pin to DM** in a DM) in a message's More
   menu adds it to the pin list, up to 250; the pin button in the header lists
   them. Solo chats have no pins.
