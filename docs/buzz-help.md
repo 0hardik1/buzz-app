@@ -1615,9 +1615,6 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   that plugin, where **Enable** turns it back on.
   If a plugin hides the focused Team sidebar row, keyboard focus moves to a
   remaining row in its section, or the section heading when none remains.
-  A saved plugin sort can briefly wait for its plugin at startup, within the
-  sidebar's 1.5-second loading budget. If unavailable, it falls back to A–Z
-  without forgetting the saved choice.
 - In **Settings → Plugins → Manage plugins → Add**, copy a plugin listing’s
   **Ref** into **Branch or tag**. Leave it blank to scan the repository’s
   default branch. If Git reports a size or repository-entry limit, try a ref
