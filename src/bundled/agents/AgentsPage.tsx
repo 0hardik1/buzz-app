@@ -684,6 +684,7 @@ export function AgentsPage({
           agent,
           session: connection.session,
           community: connection.origin,
+          viewer: connection.viewer,
         });
       },
     };
