@@ -546,7 +546,20 @@ export function createChannelLifecycle({
               );
               const roster = lifecycleRecord(events, 39002, id, relayAuthor);
               if (roster && hasTag(roster, "p", viewer)) {
-                acceptDiscovery([roster]);
+                // A channel joined without opening it, as from Browse
+                // channels, has no metadata yet and can't list without it.
+                // Read after the roster, it is as current; failing to read
+                // it leaves the confirmed Join as it was.
+                const metadata = await reread(signal, () =>
+                  read([39000], id, signal, false, true),
+                ).then(
+                  (found) => lifecycleRecord(found, 39000, id, relayAuthor),
+                  (error: unknown) => {
+                    if (signal.aborted) throw error;
+                    return undefined;
+                  },
+                );
+                acceptDiscovery(metadata ? [metadata, roster] : [roster]);
                 return;
               }
             } else {

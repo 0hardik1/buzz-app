@@ -254,10 +254,11 @@ function connected(
         roster(relay, channelId, [other.pubkey, viewer.pubkey], 1700000200),
       ]);
     },
-    /** The relay drops the viewer from `channelId`, live, in this session. */
-    revoke(channelId: string) {
+    /** The relay drops the viewer from `channelId`, live, in this session;
+     * `at` later than an `admit` removes what it added. */
+    revoke(channelId: string, at = 1700000200) {
       live?.state({ status: "connected", routes: [] });
-      live?.receive([roster(relay, channelId, [], 1700000200)]);
+      live?.receive([roster(relay, channelId, [], at)]);
     },
     render: () =>
       render(
@@ -365,11 +366,12 @@ it("marks joined matches and says when nothing matches", async () => {
     await userEvent.type(field(), "design");
     await waitFor(() =>
       expect(rows()).toEqual([
+        // The exact name leads; among equal matches, the one to join does.
         "design — Joined · 1 member",
+        "design-crit — 1 member",
         // Guests are members, open or private, so they're marked Joined.
         "design-guests — Joined · 1 member",
         "design-private — Joined · 1 member",
-        "design-crit — 1 member",
       ]),
     );
     await userEvent.clear(field());
@@ -576,7 +578,7 @@ it("reads the directory again when access changes while its pages load", async (
   }
 });
 
-it("puts joined matches first among equal matches after later pages land", async () => {
+it("puts channels to join, in arrival order, before joined matches after later pages land", async () => {
   let release = () => {};
   const later = new Promise<void>((resolve) => {
     release = resolve;
@@ -595,13 +597,13 @@ it("puts joined matches first among equal matches after later pages land", async
     await userEvent.type(field(), "design-");
     await waitFor(() =>
       expect(rows().map((row) => row?.split(" — ")[0])).toEqual([
-        "design-guests",
-        "design-private",
         "design-new-000",
         "design-new-001",
         "design-new-002",
         "design-new-003",
         "design-crit",
+        "design-guests",
+        "design-private",
       ]),
     );
   } finally {
@@ -662,11 +664,16 @@ it("joins from the list: the row keeps its place and says Joined", async () => {
 
 it("says on its row why a Join failed, and Join tries again", async () => {
   let fail = true;
-  const t = connected({
-    join: () =>
-      fail
-        ? Promise.reject(new ChannelLifecycleUnconfirmed(new Error("timeout")))
-        : Promise.resolve(),
+  // A confirmed Join, as the lifecycle settles it, has accepted the roster.
+  const t: ReturnType<typeof connected> = connected({
+    join: () => {
+      if (fail)
+        return Promise.reject(
+          new ChannelLifecycleUnconfirmed(new Error("timeout")),
+        );
+      t.admit("release");
+      return Promise.resolve();
+    },
   });
   try {
     t.render();
@@ -675,9 +682,12 @@ it("says on its row why a Join failed, and Join tries again", async () => {
     await userEvent.click(
       screen.getByRole("button", { name: "Join release-notes" }),
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
       "Join may have taken effect, but it is not confirmed yet. Try again to check.",
     );
+    // It says what to do next, so it isn't cut off with the row's one line.
+    expect(alert.closest(".truncate")).toBeNull();
     fail = false;
     await userEvent.click(
       screen.getByRole("button", { name: "Join release-notes" }),
@@ -701,18 +711,86 @@ it("says Joined once membership shows, though the Join wasn't confirmed", async 
     t.render();
     await browse();
     await waitFor(() => expect(rows()).toEqual(offered));
-    await userEvent.click(
-      screen.getByRole("button", { name: "Join release-notes" }),
-    );
+    const button = screen.getByRole("button", { name: "Join release-notes" });
+    await userEvent.click(button);
     expect(await screen.findByRole("alert")).toBeVisible();
+    expect(button).toHaveFocus();
     act(() => t.admit("release"));
     await waitFor(() =>
       expect(rows()).toContain("release-notes — Joined · 1 member"),
     );
+    // The Join that held focus left with membership: focus is on the field.
+    expect(field()).toHaveFocus();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(
       screen.queryByRole("button", { name: "Join release-notes" }),
     ).toBeNull();
+  } finally {
+    await t.dispose();
+  }
+});
+
+it("holds the other Joins while one runs, since the lifecycle runs one at a time", async () => {
+  let land = () => {};
+  const t = connected({
+    join: () =>
+      new Promise<void>((resolve) => {
+        land = resolve;
+      }),
+  });
+  try {
+    t.render();
+    await browse();
+    await waitFor(() => expect(rows()).toEqual(offered));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Join design-crit" }),
+    );
+    const next = screen.getByRole("button", { name: "Join release-notes" });
+    expect(next).toBeDisabled();
+    await userEvent.click(next);
+    expect(t.joins).toEqual(["join:design-crit"]);
+    act(() => {
+      t.admit("design-crit");
+      land();
+    });
+    await waitFor(() => expect(next).toBeEnabled());
+    await userEvent.click(next);
+    expect(t.joins).toEqual(["join:design-crit", "join:release"]);
+  } finally {
+    land();
+    await t.dispose();
+  }
+});
+
+it("offers Join again when membership is removed after a Join", async () => {
+  const t: ReturnType<typeof connected> = connected({
+    join: (channelId) => {
+      t.admit(channelId);
+      return Promise.resolve();
+    },
+  });
+  try {
+    t.render();
+    await browse();
+    await waitFor(() => expect(rows()).toEqual(offered));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Join design-crit" }),
+    );
+    await waitFor(() =>
+      expect(rows()).toContain("design-crit — Joined · 1 member"),
+    );
+    act(() => t.revoke("design-crit", 1700000300));
+    // The row keeps its place, no longer Joined, with its Join back.
+    await waitFor(() =>
+      expect(rows()).toEqual([
+        expect.stringContaining("buzz-community"),
+        expect.stringMatching(/^design-crit(?! — Joined)/),
+        expect.stringContaining("release-notes"),
+      ]),
+    );
+    expect(
+      screen.getByRole("button", { name: "Join design-crit" }),
+    ).toBeEnabled();
   } finally {
     await t.dispose();
   }

@@ -1230,8 +1230,8 @@ it.each(
     else h.owner[stop]();
     let roster: RelayEvent | undefined;
     if (join) {
-      // Revocation purges discovery, so a join may accept only a roster
-      // read after it.
+      // Revocation purges discovery, so a join may accept only records
+      // read after it: the roster, then the metadata that lists it.
       roster = join.roster(other, viewer);
       join.setEvents([join.metadata, roster]);
     }
@@ -1240,8 +1240,11 @@ it.each(
       // A published command outlives revocation, usually its own effect, and
       // still confirms.
       await run;
-      if (roster)
-        expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith([roster]);
+      if (roster && join)
+        expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith([
+          join.metadata,
+          roster,
+        ]);
       else if (action === "hide")
         expect(h.owner.capability.snapshot().hidden).toEqual([id]);
       else expect(h.removed).toHaveBeenCalledExactlyOnceWith(id);
@@ -2366,6 +2369,50 @@ describe("join from a public preview", () => {
       );
       expect(h.sign).not.toHaveBeenCalled();
       expect(h.acceptDiscovery).not.toHaveBeenCalled();
+    } finally {
+      h.owner.dispose();
+    }
+  });
+
+  it("accepts the metadata read after the confirming roster, so the channel lists", async () => {
+    const h = preview();
+    try {
+      await h.owner.capability.run("join", id);
+      expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith([
+        h.metadata,
+        expect.objectContaining({ kind: 39002 }),
+      ]);
+      const strong = h.read.mock.calls
+        .map(([filters]) => filters)
+        .filter((filters) =>
+          filters.every((filter) => filter.consistency === "strong"),
+        )
+        .map((filters) => filters.map((filter) => filter.kinds?.[0]));
+      expect(strong).toEqual([[39002], [39000]]);
+    } finally {
+      h.owner.dispose();
+    }
+  });
+
+  it("keeps a confirmed join when the metadata read after it fails", async () => {
+    const h = preview();
+    const currentRead = h.read.getMockImplementation();
+    assert(currentRead);
+    h.read.mockImplementation(async (filters, options) => {
+      if (
+        filters.some(
+          (filter) =>
+            filter.consistency === "strong" && filter.kinds?.includes(39000),
+        )
+      )
+        throw new TypeError("fetch failed");
+      return currentRead(filters, options);
+    });
+    try {
+      await h.owner.capability.run("join", id);
+      expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith([
+        expect.objectContaining({ kind: 39002 }),
+      ]);
     } finally {
       h.owner.dispose();
     }

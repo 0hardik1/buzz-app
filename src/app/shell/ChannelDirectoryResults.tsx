@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { channelIcon } from "../../features/channels/channel-icon";
 import {
   useChannelDirectory,
@@ -75,27 +75,29 @@ export function ChannelDirectoryResults({
       for (const controller of running.values()) controller.abort();
     };
   }, []);
+  // The lifecycle runs one channel action at a time, so while a Join runs
+  // the others wait, disabled, rather than fail.
+  const busy = [...joins.values()].some(({ status }) => status === "pending");
+  // Focus on a Join its row drops, joined or once membership shows after an
+  // unconfirmed Join, returns to the field, which owns keyboard navigation.
+  // Focus moved elsewhere forgets the Join; a removal moves it nowhere.
+  const focusedJoin = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (!focusedJoin.current || focusedJoin.current.isConnected) return;
+    focusedJoin.current = null;
+    input.current?.focus();
+  });
   const settle = (channelId: string, join: Join) =>
     setJoins((current) => new Map(current).set(channelId, join));
   const join = (channelId: string) => {
-    if (!lifecycle?.available || joins.get(channelId)?.status === "pending")
-      return;
+    if (!lifecycle?.available || busy) return;
     joining.current.get(channelId)?.abort();
     const controller = new AbortController();
     joining.current.set(channelId, controller);
     settle(channelId, { status: "pending" });
     lifecycle.run("join", channelId, controller.signal).then(
       () => {
-        if (controller.signal.aborted) return;
-        // Joined, the row drops its Join: focus it held returns to the
-        // field, which owns keyboard navigation.
-        if (
-          document
-            .getElementById(`directory:${channelId}`)
-            ?.contains(document.activeElement)
-        )
-          input.current?.focus();
-        settle(channelId, { status: "joined" });
+        if (!controller.signal.aborted) settle(channelId, { status: "joined" });
       },
       (reason: unknown) => {
         if (!controller.signal.aborted)
@@ -122,9 +124,10 @@ export function ChannelDirectoryResults({
     }),
     [list.channels],
   );
-  // Rows hold their places while later pages land: each page's new rows
-  // join below the ones already shown, A–Z among themselves. A view opened
-  // on a finished read is A–Z throughout.
+  // Channels to join hold their places while later pages land: each page's
+  // new rows join below the ones already shown, A–Z among themselves. A view
+  // opened on a finished read is A–Z throughout. Joined matches, listed only
+  // for typed text, follow them, so landing rows move only those down.
   const arrival = useRef({
     directory: directory.directory,
     page: 0,
@@ -135,7 +138,7 @@ export function ChannelDirectoryResults({
     arrival.current.page += 1;
   }
   // Every directory row takes the page it first landed on, before any
-  // filtering or sorting; joined rows rank as if there from the start.
+  // filtering or sorting; joined rows, after them, are A–Z.
   for (const channel of directory.directory)
     if (!arrival.current.seen.has(channel.id))
       arrival.current.seen.set(channel.id, arrival.current.page);
@@ -176,8 +179,10 @@ export function ChannelDirectoryResults({
         .sort(
           (a, b) =>
             (a.match?.rank ?? 0) - (b.match?.rank ?? 0) ||
+            // Among equal matches, the channels to join lead: they're what
+            // the list is for, and joined ones are marked and A–Z after them.
+            Number(a.joined) - Number(b.joined) ||
             landed(a) - landed(b) ||
-            Number(b.joined) - Number(a.joined) ||
             collator.compare(a.channel.name, b.channel.name) ||
             a.channel.id.localeCompare(b.channel.id),
         ),
@@ -214,9 +219,10 @@ export function ChannelDirectoryResults({
     .map(({ channel, joined, match }) => {
       const people = members.counts.get(channel.id);
       const state = joins.get(channel.id);
-      // A Join that may not have landed is Joined once membership shows.
-      const isJoined =
-        joined || state?.status === "joined" || member.has(channel.id);
+      // Membership says Joined, so a Join that may not have landed is Joined
+      // once it shows, and a row whose membership is then removed offers
+      // Join again rather than a channel it can't open.
+      const isJoined = joined || member.has(channel.id);
       const failure = state?.status === "failed" && !isJoined;
       // Shown after the name; the count has its own slot at the row's end.
       const about = [isJoined && "Joined", channel.description]
@@ -252,34 +258,48 @@ export function ChannelDirectoryResults({
                     positions={match?.positions}
                   />
                 </span>
-                {failure ? (
-                  <span className="min-w-0 truncate text-danger" role="alert">
-                    {state.error}
-                  </span>
-                ) : (
-                  about && (
-                    <span className="min-w-0 truncate text-subtle">
-                      {about}
-                    </span>
-                  )
+                {about && (
+                  <span className="min-w-0 truncate text-subtle">{about}</span>
                 )}
               </span>
+            }
+            // A failure says what to do next, so it wraps on a line of its
+            // own rather than being cut off; a retry makes the row one line.
+            subtitle={
+              failure && (
+                <span className="text-danger" role="alert">
+                  {state.error}
+                </span>
+              )
             }
             trailing={
               <>
                 {
                   // Membership can show before the Join settles; the button
-                  // stays until then, so the focus it holds has somewhere to go.
+                  // stays, loading, until then.
                   (!isJoined || state?.status === "pending") &&
                     lifecycle?.available && (
                       // Shown on hover or highlight, and kept while joining
                       // or after a failure.
-                      <span data-search-reveal={state ? undefined : ""}>
+                      <span
+                        data-search-reveal={
+                          state?.status === "pending" || failure
+                            ? undefined
+                            : ""
+                        }
+                      >
                         <Button
+                          onFocus={(event) => {
+                            focusedJoin.current = event.currentTarget;
+                          }}
+                          onBlur={(event) => {
+                            if (event.relatedTarget) focusedJoin.current = null;
+                          }}
                           size="xs"
                           variant="outline"
                           aria-label={`Join ${channel.name}`}
                           loading={state?.status === "pending"}
+                          disabled={busy && state?.status !== "pending"}
                           onClick={() => join(channel.id)}
                         >
                           Join
