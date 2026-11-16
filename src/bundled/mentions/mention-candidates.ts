@@ -14,16 +14,21 @@ import {
   mentionAdmission,
 } from "../../features/messages/mention-admission";
 
-/** The viewer's agents offered outside a stream or forum when the viewer can add members. */
+/** The viewer's agents offered outside a stream or forum when the viewer can
+ * add members, and outside a DM when `dms` (a DM adds no one, so they are
+ * only named there, never notified). */
 function availableMentionAgents<T extends { pubkey: string }>(
   channel: ChannelSummary | undefined,
   agents: readonly T[],
   canInvite: boolean | undefined,
+  dms = false,
 ) {
   if (
     !channel?.members ||
-    (channel.channelType !== "stream" && channel.channelType !== "forum") ||
-    !canInvite
+    !(channel.channelType === "dm"
+      ? dms
+      : (channel.channelType === "stream" || channel.channelType === "forum") &&
+        canInvite)
   )
     return [];
   const members = new Set(channel.members);
@@ -183,6 +188,10 @@ function buildCandidates(
     .channels.find((c) => c.id === channelId);
   const members = roster?.map((p) => p.pubkey) ?? channel?.members ?? [];
   const memberKeys = new Set(members);
+  // A saved chat's roster also offers agents that are not in the chat. Its
+  // own member list says who is; a draft with no saved list has only the roster.
+  const joined =
+    roster && channel?.members?.length ? new Set(channel.members) : memberKeys;
   const agents = session.agentChoices.snapshot().identities;
   const executions = new Map(
     agents.map((agent) => [agent.pubkey, agent.execution]),
@@ -200,6 +209,7 @@ function buildCandidates(
           channel,
           agents,
           session.outbox?.supports(9000),
+          true,
         )))
     choices.set(person.pubkey, { pubkey: person.pubkey, name: person.name });
   if (!roster && !inviteAgents && allowsOutsideMentions(channel))
@@ -262,6 +272,12 @@ function buildCandidates(
     ]);
     if (agent.managed) managed.add(agent.pubkey);
   }
+  // The viewer's saved and hosted agents, here and in their other
+  // communities. An unverified owner claim never makes an agent the viewer's;
+  // the menu adds agents whose verified owner is the viewer (README, Scope and
+  // authority).
+  const mine = (pubkey: string) =>
+    !!session.viewer && (agentNames.has(pubkey) || hosts.has(pubkey));
   return [...choices.values()]
     .filter((p) => admits(p.pubkey))
     .map((recipient) => {
@@ -280,6 +296,14 @@ function buildCandidates(
         /** The verified name the label is not, shown beside the row's detail. */
         ...(otherName ? { otherName } : {}),
         member: memberKeys.has(recipient.pubkey),
+        /**
+         * In a saved chat's roster but not in its member list: listed and
+         * chosen as a member, but outside the channel for Space (README
+         * section 5).
+         */
+        ...(memberKeys.has(recipient.pubkey) && !joined.has(recipient.pubkey)
+          ? { offered: true as const }
+          : {}),
         /** The host of the owner's other community this agent is in. */
         ...(hosts.has(recipient.pubkey)
           ? { elsewhere: hosts.get(recipient.pubkey) }
@@ -288,9 +312,7 @@ function buildCandidates(
           hosts.has(recipient.pubkey) ||
           known.has(recipient.pubkey) ||
           directoryAgents.has(recipient.pubkey),
-        owned:
-          !!session.viewer &&
-          profiles.get(recipient.pubkey)?.ownerPubkey === session.viewer,
+        owned: mine(recipient.pubkey),
         managed: managed.has(recipient.pubkey),
         aliases: [
           ...new Set(

@@ -461,9 +461,9 @@ pub fn bundled_manifests() -> Vec<Manifest> {
         serde_json::from_str(include_str!("../../../src/bundled/charts/manifest.json"))
             .expect("bundled charts manifest"),
         serde_json::from_str(include_str!(
-            "../../../src/bundled/link-previews/manifest.json"
+            "../../../src/bundled/file-viewer/manifest.json"
         ))
-        .expect("bundled link previews manifest"),
+        .expect("bundled file viewer manifest"),
         serde_json::from_str(include_str!(
             "../../../src/bundled/identity-naming/manifest.json"
         ))
@@ -538,6 +538,10 @@ pub fn bundled_manifests() -> Vec<Manifest> {
         .expect("plugin development manifest"),
         serde_json::from_str(include_str!("../../../src/bundled/focus/manifest.json"))
             .expect("focus manifest"),
+        serde_json::from_str(include_str!(
+            "../../../src/bundled/changesets/manifest.json"
+        ))
+        .expect("changesets manifest"),
     ]
 }
 /// New bundles must opt in to the default-on policy.
@@ -553,7 +557,6 @@ fn enabled_by_default(id: &str) -> bool {
             | "buzz.terminal"
             | "buzz.profiles"
             | "buzz.links"
-            | "buzz.link-previews"
             | "buzz.voice-notes"
             | "buzz.huddles"
             | "buzz.github"
