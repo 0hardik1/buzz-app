@@ -95,6 +95,7 @@ import type {
 } from "./contracts";
 import {
   readSidebarPreferences,
+  RAIL_LAYOUT_COORDINATE,
   SIDEBAR_COORDINATES,
 } from "./sidebar-preferences";
 import { createSidebarPreferencesStore } from "./sidebar-preferences-store";
@@ -1951,6 +1952,29 @@ export function createRelaySession(
         })
       : undefined;
   })();
+  const railLayoutChanged = new Set<(createdAt?: number) => void>();
+  /** The account's app sidebar arrangement, shared by its devices. */
+  const railLayout = (() => {
+    const read = transport?.readRailLayout;
+    const write = transport?.writeRailLayout;
+    const bounded = (ms: number) =>
+      AbortSignal.any([lifetime.signal, AbortSignal.timeout(ms)]);
+    return read && write
+      ? Object.freeze({
+          read: () => read(bounded(10_000)),
+          write: (payload: Record<string, unknown>, base: number) =>
+            write(payload, base, bounded(20_000)),
+          /** A record at least as new as `createdAt` exists, or with none
+           * given, one may: read again unless this device already holds it. */
+          changed(listener: (createdAt?: number) => void) {
+            railLayoutChanged.add(listener);
+            return () => {
+              railLayoutChanged.delete(listener);
+            };
+          },
+        })
+      : undefined;
+  })();
   const readPreferences = async (
     signal?: AbortSignal,
     consistency?: "strong",
@@ -2694,6 +2718,7 @@ export function createRelaySession(
     sidebarPreferences: sidebarPreferences.queries,
     /** The account's saved main agent, shared by every install. */
     mainAgent,
+    railLayout,
     soloPreferences: soloPreferences.queries,
     reminders: reminders?.capability,
     live,
@@ -3511,18 +3536,22 @@ export function createRelaySession(
     if (prefs.status === "idle" || prefs.status === "loading") return;
     channels.queries.warm?.(prefs.data?.starred ?? []);
   };
-  // Only five replaceable heads; live payloads are hints, never decoded authority.
+  // A few replaceable heads; live payloads are hints, never decoded authority.
   const sidebarHeads = new Map<string, Pick<RelayEvent, "id" | "created_at">>();
   const receiveSidebar = (events: readonly RelayEvent[]) => {
-    if (!transport?.decodeSidebarPreferences || cacheClearing) return;
+    if (!transport || cacheClearing) return;
     for (const event of events) {
       if (event.kind !== 30078 || event.pubkey !== transport.viewer) continue;
       const coordinates = event.tags.filter(([name]) => name === "d");
       const coordinate = coordinates[0]?.[1];
+      const rail = coordinate === RAIL_LAYOUT_COORDINATE;
       if (
         coordinates.length !== 1 ||
         !coordinate ||
-        !SIDEBAR_COORDINATES.some((value) => value === coordinate)
+        !(rail
+          ? railLayout
+          : transport.decodeSidebarPreferences &&
+            SIDEBAR_COORDINATES.some((value) => value === coordinate))
       )
         continue;
       const head = sidebarHeads.get(coordinate);
@@ -3536,7 +3565,10 @@ export function createRelaySession(
         id: event.id,
         created_at: event.created_at,
       });
-      sidebarPreferences.invalidate();
+      if (rail)
+        for (const listener of [...railLayoutChanged])
+          listener(event.created_at);
+      else sidebarPreferences.invalidate();
     }
   };
   const stopWarmPreferences = sidebarPreferences.queries.subscribe(warmRoster);
@@ -3630,6 +3662,9 @@ export function createRelaySession(
         return;
       }
       sidebarPreferences.reconnect(continuous);
+      // A replay that may have gaps can have missed another device's write.
+      if (!continuous)
+        for (const listener of [...railLayoutChanged]) listener();
       repairUnread(continuous);
       // Only while this same connection is still up.
       if (generation === liveGeneration && memoryConnected)

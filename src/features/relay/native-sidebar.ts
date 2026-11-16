@@ -24,7 +24,7 @@ import {
   type SidebarSortMode,
   type SidebarFilterMode,
 } from "./sidebar-preferences";
-import type { ReadTransport } from "./transport";
+import { RailLayoutConflict, type ReadTransport } from "./transport";
 
 const coordinates = [
   "channel-sections",
@@ -33,17 +33,20 @@ const coordinates = [
   "channel-sort",
   "channel-filter",
   "main-agent",
+  "rail-layout",
 ] as const;
 type Coordinate = (typeof coordinates)[number];
 type Head = { payload: Record<string, unknown>; createdAt: number };
 const empty = (coordinate: Coordinate): Record<string, unknown> =>
   coordinate === "main-agent"
     ? { version: 1, agent: null }
-    : coordinate === "channel-sections"
-      ? { version: 1, sections: [], assignments: {} }
-      : coordinate === "channel-sort" || coordinate === "channel-filter"
-        ? { version: 1, groups: {} }
-        : { version: 1, channels: {} };
+    : coordinate === "rail-layout"
+      ? { version: 1 }
+      : coordinate === "channel-sections"
+        ? { version: 1, sections: [], assignments: {} }
+        : coordinate === "channel-sort" || coordinate === "channel-filter"
+          ? { version: 1, groups: {} }
+          : { version: 1, channels: {} };
 const agentKey = /^[0-9a-f]{64}$/;
 /** The main agent the viewer chose. A null one, written by development
  * builds that cleared it, is read as none. */
@@ -110,7 +113,7 @@ export function nativeSidebar(transport: ReadTransport) {
     // The Rust decoder checks signature, author, coordinate and plaintext budget.
     const value = payload as Record<string, unknown>;
     if (coordinate === "main-agent") mainAgent(value);
-    else project(coordinate, value);
+    else if (coordinate !== "rail-layout") project(coordinate, value);
     return {
       payload:
         coordinate === "channel-sections" ||
@@ -184,6 +187,34 @@ export function nativeSidebar(transport: ReadTransport) {
   }
   return {
     decodeSidebarPreferences: decode,
+    async readRailLayout(signal: AbortSignal) {
+      const current = await head("rail-layout", signal);
+      return {
+        payload: current.createdAt ? current.payload : undefined,
+        createdAt: current.createdAt,
+      };
+    },
+    async writeRailLayout(
+      payload: Record<string, unknown>,
+      base: number,
+      signal: AbortSignal,
+    ) {
+      const current = await head("rail-layout", signal);
+      if (current.createdAt !== base) throw new RailLayoutConflict();
+      const event = eventDto(
+        await invoke<unknown>("relay_sign_sidebar", {
+          coordinate: "rail-layout",
+          payload,
+          createdAt: Math.max(Math.floor(Date.now() / 1000), base + 1),
+        }),
+      );
+      cancelled(signal);
+      if (!writer) throw new Error("Native relay writer is unavailable");
+      await writer.publish(event, signal);
+      const confirmed = await head("rail-layout", signal);
+      if (!same(confirmed.payload, payload)) throw new RailLayoutConflict();
+      return confirmed.createdAt;
+    },
     async readMainAgent(signal: AbortSignal) {
       const current = await head("main-agent", signal);
       // A record of none reads as null, apart from no record at all.

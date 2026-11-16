@@ -76,6 +76,7 @@ import { PageIcon } from "./PageIcon";
 import { pagePresentation } from "./presentation";
 import { RailConversationList } from "./RailConversationList";
 import { useRailPins, type RailEntry } from "./rail-pins";
+import { useTeamExpanded } from "./rail-sync";
 import {
   useChannelNavigation,
   type ChannelMenuSurface,
@@ -178,7 +179,7 @@ export function RailNavigation({
   const resolveName = useIdentityNames(session.names);
   const { layout: railLayout } = useRailLayout(partition);
   const [savedMessageView, setMessageView] = useActivityView(partition);
-  const [teamExpanded, setTeamExpanded] = useTeamExpanded();
+  const [teamExpanded, setTeamExpanded] = useTeamExpanded(partition);
   // Team offers no agent views; a saved one shows All.
   const messageView = useMemo(
     () => withoutAgentViews(savedMessageView),
@@ -1353,28 +1354,6 @@ export function RailNavigation({
 
 /** Unread rows in one Team view; nothing when all are read. It follows the
  * conversations themselves, not the visit the rail is showing. */
-/** Whether Team shows its rows rather than its icons, kept on this device. */
-function useTeamExpanded() {
-  const key = "buzz.rail.team-expanded";
-  const [expanded, setExpanded] = useState(() => {
-    try {
-      return localStorage.getItem(key) === "1";
-    } catch {
-      return false;
-    }
-  });
-  return [
-    expanded,
-    (next: boolean) => {
-      setExpanded(next);
-      try {
-        localStorage.setItem(key, next ? "1" : "0");
-      } catch {
-        // Storage is unavailable: the choice lasts for this window.
-      }
-    },
-  ] as const;
-}
 const TeamCount = memo(function TeamCount({
   session,
   filter,

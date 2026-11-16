@@ -874,6 +874,53 @@ pub(crate) fn write_denied_fixture() -> (IdentityHost, impl Fn()) {
 }
 
 #[tokio::test]
+async fn rail_layout_signer_admits_only_the_bounded_arrangement() {
+    use serde_json::json;
+    let host = super::IdentityHost::fixture();
+    let payload = json!({
+        "version": 1,
+        "order": ["pins", "custom:a"],
+        "sections": [{"id": "custom:a", "title": "Projects"}],
+        "placements": [{"section": "custom:a", "entry": {"id": "channel:x"}}],
+        "pins": [{"id": "channel:y"}],
+        "teamExpanded": true,
+    });
+    let event = host
+        .sign_sidebar("rail-layout".into(), payload.clone(), 100)
+        .await
+        .unwrap();
+    host.admit_sidebar(event.clone()).await.unwrap();
+    assert_eq!(
+        host.decode_sidebar(vec![event]).await.unwrap()["rail-layout"],
+        payload
+    );
+    let without = |key: &str| {
+        let mut value = payload.clone();
+        value.as_object_mut().unwrap().remove(key);
+        value
+    };
+    let with = |key: &str, field: serde_json::Value| {
+        let mut value = payload.clone();
+        value[key] = field;
+        value
+    };
+    for invalid in [
+        without("pins"),
+        with("extra", json!(true)),
+        with("teamExpanded", json!("yes")),
+        with("order", json!([7])),
+        with("sections", json!([{"id": "custom:a", "title": " "}])),
+        with("placements", json!([{"section": "custom:a", "entry": "x"}])),
+        with("pins", json!(["channel:y"])),
+    ] {
+        assert!(host
+            .sign_sidebar("rail-layout".into(), invalid, 100)
+            .await
+            .is_err());
+    }
+}
+
+#[tokio::test]
 async fn main_agent_signer_admits_one_agent_or_a_cleared_choice() {
     use serde_json::json;
     let host = super::IdentityHost::fixture();

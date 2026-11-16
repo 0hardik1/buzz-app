@@ -611,6 +611,38 @@ fn validate_sidebar_payload(coordinate: &str, value: &serde_json::Value) -> Resu
                 return Err(invalid());
             }
         }
+        // The app sidebar's arrangement. Rows are parsed where they are drawn;
+        // the signer bounds the record's shape and counts.
+        "rail-layout" => {
+            let list = |key: &str, max: usize| {
+                data.get(key)
+                    .and_then(|v| v.as_array())
+                    .filter(|items| items.len() <= max)
+                    .ok_or_else(invalid)
+            };
+            let sections = list("sections", 100)?;
+            if data.len() != 6
+                || !data.get("teamExpanded").is_some_and(|v| v.is_boolean())
+                || !list("order", 200)?.iter().all(|id| text(id, 264))
+                || !sections.iter().all(|section| {
+                    section.as_object().is_some_and(|section| {
+                        section.len() == 2
+                            && section.get("id").is_some_and(|id| text(id, 264))
+                            && section.get("title").is_some_and(|title| text(title, 256))
+                    })
+                })
+                || !list("placements", 2000)?.iter().all(|placed| {
+                    placed.as_object().is_some_and(|placed| {
+                        placed.len() == 2
+                            && placed.get("section").is_some_and(|id| text(id, 264))
+                            && placed.get("entry").is_some_and(|entry| entry.is_object())
+                    })
+                })
+                || !list("pins", 500)?.iter().all(|entry| entry.is_object())
+            {
+                return Err(invalid());
+            }
+        }
         _ => return Err(invalid()),
     }
     if let Some(meta) = data.get("meta") {
@@ -803,6 +835,7 @@ pub(crate) fn sidebar_coordinate(value: &str) -> bool {
             | "channel-sort"
             | "channel-filter"
             | "main-agent"
+            | "rail-layout"
     )
 }
 

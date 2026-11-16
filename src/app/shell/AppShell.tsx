@@ -10,6 +10,7 @@ import { ChatIcons } from "../../features/conversation/ChatIconSlot";
 import { ListColumn } from "./ListColumn";
 import { SidePanelPresence } from "../../features/panels/side-panel-presence";
 import { useListSection } from "./list-section";
+import { syncRail } from "./rail-sync";
 import { routedSection, useListColumn } from "./list-column";
 import { navigationOwner, orderPages } from "./presentation";
 import {
@@ -178,6 +179,11 @@ function AppShellContent({
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const listColumn = useListColumn(searchServices?.navigation);
   const askList = listColumn.ask;
+  const railScope = connection.viewer ? connection.scope : undefined;
+  useEffect(
+    () => (railScope ? syncRail(connection.session, railScope) : undefined),
+    [connection.session, railScope],
+  );
   const listSection = useListSection(
     connection.session,
     connection.viewer ? connection.scope : undefined,

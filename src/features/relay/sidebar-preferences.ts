@@ -15,6 +15,9 @@ export const SIDEBAR_COORDINATES = [
   "channel-sort",
   "channel-filter",
 ] as const;
+/** The app sidebar's arrangement: its own record, beside the ones above
+ * that earlier clients still read and write. */
+export const RAIL_LAYOUT_COORDINATE = "rail-layout";
 /** Only the complete bounded account-preference batch may exceed the ordinary four-filter limit. */
 export function isSidebarPreferencesBatch(
   filters: readonly ReadFilter[],

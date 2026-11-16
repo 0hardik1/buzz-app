@@ -15,8 +15,10 @@ export type RailLayout = {
 };
 const KEY = "navigation-layout:v2";
 
-function readLayout(scope: string): RailLayout {
-  const raw = readView<Partial<RailLayout> | null>(scope, KEY, null);
+const readLayout = (scope: string) =>
+  parseRailLayout(readView<unknown>(scope, KEY, null));
+export function parseRailLayout(value: unknown): RailLayout {
+  const raw = value as Partial<RailLayout> | null;
   const sections = Array.isArray(raw?.sections)
     ? raw.sections.filter(
         (section) =>
@@ -48,7 +50,8 @@ function readLayout(scope: string): RailLayout {
   return { order, sections, placements };
 }
 
-/** The rail's local arrangement never writes to a conversation or plugin's data. */
+/** The rail's arrangement never writes to a conversation or plugin's data.
+ * This device's copy answers at once; `syncRail` shares it with the account. */
 export function useRailLayout(scope: string) {
   const subscribe = useCallback(
     (listener: () => void) => subscribeView(scope, listener),

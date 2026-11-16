@@ -92,6 +92,16 @@ export interface RelayWriter {
     signal: AbortSignal,
   ): Promise<string> | Promise<void>;
 }
+export type RailLayoutHead = Readonly<{
+  payload: Record<string, unknown> | undefined;
+  createdAt: number;
+}>;
+/** Another device replaced the arrangement between this one's read and write. */
+export class RailLayoutConflict extends Error {
+  constructor() {
+    super("The sidebar changed on another device");
+  }
+}
 export interface ReadTransport {
   /** Hear the relay refuse this account for the whole community, on any
    * request after connecting: its sign-in ended, or it has no access. One
@@ -176,6 +186,16 @@ export interface ReadTransport {
   readonly writeSidebarSectionOrder?: SidebarSectionOrderMutator;
   readonly renameSidebarSection?: SidebarSectionRenameMutator;
   readonly writeSidebarStar?: SidebarStarMutator;
+  /** The account's saved app sidebar arrangement, private to its devices.
+   * `payload` is undefined and `createdAt` 0 when there is no record. */
+  readRailLayout?(signal: AbortSignal): Promise<RailLayoutHead>;
+  /** Replaces the record read at `base`, and returns the new record's time.
+   * Rejects with `RailLayoutConflict` when another device wrote since. */
+  writeRailLayout?(
+    payload: Record<string, unknown>,
+    base: number,
+    signal: AbortSignal,
+  ): Promise<number>;
   /** Host-only private account record of the main agent the viewer chose:
    * null when they saved none or it was cleared, undefined when there is no
    * record. */
