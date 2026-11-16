@@ -67,9 +67,15 @@ it("names the agent's workspace for a thread in a conversation folder", () => {
   );
   expect(own).toContain("do not create them in your working directory");
   expect(own).toContain(
-    "Work in this conversation's own folder or the chat's explicit project folders",
+    "This conversation's working directory is assigned: make changes there and do not create another worktree.",
+  );
+  expect(own).toContain(
+    "Project folders and referenced folders then name relevant code: read them, but do not make changes in them or follow their worktree rules.",
   );
   expect(own).toContain("reuse its worktree");
+  expect(developerInstructions(agent)).toContain(
+    "2. Otherwise, when the chat names project folders",
+  );
   expect(developerInstructions(agent)).toContain(
     "Your persistent workspace is in your working directory:",
   );

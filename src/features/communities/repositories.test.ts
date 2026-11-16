@@ -31,8 +31,14 @@ it("keeps repository locations exact to origin and account, escapes prompt data,
   expect(context).not.toContain("/other");
   expect(context).not.toContain("/someone-else");
   expect(repositoriesContext(undefined)).toBe("");
+  expect(repositoriesContext(`${community}:${viewer}`)).toContain(
+    "Use the conversation’s assigned folder first; otherwise use the chat’s explicit project folders.",
+  );
   saveRepositoriesFolder(community, viewer, "");
   expect(localStorage.getItem(repositoriesKey(community, viewer))).toBeNull();
+  expect(repositoriesContext(`${community}:${viewer}`)).toContain(
+    "Use the conversation’s assigned folder first; otherwise use the chat’s explicit project folders.",
+  );
   expect(repositoriesContext(`${community}:${viewer}`)).toContain(
     "REPOS in your own workspace",
   );

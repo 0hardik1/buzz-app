@@ -69,7 +69,7 @@ export function workspaceCanvas(input: Workspace): string {
     .replaceAll(">", "\\u003e");
   const instructions = value.worktree
     ? [
-        "## Workspace instructions",
+        "## Workspace instructions (unless a conversation folder is assigned)",
         "",
         ...value.folders.map(
           (folder) =>
@@ -104,12 +104,17 @@ export function readWorkspace(content: string): Workspace {
   // Saved content can fit even when the current managed header is longer.
   // Check its exact format here; the writer enforces the current size budget.
   const canvas = workspaceCanvas({ ...value, canvas: "" }) + value.canvas;
+  const earlierCanvas = canvas.replace(
+    "## Workspace instructions (unless a conversation folder is assigned)",
+    "## Workspace instructions",
+  );
   // Never silently discard manually edited instructions inside the managed block.
   if (
     canvas !== content &&
+    earlierCanvas !== content &&
     !earlierWorktreeRules.some(
       (rule) =>
-        canvas
+        earlierCanvas
           .replace(
             "needs a new worktree, create it under",
             "needs changes, create a new worktree under",

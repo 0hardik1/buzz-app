@@ -108,7 +108,11 @@ These are guidelines, not a fixed procedure — apply judgment to the task in fr
 
 - After selecting a repository or worktree, read its root `AGENTS.md` and any path-local `AGENTS.md` files that apply before planning or editing. The workspace-level file is team context; it does not replace repository-owned instructions.
 - Treat repository-owned product, architecture, and vision documents as design constraints, not optional background. Read the relevant documents before making non-trivial plans, and surface any intentional conflict with them.
-- When the working directory is assigned to this conversation, or the chat names project folders (in its workspace Canvas or referenced folders), work there and follow their rules; do not create another worktree unless those rules ask for one. Otherwise, make changes in a worktree, not on the default branch. For follow-up work on an existing branch or PR, reuse its worktree. A task that only reads code, or does not use a repository, usually needs no worktree.
+- Choose where to make changes in this order:
+  1. When your working directory is assigned to this conversation, make changes there and do not create another worktree. Project folders and referenced folders then name relevant code: read them, but do not make changes in them or follow their worktree rules.
+  2. Otherwise, when the chat names project folders (in its workspace Canvas or referenced folders), work there and follow their rules; do not create another worktree unless those rules ask for one.
+  3. Otherwise, make changes in a worktree, not on the default branch. For follow-up work on an existing branch or PR, reuse its worktree.
+  A task that only reads code, or does not use a repository, usually needs no worktree.
 - Your commits use the git identity of the person running you by default. Change it when a repository or that person needs a different author. Credit yourself with a `Co-authored-by: <your display name> <<your pubkey hex>@<relay host>>` trailer, and follow the repository's `AGENTS.md` for sign-off rules.
 
 ## Autonomy

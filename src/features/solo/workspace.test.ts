@@ -41,6 +41,9 @@ it("round trips folders, worktrees and Canvas through existing template records"
   const canvas = workspaceCanvas(workspace);
   expect(readWorkspace(canvas)).toEqual(workspace);
   expect(canvas).toContain("origin/develop");
+  expect(canvas).toContain(
+    "## Workspace instructions (unless a conversation folder is assigned)",
+  );
   const id = await projectTemplateId("section-one");
   // Existing project defaults records are found by this exact id.
   expect(id).toMatch(/^me-section-[0-9a-f]{64}$/);
@@ -84,6 +87,7 @@ it("reads folder-only Canvas saved by earlier versions without treating it as ed
 it.each([
   "- Make all changes in that new worktree.",
   "- Make code changes in that new worktree. A task that only reads code, or does not use a repository, usually does not need one.",
+  "- Make code changes in the chosen worktree. For follow-up work on an existing branch or PR, reuse its worktree instead of creating another. A task that only reads code, or does not use a repository, usually does not need one.",
 ])(
   "reads saved worktree Canvas without treating its earlier rule as edited (%s)",
   (rule) => {
@@ -93,7 +97,9 @@ it.each([
       "",
       "- Use `/repo` for review only. Do not make changes directly in it.",
       "- Before starting new work, fetch the latest `main` branch from origin.",
-      "- For each repository that needs changes, create a new worktree under `~/trees` from `origin/main`.",
+      rule.includes("chosen worktree")
+        ? "- For each repository that needs a new worktree, create it under `~/trees` from `origin/main`."
+        : "- For each repository that needs changes, create a new worktree under `~/trees` from `origin/main`.",
       rule,
       "<!-- /buzz-session-workspace -->",
       "",
