@@ -109,8 +109,10 @@ export function useTabDrag({
       if (
         x < headerBox.left - tolerance ||
         x > headerBox.right + tolerance ||
-        y < headerBox.top - tolerance ||
-        y > headerBox.bottom + Math.max(8, tolerance)
+        // A header floating over history has no height of its own: its tabs
+        // hang below it.
+        y < Math.min(headerBox.top, box.top) - tolerance ||
+        y > Math.max(headerBox.bottom, box.bottom) + Math.max(8, tolerance)
       )
         return undefined;
       // Only thread/store tabs count toward insertion. Fixed host tabs stay
