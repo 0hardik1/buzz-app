@@ -556,6 +556,7 @@ export async function connectBrokerTransport(
     sidebarFilterWrites?: boolean;
     channelActivity?: boolean;
     sidebarMuteWrites?: boolean;
+    railLayout?: boolean;
     channelKit?: boolean;
     channelIdentity?: boolean;
     searchSort?: boolean;
@@ -1113,6 +1114,38 @@ export async function connectBrokerTransport(
             ).muted;
           },
         }
+      : {}),
+    ...(session.railLayout
+      ? (() => {
+          const request = async (intent: object, signal: AbortSignal) => {
+            const result = await fetch(`${endpoint}/rail-layout`, {
+              method: "POST",
+              credentials: "same-origin",
+              headers: publicationHeaders(),
+              body: JSON.stringify(intent),
+              signal,
+            });
+            if (!result.ok)
+              throw new Error((await readApiFailure(result)).error);
+            const value = (await result.json()) as {
+              payload?: Record<string, unknown>;
+              createdAt?: number;
+              conflict?: boolean;
+            };
+            if (value.conflict) throw new RailLayoutConflict();
+            if (typeof value.createdAt !== "number")
+              throw new Error("Invalid sidebar arrangement response");
+            return { payload: value.payload, createdAt: value.createdAt };
+          };
+          return {
+            readRailLayout: (signal: AbortSignal) => request({}, signal),
+            writeRailLayout: async (
+              payload: Record<string, unknown>,
+              base: number,
+              signal: AbortSignal,
+            ) => (await request({ payload, base }, signal)).createdAt,
+          };
+        })()
       : {}),
     ...(session.channelDetails === true
       ? { channelDetails: routeWriter("channel-details") }

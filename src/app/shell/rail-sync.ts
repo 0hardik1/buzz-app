@@ -95,7 +95,7 @@ export function syncRail(session: RelaySession, scope: string) {
           } finally {
             applying = false;
           }
-        } else {
+        } else if (state().dirty) {
           try {
             const base = await remote.write(mine, head.createdAt);
             if (stopped) return;

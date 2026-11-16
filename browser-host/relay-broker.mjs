@@ -64,6 +64,7 @@ import {
   assertSidebarMuteIntent,
   mutateSidebarMute,
 } from "./sidebar-toggle.mjs";
+import { assertRailLayoutIntent, mutateRailLayout } from "./rail-layout.mjs";
 import {
   validateWorkflowEvent,
   WORKFLOW_KINDS,
@@ -1396,6 +1397,7 @@ export function relayBrokerPlugin({
               "/api/relay/sidebar-sort",
               "/api/relay/sidebar-filter",
               "/api/relay/sidebar-mute",
+              "/api/relay/rail-layout",
             ].includes(route) &&
             req.method === "POST"
           ) {
@@ -1440,6 +1442,11 @@ export function relayBrokerPlugin({
                 assertSidebarMuteIntent,
                 mutateSidebarMute,
               ],
+              "/api/relay/rail-layout": [
+                "rail-layout",
+                assertRailLayoutIntent,
+                mutateRailLayout,
+              ],
             }[route];
             const sorting =
               coordinate === "channel-sort" || coordinate === "channel-filter";
@@ -1447,11 +1454,15 @@ export function relayBrokerPlugin({
             // Sort and order intents carry up to 100 section IDs.
             const listing =
               sorting || route === "/api/relay/sidebar-section-order";
+            const arranging = coordinate === "rail-layout";
             const chunks = [];
             let bytes = 0;
             for await (const part of req) {
               bytes += part.length;
-              if (bytes > (listing ? 32 * 1024 : 2048))
+              if (
+                bytes >
+                (arranging ? SIDEBAR_HEAD_BYTES : listing ? 32 * 1024 : 2048)
+              )
                 return json(res, 413, {
                   error: `Sidebar preference intent is too large`,
                 });
@@ -1697,6 +1708,7 @@ export function relayBrokerPlugin({
               sidebarFilterWrites: true,
               channelActivity: true,
               sidebarMuteWrites: true,
+              railLayout: true,
               channelKit: true,
               channelIdentity: (await getAuthority(relay)).channelIdentity,
               readState: true,

@@ -2076,6 +2076,7 @@ export const test = base.extend({
           "channel-stars",
           "channel-sort",
           "channel-filter",
+          "rail-layout",
         ].includes(sidebarCoordinate) ||
         (ownSoloChannels.length > 0 &&
           sidebarCoordinate?.startsWith("buzz-me-kit-v1:"))
