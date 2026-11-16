@@ -771,27 +771,6 @@ export function createPluginUpdates(
           prune();
           continue;
         }
-        const candidate = update.candidate;
-        if (candidate) {
-          const previous = updates.find(
-            (item) =>
-              item.id === id &&
-              item.installedRevision === update.installedRevision &&
-              item.installedPublisher === update.installedPublisher &&
-              item.installedEnabled === update.installedEnabled &&
-              item.updateChoice === update.updateChoice &&
-              updateSourceKey(item.source) === updateSourceKey(source) &&
-              item.candidate?.revision === candidate.revision &&
-              (item.candidate.publisher ?? null) ===
-                (candidate.publisher ?? null),
-          );
-          update.token =
-            previous?.token ?? (crypto.randomUUID() as PluginUpdateToken);
-        }
-        publish([
-          ...updates.filter((item) => item.id !== id),
-          ...(update.candidate || update.error ? [update] : []),
-        ]);
       }
       if (closed) return;
       lastCheck = Date.now();
