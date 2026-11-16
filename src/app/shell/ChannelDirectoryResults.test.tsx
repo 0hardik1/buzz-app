@@ -321,6 +321,13 @@ it("Browse channels lists the open channels to join A–Z, and nothing else of s
       ]),
     );
     expect(t.countReads()).toBe(1);
+    // A count shows in its own slot at the row's end, so its arrival leaves
+    // the line after the name as it was.
+    const community = screen.getByRole("row", { name: /^buzz-community/ });
+    expect(within(community).getByText("Questions and tips")).toBeVisible();
+    expect(community.querySelector(".search-palette-count")).toHaveTextContent(
+      /^2$/,
+    );
     // Joined (guests included), archived and private channels aren't
     // offered to join.
     for (const hidden of [

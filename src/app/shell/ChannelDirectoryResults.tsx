@@ -9,6 +9,7 @@ import type { RelaySession } from "../../features/relay/session";
 import { matchName } from "../../features/search/match";
 import { MatchedLabel } from "../../features/search/MatchedLabel";
 import { joinFailure } from "../../features/messages/ChannelJoinNotice";
+import { UserIcon } from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
 import { LoadingRegion } from "../../shared/design-system/ui/LoadingRegion";
 import { PreferenceRow } from "../../shared/design-system/ui/PreferenceRow";
@@ -216,17 +217,22 @@ export function ChannelDirectoryResults({
       // A Join that may not have landed is Joined once membership shows.
       const isJoined =
         joined || state?.status === "joined" || member.has(channel.id);
-      const detail =
-        state?.status === "failed" && !isJoined
-          ? state.error
-          : [
-              isJoined && "Joined",
-              people !== undefined &&
-                `${people.toLocaleString()} ${people === 1 ? "member" : "members"}`,
-              channel.description,
-            ]
-              .filter(Boolean)
-              .join(" · ");
+      const failure = state?.status === "failed" && !isJoined;
+      // Shown after the name; the count has its own slot at the row's end.
+      const about = [isJoined && "Joined", channel.description]
+        .filter(Boolean)
+        .join(" · ");
+      // The row's accessible description: everything, the count included.
+      const detail = failure
+        ? state.error
+        : [
+            isJoined && "Joined",
+            people !== undefined &&
+              `${people.toLocaleString()} ${people === 1 ? "member" : "members"}`,
+            channel.description,
+          ]
+            .filter(Boolean)
+            .join(" · ");
       const Icon = channelIcon(channel);
       return {
         key: `directory:${channel.id}`,
@@ -246,38 +252,55 @@ export function ChannelDirectoryResults({
                     positions={match?.positions}
                   />
                 </span>
-                {state?.status === "failed" && !isJoined ? (
+                {failure ? (
                   <span className="min-w-0 truncate text-danger" role="alert">
                     {state.error}
                   </span>
                 ) : (
-                  detail && (
+                  about && (
                     <span className="min-w-0 truncate text-subtle">
-                      {detail}
+                      {about}
                     </span>
                   )
                 )}
               </span>
             }
             trailing={
-              // Membership can show before the Join settles; the button
-              // stays until then, so the focus it holds has somewhere to go.
-              (!isJoined || state?.status === "pending") &&
-              lifecycle?.available ? (
-                // Shown on hover or highlight, and kept while joining or
-                // after a failure.
-                <span data-search-reveal={state ? undefined : ""}>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    aria-label={`Join ${channel.name}`}
-                    loading={state?.status === "pending"}
-                    onClick={() => join(channel.id)}
-                  >
-                    Join
-                  </Button>
+              <>
+                {
+                  // Membership can show before the Join settles; the button
+                  // stays until then, so the focus it holds has somewhere to go.
+                  (!isJoined || state?.status === "pending") &&
+                    lifecycle?.available && (
+                      // Shown on hover or highlight, and kept while joining
+                      // or after a failure.
+                      <span data-search-reveal={state ? undefined : ""}>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          aria-label={`Join ${channel.name}`}
+                          loading={state?.status === "pending"}
+                          onClick={() => join(channel.id)}
+                        >
+                          Join
+                        </Button>
+                      </span>
+                    )
+                }
+                {/* Counts arrive after their rows; the slot's width is held
+                    from the start, so neither the line nor the column moves. */}
+                <span
+                  className="search-palette-count text-body-sm text-subtle"
+                  aria-hidden="true"
+                >
+                  {people !== undefined && (
+                    <>
+                      <UserIcon size={14} />
+                      {people.toLocaleString()}
+                    </>
+                  )}
                 </span>
-              ) : undefined
+              </>
             }
           />
         ),
