@@ -71,6 +71,16 @@ it("lets the relay's answer outrank a joined member's roster role", () => {
   expect(state.get(id)?.readOnly).toBe(true);
 });
 
+it("refreshes the readable list when a hold changes, holding or releasing", () => {
+  const state = known();
+  state.accept(roster("member", 2));
+  expect(state.readable()[0]?.readOnly).toBeUndefined();
+  state.hold(id, { post: false, joined: true, role: "member" });
+  expect(state.readable()[0]?.readOnly).toBe(true);
+  state.release(id);
+  expect(state.readable()[0]?.readOnly).toBeUndefined();
+});
+
 it("hides a held conversation while suspended, and a fresh answer restores it", () => {
   const state = known();
   state.hold(id, { post: true, joined: false, role: "member" });
