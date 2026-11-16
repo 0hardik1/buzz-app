@@ -516,7 +516,10 @@ and are asked to sign in again in Buzz.
   A bare **!**, or **!** before a space, stays text.
 - **Catch up** is an optional plugin. Enable it in **Settings → Plugins**, then open
   **Catch up** to review unread conversations one at a time. Previews leave messages
-  unread; **Mark as read** reads the conversation including replies, **Keep unread**
+  unread. Swipe right to mark as read, or left to keep unread, using touch,
+  horizontal trackpad gestures, or dragging the card header with a mouse. Vertical
+  scrolling and selecting preview text do not swipe a card. Buttons remain available.
+  **Mark as read** reads the conversation including replies, **Keep unread**
   skips it for this review, and **Open conversation** opens the normal reader.
   **Check again** includes skipped conversations. Counts reflect observed recent
   activity and may be incomplete.

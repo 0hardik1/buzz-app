@@ -5,6 +5,11 @@
 Opt-in unread conversation triage. Enable **Catch up** in Settings → Plugins,
 then open **Catch up** from navigation.
 
+Swipe right to mark read, or left to keep unread. Use touch, horizontal trackpad
+gestures, or drag the card header with a mouse. Vertical scrolling and selecting
+preview text do not swipe cards; the buttons also work with the keyboard. Each
+trackpad gesture acts on one card, including its trailing momentum.
+
 Each card shows the conversation's latest available preview and observed unread
 count. Previews do not create a reading lease or mark messages seen. **Keep
 unread** skips a conversation until **Check again** or leaving the page. **Mark

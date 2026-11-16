@@ -10,6 +10,7 @@ import type { NavigationScope } from "../../features/navigation/targets";
 import { useChannelList, useRelayConnection } from "../../features/relay/react";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
+import { messagePreview } from "../../features/notifications/content";
 import { CheckIcon } from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
 import { EmptyState } from "../../shared/design-system/ui/EmptyState";
@@ -21,6 +22,7 @@ import {
 } from "../../shared/design-system/ui/PanelHeader";
 import { useChannelLabels } from "../channels/useChannelLabels";
 import styles from "./CatchUpPage.module.css";
+import { useCatchUpSwipe } from "./useCatchUpSwipe";
 
 export function CatchUpPage({
   relay,
@@ -80,6 +82,16 @@ export function CatchUpView({
     unread.subscribeSync,
     unread.sync,
     unread.sync,
+  );
+  const inbox = useSyncExternalStore(
+    unread.subscribeInbox,
+    unread.inbox,
+    unread.inbox,
+  );
+  const feed = useSyncExternalStore(
+    session.inboxFeed.subscribe,
+    session.inboxFeed.snapshot,
+    session.inboxFeed.snapshot,
   );
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set());
   const [checking, setChecking] = useState(true);
@@ -163,6 +175,19 @@ export function CatchUpView({
   const status = channel
     ? unread.snapshot({ kind: "channel", channelId: channel.id })
     : undefined;
+  const evidence = inbox.items.find((item) => item.channelId === channel?.id);
+  const incomplete =
+    evidence &&
+    [evidence.previewMessageId, ...evidence.messageIds].some(
+      (id) => id && feed.incomplete.includes(id),
+    );
+  const preview =
+    channel?.preview ||
+    (incomplete
+      ? "Preview updates are not ready. Open the conversation for context."
+      : evidence
+        ? messagePreview(evidence.preview)
+        : "No message preview available. Open the conversation for context.");
   async function markRead() {
     if (!channel || busy.current) return;
     busy.current = true;
@@ -178,6 +203,19 @@ export function CatchUpView({
       if (alive.current) setPending(false);
     }
   }
+  function keepUnread() {
+    if (!channel || busy.current || loading) return;
+    setError(undefined);
+    setSkipped((previous) => new Set([...previous, channel.id]));
+  }
+  const swipe = useCatchUpSwipe({
+    channelId: channel?.id,
+    disabled: pending || loading,
+    read: () => {
+      void markRead();
+    },
+    keep: keepUnread,
+  });
   async function refresh() {
     if (busy.current) return;
     busy.current = true;
@@ -202,7 +240,9 @@ export function CatchUpView({
   return (
     <div className={styles.body}>
       <p className="text-body text-subtle">
-        Review unread conversations one at a time. Previews leave them unread.
+        Swipe right to mark as read; swipe left to keep unread. Use your
+        trackpad, swipe on touch, or drag the card header. Previews leave
+        messages unread.
       </p>
       {failure && (
         <div role="alert">
@@ -221,10 +261,19 @@ export function CatchUpView({
       </LoadingRegion>
       {channel ? (
         <article
+          ref={swipe.ref}
           className={styles.preview}
+          style={{ transform: `translateX(${swipe.offset}px)` }}
           aria-label={`Unread conversation: ${channel.name}`}
           aria-busy={pending}
         >
+          <p className="text-caption text-subtle" aria-live="polite">
+            {swipe.offset
+              ? swipe.offset > 0
+                ? "→ Mark as read"
+                : "← Keep unread"
+              : "← Keep unread · Mark as read →"}
+          </p>
           <p className="text-caption text-subtle">
             {
               candidates.filter((candidate) => !skipped.has(candidate.id))
@@ -239,9 +288,8 @@ export function CatchUpView({
               : `${status?.observedCount ?? 0} observed unread messages`}
             {status?.freshness === "stale" ? " · May be out of date" : ""}
           </p>
-          <p className={`${styles.message} text-body`}>
-            {channel.preview ||
-              "No message preview available. Open the conversation for context."}
+          <p data-catch-up-message className={`${styles.message} text-body`}>
+            {preview}
           </p>
           <div className={styles.actions}>
             <Button
@@ -252,13 +300,7 @@ export function CatchUpView({
             >
               Mark as read
             </Button>
-            <Button
-              disabled={pending || loading}
-              onClick={() => {
-                setError(undefined);
-                setSkipped((previous) => new Set([...previous, channel.id]));
-              }}
-            >
+            <Button disabled={pending || loading} onClick={keepUnread}>
               Keep unread
             </Button>
             <Button

@@ -14,9 +14,18 @@ import type { Navigation } from "../../features/navigation/controller";
 import { CatchUpView } from "./CatchUpPage";
 import { apply } from "./index";
 
-afterEach(cleanup);
+HTMLElement.prototype.setPointerCapture ??= () => {};
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 const scope = { viewer: "viewer", communityOrigin: "https://example.org" };
-function setup(dm = false) {
+function setup(
+  dm = false,
+  emptyPreview = false,
+  inboxBody = "Unread evidence preview",
+  incomplete: string[] = [],
+) {
   const listeners = new Set<() => void>();
   const state = new Map<string, UnreadSnapshot>(
     ["one", "two"].map((id) => [
@@ -38,7 +47,7 @@ function setup(dm = false) {
         id: "one",
         name: dm ? "Direct message" : "First",
         ...(dm ? { channelType: "dm", participants: ["alice"] } : {}),
-        preview: "First preview",
+        preview: emptyPreview ? "" : "First preview",
         members: ["viewer"],
         lastActivityAt: 2,
       },
@@ -63,8 +72,20 @@ function setup(dm = false) {
     capability: "unsupported",
     completeness: "snapshot",
   };
+  const inbox = {
+    items: [
+      {
+        channelId: "one",
+        preview: inboxBody,
+        messageIds: ["preview-id"],
+        previewMessageId: "preview-id",
+      },
+    ],
+  };
   const profiles = new Map([["alice", { pubkey: "alice", name: "Alice" }]]);
+  const feed = { incomplete };
   const session = {
+    inboxFeed: { subscribe: () => () => {}, snapshot: () => feed },
     profiles: {
       snapshot: () => profiles,
       subscribe: () => () => {},
@@ -77,6 +98,8 @@ function setup(dm = false) {
       refreshList: vi.fn(),
     },
     unread: {
+      inbox: () => inbox,
+      subscribeInbox: () => () => {},
       sync: () => sync,
       subscribeSync: () => () => {},
       snapshot: ({ channelId }: { channelId: string }) =>
@@ -227,4 +250,162 @@ it("identifies unread DMs by their participants", async () => {
     screen.getByRole("article", { name: "Unread conversation: Alice" }),
   ).toBeTruthy();
   expect(screen.queryByText("Direct message")).toBeNull();
+});
+
+function drag(
+  dx: number,
+  dy = 0,
+  type = "touch",
+  cancel = false,
+  target?: HTMLElement,
+) {
+  const card = screen.getByRole("article");
+  const start = target ?? card;
+  fireEvent.pointerDown(start, {
+    pointerId: 1,
+    pointerType: type,
+    isPrimary: true,
+    button: 0,
+    clientX: 150,
+    clientY: 100,
+  });
+  fireEvent.pointerMove(card, {
+    pointerId: 1,
+    clientX: 150 + dx,
+    clientY: 100 + dy,
+  });
+  if (cancel) fireEvent.pointerCancel(card, { pointerId: 1 });
+  else
+    fireEvent.pointerUp(card, {
+      pointerId: 1,
+      clientX: 150 + dx,
+      clientY: 100 + dy,
+    });
+}
+
+it("swipes right to read and left to keep unread", async () => {
+  const { markChannelRead } = setup();
+  await ready();
+  drag(-120);
+  expect(screen.getByText("Second preview")).toBeTruthy();
+  expect(markChannelRead).not.toHaveBeenCalled();
+  drag(120);
+  await screen.findByText("Review complete");
+  expect(markChannelRead).toHaveBeenCalledExactlyOnceWith("two");
+});
+
+it("does not dismiss for short, vertical, cancelled gestures or mouse text selection", async () => {
+  const { markChannelRead } = setup();
+  await ready();
+  drag(30);
+  drag(120, 200);
+  drag(120, 0, "touch", true);
+  drag(120, 0, "mouse", false, screen.getByText("First preview"));
+  expect(screen.getByText("First preview")).toBeTruthy();
+  expect(markChannelRead).not.toHaveBeenCalled();
+});
+
+it("allows mouse dragging the header while buttons remain separate", async () => {
+  const { markChannelRead } = setup();
+  await ready();
+  drag(
+    120,
+    0,
+    "mouse",
+    false,
+    screen.getByRole("button", { name: "Keep unread" }),
+  );
+  expect(markChannelRead).not.toHaveBeenCalled();
+  drag(-120, 0, "mouse", false, screen.getByText("First"));
+  expect(screen.getByText("Second preview")).toBeTruthy();
+});
+
+it("binds trackpad momentum to one card and rearms after the gesture ends", async () => {
+  const { markChannelRead } = setup();
+  await ready();
+  vi.useFakeTimers();
+  const card = screen.getByRole("article");
+  fireEvent.wheel(card, { deltaX: 60, deltaY: 0 });
+  expect(card.style.transform).toBe("translateX(-60px)");
+  fireEvent.wheel(card, { deltaX: 60, deltaY: 0 });
+  expect(screen.getByText("Second preview")).toBeTruthy();
+  fireEvent.wheel(card, { deltaX: 150, deltaY: 0 });
+  expect(screen.getByText("Second preview")).toBeTruthy();
+  expect(markChannelRead).not.toHaveBeenCalled();
+  act(() => vi.advanceTimersByTime(220));
+  fireEvent.wheel(card, { deltaX: -110, deltaY: 0 });
+  await act(async () => {});
+  expect(markChannelRead).toHaveBeenCalledExactlyOnceWith("two");
+});
+
+it("ignores vertical scrolling and control-wheel zoom", async () => {
+  const { markChannelRead } = setup();
+  await ready();
+  const card = screen.getByRole("article");
+  fireEvent.wheel(card, { deltaX: 10, deltaY: 150 });
+  fireEvent.wheel(card, { deltaX: -150, deltaY: 0, ctrlKey: true });
+  expect(screen.getByText("First preview")).toBeTruthy();
+  expect(markChannelRead).not.toHaveBeenCalled();
+});
+
+it("blocks swipe actions while a save is pending and cancels timers on unmount", async () => {
+  const { markChannelRead, unmount } = setup();
+  await ready();
+  vi.useFakeTimers();
+  let finish!: () => void;
+  markChannelRead.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  drag(120);
+  drag(-120);
+  fireEvent.wheel(screen.getByRole("article"), { deltaX: -200 });
+  expect(screen.getByText("First preview")).toBeTruthy();
+  expect(markChannelRead).toHaveBeenCalledTimes(1);
+  unmount();
+  act(() => vi.advanceTimersByTime(1000));
+  await act(async () => finish());
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("uses already observed unread previews before opening a channel", async () => {
+  const { reading, markChannelRead } = setup(false, true);
+  await ready();
+  expect(screen.getByText("Unread evidence preview")).toBeTruthy();
+  expect(reading).not.toHaveBeenCalled();
+  expect(markChannelRead).not.toHaveBeenCalled();
+});
+
+it("withholds unsettled previews and hides spoilers in settled evidence", async () => {
+  const first = setup(false, true, "The answer is ||Rosebud||", ["preview-id"]);
+  await ready();
+  expect(
+    screen.getByText(
+      "Preview updates are not ready. Open the conversation for context.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Rosebud/)).toBeNull();
+  first.unmount();
+  setup(false, true, "The answer is ||Rosebud||");
+  await ready();
+  expect(screen.getByText("The answer is [Spoiler]")).toBeTruthy();
+  expect(screen.queryByText(/Rosebud/)).toBeNull();
+});
+
+it("never turns a vertical-start trackpad gesture into a card action", async () => {
+  const { markChannelRead } = setup();
+  await ready();
+  vi.useFakeTimers();
+  const card = screen.getByRole("article");
+  fireEvent.wheel(card, { deltaX: 0, deltaY: 150 });
+  fireEvent.wheel(card, { deltaX: -60, deltaY: 10 });
+  fireEvent.wheel(card, { deltaX: -60, deltaY: 10 });
+  expect(markChannelRead).not.toHaveBeenCalled();
+  expect(screen.getByText("First preview")).toBeTruthy();
+  act(() => vi.advanceTimersByTime(220));
+  fireEvent.wheel(card, { deltaX: -120, deltaY: 0 });
+  await act(async () => {});
+  expect(markChannelRead).toHaveBeenCalledExactlyOnceWith("one");
 });
