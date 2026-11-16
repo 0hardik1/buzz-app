@@ -46,8 +46,9 @@ export interface ProfileQueries {
   generation?(): number;
   /** Room for `members` more profiles while a view of that many people is
    * open, within the hard limit. Growth is immediate. After a release, the
-   * next task returns the limit to the largest remaining reservation and
-   * evicts the least recently used profiles past it. */
+   * next task cancels the departing view's background reads; 30 seconds
+   * later, the limit returns to the largest remaining reservation and evicts
+   * the least recently used profiles past it. */
   reserve?(members: number): () => void;
   /** Profiles the cache can hold now; one ensure may ask for at most this many. */
   limit?(): number;
@@ -74,6 +75,8 @@ export interface ProfileQueries {
 /** Authors per profile read, the reader's largest page. A page that fills it
  * may have left out authors who do have a profile. */
 const PROFILE_PAGE = 500;
+/** How long a released reservation holds the limit up. */
+const RELEASE_HOLD_MS = 30_000;
 
 // Hidden characters must not defeat verified-name qualification. Strip them
 // before trimming so e.g. "Alice \u200b" still matches "Alice". Display text stays intact.
@@ -108,6 +111,12 @@ export function createProfileDirectory(
   // One entry per open view; the largest sets the limit.
   const reservations = new Set<{ members: number }>();
   let shrinking: ReturnType<typeof setTimeout> | undefined;
+  // A released view's room holds the limit up for a while, so a reader who
+  // switches back finds the names it showed instead of reading them again.
+  let held = 0;
+  let holding: ReturnType<typeof setTimeout> | undefined;
+  // The limit open views alone set; a drop means a view left.
+  let opened = PROFILE_CACHE_BASE;
   const owners = new WeakMap<RelayEvent, string>();
   type Batch = {
     work: Promise<void>;
@@ -165,23 +174,25 @@ export function createProfileDirectory(
       verification.authority,
       verification.subscribe,
       () => {
-        verifiedFlush ??= setTimeout(() => {
-          verifiedFlush = undefined;
-          verifiedRevision++;
-          for (const subject of verified?.takeAccepted() ?? []) {
-            acceptedAt.delete(subject);
-            acceptedAt.set(subject, verifiedRevision);
-          }
-          for (const [subject, revision] of acceptedAt) {
-            if (acceptedAt.size <= PROFILE_CACHE_MAX) break;
-            acceptedAt.delete(subject);
-            forgottenAt = revision;
-          }
-          if (!closed) publish();
-        });
+        verifiedFlush ??= setTimeout(flushVerified);
       },
       verification.refresh,
     );
+  function flushVerified() {
+    clearTimeout(verifiedFlush);
+    verifiedFlush = undefined;
+    verifiedRevision++;
+    for (const subject of verified?.takeAccepted() ?? []) {
+      acceptedAt.delete(subject);
+      acceptedAt.set(subject, verifiedRevision);
+    }
+    for (const [subject, revision] of acceptedAt) {
+      if (acceptedAt.size <= PROFILE_CACHE_MAX) break;
+      acceptedAt.delete(subject);
+      forgottenAt = revision;
+    }
+    if (!closed) publish();
+  }
   // A background read of many pages publishes once, when its pages settle:
   // every publish refolds all profiles and wakes every listener, and an open
   // mention menu re-ranks its whole roster on each one. The session accepts
@@ -303,6 +314,7 @@ export function createProfileDirectory(
         old?.picture === value.picture &&
         old?.about === value.about &&
         old?.nip05 === value.nip05 &&
+        old?.tz === value.tz &&
         old?.isAgent === value.isAgent &&
         old?.ownerPubkey === value.ownerPubkey &&
         (old?.verified === value.verified ||
@@ -491,16 +503,18 @@ export function createProfileDirectory(
     let reserved = 0;
     for (const { members } of reservations)
       reserved = Math.max(reserved, members);
-    const next = Math.min(PROFILE_CACHE_MAX, PROFILE_CACHE_BASE + reserved);
-    if (next === limit) return;
-    const shrink = next < limit;
+    const open = Math.min(PROFILE_CACHE_MAX, PROFILE_CACHE_BASE + reserved);
+    const departed = open < opened;
+    opened = open;
+    const next = Math.max(open, held);
+    if (next === limit && !departed) return;
     limit = next;
     verified?.resize(limit);
     let dropped = events.resize(limit, limit * PROFILE_ENTRY_BYTES) > 0;
     // A read asked for before the release would land as the newest entries
     // and push out names the next view just loaded. The next view's own reads,
     // foreground reads and reconnect refreshes keep going.
-    if (shrink)
+    if (departed)
       for (const batch of new Set(pending.values())) {
         if (!shrinkCancels(batch)) continue;
         batch.cancel.abort();
@@ -524,6 +538,20 @@ export function createProfileDirectory(
     return () => {
       if (!reservations.delete(reservation) || closed) return;
       releases++;
+      // Only the largest room held so far restarts the hold, so closing
+      // smaller views cannot keep a large channel's room up indefinitely.
+      const room = Math.min(
+        PROFILE_CACHE_MAX,
+        PROFILE_CACHE_BASE + reservation.members,
+      );
+      if (room >= held) {
+        held = room;
+        clearTimeout(holding);
+        holding = setTimeout(() => {
+          held = 0;
+          resize();
+        }, RELEASE_HOLD_MS);
+      }
       // Shrink after the current task: a view that releases and reserves again
       // in one commit (a roster count change, a remount) keeps its profiles.
       shrinking ??= setTimeout(resize);
@@ -611,6 +639,14 @@ export function createProfileDirectory(
           return event ? [event] : [];
         });
     },
+    /** Up to `count` held verified heads, for the device mirror. */
+    verifiedHeads: (count: number) => verified?.heads(count) ?? [],
+    /** Verified heads an earlier session saved, shown as cached until checked. */
+    restoreVerified(saved: readonly RelayEvent[]) {
+      verified?.restore(saved);
+      // Published now, so a restored session never starts without them.
+      if (verifiedFlush !== undefined) flushVerified();
+    },
     stats: () => events.stats(),
     dispose() {
       closed = true;
@@ -621,6 +657,7 @@ export function createProfileDirectory(
       // After clear(): disposing the verified directory schedules a flush.
       clearTimeout(verifiedFlush);
       clearTimeout(shrinking);
+      clearTimeout(holding);
       listeners.clear();
     },
   };

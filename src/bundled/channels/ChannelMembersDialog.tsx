@@ -105,6 +105,7 @@ import {
   UsersIcon,
 } from "../../shared/design-system/icons";
 import {
+  MemberMenus,
   MemberRow,
   useMemberAdministration,
   memberAccessLabel,
@@ -208,7 +209,6 @@ const MemberIdentityRow = memo(function MemberIdentityRow({
   ownerClickable,
   descriptionId,
   input,
-  scrollport,
   focusedAdd,
   openProfile,
   onSendMessage,
@@ -245,7 +245,6 @@ const MemberIdentityRow = memo(function MemberIdentityRow({
   ownerClickable: boolean;
   descriptionId: string;
   input: RefObject<HTMLElement | null>;
-  scrollport: RefObject<HTMLElement | null>;
   focusedAdd: RefObject<{
     key: string;
     button: HTMLButtonElement;
@@ -361,7 +360,6 @@ const MemberIdentityRow = memo(function MemberIdentityRow({
       verifiedOwner={verifiedOwner}
       onChange={onChange}
       returnFocus={input}
-      scrollport={scrollport}
       onViewProfile={clickable ? viewProfile : undefined}
       onViewOwnerProfile={
         ownerClickable ? () => openProfile(ownerTarget) : undefined
@@ -1104,14 +1102,20 @@ export function ChannelMembersDialog({
         .map(([key]) => key),
     [labelList],
   );
-  const accessOf = (key: string) =>
-    accessFilterLabel(administration.authority.roles[key]);
-  const accessGroups = accessFilterNames
-    .map((name) => ({
-      name,
-      count: currentMembers.filter((key) => accessOf(key) === name).length,
-    }))
-    .filter((group) => group.count > 0);
+  const roles = administration.authority.roles;
+  const accessOf = (key: string) => accessFilterLabel(roles[key]);
+  // Count once per roster or role change, not on every filter keystroke,
+  // which would label a large roster once per access level.
+  const accessGroups = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const key of currentMembers) {
+      const name = accessFilterLabel(roles[key]);
+      if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return accessFilterNames
+      .map((name) => ({ name, count: counts.get(name) ?? 0 }))
+      .filter((group) => group.count > 0);
+  }, [currentMembers, roles]);
   const accessFilter =
     query.length === 0 &&
     (administration.status === "loading" ||
@@ -1835,7 +1839,6 @@ export function ChannelMembersDialog({
         }
         descriptionId={`${presenceId}-${key}`}
         input={input}
-        scrollport={scrollport}
         focusedAdd={focusedAdd}
         openProfile={openProfile}
         onSendMessage={
@@ -2091,9 +2094,6 @@ export function ChannelMembersDialog({
       }
       height={selection ? "content" : generalAccess ? "stable-tall" : "stable"}
       bodyLayout={selection ? "flow" : "flex"}
-      headerGap={
-        !selection || selection.role === "remove" ? "compact" : "default"
-      }
       footerGap={
         selection && selection.role !== "remove" ? "default" : "compact"
       }
@@ -2252,8 +2252,8 @@ export function ChannelMembersDialog({
               )}
             </div>
           )}
-          <section
-            ref={scrollport}
+          <MemberMenus
+            scrollport={scrollport}
             className={`${styles.memberList} buzz-thin-scrollbar`}
             aria-label="Member list"
             data-refreshing={refreshing}
@@ -2620,7 +2620,7 @@ export function ChannelMembersDialog({
                   {share.progress}
                 </p>
               ) : null)}
-          </section>
+          </MemberMenus>
         </div>
       )}
       {share.confirmation && chosen && (

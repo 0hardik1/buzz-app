@@ -541,6 +541,244 @@ it("picking an addressed row while several agents are addressed toggles it", asy
   test.library.dispose();
 });
 
+it.each([1, 2])(
+  "typed exact-name Enter chooses Al with %i agents addressed",
+  async (count) => {
+    const test = setup(false),
+      user = userEvent.setup();
+    const alexandra = { pubkey: "c".repeat(64), name: "Alexandra" },
+      bob = { pubkey: "d".repeat(64), name: "Bob" },
+      al = { pubkey: "e".repeat(64), name: "Al" };
+    const identities = [alexandra, bob, al];
+    const library = createAgentLibrary(async () => ({
+      definitions: [],
+      identities,
+    }));
+    // Load all three choices before opening: this tests ranking, not arrival order.
+    await library.queries.refresh();
+    const session = {
+      ...test.session,
+      agentLibrary: library.queries,
+      agentChoices: createAgentChoices({
+        scope: "exact-name",
+        library: library.queries,
+        signal: new AbortController().signal,
+      }),
+    };
+    const { view, toggle } = renderAudiencePicker(
+      { ...test, session },
+      [alexandra, bob].slice(0, count),
+    );
+    try {
+      await user.click(screen.getByRole("button", { name: /Change agents/ }));
+      await screen.findByRole("button", {
+        name: rowName("Al", "Adds to chat when you send"),
+      });
+      const search = screen.getByRole("searchbox");
+      await user.type(search, "Al");
+      // Assert the action first: wrong ordering used to remove Alexandra,
+      // or hit the composer's last-agent guard when she was addressed alone.
+      await user.keyboard("{Enter}");
+      expect(toggle).toHaveBeenCalledExactlyOnceWith(al);
+      expect(
+        [...document.querySelectorAll("[data-mention-choice]")].map((row) =>
+          row.getAttribute("data-mention-choice"),
+        ),
+      ).toEqual([al.pubkey, alexandra.pubkey]);
+      expect(search).toHaveFocus();
+      expect(search).toBeVisible();
+    } finally {
+      view.unmount();
+      library.dispose();
+      test.library.dispose();
+    }
+  },
+);
+
+it("installs addressed exact keys before the cap and keeps toggle order until reopening", async () => {
+  const test = setup(false),
+    user = userEvent.setup();
+  // More than 50 choices is intentional: sorting a capped list loses Zulu.
+  const identities = Array.from({ length: 52 }, (_, i) => ({
+    pubkey: (i + 16).toString(16).padStart(64, "0"),
+    name: i === 51 ? "Zulu" : `Agent ${String(i).padStart(2, "0")}`,
+  }));
+  const library = createAgentLibrary(async () => ({
+    definitions: [],
+    identities,
+  }));
+  const list = {
+    status: "ready" as const,
+    channels: [
+      {
+        id: "parent",
+        name: "Chat",
+        channelType: "solo" as const,
+        members: [] as string[],
+      },
+    ],
+  };
+  const session = {
+    ...test.session,
+    channels: {
+      ...test.session.channels,
+      list: () => list,
+    },
+    agentLibrary: library.queries,
+    agentChoices: createAgentChoices({
+      scope: "cap",
+      library: library.queries,
+      signal: new AbortController().signal,
+    }),
+  };
+  const zulu = identities[51],
+    alpha = identities[0];
+  if (!zulu || !alpha) throw new Error("Missing cap fixture");
+  let recipients = [zulu];
+  const toggle = vi.fn((person: MentionRecipient) => {
+    recipients = recipients.some((p) => p.pubkey === person.pubkey)
+      ? recipients.filter((p) => p.pubkey !== person.pubkey)
+      : [...recipients, person];
+    view.rerender(picker());
+  });
+  const picker = () => (
+    <MentionPicker
+      session={session}
+      scope="test"
+      channelId="parent"
+      disabled={false}
+      inviteAgents
+      audience={{ recipients, named: false, only: vi.fn(), toggle }}
+      select={() => true}
+    />
+  );
+  const view = render(picker());
+  const open = () =>
+    user.click(
+      screen.getByRole("button", { name: /Change agents|Choose agent/ }),
+    );
+  const labels = identities.map((p) => p.name);
+  const shown = () =>
+    [...document.querySelectorAll("[data-mention-choice]")].map(
+      (row) =>
+        identities.find(
+          (p) => p.pubkey === row.getAttribute("data-mention-choice"),
+        )?.name,
+    );
+  try {
+    await open();
+    const zuluRow = await screen.findByRole("button", {
+      name: rowName("Zulu", "Adds to chat when you send"),
+    });
+    expect(shown()).toEqual(["Zulu", ...labels.slice(0, 49)]);
+    expect(zuluRow).toHaveAttribute("aria-pressed", "true");
+    expect(new Set(shown()).size).toBe(50);
+    await user.click(
+      screen.getByRole("button", {
+        name: rowName(alpha.name, "Adds to chat when you send"),
+      }),
+    );
+    zuluRow.focus();
+    await user.keyboard("{Enter}");
+    expect(toggle.mock.calls.map(([p]) => p.pubkey)).toEqual([
+      alpha.pubkey,
+      zulu.pubkey,
+    ]);
+    expect(zuluRow).toHaveAttribute("aria-pressed", "false");
+    expect(shown()[0]).toBe("Zulu");
+    expect(screen.getByRole("searchbox")).toBeVisible();
+    await user.keyboard("{Escape}");
+    await open();
+    await screen.findByRole("button", {
+      name: rowName(alpha.name, "Adds to chat when you send"),
+    });
+    expect(shown()).toEqual(labels.slice(0, 50));
+    await user.type(screen.getByRole("searchbox"), "Zulu");
+    await screen.findByRole("button", {
+      name: rowName("Zulu", "Adds to chat when you send"),
+    });
+    expect(shown()).toEqual(["Zulu"]);
+    act(() => test.setArchived([zulu.pubkey]));
+    expect(
+      screen.getByRole("button", { name: /^Zulu.*Archived/ }),
+    ).toBeDisabled();
+  } finally {
+    view.unmount();
+    library.dispose();
+    test.library.dispose();
+  }
+});
+
+it("checks only the addressed namesake and appends late choices without moving it", async () => {
+  const test = setup(false),
+    user = userEvent.setup();
+  let identities = [
+    { pubkey: "c".repeat(64), name: "Twin" },
+    { pubkey: "d".repeat(64), name: "Twin" },
+  ];
+  const library = createAgentLibrary(async () => ({
+    definitions: [],
+    identities,
+  }));
+  const list = {
+    status: "ready" as const,
+    channels: [
+      {
+        id: "parent",
+        name: "Chat",
+        channelType: "solo" as const,
+        members: [] as string[],
+      },
+    ],
+  };
+  const session = {
+    ...test.session,
+    channels: {
+      ...test.session.channels,
+      list: () => list,
+    },
+    agentLibrary: library.queries,
+    agentChoices: createAgentChoices({
+      scope: "twins",
+      library: library.queries,
+      signal: new AbortController().signal,
+    }),
+  };
+  const addressed = identities[1];
+  if (!addressed) throw new Error("Missing namesake fixture");
+  const view = renderAudiencePicker({ ...test, session }, [addressed]);
+  try {
+    await user.click(screen.getByRole("button", { name: /Change agents/ }));
+    const twins = await screen.findAllByRole("button", {
+      name: /Twin.*Adds to chat when you send/,
+    });
+    expect(twins).toHaveLength(2);
+    expect(twins.map((row) => row.getAttribute("aria-pressed"))).toEqual([
+      "true",
+      "false",
+    ]);
+    identities = [...identities, { pubkey: "e".repeat(64), name: "Aaron" }];
+    await act(() => library.queries.refresh());
+    await screen.findByRole("button", {
+      name: rowName("Aaron", "Adds to chat when you send"),
+    });
+    expect(
+      [...document.querySelectorAll("[data-mention-choice]")].map((row) =>
+        row.getAttribute("data-mention-choice"),
+      ),
+    ).toEqual([addressed.pubkey, "c".repeat(64), "e".repeat(64)]);
+    expect(
+      screen.getAllByRole("button", {
+        name: /Twin.*Adds to chat when you send/,
+      })[0],
+    ).toBe(twins[0]);
+  } finally {
+    view.view.unmount();
+    library.dispose();
+    test.library.dispose();
+  }
+});
+
 it("closing the pill menu resumes typing in the draft, unless the click went elsewhere", async () => {
   const test = setup(),
     user = userEvent.setup();
@@ -1990,6 +2228,226 @@ it("qualifies outside directory namesakes that have no cached profile", async ()
   expect(new Set(labels()).size).toBe(3);
   expect(labels()).not.toContain("Larry");
   names.dispose();
+});
+
+it("in a DM, names directory namesakes by owner and puts the viewer's verified agent first", async () => {
+  const t = setup();
+  const viewer = "1".repeat(64),
+    wes = "2".repeat(64),
+    sam = "3".repeat(64),
+    other = "a".repeat(64),
+    wesSol = "e".repeat(64),
+    samSol = "f".repeat(64),
+    mine = "c".repeat(64),
+    impostor = "d".repeat(64);
+  // Kyle's DM: every Sol comes from the directory and only Wes is cached. His
+  // own agent has the plain name this rule supports, not his `kylez` prefix.
+  // Both "Sol 6" and "Sol 7" claim him as owner; only his own verifies once
+  // its profile loads, so "Sol 7" ranks by its match alone: below the exact
+  // "Sol", above the qualified "Wes’s Sol" whose label matches only at a
+  // later word.
+  const people = vi.fn(async () => ({
+    people: [
+      { pubkey: wesSol, name: "Sol", isAgent: true as const, ownerPubkey: wes },
+      { pubkey: samSol, name: "Sol", isAgent: true as const, ownerPubkey: sam },
+      {
+        pubkey: impostor,
+        name: "Sol 7",
+        isAgent: true as const,
+        ownerPubkey: viewer,
+      },
+      {
+        pubkey: mine,
+        name: "Sol 6",
+        isAgent: true as const,
+        ownerPubkey: viewer,
+      },
+    ],
+    hasMore: false,
+  }));
+  let profiles = new Map<string, { name: string }>([
+    [viewer, { name: "Kyle" }],
+    [other, { name: "Logan" }],
+    [wes, { name: "Wes" }],
+  ]);
+  const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const listener of listeners) listener();
+  };
+  // The first owner read is cancelled, as a shrinking profile reservation
+  // does; an eviction count then asks again without a new query.
+  let evictions = 0;
+  const ensure = vi.fn(async (keys: readonly string[]) => {
+    if (keys.includes(sam) && !profiles.has(sam) && evictions > 0) {
+      profiles = new Map([...profiles, [sam, { name: "Sam" }]]);
+      notify();
+    }
+    // The menu reads each agent profile that claims the viewer; only his own
+    // then verifies.
+    if (keys.includes(mine) && !profiles.has(mine)) {
+      profiles = new Map([...profiles, [mine, { name: "Sol 6" }]]);
+      notify();
+    }
+  });
+  const list = {
+    status: "ready" as const,
+    channels: [
+      {
+        id: "parent",
+        name: "DM",
+        channelType: "dm" as const,
+        members: [viewer, other],
+      },
+    ],
+  };
+  const session = {
+    ...t.session,
+    viewer,
+    directMessages: { ...t.session.directMessages, people },
+    channels: { ...t.session.channels, list: () => list },
+    profiles: {
+      snapshot: () => profiles,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      ensure,
+      evictions: () => evictions,
+      owner: (key: string) =>
+        key === mine && profiles.has(mine) ? viewer : undefined,
+    },
+  };
+  const provider = createAgentDirectory();
+  const names = bindNames(
+    { viewer, profiles: session.profiles, agentLibrary: t.library.queries },
+    { snapshot: () => [provider], subscribe: () => () => {} },
+  );
+  const publish = vi.fn();
+  const menu = (text: string, revision: number) => (
+    <MentionCompletion
+      session={{ ...session, names }}
+      scope="test"
+      channelId="parent"
+      observation={{ revision, text, start: text.length, end: text.length }}
+      query={{ start: 0, end: text.length, query: text.slice(1) }}
+      publish={publish}
+    />
+  );
+  // The profile cache starts cold: the first query finds the agent and reads
+  // its profile, and the next query ranks it as verified.
+  const { rerender } = render(menu("@so", 1));
+  await waitFor(() =>
+    expect(ensure).toHaveBeenCalledWith(
+      expect.arrayContaining([mine]),
+      "background",
+    ),
+  );
+  rerender(menu("@sol", 2));
+  const items = () =>
+    (publish.mock.lastCall?.[0] as CompletionResult | undefined)?.items.map(
+      (item) => [item.id, item.label],
+    ) ?? [];
+  await waitFor(() =>
+    expect(items()).toEqual([
+      [mine, "Sol 6"],
+      [samSol, "Sol"],
+      [impostor, "Sol 7"],
+      [wesSol, "Wes’s Sol"],
+    ]),
+  );
+  expect(ensure).toHaveBeenCalledWith(
+    expect.arrayContaining([sam, wes]),
+    "background",
+  );
+  act(() => {
+    evictions += 1;
+    notify();
+  });
+  await waitFor(() =>
+    expect(items()).toEqual([
+      [mine, "Sol 6"],
+      [samSol, "Sam’s Sol"],
+      [impostor, "Sol 7"],
+      [wesSol, "Wes’s Sol"],
+    ]),
+  );
+  names.dispose();
+});
+
+it("appends the viewer's agents that load after the menu opens in a DM", async () => {
+  const t = setup();
+  const viewer = "1".repeat(64),
+    other = "a".repeat(64),
+    theirs = "e".repeat(64),
+    mine = "c".repeat(64);
+  let release: (() => void) | undefined;
+  const library = createAgentLibrary(
+    () =>
+      new Promise((resolve) => {
+        release = () =>
+          resolve({
+            definitions: [],
+            identities: [{ pubkey: mine, name: "Sol 6" }],
+          });
+      }),
+  );
+  const people = vi.fn(async () => ({
+    people: [{ pubkey: theirs, name: "Sol", isAgent: true as const }],
+    hasMore: false,
+  }));
+  const list = {
+    status: "ready" as const,
+    channels: [
+      {
+        id: "parent",
+        name: "DM",
+        channelType: "dm" as const,
+        members: [viewer, other],
+      },
+    ],
+  };
+  const profiles = new Map([
+    [viewer, { name: "Kyle" }],
+    [other, { name: "Logan" }],
+  ]);
+  const session = {
+    ...t.session,
+    viewer,
+    directMessages: { ...t.session.directMessages, people },
+    channels: { ...t.session.channels, list: () => list },
+    profiles: { ...t.session.profiles, snapshot: () => profiles },
+    agentLibrary: library.queries,
+    agentChoices: createAgentChoices({
+      scope: "test",
+      library: library.queries,
+      signal: new AbortController().signal,
+    }),
+  };
+  const publish = vi.fn();
+  render(
+    <MentionCompletion
+      session={session}
+      scope="test"
+      channelId="parent"
+      observation={{ revision: 1, text: "@sol", start: 4, end: 4 }}
+      query={{ start: 0, end: 4, query: "sol" }}
+      publish={publish}
+    />,
+  );
+  const ids = () =>
+    (publish.mock.lastCall?.[0] as CompletionResult | undefined)?.items.map(
+      (item) => item.id,
+    ) ?? [];
+  await waitFor(() => expect(ids()).toEqual([theirs]));
+  const loading = library.queries.refresh();
+  await waitFor(() => expect(release).toBeDefined());
+  await act(async () => {
+    release?.();
+    await loading;
+  });
+  // Shown rows never move; the late agent joins after them.
+  await waitFor(() => expect(ids()).toEqual([theirs, mine]));
+  library.dispose();
 });
 
 it("never expands Solo chat candidates from the community directory", async () => {

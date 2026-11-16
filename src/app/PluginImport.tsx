@@ -1188,7 +1188,6 @@ export function PluginImport({
             ? "compact"
             : "wide"
         }
-        headerGap={reviewing && updating ? "compact" : "default"}
         footerGap={reviewing && updating ? "compact" : "default"}
         leadingActions={
           !error &&
