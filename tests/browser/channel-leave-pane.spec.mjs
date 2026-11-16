@@ -205,7 +205,7 @@ const focusOrigins = {
   },
   "header's Channel actions": async (page) => {
     const actions = page.getByRole("button", {
-      name: "Channel actions",
+      name: "Conversation actions",
       exact: true,
     });
     await actions.focus();
@@ -230,11 +230,8 @@ for (const [origin, focusIn] of Object.entries(focusOrigins))
       ["private"],
     ]);
     await page.goto(app.origin);
-    await openPage(page, "Messages");
-    const sidebar = page.getByRole("navigation", {
-      name: "Subscribed channels",
-    });
-    await sidebar.getByRole("button", { name: "Alpha", exact: true }).click();
+    await openPage(page, "Team");
+    await openChannel(page, "alpha");
     await expect(
       page.getByRole("textbox", { name: "Message Alpha", exact: true }),
     ).toBeVisible();
@@ -254,9 +251,7 @@ for (const [origin, focusIn] of Object.entries(focusOrigins))
     await expect(
       alphaLost.getByRole("button", { name: "Back to channels", exact: true }),
     ).toBeFocused();
-    await expect(
-      sidebar.getByRole("button", { name: "Alpha", exact: true }),
-    ).toHaveCount(0);
+    await expect(channelRow(page, "alpha")).toHaveCount(0);
     await expect(
       page.getByRole("textbox", { name: "Message Alpha", exact: true }),
     ).toHaveCount(0);
@@ -264,7 +259,7 @@ for (const [origin, focusIn] of Object.entries(focusOrigins))
       page.getByText("Select a channel to read it.", { exact: true }),
     ).toHaveCount(0);
 
-    await sidebar.getByRole("button", { name: "Beta", exact: true }).click();
+    await channelRow(page, "beta").click();
     await expect(
       page.getByRole("textbox", { name: "Message #Beta", exact: true }),
     ).toBeVisible();
@@ -297,7 +292,7 @@ for (const [origin, focusIn] of Object.entries(focusOrigins))
       .toBe(true);
     // The status follows the header in the keyboard order.
     await page
-      .getByRole("button", { name: "Channel actions", exact: true })
+      .getByRole("button", { name: "Conversation actions", exact: true })
       .focus();
     await page.keyboard.press("Tab");
     await expect(
@@ -305,9 +300,10 @@ for (const [origin, focusIn] of Object.entries(focusOrigins))
     ).toBeFocused();
     await page.keyboard.press("Enter");
     // Beta's nearest remaining row, as Leave would choose.
-    await expect(
-      sidebar.locator(`[data-channel-id="${channelId}"]`),
-    ).toHaveAttribute("aria-current", "page");
+    await expect(channelRow(page, channelId)).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     await expect(
       page.getByRole("textbox", {
         name: "Message #Lifecycle channel",

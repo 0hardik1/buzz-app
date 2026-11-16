@@ -477,18 +477,7 @@ export function RailNavigation({
     const solo = channel.channelType === "solo";
     // Captured while it is still listed: completion can arrive after the
     // roster has dropped it.
-    const rows = conversationIndex(session)
-      .keys(
-        solo
-          ? soloView
-          : {
-              // Its own kind: a row every list showing it also shows.
-              filter: channel.channelType === "dm" ? "dms" : "channels",
-              unread: false,
-              home: "team",
-            },
-      )
-      .flatMap((key) => (key.startsWith("c:") ? [key.slice(2)] : []));
+    const rows = rowsLike(session, channel);
     const at = rows.indexOf(channel.id);
     if (at >= 0)
       lifecycleNeighbors.current = {
@@ -527,13 +516,7 @@ export function RailNavigation({
         void navigator.open(
           next
             ? { version: 1, kind: "conversation", scope, channelId: next }
-            : {
-                version: 1,
-                kind: "page",
-                pluginId: "buzz.channels",
-                pageId: "channels",
-                route: { version: 1, params: "empty" },
-              },
+            : emptyChannels,
         );
       },
     };
@@ -555,6 +538,39 @@ export function RailNavigation({
     visited.kind === "conversation"
       ? channels.find((channel) => channel.id === visited.channelId)
       : undefined;
+  // Where losing the open conversation lands: the row that takes its place,
+  // captured while it is still listed, as removal drops it first.
+  const openSuccessor = channelNavigation?.openSuccessor;
+  const openNeighbors = useRef<{ id: string; ids: string[] }>(undefined);
+  useLayoutEffect(() => {
+    if (!openSuccessor || pageSection) return;
+    if (currentChannel) {
+      const rows = rowsLike(session, currentChannel);
+      const at = rows.indexOf(currentChannel.id);
+      if (at >= 0)
+        openNeighbors.current = {
+          id: currentChannel.id,
+          ids: [...rows.slice(at + 1), ...rows.slice(0, at).reverse()],
+        };
+    }
+    const open = (id: string) => {
+      const next = (
+        openNeighbors.current?.id === id ? openNeighbors.current.ids : []
+      ).find(
+        (neighbor) =>
+          neighbor !== id && listed.current.some((row) => row.id === neighbor),
+      );
+      void navigator.open(
+        next
+          ? { version: 1, kind: "conversation", scope, channelId: next }
+          : emptyChannels,
+      );
+    };
+    openSuccessor.current = open;
+    return () => {
+      if (openSuccessor.current === open) openSuccessor.current = undefined;
+    };
+  }, [openSuccessor, pageSection, currentChannel, session, scope, navigator]);
   const activeDockSection =
     selectedSection ??
     // A section a person made has no address: its open list marks it.
@@ -1200,6 +1216,30 @@ const unreadIn = Object.fromEntries(
 ) as Record<ConversationFilter, ConversationQuery>;
 /** Entries and visits keep their targets, so each is serialized once. */
 const targetKeys = new WeakMap<object, string>();
+const emptyChannels = {
+  version: 1,
+  kind: "page",
+  pluginId: "buzz.channels",
+  pageId: "channels",
+  route: { version: 1, params: "empty" },
+} as const;
+
+/** The rows of a channel's own kind, in order: every list showing it also
+ * shows them. */
+function rowsLike(session: RelaySession, channel: ChannelSummary) {
+  return conversationIndex(session)
+    .keys(
+      channel.channelType === "solo"
+        ? soloView
+        : {
+            filter: channel.channelType === "dm" ? "dms" : "channels",
+            unread: false,
+            home: "team",
+          },
+    )
+    .flatMap((key) => (key.startsWith("c:") ? [key.slice(2)] : []));
+}
+
 function keyOf(target: Exclude<RailEntry["target"], { kind: "person" }>) {
   let key = targetKeys.get(target);
   if (key === undefined) {
