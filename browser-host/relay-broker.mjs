@@ -1551,8 +1551,15 @@ export function relayBrokerPlugin({
                 const readHead = async () => {
                   const response = await dispatch("/query", filter);
                   if (!response.ok)
-                    throw new Error(
-                      `Sidebar preference query failed (${response.status})`,
+                    throw Object.assign(
+                      new Error(
+                        `Sidebar preference query failed (${response.status})`,
+                      ),
+                      // A community's refusal keeps its status, as on every
+                      // other read.
+                      [401, 403].includes(response.status)
+                        ? { refused: response.status }
+                        : {},
                     );
                   return readSidebarHead(response);
                 };
@@ -1602,7 +1609,7 @@ export function relayBrokerPlugin({
                   paused: true,
                   retryAfterMs: error.retryAfterMs,
                 });
-              return json(res, 502, {
+              return json(res, error?.refused ?? 502, {
                 error:
                   error instanceof Error
                     ? error.message
