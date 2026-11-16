@@ -413,3 +413,67 @@ it("opens the whole result group from its header while keeping typing focus", ()
   expect(screen.getAllByRole("option")).toHaveLength(6);
   expect(field).toHaveFocus();
 });
+
+it("keeps a chosen group while an edited query's results land, and lets it go if they settle without it", () => {
+  const peekOf = (query: string, rows: number, busy: boolean) => (
+    <SearchChoices
+      query={query}
+      onQueryChange={() => {}}
+      input={createRef<HTMLElement>()}
+      groups={[
+        { label: "Channels", destinations: destinations.slice(0, 2) },
+        { label: "Messages", destinations: destinations.slice(2, 2 + rows) },
+      ]}
+      peek={{ ranked: true, busy, preview: () => null }}
+    />
+  );
+  const { rerender } = render(peekOf("design", 3, false));
+  const shown = () =>
+    screen.getByRole("tab", { selected: true }).textContent ?? "";
+  fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+  expect(shown()).toMatch(/^Messages/);
+  // Edited, the new text's messages haven't come back yet.
+  rerender(peekOf("design crit", 0, true));
+  expect(shown()).toMatch(/^Messages/);
+  expect(screen.queryByRole("option", { name: "channel-0" })).toBeNull();
+  rerender(peekOf("design crit", 2, false));
+  expect(shown()).toMatch(/^Messages/);
+  expect(screen.getAllByRole("option")).toHaveLength(2);
+  // Top results chosen while results land stays chosen once they arrive.
+  rerender(peekOf("design critique", 0, true));
+  fireEvent.click(screen.getByRole("tab", { name: /^Top results/ }));
+  rerender(peekOf("design critique", 2, false));
+  expect(shown()).toMatch(/^Top results/);
+  // A group that settles away is let go, and doesn't come back by itself.
+  fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+  rerender(peekOf("design notes", 0, false));
+  expect(shown()).toMatch(/^Top results/);
+  rerender(peekOf("design notes", 2, false));
+  expect(shown()).toMatch(/^Top results/);
+});
+
+it("goes back to Top results on Escape while a chosen group's results land", () => {
+  const peekOf = (rows: number, busy: boolean) => (
+    <SearchChoices
+      query="design"
+      onQueryChange={() => {}}
+      input={createRef<HTMLElement>()}
+      groups={[
+        { label: "Channels", destinations: destinations.slice(0, 2) },
+        { label: "Messages", destinations: destinations.slice(2, 2 + rows) },
+      ]}
+      peek={{ ranked: true, busy, preview: () => null }}
+    />
+  );
+  const { rerender } = render(peekOf(3, false));
+  fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+  rerender(peekOf(0, true));
+  // fireEvent returns false when the default (closing search) was prevented.
+  expect(
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" }),
+  ).toBe(false);
+  rerender(peekOf(3, false));
+  expect(screen.getByRole("tab", { selected: true }).textContent ?? "").toMatch(
+    /^Top results/,
+  );
+});

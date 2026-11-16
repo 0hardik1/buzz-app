@@ -802,6 +802,13 @@ export const ROLE_GROUPS: RoleGroup[] = [
         status: "core",
       },
       {
+        token: "text-categorical-green",
+        variable: "--text-categorical-green",
+        pointsAt: "green-12 light / green-12 dark",
+        use: "Categorical green text, paired with surface-categorical-green.",
+        status: "core",
+      },
+      {
         token: "text-categorical-amber",
         variable: "--text-categorical-amber",
         pointsAt: "amber-12 light / amber-12 dark",

@@ -1183,6 +1183,7 @@
   --surface-categorical-blue: var(--blue-3);
   --icon-categorical-blue: var(--blue-11);
   --surface-categorical-green: var(--green-3);
+  --text-categorical-green: var(--green-12);
   --icon-categorical-green: var(--green-11);
   --surface-categorical-amber: var(--amber-3);
   --surface-categorical-amber-hover: var(--amber-4);
@@ -1354,6 +1355,7 @@
   --surface-categorical-blue: var(--blue-3);
   --icon-categorical-blue: var(--blue-11);
   --surface-categorical-green: var(--green-3);
+  --text-categorical-green: var(--green-12);
   --icon-categorical-green: var(--green-11);
   --surface-categorical-amber: var(--amber-3);
   --surface-categorical-amber-hover: var(--amber-4);
@@ -2147,6 +2149,7 @@
   --text-color-success: var(--text-success);
   --text-color-categorical-purple: var(--text-categorical-purple);
   --color-surface-categorical-purple: var(--surface-categorical-purple);
+  --text-color-categorical-green: var(--text-categorical-green);
   --text-color-categorical-amber: var(--text-categorical-amber);
   --text-color-search-match: var(--text-search-match);
   --text-color-accent: var(--text-accent);

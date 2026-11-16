@@ -317,7 +317,20 @@ export function SearchChoices({
   const ranked = peek?.ranked
     ? merged.filter((group) => resultRows(group).length)
     : [];
-  const scoped = ranked.find((group) => group.label === peekScope);
+  // A chosen group stays chosen while an edited query's results land, shown
+  // by its own status until it has rows, and is let go if they settle
+  // without it. Shown or not, the choice is never kept out of sight.
+  const chosen = ranked.find((group) => group.label === peekScope);
+  if (peekScope && !chosen && !peek?.busy) setPeekScope(undefined);
+  const landing =
+    peekScope && !chosen && peek?.busy
+      ? (merged.find((group) => group.label === peekScope) ?? {
+          label: peekScope,
+          destinations: [],
+        })
+      : undefined;
+  const scoped = chosen ?? landing;
+  const tabs = landing ? [...ranked, landing] : ranked;
   const countOf = (group: SearchGroup) =>
     group.count ?? String(resultRows(group).length);
   const truncated = new Map<string, number>();
@@ -816,14 +829,12 @@ export function SearchChoices({
               !event.metaKey &&
               !event.altKey
             ) {
-              const order = [undefined, ...ranked.map(({ label }) => label)];
+              const order = [undefined, ...tabs.map(({ label }) => label)];
               const next =
                 order.indexOf(scoped?.label) + (event.shiftKey ? -1 : 1);
-              if (
-                ranked.length ? next >= 0 && next < order.length : peek.busy
-              ) {
+              if (tabs.length ? next >= 0 && next < order.length : peek.busy) {
                 event.preventDefault();
-                if (ranked.length) showScope(order[next]);
+                if (tabs.length) showScope(order[next]);
               }
               return;
             }
@@ -840,7 +851,7 @@ export function SearchChoices({
         {peek?.hints}
       </div>
       <div className={peek?.ranked ? "search-peek-workspace" : "contents"}>
-        {peek?.ranked && ranked.length > 0 && (
+        {peek?.ranked && tabs.length > 0 && (
           // Escape from one group returns to Top results, from a group tab
           // as from the field, not out of search.
           // biome-ignore lint/a11y/noStaticElementInteractions: Handles keys bubbling from its tabs.
@@ -858,7 +869,7 @@ export function SearchChoices({
               label="Result groups"
               value={scoped?.label ?? ""}
               onValueChange={(value) => showScope(value || undefined, false)}
-              items={[undefined, ...ranked].map((group, index) => ({
+              items={[undefined, ...tabs].map((group, index) => ({
                 value: group?.label ?? "",
                 label:
                   group?.label ??
@@ -866,16 +877,20 @@ export function SearchChoices({
                 panelId: peekPanelId(group?.label),
                 trailing: (
                   <>
-                    <span className="search-peek-count">
-                      {group
-                        ? countOf(group)
-                        : `${ranked.reduce(
-                            (sum, item) =>
-                              sum + (item.browse ? 0 : resultRows(item).length),
-                            0,
-                          )}${ranked.some((item) => !item.browse && item.count?.endsWith("+")) ? "+" : ""}`}
-                    </span>
-                    {index === 1 && !!query.trim() && (
+                    {/* A landing group has no count yet. */}
+                    {(!group || group !== landing) && (
+                      <span className="search-peek-count">
+                        {group
+                          ? countOf(group)
+                          : `${ranked.reduce(
+                              (sum, item) =>
+                                sum +
+                                (item.browse ? 0 : resultRows(item).length),
+                              0,
+                            )}${ranked.some((item) => !item.browse && item.count?.endsWith("+")) ? "+" : ""}`}
+                      </span>
+                    )}
+                    {index === 1 && group !== landing && !!query.trim() && (
                       <Badge size="xs" tone="success">
                         Best match
                       </Badge>
@@ -888,7 +903,7 @@ export function SearchChoices({
         )}
         <div
           className={peek?.ranked ? "search-peek-body" : "contents"}
-          {...(peek?.ranked && ranked.length > 0
+          {...(peek?.ranked && tabs.length > 0
             ? {
                 role: "tabpanel",
                 id: peekPanelId(scoped?.label),
