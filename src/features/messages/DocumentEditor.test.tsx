@@ -142,6 +142,33 @@ it("shows CommonMark soft breaks as spaces in rich mode", () => {
   ).toBe("First Second");
 });
 
+it.each([15999, 16001])(
+  "retains rich structure when loading or crossing the chat limit from %i characters",
+  (length) => {
+    const body = "x".repeat(length);
+    const h = mount({}, { initialValue: `**${body}**` });
+    const input = screen.getByRole("textbox", {
+      name: "Document body",
+    }) as ComposerInputElement;
+    expect(input.querySelector("strong")).toHaveTextContent(body);
+    act(() => {
+      h.ref.current?.focusEnd();
+      input.insertText("xy");
+    });
+    expect(h.change).toHaveBeenLastCalledWith(`**${body}xy**`);
+    h.rerender({ source: true });
+    expect(screen.getByRole("textbox", { name: "Markdown" })).toHaveValue(
+      `**${body}xy**`,
+    );
+    h.rerender({ source: false });
+    expect(
+      screen
+        .getByRole("textbox", { name: "Document body" })
+        .querySelector("strong"),
+    ).toHaveTextContent(`${body}xy`);
+  },
+);
+
 it("keeps quoted paragraphs when editing outside their quote", () => {
   const h = mount(
     {},
