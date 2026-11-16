@@ -2094,9 +2094,6 @@ export function ChannelMembersDialog({
       }
       height={selection ? "content" : generalAccess ? "stable-tall" : "stable"}
       bodyLayout={selection ? "flow" : "flex"}
-      headerGap={
-        !selection || selection.role === "remove" ? "compact" : "default"
-      }
       footerGap={
         selection && selection.role !== "remove" ? "default" : "compact"
       }
