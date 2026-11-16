@@ -145,7 +145,16 @@ export const UNAUTHORIZED = "Builderlab didn’t accept this request. Try again.
  * Builderlab refuses only that call: the native session decides when it ends.
  */
 export function createNativeSession(
-  identity: FederatedIdentity,
+  identity: Pick<
+    FederatedIdentity,
+    | "apiAvailable"
+    | "snapshot"
+    | "subscribe"
+    | "signIn"
+    | "cancelSignIn"
+    | "signOut"
+    | "request"
+  >,
 ): BuilderlabSession {
   type Native = Credential & Readonly<{ storage: string }>;
   let permissions: Permissions | undefined;
