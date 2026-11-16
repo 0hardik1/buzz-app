@@ -8,6 +8,16 @@ export function reviewChannelMember(
   viewer: string | undefined,
 ) {
   return (
+    channel.visibility === "private" && reviewHistoryMember(channel, viewer)
+  );
+}
+
+/** Existing submissions remain readable and deletable by their owners in joined open channels. */
+export function reviewHistoryMember(
+  channel: ChannelSummary,
+  viewer: string | undefined,
+) {
+  return (
     !!viewer &&
     channel.members?.includes(viewer) === true &&
     !channel.cached &&
@@ -16,7 +26,6 @@ export function reviewChannelMember(
     !channel.pending &&
     !channel.archived &&
     !channel.huddle &&
-    channel.visibility === "private" &&
     (channel.channelType === "stream" || channel.channelType === "forum")
   );
 }
@@ -38,6 +47,45 @@ export function reviewChannel(
       "Reviews require current membership in a private review channel. Reconnect or choose another channel.",
     );
   return channel;
+}
+
+export function reviewHistoryChannel(
+  session: RelaySession,
+  id: string,
+  write = false,
+) {
+  const list = session.channels.list();
+  const channel = list.channels.find((item) => item.id === id);
+  if (
+    list.status !== "ready" ||
+    !channel ||
+    !reviewHistoryMember(channel, session.viewer) ||
+    (write && channel.readOnly)
+  )
+    throw new Error("Current channel membership is required to read reviews.");
+  return channel;
+}
+
+/** Deleting an owned historical submission does not dispatch another review. */
+export async function confirmReviewHistoryChannel(
+  session: RelaySession,
+  channel: string,
+  signal: AbortSignal,
+) {
+  reviewHistoryChannel(session, channel, true);
+  if (
+    !session.channels.refreshRoster ||
+    !(await session.channels.refreshRoster(channel, {
+      signal,
+      consistency: "strong",
+    }))
+  )
+    throw new Error(
+      "Could not confirm channel membership. Reload and try again.",
+    );
+  await session.channelDetails.load(channel, signal);
+  signal.throwIfAborted();
+  return reviewHistoryChannel(session, channel, true);
 }
 
 /** Refresh membership at explicit mutations; subscriptions invalidate presentation. */

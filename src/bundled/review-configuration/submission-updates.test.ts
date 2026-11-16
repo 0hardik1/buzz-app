@@ -60,7 +60,7 @@ beforeEach(() => {
   localStorage.clear();
   vi.mocked(loadSubmissions)
     .mockReset()
-    .mockResolvedValue({ rows: [row], warning: "" });
+    .mockResolvedValue({ rows: [row], hasMore: false, warning: "" });
 });
 afterEach(() => {
   for (const stop of cleanups.splice(0)) stop();
@@ -103,7 +103,7 @@ it("shares one read, buffers live reports during loading, and persists explicit 
   expect(loadSubmissions).toHaveBeenCalledTimes(1);
   expect(f.session.subscribeLive).toHaveBeenCalledTimes(1);
   f.emit(report("reviewing"));
-  finish({ rows: [row], warning: "" });
+  finish({ rows: [row], hasMore: false, warning: "" });
   await vi.advanceTimersByTimeAsync(0);
   const accepted = firstRow(f.store);
   expect(accepted.reviewStates).toEqual(["reviewing"]);
@@ -119,6 +119,7 @@ it("shares one read, buffers live reports during loading, and persists explicit 
   f.store.markSeen(completed);
   vi.mocked(loadSubmissions).mockResolvedValue({
     rows: [completed],
+    hasMore: false,
     warning: "",
   });
   const reopened = fixture();
@@ -153,6 +154,7 @@ it("ignores unrelated and invalid reports and flags a reminder after acknowledgm
         },
       },
     ],
+    hasMore: false,
     warning: "",
   });
   f.store.reload();
@@ -169,7 +171,7 @@ it("discards reads after access is lost and recovers on a fresh subscription", a
   const f = fixture();
   await vi.advanceTimersByTimeAsync(250);
   f.stop();
-  finish({ rows: [row], warning: "" });
+  finish({ rows: [row], hasMore: false, warning: "" });
   await vi.advanceTimersByTimeAsync(0);
   expect(f.store.snapshot().rows).toEqual([]);
   cleanups.push(f.store.subscribe(vi.fn()));
@@ -245,4 +247,84 @@ it("identifies only changed lanes using the previously displayed request and rep
   };
   expect(f.store.unreadLane(reminder, 0)).toBe(false);
   expect(f.store.unreadLane(reminder, 1)).toBe(true);
+});
+
+it("shares personal updates across channels while retaining channel-specific acknowledgments", async () => {
+  const other = { ...row, channel: "other", artifactId: "other-artifact" };
+  const first = { ...row, channel: "channel", reviewReports: [report("done")] };
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [first, other],
+    hasMore: false,
+    warning: "",
+  });
+  const listeners = new Set<LiveListener>();
+  const session = {
+    scope: "personal",
+    viewer: "owner",
+    subscribeLive: (listener: LiveListener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  } as unknown as RelaySession;
+  const store = createSubmissionUpdates(session, ["channel", "other"]);
+  cleanups.push(store.subscribe(vi.fn()));
+  await vi.runOnlyPendingTimersAsync();
+  expect(loadSubmissions).toHaveBeenCalledWith(
+    session,
+    ["channel", "other"],
+    expect.any(AbortSignal),
+    { offset: 0 },
+  );
+  store.markSeen(first);
+  expect(
+    JSON.parse(
+      localStorage.getItem("buzz.review.seen:personal:channel") ?? "{}",
+    ),
+  ).toHaveProperty("artifact");
+  expect(localStorage.getItem("buzz.review.seen:personal:other")).toBeNull();
+  store.markSeen(other);
+  expect(
+    JSON.parse(localStorage.getItem("buzz.review.seen:personal:other") ?? "{}"),
+  ).toHaveProperty("other-artifact");
+  const live = report("lgtm_not_approved", 2);
+  for (const listener of listeners) listener({ events: [live] });
+  expect(store.unread(firstRow(store))).toBe(true);
+  expect(store.unread(store.snapshot().rows[1] ?? other)).toBe(false);
+});
+
+it("appends older personal pages and resets pagination on reload", async () => {
+  const older = { ...row, artifactId: "older", channel: "channel" };
+  vi.mocked(loadSubmissions)
+    .mockResolvedValueOnce({
+      rows: [row],
+      hasMore: true,
+      warning: "More records",
+    })
+    .mockResolvedValueOnce({ rows: [older], hasMore: false, warning: "" })
+    .mockResolvedValue({ rows: [row], hasMore: true, warning: "More records" });
+  const f = fixture();
+  await vi.runOnlyPendingTimersAsync();
+  f.store.loadMore();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(f.store.snapshot().rows.map((item) => item.artifactId)).toEqual([
+    "artifact",
+    "older",
+  ]);
+  expect(loadSubmissions).toHaveBeenLastCalledWith(
+    f.session,
+    "channel",
+    expect.any(AbortSignal),
+    { offset: 500 },
+  );
+  f.store.reload();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(f.store.snapshot().rows.map((item) => item.artifactId)).toEqual([
+    "artifact",
+  ]);
+  expect(loadSubmissions).toHaveBeenLastCalledWith(
+    f.session,
+    "channel",
+    expect.any(AbortSignal),
+    { offset: 0 },
+  );
 });

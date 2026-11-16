@@ -117,7 +117,7 @@ async function fixture(sharedOwner = false) {
     snapshotRead: vi.fn(async (filters: ReadFilter[]) => {
       const filter = filters[0];
       if (!filter) throw new Error("Missing filter");
-      if (filter.artifact && filter.consistency)
+      if (filter.artifact && (filter.consistency || filter.authors))
         throw new Error("unsupported artifact predicate");
       if (filter.kinds?.includes(0)) return [profile];
       if (filter.kinds?.includes(9))
@@ -279,6 +279,7 @@ it("saves the instruction snapshot and creates only distinct lane threads, witho
       .rows[0],
   ).toEqual({
     ...record,
+    channel,
     reviewStates: ["need_review", "need_review"],
     reviewReports: [],
   });
@@ -1698,4 +1699,151 @@ it("fences a shared agent notification when its owner leaves during outbox persi
   }
   await outcome;
   expect(f.publish).not.toHaveBeenCalled();
+});
+
+it("loads only the viewer's submissions across joined private and open channels without unsupported author predicates", async () => {
+  const f = await fixture();
+  const first = await f.run();
+  const source = f.heads.get(first.artifactId);
+  if (!source) throw new Error("Missing submission");
+  const other = "22222222-2222-4222-8222-222222222222";
+  const hidden = "33333333-3333-4333-8333-333333333333";
+  const { uuidv5 } = await import(
+    "../../features/agents/agent-config-artifacts"
+  );
+  const otherId = await uuidv5(
+    other,
+    "buzz.review.submission:example-org/project:123",
+  );
+  const list = f.session.channels.list();
+  const firstChannel = list.channels[0];
+  if (!firstChannel) throw new Error("Missing fixture channel");
+  vi.spyOn(f.session.channels, "list").mockReturnValue({
+    ...list,
+    channels: [
+      ...list.channels,
+      { ...firstChannel, id: other, visibility: "public" },
+    ],
+  });
+  const mirror = signed(f.owner, {
+    kind: 45010,
+    content: source.content,
+    tags: source.tags.map((tag) =>
+      tag[0] === "h" ? ["h", other] : tag[0] === "d" ? ["d", otherId] : tag,
+    ),
+  });
+  const stranger = keypair();
+  const foreign = signed(stranger, {
+    kind: 45010,
+    content: JSON.stringify({ ...first.value, submitter: stranger.pubkey }),
+    tags: source.tags,
+  });
+  f.heads.set(otherId, mirror);
+  f.heads.set("foreign", foreign);
+  const loaded = await loadSubmissions(
+    f.session,
+    [channel, other],
+    AbortSignal.timeout(5000),
+  );
+  expect(loaded.rows.map((row) => [row.channel, row.value.submitter])).toEqual(
+    expect.arrayContaining([
+      [channel, f.owner.pubkey],
+      [other, f.owner.pubkey],
+    ]),
+  );
+  expect(loaded.rows).toHaveLength(2);
+  expect(loaded.warning).toBe("");
+  expect(f.session.snapshotRead).toHaveBeenCalledWith(
+    [expect.objectContaining({ artifact: "current", "#h": [channel, other] })],
+    expect.anything(),
+  );
+  await expect(
+    loadSubmissions(f.session, [hidden], AbortSignal.timeout(5000)),
+  ).rejects.toThrow("membership");
+  const { reviewChannel } = await import("./access");
+  expect(() => reviewChannel(f.session, other, true)).toThrow("private");
+});
+
+it("drops a personal snapshot if membership is revoked while reading", async () => {
+  const f = await fixture();
+  await f.run();
+  const read = f.session.snapshotRead;
+  if (!read) throw new Error("Missing reader");
+  vi.mocked(read).mockImplementationOnce(async () => {
+    vi.spyOn(f.session.channels, "list").mockReturnValue({
+      status: "ready",
+      channels: [],
+    });
+    return [...f.heads.values()] as unknown as Awaited<ReturnType<typeof read>>;
+  });
+  await expect(
+    loadSubmissions(f.session, [channel], AbortSignal.timeout(5000)),
+  ).rejects.toThrow("membership");
+});
+
+it("pages past foreign records and reads an addressed submission independently", async () => {
+  const f = await fixture();
+  const own = await f.run();
+  const source = f.heads.get(own.artifactId);
+  if (!source || !f.session.snapshotRead) throw new Error("Missing fixture");
+  const foreign = { ...source, pubkey: keypair().pubkey };
+  const read = vi.mocked(f.session.snapshotRead);
+  const original = read.getMockImplementation();
+  if (!original) throw new Error("Missing reader");
+  read.mockImplementation(async (filters, options) => {
+    const filter = filters[0];
+    if (filter?.artifact && !filter["#d"]) {
+      return (filter.offset
+        ? [source]
+        : Array(500).fill(foreign)) as unknown as Awaited<
+        ReturnType<typeof read>
+      >;
+    }
+    return original(filters, options);
+  });
+  const first = await loadSubmissions(
+    f.session,
+    [channel],
+    AbortSignal.timeout(5000),
+  );
+  expect(first.rows).toEqual([]);
+  expect(first.hasMore).toBe(true);
+  const next = await loadSubmissions(
+    f.session,
+    [channel],
+    AbortSignal.timeout(5000),
+    { offset: 500 },
+  );
+  expect(next.rows[0]?.artifactId).toBe(own.artifactId);
+  expect(next.hasMore).toBe(false);
+  const addressed = await loadSubmissions(
+    f.session,
+    channel,
+    AbortSignal.timeout(5000),
+    { artifact: own.artifactId },
+  );
+  expect(addressed.rows[0]?.artifactId).toBe(own.artifactId);
+});
+
+it("allows owner deletion of public-channel history while keeping dispatch private and rejecting read-only access", async () => {
+  const f = await fixture();
+  const own = await f.run();
+  const list = f.session.channels.list();
+  const first = list.channels[0];
+  if (!first) throw new Error("Missing channel");
+  const publicChannel = { ...first, visibility: "public" as const };
+  const listing = vi.spyOn(f.session.channels, "list").mockReturnValue({
+    ...list,
+    channels: [{ ...publicChannel, readOnly: true }],
+  });
+  await expect(
+    deleteSubmission(f.session, channel, own, AbortSignal.timeout(5000)),
+  ).rejects.toThrow("membership");
+  listing.mockReturnValue({ ...list, channels: [publicChannel] });
+  await expect(f.run()).rejects.toThrow("private");
+  await deleteSubmission(f.session, channel, own, AbortSignal.timeout(5000));
+  expect(
+    (await loadSubmissions(f.session, [channel], AbortSignal.timeout(5000)))
+      .rows,
+  ).toEqual([]);
 });

@@ -1,6 +1,8 @@
 import {
   reviewChannel,
+  reviewHistoryChannel,
   confirmReviewChannel,
+  confirmReviewHistoryChannel,
   confirmReviewAgents,
 } from "./access";
 import { rememberTriage, forgetTriage } from "./triage-recovery";
@@ -71,6 +73,7 @@ export type Submission = {
   reminderMessage?: string;
 };
 export type SavedSubmission = {
+  channel?: string;
   value: Submission;
   artifactId: string;
   revision: string;
@@ -208,37 +211,82 @@ export async function decodeSubmission(
   const artifactId = await identity(channel, config.repository, value.pr);
   if (tag(event, "d") !== artifactId)
     throw new Error("Invalid submission identity.");
-  return { value: { ...value, config }, artifactId, revision: event.id };
+  return {
+    value: { ...value, config },
+    artifactId,
+    revision: event.id,
+    channel,
+  };
 }
 
 export async function loadSubmissions(
   session: RelaySession,
-  channel: string,
+  selection: string | readonly string[],
   signal: AbortSignal,
+  options: { offset?: number; artifact?: string } = {},
 ) {
   if (!session.snapshotRead)
     throw new Error("This connection cannot read submissions.");
-  reviewChannel(session, channel);
-  const events = await session.snapshotRead(
-    [
-      {
-        kinds: [ARTIFACT_KIND],
-        "#h": [channel],
-        "#type": [TYPE],
-        artifact: "current",
-        limit: 101,
-      },
-    ],
-    { signal },
+  const personal = typeof selection !== "string";
+  const channels = personal ? [...selection] : [selection];
+  for (const channel of channels) reviewHistoryChannel(session, channel);
+  if (!session.viewer) throw new Error("Sign in to read submissions.");
+  const limit = options.artifact ? 1 : personal ? 500 : 101;
+  const events: EventData[] = [];
+  let more = false;
+  for (let batch = 0; batch < channels.length; batch += 255) {
+    const page = await session.snapshotRead(
+      [
+        {
+          kinds: [ARTIFACT_KIND],
+          "#h": channels.slice(batch, batch + 255),
+          ...(options.artifact
+            ? { "#d": [options.artifact] }
+            : { "#type": [TYPE] }),
+          artifact: "current",
+          limit,
+          ...(options.offset ? { offset: options.offset } : {}),
+        },
+      ],
+      { signal },
+    );
+    more ||= !options.artifact && page.length >= limit;
+    events.push(...page);
+  }
+  events.sort(
+    (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
   );
   const results = await Promise.allSettled(
-    events.slice(0, 100).map((event) => decodeSubmission(event, channel)),
+    events
+      .slice(0, personal ? events.length : options.artifact ? 1 : 100)
+      .filter((event) => !personal || event.pubkey === session.viewer)
+      .map((event) => {
+        const channel = tag(event, "h");
+        if (
+          !channel ||
+          !channels.includes(channel) ||
+          (personal && event.pubkey !== session.viewer)
+        )
+          return Promise.reject(new Error("Unexpected submission scope."));
+        return decodeSubmission(event, channel);
+      }),
   );
   const rows = results.flatMap((result) =>
     result.status === "fulfilled" && !result.value.value.deleted
       ? [result.value]
       : [],
   );
+  const reportChannels = (ids: readonly string[], requests = false) => [
+    ...new Set(
+      rows
+        .filter((row) =>
+          row.value.threads.some((thread) =>
+            ids.includes((requests ? thread.request : thread.id) ?? ""),
+          ),
+        )
+        .map((row) => row.channel as string),
+    ),
+  ];
   const roots = rows.flatMap((row) =>
     row.value.threads.flatMap((thread) => (thread.id ? [thread.id] : [])),
   );
@@ -251,7 +299,7 @@ export async function loadSubmissions(
       [
         {
           kinds: [9],
-          "#h": [channel],
+          "#h": reportChannels(roots.slice(offset, offset + 100)),
           "#t": [REVIEW_REPORT],
           "#e": roots.slice(offset, offset + 100),
           limit: 500,
@@ -275,7 +323,7 @@ export async function loadSubmissions(
         [
           {
             kinds: [9],
-            "#h": [channel],
+            "#h": reportChannels(requests.slice(offset, offset + 100), true),
             "#t": [REVIEW_REPORT],
             "#r": requests.slice(offset, offset + 100),
             limit: 500,
@@ -290,7 +338,7 @@ export async function loadSubmissions(
       reports.push(...page);
     }
   }
-  reviewChannel(session, channel);
+  for (const channel of channels) reviewHistoryChannel(session, channel);
   return {
     rows: rows.map((row) =>
       applyReviewReports(
@@ -298,16 +346,21 @@ export async function loadSubmissions(
           ...row,
           ...(reviewHistoryIncomplete ? { reviewHistoryIncomplete: true } : {}),
         },
-        channel,
+        row.channel as string,
         reports,
       ),
     ),
+    hasMore: personal && more && (options.offset ?? 0) < 10_000,
     warning: [
       reviewHistoryIncomplete
         ? "Review history reached its limit. Current statuses are shown; last-reviewed dates are unavailable."
         : "",
-      events.length > 100
-        ? "Showing results from the latest 100 saved records, including deleted entries."
+      more
+        ? personal
+          ? (options.offset ?? 0) >= 10_000
+            ? "The relay’s history limit was reached. Older submissions may be omitted; direct submission links remain available."
+            : "More saved records are available. Load more to find older submissions."
+          : "Showing results from up to 100 saved records, including deleted entries. Some submissions may be omitted."
         : "",
       results.some((result) => result.status === "rejected")
         ? "Some saved submissions could not be read."
@@ -368,7 +421,11 @@ async function write(
   previous: SavedSubmission | undefined,
   signal: AbortSignal,
 ): Promise<SavedSubmission> {
-  reviewChannel(session, channel, true);
+  const assertAccess = () =>
+    value.deleted
+      ? reviewHistoryChannel(session, channel, true)
+      : reviewChannel(session, channel, true);
+  assertAccess();
   const writer = session.configArtifactWriter;
   if (!writer) throw new Error("This connection cannot save submissions.");
   signal.throwIfAborted();
@@ -398,7 +455,8 @@ async function write(
       value.threads.some((thread) => !thread.delivered))
   )
     rememberTriage(session.scope, { channel, artifact: artifactId });
-  reviewChannel(session, channel, true);
+  signal.throwIfAborted();
+  assertAccess();
   await writer.publish(event, signal);
   if (
     value.triage &&
@@ -418,7 +476,7 @@ export async function deleteSubmission(
   previous: SavedSubmission,
   signal: AbortSignal,
 ) {
-  await confirmReviewChannel(session, channel, signal);
+  await confirmReviewHistoryChannel(session, channel, signal);
   if (!session.viewer || previous.value.submitter !== session.viewer)
     throw new Error("Only the original submitter can delete this submission.");
   const read = session.snapshotRead;

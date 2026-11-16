@@ -75,7 +75,11 @@ beforeEach(() => {
     unreadable: 0,
     truncated: false,
   });
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [],
+    hasMore: false,
+    warning: "",
+  });
   vi.mocked(submitReview).mockImplementation(
     async (_s, _c, _config, _pr, _r, _signal, progress, _resume, facts) => {
       if (typeof facts === "function") await facts();
@@ -339,7 +343,11 @@ it("guards repeated clicks and aborts pending work when its page unmounts", asyn
 });
 
 it("shows all PRs in a table without submission controls, and deletion requires confirmation", async () => {
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [record], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [record],
+    hasMore: false,
+    warning: "",
+  });
   const test = fixture("all");
   const table = await screen.findByRole("table");
   expect(
@@ -356,6 +364,11 @@ it("shows all PRs in a table without submission controls, and deletion requires 
   await test.user.click(
     screen.getByRole("button", { name: "Delete example-org/project#42" }),
   );
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [],
+    hasMore: false,
+    warning: "",
+  });
   await test.user.click(
     screen.getByRole("button", { name: "Delete submission" }),
   );
@@ -370,7 +383,11 @@ it("shows all PRs in a table without submission controls, and deletion requires 
 });
 
 it("keeps a row and explains recovery after an uncertain delete", async () => {
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [record], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [record],
+    hasMore: false,
+    warning: "",
+  });
   vi.mocked(deleteSubmission).mockRejectedValueOnce(
     new Error("Write timed out"),
   );
@@ -389,7 +406,11 @@ it("keeps a row and explains recovery after an uncertain delete", async () => {
 });
 
 it("does not allow deleting someone else's submission", async () => {
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [record], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [record],
+    hasMore: false,
+    warning: "",
+  });
   fixture("all", "other");
   expect(
     (
@@ -402,8 +423,8 @@ it("does not allow deleting someone else's submission", async () => {
 
 it("reload replaces the list so a submission deleted elsewhere disappears", async () => {
   vi.mocked(loadSubmissions)
-    .mockResolvedValueOnce({ rows: [record], warning: "" })
-    .mockResolvedValue({ rows: [], warning: "" });
+    .mockResolvedValueOnce({ rows: [record], hasMore: false, warning: "" })
+    .mockResolvedValue({ rows: [], hasMore: false, warning: "" });
   const test = fixture("all");
   await screen.findByRole("table");
   await test.user.click(screen.getByRole("button", { name: "Reload" }));
@@ -411,7 +432,11 @@ it("reload replaces the list so a submission deleted elsewhere disappears", asyn
 });
 
 it("guards duplicate deletion and aborts it when leaving the page", async () => {
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [record], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [record],
+    hasMore: false,
+    warning: "",
+  });
   let finish = () => {};
   let pending: AbortSignal | undefined;
   vi.mocked(deleteSubmission).mockImplementationOnce(
@@ -446,7 +471,11 @@ it("guards duplicate deletion and aborts it when leaving the page", async () => 
 });
 
 it("reminds from a row, guards duplicate clicks and reports success or failure", async () => {
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [record], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [record],
+    hasMore: false,
+    warning: "",
+  });
   let finish = () => {};
   vi.mocked(remindSubmission).mockImplementationOnce(async () => {
     await new Promise<void>((resolve) => {
@@ -497,7 +526,11 @@ it("reminds from a row, guards duplicate clicks and reports success or failure",
 });
 
 it("aborts pending reminders when leaving the page", async () => {
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [record], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [record],
+    hasMore: false,
+    warning: "",
+  });
   let finish = () => {};
   let pending: AbortSignal | undefined;
   vi.mocked(remindSubmission).mockImplementationOnce(
@@ -526,6 +559,7 @@ it.each(["Closed", "Merged", "Draft", "Open"] as const)(
   async (status) => {
     vi.mocked(loadSubmissions).mockResolvedValue({
       rows: [record],
+      hasMore: false,
       warning: "",
     });
     fixture("all", record.value.submitter, async () => status);
@@ -540,6 +574,7 @@ it.each(["Closed", "Merged", "Draft", "Open"] as const)(
 it("keeps Remind disabled while loading or unavailable and refreshes status on Reload", async () => {
   vi.mocked(loadSubmissions).mockImplementation(async () => ({
     rows: [record],
+    hasMore: false,
     warning: "",
   }));
   let reject = (_error: Error) => {};
@@ -572,7 +607,11 @@ it("limits status reads and aborts queued work when leaving the list", async () 
     revision: `revision-${index}`,
     value: { ...record.value, pr: index + 1 },
   }));
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows, warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows,
+    hasMore: false,
+    warning: "",
+  });
   const signals: AbortSignal[] = [];
   const finish: (() => void)[] = [];
   const readStatus = vi.fn<ReadPullStatus>(async (_repo, _pr, signal) => {
@@ -619,9 +658,10 @@ it("recovers a report received while a reminder is still sending", async () => {
     ],
   } as import("../../features/relay/events").RelayEvent;
   vi.mocked(loadSubmissions)
-    .mockResolvedValueOnce({ rows: [record], warning: "" })
+    .mockResolvedValueOnce({ rows: [record], hasMore: false, warning: "" })
     .mockResolvedValue({
       rows: [{ ...next, reviewReports: [report], reviewStates: ["done"] }],
+      hasMore: false,
       warning: "",
     });
   let finish: ((value: SavedSubmission) => void) | undefined;
@@ -672,8 +712,11 @@ it("updates review reports in the live submission result, including snapshot buf
       return current;
     },
   );
-  let finish: (value: { rows: SavedSubmission[]; warning: string }) => void =
-    () => {};
+  let finish: (value: {
+    rows: SavedSubmission[];
+    hasMore: boolean;
+    warning: string;
+  }) => void = () => {};
   vi.mocked(loadSubmissions).mockImplementationOnce(
     () =>
       new Promise((resolve) => {
@@ -700,7 +743,9 @@ it("updates review reports in the live submission result, including snapshot buf
     ],
   } as import("../../features/relay/events").RelayEvent;
   test.emit([report]);
-  await act(async () => finish({ rows: [current], warning: "" }));
+  await act(async () =>
+    finish({ rows: [current], hasMore: false, warning: "" }),
+  );
   const result = screen.getByRole("region", { name: "Submission result" });
   expect(
     within(result).getAllByText("Completed · outcome unspecified", {
@@ -744,7 +789,11 @@ it("separates lane columns, omits triage reminders, and links status and latest 
       },
     },
   };
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [row], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [row],
+    hasMore: false,
+    warning: "",
+  });
   const test = fixture("all");
   expect(screen.queryByRole("columnheader", { name: "Delivery" })).toBeNull();
   for (const name of ["Lane threads", "Lane status", "Lane last message"])
@@ -789,8 +838,8 @@ it("rebinds a failed reminder to its saved revision and preserves the original m
     },
   };
   vi.mocked(loadSubmissions)
-    .mockResolvedValueOnce({ rows: [record], warning: "" })
-    .mockResolvedValue({ rows: [pending], warning: "" });
+    .mockResolvedValueOnce({ rows: [record], hasMore: false, warning: "" })
+    .mockResolvedValue({ rows: [pending], hasMore: false, warning: "" });
   vi.mocked(remindSubmission)
     .mockRejectedValueOnce(new Error("offline"))
     .mockResolvedValueOnce(record);
@@ -834,7 +883,11 @@ it("rebinds a failed reminder to its saved revision and preserves the original m
 });
 
 it("waits for fresh channel access before loading submissions and lane previews", async () => {
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [record], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [record],
+    hasMore: false,
+    warning: "",
+  });
   const test = fixture("all", record.value.submitter, undefined, false);
   expect(loadSubmissions).not.toHaveBeenCalled();
   expect(test.session.thread).not.toHaveBeenCalled();
@@ -898,7 +951,11 @@ it("clears the shared badge on opening and keeps lane highlights until the next 
       ],
     }) as import("../../features/relay/events").RelayEvent;
   const first = applyReviewReports(base, "channel", [report(0, 200)]);
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [first], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [first],
+    hasMore: false,
+    warning: "",
+  });
   const view = fixture("all", undefined, undefined, true, null);
   await view.user.click(
     await screen.findByRole("button", { name: "example-org/project#42" }),
@@ -925,7 +982,11 @@ it("clears the shared badge on opening and keeps lane highlights until the next 
   expect(screen.getByTestId("unseen-updates").textContent).toBe("0");
   view.unmount();
   const final = applyReviewReports(first, "channel", [report(1, 300)]);
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [final], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [final],
+    hasMore: false,
+    warning: "",
+  });
   fixture("all");
   await screen.findByText("Backend", { exact: true });
   expect(screen.queryByText("Updated")).toBeNull();
@@ -941,6 +1002,7 @@ it("shows one compact row per PR and opens only that PR's lane details", async (
   };
   vi.mocked(loadSubmissions).mockResolvedValue({
     rows: [record, second],
+    hasMore: false,
     warning: "",
   });
   const test = fixture("all", undefined, undefined, true, null);
@@ -982,7 +1044,11 @@ it("shows one compact row per PR and opens only that PR's lane details", async (
 });
 
 it("shows recovery for a missing detail without opening unrelated lane threads", async () => {
-  vi.mocked(loadSubmissions).mockResolvedValue({ rows: [record], warning: "" });
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [record],
+    hasMore: false,
+    warning: "",
+  });
   const test = fixture("all", undefined, undefined, true, "missing");
   expect(
     (await screen.findByText(/This submission is unavailable/)).textContent,
@@ -1009,6 +1075,7 @@ it("keeps updates to other PRs unread while inspecting one detail", async () => 
   };
   vi.mocked(loadSubmissions).mockResolvedValue({
     rows: [record, second],
+    hasMore: false,
     warning: "",
   });
   const test = fixture("all");
@@ -1040,4 +1107,58 @@ it("keeps updates to other PRs unread while inspecting one detail", async () => 
     .closest("tr");
   if (!row) throw new Error("Missing updated PR");
   expect(within(row).getByText("Updated")).toBeTruthy();
+});
+
+it("deletes directly from the compact list without navigating and restores heading focus", async () => {
+  vi.mocked(loadSubmissions).mockResolvedValue({
+    rows: [record],
+    hasMore: false,
+    warning: "",
+  });
+  const test = fixture("all", undefined, undefined, true, null);
+  const button = await screen.findByRole("button", {
+    name: "Delete example-org/project#42",
+  });
+  await test.user.click(button);
+  expect(test.onOpenSubmission).not.toHaveBeenCalled();
+  await test.user.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(document.activeElement).toBe(button));
+  await test.user.click(button);
+  await test.user.click(
+    screen.getByRole("button", { name: "Delete submission" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("table")).toBeNull());
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Submitted pull requests" }),
+    ),
+  );
+});
+
+it("loads an addressed detail outside the collection and returns to the original list", async () => {
+  const other = {
+    ...record,
+    artifactId: "other",
+    value: { ...record.value, pr: 43, submitter: "other" },
+  };
+  vi.mocked(loadSubmissions).mockImplementation(
+    async (_s, _c, _signal, options) => ({
+      rows: options?.artifact === "other" ? [other] : [record],
+      hasMore: false,
+      warning: "",
+    }),
+  );
+  const test = fixture("all", undefined, undefined, true, "other");
+  await screen.findByRole("rowgroup", { name: "example-org/project#43" });
+  expect(loadSubmissions).toHaveBeenCalledWith(
+    test.session,
+    "channel",
+    expect.any(AbortSignal),
+    { offset: 0, artifact: "other" },
+  );
+  test.select(null);
+  await screen.findByRole("button", { name: "example-org/project#42" });
+  expect(
+    screen.queryByRole("button", { name: "example-org/project#43" }),
+  ).toBeNull();
 });

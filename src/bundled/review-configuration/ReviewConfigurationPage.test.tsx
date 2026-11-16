@@ -60,11 +60,41 @@ function fixture() {
     },
     definitions: [],
   };
-  const snapshotRead = vi.fn(async (filters: { kinds?: number[] }[]) =>
-    filters[0]?.kinds?.includes(0) ? profiles : events,
+  const snapshotRead = vi.fn(
+    async (
+      filters: {
+        kinds?: number[];
+        "#d"?: string[];
+        "#h"?: string[];
+        artifact?: string;
+      }[],
+    ) => {
+      const filter = filters[0];
+      if (filter?.kinds?.includes(0)) return profiles;
+      return events.filter(
+        (event) =>
+          (!filter?.["#d"] ||
+            filter["#d"].includes(
+              event.tags.find((tag) => tag[0] === "d")?.[1] ?? "",
+            )) &&
+          (!filter?.["#h"] ||
+            filter["#h"].includes(
+              event.tags.find((tag) => tag[0] === "h")?.[1] ?? "",
+            )) &&
+          (filter?.artifact !== "current" ||
+            !event.tags.some((tag) => tag[0] === "op" && tag[1] === "delete")),
+      );
+    },
   );
   const publish = vi.fn(async (event: EventData) => {
-    events = [event];
+    events = [
+      event,
+      ...events.filter(
+        (item) =>
+          item.tags.find((tag) => tag[0] === "d")?.[1] !==
+          event.tags.find((tag) => tag[0] === "d")?.[1],
+      ),
+    ];
     return event.id;
   });
   const profileSnapshot = new Map(
@@ -181,14 +211,10 @@ async function openDraft() {
   await user.click(screen.getByRole("button", { name: "Register repository" }));
   await user.click(screen.getByRole("combobox", { name: "Review channel" }));
   await user.click(await screen.findByRole("option", { name: "Reviews" }));
-  await user.type(
-    screen.getByRole("textbox", { name: "GitHub repository" }),
-    "example-org/project",
-  );
-  await user.type(
-    screen.getByRole("textbox", { name: "Instructions" }),
-    "Check authorization and keyboard navigation.",
-  );
+  await user.click(screen.getByRole("textbox", { name: "GitHub repository" }));
+  await user.paste("example-org/project");
+  await user.click(screen.getByRole("textbox", { name: "Instructions" }));
+  await user.paste("Check authorization and keyboard navigation.");
   await user.type(screen.getByRole("textbox", { name: "Value" }), "review");
   return user;
 }
@@ -374,6 +400,37 @@ it("refreshes failed agent and archive reads without discarding the draft", asyn
 
 it("stores a personal default per repository and isolates it between sessions", async () => {
   const test = fixture();
+  const other = "22222222-2222-4222-8222-222222222222";
+  test.setChannels([
+    { id: channel, name: "Reviews" },
+    { id: other, name: "Other reviews" },
+  ] as ChannelSummary[]);
+  const { saveConfiguration } = await import("./configuration");
+  await saveConfiguration(
+    test.session,
+    other,
+    {
+      version: 1,
+      repository: "example-org/project",
+      reminderMinutes: 15,
+      lanes: [
+        {
+          id: "general",
+          name: "General",
+          instructions: "Review",
+          reviewers: [],
+          routing: {
+            mode: "all",
+            rules: [
+              { id: "all", field: "files", operator: "at-least", value: "0" },
+            ],
+          },
+        },
+      ],
+    },
+    undefined,
+    AbortSignal.timeout(5000),
+  );
   const view = render(<ReviewConfigurationCommunity session={test.session} />);
   const user = await openDraft();
   await user.click(screen.getByRole("button", { name: "Save lane" }));
@@ -445,7 +502,7 @@ it("saves path rules through field changes and preserves them after reload", asy
   expect(test.publish).toHaveBeenCalledTimes(1);
 });
 
-it("preserves the remembered channel until pending metadata finishes", async () => {
+it("opens the personal PR list without a channel picker and preserves the submission preference", async () => {
   const test = fixture();
   const second = "22222222-2222-4222-8222-222222222222";
   localStorage.setItem("buzz.review.channel:review-test-scope", second);
@@ -467,10 +524,8 @@ it("preserves the remembered channel until pending metadata finishes", async () 
       } as ChannelSummary,
     ]),
   );
-  await screen.findByRole("combobox", { name: "Review channel" });
-  expect(
-    screen.getByRole("combobox", { name: "Review channel" }).textContent,
-  ).toContain("Remembered reviews");
+  await screen.findByRole("heading", { name: "My pull requests" });
+  expect(screen.queryByRole("combobox", { name: "Review channel" })).toBeNull();
   expect(localStorage.getItem("buzz.review.channel:review-test-scope")).toBe(
     second,
   );
@@ -652,11 +707,12 @@ it("returns focus to the lane region after removing the edited lane", async () =
   await user.type(screen.getByRole("textbox", { name: "Value" }), "tests");
   await user.click(screen.getByRole("button", { name: "Save lane" }));
   await user.click(
-    await screen.findByRole("button", { name: "Edit Second lane" }),
+    await screen.findByRole("button", { name: "Delete Second lane" }),
   );
-  await user.click(screen.getByRole("button", { name: "Remove lane" }));
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  await user.click(screen.getByRole("button", { name: "Delete Second lane" }));
   expect(test.publish).toHaveBeenCalledTimes(2);
-  await user.click(screen.getByRole("button", { name: "Confirm remove lane" }));
+  await user.click(screen.getByRole("button", { name: "Delete lane" }));
   await waitFor(() =>
     expect(
       screen.getByRole("region", { name: "Repository configuration" }),
@@ -795,7 +851,7 @@ it("keeps the addressed detail during a transient navigation handoff, then retur
       target: { ...target, route: undefined },
     } as unknown as PageNavigation),
   );
-  expect(screen.getByText("Submitted pull requests")).toBeTruthy();
+  expect(screen.getByText("My pull requests")).toBeTruthy();
 });
 
 it("requires a new choice for an unavailable default and clears revoked access", async () => {
@@ -837,4 +893,103 @@ it("requires a new choice for an unavailable default and clears revoked access",
   expect(
     screen.getByRole("combobox", { name: "Review channel" }).textContent,
   ).toContain("Choose a channel");
+});
+
+it("confirms deletion, preserves a rejected configuration, and permits registration again", async () => {
+  const test = fixture();
+  render(<ReviewConfigurationCommunity session={test.session} />);
+  const user = await openDraft();
+  await user.click(screen.getByRole("button", { name: "Save lane" }));
+  await screen.findByText("Saved example-org/project.");
+  await user.click(
+    screen.getByRole("button", { name: "Back to repositories" }),
+  );
+  const deletion = await screen.findByRole("button", {
+    name: "Delete example-org/project in Reviews",
+  });
+  await user.click(deletion);
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(test.publish).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(document.activeElement).toBe(deletion));
+  await user.click(deletion);
+  test.publish.mockRejectedValueOnce(
+    new Error("conflict: artifact head changed"),
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Delete configuration" }),
+  );
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "head changed",
+  );
+  expect(screen.getByRole("alertdialog")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  await user.click(screen.getByRole("button", { name: "Reload" }));
+  await user.click(
+    await screen.findByRole("button", {
+      name: "Delete example-org/project in Reviews",
+    }),
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Delete configuration" }),
+  );
+  await screen.findByText(/No repositories configured/);
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Repositories" }),
+    ),
+  );
+  await openDraft();
+  await user.click(screen.getByRole("button", { name: "Save lane" }));
+  await screen.findByText("Saved example-org/project.");
+  expect(test.publish.mock.calls.at(-1)?.[0].tags).toContainEqual([
+    "op",
+    "restore",
+  ]);
+});
+
+it("cancels pending deletion when channel membership is lost", async () => {
+  const test = fixture();
+  render(<ReviewConfigurationCommunity session={test.session} />);
+  const user = await openDraft();
+  await user.click(screen.getByRole("button", { name: "Save lane" }));
+  await screen.findByText("Saved example-org/project.");
+  await user.click(
+    screen.getByRole("button", { name: "Back to repositories" }),
+  );
+  await user.click(
+    await screen.findByRole("button", {
+      name: "Delete example-org/project in Reviews",
+    }),
+  );
+  const writer = test.session.configArtifactWriter;
+  if (!writer) throw new Error("Missing writer");
+  const original = writer.sign;
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const sign = vi
+    .spyOn(writer, "sign")
+    .mockImplementation(async (template, signal) => {
+      await gate;
+      return original(template, signal);
+    });
+  try {
+    await user.click(
+      screen.getByRole("button", { name: "Delete configuration" }),
+    );
+    await waitFor(() => expect(sign).toHaveBeenCalledOnce());
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Cancel",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    act(() => test.metadataCached(true));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  } finally {
+    await act(async () => finish());
+  }
+  expect(test.publish).toHaveBeenCalledTimes(1);
 });

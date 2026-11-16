@@ -71,6 +71,7 @@ type Snapshot = {
   error: string;
   warning: string;
   seen: Record<string, string>;
+  hasMore: boolean;
 };
 const empty = (): Snapshot => ({
   rows: [],
@@ -78,6 +79,7 @@ const empty = (): Snapshot => ({
   error: "",
   warning: "",
   seen: {},
+  hasMore: false,
 });
 
 /** One bounded snapshot (plus report batches) for the selected channel, shared
@@ -85,9 +87,14 @@ const empty = (): Snapshot => ({
  * relay session performs a jittered bounded repair after access is confirmed. */
 export function createSubmissionUpdates(
   session: RelaySession,
-  channel: string,
+  selection: string | readonly string[],
+  artifact?: string,
 ) {
-  const key = `buzz.review.seen:${session.scope}:${channel}`;
+  const channels = typeof selection === "string" ? [selection] : [...selection];
+  const keyFor = (channel: string) =>
+    `buzz.review.seen:${session.scope}:${channel}`;
+  const keys = channels.map(keyFor);
+  const rowChannel = (row: SavedSubmission) => row.channel ?? channels[0] ?? "";
   const listeners = new Set<() => void>();
   let state = empty();
   let controller: AbortController | undefined;
@@ -100,43 +107,57 @@ export function createSubmissionUpdates(
     for (const listener of listeners) listener();
   };
   const readSeen = () => {
-    try {
-      const value: unknown = JSON.parse(localStorage.getItem(key) ?? "{}");
-      if (value && typeof value === "object" && !Array.isArray(value))
-        return Object.fromEntries(
-          Object.entries(value).filter(([, v]) => typeof v === "string"),
-        );
-    } catch {
-      /* Unavailable or damaged local preferences must not hide updates. */
+    const seen: Record<string, string> = { ...state.seen };
+    for (const key of keys) {
+      try {
+        const value: unknown = JSON.parse(localStorage.getItem(key) ?? "{}");
+        if (value && typeof value === "object" && !Array.isArray(value))
+          Object.assign(
+            seen,
+            Object.fromEntries(
+              Object.entries(value).filter(([, v]) => typeof v === "string"),
+            ),
+          );
+      } catch {
+        /* Damaged preferences must not hide updates. */
+      }
     }
-    return state.seen;
+    return seen;
   };
   const storage = (event: StorageEvent) => {
-    if (event.key === key || event.key === null)
+    if (event.key === null || keys.includes(event.key))
       emit({ ...state, seen: readSeen() });
   };
-  const reload = () => {
+  let offset = 0;
+  const load = (append = false) => {
     if (!listeners.size) return;
     clearTimeout(timer);
     controller?.abort();
     const current = new AbortController();
     controller = current;
     pending = [];
+    const nextOffset = append ? offset + 500 : 0;
     emit({ ...state, loading: true, error: "" });
     void loadSubmissions(
       session,
-      channel,
+      selection,
       AbortSignal.any([current.signal, AbortSignal.timeout(20_000)]),
+      { offset: nextOffset, ...(artifact ? { artifact } : {}) },
     )
       .then((next) => {
         if (current.signal.aborted) return;
         refreshDelay = 100;
+        offset = nextOffset;
+        const incoming = new Set(next.rows.map((row) => row.artifactId));
         emit({
           ...state,
           ...next,
-          rows: next.rows.map((row) =>
-            applyReviewReports(row, channel, pending),
-          ),
+          rows: [
+            ...(append
+              ? state.rows.filter((row) => !incoming.has(row.artifactId))
+              : []),
+            ...next.rows,
+          ].map((row) => applyReviewReports(row, rowChannel(row), pending)),
           loading: false,
         });
         pending = [];
@@ -155,6 +176,7 @@ export function createSubmissionUpdates(
         }
       });
   };
+  const reload = () => load();
   return {
     snapshot: () => state,
     subscribe(listener: () => void) {
@@ -166,12 +188,16 @@ export function createSubmissionUpdates(
         stopLive = session.subscribeLive?.(
           ({ events }) => {
             const scoped = events.filter((event) =>
-              event.tags.some((tag) => tag[0] === "h" && tag[1] === channel),
+              event.tags.some(
+                (tag) => tag[0] === "h" && channels.includes(tag[1] ?? ""),
+              ),
             );
             if (
               scoped.some(
                 (event) =>
                   event.kind === 45010 &&
+                  (typeof selection === "string" ||
+                    event.pubkey === session.viewer) &&
                   event.tags.some(
                     (tag) => tag[0] === "type" && tag[1] === REVIEW_SUBMISSION,
                   ),
@@ -193,7 +219,7 @@ export function createSubmissionUpdates(
               emit({
                 ...state,
                 rows: state.rows.map((row) =>
-                  applyReviewReports(row, channel, reports),
+                  applyReviewReports(row, rowChannel(row), reports),
                 ),
               });
           },
@@ -211,6 +237,9 @@ export function createSubmissionUpdates(
       };
     },
     reload,
+    loadMore: () => {
+      if (!state.loading && state.hasMore) load(true);
+    },
     setRows(update: (rows: SavedSubmission[]) => SavedSubmission[]) {
       emit({ ...state, rows: update(state.rows) });
     },
@@ -267,7 +296,25 @@ export function createSubmissionUpdates(
         ),
       };
       try {
-        localStorage.setItem(key, JSON.stringify(seen));
+        const rows = Array.isArray(input) ? input : [input];
+        for (const channel of new Set(rows.map(rowChannel))) {
+          const channelSeen = rows.filter((row) => rowChannel(row) === channel);
+          const existing: Record<string, string> = JSON.parse(
+            localStorage.getItem(keyFor(channel)) ?? "{}",
+          );
+          localStorage.setItem(
+            keyFor(channel),
+            JSON.stringify({
+              ...existing,
+              ...Object.fromEntries(
+                channelSeen.map((row) => [
+                  row.artifactId,
+                  seen[row.artifactId],
+                ]),
+              ),
+            }),
+          );
+        }
       } catch {
         /* Acknowledgment still works for this session. */
       }
@@ -285,20 +332,37 @@ export function useSubmissionUpdates(
   session: RelaySession,
   channel: string,
   enabled: boolean,
+  historyChannels?: readonly string[],
+  artifact?: string,
 ) {
+  const signature = historyChannels
+    ? [...historyChannels].sort().join(":")
+    : undefined;
+  const storeKey =
+    signature === undefined
+      ? `${channel}${artifact ? `:${artifact}` : ""}`
+      : `mine:${signature}`;
   const store = useMemo(() => {
     let channels = stores.get(session);
     if (!channels) {
       channels = new Map();
       stores.set(session, channels);
     }
-    let value = channels.get(channel);
+    let value = channels.get(storeKey);
     if (!value) {
-      value = createSubmissionUpdates(session, channel);
-      channels.set(channel, value);
+      value = createSubmissionUpdates(
+        session,
+        signature === undefined
+          ? channel
+          : signature
+            ? signature.split(":")
+            : [],
+        artifact,
+      );
+      channels.set(storeKey, value);
     }
     return value;
-  }, [session, channel]);
+  }, [session, signature, storeKey, channel, artifact]);
   const snapshot = useSyncExternalStore(
     enabled ? store.subscribe : noSubscribe,
     enabled ? store.snapshot : () => idle,

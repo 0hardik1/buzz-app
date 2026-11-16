@@ -1,5 +1,5 @@
 import { useChannelList } from "../../features/relay/react";
-import { reviewChannelMember } from "./access";
+import { reviewHistoryMember } from "./access";
 import {
   MarkdownDocument,
   sharedComponents,
@@ -47,7 +47,7 @@ export function ReviewMessageDialog({
   const readable =
     channels.status === "ready" &&
     !!channel &&
-    reviewChannelMember(channel, session.viewer);
+    reviewHistoryMember(channel, session.viewer);
   const [view, setView] = useState<ThreadView>();
   const [error, setError] = useState("");
   useEffect(() => {

@@ -185,3 +185,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.review-config-repository {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  margin-block-end: var(--space-4);
+}
+.review-config-channel-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+}
+
+.review-config-single-channel {
+  padding-block: var(--space-3);
+}

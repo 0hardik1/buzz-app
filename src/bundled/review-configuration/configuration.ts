@@ -1,7 +1,12 @@
-import { reviewChannel, confirmReviewAgents } from "./access";
+import {
+  reviewChannel,
+  confirmReviewAgents,
+  confirmReviewChannel,
+} from "./access";
 import { validateRouting, type LaneRouting } from "./routing";
 import {
   ARTIFACT_KIND,
+  readHead,
   uuidv5,
 } from "../../features/agents/agent-config-artifacts";
 import type { EventData } from "../../features/relay/events";
@@ -329,6 +334,31 @@ export async function saveConfiguration(
     throw new Error(
       "Create a new configuration to change the repository or channel.",
     );
+  let predecessor = previous?.revision;
+  let operation = previous ? "update" : "create";
+  if (!previous) {
+    if (!session.snapshotRead)
+      throw new Error("Review configuration reads are unavailable.");
+    const head = await readHead(
+      session.snapshotRead,
+      channel,
+      artifactId,
+      signal,
+    );
+    if (head) {
+      if (
+        head.kind !== ARTIFACT_KIND ||
+        tag(head, "h") !== channel ||
+        tag(head, "type") !== REVIEW_CONFIG_TYPE ||
+        tag(head, "op") !== "delete"
+      )
+        throw new Error(
+          "This repository is already configured. Reload before editing it.",
+        );
+      operation = "restore";
+      predecessor = head.id;
+    }
+  }
   assertAgents();
   const event = await writer.sign(
     {
@@ -341,8 +371,8 @@ export async function saveConfiguration(
         ["h", channel],
         ["type", REVIEW_CONFIG_TYPE],
         ["title", `Review configuration: ${config.repository}`],
-        ["op", previous ? "update" : "create"],
-        ...(previous ? [["prev", previous.revision]] : []),
+        ["op", operation],
+        ...(predecessor ? [["prev", predecessor]] : []),
       ],
     },
     signal,
@@ -350,4 +380,44 @@ export async function saveConfiguration(
   assertAgents();
   await writer.publish(event, signal);
   return { config, artifactId, revision: event.id };
+}
+
+/** Remove only the loaded configuration; submissions and conversations have separate identities. */
+export async function deleteConfiguration(
+  session: RelaySession,
+  channel: string,
+  previous: SavedReviewConfig,
+  signal: AbortSignal,
+): Promise<void> {
+  const writer = session.configArtifactWriter;
+  if (!writer)
+    throw new Error("This connection cannot delete review configuration.");
+  const artifactId = await identity(
+    channel,
+    repositoryName(previous.config.repository),
+  );
+  if (previous.artifactId !== artifactId)
+    throw new Error(
+      "The configuration does not belong to this repository and channel.",
+    );
+  await confirmReviewChannel(session, channel, signal);
+  const event = await writer.sign(
+    {
+      kind: ARTIFACT_KIND,
+      created_at: Math.floor(Date.now() / 1000),
+      content: "",
+      tags: [
+        ["ar", "1"],
+        ["d", artifactId],
+        ["h", channel],
+        ["type", REVIEW_CONFIG_TYPE],
+        ["op", "delete"],
+        ["prev", previous.revision],
+      ],
+    },
+    signal,
+  );
+  signal.throwIfAborted();
+  reviewChannel(session, channel, true);
+  await writer.publish(event, signal);
 }

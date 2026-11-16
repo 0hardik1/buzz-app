@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RelaySession } from "../../features/relay/session";
 import { useChannelList } from "../../features/relay/react";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Select } from "../../shared/design-system/ui/Select";
-import { InlineHeader } from "../../shared/design-system/ui/Header";
+import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
+import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
+import { Header, InlineHeader } from "../../shared/design-system/ui/Header";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { reviewChannelMember } from "./access";
 import {
+  deleteConfiguration,
   loadRepositoryDirectory,
   type SavedReviewConfig,
 } from "./configuration";
@@ -90,12 +93,17 @@ function RepositoryRow({
   rows,
   channels,
   onOpen,
+  onDelete,
 }: {
   session: RelaySession;
   repository: string;
   rows: (SavedReviewConfig & { channel: string })[];
   channels: ReturnType<typeof useReviewRepositories>["channels"];
   onOpen(channel: string, repository: string): void;
+  onDelete(
+    row: SavedReviewConfig & { channel: string },
+    trigger: HTMLElement,
+  ): void;
 }) {
   const [preferred, setPreferred] = useRepositoryDefault(
     session.scope,
@@ -103,42 +111,161 @@ function RepositoryRow({
   );
   return (
     <section
-      className="review-config-form"
+      className="review-config-repository"
       aria-label={`${repository} configurations`}
     >
-      <InlineHeader title={repository} />
-      <Select
-        label={`Default channel for ${repository}`}
-        variant="field"
-        value={rows.some((row) => row.channel === preferred) ? preferred : ""}
-        placeholder="Choose your default"
-        onValueChange={setPreferred}
-        description="Your default for new submissions to this repository."
-        groups={[
-          {
-            label: "Your configurations",
-            options: rows.map((row) => ({
-              value: row.channel,
-              label:
-                channels.find((channel) => channel.id === row.channel)?.name ??
-                row.channel,
-            })),
-          },
-        ]}
-      />
-      {rows.map((row) => (
-        <NavigationItem
-          key={row.artifactId}
-          aria-label={`Open ${repository} in ${channels.find((channel) => channel.id === row.channel)?.name ?? row.channel}`}
-          label={
-            channels.find((channel) => channel.id === row.channel)?.name ??
-            row.channel
-          }
-          trailing={`${row.config.lanes.length} ${row.config.lanes.length === 1 ? "lane" : "lanes"}`}
-          onClick={() => onOpen(row.channel, repository)}
-        />
-      ))}
+      <Header level={3} title={repository} eyebrow="Repository" />
+      <SettingsGroup>
+        {rows.length > 1 ||
+        (preferred && !rows.some((row) => row.channel === preferred)) ? (
+          <Select
+            label={`Default channel for ${repository}`}
+            variant="preference"
+            value={
+              rows.some((row) => row.channel === preferred) ? preferred : ""
+            }
+            placeholder="Choose your default"
+            onValueChange={setPreferred}
+            description="Your default for new submissions to this repository."
+            groups={[
+              {
+                label: "Your configurations",
+                options: rows.map((row) => ({
+                  value: row.channel,
+                  label:
+                    channels.find((channel) => channel.id === row.channel)
+                      ?.name ?? row.channel,
+                })),
+              },
+            ]}
+          />
+        ) : (
+          <p className="review-config-single-channel text-caption text-subtle">
+            New reviews use this channel automatically.
+          </p>
+        )}
+        {rows.map((row) => {
+          const channel = channels.find(
+            (channel) => channel.id === row.channel,
+          );
+          const name = channel?.name ?? row.channel;
+          return (
+            <div className="review-config-channel-row" key={row.artifactId}>
+              <NavigationItem
+                aria-label={`Open ${repository} in ${name}`}
+                multiline
+                label={
+                  <span className="review-config-repository-label">
+                    <span className="text-label-sm">{name}</span>
+                    <span className="text-caption text-subtle">
+                      {row.config.lanes.map((lane) => lane.name).join(" · ")}
+                    </span>
+                  </span>
+                }
+                trailing={`${row.config.lanes.length} ${row.config.lanes.length === 1 ? "lane" : "lanes"}`}
+                onClick={() => onOpen(row.channel, repository)}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={`Delete ${repository} in ${name}`}
+                disabled={!session.configArtifactWriter || channel?.readOnly}
+                onClick={(event) => onDelete(row, event.currentTarget)}
+              >
+                Delete
+              </Button>
+            </div>
+          );
+        })}
+      </SettingsGroup>
     </section>
+  );
+}
+
+function DeleteConfigurationDialog({
+  session,
+  row,
+  channelName,
+  onClose,
+  onDeleted,
+  onEditingChange,
+  finalFocus,
+}: {
+  session: RelaySession;
+  row: SavedReviewConfig & { channel: string };
+  channelName: string;
+  onClose(): void;
+  onDeleted(): void;
+  onEditingChange(editing: boolean): void;
+  finalFocus(deleted: boolean): HTMLElement | null;
+}) {
+  const operation = useRef<AbortController | null>(null);
+  const deleted = useRef(false);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    onEditingChange(true);
+    return () => {
+      operation.current?.abort();
+      onEditingChange(false);
+    };
+  }, [onEditingChange]);
+  const remove = async () => {
+    if (operation.current) return;
+    const controller = new AbortController();
+    operation.current = controller;
+    setPending(true);
+    setError("");
+    try {
+      await deleteConfiguration(
+        session,
+        row.channel,
+        row,
+        AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
+      );
+      if (!controller.signal.aborted) {
+        deleted.current = true;
+        onDeleted();
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) setError(String(error));
+    } finally {
+      if (!controller.signal.aborted) {
+        operation.current = null;
+        setPending(false);
+      }
+    }
+  };
+  return (
+    <AlertDialog
+      title={`Delete ${row.config.repository} in ${channelName}?`}
+      description="This removes this channel’s configuration for new reviews. Submitted PRs and conversations are kept. You can register the repository again later."
+      pending={pending}
+      initialFocus={cancel}
+      finalFocus={() => finalFocus(deleted.current)}
+      onClose={onClose}
+      actions={
+        <>
+          <Button ref={cancel} disabled={pending} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            loading={pending}
+            onClick={() => void remove()}
+          >
+            Delete configuration
+          </Button>
+        </>
+      }
+    >
+      {error && (
+        <p role="alert">
+          {error} Reload configurations before retrying a conflict.
+        </p>
+      )}
+    </AlertDialog>
   );
 }
 
@@ -154,6 +281,21 @@ export function RepositoryConfigurations({
   onEditingChange(editing: boolean): void;
 }) {
   const directory = useReviewRepositories(session);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [deleting, setDeleting] = useState<{
+    row: SavedReviewConfig & { channel: string };
+    trigger: HTMLElement;
+    session: RelaySession;
+  }>();
+  const deleteChannel =
+    deleting?.session === session
+      ? directory.channels.find(
+          (channel) => channel.id === deleting.row.channel && !channel.readOnly,
+        )
+      : undefined;
+  useEffect(() => {
+    if (!deleteChannel) setDeleting(undefined);
+  }, [deleteChannel]);
   const [, setRepository] = useReviewRepository(session.scope);
   const [, setChannel] = useReviewChannel(session.scope);
   const [editing, setEditing] = useState(false);
@@ -214,6 +356,14 @@ export function RepositoryConfigurations({
             initialRepository={target.repository}
             initiallyCreating={!!target.create}
             onBack={back}
+            onDelete={(row, trigger) => {
+              setTarget(undefined);
+              setDeleting({
+                row: { ...row, channel: target.channel },
+                trigger,
+                session,
+              });
+            }}
             onRegistered={(repository) => open(target.channel, repository)}
             onEditingChange={editingChanged}
             channelSelector={
@@ -257,6 +407,8 @@ export function RepositoryConfigurations({
         </Button>
       </div>
       <InlineHeader
+        ref={heading}
+        tabIndex={-1}
         title="Repositories"
         subtitle="Configurations in your private review channels. Each channel has its own lanes and agents."
         actions={
@@ -280,6 +432,7 @@ export function RepositoryConfigurations({
             )}
             channels={directory.channels}
             onOpen={open}
+            onDelete={(row, trigger) => setDeleting({ row, trigger, session })}
           />
         ))
       ) : (
@@ -287,6 +440,24 @@ export function RepositoryConfigurations({
           No repositories configured in your private channels. Register one to
           save its review lanes.
         </p>
+      )}
+      {deleting && deleteChannel && (
+        <DeleteConfigurationDialog
+          session={session}
+          row={deleting.row}
+          channelName={deleteChannel.name}
+          onEditingChange={onEditingChange}
+          onClose={() => setDeleting(undefined)}
+          onDeleted={() => {
+            setDeleting(undefined);
+            directory.refresh();
+          }}
+          finalFocus={(deleted) =>
+            !deleted && deleting.trigger.isConnected
+              ? deleting.trigger
+              : heading.current
+          }
+        />
       )}
       {directory.incomplete && (
         <p role="alert">

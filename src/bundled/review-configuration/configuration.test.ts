@@ -5,6 +5,7 @@ import type { EventData } from "../../features/relay/events";
 import type { EventTemplate } from "nostr-tools";
 import { keypair, signed } from "../../features/relay/testing";
 import {
+  deleteConfiguration,
   loadConfigurations,
   repositoryName,
   saveConfiguration,
@@ -43,11 +44,41 @@ function host() {
   const key = keypair();
   let events: EventData[] = [];
   const profile = reviewAgentProfile(key, agent);
-  const snapshotRead = vi.fn(async (filters: { kinds?: number[] }[]) =>
-    filters[0]?.kinds?.includes(0) ? [profile] : events,
+  const snapshotRead = vi.fn(
+    async (
+      filters: {
+        kinds?: number[];
+        "#d"?: string[];
+        "#h"?: string[];
+        artifact?: string;
+      }[],
+    ) => {
+      const filter = filters[0];
+      if (filter?.kinds?.includes(0)) return [profile];
+      return events.filter(
+        (event) =>
+          (!filter?.["#d"] ||
+            filter["#d"].includes(
+              event.tags.find((tag) => tag[0] === "d")?.[1] ?? "",
+            )) &&
+          (!filter?.["#h"] ||
+            filter["#h"].includes(
+              event.tags.find((tag) => tag[0] === "h")?.[1] ?? "",
+            )) &&
+          (filter?.artifact !== "current" ||
+            !event.tags.some((tag) => tag[0] === "op" && tag[1] === "delete")),
+      );
+    },
   );
   const publish = vi.fn(async (event: EventData) => {
-    events = [event];
+    events = [
+      event,
+      ...events.filter(
+        (item) =>
+          item.tags.find((tag) => tag[0] === "d")?.[1] !==
+          event.tags.find((tag) => tag[0] === "d")?.[1],
+      ),
+    ];
     return event.id;
   });
   const sign = vi.fn(async (template: EventTemplate) => signed(key, template));
@@ -132,6 +163,7 @@ it("never fetches a newer revision to overwrite a concurrent edit; propagates re
     undefined,
     signal(),
   );
+  test.snapshotRead.mockClear();
   test.publish.mockRejectedValueOnce(
     new Error("conflict: artifact head changed"),
   );
@@ -158,14 +190,15 @@ it("canonicalizes duplicate repository inputs and scopes identities to the chann
     undefined,
     signal(),
   );
-  const duplicate = await saveConfiguration(
-    test.session,
-    channel,
-    { ...config, repository: " https://github.com/Example-Org/PROJECT/ " },
-    undefined,
-    signal(),
-  );
-  expect(duplicate.artifactId).toBe(first.artifactId);
+  await expect(
+    saveConfiguration(
+      test.session,
+      channel,
+      { ...config, repository: " https://github.com/Example-Org/PROJECT/ " },
+      undefined,
+      signal(),
+    ),
+  ).rejects.toThrow("already configured");
   const separate = await saveConfiguration(
     test.session,
     other,
@@ -345,4 +378,119 @@ it("keeps automatic approval opt-in and rejects non-boolean stored permissions",
       lanes: [{ ...firstLane, autoApprove: "true" }],
     }),
   ).toThrow();
+});
+
+it("deletes exactly the loaded configuration and restores its identity when registered again", async () => {
+  const test = host();
+  const first = await saveConfiguration(
+    test.session,
+    channel,
+    config,
+    undefined,
+    signal(),
+  );
+  const second = await saveConfiguration(
+    test.session,
+    other,
+    config,
+    undefined,
+    signal(),
+  );
+  await deleteConfiguration(test.session, channel, first, signal());
+  const deletion = test.publish.mock.calls[2]?.[0];
+  expect(deletion?.content).toBe("");
+  expect(deletion?.tags).toEqual(
+    expect.arrayContaining([
+      ["op", "delete"],
+      ["prev", first.revision],
+      ["d", first.artifactId],
+      ["h", channel],
+    ]),
+  );
+  expect(
+    (await loadConfigurations(test.session, channel, signal())).rows,
+  ).toEqual([]);
+  expect(
+    (await loadConfigurations(test.session, other, signal())).rows,
+  ).toEqual([second]);
+  const restored = await saveConfiguration(
+    test.session,
+    channel,
+    config,
+    undefined,
+    signal(),
+  );
+  expect(restored.artifactId).toBe(first.artifactId);
+  expect(test.publish.mock.calls[3]?.[0].tags).toEqual(
+    expect.arrayContaining([
+      ["op", "restore"],
+      ["prev", deletion?.id],
+    ]),
+  );
+});
+
+it("rejects stale deletion and never substitutes a newer revision", async () => {
+  const test = host();
+  const first = await saveConfiguration(
+    test.session,
+    channel,
+    config,
+    undefined,
+    signal(),
+  );
+  test.snapshotRead.mockClear();
+  test.publish.mockRejectedValueOnce(
+    new Error("conflict: artifact head changed"),
+  );
+  await expect(
+    deleteConfiguration(test.session, channel, first, signal()),
+  ).rejects.toThrow("head changed");
+  expect(test.snapshotRead).not.toHaveBeenCalled();
+  expect(test.publish.mock.calls[1]?.[0].tags).toContainEqual([
+    "prev",
+    first.revision,
+  ]);
+  await expect(
+    deleteConfiguration(test.session, other, first, signal()),
+  ).rejects.toThrow("does not belong");
+});
+
+it("can delete obsolete agents but cannot publish after access is revoked during signing", async () => {
+  const test = host();
+  const first = await saveConfiguration(
+    test.session,
+    channel,
+    config,
+    undefined,
+    signal(),
+  );
+  test.snapshotRead.mockRejectedValue(new Error("Agents unavailable"));
+  await deleteConfiguration(test.session, channel, first, signal());
+  const published = test.publish.mock.calls.length;
+  test.sign.mockImplementationOnce(async (template) => {
+    vi.spyOn(test.session.channels, "list").mockReturnValue({
+      status: "ready",
+      channels: [],
+    });
+    return signed(keypair(), template);
+  });
+  await expect(
+    deleteConfiguration(test.session, channel, first, signal()),
+  ).rejects.toThrow("membership");
+  expect(test.publish).toHaveBeenCalledTimes(published);
+});
+
+it("fails registration closed when the artifact head cannot be read", async () => {
+  const test = host();
+  test.snapshotRead.mockRejectedValueOnce(new Error("Head unavailable"));
+  await expect(
+    saveConfiguration(
+      test.session,
+      channel,
+      { ...config, lanes: [{ ...firstLane, reviewers: [] }] },
+      undefined,
+      signal(),
+    ),
+  ).rejects.toThrow("Head unavailable");
+  expect(test.sign).not.toHaveBeenCalled();
 });

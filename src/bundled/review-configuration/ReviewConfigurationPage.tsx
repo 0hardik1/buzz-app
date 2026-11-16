@@ -1,4 +1,4 @@
-import { reviewChannelMember } from "./access";
+import { reviewChannelMember, reviewHistoryMember } from "./access";
 import {
   RepositoryConfigurations,
   SubmissionRepository,
@@ -52,7 +52,6 @@ import {
   PanelHeader,
   PanelHeaderLabel,
 } from "../../shared/design-system/ui/PanelHeader";
-import { Select } from "../../shared/design-system/ui/Select";
 import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
 import { Textarea } from "../../shared/design-system/ui/Textarea";
 import {
@@ -366,84 +365,24 @@ export function ReviewConfigurationCommunity({
       );
     }
   }
-  const channels = list.channels.filter(
-    (item) =>
-      reviewChannelMember(item, session.viewer) &&
-      !item.metadataPending &&
-      !item.huddle &&
-      !item.archived &&
-      !item.pending &&
-      (item.channelType === "stream" || item.channelType === "forum"),
-  );
-  useEffect(() => {
-    if (
-      page !== "all" ||
-      messageChannel ||
-      list.status !== "ready" ||
-      list.coverage === "partial" ||
-      editing
-    )
-      return;
-    if (list.channels.some((item) => item.metadataPending)) return;
-    if (channel && channels.some((item) => item.id === channel)) return;
-    setChannel(channels.length === 1 ? (channels[0]?.id ?? "") : "");
-  }, [
-    page,
-    messageChannel,
-    list.status,
-    list.coverage,
-    list.channels,
-    channels,
-    channel,
-    editing,
-    setChannel,
-  ]);
-  const selected = channels.find((item) => item.id === channel);
-  const readable = !!selected && !selected.cached && !selected.metadataCached;
+  const historyChannels =
+    list.status === "ready"
+      ? list.channels
+          .filter((item) => reviewHistoryMember(item, session.viewer))
+          .map((item) => item.id)
+      : [];
+  const selected = list.channels.find((item) => item.id === channel);
+  const readable =
+    page === "all"
+      ? list.status === "ready" &&
+        (!submission || historyChannels.includes(channel))
+      : !!selected && reviewChannelMember(selected, session.viewer);
   const writable =
     !!selected &&
-    !selected.metadataCached &&
-    !selected.cached &&
+    list.status === "ready" &&
+    reviewChannelMember(selected, session.viewer) &&
     !selected.readOnly &&
     !!session.configArtifactWriter;
-  const channelSelector = (
-    <>
-      {page !== "configuration" && channels.length === 1 ? (
-        <p className="text-caption text-subtle">
-          Review channel: {selected?.name}
-        </p>
-      ) : (
-        <Select
-          label="Review channel"
-          variant="field"
-          value={channel}
-          onValueChange={setChannel}
-          disabled={editing}
-          placeholder="Choose a channel"
-          groups={[
-            {
-              label: "Channels",
-              options: channels.map((item) => ({
-                value: item.id,
-                label: item.name,
-              })),
-            },
-          ]}
-          description="Repositories and reviews are shared with this channel."
-        />
-      )}
-      {list.status === "loading" && <p role="status">Loading channels…</p>}
-      {list.status === "error" && (
-        <p role="alert">Could not load channels. Reconnect to try again.</p>
-      )}
-      {channel && !writable && (
-        <p role="alert">
-          Saving is unavailable until channel access is confirmed. Your open
-          draft is preserved.
-        </p>
-      )}
-    </>
-  );
   return (
     <Frame page={page}>
       {page !== "configuration" && (
@@ -490,16 +429,26 @@ export function ReviewConfigurationCommunity({
           onSelection={selectSubmission}
         />
       )}
-      {!submission && page === "all" && channelSelector}
+      {page === "all" && list.status === "loading" && (
+        <p role="status">Loading your review channels…</p>
+      )}
+      {page === "all" && list.status === "error" && (
+        <p role="alert">Could not load channels. Reconnect to try again.</p>
+      )}
       {submission && !readable && (
         <p role="status">
           Pull request details are unavailable until access to the review
           channel is confirmed.
         </p>
       )}
-      {channel && page !== "configuration" && (
+      {(page === "all" || (channel && page === "submit")) && (
         <ReviewSubmissions
-          key={`${channel}:${page}:${page === "submit" ? submitSelection.repository : ""}`}
+          key={
+            page === "all"
+              ? "all"
+              : `${channel}:${page}:${submitSelection.repository}`
+          }
+          historyChannels={page === "all" ? historyChannels : undefined}
           mode={page}
           repository={
             page === "submit" ? submitSelection.repository : undefined
@@ -535,11 +484,13 @@ export function ChannelConfiguration({
   initiallyCreating = false,
   onBack,
   onRegistered,
+  onDelete,
 }: {
   initialRepository?: string;
   initiallyCreating?: boolean;
   onBack?: () => void;
   onRegistered?: (repository: string) => void;
+  onDelete?: (row: SavedReviewConfig, trigger: HTMLElement) => void;
   channelSelector: ReactNode;
   onSubmit?: (() => void) | undefined;
   onShowPulls?: (() => void) | undefined;
@@ -551,6 +502,7 @@ export function ChannelConfiguration({
   const choices = useReviewAgents(session, channel);
   const [admissionEditing, setAdmissionEditing] = useState(false);
   const [laneId, setLaneId] = useState<string>();
+  const [deletingLane, setDeletingLane] = useState(false);
   const [rows, setRows] = useState<SavedReviewConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -752,6 +704,7 @@ export function ChannelConfiguration({
                     writable={writable}
                     previous={editor === "new" ? undefined : editor}
                     laneId={laneId}
+                    initiallyRemoving={deletingLane}
                     existing={rows}
                     onCancel={() =>
                       initiallyCreating && onBack
@@ -796,26 +749,54 @@ export function ChannelConfiguration({
                           <InlineHeader
                             title={lane.name}
                             actions={
-                              <Button
-                                ref={(node) => {
-                                  if (laneId === lane.id)
-                                    editorTrigger.current = node;
-                                }}
-                                disabled={
-                                  !writable ||
-                                  loading ||
-                                  !!error ||
-                                  admissionEditing
-                                }
-                                aria-label={`Edit ${lane.name} lane`}
-                                onClick={() => {
-                                  setLaneId(lane.id);
-                                  setNotice("");
-                                  setEditor(selected);
-                                }}
-                              >
-                                Edit lane
-                              </Button>
+                              <div className="review-config-actions">
+                                <Button
+                                  ref={(node) => {
+                                    if (laneId === lane.id)
+                                      editorTrigger.current = node;
+                                  }}
+                                  disabled={
+                                    !writable ||
+                                    loading ||
+                                    !!error ||
+                                    admissionEditing
+                                  }
+                                  aria-label={`Edit ${lane.name} lane`}
+                                  onClick={() => {
+                                    setDeletingLane(false);
+                                    setLaneId(lane.id);
+                                    setNotice("");
+                                    setEditor(selected);
+                                  }}
+                                >
+                                  Edit lane
+                                </Button>
+                                <Button
+                                  disabled={
+                                    !writable ||
+                                    loading ||
+                                    !!error ||
+                                    admissionEditing ||
+                                    (selected.config.lanes.length === 1 &&
+                                      !onDelete)
+                                  }
+                                  aria-label={`Delete ${lane.name} lane`}
+                                  onClick={(event) => {
+                                    if (selected.config.lanes.length === 1) {
+                                      onDelete?.(selected, event.currentTarget);
+                                    } else {
+                                      editorTrigger.current =
+                                        event.currentTarget;
+                                      setDeletingLane(true);
+                                      setLaneId(lane.id);
+                                      setNotice("");
+                                      setEditor(selected);
+                                    }
+                                  }}
+                                >
+                                  Delete lane
+                                </Button>
+                              </div>
                             }
                           />
                           <div className="review-config-reviewers">
@@ -883,6 +864,7 @@ export function ChannelConfiguration({
                           selected.config.lanes.length >= 12
                         }
                         onClick={() => {
+                          setDeletingLane(false);
                           setLaneId(undefined);
                           setNotice("");
                           setEditor(selected);
@@ -928,6 +910,7 @@ function ConfigurationEditor({
   writable,
   previous,
   laneId,
+  initiallyRemoving = false,
   existing,
   onCancel,
   onSaved,
@@ -937,6 +920,7 @@ function ConfigurationEditor({
   writable: boolean;
   previous: SavedReviewConfig | undefined;
   laneId?: string | undefined;
+  initiallyRemoving?: boolean;
   existing: readonly SavedReviewConfig[];
   onCancel: () => void;
   onSaved: (saved: SavedReviewConfig) => void;
@@ -970,9 +954,9 @@ function ConfigurationEditor({
         },
   }));
   const [busy, setBusy] = useState(false);
-  const [removing, setRemoving] = useState(false);
+  const [removing, setRemoving] = useState(initiallyRemoving);
   const [error, setError] = useState("");
-  const editorRegion = useRef<HTMLFormElement>(null);
+  const editorRegion = useRef<HTMLElement>(null);
   useEffect(() => {
     editorRegion.current?.focus();
   }, []);
@@ -1030,9 +1014,40 @@ function ConfigurationEditor({
       if (!controller.signal.aborted) setBusy(false);
     }
   }
+  if (initiallyRemoving && removing)
+    return (
+      <section
+        className="review-config-form"
+        ref={editorRegion}
+        tabIndex={-1}
+        aria-label="Delete lane"
+      >
+        <InlineHeader title={`Delete ${original?.name} lane?`} />
+        <p>
+          Remove this lane and its routing rules from future reviews? Existing
+          review results and conversations are kept.
+        </p>
+        {error && <p role="alert">{error}</p>}
+        <div className="review-config-actions">
+          <Button disabled={busy} onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={!writable}
+            loading={busy}
+            onClick={() => void save(true)}
+          >
+            Delete lane
+          </Button>
+        </div>
+      </section>
+    );
   return (
     <form
-      ref={editorRegion}
+      ref={(node) => {
+        editorRegion.current = node;
+      }}
       tabIndex={-1}
       aria-label="Edit lane"
       noValidate

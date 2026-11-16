@@ -1,3 +1,4 @@
+import { reviewHistoryChannel } from "./access";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { useSubmissionUpdates } from "./submission-updates";
 import { ReviewStatusLabel, ReviewDate } from "./ReviewStatusLabel";
@@ -66,6 +67,7 @@ export function ReviewSubmissions({
   repository: selectedRepository,
   onOpenSubmission,
   channel,
+  historyChannels,
   writable,
   readable = true,
   onEditingChange,
@@ -84,6 +86,7 @@ export function ReviewSubmissions({
     | ((channel: string, submission?: string) => Promise<void>)
     | undefined;
   channel: string;
+  historyChannels?: readonly string[] | undefined;
   writable: boolean;
   readable?: boolean;
   onEditingChange: (editing: boolean) => void;
@@ -102,11 +105,24 @@ export function ReviewSubmissions({
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [result, setResult] = useState<SavedSubmission>();
-  const updates = useSubmissionUpdates(
+  const personalUpdates = useSubmissionUpdates(
     session,
     channel,
     readable && (mode === "all" || !!result),
+    historyChannels,
   );
+  const needsAddressed =
+    !!submission &&
+    !personalUpdates.loading &&
+    !personalUpdates.rows.some((row) => row.artifactId === submission);
+  const addressedUpdates = useSubmissionUpdates(
+    session,
+    channel,
+    readable && needsAddressed,
+    undefined,
+    submission,
+  );
+  const updates = needsAddressed ? addressedUpdates : personalUpdates;
   const {
     rows,
     loading: listLoading,
@@ -153,7 +169,7 @@ export function ReviewSubmissions({
     Record<string, { value: PullStatus | "Unavailable"; error?: string }>
   >({});
   const input = useRef<HTMLInputElement>(null);
-  const listHeading = useRef<HTMLDivElement>(null);
+  const listHeading = useRef<HTMLHeadingElement>(null);
   const previousSubmission = useRef(submission);
   const listScroll = useRef({ top: 0, left: 0 });
   useEffect(() => {
@@ -176,19 +192,21 @@ export function ReviewSubmissions({
     if (submission) heading?.focus({ preventScroll: true });
     else if (previous) {
       const button = Array.from(
-        heading?.parentElement?.querySelectorAll<HTMLElement>(
-          "[data-submission]",
-        ) ?? [],
+        heading
+          ?.closest("section")
+          ?.querySelectorAll<HTMLElement>("[data-submission]") ?? [],
       ).find((item) => item.dataset.submission === previous);
       (button ?? heading)?.focus({ preventScroll: true });
     }
     if (scroll) scroll.scrollTop = submission ? 0 : listScroll.current.top;
-    const tableScroll = heading?.parentElement?.querySelector<HTMLElement>(
-      ".review-config-table-scroll",
-    );
+    const tableScroll = heading
+      ?.closest("section")
+      ?.querySelector<HTMLElement>(".review-config-table-scroll");
     if (tableScroll)
       tableScroll.scrollLeft = submission ? 0 : listScroll.current.left;
   }, [submission]);
+  const deleteCompleted = useRef(false);
+  const deleteCancel = useRef<HTMLButtonElement>(null);
   const deleteTrigger = useRef<HTMLButtonElement | null>(null);
   const [removing, setRemoving] = useState<SavedSubmission>();
   const [reminding, setReminding] = useState<{
@@ -465,7 +483,7 @@ export function ReviewSubmissions({
   }
 
   async function remove() {
-    if (!removing || operation.current || !writable) return;
+    if (!removing || operation.current || !canDelete(removing)) return;
     const controller = new AbortController();
     operation.current = controller;
     setBusy(true);
@@ -475,7 +493,7 @@ export function ReviewSubmissions({
     try {
       await deleteSubmission(
         session,
-        channel,
+        removing.channel ?? channel,
         removing,
         AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]),
       );
@@ -483,6 +501,8 @@ export function ReviewSubmissions({
       setRows((current) =>
         current.filter((row) => row.artifactId !== removing.artifactId),
       );
+      deleteCompleted.current = true;
+      if (store !== personalUpdates.store) personalUpdates.store.reload();
       setRemoving(undefined);
       setStatus(
         "Submission deleted from the list. Existing conversations are kept.",
@@ -528,6 +548,24 @@ export function ReviewSubmissions({
     ) : null;
   }
 
+  function canDelete(row: SavedSubmission) {
+    if (busy || listLoading || row.value.submitter !== session.viewer)
+      return false;
+    if (!historyChannels) return writable;
+    try {
+      reviewHistoryChannel(session, row.channel ?? channel, true);
+      return !!session.configArtifactWriter;
+    } catch {
+      return false;
+    }
+  }
+  function openDelete(row: SavedSubmission, trigger: HTMLButtonElement) {
+    deleteCompleted.current = false;
+    deleteTrigger.current = trigger;
+    setDeleteError("");
+    setRemoving(row);
+  }
+
   function canRemind(row: SavedSubmission) {
     return (
       !busy &&
@@ -571,7 +609,7 @@ export function ReviewSubmissions({
   }
   async function openSubmission(row: SavedSubmission) {
     try {
-      await onOpenSubmission?.(channel, row.artifactId);
+      await onOpenSubmission?.(row.channel ?? channel, row.artifactId);
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -595,10 +633,12 @@ export function ReviewSubmissions({
           <thead>
             <tr>
               <th scope="col">Pull request</th>
+              {historyChannels && <th scope="col">Channel</th>}
               <th scope="col">GitHub status</th>
               <th scope="col">Review status</th>
               <th scope="col">Summary</th>
               <th scope="col">Updates</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -625,6 +665,14 @@ export function ReviewSubmissions({
                       onClick={() => void openSubmission(row)}
                     />
                   </th>
+                  {historyChannels && (
+                    <td>
+                      {session.channels
+                        .list()
+                        .channels.find((item) => item.id === row.channel)
+                        ?.name ?? row.channel}
+                    </td>
+                  )}
                   <td title={statuses[row.revision]?.error}>
                     {statuses[row.revision]?.value ?? "Loading…"}
                   </td>
@@ -643,6 +691,17 @@ export function ReviewSubmissions({
                     ) : (
                       "—"
                     )}
+                  </td>
+                  <td>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canDelete(row)}
+                      aria-label={`Delete ${name}`}
+                      onClick={(event) => openDelete(row, event.currentTarget)}
+                    >
+                      Delete
+                    </Button>
                   </td>
                 </tr>
               );
@@ -959,17 +1018,10 @@ export function ReviewSubmissions({
                               icon={<TrashIcon />}
                               title="Delete submission"
                               size="sm"
-                              disabled={
-                                busy ||
-                                listLoading ||
-                                !writable ||
-                                row.value.submitter !== session.viewer
+                              disabled={!canDelete(row)}
+                              onClick={(event) =>
+                                openDelete(row, event.currentTarget)
                               }
-                              onClick={(event) => {
-                                deleteTrigger.current = event.currentTarget;
-                                setDeleteError("");
-                                setRemoving(row);
-                              }}
                               aria-label={`Delete ${name}`}
                             />
                           </div>
@@ -1075,14 +1127,18 @@ export function ReviewSubmissions({
       )}
       {mode === "all" && (
         <section className="review-config-form" aria-label="All PRs">
-          <div ref={listHeading} tabIndex={-1}>
+          <div>
             <InlineHeader
+              ref={listHeading}
+              tabIndex={-1}
               title={
                 submission
                   ? selected
                     ? `${selected.value.config.repository}#${selected.value.pr}`
                     : "Pull request details"
-                  : "Submitted pull requests"
+                  : historyChannels
+                    ? "My pull requests"
+                    : "Submitted pull requests"
               }
               actions={
                 <Button
@@ -1136,6 +1192,14 @@ export function ReviewSubmissions({
             </p>
           )}
           {warning && <p role="alert">{warning}</p>}
+          {!submission && personalUpdates.hasMore && (
+            <Button
+              disabled={listLoading}
+              onClick={personalUpdates.store.loadMore}
+            >
+              Load more
+            </Button>
+          )}
         </section>
       )}
       {reminding && (
@@ -1190,20 +1254,25 @@ export function ReviewSubmissions({
           title={`Delete ${removing.value.config.repository}#${removing.value.pr}?`}
           description="Remove this submission from the shared list. The GitHub PR and existing conversations stay available. This does not stop an active review. Submitting the same URL again starts a new review with new threads."
           pending={busy}
+          initialFocus={deleteCancel}
           finalFocus={() =>
-            deleteTrigger.current?.isConnected
+            !deleteCompleted.current && deleteTrigger.current?.isConnected
               ? deleteTrigger.current
               : listHeading.current
           }
           onClose={() => setRemoving(undefined)}
           actions={
             <>
-              <Button disabled={busy} onClick={() => setRemoving(undefined)}>
+              <Button
+                ref={deleteCancel}
+                disabled={busy}
+                onClick={() => setRemoving(undefined)}
+              >
                 Cancel
               </Button>
               <Button
-                variant="prominent"
-                disabled={!writable}
+                variant="destructive"
+                disabled={!canDelete(removing)}
                 loading={busy}
                 onClick={() => void remove()}
               >
