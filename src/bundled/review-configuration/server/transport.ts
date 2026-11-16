@@ -106,7 +106,7 @@ export function reviewTransport(options: {
     },
   };
   const writer: RelayWriter = {
-    kinds: [9, 45010],
+    kinds: [7, 9, 45010],
     async sign(event, signal) {
       signal.throwIfAborted();
       return finalizeEvent(

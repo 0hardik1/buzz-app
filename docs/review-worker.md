@@ -4,6 +4,9 @@ The optional Node worker polls every 30 seconds independently of the desktop app
 It discovers GitHub PR links from the last hour in explicitly assigned private
 channels and submits configured repositories through the same admission, triage,
 lane routing and signed delivery path as Submit PR.
+The worker adds 👀 to the original PR-link message when it picks it up. This
+acknowledges processing; admission and review outcomes remain in the PR details.
+Repeated scans and restarts do not add duplicate pickup reactions.
 
 It reassigns work that is not accepted within five minutes. Accepted reviews get
 three reminders, five minutes apart, then another five minutes to respond before

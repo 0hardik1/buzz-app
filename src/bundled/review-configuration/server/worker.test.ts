@@ -45,6 +45,7 @@ async function fixture() {
     heads = new Map<string, RelayEvent>();
   const published: RelayEvent[] = [];
   let loseReply = false;
+  let loseReaction = false;
   let revokeOnIntent = false;
   const tags = (event: RelayEvent, name: string) =>
     event.tags.find(([key]) => key === name)?.[1];
@@ -215,6 +216,11 @@ async function fixture() {
           revokeOnIntent = false;
           metadata([owner.pubkey, second.pubkey]);
         }
+        if (event.kind === 7 && loseReaction) {
+          loseReaction = false;
+          res.destroy();
+          return;
+        }
         if (event.kind === 9 && loseReply) {
           loseReply = false;
           res.destroy();
@@ -250,6 +256,7 @@ async function fixture() {
     state: storage,
     session: host.session,
     refresh: host.refresh,
+    pickup: host.pickup,
     channels: [channel],
     readStatus: async () => status,
     readPull: async (_repository, pr) => ({
@@ -333,6 +340,32 @@ async function fixture() {
     closePr() {
       status = "Closed";
     },
+    seedPickupIntent(message: RelayEvent) {
+      const event = signed(owner, {
+        kind: 7,
+        created_at: now,
+        content: "👀",
+        tags: [
+          ["h", channel],
+          ["e", message.id],
+          ["p", owner.pubkey],
+        ],
+      });
+      storage.set("outbox", [
+        {
+          event,
+          signed: event,
+          delivery: "sending",
+          guarded: true,
+          recovery: { key: `review-pickup:${message.id}`, value: message.id },
+        },
+      ]);
+      return event;
+    },
+    loseReaction() {
+      loseReaction = true;
+    },
+    pickup: (message: RelayEvent) => host.pickup(message, lifetime.signal),
     loseReply() {
       loseReply = true;
     },
@@ -717,4 +750,72 @@ it("backs off a rejected PR without delaying another candidate", async () => {
       ([event]) => event.pr === 43 && event.action === "submitted",
     ),
   ).toBe(true);
+});
+
+it("reacts to original configured PR messages once across repeated scans and restarts", async () => {
+  const h = await fixture();
+  h.message("Another link https://github.com/example-org/project/pull/42");
+  h.message("Unconfigured https://github.com/elsewhere/project/pull/42");
+  await h.tick();
+  const originals = [...h.events.values()].filter(
+    (e) =>
+      e.kind === 9 &&
+      e.content.includes("https://github.com/example-org/project/pull/42") &&
+      !e.tags.some((t) => t[0] === "subject"),
+  );
+  const reactions = h.published.filter((e) => e.kind === 7);
+  expect(reactions).toHaveLength(2);
+  expect(
+    reactions.every(
+      (e) =>
+        e.content === "👀" &&
+        e.tags.some((t) => t[0] === "p" && t[1] === h.owner.pubkey),
+    ),
+  ).toBe(true);
+  expect(
+    reactions.map((e) => e.tags.find((t) => t[0] === "e")?.[1]).sort(),
+  ).toEqual(originals.map((e) => e.id).sort());
+  await h.restart();
+  h.advance(31);
+  await h.tick();
+  expect(h.published.filter((e) => e.kind === 7)).toHaveLength(2);
+  expect(h.published.filter((e) => e.kind === 9)).toHaveLength(1);
+});
+it("retries an uncertain pickup reaction with the same signed event without blocking submission", async () => {
+  const h = await fixture();
+  h.loseReaction();
+  await h.tick();
+  expect(must(await h.row()).value.threads[0]?.delivered).toBe(true);
+  const first = must(h.published.find((e) => e.kind === 7));
+  await h.restart();
+  h.advance(31);
+  await h.tick();
+  expect(
+    h.published.filter((e) => e.kind === 7).every((e) => e.id === first.id),
+  ).toBe(true);
+  expect([...h.events.values()].filter((e) => e.kind === 7)).toHaveLength(1);
+});
+it("refuses pickup reactions after membership loss or for a target outside the channel", async () => {
+  const h = await fixture();
+  const original = must([...h.events.values()].find((e) => e.kind === 9));
+  await expect(
+    h.pickup({ ...original, tags: [["h", "other"]] }),
+  ).rejects.toThrow();
+  h.metadata([h.first.pubkey, h.second.pubkey]);
+  await expect(h.pickup(original)).rejects.toThrow();
+  expect(h.published.filter((e) => e.kind === 7)).toHaveLength(0);
+});
+
+it("publishes a pickup intent left sending by a crashed process", async () => {
+  const h = await fixture();
+  const original = must([...h.events.values()].find((e) => e.kind === 9));
+  const pending = h.seedPickupIntent(original);
+  await h.restart();
+  await h.tick();
+  expect(h.published.filter((e) => e.kind === 7).map((e) => e.id)).toEqual([
+    pending.id,
+  ]);
+  await h.restart();
+  await h.tick();
+  expect(h.published.filter((e) => e.kind === 7)).toHaveLength(1);
 });

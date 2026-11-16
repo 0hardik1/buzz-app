@@ -1327,7 +1327,9 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   GitHub comments or pin reviewer checkouts.
   An optional, separately provisioned **review server worker** can keep running with Buzz closed.
   Every 30 seconds it scans the last hour in its assigned private channels and submits matching
-  PR links through the saved admission and lane rules. It manages only its signing identity's
+  PR links through the saved admission and lane rules. A 👀 reaction on the original message
+  shows the worker picked it up; check PR details for admission and review outcomes.
+  It manages only its signing identity's
   submissions. Unaccepted assignments rotate after five minutes; accepted reviews get up to
   three five-minute inactivity reminders, then another five minutes to respond before rotation.
   Automatic reminders preserve Reviewing; the reviewer's thread replies reset inactivity.

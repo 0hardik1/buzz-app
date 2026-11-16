@@ -1,3 +1,4 @@
+import type { RelayEvent } from "../../../features/relay/events";
 import {
   ARTIFACT_KIND,
   uuidv5,
@@ -53,6 +54,7 @@ export type ReviewWorker = {
     get<T>(key: string): T | undefined;
     set(key: string, value: unknown): void;
   };
+  pickup?(message: RelayEvent, signal: AbortSignal): Promise<void>;
   report(event: {
     channel: string;
     pr?: number;
@@ -198,7 +200,7 @@ export async function reviewTick(
       }
       const candidates = new Map<
         string,
-        ReturnType<typeof discoverPulls>[number]
+        ReturnType<typeof discoverPulls>[number] & { messages: RelayEvent[] }
       >();
       let before: { until: number; before_id: string } | undefined;
       for (let page = 0; page < 4; page++) {
@@ -230,8 +232,15 @@ export async function reviewTick(
           )
             continue;
           for (const pull of discoverPulls(message.content))
-            if (directory.has(pull.repository))
-              candidates.set(`${pull.repository}:${pull.pr}`, pull);
+            if (directory.has(pull.repository)) {
+              const key = `${pull.repository}:${pull.pr}`;
+              const candidate = candidates.get(key) ?? {
+                ...pull,
+                messages: [],
+              };
+              candidate.messages.push(message);
+              candidates.set(key, candidate);
+            }
         }
         if (messages.length < 500) break;
         if (page === 3)
@@ -276,7 +285,9 @@ export async function reviewTick(
             { signal },
           );
           if (existing[0]) {
-            await decodeSubmission(existing[0], channel);
+            const row = await decodeSubmission(existing[0], channel);
+            if (!row.value.deleted && row.value.submitter === viewer)
+              await pickup(row);
             continue;
           }
           const status = await worker.readStatus(
@@ -285,6 +296,7 @@ export async function reviewTick(
             signal,
           );
           if (status !== "Open" && status !== "Draft") continue;
+          await pickup();
           const config = directory.get(pull.repository);
           if (!config) continue;
           const facts = await worker.readPull(pull.repository, pull.pr, signal);
@@ -337,6 +349,36 @@ export async function reviewTick(
           worker.report({ channel, pr: pull.pr, action: "submitted" });
         } catch (error) {
           recordError(channel, error, pull.pr, job);
+        }
+        async function pickup(record?: SavedSubmission) {
+          if (!worker.pickup) return;
+          const roots = new Set(
+            [
+              ...(record?.value.threads.map((thread) => thread.id) ?? []),
+              record?.value.triage?.thread.id,
+            ].filter(Boolean),
+          );
+          for (const message of pull.messages) {
+            if (
+              roots.has(message.id) ||
+              message.tags.some(
+                ([name, value]) => name === "e" && roots.has(value),
+              )
+            )
+              continue;
+            try {
+              await worker.pickup(message, signal);
+            } catch (error) {
+              signal.throwIfAborted();
+              worker.report({
+                channel,
+                pr: pull.pr,
+                action: "reaction-error",
+                error:
+                  error instanceof Error ? error.message : "Reaction failed.",
+              });
+            }
+          }
         }
       }
       async function submit(

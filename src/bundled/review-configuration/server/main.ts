@@ -95,6 +95,7 @@ async function main() {
       state: storage,
       session: host.session,
       refresh: host.refresh,
+      pickup: host.pickup,
       channels: config.channels,
       readPull: createPullReader(gh),
       readStatus: createPullStatusReader(gh),
