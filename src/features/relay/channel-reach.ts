@@ -65,8 +65,12 @@ type Result = "loading" | "open" | "unavailable" | "failed" | "banned";
 type Record = {
   holders: number;
   result: Result;
-  /** When a timeout in the relay's answer ends (Unix seconds). */
+  /** When to ask again because a timeout in the relay's answer ends (ms). */
+  due?: number | undefined;
+  /** The timeout end the last answer carried (Unix seconds). */
   until?: number | undefined;
+  /** Answers in a row that repeated it. */
+  repeats: number;
   checking?: AbortController | undefined;
   again: boolean;
   listeners: Set<() => void>;
@@ -88,6 +92,10 @@ const banned: ChannelReachState = Object.freeze({
 });
 /** The longest delay a timer can hold; a later end is waited for in steps. */
 const LONGEST_WAIT = 2 ** 31 - 1;
+/** The least wait after an answer repeats the last one's timeout end,
+ * doubling with each repeat up to the most. */
+const LATE_WAIT = 5_000;
+const LATEST_WAIT = 300_000;
 
 export function createChannelReach(host: ChannelReachHost) {
   const records = new Map<string, Record>();
@@ -99,20 +107,20 @@ export function createChannelReach(host: ChannelReachHost) {
     timer = undefined;
     let next = Infinity;
     for (const record of records.values())
-      if (record.until !== undefined) next = Math.min(next, record.until);
+      if (record.due !== undefined) next = Math.min(next, record.due);
     if (next === Infinity || host.signal.aborted) return;
     timer = setTimeout(
       () => {
         timer = undefined;
-        const now = Date.now() / 1000;
+        const now = Date.now();
         for (const [id, record] of records)
-          if (record.until !== undefined && record.until <= now) {
-            record.until = undefined;
+          if (record.due !== undefined && record.due <= now) {
+            record.due = undefined;
             void check(id);
           }
         schedule();
       },
-      Math.min(LONGEST_WAIT, Math.max(0, next * 1000 - Date.now())),
+      Math.min(LONGEST_WAIT, Math.max(0, next - Date.now())),
     );
   }
 
@@ -209,7 +217,23 @@ export function createChannelReach(host: ChannelReachHost) {
     if (records.get(id) !== record) return;
     // The result first, so the change it causes is read against it.
     record.result = outcome.result;
-    record.until = outcome.access?.until;
+    // Ask again when the timeout ends. A clock running fast sees that end
+    // pass while the relay still gives it: each repeat waits at least
+    // longer, never back to back. A changed answer starts over.
+    const until = outcome.access?.until;
+    record.repeats =
+      until !== undefined && until === record.until ? record.repeats + 1 : 0;
+    record.until = until;
+    record.due =
+      until === undefined
+        ? undefined
+        : Date.now() +
+          Math.max(
+            until * 1000 - Date.now(),
+            record.repeats
+              ? Math.min(LATEST_WAIT, LATE_WAIT * 2 ** (record.repeats - 1))
+              : 0,
+          );
     schedule();
     if (outcome.result === "unavailable" || outcome.result === "banned")
       host.deny(id);
@@ -226,6 +250,7 @@ export function createChannelReach(host: ChannelReachHost) {
         record = {
           holders: 0,
           result: "loading",
+          repeats: 0,
           again: false,
           listeners: new Set(),
           state: loading,

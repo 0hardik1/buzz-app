@@ -620,3 +620,30 @@ it("says a banned viewer is banned, not that the check failed", async () => {
     h.owner.dispose();
   }
 });
+
+it("asks a handful of times, not in a burst, when this clock runs two minutes fast", async () => {
+  const h = await setup();
+  try {
+    const handle = h.owner.session.channels.reach?.(conversation);
+    // The relay's clock is two minutes behind this one, and the timeout ends
+    // two minutes from now by the relay's: "now" here.
+    const ends = Math.floor(Date.now() / 1000);
+    const relayLifts = Date.now() + 120_000;
+    const reply = () => (Date.now() < relayLifts ? timedOut(ends) : member);
+    (await h.ask()).answer(reply());
+    await h.named();
+    let asked = 1;
+    for (let second = 0; second < 300; second++) {
+      await vi.advanceTimersByTimeAsync(1_000);
+      while (h.asks.length) {
+        h.asks.shift()?.answer(reply());
+        asked++;
+        await h.named();
+      }
+    }
+    expect(asked).toBeLessThanOrEqual(8);
+    expect(handle?.snapshot()).toMatchObject({ status: "open", post: true });
+  } finally {
+    h.owner.dispose();
+  }
+});
