@@ -1,3 +1,4 @@
+import { TeamViewMenu } from "./TeamViewMenu";
 import { RailPinPicker } from "./RailPinPicker";
 import { RailEntryArtwork } from "./RailEntryArtwork";
 import { railSections } from "./rail-sections";
@@ -40,7 +41,6 @@ import {
   sidebarSectionTarget,
   isSidebarSectionRoute,
 } from "../../features/channel-navigation/sidebar-section-route";
-import { CountBadge } from "../../shared/design-system/ui/CountBadge";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
@@ -55,6 +55,7 @@ import {
   PinIcon,
   PlusIcon,
   StorefrontIcon,
+  SendIcon,
   UserIcon,
   UsersIcon,
 } from "../../shared/design-system/icons";
@@ -175,6 +176,7 @@ export function RailNavigation({
   const list = useChannelRoster(session.channels);
   // Solo's chats, most recent first: the index keeps them in order.
   const soloOrder = useConversationKeys(session, soloView);
+  const recentOrder = useConversationKeys(session, recentView);
   const profiles = useSyncExternalStore(
     session.profiles.subscribe,
     session.profiles.snapshot,
@@ -678,12 +680,13 @@ export function RailNavigation({
     const activityPage = teamPages.find(
       (page) => page.key === "buzz.inbox/inbox",
     );
-    const activityEntry = activityPage && byId.get(activityPage.key);
     const teamViews: {
       filter: ActivityView["filter"];
       label: string;
       icon: ReactElement;
     }[] = [
+      { filter: "all", label: "Activity", icon: <ChatCircleIcon size={18} /> },
+      { filter: "channels", label: "Channels", icon: <HashIcon size={18} /> },
       {
         filter: "threads",
         label: "Threads",
@@ -691,62 +694,80 @@ export function RailNavigation({
       },
       { filter: "dms", label: "DMs", icon: <UsersIcon size={18} /> },
       { filter: "mentions", label: "Mentions", icon: <AtIcon size={18} /> },
-      { filter: "channels", label: "Channels", icon: <HashIcon size={18} /> },
     ];
     const teamOpen = routedSection(navigation.entry.target) === "messages";
+    const draftsPage = teamPages.find((page) => page !== activityPage);
     const messageCard = shown("messages", () => (
       <RailGroup
         id="messages"
         title="Team"
-        rows={[
-          ...(activityEntry
-            ? [
-                {
-                  entry: activityEntry,
-                  content: (
-                    <NavigationItem
-                      label="Activity"
-                      icon={<ChatCircleIcon size={18} />}
-                      trailing={teamCount("all")}
-                      data-rail-team-view="all"
-                      // Activity is Team's list on All.
-                      selected={teamOpen && messageView.filter === "all"}
+        rows={recentOrder.flatMap((key) => {
+          const channel = channelsById.get(key.slice(2));
+          if (
+            !channel ||
+            channel.channelType === "solo" ||
+            hidden.has(channel.id)
+          )
+            return [];
+          const entry = byId.get(`channel:${channel.id}`);
+          return entry ? [sourceRow(entry, "messages")] : [];
+        })}
+        views={
+          <div className={styles.teamViews}>
+            {teamViews.map((item) => (
+              <TeamViewMenu
+                key={item.filter}
+                session={session}
+                filter={item.filter}
+              >
+                <div className={styles.teamView}>
+                  <Tooltip content={item.label}>
+                    <IconButton
+                      variant="ghost"
+                      shape="round"
+                      aria-label={item.label}
+                      icon={item.icon}
+                      data-rail-team-view={item.filter}
+                      aria-pressed={
+                        teamOpen && messageView.filter === item.filter
+                      }
                       onClick={() => {
-                        setMessageView({ ...messageView, filter: "all" });
+                        setMessageView({ ...messageView, filter: item.filter });
                         void directNavigator.open(
                           sidebarSectionTarget(scope, "messages"),
                         );
                       }}
                     />
-                  ),
-                },
-              ]
-            : []),
-          ...teamPages.filter((page) => page !== activityPage).flatMap(pageRow),
-        ]}
-        leadingEntryIds={["buzz.inbox/inbox"]}
-        views={teamViews.map((item) => (
-          <NavigationItem
-            key={item.filter}
-            label={item.label}
-            icon={item.icon}
-            trailing={teamCount(item.filter)}
-            data-rail-team-view={item.filter}
-            selected={teamOpen && messageView.filter === item.filter}
-            onClick={() => {
-              setMessageView({ ...messageView, filter: item.filter });
-              void directNavigator.open(
-                sidebarSectionTarget(scope, "messages"),
-              );
-            }}
-          />
-        ))}
-        pageContent={sectionPage}
-        // Drafts and sent stays under the views, ahead of what a person adds.
-        sortEntries={(a, b) =>
-          Number(b.id === "buzz.drafts-and-sent/drafts-sent") -
-          Number(a.id === "buzz.drafts-and-sent/drafts-sent")
+                  </Tooltip>
+                  <span className={styles.teamCount}>
+                    {teamCount(item.filter)}
+                  </span>
+                </div>
+              </TeamViewMenu>
+            ))}
+            {draftsPage && (
+              <Tooltip content={draftsPage.title}>
+                <IconButton
+                  variant="ghost"
+                  shape="round"
+                  aria-label={draftsPage.title}
+                  icon={<SendIcon size={18} />}
+                  onClick={() => onSelect(draftsPage.key)}
+                />
+              </Tooltip>
+            )}
+          </div>
         }
+        pageContent={sectionPage}
+        renderOpen={(hidden, open) => (
+          <RailOpenConversations
+            session={session}
+            channels={channels}
+            hidden={hidden}
+            label="Open Team"
+            onClick={open}
+          />
+        )}
         action={creationAction}
       />
     ));
@@ -1147,9 +1168,10 @@ const TeamCount = memo(function TeamCount({
 }) {
   const count = useConversationCount(session, unreadIn[filter]);
   return count ? (
-    <CountBadge
-      count={count}
-      label={`${count} unread conversation${count === 1 ? "" : "s"}`}
+    <span
+      className={styles.teamUnreadMark}
+      role="img"
+      aria-label={`${count} unread conversation${count === 1 ? "" : "s"}`}
     />
   ) : null;
 });
@@ -1160,6 +1182,11 @@ const unreadIn = Object.fromEntries(
     { filter, unread: true, home: "team" },
   ]),
 ) as Record<ActivityView["filter"], ConversationQuery>;
+const recentView: ConversationQuery = {
+  filter: "all",
+  unread: false,
+  sort: "recent",
+};
 const soloView: ConversationQuery = {
   filter: "all",
   unread: false,

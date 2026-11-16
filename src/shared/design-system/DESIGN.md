@@ -2324,6 +2324,10 @@ button (beneath horizontal docks); badges overlay the tile. CountBadge uses a co
 corner capsule straddling the top-right edge, with `surface-dock-count` and
 `text-dock-count` keeping dark fill and readable accent ink in both modes. The
 shell scrollport preserves gutter space for the full capsule and focus ring.
+Rail shortcut counts use CountBadge’s `rail` variant: theme accent fill, contrasting
+text, and a 1.5px `surface-rail-card` ring separating the badge from its button.
+The `dot` presentation retains the accessible count while showing only unread
+presence; Team uses it for subviews and keeps the Activity aggregate numeric.
 A tile with a page preview shows its label on keyboard focus and while its preview is closed.
 Up/Down arrow keys move focus in the side dock without selecting; Enter, Space or
 pointer selection changes the page while focus stays on its tab. Horizontal dock

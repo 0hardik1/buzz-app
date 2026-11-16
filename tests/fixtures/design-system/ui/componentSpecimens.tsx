@@ -2573,6 +2573,8 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
   "theme-picker": ThemePickerSpecimen,
   "count-badge": () => (
     <div className="flex w-64 flex-col gap-1">
+      <CountBadge variant="rail" count={35} label="35 unread conversations" />
+      <CountBadge variant="rail" dot count={6} label="6 unread channels" />
       <NavigationItem
         label="Drafts & sent"
         trailing={<CountBadge count={5} label="5 drafts" />}

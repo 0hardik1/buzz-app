@@ -946,8 +946,7 @@ and are asked to sign in again in Buzz.
   **Open [section name]** opens a dedicated list in the main content area without expanding
   the card. Back and Forward return between the list and its items. Pins remains uncapped. The Team card lists
   **Activity**, **Threads**, **DMs**, **Mentions**, and **Channels**. Each opens the
-  Team list on that view; Activity is the **All** view. Each row shows how many
-  of its conversations are unread, and no number when all are read. The view
+  Team list on that view; Activity is the **All** view. Activity shows its unread count; the other shortcuts show a dot when unread. The view
   you choose is saved locally for this account and community. Bestie conversations
   follow normal ordering; the Bestie plugin also appears under Plugins.
   Team's views keep Solo chats in the Solo collection.
@@ -1073,8 +1072,13 @@ and are asked to sign in again in Buzz.
   grabbers brighten only when the pointer is close and appear immediately under it.
   Hovering elsewhere on the card keeps them hidden. Keyboard focus reveals controls
   immediately, and touch devices show them without waiting.
-- **Team card**: Activity, Threads, DMs, Mentions, and Channels each show an unread count.
-  Drafts & sent and anything you move into Team appear below them. The **Team**
+- Right-click a Team view shortcut to mark its matching conversations or items as read
+  or unread. Marking unread applies on this device; Drafts & sent has no read state.
+- **Team card**: Activity shows the unread count; Threads, DMs, Mentions, and Channels show an
+  unread dot. Right-click offers Mark as read when the view has unread items,
+  otherwise Mark as unread.
+  Drafts & sent sits beside those shortcuts. Below them, the card shows up to four
+  recent Team conversations, with **Open Team** for the full list. The **Team**
   heading opens the full conversation list.
   Opening Team this way selects no conversation: the main panel says
   **No conversation selected** until you pick a row, and **+** starts a new

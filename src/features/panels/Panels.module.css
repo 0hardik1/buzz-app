@@ -235,7 +235,7 @@ html[data-keyboard-input] :is(.subviewBase, .subview) {
 }
 .workspace
   > header:not([data-variant="conversation"])
-  [class="panel-header-title"] {
+  [class="panel-header-title"]:not(:has(> [data-variant="navigation"])) {
   overflow: hidden;
 }
 .workspace > header [class="panel-header-actions"] {

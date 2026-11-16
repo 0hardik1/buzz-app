@@ -9,8 +9,14 @@ const MAX_VISIBLE = 99;
 export function CountBadge({
   count,
   label,
+  variant = "neutral",
+  dot = false,
 }: {
   count: number;
+  /** Preserve the accessible count while showing only unread presence. */
+  dot?: boolean;
+  /** Rail shortcut badges use theme color and a card-colored separating ring. */
+  variant?: "neutral" | "rail";
   /** Spoken description, such as "5 drafts". */
   label: string;
 }) {
@@ -19,10 +25,12 @@ export function CountBadge({
     <span
       data-buzz-ui=""
       className="buzz-count-badge"
+      data-variant={variant}
+      data-dot={dot || undefined}
       role="img"
       aria-label={label}
     >
-      {count > MAX_VISIBLE ? `${MAX_VISIBLE}+` : count}
+      {!dot && (count > MAX_VISIBLE ? `${MAX_VISIBLE}+` : count)}
     </span>
   );
 }
