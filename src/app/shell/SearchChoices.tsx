@@ -129,8 +129,9 @@ export type SearchPeek = {
   /** Results that may still arrive, so the list is busy. */
   busy?: boolean;
   /** Groups whose source hasn't searched this text as typed (a last word
-   * too short to search messages, say), so they may still come back. */
-  unsearched?: readonly string[] | undefined;
+   * too short to search messages, say), so they may still come back, each
+   * with the reason shown while it's chosen. */
+  unsearched?: Readonly<Record<string, ReactNode>> | undefined;
 };
 
 /** Top results shows this many rows of its first group, and of the rest. */
@@ -326,16 +327,20 @@ export function SearchChoices({
   // settled without it. Shown or not, the choice is never kept out of sight.
   const chosen = ranked.find((group) => group.label === peekScope);
   const awaited =
-    !!peekScope && (!!peek?.busy || !!peek?.unsearched?.includes(peekScope));
+    !!peekScope &&
+    (!!peek?.busy || Object.hasOwn(peek?.unsearched ?? {}, peekScope));
   // Peek turned off (a filter such as `in:` added) lets it go too.
   if (peekScope && (!peek?.ranked || (!chosen && !awaited)))
     setPeekScope(undefined);
   const landing =
     peek?.ranked && peekScope && !chosen && awaited
-      ? (merged.find((group) => group.label === peekScope) ?? {
-          label: peekScope,
-          destinations: [],
-        })
+      ? {
+          ...(merged.find((group) => group.label === peekScope) ?? {
+            label: peekScope,
+            destinations: [],
+          }),
+          empty: peek.unsearched?.[peekScope],
+        }
       : undefined;
   const scoped = chosen ?? landing;
   const tabs = landing ? [...ranked, landing] : ranked;

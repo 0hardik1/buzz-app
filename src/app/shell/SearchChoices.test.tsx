@@ -479,7 +479,7 @@ it("goes back to Top results on Escape while a chosen group's results land", () 
 });
 
 it("keeps a chosen group while its source hasn't searched the text as typed", () => {
-  const peekOf = (rows: number, unsearched?: string[]) => (
+  const peekOf = (rows: number, unsearched?: Record<string, string>) => (
     <SearchChoices
       query="design"
       onQueryChange={() => {}}
@@ -496,8 +496,9 @@ it("keeps a chosen group while its source hasn't searched the text as typed", ()
     screen.getByRole("tab", { selected: true }).textContent ?? "";
   fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
   // "design c": the other sources settled, but messages weren't searched.
-  rerender(peekOf(0, ["Messages"]));
+  rerender(peekOf(0, { Messages: "Type at least 3 characters." }));
   expect(shown()).toMatch(/^Messages/);
+  expect(screen.getByText("Type at least 3 characters.")).toBeVisible();
   rerender(peekOf(2));
   expect(shown()).toMatch(/^Messages/);
 });

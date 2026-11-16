@@ -3261,6 +3261,83 @@ it("reads no message search until the last word has three characters", async () 
   }
 });
 
+it("keeps a chosen Messages group, with its reason, while the text as typed isn't searchable", async () => {
+  vi.useFakeTimers();
+  const relay = keypair(),
+    viewer = keypair();
+  const discovery = [
+    metadata(relay, "crew", "crew"),
+    roster(relay, "crew", [viewer.pubkey]),
+    metadata(relay, "crit", "design-crit"),
+    roster(relay, "crit", [viewer.pubkey]),
+  ];
+  const owner = createRelaySession({
+    ...scriptedTransport(viewer.pubkey, relay.pubkey).transport,
+    query(filters) {
+      const search = filters.find(
+        (filter) => filter.search !== undefined && filter.kinds?.includes(9),
+      )?.search;
+      if (search !== undefined)
+        return Promise.resolve([
+          message(viewer, "crew", `${search} notes`, 1700000500),
+        ]);
+      return Promise.resolve(
+        discovery.filter((event) =>
+          filters.some((filter) => matchFilter(filter as Filter, event)),
+        ),
+      );
+    },
+  });
+  const props = {
+    session: owner.session,
+    onQueryChange: () => {},
+    input: createRef<HTMLInputElement>(),
+    pages: [],
+    openConversation: () => {},
+  };
+  const settle = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+    });
+  const shown = () =>
+    screen.getByRole("tab", { selected: true }).textContent ?? "";
+  try {
+    const view = render(<SearchResults {...props} query="design" />);
+    await settle();
+    fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+    expect(screen.getByRole("option", { name: /design notes/ })).toBeVisible();
+
+    // design-crit still matches, but messages aren't searched yet.
+    view.rerender(<SearchResults {...props} query="design c" />);
+    await settle();
+    expect(shown()).toMatch(/^Messages/);
+    expect(
+      screen.getByText(
+        "Type at least 3 characters in the last word to search messages.",
+      ),
+    ).toBeVisible();
+
+    view.rerender(<SearchResults {...props} query="-design" />);
+    await settle();
+    expect(shown()).toMatch(/^Messages/);
+    expect(
+      screen.getByText(
+        "Add a word or “phrase” to search for alongside -exclusions.",
+      ),
+    ).toBeVisible();
+
+    view.rerender(<SearchResults {...props} query="design crit" />);
+    await settle();
+    expect(shown()).toMatch(/^Messages/);
+    expect(
+      screen.getByRole("option", { name: /design crit notes/ }),
+    ).toBeVisible();
+  } finally {
+    cleanup();
+    owner.dispose();
+  }
+});
+
 it("an in: operator does not lower the message search minimum", async () => {
   vi.useFakeTimers();
   const relay = keypair(),

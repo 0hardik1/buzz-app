@@ -2218,7 +2218,9 @@ export function SearchResults({
           hints,
           busy: !!query.trim() && (messagesPending || directoryPending),
           unsearched:
-            search.tooShort || search.onlyExclusions ? ["Messages"] : undefined,
+            search.tooShort || search.onlyExclusions
+              ? { Messages: messageEmpty }
+              : undefined,
           preview: (row, tone, follow) => (
             <SearchPreview
               session={session}
