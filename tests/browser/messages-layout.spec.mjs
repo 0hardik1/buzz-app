@@ -367,6 +367,20 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     });
     await page.mouse.up();
   };
+  // The new-section target appears once a row is lifted and can still be
+  // settling into place, so the pointer follows it until it takes the drop.
+  const dropOnNewSection = async (target) => {
+    await expect(async () => {
+      const box = await target.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, {
+        steps: 4,
+      });
+      await expect(target).toHaveAttribute("data-drop-target", "true", {
+        timeout: 500,
+      });
+    }).toPass();
+    await page.mouse.up();
+  };
   const order = () =>
     rail
       .locator("[data-rail-section]")
@@ -421,7 +435,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
 
   await startDrag(workflows);
   await expect(newSection).toHaveCSS("opacity", "1");
-  await dropOn(newSection);
+  await dropOnNewSection(newSection);
   const dialog = page.getByRole("dialog", {
     name: "Move to new section",
     exact: true,
@@ -445,7 +459,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
 
   await startDrag(workflows);
   await expect(newSection).toHaveCSS("opacity", "1");
-  await dropOn(newSection);
+  await dropOnNewSection(newSection);
   await opened();
   await dialog
     .getByRole("textbox", { name: "Section name" })
