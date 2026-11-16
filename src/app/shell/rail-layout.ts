@@ -13,7 +13,8 @@ export type RailLayout = {
   sections: { id: string; title: string }[];
   placements: Placement[];
 };
-const KEY = "navigation-layout:v2";
+export const LAYOUT_KEY = "navigation-layout:v2";
+const KEY = LAYOUT_KEY;
 
 const readLayout = (scope: string) =>
   parseRailLayout(readView<unknown>(scope, KEY, null));

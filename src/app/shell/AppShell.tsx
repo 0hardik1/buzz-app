@@ -10,6 +10,7 @@ import { ChatIcons } from "../../features/conversation/ChatIconSlot";
 import { ListColumn } from "./ListColumn";
 import { SidePanelPresence } from "../../features/panels/side-panel-presence";
 import { useListSection } from "./list-section";
+import { useRailInputs } from "./rail-model";
 import { syncRail } from "./rail-sync";
 import { routedSection, useListColumn } from "./list-column";
 import { navigationOwner, orderPages } from "./presentation";
@@ -191,9 +192,9 @@ function AppShellContent({
     connection.session,
     connection.viewer ? connection.scope : undefined,
     searchServices?.navigation,
-    searchServices?.sidebarSections,
     listColumn.list,
   );
+  useRailInputs(connection.session, pages, searchServices?.sidebarSections);
   // Open side panels report themselves; the layout does not search for them.
   const [sidePanels, setSidePanels] = useState(0);
   const sidePanelPresence = useMemo(

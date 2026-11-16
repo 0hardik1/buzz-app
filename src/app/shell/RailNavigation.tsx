@@ -1,6 +1,5 @@
 import { RailPinPicker } from "./RailPinPicker";
 import { RailEntryArtwork } from "./RailEntryArtwork";
-import { railSections } from "./rail-sections";
 import {
   memo,
   useCallback,
@@ -24,15 +23,10 @@ import type { NavigationOpenOptions } from "../../features/navigation/controller
 import { targetKey } from "../../features/navigation/targets";
 import type { Navigation } from "../../features/navigation/controller";
 import type { RegisteredPage } from "../../features/pages/service";
-import { useAgentChoices } from "../../features/agents/use-choices";
 import { canMessageAgent } from "../../features/agents/choices";
-import { archiveHides } from "../../features/relay/identity-archives";
-import { dmLabel } from "../../features/conversation/dm-label";
 import { useIdentityNames } from "../../features/identity-names/react";
 import { useSavedHiddenDmIds } from "../../bundled/channels/useHiddenDms";
 import { resumeSoloDraftTarget } from "../../features/channel-navigation/routes";
-import { useSoloNavigation } from "../../features/channel-navigation/solo-navigation-react";
-import { hiddenSoloChats } from "../../features/channel-navigation/solo-navigation-model";
 import { soloDraftInput } from "../../features/solo/SoloDraft";
 import {
   soloNeighbors,
@@ -65,7 +59,6 @@ import {
   UserIcon,
   UsersIcon,
 } from "../../shared/design-system/icons";
-import { useRailLayout } from "./rail-layout";
 import { RailArrangement, RailGroup } from "./RailArrangement";
 import { ContributedRailSections } from "../../features/channel-navigation/ContributedRailSections";
 import type { SidebarSections } from "../../features/channel-navigation/sidebar-sections-service";
@@ -76,6 +69,7 @@ import { PageIcon } from "./PageIcon";
 import { pagePresentation } from "./presentation";
 import { RailConversationList } from "./RailConversationList";
 import { useRailPins, type RailEntry } from "./rail-pins";
+import { personEntries, soloView, useRailModel } from "./rail-model";
 import { useTeamExpanded } from "./rail-sync";
 import {
   useChannelNavigation,
@@ -90,12 +84,9 @@ import styles from "./RailNavigation.module.css";
 import {
   useConversationCount,
   conversationIndex,
-  useConversationKeys,
   type ConversationFilter,
   type ConversationQuery,
 } from "../../features/conversation/conversation-index";
-import { useChannelRoster } from "../../features/relay/react";
-import { selectProfiles } from "../../features/relay/profile-selection";
 import {
   CollectionCreationAction,
   CollectionFilters,
@@ -178,7 +169,6 @@ export function RailNavigation({
     session.sidebarPreferences.snapshot,
   );
   const resolveName = useIdentityNames(session.names);
-  const { layout: railLayout } = useRailLayout(partition);
   const [savedMessageView, setMessageView] = useActivityView(partition);
   const [teamExpanded, setTeamExpanded] = useTeamExpanded(partition);
   // Team offers no agent views; a saved one shows All.
@@ -186,16 +176,19 @@ export function RailNavigation({
     () => withoutAgentViews(savedMessageView),
     [savedMessageView],
   );
-  const { pins, setPinned } = useRailPins(partition);
-  // The roster: a message replaces the list, but not who is in it.
-  const list = useChannelRoster(session.channels);
-  // Solo's chats, most recent first: the index keeps them in order.
-  const soloOrder = useConversationKeys(session, soloView);
-  const agents = useAgentChoices(session, true, true);
-  const archives = useSyncExternalStore(
-    session.archives.subscribe,
-    session.archives.snapshot,
-  );
+  const { setPinned } = useRailPins(partition);
+  // What the rail shows is built once for the session; this only draws it.
+  const {
+    channels,
+    channelsById,
+    agents,
+    agentEntries,
+    entries: modelEntries,
+    byId: modelById,
+    pins,
+    sections: membership,
+    soloChats,
+  } = useRailModel(session);
   // Only the shown entry draws the rail. An opening visit's other steps,
   // its start and its settling, change nothing here and render nothing.
   const shownEntry = useSyncExternalStore(
@@ -231,149 +224,36 @@ export function RailNavigation({
   }, [navigator]);
   useEffect(() => () => pending.current?.abort(), []);
 
-  const channels = useMemo(
-    () =>
-      list.channels.filter(
-        (channel) =>
-          !channel.archived && !channel.huddle && !channel.metadataPending,
+  // The open picker lists everyone known, not only the people the rail names.
+  const everyone = useSyncExternalStore(
+    picker ? session.profiles.subscribe : noSubscription,
+    () => (picker ? session.profiles.snapshot() : undefined),
+  );
+  const { entries, byId } = useMemo(() => {
+    if (!everyone) return { entries: modelEntries, byId: modelById };
+    const entries = [
+      ...modelEntries.filter((entry) => !entry.id.startsWith("person:")),
+      ...personEntries(
+        session,
+        scope.viewer,
+        everyone,
+        new Set(agents.identities.map((agent) => agent.pubkey)),
+        resolveName,
       ),
-    [list.channels],
-  );
-  const channelsById = useMemo(
-    () => new Map(channels.map((channel) => [channel.id, channel])),
-    [channels],
-  );
-  // The rail names DM participants and pinned people, so only their
-  // profiles draw it; the open picker lists everyone known. Each row's
-  // artwork follows its own people.
-  const named = useMemo(
-    () =>
-      [
-        ...new Set([
-          ...channels.flatMap((channel) =>
-            channel.channelType === "dm" ? (channel.participants ?? []) : [],
-          ),
-          ...pins.flatMap((pin) =>
-            pin.target.kind === "person" ? [pin.target.pubkey] : [],
-          ),
-        ]),
-      ]
-        .sort()
-        .join(":"),
-    [channels, pins],
-  );
-  const shownProfiles = useMemo(
-    () =>
-      picker
-        ? session.profiles
-        : selectProfiles(session.profiles, named ? named.split(":") : []),
-    [session.profiles, picker, named],
-  );
-  const profiles = useSyncExternalStore(
-    shownProfiles.subscribe,
-    shownProfiles.snapshot,
-  );
-  const channelEntries = useMemo(
-    (): RailEntry[] =>
-      channels.map((channel) => {
-        const dm = channel.channelType === "dm";
-        const other = dm ? channel.participants?.[0] : undefined;
-        return {
-          id: `channel:${channel.id}`,
-          label: dm
-            ? dmLabel(channel.participants, profiles, resolveName, channel.name)
-            : channel.name,
-          kind: dm
-            ? "person"
-            : channel.channelType === "solo"
-              ? "chat"
-              : "channel",
-          picture: other ? profiles.get(other)?.picture : undefined,
-          target: {
-            version: 1,
-            kind: "conversation",
-            scope,
-            channelId: channel.id,
-          },
-        };
-      }),
-    [channels, profiles, resolveName, scope],
-  );
-  const agentEntries = useMemo(
-    (): RailEntry[] =>
-      agents.selectable.filter(canMessageAgent).map((agent) => ({
-        id: `agent:${agent.pubkey}`,
-        label: agent.managedName ?? agent.name,
-        picture: agent.avatar,
-        kind: "agent",
-        target: { kind: "person", pubkey: agent.pubkey },
-      })),
-    [agents.selectable],
-  );
-  const people = useMemo((): RailEntry[] => {
-    void archives;
-    // Only pinned people need labels while the picker is closed.
-    const pinnedPeople = new Set(pins.map((pin) => pin.id));
-    const knownAgents = new Set(agents.identities.map((agent) => agent.pubkey));
-    return (
-      picker
-        ? [...profiles]
-        : pins.flatMap((pin) => {
-            if (pin.target.kind !== "person") return [];
-            const profile = profiles.get(pin.target.pubkey);
-            return profile ? [[pin.target.pubkey, profile] as const] : [];
-          })
-    )
-      .filter(
-        ([key, profile]) =>
-          (picker || pinnedPeople.has(`person:${key}`)) &&
-          key !== scope.viewer &&
-          !profile.isAgent &&
-          !profile.nameIsFallback &&
-          !knownAgents.has(key) &&
-          !archiveHides(session.archives, key, scope.viewer),
-      )
-      .map(([pubkey, profile]) => ({
-        id: `person:${pubkey}`,
-        label: resolveName(pubkey, profile.name),
-        kind: "person",
-        picture: profile.picture,
-        target: { kind: "person", pubkey },
-      }));
+    ];
+    return {
+      entries,
+      byId: new Map(entries.map((entry) => [entry.id, entry])),
+    };
   }, [
-    picker,
-    pins,
-    profiles,
-    agents.identities,
-    session.archives,
-    archives,
+    everyone,
+    modelEntries,
+    modelById,
+    session,
     scope.viewer,
+    agents.identities,
     resolveName,
   ]);
-  const pageEntries = useMemo(
-    (): RailEntry[] =>
-      pages.map((page) => ({
-        id: page.key,
-        label: page.title,
-        kind: "page",
-        target: {
-          version: 1,
-          kind: "page",
-          pluginId: page.pluginId,
-          pageId: page.id,
-          scope,
-        },
-      })),
-    [pages, scope],
-  );
-  const entries = useMemo(
-    () => [...channelEntries, ...agentEntries, ...people, ...pageEntries],
-    [channelEntries, agentEntries, people, pageEntries],
-  );
-  const byId = useMemo(
-    () => new Map(entries.map((entry) => [entry.id, entry])),
-    [entries],
-  );
   const pinned = new Set(pins.map((pin) => pin.id));
   const togglePin = (entry: RailEntry, nextPinned = !pinned.has(entry.id)) => {
     const saved = setPinned(entry, nextPinned);
@@ -486,15 +366,6 @@ export function RailNavigation({
       agentEntries={agentEntries}
     />
   );
-  // A plugin that hides its Solo region lists its chats in its own UI.
-  const soloRegions = useSoloNavigation(session).regions;
-  const soloChats = useMemo(() => {
-    const hidden = hiddenSoloChats(soloRegions);
-    return soloOrder.flatMap((key) => {
-      const channel = channelsById.get(key.slice(2));
-      return channel && !hidden.has(channel.id) ? [channel] : [];
-    });
-  }, [soloOrder, channelsById, soloRegions]);
   // New returns to an ordinary draft that is already open rather than
   // replacing its editor.
   const newSoloChat = () => {
@@ -850,13 +721,6 @@ export function RailNavigation({
     );
     let sectionPage: ReactNode;
     if (pageSection === "team" || pageSection === "solo") {
-      const membership = railSections(
-        railLayout,
-        contributed.map((section) => ({
-          id: section.key,
-          title: section.title,
-        })),
-      );
       const defaults = (pageSection === "solo" ? soloChats : channels).flatMap(
         (channel) => {
           const entry = byId.get(`channel:${channel.id}`);
@@ -1085,13 +949,7 @@ export function RailNavigation({
           const first =
             id === "team" || id === "solo"
               ? undefined
-              : railSections(
-                  railLayout,
-                  contributed.map((section) => ({
-                    id: section.key,
-                    title: section.title,
-                  })),
-                )
+              : membership
                   .entries(id, [], byId)
                   .find((entry) => entry.target.kind === "conversation");
           if (first?.target.kind === "conversation" && openInSection)
@@ -1402,11 +1260,6 @@ const unreadIn = Object.fromEntries(
     { filter, unread: true, home: "team" },
   ]),
 ) as Record<ConversationFilter, ConversationQuery>;
-const soloView: ConversationQuery = {
-  filter: "all",
-  unread: false,
-  home: "solo",
-};
 /** Entries and visits keep their targets, so each is serialized once. */
 const targetKeys = new WeakMap<object, string>();
 function keyOf(target: Exclude<RailEntry["target"], { kind: "person" }>) {
