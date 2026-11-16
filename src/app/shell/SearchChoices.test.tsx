@@ -477,3 +477,56 @@ it("goes back to Top results on Escape while a chosen group's results land", () 
     /^Top results/,
   );
 });
+
+it("keeps a chosen group while its source hasn't searched the text as typed", () => {
+  const peekOf = (rows: number, unsearched?: string[]) => (
+    <SearchChoices
+      query="design"
+      onQueryChange={() => {}}
+      input={createRef<HTMLElement>()}
+      groups={[
+        { label: "Channels", destinations: destinations.slice(0, 2) },
+        { label: "Messages", destinations: destinations.slice(2, 2 + rows) },
+      ]}
+      peek={{ ranked: true, unsearched, preview: () => null }}
+    />
+  );
+  const { rerender } = render(peekOf(3));
+  const shown = () =>
+    screen.getByRole("tab", { selected: true }).textContent ?? "";
+  fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+  // "design c": the other sources settled, but messages weren't searched.
+  rerender(peekOf(0, ["Messages"]));
+  expect(shown()).toMatch(/^Messages/);
+  rerender(peekOf(2));
+  expect(shown()).toMatch(/^Messages/);
+});
+
+it("lets Escape through once Peek turns off under a chosen group", () => {
+  const peekOf = (ranked: boolean, rows: number) => (
+    <SearchChoices
+      query="design"
+      onQueryChange={() => {}}
+      input={createRef<HTMLElement>()}
+      groups={[
+        { label: "Channels", destinations: destinations.slice(0, 2) },
+        { label: "Messages", destinations: destinations.slice(2, 2 + rows) },
+      ]}
+      peek={{ ranked, busy: true, preview: () => null }}
+    />
+  );
+  const { rerender } = render(peekOf(true, 3));
+  fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+  // A filter such as `in:` turns Peek off while its results load.
+  rerender(peekOf(false, 0));
+  expect(screen.queryByRole("tab")).toBeNull();
+  // fireEvent returns true when nothing prevented the default (closing).
+  expect(
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" }),
+  ).toBe(true);
+  // Peek back on doesn't bring back the choice it let go.
+  rerender(peekOf(true, 3));
+  expect(screen.getByRole("tab", { selected: true }).textContent ?? "").toMatch(
+    /^Top results/,
+  );
+});
