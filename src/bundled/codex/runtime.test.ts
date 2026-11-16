@@ -10,7 +10,7 @@ import { schnorr } from "@noble/curves/secp256k1.js";
 import { bytesToHex } from "nostr-tools/utils";
 import { apply } from "./index";
 import { CodexSetup, explainTurn } from "./setup";
-import { describe, afterEach, expect, it, vi } from "vitest";
+import { describe, afterEach, expect, it, vi, beforeEach } from "vitest";
 import {
   assignConversationFolder,
   conversationKey,
@@ -49,6 +49,10 @@ import { config } from "./config";
 import type { AddedTool } from "../../buzz-mcp/session-tools";
 import { wake } from "../../features/agent-harness/wakes";
 import type { Wire } from "./rpc";
+import { setLeanBasePromptPreference } from "../../features/agent-harness/lean-base-prompt-preference";
+
+// These tests pin the full base prompt.
+beforeEach(() => setLeanBasePromptPreference(false));
 
 vi.mock("./voice", () => ({
   openVoice: vi.fn(async () => ({ input: vi.fn(), close: vi.fn() })),

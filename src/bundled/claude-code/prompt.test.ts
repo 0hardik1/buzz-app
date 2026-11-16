@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, beforeEach } from "vitest";
 import { quoted } from "../../features/agent-harness/turn-records";
 import type { ConversationWake } from "../../features/agents/service";
 import type { EventData } from "../../features/relay/events";
@@ -10,6 +10,10 @@ import {
   promptSections,
 } from "../../features/agents/activity-transcript";
 import { steerPrompt, systemPrompt, turnPrompt } from "./prompt";
+import { setLeanBasePromptPreference } from "../../features/agent-harness/lean-base-prompt-preference";
+
+// These tests pin the full base prompt.
+beforeEach(() => setLeanBasePromptPreference(false));
 
 const alice = "a".repeat(64);
 const bob = "b".repeat(64);

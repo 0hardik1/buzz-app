@@ -1,7 +1,11 @@
-import { expect, it } from "vitest";
+import { expect, it, beforeEach } from "vitest";
 import { MENTION_PROMPT } from "../../features/agent-harness/base-prompt";
 import type { EventData } from "../../features/relay/events";
 import { developerInstructions, turnInput } from "./prompt";
+import { setLeanBasePromptPreference } from "../../features/agent-harness/lean-base-prompt-preference";
+
+// These tests pin the full base prompt.
+beforeEach(() => setLeanBasePromptPreference(false));
 
 const event = {
   id: "1".repeat(64),

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import { bytesToHex } from "nostr-tools/utils";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import type { BuzzClient } from "../../buzz-mcp/client";
 import { appClient } from "../../buzz-mcp/app-client";
 import { callTool } from "../../buzz-mcp/tools";
@@ -47,6 +47,10 @@ import { quoted } from "../../features/agent-harness/turn-records";
 import { wake } from "../../features/agent-harness/wakes";
 import { workspaceCanvas } from "../../features/solo/workspace";
 import { messageTokenTags } from "../../features/messages/message-tokens";
+import { setLeanBasePromptPreference } from "../../features/agent-harness/lean-base-prompt-preference";
+
+// These tests pin the full base prompt.
+beforeEach(() => setLeanBasePromptPreference(false));
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", async (actual) => ({
