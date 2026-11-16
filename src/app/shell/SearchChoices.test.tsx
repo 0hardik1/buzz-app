@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ChatCircleIcon } from "../../shared/design-system/icons";
@@ -263,4 +269,27 @@ it("keeps an action-only group in place when Peek's order freezes", () => {
   fireEvent.keyDown(screen.getByRole("combobox"), { key: "ArrowDown" });
   rerender(palette(["This conversation", "Recent activity"]));
   expect(order()).toEqual(["This conversation", "Recent activity"]);
+});
+
+it("opens the whole result group from its header while keeping typing focus", () => {
+  render(
+    <SearchChoices
+      query="channel"
+      onQueryChange={() => {}}
+      input={createRef<HTMLInputElement>()}
+      groups={[{ label: "Channels", destinations: destinations.slice(0, 6) }]}
+      peek={{ ranked: true, preview: () => null }}
+    />,
+  );
+  const field = screen.getByRole("combobox");
+  field.focus();
+  expect(screen.getAllByRole("option")).toHaveLength(5);
+  const header = within(
+    screen.getByRole("group", { name: "Channels" }),
+  ).getByRole("heading");
+  fireEvent.click(
+    within(header).getByRole("button", { name: "Show all Channels" }),
+  );
+  expect(screen.getAllByRole("option")).toHaveLength(6);
+  expect(field).toHaveFocus();
 });

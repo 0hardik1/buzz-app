@@ -212,37 +212,42 @@ export function SearchPreview({
       : []);
   return (
     <div className="search-peek-card">
-      <div className="search-peek-head">
-        {row.avatar && !message ? (
-          <Avatar
-            alt=""
-            fallback={row.avatar.name ?? row.label}
-            src={row.avatar.src}
-            size="default"
-            shape={row.avatar.shape}
-          />
-        ) : (
-          <span
-            className="search-peek-tile"
-            data-size="large"
-            data-tone={message ? "channel" : tone}
-            aria-hidden="true"
-          >
-            {Icon && <Icon size={18} />}
-          </span>
-        )}
-        <div className="min-w-0">
-          <div className="search-peek-title text-label">
-            {message ? (
-              whereOf(message.channelId)
-            ) : (
-              <MatchedLabel label={row.label} positions={row.matches} />
-            )}
-          </div>
-          <div className="truncate text-caption text-subtle">
-            {message ? when(message.createdAt) : row.detail}
+      <div className="search-peek-summary">
+        <div className="search-peek-head">
+          {row.avatar && !message ? (
+            <Avatar
+              alt=""
+              fallback={row.avatar.name ?? row.label}
+              src={row.avatar.src}
+              size="default"
+              shape={row.avatar.shape}
+            />
+          ) : (
+            <span
+              className="search-peek-tile"
+              data-size="large"
+              data-tone={message ? "channel" : tone}
+              aria-hidden="true"
+            >
+              {Icon && <Icon size={18} />}
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="search-peek-title truncate text-label">
+              {message ? (
+                whereOf(message.channelId)
+              ) : (
+                <MatchedLabel label={row.label} positions={row.matches} />
+              )}
+            </div>
+            <div className="truncate text-caption text-subtle">
+              {message ? when(message.createdAt) : row.detail}
+            </div>
           </div>
         </div>
+        {target?.kind === "channel" && target.about && (
+          <p className="search-peek-about text-body-sm">{target.about}</p>
+        )}
       </div>
       {!target && row.action && (
         <p className="search-peek-start m-0 text-body-sm text-subtle">
@@ -251,12 +256,6 @@ export function SearchPreview({
           </span>{" "}
           {row.action}
         </p>
-      )}
-      {target?.kind === "channel" && target.about && (
-        <p className="search-peek-about text-body-sm">{target.about}</p>
-      )}
-      {target && !message && shown.length > 0 && (
-        <div className="text-caption text-subtle">Latest</div>
       )}
       {shown.length > 0 && (
         <ol className="search-peek-lines">

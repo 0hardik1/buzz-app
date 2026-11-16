@@ -354,26 +354,27 @@
     color: var(--text-subtle);
     font-size: var(--text-caption);
   }
-  .search-palette-group .navigation-section-heading:has(.search-peek-see-all) {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+  .search-palette-group .navigation-section-heading[data-search-action] {
+    padding-inline: var(--space-2);
   }
-  .search-peek-see-all {
-    flex: none;
+  .navigation-section-heading[data-search-action] .buzz-button {
+    width: 100%;
+    justify-content: flex-start;
   }
 
-  /* One outlined workspace owns the tabs, list and edge-to-edge preview. */
+  /* Full-width dividers frame the inset results and preview. */
   .search-peek-workspace {
     display: grid;
     flex: 1;
     min-width: 0;
     min-height: 0;
     grid-template-columns: minmax(0, 64fr) minmax(0, 40fr);
+    column-gap: var(--space-3);
     grid-template-rows: auto minmax(0, 1fr);
     overflow: clip;
-    border: 1px solid var(--border-standard);
-    border-radius: var(--radius-control);
+    margin-inline: calc(-1 * var(--dialog-padding));
+    border-block: 1px solid var(--border-standard);
+    padding-inline: var(--dialog-padding);
   }
   .search-peek-body {
     display: flex;
@@ -406,6 +407,9 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
+    margin-block: var(--space-3);
+    overflow: clip;
+    border-radius: var(--radius-control);
     background: var(--surface-inset-subtle);
   }
   .search-peek-preview {
@@ -419,6 +423,13 @@
     flex-direction: column;
     gap: var(--space-4);
   }
+  .search-peek-summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    border-bottom: 1px solid var(--border-standard);
+    padding-bottom: var(--space-4);
+  }
   .search-peek-head {
     display: flex;
     align-items: center;
@@ -427,7 +438,6 @@
   }
   .search-peek-title {
     color: var(--text-standard);
-    overflow-wrap: anywhere;
   }
   .search-peek-about {
     margin: 0;
@@ -463,7 +473,7 @@
     font-size: var(--text-body-sm);
   }
 
-  /* Keep search controls separate from the outlined results workspace. */
+  /* Keep search controls separate from the results workspace. */
   .search-palette[data-search-peek] .search-palette-controls {
     flex: none;
     padding-bottom: var(--space-3);
@@ -508,7 +518,9 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-4);
-    padding: var(--space-3);
+    margin-inline: calc(-1 * var(--dialog-padding));
+    padding: var(--space-3) calc(var(--dialog-padding) + var(--space-3));
+    background: var(--surface-inset-subtle);
   }
   .search-peek-keys kbd,
   .search-peek-start kbd {

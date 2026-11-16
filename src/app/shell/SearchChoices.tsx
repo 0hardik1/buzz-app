@@ -8,14 +8,11 @@ import {
   type RefObject,
   type ReactNode,
 } from "react";
-import {
-  CaretRightIcon,
-  type ChatCircleIcon,
-} from "../../shared/design-system/icons/index";
+import type { ChatCircleIcon } from "../../shared/design-system/icons/index";
 import type { PeekTarget } from "./SearchPreview";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
-import { Button } from "../../shared/design-system/ui/Button";
 import { Badge } from "../../shared/design-system/ui/Badge";
+import { Button } from "../../shared/design-system/ui/Button";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { SearchField } from "../../shared/design-system/ui/SearchField";
 import { Tabs } from "../../shared/design-system/ui/Tabs";
@@ -774,345 +771,359 @@ export function SearchChoices({
                       why,
                       tone,
                       multiline,
-                    }) => (
-                      // biome-ignore lint/a11y/useAriaPropsSupportedByRole: Both grid rowgroups and listbox groups are named.
-                      <div
-                        key={label}
-                        role={hasControls ? "rowgroup" : "group"}
-                        aria-label={label}
-                        // A status-only group has no rows yet; busy states why.
-                        aria-busy={
-                          (!!headingStatus && !destinations.length) || undefined
-                        }
-                        className="search-palette-group"
-                        data-tone={tone}
-                      >
-                        <div className="navigation-section" data-buzz-ui="">
-                          {!hideLabel && (
-                            <div
-                              className="navigation-section-heading"
-                              aria-hidden={hasControls || undefined}
-                            >
-                              <h2
-                                className={`navigation-section-label text-body text-secondary${headingStatus ? " truncate" : ""}`}
+                    }) => {
+                      const heading = (
+                        <span
+                          className={`navigation-section-label text-body text-secondary${headingStatus ? " truncate" : ""}`}
+                        >
+                          <span className="search-peek-group-label text-label-sm">
+                            {label}
+                          </span>
+                          {peek?.ranked &&
+                            ranked.some((group) => group.label === label) && (
+                              <span
+                                className="search-peek-count"
+                                aria-hidden="true"
                               >
-                                <span className="search-peek-group-label text-label-sm">
-                                  {label}
-                                </span>
-                                {peek?.ranked &&
-                                  ranked.some(
+                                {" "}
+                                {countOf(
+                                  ranked.find(
                                     (group) => group.label === label,
-                                  ) && (
-                                    <span
-                                      className="search-peek-count"
-                                      aria-hidden="true"
-                                    >
-                                      {" "}
-                                      {countOf(
-                                        ranked.find(
-                                          (group) => group.label === label,
-                                        ) ?? { label, destinations },
-                                      )}
-                                    </span>
-                                  )}
-                                {why && (
-                                  <span
-                                    className="search-peek-why"
-                                    aria-hidden="true"
-                                  >
-                                    {" "}
-                                    · {why}
-                                  </span>
+                                  ) ?? { label, destinations },
                                 )}
-                                {headingStatus && (
-                                  <span aria-hidden="true">
-                                    {" "}
-                                    · {headingStatus}
-                                  </span>
-                                )}
-                              </h2>
-                              {truncated.has(label) && (
-                                <span className="search-peek-see-all">
-                                  <Button
-                                    variant="plain"
-                                    size="inline"
-                                    tabIndex={-1}
-                                    onMouseDown={(event) =>
-                                      event.preventDefault()
-                                    }
-                                    onClick={() => showScope(label)}
-                                  >
-                                    See all{" "}
-                                    {countOf(
-                                      ranked.find(
-                                        (group) => group.label === label,
-                                      ) ?? {
-                                        label,
-                                        destinations,
-                                      },
-                                    )}
-                                    {/* Names the group; flex drops the space. */}{" "}
-                                    <span className="sr-only">{label}</span>
-                                    <CaretRightIcon
-                                      size={12}
-                                      aria-hidden="true"
-                                    />
-                                  </Button>
-                                </span>
-                              )}
-                            </div>
+                              </span>
+                            )}
+                          {why && (
+                            <span
+                              className="search-peek-why"
+                              aria-hidden="true"
+                            >
+                              {" "}
+                              · {why}
+                            </span>
                           )}
-                          <div className="navigation-section-rows">
-                            {destinations.map(
-                              ({
-                                content,
-                                key,
-                                label,
-                                detail,
-                                detailIcon: DetailIcon,
-                                detailIconLabel,
-                                trailing,
-                                matches,
-                                icon,
-                                image,
-                                avatar,
-                                kind,
-                              }) =>
-                                content ? (
-                                  // biome-ignore lint/a11y/useSemanticElements: Interactive search grid, not a data table.
-                                  <div
-                                    key={key}
-                                    {...highlight.rowProps(key)}
-                                    role="row"
-                                    aria-label={[label, detail]
-                                      .filter(Boolean)
-                                      .join(" — ")}
-                                    aria-selected={selected === key}
-                                    tabIndex={-1}
-                                    className="search-control-row"
-                                    data-highlighted={
-                                      selected === key || undefined
-                                    }
-                                    onClick={(event) => {
-                                      if (
-                                        !event.currentTarget.contains(
-                                          event.target as Node,
-                                        )
-                                      )
-                                        return;
-                                      if (
-                                        (event.target as HTMLElement).closest(
-                                          "button, input, label, [role=switch], [role=combobox]",
-                                        )
-                                      )
-                                        return;
-                                      highlight.choose(key);
-                                    }}
-                                    onKeyDownCapture={(event) => {
-                                      const target =
-                                        event.target as HTMLElement;
-                                      if (
-                                        target !== event.currentTarget &&
-                                        event.currentTarget.contains(target) &&
-                                        !target.closest(
-                                          '[role="combobox"][aria-expanded="true"]',
-                                        )
-                                      )
-                                        highlight
-                                          .rowProps(key)
-                                          .onKeyDown(event);
-                                    }}
-                                    onKeyDown={(event) => {
-                                      if (event.target !== event.currentTarget)
-                                        return;
-                                      if (
-                                        event.key === "Enter" ||
-                                        event.key === " "
-                                      ) {
-                                        event.preventDefault();
-                                        highlight.choose(key);
-                                      } else
-                                        highlight
-                                          .rowProps(key)
-                                          .onKeyDown(event);
-                                    }}
-                                  >
-                                    {/* biome-ignore lint/a11y/useSemanticElements: Interactive search grid, not a data table. */}
-                                    <div id={key} role="gridcell" tabIndex={-1}>
-                                      {content}
-                                    </div>
-                                  </div>
-                                ) : (
-                                  // biome-ignore lint/a11y/useAriaPropsSupportedByRole: Selection and label apply only to the grid row.
-                                  // biome-ignore lint/a11y/noStaticElementInteractions: Keyboard handling applies only to the grid row.
-                                  <div
-                                    key={key}
-                                    {...(hasControls
-                                      ? highlight.rowProps(key)
-                                      : {})}
-                                    role={hasControls ? "row" : "presentation"}
-                                    aria-label={
-                                      hasControls
-                                        ? [
-                                            label,
-                                            detail && detailIconLabel
-                                              ? `${detailIconLabel}, ${detail}`
-                                              : detail,
-                                          ]
-                                            .filter(Boolean)
-                                            .join(" — ")
-                                        : undefined
-                                    }
-                                    aria-selected={
-                                      hasControls ? selected === key : undefined
-                                    }
-                                    tabIndex={hasControls ? -1 : undefined}
-                                    data-search-result={
-                                      hasControls ? "" : undefined
-                                    }
-                                    data-search-key={watching ? key : undefined}
-                                    data-highlighted={
-                                      (hasControls && selected === key) ||
-                                      undefined
-                                    }
-                                    onKeyDown={
-                                      hasControls
-                                        ? (event) => {
-                                            if (
-                                              event.target ===
-                                                event.currentTarget &&
-                                              event.key === "Enter"
-                                            ) {
-                                              event.preventDefault();
-                                              highlight.choose(key);
-                                            } else
-                                              highlight
-                                                .rowProps(key)
-                                                .onKeyDown(event);
-                                          }
-                                        : undefined
-                                    }
-                                  >
+                          {headingStatus && (
+                            <span aria-hidden="true"> · {headingStatus}</span>
+                          )}
+                        </span>
+                      );
+                      return (
+                        // biome-ignore lint/a11y/useAriaPropsSupportedByRole: Both grid rowgroups and listbox groups are named.
+                        <div
+                          key={label}
+                          role={hasControls ? "rowgroup" : "group"}
+                          aria-label={label}
+                          // A status-only group has no rows yet; busy states why.
+                          aria-busy={
+                            (!!headingStatus && !destinations.length) ||
+                            undefined
+                          }
+                          className="search-palette-group"
+                          data-tone={tone}
+                        >
+                          <div className="navigation-section" data-buzz-ui="">
+                            {!hideLabel && (
+                              <div
+                                className="navigation-section-heading"
+                                data-search-action={
+                                  truncated.has(label) || undefined
+                                }
+                                aria-hidden={hasControls || undefined}
+                              >
+                                <h2 className="m-0 min-w-0 flex-1">
+                                  {truncated.has(label) ? (
+                                    <Button
+                                      variant="plain"
+                                      size="inline"
+                                      aria-label={`Show all ${label}`}
+                                      tabIndex={-1}
+                                      onMouseDown={(event) =>
+                                        event.preventDefault()
+                                      }
+                                      onClick={() => showScope(label)}
+                                    >
+                                      {heading}
+                                    </Button>
+                                  ) : (
+                                    heading
+                                  )}
+                                </h2>
+                              </div>
+                            )}
+                            <div className="navigation-section-rows">
+                              {destinations.map(
+                                ({
+                                  content,
+                                  key,
+                                  label,
+                                  detail,
+                                  detailIcon: DetailIcon,
+                                  detailIconLabel,
+                                  trailing,
+                                  matches,
+                                  icon,
+                                  image,
+                                  avatar,
+                                  kind,
+                                }) =>
+                                  content ? (
+                                    // biome-ignore lint/a11y/useSemanticElements: Interactive search grid, not a data table.
                                     <div
+                                      key={key}
+                                      {...highlight.rowProps(key)}
+                                      role="row"
+                                      aria-label={[label, detail]
+                                        .filter(Boolean)
+                                        .join(" — ")}
+                                      aria-selected={selected === key}
+                                      tabIndex={-1}
+                                      className="search-control-row"
+                                      data-highlighted={
+                                        selected === key || undefined
+                                      }
+                                      onClick={(event) => {
+                                        if (
+                                          !event.currentTarget.contains(
+                                            event.target as Node,
+                                          )
+                                        )
+                                          return;
+                                        if (
+                                          (event.target as HTMLElement).closest(
+                                            "button, input, label, [role=switch], [role=combobox]",
+                                          )
+                                        )
+                                          return;
+                                        highlight.choose(key);
+                                      }}
+                                      onKeyDownCapture={(event) => {
+                                        const target =
+                                          event.target as HTMLElement;
+                                        if (
+                                          target !== event.currentTarget &&
+                                          event.currentTarget.contains(
+                                            target,
+                                          ) &&
+                                          !target.closest(
+                                            '[role="combobox"][aria-expanded="true"]',
+                                          )
+                                        )
+                                          highlight
+                                            .rowProps(key)
+                                            .onKeyDown(event);
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (
+                                          event.target !== event.currentTarget
+                                        )
+                                          return;
+                                        if (
+                                          event.key === "Enter" ||
+                                          event.key === " "
+                                        ) {
+                                          event.preventDefault();
+                                          highlight.choose(key);
+                                        } else
+                                          highlight
+                                            .rowProps(key)
+                                            .onKeyDown(event);
+                                      }}
+                                    >
+                                      {/* biome-ignore lint/a11y/useSemanticElements: Interactive search grid, not a data table. */}
+                                      <div
+                                        id={key}
+                                        role="gridcell"
+                                        tabIndex={-1}
+                                      >
+                                        {content}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: Selection and label apply only to the grid row.
+                                    // biome-ignore lint/a11y/noStaticElementInteractions: Keyboard handling applies only to the grid row.
+                                    <div
+                                      key={key}
+                                      {...(hasControls
+                                        ? highlight.rowProps(key)
+                                        : {})}
                                       role={
+                                        hasControls ? "row" : "presentation"
+                                      }
+                                      aria-label={
                                         hasControls
-                                          ? "gridcell"
-                                          : "presentation"
+                                          ? [
+                                              label,
+                                              detail && detailIconLabel
+                                                ? `${detailIconLabel}, ${detail}`
+                                                : detail,
+                                            ]
+                                              .filter(Boolean)
+                                              .join(" — ")
+                                          : undefined
+                                      }
+                                      aria-selected={
+                                        hasControls
+                                          ? selected === key
+                                          : undefined
+                                      }
+                                      tabIndex={hasControls ? -1 : undefined}
+                                      data-search-result={
+                                        hasControls ? "" : undefined
+                                      }
+                                      data-search-key={
+                                        watching ? key : undefined
+                                      }
+                                      data-highlighted={
+                                        (hasControls && selected === key) ||
+                                        undefined
+                                      }
+                                      onKeyDown={
+                                        hasControls
+                                          ? (event) => {
+                                              if (
+                                                event.target ===
+                                                  event.currentTarget &&
+                                                event.key === "Enter"
+                                              ) {
+                                                event.preventDefault();
+                                                highlight.choose(key);
+                                              } else
+                                                highlight
+                                                  .rowProps(key)
+                                                  .onKeyDown(event);
+                                            }
+                                          : undefined
                                       }
                                     >
-                                      <NavigationItem
-                                        variant="search"
-                                        key={key}
-                                        {...(!hasControls
-                                          ? highlight.rowProps(key)
-                                          : {})}
-                                        role={hasControls ? "button" : "option"}
-                                        aria-selected={
+                                      <div
+                                        role={
                                           hasControls
-                                            ? undefined
-                                            : selected === key
+                                            ? "gridcell"
+                                            : "presentation"
                                         }
-                                        {...(!hasControls &&
-                                          positions.get(key))}
-                                        tabIndex={-1}
-                                        aria-current={false}
-                                        multiline={!!multiline}
-                                        highlighted={selected === key}
-                                        data-search-result={
-                                          !hasControls ? "" : undefined
-                                        }
-                                        aria-keyshortcuts={
-                                          shortcutNumbers.has(key)
-                                            ? `Shift+${apple ? "Meta" : "Control"}+${shortcutNumbers.get(key)}`
-                                            : undefined
-                                        }
-                                        icon={
-                                          <span
-                                            className="search-row-icon grid size-6 shrink-0 place-items-center"
-                                            data-tile={
-                                              (!avatar && !image) || undefined
-                                            }
-                                            data-tone={kind}
-                                          >
-                                            {avatar ? (
-                                              <Avatar
-                                                alt=""
-                                                fallback={avatar.name ?? label}
-                                                src={avatar.src}
-                                                size="small"
-                                                shape={avatar.shape}
-                                              />
-                                            ) : (
-                                              <PageIcon
-                                                icon={icon}
-                                                image={image}
-                                                size={peek && !image ? 15 : 21}
-                                              />
-                                            )}
-                                          </span>
-                                        }
-                                        label={
-                                          <>
-                                            <span className="block truncate text-body-sm">
-                                              <MatchedLabel
-                                                label={label}
-                                                positions={matches}
-                                              />
+                                      >
+                                        <NavigationItem
+                                          variant="search"
+                                          key={key}
+                                          {...(!hasControls
+                                            ? highlight.rowProps(key)
+                                            : {})}
+                                          role={
+                                            hasControls ? "button" : "option"
+                                          }
+                                          aria-selected={
+                                            hasControls
+                                              ? undefined
+                                              : selected === key
+                                          }
+                                          {...(!hasControls &&
+                                            positions.get(key))}
+                                          tabIndex={-1}
+                                          aria-current={false}
+                                          multiline={!!multiline}
+                                          highlighted={selected === key}
+                                          data-search-result={
+                                            !hasControls ? "" : undefined
+                                          }
+                                          aria-keyshortcuts={
+                                            shortcutNumbers.has(key)
+                                              ? `Shift+${apple ? "Meta" : "Control"}+${shortcutNumbers.get(key)}`
+                                              : undefined
+                                          }
+                                          icon={
+                                            <span
+                                              className="search-row-icon grid size-6 shrink-0 place-items-center"
+                                              data-tile={
+                                                (!avatar && !image) || undefined
+                                              }
+                                              data-tone={kind}
+                                            >
+                                              {avatar ? (
+                                                <Avatar
+                                                  alt=""
+                                                  fallback={
+                                                    avatar.name ?? label
+                                                  }
+                                                  src={avatar.src}
+                                                  size="small"
+                                                  shape={avatar.shape}
+                                                />
+                                              ) : (
+                                                <PageIcon
+                                                  icon={icon}
+                                                  image={image}
+                                                  size={
+                                                    peek && !image ? 15 : 21
+                                                  }
+                                                />
+                                              )}
                                             </span>
-                                            {detail && (
-                                              <span
-                                                className={`block text-body-sm text-subtle ${multiline ? "whitespace-pre-wrap" : "truncate"}`}
-                                              >
-                                                {/* Read in place of the icon. jsdom (dom-accessibility-api) trims
+                                          }
+                                          label={
+                                            <>
+                                              <span className="block truncate text-body-sm">
+                                                <MatchedLabel
+                                                  label={label}
+                                                  positions={matches}
+                                                />
+                                              </span>
+                                              {detail && (
+                                                <span
+                                                  className={`block text-body-sm text-subtle ${multiline ? "whitespace-pre-wrap" : "truncate"}`}
+                                                >
+                                                  {/* Read in place of the icon. jsdom (dom-accessibility-api) trims
                                                 each element's text, so the space sits outside the span;
                                                 browsers don't trim it. Shown, the space collapses at the
                                                 line's start. */}
-                                                {detailIconLabel && (
-                                                  <>
-                                                    <span className="sr-only">{`${detailIconLabel},`}</span>{" "}
-                                                  </>
-                                                )}
-                                                {/* Text-sized and spaced as LinkLabel shows a channel mention's icon. */}
-                                                {DetailIcon && (
-                                                  <DetailIcon
-                                                    className={channelIconClass(
-                                                      DetailIcon,
-                                                    )}
-                                                  />
-                                                )}
-                                                {detail}
-                                              </span>
-                                            )}
-                                          </>
-                                        }
-                                        trailing={trailing}
-                                        onClick={() => highlight.choose(key)}
-                                      />
+                                                  {detailIconLabel && (
+                                                    <>
+                                                      <span className="sr-only">{`${detailIconLabel},`}</span>{" "}
+                                                    </>
+                                                  )}
+                                                  {/* Text-sized and spaced as LinkLabel shows a channel mention's icon. */}
+                                                  {DetailIcon && (
+                                                    <DetailIcon
+                                                      className={channelIconClass(
+                                                        DetailIcon,
+                                                      )}
+                                                    />
+                                                  )}
+                                                  {detail}
+                                                </span>
+                                              )}
+                                            </>
+                                          }
+                                          trailing={trailing}
+                                          onClick={() => highlight.choose(key)}
+                                        />
+                                      </div>
                                     </div>
-                                  </div>
-                                ),
-                            )}
-                            {(notice ||
-                              (!destinations.length && !headingStatus)) && (
-                              <div role={hasControls ? "row" : "presentation"}>
+                                  ),
+                              )}
+                              {(notice ||
+                                (!destinations.length && !headingStatus)) && (
                                 <div
-                                  role={
-                                    hasControls ? "gridcell" : "presentation"
-                                  }
+                                  role={hasControls ? "row" : "presentation"}
                                 >
-                                  {notice}
-                                  {!destinations.length && (
-                                    <p className="search-palette-group-empty">
-                                      {empty ?? "No matching results."}
-                                    </p>
-                                  )}
+                                  <div
+                                    role={
+                                      hasControls ? "gridcell" : "presentation"
+                                    }
+                                  >
+                                    {notice}
+                                    {!destinations.length && (
+                                      <p className="search-palette-group-empty">
+                                        {empty ?? "No matching results."}
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ),
+                      );
+                    },
                   )}
               </div>
               {children && (
