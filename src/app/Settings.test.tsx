@@ -4011,9 +4011,11 @@ it("scopes Git acquisitions to each installed plugin path", async () => {
   expect(
     await screen.findByRole("button", { name: "Update Zebra external" }),
   ).toBeVisible();
-  expect(
-    await screen.findByRole("button", { name: "Update Sibling" }),
-  ).toBeVisible();
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Update Sibling" }),
+    ).toBeVisible(),
+  );
   expect(checkGit).toHaveBeenCalledTimes(2);
   expect(checkGit).toHaveBeenCalledWith(
     savedGitSource.repository,
