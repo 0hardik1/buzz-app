@@ -194,6 +194,7 @@ export function DocumentEditor({
               variant="code"
               disabled={disabled || !editing}
               onKeyDown={(event) => {
+                if (disabled || !editing) return;
                 if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                   event.preventDefault();
                   onSave();
@@ -227,6 +228,7 @@ export function DocumentEditor({
                 onFormatsChange={setFormats}
                 onEditLink={editLink}
                 onKeyDown={(event) => {
+                  if (disabled || !editing) return;
                   if (
                     !event.defaultPrevented &&
                     (event.metaKey || event.ctrlKey) &&

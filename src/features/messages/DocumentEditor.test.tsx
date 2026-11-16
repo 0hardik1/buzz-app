@@ -314,6 +314,30 @@ it("keeps save shortcuts and selection restoration at the controlled editor boun
   expect(h.save).toHaveBeenCalledTimes(2);
 });
 
+it.each([false, true])(
+  "guards save shortcuts after disabling the focused field (source=%s)",
+  (source) => {
+    const h = mount({ source });
+    const input = screen.getByRole("textbox", {
+      name: source ? "Markdown" : "Document body",
+    });
+    act(() => input.focus());
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    expect(h.save).toHaveBeenCalledTimes(1);
+    h.rerender({ source, disabled: true });
+    if (!source) expect(input).toHaveFocus();
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, repeat: true });
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true });
+    expect(h.save).toHaveBeenCalledTimes(1);
+    h.rerender({ source, editing: false });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    expect(h.save).toHaveBeenCalledTimes(1);
+    h.rerender({ source, disabled: false, editing: true });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    expect(h.save).toHaveBeenCalledTimes(2);
+  },
+);
+
 it("uses the existing link validator and retains the selected document text", async () => {
   const h = mount();
   const user = userEvent.setup();
