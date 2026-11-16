@@ -216,6 +216,12 @@
     calc(100% - 2 * var(--message-side-space) + var(--space-1) - var(--space-8))
   );
 }
+.message[data-full-width] {
+  width: 100%;
+}
+.message:where([data-full-width]):has(> .messageGutter) > .messageBody {
+  max-width: none;
+}
 .message[data-viewer-message] > .messageBody {
   flex: 0 1 auto;
   width: fit-content;
@@ -4061,4 +4067,11 @@ html[data-keyboard-navigation] .activityExpansion {
 }
 .activityGroupHeader[data-expanded] > div:last-child {
   flex-shrink: 0;
+}
+.agentNote {
+  margin: var(--space-1h) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  letter-spacing: var(--text-caption--letter-spacing);
 }

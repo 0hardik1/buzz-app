@@ -85,6 +85,7 @@ import {
 } from "../conversation/ContributionBoundary";
 import type { ChannelMessage, Profile } from "../relay/contracts";
 import { AttachmentImage } from "./AttachmentImage";
+import { AgentDeclineNotes } from "./AgentDeclineNotes";
 import { DeliveryNotice } from "./DeliveryNotice";
 import { AttachmentView } from "../conversation/AttachmentView";
 import { AudioAttachment } from "./AudioAttachment";
@@ -112,6 +113,9 @@ import {
   MenuIcon,
   MenuItem,
   MenuSeparator,
+  MenuSubmenu,
+  MenuSubmenuPopup,
+  MenuSubmenuTrigger,
 } from "../../shared/design-system/ui/Menu";
 import { ToastNotice } from "../../shared/design-system/ui/Toast";
 import { ReportMessageDialog } from "./ReportMessageDialog";
@@ -122,6 +126,10 @@ import { useThreadDraft } from "./draft-places";
 export type MessageLinkOrigin = Readonly<{ rootId: string }>;
 export type MessageRowProps = {
   row: ChannelMessage;
+  /** Read-only presentations can retain their own prose highlighting. */
+  bodyContent?: ReactNode;
+  /** Narrow previews use the available width without opposite-avatar clearance. */
+  fullWidth?: boolean;
   recordedActivity?: ActivityRowPresentation | undefined;
   representedAgents?: readonly string[] | undefined;
   repliedAgents?: readonly string[] | undefined;
@@ -228,6 +236,8 @@ const FullMessageRow = memo(function MessageRow(props: MessageContentProps) {
 });
 function MessageRowContent({
   row,
+  bodyContent,
+  fullWidth = false,
   shownRow,
   renderMessage,
   getThreadRoot,
@@ -326,6 +336,11 @@ function MessageRowContent({
     row.channelId,
     (channel) => channel?.channelType === "solo",
   );
+  const dmMembers = useListedChannel(
+    references?.channels,
+    row.channelId,
+    (channel) => (channel?.channelType === "dm" && channel.members) || none,
+  );
   const showTime =
     messageTimestamps === "show" ||
     (messageTimestamps === "hide-solo" && !solo);
@@ -384,18 +399,77 @@ function MessageRowContent({
     canViewTranscript ? session?.agentActivity : undefined,
     row,
   );
-  const activityItem = canViewActivity && (
-    <MenuItem
-      onClick={() => {
-        if (canOpenLink?.(activityView)) onOpenLink(activityView);
-      }}
-    >
-      <MenuIcon>
-        <ListBulletsIcon />
-      </MenuIcon>
-      View activity
-    </MenuItem>
+  // An agent's message opens at the turn that posted it; the viewer's own
+  // message, at the turns it began for each agent it names, or for the other
+  // member of a one-to-one DM, which wakes without a mention.
+  const own = !canViewActivity && !!viewer && row.authorId === viewer;
+  const activityAgents = canViewActivity
+    ? [row.authorId]
+    : own && row.audience !== "agents"
+      ? [
+          ...new Set([
+            ...row.mentions,
+            ...(dmMembers.length === 2
+              ? dmMembers.filter((pubkey) => pubkey !== viewer)
+              : []),
+          ]),
+        ].filter(
+          (pubkey) =>
+            agentPubkeys?.has(pubkey) ||
+            !!directory.profiles.get(pubkey)?.isAgent ||
+            directory.agents.some((item) => item.pubkey === pubkey),
+        )
+      : [];
+  const activityFocus = [row.id, ...(row.request ? [row.request] : [])];
+  const openActivity = (view: string) =>
+    canOpenLink?.(view) && openProfileTranscript(view, openLink, activityFocus);
+  const activityViews = activityAgents.flatMap((pubkey) => {
+    const view = profileActivityViewTarget(pubkey);
+    return view && canOpenLink?.(view) ? [{ pubkey, view }] : [];
+  });
+  // On the viewer's own message, say whose activity: the agent's name as the
+  // rest of the app shows it, or "Agent" when it has none.
+  const agentName = (pubkey: string) => {
+    const profile = directory.profiles.get(pubkey);
+    return resolveName(
+      pubkey,
+      directory.agents.find((item) => item.pubkey === pubkey)?.name.trim() ||
+        (profile?.nameIsFallback ? "" : profile?.name.trim()) ||
+        "Agent",
+    );
+  };
+  const activityIcon = (
+    <MenuIcon>
+      <ListBulletsIcon />
+    </MenuIcon>
   );
+  const [onlyActivity] = activityViews;
+  const activityItem =
+    activityViews.length > 1 ? (
+      // Several agents share one item, so the menu keeps its length.
+      <MenuSubmenu>
+        <MenuSubmenuTrigger>
+          {activityIcon}
+          View activity
+        </MenuSubmenuTrigger>
+        <MenuSubmenuPopup>
+          {activityViews.map(({ pubkey, view }) => (
+            <MenuItem key={pubkey} onClick={() => openActivity(view)}>
+              {agentName(pubkey)}
+            </MenuItem>
+          ))}
+        </MenuSubmenuPopup>
+      </MenuSubmenu>
+    ) : (
+      onlyActivity && (
+        <MenuItem onClick={() => openActivity(onlyActivity.view)}>
+          {activityIcon}
+          {own
+            ? `View ${agentName(onlyActivity.pubkey)}’s activity`
+            : "View activity"}
+        </MenuItem>
+      )
+    );
   const avatarShape =
     row.agentEnvelope || agentPubkeys?.has(row.authorId) || profile?.isAgent
       ? "squircle"
@@ -421,13 +495,19 @@ function MessageRowContent({
       : undefined;
   const presenceId = useId();
   const shown = shownRow ?? row;
-  const timeReply = shown.diff ? undefined : parseMediaTimeReply(shown.content);
+  const timeReply =
+    shown.diff || bodyContent != null
+      ? undefined
+      : parseMediaTimeReply(shown.content);
   const sourceRow = timeReply
     ? { ...shown, content: timeReply.content }
     : shown;
   const { caption: displayRow, cards: chatCards } = useMemo(
-    () => separateChatCards(sourceRow, directory.channels),
-    [sourceRow, directory.channels],
+    () =>
+      bodyContent != null
+        ? { caption: sourceRow, cards: [] }
+        : separateChatCards(sourceRow, directory.channels),
+    [sourceRow, directory.channels, bodyContent],
   );
   const cardsOnly =
     chatCards.length > 0 && !displayRow.content.trim() && !timeReply;
@@ -672,43 +752,45 @@ function MessageRowContent({
       previous.push(attachment);
     else attachmentGroups.push([attachment]);
   }
-  const body = row.diff ? (
-    <div>
-      <p className="text-label-sm">{row.diff.filePath || "Diff"}</p>
-      {row.diff.description && (
-        <p className="text-body-sm">{row.diff.description}</p>
-      )}
-      {/* biome-ignore lint/a11y/useSemanticElements: The raw scroll region preserves preformatted text and needs keyboard access. */}
-      <pre
-        className={styles.rawDiff}
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: The raw scroll owner must support keyboard scrolling.
-        tabIndex={0}
-        role="region"
-        aria-label="Raw diff"
-      >
-        {row.content || "No diff content"}
-      </pre>
-      {row.diff.truncated && (
-        <p className="text-body-sm">
-          Diff truncated. View the full diff at the source repository.
-        </p>
-      )}
-    </div>
-  ) : (
-    <MessageMarkdown
-      directory={directory}
-      session={references}
-      scope={scope}
-      row={displayRow}
-      extensions={extensions}
-      media={media}
-      onOpenLink={openLink}
-      canOpenLink={canOpenLink}
-      participantProfiles={participantProfiles}
-      largeEmoji={emojiOnly}
-      edited={editedInBody && displayRow.edited}
-    />
-  );
+  const body =
+    bodyContent ??
+    (row.diff ? (
+      <div>
+        <p className="text-label-sm">{row.diff.filePath || "Diff"}</p>
+        {row.diff.description && (
+          <p className="text-body-sm">{row.diff.description}</p>
+        )}
+        {/* biome-ignore lint/a11y/useSemanticElements: The raw scroll region preserves preformatted text and needs keyboard access. */}
+        <pre
+          className={styles.rawDiff}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: The raw scroll owner must support keyboard scrolling.
+          tabIndex={0}
+          role="region"
+          aria-label="Raw diff"
+        >
+          {row.content || "No diff content"}
+        </pre>
+        {row.diff.truncated && (
+          <p className="text-body-sm">
+            Diff truncated. View the full diff at the source repository.
+          </p>
+        )}
+      </div>
+    ) : (
+      <MessageMarkdown
+        directory={directory}
+        session={references}
+        scope={scope}
+        row={displayRow}
+        extensions={extensions}
+        media={media}
+        onOpenLink={openLink}
+        canOpenLink={canOpenLink}
+        participantProfiles={participantProfiles}
+        largeEmoji={emojiOnly}
+        edited={editedInBody && displayRow.edited}
+      />
+    ));
   const avatarSize = compactAvatar && !flat ? "small" : "default";
   const authorName = (
     <>
@@ -1114,6 +1196,7 @@ function MessageRowContent({
         className={styles.message}
         data-highlight-surface=""
         data-layout={layout}
+        data-full-width={fullWidth || undefined}
         data-stack-previous={stackPrevious || undefined}
         data-stack-next={stackNext || undefined}
         data-viewer-message={
@@ -1248,10 +1331,7 @@ function MessageRowContent({
                     <button
                       type="button"
                       className={referenceStyles.link}
-                      onClick={() => {
-                        if (canOpenLink?.(transcriptView))
-                          openProfileTranscript(transcriptView, openLink);
-                      }}
+                      onClick={() => openActivity(transcriptView)}
                     >
                       View activity
                     </button>
@@ -1624,6 +1704,14 @@ function MessageRowContent({
           </div>
           {!reactionsInBubble && reactionContent}
           <DeliveryNotice row={row} retry={retry} />
+          {session && scope && (
+            <AgentDeclineNotes
+              session={session}
+              scope={scope}
+              channelId={row.channelId}
+              messageId={row.id}
+            />
+          )}
           {active && session && scope && extensions?.accessories && (
             <ComposerAccessories
               registry={extensions.accessories}

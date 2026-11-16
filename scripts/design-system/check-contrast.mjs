@@ -156,6 +156,10 @@ const TEXT_ROLES = [
  * every fill it can actually sit on, and hover is one of them.
  */
 const PAIRS = [
+  ...["--text-standard", "--text-subtle", "--text-metadata"].map((role) => [
+    role,
+    "--surface-inset-subtle",
+  ]),
   ["--text-control-selected", "--surface-control-selected"],
   ...[
     "affordance-call-join",
@@ -304,6 +308,7 @@ const TINT_PAIRS = [
   ["--green-12", "--green-3"],
   ["--purple-12", "--purple-3"],
   ["--purple-12", "--purple-4"],
+  ["--text-categorical-green", "--surface-categorical-green"],
   ["--text-categorical-amber", "--surface-categorical-amber"],
   ["--text-categorical-amber", "--surface-categorical-amber-hover"],
   ["--text-search-match", "--surface-search-match"],

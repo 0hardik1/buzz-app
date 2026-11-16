@@ -9,10 +9,10 @@ import type { RelaySession } from "../../features/relay/session";
 import type { ReadFilter } from "../../features/relay/events";
 import { MatchedLabel } from "../../features/search/MatchedLabel";
 import { termMatches } from "../../features/search/snippet";
-import { avatarMedia } from "../../shared/avatar-source";
 import { SEARCH_DEBOUNCE_MS } from "../../shared/search-debounce";
 import { formatItemTimestamp } from "../../shared/datetime";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
+import { MessageRow } from "../../features/messages/MessageRow";
 import type { SearchDestination, SearchTone } from "./SearchChoices";
 import { SEARCH_KINDS, searchText } from "./useSearchMessages";
 
@@ -45,7 +45,21 @@ type Line = {
  * rows reads only where someone stops. A followed highlight waits as long as
  * search does after each key, and for its results. */
 const DWELL = 150;
-const cache = new WeakMap<RelaySession, Map<string, readonly Line[]>>();
+/** Windows after a message hit, in seconds, read in turn until one holds its
+ * next two messages: a minute, an hour, a week. */
+const SUCCESSOR_SPANS = [60, 3600, 7 * 86_400];
+const SUCCESSOR_PAGE = 20;
+
+/** Previews read while search is open, by target, so returning to a row
+ * reads nothing. Search makes one each time it opens; later activity and
+ * Clear cache show the next time. */
+export type PreviewCache = Map<string, readonly Line[]>;
+
+/** Conversation order: by time, then by id within a second, as threads are. */
+const chronological = (
+  a: { createdAt: number; id: string },
+  b: { createdAt: number; id: string },
+) => a.createdAt - b.createdAt || a.id.localeCompare(b.id);
 
 const keyOf = (target: PeekTarget) =>
   target.kind === "message"
@@ -94,24 +108,35 @@ async function readLines(
     );
   if (target.kind === "message") {
     const where = { kinds: SEARCH_KINDS, "#h": [target.channelId] };
+    // Both reads include the hit's second; each keeps its own side of the
+    // hit, so a message sent in that second shows once.
+    const hit = { createdAt: target.createdAt, id: target.messageId };
+    const side = (lines: readonly Line[], after: boolean) =>
+      lines.filter((line) => chronological(line, hit) * (after ? 1 : -1) > 0);
+    // Relay reads return the newest first, so a full page of a window may
+    // skip the replies just after the hit. Widen from a short window, and
+    // keep the last one that came back whole.
+    const successors = async () => {
+      let whole: Line[] = [];
+      for (const span of SUCCESSOR_SPANS) {
+        const page = await read({
+          ...where,
+          since: target.createdAt,
+          until: target.createdAt + span,
+          limit: SUCCESSOR_PAGE,
+        });
+        if (page.length >= SUCCESSOR_PAGE) break;
+        whole = side(page, true);
+        if (whole.length >= 2) break;
+      }
+      return whole;
+    };
     const [before, after] = await Promise.all([
       read({ ...where, until: target.createdAt, limit: 3 }),
-      read({
-        ...where,
-        since: target.createdAt,
-        until: target.createdAt + 6 * 3600,
-        limit: 20,
-      }),
+      successors(),
     ]);
-    const earlier = before
-      .filter(({ id }) => id !== target.messageId)
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .slice(0, 2)
-      .reverse();
-    const later = after
-      .filter(({ id }) => id !== target.messageId)
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .slice(0, 2);
+    const earlier = side(before, false).sort(chronological).slice(-2);
+    const later = after.sort(chronological).slice(0, 2);
     return [
       ...earlier,
       {
@@ -137,11 +162,12 @@ async function readLines(
 
 function useLines(
   session: RelaySession,
+  cache: PreviewCache,
   target: PeekTarget | undefined,
   follow: PeekFollow | undefined,
 ) {
   const key = target ? keyOf(target) : "";
-  const known = cache.get(session)?.get(key);
+  const known = cache.get(key);
   const [state, setState] = useState<{
     key: string;
     lines?: readonly Line[];
@@ -156,9 +182,7 @@ function useLines(
         readLines(session, target, controller.signal)
           .then((lines) => {
             if (controller.signal.aborted) return;
-            const saved = cache.get(session) ?? new Map();
-            cache.set(session, saved);
-            saved.set(key, lines);
+            cache.set(key, lines);
             setState({ key, lines });
             void session.profiles
               .ensure(
@@ -177,7 +201,7 @@ function useLines(
       clearTimeout(timer);
       controller.abort();
     };
-  }, [session, key, follow?.busy, follow?.text]);
+  }, [session, cache, key, follow?.busy, follow?.text]);
   const failed = !known && state?.key === key && !!state.failed;
   return {
     lines: known ?? (state?.key === key ? state.lines : undefined),
@@ -192,6 +216,7 @@ const when = (createdAt: number) =>
  * without opening it. */
 export function SearchPreview({
   session,
+  cache,
   row,
   tone,
   terms,
@@ -200,6 +225,7 @@ export function SearchPreview({
   follow,
 }: {
   session: RelaySession;
+  cache: PreviewCache;
   row: (SearchDestination & { peek?: PeekTarget | undefined }) | undefined;
   tone: SearchTone | undefined;
   terms: readonly string[];
@@ -212,8 +238,15 @@ export function SearchPreview({
     session.profiles.subscribe,
     session.profiles.snapshot,
   );
+  // Losing access to a channel republishes the list; held lines from a
+  // channel the viewer can no longer read drop out, cached or shown.
+  useSyncExternalStore(session.channels.subscribeList, session.channels.list);
+  const readable = (line: { channelId: string }) =>
+    !!session.channels.get?.(line.channelId);
   const target = row?.peek;
-  const { lines, failed } = useLines(session, target, follow);
+  const read = useLines(session, cache, target, follow);
+  const lines = read.lines?.filter(readable);
+  const { failed } = read;
   const card = useRef<HTMLDivElement>(null);
   // Each row's preview opens at its top, then scrolls only as far as the hit
   // needs: a hit taller than the view starts at its own top, the last line of
@@ -235,12 +268,10 @@ export function SearchPreview({
     const past = rect.bottom + pad + edge - box.bottom;
     if (past > 0)
       view.scrollTop = Math.min(past, rect.top - box.top - edge - sliver);
-  }, [target && keyOf(target), lines, failed]);
+  }, [target && keyOf(target), read.lines, failed]);
   if (!row) return <p className="search-peek-empty">Nothing highlighted</p>;
   const message = target?.kind === "message" ? target : undefined;
   const Icon = (message ? row.detailIcon : undefined) ?? row.icon;
-  const pictureOf = (pubkey: string) =>
-    avatarMedia(profiles.get(pubkey)?.picture, session.media);
   // The hit stands in while its neighbours load, below room held for the two
   // before it, so it doesn't move when they arrive.
   const loading = !!message && !lines && !failed;
@@ -255,41 +286,86 @@ export function SearchPreview({
             createdAt: message.createdAt,
             text: message.text,
           },
-        ]
+        ].filter(readable)
       : []);
+  const lineRow = (line: Line, hit: boolean) => {
+    const text = line.text.slice(0, 1600);
+    return (
+      <MessageRow
+        row={{
+          id: line.id,
+          channelId: line.channelId,
+          authorId: line.authorId,
+          createdAt: line.createdAt,
+          content: text,
+          mentions: [],
+          attachments: [],
+          reactions: [],
+          replyCount: 0,
+          participants: [],
+        }}
+        bodyContent={
+          <div className="search-peek-text text-message">
+            <MatchedLabel
+              label={text}
+              positions={hit || !message ? termMatches(text, terms) : undefined}
+            />
+          </div>
+        }
+        profile={{
+          ...profiles.get(line.authorId),
+          name: nameOf(line.authorId, line.channelId),
+        }}
+        references={session}
+        viewer={session.viewer}
+        media={session.media}
+        onOpenLink={() => false}
+        canOpenLink={() => false}
+        day={false}
+        retry={undefined}
+        layout="thread"
+        fullWidth
+      />
+    );
+  };
   return (
     <div ref={card} className="search-peek-card">
-      <div className="search-peek-head">
-        {row.avatar && !message ? (
-          <Avatar
-            alt=""
-            fallback={row.avatar.name ?? row.label}
-            src={row.avatar.src}
-            size="default"
-            shape={row.avatar.shape}
-          />
-        ) : (
-          <span
-            className="search-peek-tile"
-            data-size="large"
-            data-tone={message ? "channel" : tone}
-            aria-hidden="true"
-          >
-            {Icon && <Icon size={18} />}
-          </span>
-        )}
-        <div className="min-w-0">
-          <div className="search-peek-title text-label">
-            {message ? (
-              whereOf(message.channelId)
-            ) : (
-              <MatchedLabel label={row.label} positions={row.matches} />
-            )}
-          </div>
-          <div className="truncate text-caption text-subtle">
-            {message ? when(message.createdAt) : row.detail}
+      <div className="search-peek-summary">
+        <div className="search-peek-head">
+          {row.avatar && !message ? (
+            <Avatar
+              alt=""
+              fallback={row.avatar.name ?? row.label}
+              src={row.avatar.src}
+              size="default"
+              shape={row.avatar.shape}
+            />
+          ) : (
+            <span
+              className="search-peek-tile"
+              data-size="large"
+              data-tone={message ? "channel" : tone}
+              aria-hidden="true"
+            >
+              {Icon && <Icon size={18} />}
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="search-peek-title truncate text-label">
+              {message ? (
+                whereOf(message.channelId)
+              ) : (
+                <MatchedLabel label={row.label} positions={row.matches} />
+              )}
+            </div>
+            <div className="truncate text-caption text-subtle">
+              {message ? when(message.createdAt) : row.detail}
+            </div>
           </div>
         </div>
+        {target?.kind === "channel" && target.about && (
+          <p className="search-peek-about text-body-sm">{target.about}</p>
+        )}
       </div>
       {!target && row.action && (
         <p className="search-peek-start m-0 text-body-sm text-subtle">
@@ -298,12 +374,6 @@ export function SearchPreview({
           </span>{" "}
           {row.action}
         </p>
-      )}
-      {target?.kind === "channel" && target.about && (
-        <p className="search-peek-about text-body-sm">{target.about}</p>
-      )}
-      {target && !message && shown.length > 0 && (
-        <div className="text-caption text-subtle">Latest</div>
       )}
       {shown.length > 0 && (
         <ol className="search-peek-lines">
@@ -318,18 +388,11 @@ export function SearchPreview({
                 data-slot=""
                 aria-hidden="true"
               >
-                <Avatar alt="" fallback="" size="small" shape="circle" />
-                <div className="min-w-0">
-                  <div className="search-peek-line-head text-caption">
-                    <span className="search-peek-author">{" "}</span>
-                  </div>
-                  <div className="search-peek-text text-body-sm">{" "}</div>
-                </div>
+                {lineRow({ ...message, id: slot, text: "\u00a0" }, false)}
               </li>
             ))}
           {shown.map((line) => {
             const hit = !!message && line.id === message.messageId;
-            const text = line.text.slice(0, 1600);
             return (
               <li
                 key={line.id}
@@ -337,34 +400,12 @@ export function SearchPreview({
                 data-hit={hit || undefined}
                 data-context={(!!message && !hit) || undefined}
               >
-                <Avatar
-                  alt=""
-                  fallback={nameOf(line.authorId, line.channelId)}
-                  src={pictureOf(line.authorId)}
-                  size="small"
-                  shape="circle"
-                />
-                <div className="min-w-0">
-                  <div className="search-peek-line-head text-caption">
-                    <span className="search-peek-author">
-                      {nameOf(line.authorId, line.channelId)}
-                    </span>
-                    {target?.kind === "person" && (
-                      <span className="truncate text-subtle">
-                        {whereOf(line.channelId)}
-                      </span>
-                    )}
-                    <time className="text-subtle">{when(line.createdAt)}</time>
+                {target?.kind === "person" && (
+                  <div className="text-caption text-subtle">
+                    {whereOf(line.channelId)}
                   </div>
-                  <div className="search-peek-text text-body-sm">
-                    <MatchedLabel
-                      label={text}
-                      positions={
-                        hit || !message ? termMatches(text, terms) : undefined
-                      }
-                    />
-                  </div>
-                </div>
+                )}
+                {lineRow(line, hit)}
               </li>
             );
           })}

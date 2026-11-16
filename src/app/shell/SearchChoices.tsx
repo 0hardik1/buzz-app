@@ -4,26 +4,36 @@ import {
   useRef,
   useEffect,
   useState,
+  useId,
+  useSyncExternalStore,
   type RefObject,
   type ReactNode,
 } from "react";
 import { Virtualizer } from "virtua";
-import {
-  CaretRightIcon,
-  ClockIcon,
-  MagnifyingGlassIcon,
-  type ChatCircleIcon,
-} from "../../shared/design-system/icons/index";
+import type { ChatCircleIcon } from "../../shared/design-system/icons/index";
 import type { PeekFollow, PeekTarget } from "./SearchPreview";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
+import { Badge } from "../../shared/design-system/ui/Badge";
+import { Button } from "../../shared/design-system/ui/Button";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { SearchField } from "../../shared/design-system/ui/SearchField";
+import { Tabs } from "../../shared/design-system/ui/Tabs";
 import { isApplePlatform } from "../../features/shortcuts/format";
 import { MatchedLabel } from "../../features/search/MatchedLabel";
 import { useSearchHighlight } from "../../features/search/use-search-highlight";
 import { channelIconClass } from "../../shared/inline-reference";
 import { PageIcon } from "./PageIcon";
 import "./SearchChoices.css";
+
+/** Narrow windows have no room for the preview; SearchChoices.css stacks the
+ * workspace at the same width. */
+const NARROW = "(max-width: 760px)";
+const watchNarrow = (change: () => void) => {
+  const query = globalThis.matchMedia?.(NARROW);
+  query?.addEventListener("change", change);
+  return () => query?.removeEventListener("change", change);
+};
+const isNarrow = () => !!globalThis.matchMedia?.(NARROW).matches;
 
 export type SearchDestination = {
   content?: ReactNode;
@@ -118,6 +128,10 @@ export type SearchPeek = {
   hints?: ReactNode;
   /** Results that may still arrive, so the list is busy. */
   busy?: boolean;
+  /** Groups whose source hasn't searched this text as typed (a last word
+   * too short to search messages, say), so they may still come back, each
+   * with the reason shown while it's chosen. */
+  unsearched?: Readonly<Record<string, ReactNode>> | undefined;
 };
 
 /** Top results shows this many rows of its first group, and of the rest. */
@@ -197,7 +211,7 @@ export function SearchChoices({
   onDisplayQueryChange,
   input,
   label = "Search Buzz",
-  placeholder = "Search people, channels, plugins and messages",
+  placeholder = "Search",
   scope,
   scopeAction,
   children,
@@ -236,6 +250,11 @@ export function SearchChoices({
   fill?: boolean;
 }) {
   const palette = useRef<HTMLDivElement>(null);
+  // A hidden preview would still read; it mounts only where it shows.
+  const narrow = useSyncExternalStore(watchNarrow, isNarrow);
+  const peekPanelPrefix = useId();
+  const peekPanelId = (label: string | undefined) =>
+    `${peekPanelPrefix}-group-${encodeURIComponent(label ?? "")}`;
   const resultsViewport = useRef<HTMLDivElement>(null);
   const resultsContent = useRef<HTMLDivElement>(null);
   // Peek and long lists fill their dialog; only a palette sized by its
@@ -310,7 +329,30 @@ export function SearchChoices({
   const ranked = peek?.ranked
     ? merged.filter((group) => resultRows(group).length)
     : [];
-  const scoped = ranked.find((group) => group.label === peekScope);
+  // A chosen group stays chosen while an edited query's results land, or
+  // while its source hasn't searched the text as typed, shown by its own
+  // status until it has rows. It's let go once its source has searched and
+  // settled without it. Shown or not, the choice is never kept out of sight.
+  const chosen = ranked.find((group) => group.label === peekScope);
+  const awaited =
+    !!peekScope &&
+    (!!peek?.busy || Object.hasOwn(peek?.unsearched ?? {}, peekScope));
+  // Peek turned off (a filter such as `in:` added) lets it go too.
+  if (peekScope && (!peek?.ranked || (!chosen && !awaited)))
+    setPeekScope(undefined);
+  const held =
+    peek?.ranked && peekScope && !chosen && awaited
+      ? (merged.find((group) => group.label === peekScope) ?? {
+          label: peekScope,
+          destinations: [],
+        })
+      : undefined;
+  const landing = held && {
+    ...held,
+    empty: held.empty ?? peek?.unsearched?.[held.label],
+  };
+  const scoped = chosen ?? landing;
+  const tabs = landing ? [...ranked, landing] : ranked;
   const countOf = (group: SearchGroup) =>
     group.count ?? String(resultRows(group).length);
   const truncated = new Map<string, number>();
@@ -337,14 +379,14 @@ export function SearchChoices({
               total: /^\d+$/.test(count) ? Number(count) : -1,
             };
           });
-  const showScope = (label: string | undefined) => {
+  const showScope = (label: string | undefined, focusInput = true) => {
     setPeekScope(label);
     const first = (
       label ? ranked.find((group) => group.label === label) : ranked[0]
     )?.destinations[0]?.key;
     if (first) highlight.select(first);
     if (resultsContent.current) resultsContent.current.scrollTop = 0;
-    input.current?.focus();
+    if (focusInput) input.current?.focus();
   };
   const hasControls = groups.some((group) =>
     group.destinations.some((row) => row.content),
@@ -377,7 +419,13 @@ export function SearchChoices({
   // biome-ignore lint/correctness/useExhaustiveDependencies: Freezes the order just shown, once per text.
   useLayoutEffect(() => {
     if (!moved || frozen.current) return;
-    frozen.current = { query, labels: merged.map(({ label }) => label) };
+    // Only groups on screen keep a place; one still empty arrives later.
+    frozen.current = {
+      query,
+      labels: merged
+        .filter((group) => group.destinations.length)
+        .map(({ label }) => label),
+    };
   }, [moved, query]);
   // A highlight is kept only while its row is in view: one scrolled away
   // would reopen with Enter choosing a row nobody can see.
@@ -649,7 +697,7 @@ export function SearchChoices({
             }
             icon={
               <span
-                className="search-row-icon grid size-6 shrink-0 items-center justify-items-start"
+                className="search-row-icon grid size-6 shrink-0 place-items-center"
                 data-tile={(!avatar && !image) || undefined}
                 data-tone={kind}
               >
@@ -662,7 +710,11 @@ export function SearchChoices({
                     shape={avatar.shape}
                   />
                 ) : (
-                  <PageIcon icon={icon} image={image} size={21} />
+                  <PageIcon
+                    icon={icon}
+                    image={image}
+                    size={peek && !image ? 15 : 21}
+                  />
                 )}
               </span>
             }
@@ -724,284 +776,342 @@ export function SearchChoices({
           {scopeAction}
         </div>
       )}
-      <SearchField
-        variant="palette"
-        prefix={
-          chips?.length ? (
-            <span className="search-palette-author-prefix">
-              {chips.map((chip) => (
-                <button
-                  key={chip.operand}
-                  type="button"
-                  className="search-palette-author-chip"
-                  aria-label={chip.label}
-                  title={chip.title}
-                  onClick={() => onRemoveChip?.(chip)}
-                >
-                  <span aria-hidden="true">×</span> {chip.text}
-                </button>
-              ))}
-            </span>
-          ) : undefined
-        }
-        inputRef={input}
-        role="combobox"
-        aria-controls={highlight.listId}
-        aria-expanded="true"
-        aria-autocomplete="list"
-        aria-haspopup={hasControls ? "grid" : "listbox"}
-        {...highlight.fieldProps}
-        label={label}
-        placeholder={placeholder}
-        value={displayQuery ?? query}
-        onValueChange={onDisplayQueryChange ?? onQueryChange}
-        spellCheck={false}
-        autoCorrect="off"
-        autoCapitalize="off"
-        autoComplete="off"
-        maxLength={256}
-        onKeyDown={(event) => {
-          const shortcutNumber = /^Digit([1-9])$/.exec(event.code)?.[1];
-          if (
-            !event.nativeEvent.isComposing &&
-            event.nativeEvent.keyCode !== 229 &&
-            !event.altKey &&
-            event.shiftKey &&
-            event.metaKey === apple &&
-            event.ctrlKey !== apple &&
-            shortcutNumber
-          ) {
-            const destination = destinations[Number(shortcutNumber) - 1];
-            if (destination) {
-              event.preventDefault();
-              if (!event.repeat) highlight.choose(destination.key);
+      <div className="search-palette-controls">
+        <SearchField
+          variant="palette"
+          prefix={
+            chips?.length ? (
+              <span className="search-palette-author-prefix">
+                {chips.map((chip) => (
+                  <button
+                    key={chip.operand}
+                    type="button"
+                    className="search-palette-author-chip"
+                    aria-label={chip.label}
+                    title={chip.title}
+                    onClick={() => onRemoveChip?.(chip)}
+                  >
+                    <span aria-hidden="true">×</span> {chip.text}
+                  </button>
+                ))}
+              </span>
+            ) : undefined
+          }
+          inputRef={input}
+          role="combobox"
+          aria-controls={highlight.listId}
+          aria-expanded="true"
+          aria-autocomplete="list"
+          aria-haspopup={hasControls ? "grid" : "listbox"}
+          {...highlight.fieldProps}
+          label={label}
+          placeholder={placeholder}
+          value={displayQuery ?? query}
+          onValueChange={onDisplayQueryChange ?? onQueryChange}
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
+          autoComplete="off"
+          maxLength={256}
+          onKeyDown={(event) => {
+            const shortcutNumber = /^Digit([1-9])$/.exec(event.code)?.[1];
+            if (
+              !event.nativeEvent.isComposing &&
+              event.nativeEvent.keyCode !== 229 &&
+              !event.altKey &&
+              event.shiftKey &&
+              event.metaKey === apple &&
+              event.ctrlKey !== apple &&
+              shortcutNumber
+            ) {
+              const destination = destinations[Number(shortcutNumber) - 1];
+              if (destination) {
+                event.preventDefault();
+                if (!event.repeat) highlight.choose(destination.key);
+              }
+              return;
             }
-            return;
-          }
-          if (
-            event.key === "Backspace" &&
-            chips?.length &&
-            event.currentTarget.selectionStart === 0 &&
-            event.currentTarget.selectionEnd === 0
-          ) {
-            event.preventDefault();
-            onEditLastChip?.();
-            return;
-          }
-          if (event.key === "ArrowDown" || event.key === "ArrowUp")
-            restore.current = 0;
-          // Tab moves between groups whether or not any have arrived yet, so
-          // it never leaves the field while results are still landing.
-          if (
-            peek?.ranked &&
-            event.key === "Tab" &&
-            !event.ctrlKey &&
-            !event.metaKey &&
-            !event.altKey
-          ) {
-            event.preventDefault();
-            if (!ranked.length) return;
-            const order = [undefined, ...ranked.map(({ label }) => label)];
-            const index = order.indexOf(scoped?.label);
-            showScope(
-              order[
-                (index + (event.shiftKey ? -1 : 1) + order.length) %
-                  order.length
-              ],
-            );
-            return;
-          }
-          // Escape from one group returns to Top results, not out of search.
-          if (event.key === "Escape" && scoped) {
-            event.preventDefault();
-            event.stopPropagation();
-            showScope(undefined);
-            return;
-          }
-          highlight.keyDown(event);
-        }}
-      />
-      {peek?.hints}
-      <div className={peek?.ranked ? "search-peek-body" : "contents"}>
-        <div ref={resultsViewport} className="search-palette-height">
+            if (
+              event.key === "Backspace" &&
+              chips?.length &&
+              event.currentTarget.selectionStart === 0 &&
+              event.currentTarget.selectionEnd === 0
+            ) {
+              event.preventDefault();
+              onEditLastChip?.();
+              return;
+            }
+            if (event.key === "ArrowDown" || event.key === "ArrowUp")
+              restore.current = 0;
+            // Tab moves between groups, and stays in the field while results
+            // are still landing. Past the first or last group it moves on as
+            // Tab does, so retry and other controls stay in reach.
+            if (
+              peek?.ranked &&
+              event.key === "Tab" &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !event.altKey
+            ) {
+              const order = [undefined, ...tabs.map(({ label }) => label)];
+              const next =
+                order.indexOf(scoped?.label) + (event.shiftKey ? -1 : 1);
+              if (tabs.length ? next >= 0 && next < order.length : peek.busy) {
+                event.preventDefault();
+                if (tabs.length) showScope(order[next]);
+              }
+              return;
+            }
+            // Escape from one group returns to Top results, not out of search.
+            if (event.key === "Escape" && scoped) {
+              event.preventDefault();
+              event.stopPropagation();
+              showScope(undefined);
+              return;
+            }
+            highlight.keyDown(event);
+          }}
+        />
+        {peek?.hints}
+      </div>
+      <div className={peek?.ranked ? "search-peek-workspace" : "contents"}>
+        {peek?.ranked && tabs.length > 0 && (
+          // Escape from one group returns to Top results, from a group tab
+          // as from the field, not out of search.
+          // biome-ignore lint/a11y/noStaticElementInteractions: Handles keys bubbling from its tabs.
           <div
-            ref={resultsContent}
-            className="search-palette-scroll"
-            onWheel={() => {
-              restore.current = 0;
-            }}
-            onPointerDown={() => {
-              restore.current = 0;
-            }}
-            onScroll={(event) => {
-              if (restore.current) return;
-              // Enter never chooses a row scrolled out of sight.
-              if (selected && !inView(selected)) highlight.clear();
-              if (!place) return;
-              place.top = event.currentTarget.scrollTop;
-              keepPlace();
+            className="search-peek-rail"
+            onKeyDown={(event) => {
+              if (event.key !== "Escape" || !scoped) return;
+              event.preventDefault();
+              event.stopPropagation();
+              showScope(undefined);
             }}
           >
-            {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: Both grid and listbox support an accessible label. */}
+            <Tabs
+              variant="panel"
+              label="Result groups"
+              value={scoped?.label ?? ""}
+              onValueChange={(value) => showScope(value || undefined, false)}
+              items={[undefined, ...tabs].map((group, index) => ({
+                value: group?.label ?? "",
+                label:
+                  group?.label ??
+                  (query.trim() ? "Top results" : "Jump back in"),
+                panelId: peekPanelId(group?.label),
+                trailing: (
+                  <>
+                    {/* A landing group has no count yet. */}
+                    {(!group || group !== landing) && (
+                      <span className="search-peek-count">
+                        {group
+                          ? countOf(group)
+                          : `${ranked.reduce(
+                              (sum, item) =>
+                                sum +
+                                (item.browse ? 0 : resultRows(item).length),
+                              0,
+                            )}${ranked.some((item) => !item.browse && item.count?.endsWith("+")) ? "+" : ""}`}
+                      </span>
+                    )}
+                    {index === 1 && group !== landing && !!query.trim() && (
+                      <Badge size="xs" tone="success">
+                        Best match
+                      </Badge>
+                    )}
+                  </>
+                ),
+              }))}
+            />
+          </div>
+        )}
+        <div
+          className={peek?.ranked ? "search-peek-body" : "contents"}
+          {...(peek?.ranked && tabs.length > 0
+            ? {
+                role: "tabpanel",
+                id: peekPanelId(scoped?.label),
+                "aria-labelledby": `${peekPanelId(scoped?.label)}-tab`,
+              }
+            : {})}
+        >
+          <div ref={resultsViewport} className="search-palette-height">
             <div
-              id={highlight.listId}
-              role={hasControls ? "grid" : "listbox"}
-              aria-label={resultsLabel}
-              aria-busy={peek?.busy || undefined}
-              className="search-palette-results interaction-panel"
+              ref={resultsContent}
+              className="search-palette-scroll"
+              onWheel={() => {
+                restore.current = 0;
+              }}
+              onPointerDown={() => {
+                restore.current = 0;
+              }}
+              onScroll={(event) => {
+                if (restore.current) return;
+                // Enter never chooses a row scrolled out of sight.
+                if (selected && !inView(selected)) highlight.clear();
+                if (!place) return;
+                place.top = event.currentTarget.scrollTop;
+                keepPlace();
+              }}
             >
-              {groups
-                .filter(
-                  ({ destinations, empty, headingStatus }) =>
-                    destinations.length || empty !== undefined || headingStatus,
-                )
-                .map(
-                  ({
-                    label,
-                    hideLabel,
-                    destinations,
-                    empty,
-                    notice,
-                    headingStatus,
-                    why,
-                    tone,
-                    icon: GroupIcon = destinations[0]?.icon,
-                    multiline,
-                  }) => (
-                    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: Both grid rowgroups and listbox groups are named.
-                    <div
-                      key={label}
-                      role={hasControls ? "rowgroup" : "group"}
-                      aria-label={label}
-                      // A status-only group has no rows yet; busy states why.
-                      aria-busy={
-                        (!!headingStatus && !destinations.length) || undefined
-                      }
-                      className="search-palette-group"
-                      data-tone={tone}
-                    >
-                      <div className="navigation-section" data-buzz-ui="">
-                        {!hideLabel && (
-                          <div
-                            className="navigation-section-heading"
-                            aria-hidden={hasControls || undefined}
-                          >
-                            <h2
-                              className={`navigation-section-label text-body text-secondary${headingStatus ? " truncate" : ""}`}
-                            >
-                              {peek?.ranked && GroupIcon && (
-                                <span
-                                  className="search-peek-tile"
-                                  data-tone={tone}
-                                  aria-hidden="true"
-                                >
-                                  <GroupIcon size={12} />
-                                </span>
-                              )}
-                              <span className="search-peek-group-label">
-                                {label}
-                              </span>
-                              {peek?.ranked &&
-                                ranked.some(
-                                  (group) => group.label === label,
-                                ) && (
-                                  <span
-                                    className="search-peek-count"
-                                    aria-hidden="true"
-                                  >
-                                    {" "}
-                                    {countOf(
-                                      ranked.find(
-                                        (group) => group.label === label,
-                                      ) ?? { label, destinations },
-                                    )}
-                                  </span>
-                                )}
-                              {why && (
-                                <span
-                                  className="search-peek-why"
-                                  aria-hidden="true"
-                                >
-                                  {" "}
-                                  · {why}
-                                </span>
-                              )}
-                              {headingStatus && (
-                                <span aria-hidden="true">
-                                  {" "}
-                                  · {headingStatus}
-                                </span>
-                              )}
-                            </h2>
-                            {truncated.has(label) && (
-                              <button
-                                type="button"
-                                tabIndex={-1}
-                                className="search-peek-see-all text-body-sm"
-                                onMouseDown={(event) => event.preventDefault()}
-                                onClick={() => showScope(label)}
+              {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: Both grid and listbox support an accessible label. */}
+              <div
+                id={highlight.listId}
+                role={hasControls ? "grid" : "listbox"}
+                aria-label={resultsLabel}
+                aria-busy={peek?.busy || undefined}
+                className="search-palette-results interaction-panel"
+              >
+                {groups
+                  .filter(
+                    ({ destinations, empty, headingStatus }) =>
+                      destinations.length ||
+                      empty !== undefined ||
+                      headingStatus,
+                  )
+                  .map(
+                    ({
+                      label,
+                      hideLabel,
+                      destinations,
+                      empty,
+                      notice,
+                      headingStatus,
+                      why,
+                      tone,
+                      multiline,
+                    }) => {
+                      const heading = (
+                        <span
+                          className={`navigation-section-label text-body text-secondary${headingStatus ? " truncate" : ""}`}
+                        >
+                          <span className="search-peek-group-label text-label-sm">
+                            {label}
+                          </span>
+                          {peek?.ranked &&
+                            ranked.some((group) => group.label === label) && (
+                              <span
+                                className="search-peek-count"
+                                aria-hidden="true"
                               >
-                                See all{" "}
+                                {" "}
                                 {countOf(
                                   ranked.find(
                                     (group) => group.label === label,
-                                  ) ?? {
-                                    label,
-                                    destinations,
-                                  },
+                                  ) ?? { label, destinations },
                                 )}
-                                {/* Names the group; flex drops the space. */}{" "}
-                                <span className="sr-only">{label}</span>
-                                <CaretRightIcon size={12} aria-hidden="true" />
-                              </button>
+                              </span>
                             )}
-                          </div>
-                        )}
-                        <div className="navigation-section-rows">
-                          {virtual ? (
-                            // Only the rows near the view are drawn; the
-                            // highlighted one stays, for the field to point at.
-                            // The heading above is well inside virtua's buffer,
-                            // so no start margin is needed.
-                            <div className="search-palette-virtual">
-                              <Virtualizer
-                                data={destinations}
-                                scrollRef={resultsContent}
-                                keepMounted={keepMounted}
-                              >
-                                {(row) => renderRow(row, multiline)}
-                              </Virtualizer>
-                            </div>
-                          ) : (
-                            destinations.map((row) => renderRow(row, multiline))
+                          {why && (
+                            <span
+                              className="search-peek-why"
+                              aria-hidden="true"
+                            >
+                              {" "}
+                              · {why}
+                            </span>
                           )}
-                          {(notice ||
-                            (!destinations.length && !headingStatus)) && (
-                            <div role={hasControls ? "row" : "presentation"}>
+                          {headingStatus && (
+                            <span aria-hidden="true"> · {headingStatus}</span>
+                          )}
+                        </span>
+                      );
+                      return (
+                        // biome-ignore lint/a11y/useAriaPropsSupportedByRole: Both grid rowgroups and listbox groups are named.
+                        <div
+                          key={label}
+                          role={hasControls ? "rowgroup" : "group"}
+                          aria-label={label}
+                          // A status-only group has no rows yet; busy states why.
+                          aria-busy={
+                            (!!headingStatus && !destinations.length) ||
+                            undefined
+                          }
+                          className="search-palette-group"
+                          data-tone={tone}
+                        >
+                          <div className="navigation-section" data-buzz-ui="">
+                            {!hideLabel && (
                               <div
-                                role={hasControls ? "gridcell" : "presentation"}
+                                className="navigation-section-heading"
+                                data-search-action={
+                                  truncated.has(label) || undefined
+                                }
+                                aria-hidden={hasControls || undefined}
                               >
-                                {notice}
-                                {!destinations.length && (
-                                  <p className="search-palette-group-empty">
-                                    {empty ?? "No matching results."}
-                                  </p>
-                                )}
+                                <h2 className="m-0 min-w-0 flex-1">
+                                  {truncated.has(label) ? (
+                                    <Button
+                                      variant="plain"
+                                      size="inline"
+                                      aria-label={`Show all ${label}`}
+                                      tabIndex={-1}
+                                      onMouseDown={(event) =>
+                                        event.preventDefault()
+                                      }
+                                      onClick={() => showScope(label)}
+                                    >
+                                      {heading}
+                                    </Button>
+                                  ) : (
+                                    heading
+                                  )}
+                                </h2>
                               </div>
+                            )}
+                            <div className="navigation-section-rows">
+                              {virtual ? (
+                                // Only the rows near the view are drawn; the
+                                // highlighted one stays, for the field to point at.
+                                // The heading above is well inside virtua's buffer,
+                                // so no start margin is needed.
+                                <div className="search-palette-virtual">
+                                  <Virtualizer
+                                    data={destinations}
+                                    scrollRef={resultsContent}
+                                    keepMounted={keepMounted}
+                                  >
+                                    {(row) => renderRow(row, multiline)}
+                                  </Virtualizer>
+                                </div>
+                              ) : (
+                                destinations.map((row) =>
+                                  renderRow(row, multiline),
+                                )
+                              )}
+                              {(notice ||
+                                (!destinations.length && !headingStatus)) && (
+                                <div
+                                  role={hasControls ? "row" : "presentation"}
+                                >
+                                  <div
+                                    role={
+                                      hasControls ? "gridcell" : "presentation"
+                                    }
+                                  >
+                                    {notice}
+                                    {!destinations.length && (
+                                      <p className="search-palette-group-empty">
+                                        {empty ?? "No matching results."}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  ),
-                )}
+                      );
+                    },
+                  )}
+              </div>
+              {children && (
+                <div className="search-palette-status">{children}</div>
+              )}
             </div>
-            {children && (
-              <div className="search-palette-status">{children}</div>
-            )}
           </div>
         </div>
-        {peek?.ranked && (
+        {peek?.ranked && !narrow && (
           <aside className="search-peek-side" aria-label="Preview">
             {/* Not live: the highlighted row is already announced, and the
               preview changes with every keystroke. */}
@@ -1023,70 +1133,6 @@ export function SearchChoices({
                 );
               })()}
             </div>
-            {ranked.length > 0 && (
-              <nav className="search-peek-rail" aria-label="Result groups">
-                <div className="search-peek-rail-head text-body-sm text-subtle">
-                  <span>{query.trim() ? "Show" : "Browse"}</span>
-                  <kbd>Tab</kbd>
-                </div>
-                {[undefined, ...ranked].map((group, index) => {
-                  const Icon = group
-                    ? (group.icon ?? group.destinations[0]?.icon)
-                    : query.trim()
-                      ? MagnifyingGlassIcon
-                      : ClockIcon;
-                  const shown = (scoped?.label ?? undefined) === group?.label;
-                  return (
-                    <button
-                      key={group?.label ?? ""}
-                      // A long rail scrolls; the group shown stays in sight.
-                      ref={
-                        shown
-                          ? (item) =>
-                              item?.scrollIntoView?.({ block: "nearest" })
-                          : undefined
-                      }
-                      type="button"
-                      tabIndex={-1}
-                      className="search-peek-rail-item text-body-sm"
-                      aria-pressed={shown}
-                      title={group?.why}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => showScope(group?.label)}
-                    >
-                      {Icon && (
-                        <span
-                          className="search-peek-tile"
-                          data-tone={group?.tone}
-                          aria-hidden="true"
-                        >
-                          <Icon size={12} />
-                        </span>
-                      )}
-                      <span className="search-peek-rail-label">
-                        {group?.label ??
-                          (query.trim() ? "Top results" : "Jump back in")}
-                        {index === 1 && !!query.trim() && (
-                          <small className="search-peek-best">
-                            <span className="sr-only">, </span>Best match
-                          </small>
-                        )}
-                      </span>
-                      <span className="search-peek-count">
-                        {group
-                          ? countOf(group)
-                          : `${ranked.reduce(
-                              (sum, item) =>
-                                sum +
-                                (item.browse ? 0 : resultRows(item).length),
-                              0,
-                            )}${ranked.some((item) => !item.browse && item.count?.endsWith("+")) ? "+" : ""}`}
-                      </span>
-                    </button>
-                  );
-                })}
-              </nav>
-            )}
           </aside>
         )}
       </div>

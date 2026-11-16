@@ -215,7 +215,7 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     name: "Dialog",
     purpose: "A shared modal frame with title, content and actions.",
     behavior:
-      "Shared title/description header and secondary Close; 2rem insets (1rem at viewport widths up to 30rem) and a fixed 1rem minimum gutter above footer buttons outside scrolling content. Compact dialogs center; task modals start 8rem from the top. Base UI owns focus, default outside dismissal and transition presence; shared motion tokens animate entry and exit. The host can preserve native titlebar dragging through the backdrop.",
+      "Shared title/description header and secondary Close; one 12px heading-to-body gap, 2rem outer insets (1rem at viewport widths up to 30rem) and a fixed 1rem minimum gutter above footer buttons outside scrolling content. Compact dialogs center; task modals start 8rem from the top. Base UI owns focus, default outside dismissal and transition presence; shared motion tokens animate entry and exit. The host can preserve native titlebar dragging through the backdrop.",
     variants: [
       "compact (25rem)",
       "default (40rem)",
@@ -390,6 +390,21 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     composes: ["field", "radio-group"],
   },
   {
+    slug: "badge",
+    name: "Badge",
+    purpose:
+      "Present concise, non-interactive metadata such as a search result’s Best match label.",
+    behavior:
+      "XS text capsule with neutral and success tones. Not focusable or interactive.",
+    variants: ["xs neutral", "xs success"],
+    status: "proposed",
+    collection: "components",
+    owner: "Global search",
+    source: "shared/design-system/ui/Badge.tsx",
+    baseUi: [],
+    composes: [],
+  },
+  {
     slug: "count-badge",
     name: "CountBadge",
     purpose:
@@ -498,6 +513,7 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
       "ghost",
       "destructive",
       "outline",
+      "outline-subtle: standard border for quiet secondary actions",
       "attention (proposed): light dashed danger outline with slow marching ants",
       "glass",
       "glass-ghost (proposed): quiet artwork control with glass hover/open states",

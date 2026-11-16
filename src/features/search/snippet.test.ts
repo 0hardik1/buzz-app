@@ -27,3 +27,16 @@ it("windows a long message around its first match, on word boundaries", () => {
   expect(shown.text).toContain("remote agent");
   expect(marked(shown.text, shown.matches)).toBe("remote");
 });
+
+it("highlights where the match is when lowercasing lengthens earlier text", () => {
+  const text = "İİ remote";
+  expect(marked(text, termMatches(text, ["remote"]))).toBe("remote");
+});
+
+it.each(["ΟΔΟΣ", "οδος"])(
+  "highlights a word ending in a capital sigma when searching %s",
+  (query) => {
+    const text = "ΟΔΟΣ τώρα";
+    expect(marked(text, termMatches(text, searchTerms(query)))).toBe("ΟΔΟΣ");
+  },
+);

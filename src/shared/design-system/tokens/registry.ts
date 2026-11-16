@@ -485,6 +485,13 @@ export const ROLE_GROUPS: RoleGroup[] = [
         use: "A recessed region inside a panel.",
         status: "core",
       },
+      {
+        token: "bg-surface-inset-subtle",
+        variable: "--surface-inset-subtle",
+        pointsAt: "50% surface-panel / 50% surface-inset in both modes",
+        use: "Quiet recessed reading panes, including global search previews.",
+        status: "core",
+      },
     ],
   },
   {
@@ -792,6 +799,13 @@ export const ROLE_GROUPS: RoleGroup[] = [
         pointsAt:
           "icon-categorical-purple; the own bubble's link ink at Buzzin’",
         use: "Categorical state icons inside your own bubble, where the solid fill clears no purple.",
+        status: "core",
+      },
+      {
+        token: "text-categorical-green",
+        variable: "--text-categorical-green",
+        pointsAt: "green-12 light / green-12 dark",
+        use: "Categorical green text, paired with surface-categorical-green.",
         status: "core",
       },
       {
