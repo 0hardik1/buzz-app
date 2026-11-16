@@ -388,7 +388,7 @@
   color: var(--message-icon-success, var(--icon-success));
 }
 .soloPull[data-tone="closed"] {
-  color: var(--text-danger);
+  color: var(--icon-status-failure);
 }
 .soloPull[data-tone="merged"],
 .pullState[data-pr-state="merged"],
@@ -414,7 +414,7 @@
   aspect-ratio: 1;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  background: var(--text-danger);
+  background: var(--icon-status-failure);
 }
 .soloPull[data-tone="pending"] > .soloPullBadge {
   background: var(--icon-status-progress);
