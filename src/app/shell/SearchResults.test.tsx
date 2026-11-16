@@ -4712,6 +4712,15 @@ it.each(
 )(
   "completes verified alias $alias in $scope with $preference and namesake $namesake",
   async ({ scope, preference, alias, namesake }) => {
+    // A controlled clock: the namesake lands after up to three chained search
+    // debounces, which in real time sits at a wait's one-second default.
+    vi.useFakeTimers();
+    const settle = async () => {
+      for (let step = 0; step < 3; step += 1)
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
+        });
+    };
     const previous = namePreference();
     setNamePreference(preference as "username" | "full-name");
     const { owner, person, reads } = verifiedAuthorSession(
@@ -4736,20 +4745,20 @@ it.each(
           query={alias === "robinz" ? `from:@${alias}` : completed}
         />,
       );
+      await settle();
       if (alias === "robinz") {
-        await screen.findByRole("option", {
+        screen.getByRole("option", {
           name: new RegExp(person.pubkey.slice(0, 12)),
         });
         mounted.rerender(<SearchResults {...props} query={completed} />);
+        await settle();
       }
       if (namesake) {
-        await waitFor(() =>
-          expect(
-            within(screen.getByRole("group", { name: "People" })).getAllByRole(
-              "option",
-            ),
-          ).toHaveLength(2),
-        );
+        expect(
+          within(screen.getByRole("group", { name: "People" })).getAllByRole(
+            "option",
+          ),
+        ).toHaveLength(2);
         expect(reads).toEqual([]);
         fireEvent.click(
           screen.getByRole("option", {
@@ -4758,13 +4767,11 @@ it.each(
         );
         expect(change).toHaveBeenCalledWith(`from:${person.pubkey} deploy`);
       } else {
-        await waitFor(() =>
-          expect(reads).toContainEqual(
-            expect.objectContaining({
-              authors: [person.pubkey],
-              search: "deploy",
-            }),
-          ),
+        expect(reads).toContainEqual(
+          expect.objectContaining({
+            authors: [person.pubkey],
+            search: "deploy",
+          }),
         );
       }
     } finally {
