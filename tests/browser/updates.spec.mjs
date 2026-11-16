@@ -82,6 +82,7 @@ async function nativeUpdater(
         if (command === "app_agent_state_load") return {};
         if (command === "app_agent_state_set") return;
         if (command === "credential_pairing_communities") return;
+        if (command === "credential_pair_prompt") return;
         const plugin = /^plugin:(updater|resources)\|(\w+)$/.exec(command);
         if (!plugin && command !== "update_restart")
           throw new Error(`Unexpected command ${command}`);
