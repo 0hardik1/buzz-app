@@ -450,3 +450,36 @@ it.each([false, true])(
     }
   },
 );
+
+it.each([
+  { reference: "policy" },
+  { path: "policy" },
+  { commit: "b".repeat(40) },
+])(
+  "does not reuse a former managed discovery source in saved-source UI: %j",
+  (change) => {
+    const installed = {
+      ...plugin(),
+      updateSource: { ...plugin().updateSource, commit: "a".repeat(40) },
+    };
+    const policy = { ...installed.updateSource, ...change };
+    const checks = createPluginUpdateChecks(undefined);
+    checks.observe(installed, policy)({ revision: "policy-new" });
+    expect(pluginUpdateAvailable(checks.snapshot(), installed)).toBe(false);
+    expect(pluginUpdateCheck(checks.snapshot(), installed)).toBeUndefined();
+  },
+);
+
+it("matches equivalent managed commit pins regardless of case", () => {
+  const installed = plugin();
+  const policy = { ...installed.updateSource, commit: "A".repeat(40) };
+  const checks = createPluginUpdateChecks(undefined);
+  checks.observe(installed, policy)({ revision: "policy-new" });
+  expect(
+    pluginUpdateCheck(checks.snapshot(), installed, {
+      ...policy,
+      commit: policy.commit.toLowerCase(),
+    })?.release?.revision,
+  ).toBe("policy-new");
+});
+
