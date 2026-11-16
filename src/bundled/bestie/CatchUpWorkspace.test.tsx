@@ -96,6 +96,7 @@ async function fixture(take?: BestieTake, refuseFirstCreate = false) {
       events.push(
         metadata(authority, id, "Catch-up", undefined, [
           ["private"],
+          ["ttl", "604800"],
           ["t", "stream"],
           ["t", "buzz.solo"],
         ]),
@@ -329,6 +330,11 @@ it("keeps one submitted exchange while browsing, hiding and reopening in StrictM
   );
   await screen.findByRole("textbox", { name: "Message Pollen" });
   const prompt = f.publish.mock.calls.find(([event]) => event.kind === 9)?.[0];
+  const created = f.publish.mock.calls.find(
+    ([event]) => event.kind === 9007,
+  )?.[0];
+  expect(created?.tags).toContainEqual(["ttl", "604800"]);
+  expect(created?.tags).toContainEqual(["name", "Catch-up · Launch"]);
   expect(prompt?.content).toContain(f.source.id);
   expect(prompt?.tags).toContainEqual(["p", f.agent.pubkey]);
   const launcher = screen.getAllByRole("button", {

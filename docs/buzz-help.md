@@ -286,7 +286,9 @@ available rather than silently discarding it.
   Recent asks are kept only for this app session; created chats remain in Solo.
   “Queued” is not proof of delivery or an answer. These prototypes do not watch
   conversations or create monitoring subscriptions. **Current panel** keeps the
-  earlier catch-up presentation.
+  earlier catch-up presentation: its catch-ups are temporary Solo chats that
+  archive after seven days without activity, unless **Keep this chat** removes
+  that expiry.
 - With the **Bestie** plugin on and no saved choice, **Choose your bestie agent**
   offers a searchable agent picker and **Create agent**. Choosing a known remote
   agent, including one created through Builderlab, asks for confirmation:

@@ -23,6 +23,8 @@ import {
 import { XIcon } from "../../shared/design-system/icons";
 import { CatchUpAvatar } from "./CatchUpAvatar";
 import { messagePreviewText } from "../../features/conversation/message-preview-text";
+import { DEFAULT_TEMPORARY_CHANNEL_TTL_SECONDS } from "../../features/relay/channel-writes";
+import type { RelaySession } from "../../features/relay/session";
 import panelStyles from "./CatchUpPanel.module.css";
 import type { CatchUpOpening } from "./catch-up-context";
 import styles from "./PinnedBestie.module.css";
@@ -134,10 +136,12 @@ export function CatchUpPanel({
             pubkey: bestie.pubkey,
             name: bestie.managedName ?? bestie.name,
           };
+          const title = `Catch-up · ${sourceName.current ?? "original context"}`;
           const start = session.channelWrites.start(
             channelId,
-            `Catch-up with ${agent.name}`,
+            title.slice(0, 120),
             [agent.pubkey],
+            DEFAULT_TEMPORARY_CHANNEL_TTL_SECONDS,
           );
           current = { channelId, create: start.create, agent };
           submitted.current = current;
@@ -280,35 +284,106 @@ export function CatchUpPanel({
           {request ? "Opening catch-up…" : "Preparing your catch-up…"}
         </p>
       ) : (
-        <ConversationPresentation value={shown}>
-          <ConversationChannel
-            session={session}
-            scope={source.session.scope}
-            channel={channel}
-            extensions={source.extensions}
-            host={source.host}
-            active={shown}
-          >
-            <div className={`${styles.work} flex min-h-0 flex-1 flex-col`}>
-              <SoloColumn>
-                <ChannelBody
-                  cached={!!channel.cached}
-                  viewer={session.viewer}
-                  marksRead={shown}
-                  revealMessageId={sent}
-                />
-                <ConversationComposer
-                  shown={shown}
-                  autoFocus={false}
-                  defaultMention={request.agent}
-                  label={`Message ${request.agent.name}`}
-                  onSend={setSent}
-                />
-              </SoloColumn>
-            </div>
-          </ConversationChannel>
-        </ConversationPresentation>
+        <>
+          <CatchUpLifetime session={session} channelId={request.channelId} />
+          <ConversationPresentation value={shown}>
+            <ConversationChannel
+              session={session}
+              scope={source.session.scope}
+              channel={channel}
+              extensions={source.extensions}
+              host={source.host}
+              active={shown}
+            >
+              <div className={`${styles.work} flex min-h-0 flex-1 flex-col`}>
+                <SoloColumn>
+                  <ChannelBody
+                    cached={!!channel.cached}
+                    viewer={session.viewer}
+                    marksRead={shown}
+                    revealMessageId={sent}
+                  />
+                  <ConversationComposer
+                    shown={shown}
+                    autoFocus={false}
+                    defaultMention={request.agent}
+                    label={`Message ${request.agent.name}`}
+                    onSend={setSent}
+                  />
+                </SoloColumn>
+              </div>
+            </ConversationChannel>
+          </ConversationPresentation>
+        </>
       )}
     </section>
+  );
+}
+
+function CatchUpLifetime({
+  session,
+  channelId,
+}: {
+  session: RelaySession;
+  channelId: string;
+}) {
+  const details = session.channelDetails;
+  const [status, setStatus] = useState<"temporary" | "saving" | "kept">(
+    "temporary",
+  );
+  const [error, setError] = useState<string>();
+  const operation = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => operation.current?.abort(), []);
+  if (!details?.available || status === "kept") return null;
+  return (
+    <div className={`${panelStyles.lifetime} text-body-sm`}>
+      <span>Temporary chat — archives after 7 days without activity.</span>
+      <Button
+        size="xs"
+        variant="subtle"
+        disabled={status === "saving"}
+        onClick={() => {
+          operation.current?.abort();
+          const controller = new AbortController();
+          operation.current = controller;
+          setStatus("saving");
+          setError(undefined);
+          void details
+            .load(channelId, controller.signal)
+            .then((base) => {
+              if (!base.canEdit)
+                throw new Error(
+                  "You can no longer change this chat’s lifetime.",
+                );
+              return base.ttlSeconds === undefined
+                ? undefined
+                : details.save(
+                    base,
+                    { ...base, ttlSeconds: undefined },
+                    controller.signal,
+                  );
+            })
+            .then(() => {
+              if (!controller.signal.aborted) setStatus("kept");
+            })
+            .catch((reason) => {
+              if (controller.signal.aborted) return;
+              setStatus("temporary");
+              setError(
+                reason instanceof Error
+                  ? reason.message
+                  : "Bestie couldn’t keep this chat.",
+              );
+            })
+            .finally(() => {
+              if (operation.current === controller)
+                operation.current = undefined;
+            });
+        }}
+      >
+        {status === "saving" ? "Keeping…" : "Keep this chat"}
+      </Button>
+      {error && <span role="alert">{error}</span>}
+    </div>
   );
 }

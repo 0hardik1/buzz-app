@@ -214,8 +214,10 @@ source again reopens it without resubmitting. A different source replaces the
 one in-memory exchange; previous conversations remain ordinary Solo chats.
 
 Requests use the existing private Solo creation, membership and outbox path.
-They are submitted once per opening, after the create is confirmed. Hiding or
-changing channels never cancels an accepted request. Navigating to another
+They are submitted once per opening, after the create is confirmed. Each is a
+temporary seven-day Solo chat and names its source; **Keep this chat** removes
+that expiry when the viewer can edit the chat. Hiding or changing channels never
+cancels an accepted request. Navigating to another
 community/account or disabling Bestie drops the presentation and prevents a
 not-yet-submitted request from sending. Reload does not reconstruct the panel.
 Source/channel access and all publication checks remain with the relay session.
