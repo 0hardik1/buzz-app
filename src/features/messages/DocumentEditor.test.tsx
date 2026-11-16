@@ -203,6 +203,30 @@ it.each([15999, 16001])(
   },
 );
 
+it("caps rich edits at the decoder ceiling while preserving the source budget", () => {
+  const body = "x".repeat(99_990);
+  const h = mount({ maxLength: 120_000 }, { initialValue: `**${body}**` });
+  const input = screen.getByRole("textbox", {
+    name: "Document body",
+  }) as ComposerInputElement;
+  act(() => {
+    h.ref.current?.focusEnd();
+    input.insertText("y".repeat(20));
+  });
+  expect(h.change).not.toHaveBeenCalled();
+  expect(input.querySelector("strong")).toHaveTextContent(body);
+  act(() => input.insertText("123456"));
+  const accepted = `**${body}123456**`;
+  expect(h.change).toHaveBeenLastCalledWith(accepted);
+  act(() => input.insertText("!"));
+  expect(h.change).toHaveBeenCalledTimes(1);
+  h.rerender({ maxLength: 120_000, source: true });
+  const source = screen.getByRole("textbox", { name: "Markdown" });
+  expect(source).toHaveValue(accepted);
+  fireEvent.change(source, { target: { value: `${accepted}\n\nRaw source` } });
+  expect(h.change).toHaveBeenLastCalledWith(`${accepted}\n\nRaw source`);
+});
+
 it("keeps quoted paragraphs when editing outside their quote", () => {
   const h = mount(
     {},

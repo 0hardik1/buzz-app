@@ -21,6 +21,7 @@ import {
   documentEditorDraft,
   documentEditorMarkdown,
 } from "./document-editor-markdown";
+import { MAX_MARKDOWN_LENGTH } from "../relay/message-content";
 import styles from "./DocumentEditor.module.css";
 
 const noDecorations = () => [];
@@ -214,7 +215,7 @@ export function DocumentEditor({
                 disabled={disabled || !editing}
                 placeholder={placeholder}
                 aria-label={label}
-                maxLength={maxLength}
+                maxLength={Math.min(maxLength, MAX_MARKDOWN_LENGTH)}
                 markdownMode="document"
                 decorationsFor={noDecorations}
                 onDraftChange={(next) => {
