@@ -137,8 +137,6 @@ export type Panels = {
     Workspace: ComponentType<PanelWorkspaceProps>;
     /** Stable names should include the plugin ID; scope is the session workspace. */
     useSplit: typeof usePluginPanelSplit;
-    /** Publish the selected document's title while inside a host workspace. */
-    useTabTitle: typeof usePanelTabTitle;
   };
   register(panel: Panel): void;
   resolve(target: string): RegisteredPanel | undefined;
@@ -152,9 +150,10 @@ export type Panels = {
     handler: (request: PanelOpenRequest) => boolean,
   ): () => void;
   /** React hook for a panel component: names its tab, in place of the static
-   * `title`, while mounted. Does nothing outside a panel tab. Absent on hosts
+   * `title`, while mounted, with an optional icon. Also works in a host workspace.
+   * Does nothing outside a tab. Absent on hosts
    * that predate it, so feature-detect before calling. */
-  useTabTitle?(label: string): void;
+  useTabTitle?: typeof usePanelTabTitle;
 };
 declare module "@deepseek-ai/cordis" {
   interface Context {
@@ -165,7 +164,6 @@ export class PanelsService extends Service implements Panels {
   readonly ui: Panels["ui"] = Object.freeze({
     Workspace: PanelWorkspace,
     useSplit: usePluginPanelSplit,
-    useTabTitle: usePanelTabTitle,
   });
   private readonly panels;
   constructor(ctx: Context) {
@@ -175,7 +173,7 @@ export class PanelsService extends Service implements Panels {
   private readonly openHandlers = new Set<
     (request: PanelOpenRequest) => boolean
   >();
-  useTabTitle = (label: string) => usePanelTabTitle(label);
+  useTabTitle = usePanelTabTitle;
   snapshot = () => this.panels.snapshot();
   subscribe = (listener: () => void) => this.panels.subscribe(listener);
   requestOpen = (request: PanelOpenRequest) => {

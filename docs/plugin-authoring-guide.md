@@ -241,8 +241,9 @@ Inject `panels` to use these host members:
   tab, for example while edits need confirmation. The host owns tab controls,
   focus and nested detail presentation; your page owns selection, admission,
   closing and Back/Forward visits. It does not create a second history owner.
-- `ctx.panels.ui.useTabTitle(label, icon?)` publishes a document's live title
+- `ctx.panels.useTabTitle(label, icon?)` publishes a document's live title
   inside a host workspace (including registered panels opened by Channels).
+  Feature-detect this hook on older hosts before calling it.
 - `ctx.panels.ui.useSplit(scope, name, defaultWidth?, min?, primary?)` returns
   `{ ref, style, handle }`. Attach `ref` and `style` to your layout container,
   place `handle` beside its secondary pane, and use CSS variable
@@ -258,7 +259,7 @@ export const inject = ["react", "conversation", "panels", "pages"];
 export function apply(ctx) {
   const React = ctx.react;
   function Reader() {
-    ctx.panels.ui.useTabTitle("Guide");
+    ctx.panels.useTabTitle?.("Guide");
     return React.createElement(ctx.conversation.ui.Markdown, {
       content: "## A guide\n\n**Shared rendering**",
       openLink: () => false,
