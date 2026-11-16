@@ -5,6 +5,7 @@ import {
   type VerifiedProfileSink,
 } from "./verified-profile.ts";
 import { getLogger } from "../developer/logging.ts";
+import { ACCESS_CHANGED_KIND } from "./channel-access";
 import { CHANNEL_KINDS } from "./channel-kinds.ts";
 import { logSocketFrame, relayLabel } from "../developer/traffic.ts";
 
@@ -1320,7 +1321,13 @@ export function subscribeRelayTraffic(
         ? (route.liveOnly || route.page
             ? [scope(route)]
             : scope(route).map((id) => [id])
-          ).map((ids) => ({ kinds: CHANNEL_KINDS, "#h": ids }))
+          )
+            // The relay's access hint reaches every live view of a channel,
+            // joined or not; the session rechecks only what views hold.
+            .map((ids) => ({
+              kinds: [...CHANNEL_KINDS, ACCESS_CHANGED_KIND],
+              "#h": ids,
+            }))
         : route.id === "presence"
           ? [{ kinds: [20001], authors: presenceAuthors }]
           : route.id === "profiles"
