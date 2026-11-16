@@ -55,7 +55,7 @@ import {
   readRecentSearches,
   recordRecentSearch,
 } from "../../features/search/recent-searches";
-import { SearchPreview } from "./SearchPreview";
+import { type PreviewCache, SearchPreview } from "./SearchPreview";
 import { formatItemTimestamp } from "../../shared/datetime";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Calendar } from "../../shared/design-system/ui/Calendar";
@@ -598,6 +598,8 @@ export function SearchResults({
   // `ask:` and the Ask row start a chat with the agent New chat would tag,
   // read only once there is something to ask.
   const [askAgent, setAskAgent] = useState<MentionRecipient>();
+  // Search unmounts as it closes, so each opening reads previews afresh.
+  const [previews] = useState<PreviewCache>(() => new Map());
   const [sort, setSort] = useState<SearchSort>("relevance");
   const search = useSearchMessages(
     session,
@@ -2112,6 +2114,7 @@ export function SearchResults({
         // opening a message that lands first. A cold joined list has not yet
         // started the open-channel lookup.
         pending={
+          !asking &&
           (directoryPending ||
             operatorLookupPending ||
             search.loading ||
@@ -2122,8 +2125,7 @@ export function SearchResults({
           !groups.some(
             (group) =>
               group.rank !== Infinity &&
-              group.destinations !== scopeAction &&
-              group.destinations.length,
+              group.destinations.some(({ key }) => !isSearchAction(key)),
           )
         }
         isAction={isSearchAction}
@@ -2135,6 +2137,7 @@ export function SearchResults({
           preview: (row, tone, follow) => (
             <SearchPreview
               session={session}
+              cache={previews}
               row={row}
               tone={tone}
               follow={follow}

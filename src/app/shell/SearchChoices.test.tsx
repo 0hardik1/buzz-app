@@ -273,27 +273,55 @@ it("puts a group that was still empty when the order froze after the ones shown"
   expect(order()).toEqual(["Channels", "Messages", "People"]);
 });
 
-it("keeps Tab in the field before Peek has any group to show", () => {
-  const action = {
-    key: "scope:a",
-    label: "Search in Alpha",
-    icon: ChatCircleIcon,
-    run,
-  };
+it.each([true, false])(
+  "keeps Tab in the field while Peek's groups are landing (busy: %s), and lets it move on once none came",
+  (busy) => {
+    const action = {
+      key: "scope:a",
+      label: "Search in Alpha",
+      icon: ChatCircleIcon,
+      run,
+    };
+    render(
+      <SearchChoices
+        query="release plan"
+        onQueryChange={() => {}}
+        input={createRef<HTMLElement>()}
+        isAction={(key) => key.startsWith("scope:")}
+        peek={{ ranked: true, busy, preview: () => null }}
+        groups={[{ label: "This conversation", destinations: [action] }]}
+      />,
+    );
+    const field = screen.getByRole("combobox");
+    // fireEvent returns false when the default (moving focus) was prevented.
+    expect(fireEvent.keyDown(field, { key: "Tab" })).toBe(!busy);
+    expect(fireEvent.keyDown(field, { key: "Tab", shiftKey: true })).toBe(
+      !busy,
+    );
+  },
+);
+
+it("moves Tab through Peek's groups, then on past the last and before the first", () => {
   render(
     <SearchChoices
-      query="release plan"
+      query="channel"
       onQueryChange={() => {}}
       input={createRef<HTMLElement>()}
-      isAction={(key) => key.startsWith("scope:")}
+      groups={[{ label: "Channels", destinations: destinations.slice(0, 2) }]}
       peek={{ ranked: true, preview: () => null }}
-      groups={[{ label: "This conversation", destinations: [action] }]}
     />,
   );
   const field = screen.getByRole("combobox");
-  // fireEvent returns false when the default (moving focus) was prevented.
+  const shown = () =>
+    screen.getByRole("tab", { selected: true }).textContent ?? "";
+  expect(shown()).toMatch(/^Top results/);
+  // Before the first group, Shift+Tab leaves the field.
+  expect(fireEvent.keyDown(field, { key: "Tab", shiftKey: true })).toBe(true);
   expect(fireEvent.keyDown(field, { key: "Tab" })).toBe(false);
-  expect(fireEvent.keyDown(field, { key: "Tab", shiftKey: true })).toBe(false);
+  expect(shown()).toMatch(/^Channels/);
+  // Past the last group, Tab leaves the field for the controls after it.
+  expect(fireEvent.keyDown(field, { key: "Tab" })).toBe(true);
+  expect(shown()).toMatch(/^Channels/);
 });
 
 it("keeps an action-only group in place when Peek's order freezes", () => {

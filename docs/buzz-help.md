@@ -686,7 +686,8 @@ and are asked to sign in again in Buzz.
 - **Ask an agent**: start with `ask:` to write a question for your default
   agent, or choose **Ask** under a long query. Enter opens New chat with the
   question addressed to that agent; press Enter again to send it. If New chat
-  already has an unsent draft, Ask keeps it and offers **Replace it**. Filters
+  already has an unsent draft, Ask keeps it and offers **Replace it**, which
+  opens New chat with the question instead. Filters
   such as `in:` stay part of the question. With an empty query, search lists
   your recent searches on this device.
 - **Channel, people, and message search** shows “Searching…” beside each section heading

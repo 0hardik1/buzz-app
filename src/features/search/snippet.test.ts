@@ -27,3 +27,8 @@ it("windows a long message around its first match, on word boundaries", () => {
   expect(shown.text).toContain("remote agent");
   expect(marked(shown.text, shown.matches)).toBe("remote");
 });
+
+it("highlights where the match is when lowercasing lengthens earlier text", () => {
+  const text = "İİ remote";
+  expect(marked(text, termMatches(text, ["remote"]))).toBe("remote");
+});

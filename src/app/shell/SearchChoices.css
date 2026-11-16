@@ -532,6 +532,7 @@
     font-size: var(--text-caption);
     text-align: center;
   }
+  /* SearchChoices drops the preview at this width too. */
   @media (max-width: 760px) {
     .search-peek-workspace {
       grid-template-columns: minmax(0, 1fr);
@@ -540,7 +541,6 @@
       display: flex;
       flex-direction: column;
     }
-    .search-peek-side,
     .search-peek-keys {
       display: none;
     }

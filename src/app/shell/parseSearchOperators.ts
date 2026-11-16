@@ -78,11 +78,19 @@ function parseDateValue(value: string, periods: boolean, now: Date) {
     const count = Number(rolling[1]);
     if (!count) return null;
     const unit = rolling[2];
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    if (unit === "d") start.setDate(start.getDate() - count);
-    if (unit === "w") start.setDate(start.getDate() - count * 7);
-    if (unit === "m") start.setMonth(start.getMonth() - count);
-    if (unit === "y") start.setFullYear(start.getFullYear() - count);
+    const [year, today] = [now.getFullYear(), now.getDate()];
+    const days = unit === "d" ? count : unit === "w" ? count * 7 : 0;
+    const month =
+      now.getMonth() - (unit === "m" ? count : unit === "y" ? count * 12 : 0);
+    // A month or year back keeps today's day, or the target month's last day
+    // when it is shorter: a month before March 31 is February 28.
+    const start = days
+      ? new Date(year, month, today - days)
+      : new Date(
+          year,
+          month,
+          Math.min(today, new Date(year, month + 1, 0).getDate()),
+        );
     return {
       start: Math.floor(start.getTime() / 1000),
       end: period(now.getFullYear(), now.getMonth(), now.getDate()).end,

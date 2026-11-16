@@ -49,7 +49,17 @@ const DWELL = 150;
  * next two messages: a minute, an hour, a week. */
 const SUCCESSOR_SPANS = [60, 3600, 7 * 86_400];
 const SUCCESSOR_PAGE = 20;
-const cache = new WeakMap<RelaySession, Map<string, readonly Line[]>>();
+
+/** Previews read while search is open, by target, so returning to a row
+ * reads nothing. Search makes one each time it opens; later activity and
+ * Clear cache show the next time. */
+export type PreviewCache = Map<string, readonly Line[]>;
+
+/** Conversation order: by time, then by id within a second, as threads are. */
+const chronological = (
+  a: { createdAt: number; id: string },
+  b: { createdAt: number; id: string },
+) => a.createdAt - b.createdAt || a.id.localeCompare(b.id);
 
 const keyOf = (target: PeekTarget) =>
   target.kind === "message"
@@ -98,8 +108,11 @@ async function readLines(
     );
   if (target.kind === "message") {
     const where = { kinds: SEARCH_KINDS, "#h": [target.channelId] };
-    const others = (lines: readonly Line[]) =>
-      lines.filter(({ id }) => id !== target.messageId);
+    // Both reads include the hit's second; each keeps its own side of the
+    // hit, so a message sent in that second shows once.
+    const hit = { createdAt: target.createdAt, id: target.messageId };
+    const side = (lines: readonly Line[], after: boolean) =>
+      lines.filter((line) => chronological(line, hit) * (after ? 1 : -1) > 0);
     // Relay reads return the newest first, so a full page of a window may
     // skip the replies just after the hit. Widen from a short window, and
     // keep the last one that came back whole.
@@ -113,7 +126,7 @@ async function readLines(
           limit: SUCCESSOR_PAGE,
         });
         if (page.length >= SUCCESSOR_PAGE) break;
-        whole = others(page);
+        whole = side(page, true);
         if (whole.length >= 2) break;
       }
       return whole;
@@ -122,11 +135,8 @@ async function readLines(
       read({ ...where, until: target.createdAt, limit: 3 }),
       successors(),
     ]);
-    const earlier = others(before)
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .slice(0, 2)
-      .reverse();
-    const later = after.sort((a, b) => a.createdAt - b.createdAt).slice(0, 2);
+    const earlier = side(before, false).sort(chronological).slice(-2);
+    const later = after.sort(chronological).slice(0, 2);
     return [
       ...earlier,
       {
@@ -152,11 +162,12 @@ async function readLines(
 
 function useLines(
   session: RelaySession,
+  cache: PreviewCache,
   target: PeekTarget | undefined,
   follow: PeekFollow | undefined,
 ) {
   const key = target ? keyOf(target) : "";
-  const known = cache.get(session)?.get(key);
+  const known = cache.get(key);
   const [state, setState] = useState<{
     key: string;
     lines?: readonly Line[];
@@ -171,9 +182,7 @@ function useLines(
         readLines(session, target, controller.signal)
           .then((lines) => {
             if (controller.signal.aborted) return;
-            const saved = cache.get(session) ?? new Map();
-            cache.set(session, saved);
-            saved.set(key, lines);
+            cache.set(key, lines);
             setState({ key, lines });
             void session.profiles
               .ensure(
@@ -192,7 +201,7 @@ function useLines(
       clearTimeout(timer);
       controller.abort();
     };
-  }, [session, key, follow?.busy, follow?.text]);
+  }, [session, cache, key, follow?.busy, follow?.text]);
   const failed = !known && state?.key === key && !!state.failed;
   return {
     lines: known ?? (state?.key === key ? state.lines : undefined),
@@ -207,6 +216,7 @@ const when = (createdAt: number) =>
  * without opening it. */
 export function SearchPreview({
   session,
+  cache,
   row,
   tone,
   terms,
@@ -215,6 +225,7 @@ export function SearchPreview({
   follow,
 }: {
   session: RelaySession;
+  cache: PreviewCache;
   row: (SearchDestination & { peek?: PeekTarget | undefined }) | undefined;
   tone: SearchTone | undefined;
   terms: readonly string[];
@@ -233,7 +244,7 @@ export function SearchPreview({
   const readable = (line: { channelId: string }) =>
     !!session.channels.get?.(line.channelId);
   const target = row?.peek;
-  const read = useLines(session, target, follow);
+  const read = useLines(session, cache, target, follow);
   const lines = read.lines?.filter(readable);
   const { failed } = read;
   const card = useRef<HTMLDivElement>(null);

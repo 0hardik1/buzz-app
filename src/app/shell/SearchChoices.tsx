@@ -5,6 +5,7 @@ import {
   useEffect,
   useState,
   useId,
+  useSyncExternalStore,
   type RefObject,
   type ReactNode,
 } from "react";
@@ -23,6 +24,16 @@ import { useSearchHighlight } from "../../features/search/use-search-highlight";
 import { channelIconClass } from "../../shared/inline-reference";
 import { PageIcon } from "./PageIcon";
 import "./SearchChoices.css";
+
+/** Narrow windows have no room for the preview; SearchChoices.css stacks the
+ * workspace at the same width. */
+const NARROW = "(max-width: 760px)";
+const watchNarrow = (change: () => void) => {
+  const query = globalThis.matchMedia?.(NARROW);
+  query?.addEventListener("change", change);
+  return () => query?.removeEventListener("change", change);
+};
+const isNarrow = () => !!globalThis.matchMedia?.(NARROW).matches;
 
 export type SearchDestination = {
   content?: ReactNode;
@@ -228,6 +239,8 @@ export function SearchChoices({
   peek?: SearchPeek | undefined;
 }) {
   const palette = useRef<HTMLDivElement>(null);
+  // A hidden preview would still read; it mounts only where it shows.
+  const narrow = useSyncExternalStore(watchNarrow, isNarrow);
   const peekPanelPrefix = useId();
   const peekPanelId = (label: string | undefined) =>
     `${peekPanelPrefix}-group-${encodeURIComponent(label ?? "")}`;
@@ -793,8 +806,9 @@ export function SearchChoices({
             }
             if (event.key === "ArrowDown" || event.key === "ArrowUp")
               restore.current = 0;
-            // Tab moves between groups whether or not any have arrived yet, so
-            // it never leaves the field while results are still landing.
+            // Tab moves between groups, and stays in the field while results
+            // are still landing. Past the first or last group it moves on as
+            // Tab does, so retry and other controls stay in reach.
             if (
               peek?.ranked &&
               event.key === "Tab" &&
@@ -802,16 +816,15 @@ export function SearchChoices({
               !event.metaKey &&
               !event.altKey
             ) {
-              event.preventDefault();
-              if (!ranked.length) return;
               const order = [undefined, ...ranked.map(({ label }) => label)];
-              const index = order.indexOf(scoped?.label);
-              showScope(
-                order[
-                  (index + (event.shiftKey ? -1 : 1) + order.length) %
-                    order.length
-                ],
-              );
+              const next =
+                order.indexOf(scoped?.label) + (event.shiftKey ? -1 : 1);
+              if (
+                ranked.length ? next >= 0 && next < order.length : peek.busy
+              ) {
+                event.preventDefault();
+                if (ranked.length) showScope(order[next]);
+              }
               return;
             }
             // Escape from one group returns to Top results, not out of search.
@@ -1048,7 +1061,7 @@ export function SearchChoices({
             </div>
           </div>
         </div>
-        {peek?.ranked && (
+        {peek?.ranked && !narrow && (
           <aside className="search-peek-side" aria-label="Preview">
             {/* Not live: the highlighted row is already announced, and the
               preview changes with every keystroke. */}

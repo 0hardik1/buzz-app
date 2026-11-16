@@ -8502,3 +8502,64 @@ it("asks for a search word when the text only excludes", async () => {
     owner.dispose();
   }
 });
+
+it("holds an early Enter while only Ask is offered, until message search answers", async () => {
+  const relay = keypair(),
+    viewer = keypair(),
+    agent = keypair();
+  let answer!: () => void;
+  const owner = createRelaySession({
+    ...scriptedTransport(viewer.pubkey, relay.pubkey).transport,
+    query: (filters) =>
+      isMessageSearch(filters as Filter[])
+        ? new Promise((resolve) => {
+            answer = () => resolve([]);
+          })
+        : Promise.resolve([]),
+  });
+  const source = owner.session.agentChoices;
+  const picked = { pubkey: agent.pubkey, name: "Aria", managed: true };
+  const choices = {
+    ...source.snapshot(),
+    complete: true,
+    identities: [picked],
+    selectable: [picked],
+    archives: { status: "unavailable", archived: [] },
+  } as ReturnType<typeof source.snapshot>;
+  const session = {
+    ...owner.session,
+    agentChoices: {
+      ...source,
+      snapshot: () => choices,
+      subscribe: () => () => {},
+      retain: () => () => {},
+      ensure: () => {},
+    },
+  } as typeof owner.session;
+  const openAsk = vi.fn();
+  try {
+    render(
+      <SearchResults
+        session={session}
+        query="how do we rotate keys"
+        onQueryChange={() => {}}
+        input={createRef()}
+        pages={[]}
+        openConversation={vi.fn()}
+        openAsk={openAsk}
+        sidebarScope={`wss://relay.example:${viewer.pubkey}`}
+      />,
+    );
+    await screen.findByRole("option", { name: /Aria/ });
+    await waitFor(() => expect(answer).toBeDefined());
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search Buzz" }), {
+      key: "Enter",
+    });
+    expect(openAsk).not.toHaveBeenCalled();
+    await act(async () => answer());
+    await waitFor(() => expect(openAsk).toHaveBeenCalledOnce());
+  } finally {
+    cleanup();
+    owner.dispose();
+  }
+});

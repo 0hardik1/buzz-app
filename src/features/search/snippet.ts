@@ -26,7 +26,12 @@ const isWordChar = (char: string | undefined) =>
 
 /** Where `terms` start words in `text`, as UTF-16 `[start, end)` ranges. */
 function termRanges(text: string, terms: readonly string[]) {
-  const lower = text.toLowerCase();
+  // Fold each character alone, keeping any whose lowercase is longer (as
+  // "İ" is), so offsets found here are offsets in `text`.
+  const lower = Array.from(text, (char) => {
+    const folded = char.toLowerCase();
+    return folded.length === char.length ? folded : char;
+  }).join("");
   const ranges: [number, number][] = [];
   for (const term of terms) {
     let from = 0;

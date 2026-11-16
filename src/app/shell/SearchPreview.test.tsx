@@ -55,6 +55,7 @@ it("holds room for a message's earlier neighbours, so the hit stays put as they 
   render(
     <SearchPreview
       session={session}
+      cache={new Map()}
       row={{
         key: "m:hit",
         label: "the hit",
@@ -107,10 +108,11 @@ it("holds room for a message's earlier neighbours, so the hit stays put as they 
   ]);
 });
 
-function messagePreview(session: RelaySession) {
+function messagePreview(session: RelaySession, cache = new Map()) {
   return (
     <SearchPreview
       session={session}
+      cache={cache}
       row={{
         key: "m:hit",
         label: "the hit",
@@ -193,7 +195,8 @@ it("drops a held preview once its channel can no longer be read", async () => {
       },
     },
   } as unknown as RelaySession;
-  const { unmount } = render(messagePreview(session));
+  const cache = new Map();
+  const { unmount } = render(messagePreview(session, cache));
   await act(async () => {
     vi.advanceTimersByTime(150);
   });
@@ -209,9 +212,77 @@ it("drops a held preview once its channel can no longer be read", async () => {
   // Highlighting it again shows nothing from the cache, without a read.
   unmount();
   const reads = readPage.mock.calls.length;
-  render(messagePreview(session));
+  render(messagePreview(session, cache));
   expect(document.body).not.toHaveTextContent("private words");
   expect(session.readPage).toHaveBeenCalledTimes(reads);
+});
+
+const plainSession = (readPage: unknown) =>
+  ({
+    readPage,
+    profiles: {
+      subscribe: () => () => {},
+      snapshot: () => noProfiles,
+      ensure: () => Promise.resolve(),
+    },
+    channels: {
+      get: () => ({}),
+      list: () => list,
+      subscribeList: () => () => {},
+    },
+  }) as unknown as RelaySession;
+const shownLines = () =>
+  [...document.querySelectorAll(".search-peek-line")].map(
+    (line) => line.textContent,
+  );
+
+it("shows a message sent in the hit's second once, on its side of the hit", async () => {
+  vi.useFakeTimers();
+  // Both reads include the hit's second, so both answer with it.
+  const same = [event("hit", 1000, "the hit"), event("s", 1000, "same second")];
+  const pages = [
+    [event("a", 900, "before"), ...same],
+    [...same, event("z", 1001, "next")],
+  ];
+  render(
+    messagePreview(
+      plainSession(vi.fn(async () => ({ events: pages.shift() ?? [] }))),
+    ),
+  );
+  await act(async () => {
+    vi.advanceTimersByTime(150);
+  });
+  expect(shownLines()).toEqual([
+    expect.stringContaining("before"),
+    expect.stringContaining("the hit"),
+    expect.stringContaining("same second"),
+    expect.stringContaining("next"),
+  ]);
+});
+
+it("reads a preview again in a new search, not again in the same one", async () => {
+  vi.useFakeTimers();
+  const readPage = vi.fn(async () => ({ events: [] }));
+  const session = plainSession(readPage);
+  const settle = () =>
+    act(async () => {
+      vi.advanceTimersByTime(150);
+    });
+  const search = new Map();
+  const first = render(messagePreview(session, search));
+  await settle();
+  const once = readPage.mock.calls.length;
+  expect(once).toBeGreaterThan(0);
+  first.unmount();
+  // The same search returns to the row: its lines are held.
+  const again = render(messagePreview(session, search));
+  await settle();
+  expect(readPage).toHaveBeenCalledTimes(once);
+  again.unmount();
+  // Search opened again makes a new cache, so later activity shows.
+  render(messagePreview(session, new Map()));
+  await settle();
+  expect(readPage.mock.calls.length).toBeGreaterThan(once);
 });
 
 it("reads for a highlight nobody moved only once typing pauses and results settle", async () => {
@@ -230,9 +301,11 @@ it("reads for a highlight nobody moved only once typing pauses and results settl
       subscribeList: () => () => {},
     },
   } as unknown as RelaySession;
+  const cache = new Map();
   const preview = (follow: PeekFollow) => (
     <SearchPreview
       session={session}
+      cache={cache}
       row={{
         key: "channel:design",
         label: "design",
@@ -322,6 +395,7 @@ it.each([
       render(
         <SearchPreview
           session={session}
+          cache={new Map()}
           row={{
             key: "channel",
             label: "Solo",

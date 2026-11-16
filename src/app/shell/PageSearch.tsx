@@ -574,10 +574,11 @@ function CommunitySearch({
             return;
           // New chat opens with the question addressed to the agent; Enter
           // sends it. An unsent draft there is kept unless the person asks to
-          // replace it.
+          // replace it. New chat's composer reads its draft as it opens, so
+          // the question is written before New chat opens, never after.
           const scopeKey = relay.scope;
           const tag = `@${agent.name}`;
-          const ask = () =>
+          const ask = () => {
             writeView(scopeKey, NEW_CHAT_DRAFT, {
               text: `${tag} Search Buzz to answer: ${question}`,
               recipients: [
@@ -589,6 +590,10 @@ function CommunitySearch({
                 },
               ],
             });
+            void services.navigation.open(
+              soloDraftTarget(scopeKey, { agent: agent.pubkey }),
+            );
+          };
           const kept = hasDraftContent(
             mentionDraft(readView<unknown>(scopeKey, NEW_CHAT_DRAFT, "")),
             attachmentDraftCount(
@@ -596,12 +601,9 @@ function CommunitySearch({
               `${scopeKey}:${NEW_CHAT_DRAFT}`,
             ),
           );
-          if (!kept) ask();
           close();
-          void services.navigation.open(
-            soloDraftTarget(scopeKey, { agent: agent.pubkey }),
-          );
-          if (kept)
+          if (!kept) ask();
+          else
             notify("New chat already has an unsent draft", "info", {
               label: "Replace it",
               onClick: ask,
