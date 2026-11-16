@@ -195,6 +195,11 @@ test.describe("Inbox names after leaving a channel", () => {
     );
     await open(page, app);
     await activityRow(page).click();
+    // She mentioned the viewer, so Mentions lists it.
+    await page
+      .getByRole("tablist", { name: "Conversation view" })
+      .getByRole("tab", { name: "Mentions", exact: true })
+      .click();
     const row = conversationList(page)
       .locator("[data-activity-event]")
       .filter({ hasText: "release notes" });
