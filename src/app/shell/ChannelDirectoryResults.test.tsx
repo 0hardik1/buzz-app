@@ -68,7 +68,11 @@ function connected(
   options: {
     fail?: boolean;
     /** Stands in for the relay's answer to a Join. */
-    join?: (channelId: string) => Promise<void>;
+    join?: (
+      channelId: string,
+      caller?: AbortSignal,
+      active?: () => boolean,
+    ) => Promise<void>;
     /** Newer open channels, which fill the directory's first page. */
     newer?: number;
     /** The newer channels' name prefix. */
@@ -211,9 +215,14 @@ function connected(
           channelLifecycle: {
             ...owner.session.channelLifecycle,
             available: true,
-            run: (action: string, channelId: string) => {
+            run: (
+              action: string,
+              channelId: string,
+              caller?: AbortSignal,
+              active?: () => boolean,
+            ) => {
               joins.push(`${action}:${channelId}`);
-              return join(channelId);
+              return join(channelId, caller, active);
             },
           },
         }
@@ -657,6 +666,43 @@ it("joins from the list: the row keeps its place and says Joined", async () => {
     expect(
       screen.getByRole("button", { name: "Join release-notes" }),
     ).toBeVisible();
+  } finally {
+    await t.dispose();
+  }
+});
+
+it("closing the list cancels only a Join not yet sent", async () => {
+  let land = () => {};
+  let run: {
+    caller?: AbortSignal | undefined;
+    active?: (() => boolean) | undefined;
+  } = {};
+  const t = connected({
+    join: (_channelId, caller, active) => {
+      run = { caller, active };
+      return new Promise<void>((resolve) => {
+        land = resolve;
+      });
+    },
+  });
+  try {
+    t.render();
+    await browse();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Join design-crit" }),
+    );
+    expect(run.active?.()).toBe(true);
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Browse channels" }),
+      ).toBeNull(),
+    );
+    // The lifecycle checks `active` just before sending: closed, the Join
+    // stops there. Nothing aborts one already sent, so its channel lists.
+    expect(run.active?.()).toBe(false);
+    expect(run.caller).toBeUndefined();
+    act(() => land());
   } finally {
     await t.dispose();
   }

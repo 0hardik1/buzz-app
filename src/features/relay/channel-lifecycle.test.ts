@@ -2394,26 +2394,46 @@ describe("join from a public preview", () => {
     }
   });
 
-  it("keeps a confirmed join when the metadata read after it fails", async () => {
+  it.each([
+    ["retries a metadata read that fails briefly, so the channel lists", 1],
+    [
+      "keeps a confirmed join when the metadata read after it keeps failing",
+      Infinity,
+    ],
+  ])("%s", async (_name, failures) => {
     const h = preview();
     const currentRead = h.read.getMockImplementation();
     assert(currentRead);
+    let failed = 0;
     h.read.mockImplementation(async (filters, options) => {
       if (
+        failed < failures &&
         filters.some(
           (filter) =>
             filter.consistency === "strong" && filter.kinds?.includes(39000),
         )
-      )
+      ) {
+        failed++;
         throw new TypeError("fetch failed");
+      }
       return currentRead(filters, options);
     });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      await h.owner.capability.run("join", id);
-      expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith([
-        expect.objectContaining({ kind: 39002 }),
-      ]);
+      const joined = h.owner.capability.run("join", id);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await joined;
+      expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith(
+        failures === 1
+          ? [
+              expect.objectContaining({ kind: 39000 }),
+              expect.objectContaining({ kind: 39002 }),
+            ]
+          : [expect.objectContaining({ kind: 39002 })],
+      );
+      expect(failed).toBe(failures === 1 ? 1 : 4);
     } finally {
+      vi.useRealTimers();
       h.owner.dispose();
     }
   });

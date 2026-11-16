@@ -548,10 +548,19 @@ export function createChannelLifecycle({
               if (roster && hasTag(roster, "p", viewer)) {
                 // A channel joined without opening it, as from Browse
                 // channels, has no metadata yet and can't list without it.
-                // Read after the roster, it is as current; failing to read
-                // it leaves the confirmed Join as it was.
-                const metadata = await reread(signal, () =>
-                  read([39000], id, signal, false, true),
+                // Read after the roster, it is as current. A brief failure
+                // retries under its own bound, never the Join's deadline;
+                // one that persists leaves the confirmed Join as it was.
+                const bounded = AbortSignal.any([
+                  signal,
+                  AbortSignal.timeout(5000),
+                ]);
+                const metadata = await retryRead(
+                  (attempt) =>
+                    reread(attempt, () =>
+                      read([39000], id, attempt, false, true),
+                    ),
+                  bounded,
                 ).then(
                   (found) => lifecycleRecord(found, 39000, id, relayAuthor),
                   (error: unknown) => {

@@ -95,18 +95,23 @@ export function ChannelDirectoryResults({
     const controller = new AbortController();
     joining.current.set(channelId, controller);
     settle(channelId, { status: "pending" });
-    lifecycle.run("join", channelId, controller.signal).then(
-      () => {
-        if (!controller.signal.aborted) settle(channelId, { status: "joined" });
-      },
-      (reason: unknown) => {
-        if (!controller.signal.aborted)
-          settle(channelId, {
-            status: "failed",
-            error: joinFailure(reason, "channel"),
-          });
-      },
-    );
+    // Closing the list cancels a Join not yet sent. A sent one finishes, so
+    // the channel it joined lists; the closed list just ignores the result.
+    lifecycle
+      .run("join", channelId, undefined, () => !controller.signal.aborted)
+      .then(
+        () => {
+          if (!controller.signal.aborted)
+            settle(channelId, { status: "joined" });
+        },
+        (reason: unknown) => {
+          if (!controller.signal.aborted)
+            settle(channelId, {
+              status: "failed",
+              error: joinFailure(reason, "channel"),
+            });
+        },
+      );
   };
   const { joined, member } = useMemo(
     () => ({
