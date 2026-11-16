@@ -68,11 +68,12 @@ export function ChannelDirectoryResults({
   // saying Joined, so the next one is where it was.
   const lifecycle = session.channelLifecycle;
   const [joins, setJoins] = useState<ReadonlyMap<string, Join>>(new Map());
-  const joining = useRef(new Map<string, AbortController>());
+  // Each Join's close: the closed list ignores its result.
+  const joining = useRef(new Map<string, () => void>());
   useEffect(() => {
     const running = joining.current;
     return () => {
-      for (const controller of running.values()) controller.abort();
+      for (const close of running.values()) close();
     };
   }, []);
   // The lifecycle runs one channel action at a time, so while a Join runs
@@ -91,14 +92,24 @@ export function ChannelDirectoryResults({
     setJoins((current) => new Map(current).set(channelId, join));
   const join = (channelId: string) => {
     if (!lifecycle?.available || busy) return;
-    joining.current.get(channelId)?.abort();
+    joining.current.get(channelId)?.();
     const controller = new AbortController();
-    joining.current.set(channelId, controller);
+    // Closing the list cancels a Join not yet sent, so it doesn't hold the
+    // lifecycle from the next action. One the lifecycle has begun sending
+    // finishes, so the channel it joined lists.
+    const unsent = new AbortController();
+    let sent = false;
+    joining.current.set(channelId, () => {
+      controller.abort();
+      if (!sent) unsent.abort();
+    });
     settle(channelId, { status: "pending" });
-    // Closing the list cancels a Join not yet sent. A sent one finishes, so
-    // the channel it joined lists; the closed list just ignores the result.
     lifecycle
-      .run("join", channelId, undefined, () => !controller.signal.aborted)
+      .run("join", channelId, unsent.signal, () => {
+        // Asked right before sending: true means it sends now.
+        sent = !controller.signal.aborted;
+        return sent;
+      })
       .then(
         () => {
           if (!controller.signal.aborted)

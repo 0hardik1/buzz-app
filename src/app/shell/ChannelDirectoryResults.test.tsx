@@ -671,7 +671,10 @@ it("joins from the list: the row keeps its place and says Joined", async () => {
   }
 });
 
-it("closing the list cancels only a Join not yet sent", async () => {
+it.each([
+  ["cancels a Join not yet sent, freeing the lifecycle", false],
+  ["leaves a Join being sent to finish, so its channel lists", true],
+])("closing the list %s", async (_name, sending) => {
   let land = () => {};
   let run: {
     caller?: AbortSignal | undefined;
@@ -691,17 +694,17 @@ it("closing the list cancels only a Join not yet sent", async () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "Join design-crit" }),
     );
-    expect(run.active?.()).toBe(true);
+    expect(run.caller?.aborted).toBe(false);
+    // The lifecycle asks `active` right before sending; true means it sends.
+    if (sending) expect(run.active?.()).toBe(true);
     await userEvent.keyboard("{Escape}");
     await waitFor(() =>
       expect(
         screen.queryByRole("dialog", { name: "Browse channels" }),
       ).toBeNull(),
     );
-    // The lifecycle checks `active` just before sending: closed, the Join
-    // stops there. Nothing aborts one already sent, so its channel lists.
-    expect(run.active?.()).toBe(false);
-    expect(run.caller).toBeUndefined();
+    expect(run.caller?.aborted).toBe(!sending);
+    if (!sending) expect(run.active?.()).toBe(false);
     act(() => land());
   } finally {
     await t.dispose();

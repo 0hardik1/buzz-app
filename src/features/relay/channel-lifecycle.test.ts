@@ -2438,6 +2438,84 @@ describe("join from a public preview", () => {
     }
   });
 
+  it.each([
+    ["outlasts its own 5 s bound", 0, "bound"],
+    ["runs into the Join's deadline", 16_500, "deadline"],
+    ["outlives a cleared session", 0, "clear"],
+  ] as const)(
+    "when the metadata read after a confirmed roster %s",
+    async (_name, signing, end) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      // Node's native AbortSignal timer is not driven by Vitest's clock.
+      vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), milliseconds);
+        return controller.signal;
+      });
+      const h = preview();
+      const currentRead = h.read.getMockImplementation();
+      const currentSign = h.sign.getMockImplementation();
+      assert(currentRead && currentSign);
+      h.sign.mockImplementation(async (event) => {
+        await new Promise((resolve) => setTimeout(resolve, signing));
+        return currentSign(event);
+      });
+      // The metadata read never answers; only its signal ends it.
+      let reading = false;
+      h.read.mockImplementation(async (filters, options) => {
+        if (
+          !filters.some(
+            (filter) =>
+              filter.consistency === "strong" && filter.kinds?.includes(39000),
+          )
+        )
+          return currentRead(filters, options);
+        reading = true;
+        return new Promise((_resolve, reject) => {
+          const signal = options?.signal;
+          signal?.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        });
+      });
+      try {
+        let outcome: unknown = "pending";
+        h.owner.capability.run("join", id).then(
+          () => {
+            outcome = "joined";
+          },
+          (error: unknown) => {
+            outcome = error;
+          },
+        );
+        await vi.advanceTimersByTimeAsync(signing);
+        expect(reading).toBe(true);
+        if (end === "clear") h.owner.clear();
+        else
+          await vi.advanceTimersByTimeAsync(
+            end === "bound" ? 4_900 : 20_000 - signing - 100,
+          );
+        await vi.advanceTimersByTimeAsync(end === "clear" ? 0 : 200);
+        if (end === "clear") {
+          // A cleared session's roster isn't the next session's to accept.
+          expect(h.acceptDiscovery).not.toHaveBeenCalled();
+          expect(outcome).toBeInstanceOf(ChannelLifecycleUnconfirmed);
+        } else {
+          // Ended by its bound or the Join's deadline, the read gives way to
+          // the confirmed roster: the Join stands.
+          expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith([
+            expect.objectContaining({ kind: 39002 }),
+          ]);
+          expect(outcome).toBe("joined");
+        }
+      } finally {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+        h.owner.dispose();
+      }
+    },
+  );
+
   it("reports an accepted but unconfirmed join, then a retry confirms it", async () => {
     const h = preview();
     h.publish.mockImplementationOnce(async () => {});

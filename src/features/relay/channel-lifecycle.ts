@@ -421,6 +421,7 @@ export function createChannelLifecycle({
       const id = lifecycleChannelId(value);
       busy = true;
       const scope: Scope = { id, caller };
+      const started = epoch;
       try {
         await owned(scope, async (signal) => {
           // Joining starts from a nonmember preview, so membership-based
@@ -549,8 +550,9 @@ export function createChannelLifecycle({
                 // A channel joined without opening it, as from Browse
                 // channels, has no metadata yet and can't list without it.
                 // Read after the roster, it is as current. A brief failure
-                // retries under its own bound, never the Join's deadline;
-                // one that persists leaves the confirmed Join as it was.
+                // retries for up to 5 s. One that persists, or the Join's
+                // deadline or caller ending the read, keeps the confirmed
+                // roster; only a cleared or closed session drops it.
                 const bounded = AbortSignal.any([
                   signal,
                   AbortSignal.timeout(5000),
@@ -564,7 +566,7 @@ export function createChannelLifecycle({
                 ).then(
                   (found) => lifecycleRecord(found, 39000, id, relayAuthor),
                   (error: unknown) => {
-                    if (signal.aborted) throw error;
+                    if (started !== epoch) throw error;
                     return undefined;
                   },
                 );
