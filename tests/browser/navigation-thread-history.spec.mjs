@@ -792,7 +792,11 @@ test("Back and Forward return to a root-linked thread's reading place; a fresh l
           (node, id) =>
             node
               .querySelector(`[data-message-id="${id}"]`)
-              .getBoundingClientRect().top - node.getBoundingClientRect().top,
+              .getBoundingClientRect().top -
+            node.getBoundingClientRect().top -
+            // The thread's tabs float over its history: the top of what can
+            // be read is below them.
+            (parseFloat(getComputedStyle(node).scrollPaddingTop) || 0),
           root.id,
         ),
       )
