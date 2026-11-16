@@ -3251,15 +3251,36 @@
     gap: var(--space-row-gap);
   }
   /* One line per row, for long lists scanned by name: 36px with the icon
-     slot, so about a third more rows fit than the two-line search row. */
+     slot, so about a third more rows fit than the two-line search row. The
+     trailing takes at most half the row, stacking its controls when they
+     need more, as in a narrow window with enlarged text, so the title keeps
+     room. */
   .buzz-preference-row[data-variant="search-compact"] {
+    --preference-row-trailing: fit-content(50%);
     padding-block: var(--space-1h);
+    row-gap: 0;
   }
-  /* The title column keeps to the row, so its line ellipsizes before the
-     trailing control rather than running under it. */
+  /* The title keeps to its column, so its line ellipsizes before the
+     trailing control rather than running under it. A description, such as
+     a failed action's message, takes a line of its own below, from the
+     title's edge to the row's end: in a narrow window with enlarged text
+     the trailing controls would leave it no width beside them. */
   .buzz-preference-row[data-variant="search-compact"]
   .buzz-preference-row-content {
-    grid-template-columns: minmax(0, 1fr);
+    display: contents;
+  }
+  .buzz-preference-row[data-variant="search-compact"]
+    .buzz-preference-row-label {
+    grid-area: 1 / -3 / 2 / -2;
+    min-width: 0;
+  }
+  .buzz-preference-row[data-variant="search-compact"]
+    .buzz-preference-row-trailing {
+    grid-area: 1 / -2;
+  }
+  .buzz-preference-row[data-variant="search-compact"]
+    .buzz-preference-row-description {
+    grid-area: 2 / -3 / 3 / -1;
   }
   /* The extra-small trailing control is 24px in a 36px row: its hit area
      takes the row's height, so a near miss doesn't choose the row instead. */
