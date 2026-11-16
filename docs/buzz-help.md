@@ -106,6 +106,8 @@ if that desktop app is up and running.
 - **Workspaces.** Drag conversations in, or use **Move to…**. A workspace can
   set the folders and default agents for new chats started in it.
 - **Activity** collects your mentions, DMs, chat replies and reactions.
+  Each conversation, thread, or GitHub or profile tab opened from it is a stop for
+  **Back** and **Forward**; closing a tab removes its stops.
   **Mute** on a conversation silences everything but mentions.
 - **Search** supports `from:`, `in:#channel`, `in:@person`, `after:`,
   `before:`, `"exact phrase"` and `-word`; type `?` for the full list. `ask:`
