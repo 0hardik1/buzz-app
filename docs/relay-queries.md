@@ -45,6 +45,20 @@ if (outbox?.supports(9)) {
 }
 ```
 
+When work keyed by the new event's ID must finish before the event publishes,
+use `outbox.sendHeld(input, hold, recovery?, active?)`. Each delivery attempt in
+this window calls `hold(id)` after signing and publishes only after it resolves.
+Only that event waits, and it takes no delivery slot while it waits. In a chat
+this device is starting, local agents also get the message only after the hold.
+The hold counts toward the attempt's delivery deadline (10 seconds by default).
+A rejected hold, or one still pending at the deadline, fails the delivery
+without publishing; Retry calls the hold again. The entry is saved as `held`.
+After a reload its hold is gone, so a plain `retry(id)` throws and the app's
+Retry controls say to retry from the plugin that sent it. The plugin retries
+with `outbox.retry(id, active, hold)`, which publishes only after the new hold
+resolves. Older hosts omit the method: check `outbox.sendHeld` before calling
+it.
+
 `session.read(filters, { signal })` is a finite read merged with matching local
 operations at completion. `session.observe(filters)` additionally subscribes to
 outbox changes, exposing immutable `{ status, events, error }` snapshots. Own the
@@ -241,6 +255,20 @@ independently from finite channel-head invalidation. Author deletion of a retain
 edit/reaction removes that overlay. Unknown or denied auxiliary targets remain
 invisible; active thread target evidence survives shared-cache eviction but still
 passes the existing recursive access check.
+
+Closing a ready ordinary view of a root keeps the rows it showed (root, confirmed
+replies, direction and load-more state) in a memory-only resume (32 threads / 8 MiB,
+least recently used first); closing it during a read, or after it selected an exact
+target, leaves an earlier resume in place. The next ordinary view of that root
+starts `ready` showing those rows, after the existing access check, so the panel
+positions it without the loader. Resumed rows are display only and never evidence:
+the closed view missed the stream, and the relay omits deleted rows with their
+deletions. A resumed row never shows over that row's own evidence or any retained
+deletion of it. A view opened from a resume with no retained root skips the
+session's replay of retained events, which a first open without the root ignores. The view's first refresh runs in the background with the same reads as a
+first open, then replaces them; if it fails they are dropped. Exact views neither
+use nor replace a resume. Any access change, cache clear or session disposal drops
+every resume.
 
 Threads share the 64 owned-handle ceiling. Each retains at most 2,000 events / 4 MiB;
 overflow clears display evidence and exposes an explicit recoverable limit rather
@@ -856,8 +884,10 @@ a fresh hash of signed fields and the exact previously verified signature. It
 still returns newly owned frozen data and performs every HTTP read and access
 check. It is not an event/query cache or authorization proof. Live subscriptions
 retain up to 16,384 proofs across reconnects; direct `eventDto` calls are uncached.
-Desktop finite reads and live events send signature batches to the existing Rust
-libsecp256k1 verifier off the renderer thread. JavaScript still checks wire shape
+Desktop finite reads, live events, and cached channel discovery/history/profile
+restoration send signature checks to the existing Rust libsecp256k1 verifier off
+the renderer thread. Cached restoration retains JavaScript verification as a
+fallback if the host is unavailable or rejects the cached batch. JavaScript still checks wire shape
 and content hashes. Live EVENT/EOSE/CLOSED delivery stays ordered, with bounded
 pending work; overflow or host failure reconnects from before unprocessed frames.
 Browser and broker callers retain JavaScript signature verification.
