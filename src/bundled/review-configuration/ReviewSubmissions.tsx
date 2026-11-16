@@ -150,13 +150,15 @@ export function ReviewSubmissions({
         .filter((index) => store.unreadLane(row, index))
         .map((index) => `${row.artifactId}:${index}`),
     );
-    // Retain the changes visible during this visit after clearing the dock count.
+    // Keep lane highlights for this visit; opening a PR clears its list marker.
     setVisit((previous) => ({
       store,
-      rows: new Set([
-        ...(previous.store === store ? previous.rows : []),
-        ...updated.map((row) => row.artifactId),
-      ]),
+      rows: new Set(
+        [
+          ...(previous.store === store ? previous.rows : []),
+          ...updated.map((row) => row.artifactId),
+        ].filter((id) => id !== submission),
+      ),
       lanes: new Set([
         ...(previous.store === store ? previous.lanes : []),
         ...lanes,
@@ -637,7 +639,6 @@ export function ReviewSubmissions({
               <th scope="col">GitHub status</th>
               <th scope="col">Review status</th>
               <th scope="col">Summary</th>
-              <th scope="col">Updates</th>
               <th scope="col">Actions</th>
             </tr>
           </thead>
@@ -660,6 +661,20 @@ export function ReviewSubmissions({
                     <NavigationItem
                       variant="text"
                       label={name}
+                      aria-label={name}
+                      trailing={
+                        visit.store === store &&
+                        visit.rows.has(row.artifactId) ? (
+                          <span
+                            role="img"
+                            aria-label="New review updates"
+                            title="New review updates"
+                            className="review-config-update text-accent"
+                          >
+                            <BellIcon size={14} aria-hidden="true" />
+                          </span>
+                        ) : undefined
+                      }
                       data-submission={row.artifactId}
                       disabled={busy || !onOpenSubmission}
                       onClick={() => void openSubmission(row)}
@@ -681,16 +696,6 @@ export function ReviewSubmissions({
                   </td>
                   <td className="review-config-summary" title={summary(row)}>
                     {summary(row)}
-                  </td>
-                  <td>
-                    {visit.store === store && visit.rows.has(row.artifactId) ? (
-                      <strong className="review-config-update text-caption text-accent">
-                        <BellIcon size={14} aria-hidden="true" />
-                        Updated
-                      </strong>
-                    ) : (
-                      "—"
-                    )}
                   </td>
                   <td>
                     <Button

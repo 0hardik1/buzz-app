@@ -1106,7 +1106,39 @@ it("keeps updates to other PRs unread while inspecting one detail", async () => 
     .getByRole("button", { name: "example-org/project#43" })
     .closest("tr");
   if (!row) throw new Error("Missing updated PR");
-  expect(within(row).getByText("Updated")).toBeTruthy();
+  expect(screen.queryByRole("columnheader", { name: "Updates" })).toBeNull();
+  expect(
+    within(row).getByRole("img", { name: "New review updates" }),
+  ).toBeTruthy();
+  await test.user.click(row);
+  await screen.findByRole("button", { name: "Open UI thread" });
+  test.select(null);
+  expect(screen.queryByRole("img", { name: "New review updates" })).toBeNull();
+  test.emit([
+    {
+      id: "2".repeat(64),
+      kind: 9,
+      created_at: 300,
+      pubkey: "a".repeat(64),
+      content: "Looks good",
+      tags: [
+        ["h", "channel"],
+        ["t", "buzz.review.status"],
+        ["r", request],
+        ["review", "second", "0"],
+        ["e", "e".repeat(64), "", "reply"],
+        ["status", "lgtm_not_approved"],
+        ["review-sequence", "2"],
+      ],
+    } as import("../../features/relay/events").RelayEvent,
+  ]);
+  expect(screen.getByRole("img", { name: "New review updates" })).toBeTruthy();
+  const link = screen.getByRole("button", { name: "example-org/project#43" });
+  link.focus();
+  await test.user.keyboard("{Enter}");
+  await screen.findByRole("button", { name: "Open UI thread" });
+  test.select(null);
+  expect(screen.queryByRole("img", { name: "New review updates" })).toBeNull();
 });
 
 it("deletes directly from the compact list without navigating and restores heading focus", async () => {
