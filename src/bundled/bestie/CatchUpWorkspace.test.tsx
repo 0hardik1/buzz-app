@@ -336,6 +336,9 @@ it("keeps one submitted exchange while browsing, hiding and reopening in StrictM
   expect(created?.tags).toContainEqual(["ttl", "604800"]);
   expect(created?.tags).toContainEqual(["name", "Catch-up · Launch"]);
   expect(prompt?.content).toContain(f.source.id);
+  expect(prompt?.content).toContain(
+    "Use relevant owner context from your existing Bestie memory",
+  );
   expect(prompt?.tags).toContainEqual(["p", f.agent.pubkey]);
   const launcher = screen.getAllByRole("button", {
     name: "Hide Bestie catch-up",

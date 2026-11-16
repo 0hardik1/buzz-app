@@ -81,7 +81,7 @@ export function CatchUpPanel({
   const scope = splitPartition(source.session.scope);
   const isThread =
     !!source.message.threadRootId || source.message.replyCount > 0;
-  const requestPrompt = `Catch me up on this ${isThread ? "thread" : "post"}. Summarize what’s happening, decisions, blockers, and the next step.\n\n${link}`;
+  const requestPrompt = `Catch me up on this ${isThread ? "thread" : "post"}. Summarize what’s happening, decisions, blockers, and the next step. Use relevant owner context from your existing Bestie memory when it is available and pertinent; distinguish facts from assumptions, and explain why a recommended next step matters.\n\n${link}`;
   const sourceName = useRef(sourceChannel?.name);
   if (sourceChannel?.name) sourceName.current = sourceChannel.name;
   const name =
