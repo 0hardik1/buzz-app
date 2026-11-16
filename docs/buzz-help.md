@@ -251,6 +251,13 @@ mention anyone. Explicit agent watches on that room can still receive them.
   community picker and paste an invite link or type an address such as
   `relay.example.com`; an invite link fills in its invite code. Paste the whole
   link there; a code on its own is refused.
+- In the community switcher, other communities show a number for mentions, DMs
+  and followed-thread replies waiting for you, or a dot for other unread. A dot on
+  the closed switcher means another community has unread. Muted channels count
+  only as their sidebar rows do: a mention there, or a muted DM. A blank row
+  means nothing is unread, or its unread isn't known yet, for example because that
+  community isn't connected or was closed to make room for one you opened. Only
+  the first 24 communities get badges at startup; others show one once opened.
 - Community owners and admins manage access in the community's **Membership**
   settings (also reached from **Invite to community** in the community picker's
   right-click menu). **Members** shows the roster and updates as membership changes arrive.
@@ -634,7 +641,8 @@ and are asked to sign in again in Buzz.
   you. Unmute restores ordinary unread emphasis and dots. Manual **Mark as unread**
   can still make the name bold. Muted rows show no unread dots, including thread
   dots, and do not contribute to the sidebar’s floating **N unread** buttons or
-  their avatar previews. Muted activity does not light the macOS Dock unread dot.
+  their avatar previews. The macOS Dock unread dot follows the rows: a muted channel
+  lights it only for a mention of you or **Mark as unread**, and a muted DM still lights it.
   Muting does not mark messages or threads as read.
 - **Hidden DMs**: **Close conversation** and **Hide conversation** take a DM out
   of the sidebar without leaving it. To find one again, start a **New message**
