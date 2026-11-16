@@ -659,24 +659,31 @@ export function createPluginUpdates(
     const checks = updateChecks();
     const batch = configuration.catalog.plugins.flatMap((plugin) => {
       const source = pluginUpdateSource(plugins, plugin.manifest.id);
-      return source
-        ? [{ plugin, source, observe: checks.observe(plugin, source) }]
-        : [];
+      return source ? [{ plugin, source }] : [];
     });
     checking = true;
     publish();
     try {
-      const repositories = new Map<string, Promise<ImportPreview | null>>();
+      const repositories = new Map<
+        string,
+        {
+          preview: Promise<ImportPreview | null>;
+          observers: Map<string, ReturnType<typeof checks.observe>>;
+        }
+      >();
       const discover = (source: GitUpdateSource) => {
-        const key = JSON.stringify([
-          source.repository,
-          source.reference,
-          source.path,
-          source.commit,
-        ]);
+        const key = updateSourceKey(source);
         let result = repositories.get(key);
         if (!result) {
-          result = (async () => {
+          const observers = new Map(
+            batch
+              .filter((item) => updateSourceKey(item.source) === key)
+              .map((item) => [
+                item.plugin.manifest.id,
+                checks.observe(item.plugin, item.source),
+              ]),
+          );
+          const preview = (async () => {
             const eligible = () => {
               const live = plugins.snapshot().configuration;
               return (
@@ -708,11 +715,12 @@ export function createPluginUpdates(
               ) ?? null
             );
           })();
+          result = { preview, observers };
           repositories.set(key, result);
         }
         return result;
       };
-      for (const { plugin, source, observe } of batch) {
+      for (const { plugin, source } of batch) {
         if (closed) return;
         const id = plugin.manifest.id;
         const identity = JSON.stringify([
@@ -736,8 +744,10 @@ export function createPluginUpdates(
           installedEnabled: plugin.enabled,
           updateChoice: plugin.updateChecks ?? null,
         };
+        const acquisition = discover(source);
+        const observe = acquisition.observers.get(id);
         try {
-          const preview = await discover(source);
+          const preview = await acquisition.preview;
           if (!preview) throw new Error("No update source found. Try again.");
           if (
             source.commit &&
@@ -762,7 +772,7 @@ export function createPluginUpdates(
         if (!current(update)) continue;
         checked.set(id, { identity, at: Date.now() });
         if (
-          !observe(
+          !observe?.(
             update.candidate ?? plugin,
             update.error ?? null,
             update.candidate,

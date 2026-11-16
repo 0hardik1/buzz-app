@@ -2750,3 +2750,68 @@ it.each(["opt-out", "folder", "url"])(
     }
   },
 );
+
+it.each([false, true])(
+  "publishes a queued Git acquisition after an earlier explicit check (failure=%s)",
+  async (failure) => {
+    const f = fixture();
+    const configuration = f.get();
+    if (configuration.status !== "ready") throw new Error("Expected catalog");
+    const sibling = {
+      ...f.plugin,
+      manifest: { ...f.plugin.manifest, id: "example.sibling" },
+      updateSource: {
+        ...gitUpdateSource(f.plugin),
+        repository: "https://example.com/sibling.git",
+      },
+    };
+    f.set({
+      ...configuration,
+      catalog: { ...configuration.catalog, plugins: [f.plugin, sibling] },
+    });
+    let finish!: (preview: ImportPreview) => void;
+    f.checkGit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const updates = createPluginUpdates(f.manager, f.authorize);
+    const pending = updates.check();
+    try {
+      await vi.waitFor(() => expect(f.checkGit).toHaveBeenCalledOnce());
+      if (failure)
+        f.checkGit.mockRejectedValueOnce(new Error("explicit failure"));
+      else
+        f.checkGit.mockResolvedValueOnce({
+          ...f.preview,
+          candidates: [
+            { ...f.candidate, manifest: sibling.manifest, revision: "old" },
+          ],
+        });
+      await sharedPluginUpdateChecks(f.manager.imports).check(
+        sibling,
+        f.authorize,
+      );
+      f.checkGit.mockResolvedValueOnce({
+        ...f.preview,
+        candidates: [{ ...f.candidate, manifest: sibling.manifest }],
+      });
+      finish(f.preview);
+      await pending;
+      expect(updates.capability.getSnapshot().candidates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: sibling.manifest.id,
+            candidateRevision: "new",
+          }),
+        ]),
+      );
+      expect(updates.capability.getSnapshot().errors).toEqual([]);
+    } finally {
+      finish(f.preview);
+      await pending;
+      updates.dispose();
+    }
+  },
+);
