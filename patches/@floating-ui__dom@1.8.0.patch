@@ -1,0 +1,48 @@
+diff --git a/dist/floating-ui.dom.mjs b/dist/floating-ui.dom.mjs
+index 078fcb5ee68ae38884a0bf4961506f89af8e5649..ccc178102e430d77df1617e2d51a81a37c71e882 100644
+--- a/dist/floating-ui.dom.mjs
++++ b/dist/floating-ui.dom.mjs
+@@ -637,10 +637,15 @@ function autoUpdate(reference, floating, update, options) {
+   });
+   const cleanupIo = referenceEl && layoutShift ? observeMove(referenceEl, update, ancestorResize) : null;
+   let reobserveFrame = -1;
++  let floatingResizeFrame = -1;
+   let resizeObserver = null;
+   if (elementResize) {
+     resizeObserver = new ResizeObserver(_ref => {
+       let [firstEntry] = _ref;
++      const floatingOnlyResize =
++        _ref.length === 1 &&
++        firstEntry?.target === floating &&
++        floating !== referenceEl;
+       if (firstEntry && firstEntry.target === referenceEl && resizeObserver && floating) {
+         // Prevent update loops when using the `size` middleware.
+         // https://github.com/floating-ui/floating-ui/issues/1740
+@@ -651,7 +656,16 @@ function autoUpdate(reference, floating, update, options) {
+           (_resizeObserver = resizeObserver) == null || _resizeObserver.observe(floating);
+         });
+       }
+-      update();
++      if (floatingOnlyResize) {
++        if (floatingResizeFrame === -1) {
++          floatingResizeFrame = requestAnimationFrame(() => {
++            floatingResizeFrame = -1;
++            update();
++          });
++        }
++      } else {
++        update();
++      }
+     });
+     if (referenceEl && !animationFrame) {
+       resizeObserver.observe(referenceEl);
+@@ -683,6 +697,9 @@ function autoUpdate(reference, floating, update, options) {
+     cleanupIo == null || cleanupIo();
+     (_resizeObserver2 = resizeObserver) == null || _resizeObserver2.disconnect();
+     resizeObserver = null;
++    if (floatingResizeFrame !== -1) {
++      cancelAnimationFrame(floatingResizeFrame);
++    }
+     if (animationFrame) {
+       cancelAnimationFrame(frameId);
+     }

@@ -7,6 +7,7 @@ settings:
 patchedDependencies:
   '@base-ui/react@1.9.0': 958237d028ca73b236150c1367b09699dd0d42738be177382595af9b5fd91709
   '@dnd-kit/core@6.3.1': 5574bf49bcc2d7dedd0b2b177d78447eaefecccddd2097929a7a6ecb42450623
+  '@floating-ui/dom@1.8.0': a16aee3966b16e6ac7e6a642e4763da6eafe24cea15b7a113dedccf240f697dc
   sonner@2.0.8: 5382cda2bb9248e880166099e960d33a043570b790643cf5238d60c61f7def28
   virtua@0.53.5: 2ec4aead43edeae07a52fd481d2db8a46ac16e2a98f13d0c2f1a5e543e208ce8
 
@@ -2613,14 +2614,14 @@ snapshots:
     dependencies:
       '@floating-ui/utils': 0.2.12
 
-  '@floating-ui/dom@1.8.0':
+  '@floating-ui/dom@1.8.0(patch_hash=a16aee3966b16e6ac7e6a642e4763da6eafe24cea15b7a113dedccf240f697dc)':
     dependencies:
       '@floating-ui/core': 1.8.0
       '@floating-ui/utils': 0.2.12
 
   '@floating-ui/react-dom@2.1.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
-      '@floating-ui/dom': 1.8.0
+      '@floating-ui/dom': 1.8.0(patch_hash=a16aee3966b16e6ac7e6a642e4763da6eafe24cea15b7a113dedccf240f697dc)
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
