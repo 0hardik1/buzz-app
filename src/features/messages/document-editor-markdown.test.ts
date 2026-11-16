@@ -39,6 +39,7 @@ it.each([
   "- [x] Completed\n- [ ] Pending",
   "![Image](https://example.com/image.png)",
   "Before [`code`](https://example.com) after",
+  "[](https://example.com)\n\nKeep",
   "[![Image](https://example.com/image.png)](https://example.com)",
   "> - [ ] a\n> - [ ] b",
   "> # Heading\n> continuation",

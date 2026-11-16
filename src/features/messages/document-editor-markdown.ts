@@ -73,6 +73,7 @@ export function documentEditorDraft(markdown: string) {
       node.type === "link" &&
       composerLinkUrl(node.url) &&
       node.title == null &&
+      node.children.length > 0 &&
       node.children.every(linkLabel)
     )
       return node.children.flatMap((child) =>
