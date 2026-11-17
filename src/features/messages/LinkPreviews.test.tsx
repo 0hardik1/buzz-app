@@ -13,6 +13,7 @@ import type {
   LinkPreviewProps,
   LinkPreviewRenderer,
 } from "../conversation/contracts";
+import { ConversationPresentation } from "../conversation/ConversationPresentation";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { LinkPreviews } from "./LinkPreviews";
 
@@ -159,25 +160,31 @@ it("opens it with the system opener on desktop, and not when a panel takes it", 
   expect(opened).not.toHaveBeenCalled();
 });
 
-it("tells the viewer when the system opener refuses", async () => {
+it("tells the viewer when the system opener refuses, until they leave the conversation", async () => {
   tauri.isTauri.mockReturnValue(true);
   tauri.invoke.mockRejectedValue(new Error("refused"));
-  render(
+  const view = (active: boolean) => (
     <ToastProvider>
-      <LinkPreviews
-        urls={["https://docs.example/"]}
-        messageId="m"
-        registry={reader([entry("web", () => true, 100, card("web"))])}
-        onOpenLink={() => false}
-      />
-    </ToastProvider>,
+      <ConversationPresentation.Provider value={active}>
+        <LinkPreviews
+          urls={["https://docs.example/"]}
+          messageId="m"
+          registry={reader([entry("web", () => true, 100, card("web"))])}
+          onOpenLink={() => false}
+        />
+      </ConversationPresentation.Provider>
+    </ToastProvider>
   );
+  const { rerender } = render(view(true));
   fireEvent.click(
     screen.getByRole("button", { name: "web https://docs.example/" }),
   );
-  expect(
-    await screen.findByText("Couldn’t open the link in your browser."),
-  ).toBeTruthy();
+  const notice = "Couldn’t open the link in your browser.";
+  expect(await screen.findByText(notice)).toBeTruthy();
+  rerender(view(false));
+  expect(screen.queryByText(notice)).toBeNull();
+  rerender(view(true));
+  expect(screen.queryByText(notice)).toBeNull();
 });
 
 it("opens nothing once the card's renderer has left the registry", () => {

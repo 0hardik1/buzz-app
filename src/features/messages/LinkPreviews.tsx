@@ -55,6 +55,8 @@ export function LinkPreviews({
   const active = useConversationPresentation();
   const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Leaving the conversation clears the notice, as MessageLink's does.
+  if (!active && failed) setFailed(false);
   const live = useRef(true);
   useEffect(() => {
     live.current = true;
@@ -103,7 +105,7 @@ export function LinkPreviews({
           </ContributionBoundary>
         );
       })}
-      {failed && (
+      {active && failed && (
         <ToastNotice
           title="Couldn’t open the link in your browser."
           onDismiss={() => setFailed(false)}
