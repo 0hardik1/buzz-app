@@ -10,7 +10,7 @@ type Addition = Readonly<{
 }>;
 
 const differentRole =
-  "This member is already being added with another role. Wait for it to finish or show Not sent in Outbox, then try again.";
+  "This member is already being added with another role. Wait for it to finish, then try again.";
 
 /** Session-owned continuation and recovery; closing a view never cancels intent. */
 export function createMemberAdditions(
@@ -27,6 +27,8 @@ export function createMemberAdditions(
     pubkeys: readonly string[],
     intents: ReadonlyMap<string, MemberAdditionIntent>,
   ) => Promise<ReadonlySet<string>>,
+  /** Durably gives up this person's saved additions that cannot finish. */
+  discard?: (channelId: string, pubkey: string) => Promise<void>,
 ) {
   let snapshot: readonly Addition[] = [];
   const listeners = new Set<() => void>();
@@ -160,6 +162,26 @@ export function createMemberAdditions(
       pending.set(key, operation);
       update({ channelId, pubkey, pending: true, confirmed });
       return operation;
+    },
+    /** Explicitly gives up this person's failed addition and stops reporting
+     * it. Their intent is kept, so only its observed dismissal permits a
+     * replacement write. */
+    async discard(channelId: string, pubkey: string): Promise<void> {
+      if (signal.aborted) throw new Error("The community connection closed.");
+      if (pending.has(JSON.stringify([channelId, pubkey])))
+        throw new Error(
+          "A member operation is already running. Wait for it to finish, then try again.",
+        );
+      await discard?.(channelId, pubkey);
+      if (!signal.aborted)
+        publish(
+          snapshot.filter(
+            (item) =>
+              item.pending ||
+              item.channelId !== channelId ||
+              item.pubkey !== pubkey,
+          ),
+        );
     },
   });
 }

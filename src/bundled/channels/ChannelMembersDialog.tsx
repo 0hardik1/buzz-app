@@ -62,10 +62,13 @@ import {
   type MemberChange,
 } from "../../features/channel-members/administration-protocol";
 import {
+  additionExpired,
   canAddMembers,
   canAddToDirectMessage,
   canShareSoloChat,
+  discardableAdditions,
 } from "../../features/channel-members/members";
+import type { OutgoingEvent } from "../../features/relay/outbox";
 import { ownSolo, soloShareDisclosure } from "../../features/solo/labels";
 import { soloChatLink } from "../../features/solo/share";
 import {
@@ -533,6 +536,12 @@ export function ChannelMembersButton({
 /** Members are shared relay truth; only search and in-progress presentation belong to this dialog. */
 const noTeams = () => () => {};
 const noSnapshot = () => undefined;
+/** A session without an outbox has no saved additions. */
+const noSavedChanges = () => () => {};
+const saved: readonly OutgoingEvent[] = [];
+const noSaved = () => saved;
+const expiredAddition =
+  "An earlier addition expired. Discard it to add them again.";
 
 /** A team of the owner's agents, added to the channel with one button. */
 function TeamRow({
@@ -822,6 +831,18 @@ export function ChannelMembersDialog({
       (key) => directAdditions[key]?.pending,
     ),
   ]);
+  // Saved additions that cannot finish. Discarding one is the only way to add
+  // its person again once it has expired.
+  const stale = discardableAdditions(
+    useSyncExternalStore(
+      session.outbox?.subscribe ?? noSavedChanges,
+      session.outbox?.snapshot ?? noSaved,
+    ),
+    channelId,
+  );
+  const named = (item: (typeof stale)[number]) =>
+    item.event.tags.find(([tag]) => tag === "p")?.[1] ?? "";
+  const discardable = new Set(stale.map(named));
   // One alert per reason: a refused team add names its members together.
   // Solo agents and DM additions join directly, one at a time, so each keeps
   // its own Retry.
@@ -839,6 +860,7 @@ export function ChannelMembersDialog({
       if (item.error) refuse(key, item.error, key);
   }
   const [notice, setNotice] = useState("");
+  const [discardError, setDiscardError] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const copyFailure = copyStatus && copyStatus !== "Link copied";
   const [rosterReadError, setRosterReadError] = useState("");
@@ -889,6 +911,20 @@ export function ChannelMembersDialog({
   const channel =
     list.channels.find((item) => item.id === channelId) ??
     session.channels.get?.(channelId);
+  // An expired addition blocks its person wherever it was started, including
+  // an earlier launch, so it is reported before another attempt does.
+  if (!memberActions) {
+    const reported = new Set(
+      [...refusals.values()].flatMap((item) => item.keys),
+    );
+    for (const key of new Set(stale.filter(additionExpired).map(named)))
+      if (
+        !reported.has(key) &&
+        !busy.has(key) &&
+        !channel?.members?.includes(key)
+      )
+        refuse(expiredAddition, expiredAddition, key);
+  }
   const solo = channel?.channelType === "solo";
   const dm = channel?.channelType === "dm";
   const place = solo ? "chat" : dm ? "DM" : "channel";
@@ -1935,6 +1971,30 @@ export function ChannelMembersDialog({
     [session, channelId, memberActions, memberPending],
   );
 
+  // Gives up additions that cannot finish, so adding these people again starts
+  // a new one. The session stops reporting them; a direct addition is kept here.
+  const discard = async (keys: readonly string[]) => {
+    setNotice("");
+    setDiscardError("");
+    try {
+      for (const key of keys)
+        await session.memberAdditions.discard(channelId, key);
+      setDirectAdditions((old) =>
+        Object.fromEntries(
+          Object.entries(old).filter(
+            ([key, item]) => item.pending || !keys.includes(key),
+          ),
+        ),
+      );
+    } catch (error) {
+      setDiscardError(
+        error instanceof Error
+          ? error.message
+          : "Could not discard this addition. Try again.",
+      );
+    }
+  };
+
   // Typed text highlights the first person not in the channel, so Enter adds
   // them. Rows keep their own buttons; the highlight only marks one of them.
   const highlight = useSearchHighlight({
@@ -2472,12 +2532,14 @@ export function ChannelMembersDialog({
             </p>
           )}
           {(refusals.size > 0 ||
+            discardError ||
             openingMessage ||
             messageError ||
             copyFailure) && (
             <div className={styles.feedback}>
               {[...refusals].map(([group, { error, keys }]) => {
                 const names = listNames(keys);
+                const doomed = keys.filter((key) => discardable.has(key));
                 return (
                   <p
                     role="alert"
@@ -2500,9 +2562,26 @@ export function ChannelMembersDialog({
                     >
                       Retry
                     </Button>
+                    {doomed.length > 0 && (
+                      <>
+                        {" "}
+                        <Button
+                          variant="outline"
+                          aria-label={`Discard failed addition of ${listNames(doomed)}`}
+                          onClick={() => void discard(doomed)}
+                        >
+                          Discard
+                        </Button>
+                      </>
+                    )}
                   </p>
                 );
               })}
+              {discardError && (
+                <p role="alert" className="text-body-sm text-danger">
+                  {discardError}
+                </p>
+              )}
               {openingMessage && (
                 <p role="status" className="text-body-sm text-subtle">
                   Opening conversation…

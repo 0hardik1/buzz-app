@@ -347,7 +347,9 @@ it("never retries a failed Bot addition for a guest add, in the session or after
   t.restart();
   await t.ready();
   await t.setAgent();
-  await expect(guest()).rejects.toThrow(/another role/);
+  await expect(guest()).rejects.toThrow(
+    "An earlier addition of this member with another role has not finished. Retry it where it was started, or discard it in People once it has failed, then try again.",
+  );
   // Only the first Bot attempt was ever sent, and its receipt is kept.
   expect(t.publish).toHaveBeenCalledOnce();
   expect(t.records()).toHaveLength(1);
@@ -356,10 +358,13 @@ it("never retries a failed Bot addition for a guest add, in the session or after
   expect(t.session.channels.list().channels[0]?.members).not.toContain(
     t.person.pubkey,
   );
-  // Removing the Not sent item in Outbox clears the way for the guest add.
+  // Discarding the failed Bot addition, as People does, clears the way for
+  // the guest add and stops reporting the refusal.
   const id = saved?.event.id;
   if (!id) throw new Error("Expected the Bot receipt");
-  await t.session.outbox?.dismiss(id);
+  await t.session.memberAdditions.discard(t.id, t.person.pubkey);
+  expect(t.records()).toEqual([]);
+  expect(t.session.memberAdditions.snapshot()).toEqual([]);
   await guest();
   expect(t.publish).toHaveBeenCalledTimes(2);
   const sent = t.publish.mock.calls[1]?.[0];
@@ -597,27 +602,78 @@ it.each(["rejected", "unknown", "unconfirmed"])(
   },
 );
 
-it("allows a new explicit addition after an expired failed request is dismissed", async () => {
+it.each(["this session", "an earlier launch"])(
+  "blocks an expired failed request from %s until it is discarded, then adds anew",
+  async (origin) => {
+    const t = setup();
+    await t.ready();
+    t.setFail("Rejected addition");
+    await expect(t.managedAdd()).rejects.toThrow(/Rejected addition/);
+    const first = t.publish.mock.calls[0]?.[0].id;
+    if (!first) throw new Error("Expected invitation");
+    t.setFail("");
+    if (origin === "an earlier launch") {
+      t.restart();
+      await t.ready();
+    }
+    const now = vi
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.now() + 16 * 60 * 1000);
+    try {
+      // Neither Retry nor a new Add resends it, however often they are tried.
+      for (const retry of [true, false, false])
+        await expect(
+          t.session.memberAdditions.add(
+            t.id,
+            t.person.pubkey,
+            retry ? { retry } : {},
+          ),
+        ).rejects.toThrow(
+          "This addition expired. Discard it in People, then add them again.",
+        );
+      expect(t.publish).toHaveBeenCalledOnce();
+      expect(t.records()).toMatchObject([
+        { event: { id: first }, delivery: "failed" },
+      ]);
+      // Someone else's discard leaves this request and its failure alone.
+      await t.session.memberAdditions.discard(t.id, t.viewer.pubkey);
+      expect(t.records()).toHaveLength(1);
+      expect(t.session.memberAdditions.snapshot()).toHaveLength(1);
+      await t.session.memberAdditions.discard(t.id, t.person.pubkey);
+      expect(t.records()).toEqual([]);
+      expect(t.session.outbox?.snapshot()).toEqual([]);
+      expect(t.session.memberAdditions.snapshot()).toEqual([]);
+      await t.managedAdd();
+    } finally {
+      now.mockRestore();
+    }
+    expect(t.publish).toHaveBeenCalledTimes(2);
+    expect(t.publish.mock.calls[1]?.[0].id).not.toBe(first);
+    expect(t.session.channels.list().channels[0]?.members).toContain(
+      t.person.pubkey,
+    );
+  },
+);
+
+it("keeps an unconfirmed addition when asked to discard it", async () => {
   const t = setup();
   await t.ready();
-  t.setFail("Rejected addition");
-  await expect(t.managedAdd()).rejects.toThrow(/Rejected addition/);
+  t.setApply(false);
+  t.setFail("Receipt lost", true);
+  await expect(t.managedAdd()).rejects.toThrow(/Receipt lost/);
   const first = t.publish.mock.calls[0]?.[0].id;
-  if (!first) throw new Error("Expected invitation");
   const now = vi
     .spyOn(Date, "now")
     .mockReturnValue(Date.now() + 16 * 60 * 1000);
   try {
-    await expect(t.managedAdd()).rejects.toThrow(/addition expired/);
+    // It may have reached the relay, so only Retry may resolve it.
+    await t.session.memberAdditions.discard(t.id, t.person.pubkey);
   } finally {
     now.mockRestore();
   }
-  await t.session.outbox?.dismiss(first);
-  expect(t.session.outbox?.snapshot()).toEqual([]);
-  t.setFail("");
-  await t.managedAdd();
-  expect(t.publish).toHaveBeenCalledTimes(2);
-  expect(t.publish.mock.calls[1]?.[0].id).not.toBe(first);
+  expect(t.records()).toMatchObject([
+    { event: { id: first }, delivery: "unknown" },
+  ]);
 });
 
 it("keeps the exact failed request when durable dismissal fails", async () => {

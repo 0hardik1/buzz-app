@@ -1,7 +1,7 @@
 import type { RelayReader } from "../relay/reader";
 import { isTransientFailure } from "../relay/errors";
 import type { RelayEvent, ReadFilter } from "../relay/events";
-import type { Outbox, LocalEvents } from "../relay/outbox";
+import type { Outbox, LocalEvents, OutgoingEvent } from "../relay/outbox";
 import type { ChannelKitHost } from "./host";
 import type { ChannelSummary } from "../relay/contracts";
 import {
@@ -248,6 +248,22 @@ export function createChannelKit({
       throw error;
     }
   }
+  /** Whether an earlier unresolved save of the same record blocks a new one.
+   * Only a save that can still reach the relay does. One known not to have
+   * been sent, or older than the relay's 15-minute intake window, cannot land
+   * later: it is discarded, as after a proven conflict, so the reviewed save
+   * proceeds on the head just read. */
+  async function blocked(previous: OutgoingEvent | undefined) {
+    if (!previous || !outbox) return false;
+    if (
+      previous.delivery !== "failed" &&
+      (previous.delivery !== "unknown" ||
+        Date.now() / 1000 - previous.event.created_at < 15 * 60)
+    )
+      return true;
+    await outbox.dismiss(previous.event.id);
+    return false;
+  }
   /** One replaceable private-record write: fresh head check, unresolved-save
    * guard, enqueue, exact confirmation and selected-head readback. With
    * `resume.id` it confirms that earlier event instead of enqueueing again. */
@@ -301,9 +317,9 @@ export function createChannelKit({
               e.event.tags.some((t) => t[0] === "d" && t[1] === d) &&
               !["accepted", "seen"].includes(e.delivery),
           );
-        if (previous)
+        if (await blocked(previous))
           throw new Error(
-            "A save for this recipe is unresolved. Inspect Outbox and refresh before replacing it.",
+            "A save for this recipe is unresolved and may still arrive. Refresh, then save again once 15 minutes have passed since that save.",
           );
         // Replaceable records use seconds. Do not create an ambiguous equal-time replacement.
         if (current && current.created_at >= Math.floor(Date.now() / 1000))
@@ -465,9 +481,9 @@ export function createChannelKit({
             e.event.tags.some((t) => t[0] === "h" && t[1] === channel) &&
             !["accepted", "seen"].includes(e.delivery),
         );
-      if (pending)
+      if (await blocked(pending))
         throw new Error(
-          "This channel has an unresolved Canvas save. Inspect Outbox before making another save.",
+          "This channel has an unresolved Canvas save that may still arrive. Your draft is kept. Save again once 15 minutes have passed since that save.",
         );
       if (head && head.created_at >= Math.floor(Date.now() / 1000))
         throw new Error("Please wait a second before saving Canvas again");

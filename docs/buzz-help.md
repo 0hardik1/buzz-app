@@ -958,6 +958,9 @@ and are asked to sign in again in Buzz.
   instead. **History** shows how each saved version differs from the current
   Canvas, with + marking lines only that version has and − marking current
   lines it lacks. Turn on **Show full content** to read a version as written.
+  A save that fails keeps your draft, and you can save again. If a save could
+  not be confirmed, it may still arrive: your draft is kept, and saving again
+  works once 15 minutes have passed since that save.
 - **Keyboard shortcuts** follow Slack where they can. Press ⌘/ (Ctrl+/ on
   Windows and Linux) to open **Settings → Shortcuts**, which lists them, lets
   you change most of them and also shows the fixed message-formatting keys. In
@@ -1044,13 +1047,16 @@ and are asked to sign in again in Buzz.
   readable. View only retains Guest admission. Copying its link alone does not grant access. Check the intended people
   and destination before changing access. If an older saved invitation granted
   view-only access, remove that person in People and invite them again for
-  participation. For an older unresolved invitation, use **Retry** in Outbox
-  (**View channel details** → Diagnostics, which only developer builds show)
-  or add the person again if the receipt is already Seen. After its 15-minute
-  delivery window, Buzz verifies the original command and current membership
-  before allowing a fresh participation invitation; failed checks keep the original.
-  If the original invitation was applied and the person was later removed, Retry
-  clears the old row without re-adding them. Use **Add** in People to invite them again.
+  participation. For an older unresolved invitation, use **Add** in People to
+  invite the person again. After the invitation's 15-minute delivery window,
+  Buzz verifies the original command and current membership before sending a
+  fresh participation invitation; failed checks keep the original, and before
+  then Add asks you to wait. If an addition of a person or agent failed and has
+  expired, People reports it with **Discard**: discard it, then add them again.
+  Developer builds only: Outbox (**View channel details** → Diagnostics) also
+  lists saved invitations. Its **Retry** finishes the original without
+  re-inviting, so if that invitation was applied and the person was later
+  removed, it clears the old row; use **Add** in People to invite them again.
 - **Open links in your browser**: on desktop, ⌘-click (Ctrl-click on Windows
   and Linux) an HTTP(S) link in a message to open it in your default browser
   instead of a side panel. You can also right-click the link and choose

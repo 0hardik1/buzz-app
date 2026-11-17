@@ -1627,6 +1627,50 @@ it("shows the real rejection and retries without discarding the query", async ()
   await t.user.click(screen.getByRole("button", { name: /^Retry adding / }));
   await screen.findByText("Morgan is in the channel.");
 });
+// Past the relay's 15-minute intake window a signed addition cannot be sent again.
+function afterIntakeWindow() {
+  const now = vi
+    .spyOn(Date, "now")
+    .mockReturnValue(Date.now() + 16 * 60 * 1000);
+  stops.push(() => now.mockRestore());
+}
+it("discards an expired failed addition in People so the person can be added again", async () => {
+  const t = await setup();
+  t.fail("Invitation denied");
+  await t.user.click(await t.search());
+  await screen.findByText(/Invitation denied/);
+  const original = t.publish.mock.calls[0]?.[0].id;
+  t.fail("");
+  afterIntakeWindow();
+  // Retry cannot resend the expired request, and names a control shown here.
+  await t.user.click(
+    screen.getByRole("button", { name: "Retry adding Morgan" }),
+  );
+  const alert = await screen.findByText(
+    /This addition expired\. Discard it in People, then add them again\./,
+  );
+  expect(alert).not.toHaveTextContent(/outbox/i);
+  expect(t.publish).toHaveBeenCalledOnce();
+  expect(t.session.outbox?.snapshot()).toMatchObject([
+    { event: { id: original }, delivery: "failed" },
+  ]);
+  await t.user.click(
+    within(alert).getByRole("button", {
+      name: "Discard failed addition of Morgan",
+    }),
+  );
+  await vi.waitFor(() => expect(t.session.outbox?.snapshot()).toEqual([]));
+  // The discarded attempt is no longer reported, and the search is kept.
+  await vi.waitFor(() =>
+    expect(screen.queryByText(/This addition expired/)).not.toBeInTheDocument(),
+  );
+  expect(t.session.memberAdditions.snapshot()).toEqual([]);
+  expect(screen.getByRole("searchbox")).toHaveValue("Morgan");
+  await t.user.click(screen.getByRole("button", { name: /Add Morgan/ }));
+  await screen.findByText("Morgan is in the channel.");
+  expect(t.publish).toHaveBeenCalledTimes(2);
+  expect(t.publish.mock.calls[1]?.[0].id).not.toBe(original);
+});
 it("DMs cannot add people without a connection that adds to them", async () => {
   const t = await setup("dm");
   await t.user.type(screen.getByRole("searchbox"), "Morgan");
@@ -3572,6 +3616,82 @@ it("Solo agent search keeps the query after a rejected addition, then retries th
     9000, 9000,
   ]);
   expect(t.publish.mock.calls[1]?.[0].id).toBe(original);
+});
+
+it("discards an expired Solo agent addition in People so the agent can be added again", async () => {
+  const t = await setup("solo", false, true);
+  const input = screen.getByRole("searchbox");
+  await t.user.type(input, "Fixture");
+  t.fail("Permission denied");
+  await t.user.click(
+    await screen.findByRole("button", { name: /Add Fixture agent/ }),
+  );
+  await screen.findByText(/Fixture agent: Permission denied/);
+  const original = t.publish.mock.calls[0]?.[0].id;
+  t.fail("");
+  afterIntakeWindow();
+  await t.user.click(
+    screen.getByRole("button", { name: "Retry adding Fixture agent" }),
+  );
+  const alert = await screen.findByText(
+    /This agent-add request expired\. Discard it in People, then add the agent again\./,
+  );
+  expect(alert).not.toHaveTextContent(/outbox/i);
+  expect(t.publish).toHaveBeenCalledOnce();
+  await t.user.click(
+    within(alert).getByRole("button", {
+      name: "Discard failed addition of Fixture agent",
+    }),
+  );
+  await vi.waitFor(() => expect(t.session.outbox?.snapshot()).toEqual([]));
+  await vi.waitFor(() =>
+    expect(screen.queryByText(/request expired/)).not.toBeInTheDocument(),
+  );
+  expect(input).toHaveValue("Fixture");
+  await t.user.click(screen.getByRole("button", { name: /Add Fixture agent/ }));
+  await screen.findByText("Fixture agent added.");
+  expect(t.publish).toHaveBeenCalledTimes(2);
+  expect(t.publish.mock.calls[1]?.[0].id).not.toBe(original);
+});
+it("offers Discard in People for an agent addition that expired on another surface", async () => {
+  const t = await setup("solo", false, true);
+  const id = "11111111-1111-4111-8111-111111111111";
+  // The composer adds a tagged agent this way and reports the failure itself.
+  t.fail("Permission denied");
+  await expect(
+    t.session.channelWrites.addAgents(id, [t.agent.pubkey], () => true),
+  ).rejects.toThrow(/Permission denied/);
+  t.fail("");
+  // Until it expires, adding the agent again retries it, so People is quiet.
+  await t.user.click(screen.getByRole("button", { name: "Close" }));
+  await t.user.click(t.trigger);
+  await screen.findByText("Carl (you)");
+  expect(screen.queryByText(/expired/)).not.toBeInTheDocument();
+  await t.user.click(screen.getByRole("button", { name: "Close" }));
+  afterIntakeWindow();
+  await expect(
+    t.session.channelWrites.addAgents(id, [t.agent.pubkey], () => true),
+  ).rejects.toThrow(
+    "This agent-add request expired. Discard it in People, then add the agent again.",
+  );
+  await t.user.click(t.trigger);
+  const alert = await screen.findByText(
+    /Fixture agent: An earlier addition expired\. Discard it to add them again\./,
+  );
+  await t.user.click(
+    within(alert).getByRole("button", {
+      name: "Discard failed addition of Fixture agent",
+    }),
+  );
+  await vi.waitFor(() => expect(t.session.outbox?.snapshot()).toEqual([]));
+  await vi.waitFor(() =>
+    expect(screen.queryByText(/expired/)).not.toBeInTheDocument(),
+  );
+  await t.session.channelWrites.addAgents(id, [t.agent.pubkey], () => true);
+  expect(t.publish).toHaveBeenCalledTimes(2);
+  expect(t.session.channels.list().channels[0]?.members).toContain(
+    t.agent.pubkey,
+  );
 });
 
 it("withholds Solo agent additions from a shared viewer", async () => {

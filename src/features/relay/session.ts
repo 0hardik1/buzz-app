@@ -6,6 +6,7 @@ import { createMemberAdditions } from "../channel-members/operations";
 import {
   addChannelMember,
   addChannelMembersAtOnce,
+  discardAdditions,
 } from "../channel-members/members";
 import type { LocalAgents } from "../agents/local";
 import type { GitRead } from "../repos/git";
@@ -2603,6 +2604,7 @@ export function createRelaySession(
         solo(channelId),
         writes?.local,
       ),
+    (channelId, pubkey) => discardAdditions(session, channelId, pubkey),
   );
   const recoverable = (
     subscribe: (listener: () => void) => () => void,

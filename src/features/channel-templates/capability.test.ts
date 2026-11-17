@@ -270,10 +270,12 @@ it("caller cancellation after enqueue does not retract or interrupt durable deli
 });
 it("keeps drafts safe from stale Canvas, unresolved writes and access loss", async () => {
   const f = fixture();
+  // Recent enough that, while unconfirmed, it may still reach the relay.
   const head = signed(viewer, {
     kind: 40100,
     tags: [["h", channel]],
     content: "Old",
+    created_at: Math.floor(Date.now() / 1000) - 60,
   });
   f.events.push(head);
   await expect(f.canvas.save(channel, "New", undefined)).rejects.toThrow(
@@ -302,6 +304,68 @@ it("keeps drafts safe from stale Canvas, unresolved writes and access loss", asy
     content: "New",
   });
 });
+it.each(
+  (["recipe", "Canvas"] as const).flatMap((kind) =>
+    (
+      [
+        ["failed", 60, true],
+        ["unknown", 16 * 60, true],
+        ["unknown", 14 * 60, false],
+        ["sending", 16 * 60, false],
+      ] as const
+    ).map(([delivery, age, replaced]) => ({ kind, delivery, age, replaced })),
+  ),
+)(
+  "a $delivery $kind save made $age seconds ago is replaced by the next save: $replaced",
+  async ({ kind, delivery, age, replaced }) => {
+    const f = fixture();
+    const now = 1_700_001_000;
+    vi.spyOn(Date, "now").mockReturnValue(now * 1000);
+    // It never reached the relay, which therefore has no head to conflict with.
+    const earlier = signed(
+      viewer,
+      kind === "recipe"
+        ? {
+            kind: 30078,
+            content: "Earlier",
+            tags: [
+              ["d", coordinate(record)],
+              ["t", KIT_TAG],
+            ],
+            created_at: now - age,
+          }
+        : {
+            kind: 40100,
+            content: "Earlier",
+            tags: [["h", channel]],
+            created_at: now - age,
+          },
+    );
+    f.pending.push({ event: earlier, delivery });
+    const save = () =>
+      kind === "recipe"
+        ? f.capability.save(record.value, undefined)
+        : f.canvas.save(channel, "Reviewed", undefined);
+    if (replaced) {
+      await save();
+      expect(f.outbox.dismiss).toHaveBeenCalledExactlyOnceWith(earlier.id);
+      expect(f.outbox.send).toHaveBeenCalledOnce();
+      return;
+    }
+    // It may still arrive: the message says when to try again, and names no
+    // surface a release build lacks.
+    const refusal = await save().then(
+      () => undefined,
+      (reason: Error) => reason.message,
+    );
+    expect(refusal).toMatch(
+      /unresolved.*may still arrive.*once 15 minutes have passed/,
+    );
+    expect(refusal).not.toMatch(/outbox/i);
+    expect(f.outbox.dismiss).not.toHaveBeenCalled();
+    expect(f.outbox.send).not.toHaveBeenCalled();
+  },
+);
 it("never re-signs an expired uncertain operation and clears candidates on retirement", async () => {
   const f = fixture();
   const old = signed(viewer, {
@@ -409,6 +473,8 @@ it.each(["recipe", "Canvas"])(
           }
         : { kind: 40100, content: "Prior Canvas", tags: [["h", channel]] },
     );
+    // The prior save is recent, so while unconfirmed it may still arrive.
+    vi.spyOn(Date, "now").mockReturnValue((prior.created_at + 60) * 1000);
     let hydrate: (rows: readonly OutgoingEvent[]) => void = () => {};
     const hydration = new Promise<readonly OutgoingEvent[]>((resolve) => {
       hydrate = resolve;

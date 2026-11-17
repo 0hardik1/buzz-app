@@ -62,6 +62,53 @@ it("passes a requested guest role to the addition, and only to that one", async 
   expect(roles).toEqual(["guest", undefined]);
 });
 
+it("discards a failed addition and stops reporting it, leaving others alone", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const add = vi.fn(async (_channel: string, person: string) => {
+    if (person === "held") await gate;
+    throw new Error("Could not add");
+  });
+  const discard = vi.fn(async () => {});
+  const owner = createMemberAdditions(
+    new AbortController().signal,
+    add,
+    undefined,
+    undefined,
+    discard,
+  );
+  await expect(owner.add("channel", "person")).rejects.toThrow("Could not add");
+  await expect(owner.add("channel", "other")).rejects.toThrow("Could not add");
+  await expect(owner.add("elsewhere", "person")).rejects.toThrow(
+    "Could not add",
+  );
+  // An addition under way is not a failure to give up.
+  const held = owner.add("channel", "held");
+  await expect(owner.discard("channel", "held")).rejects.toThrow(
+    /already running/,
+  );
+  expect(discard).not.toHaveBeenCalled();
+  await owner.discard("channel", "person");
+  expect(discard).toHaveBeenCalledExactlyOnceWith("channel", "person");
+  expect(
+    owner.snapshot().map((item) => [item.channelId, item.pubkey, item.pending]),
+  ).toEqual([
+    ["channel", "other", false],
+    ["elsewhere", "person", false],
+    ["channel", "held", true],
+  ]);
+  // A failed dismissal keeps the failure reported.
+  discard.mockRejectedValueOnce(new Error("Storage unavailable"));
+  await expect(owner.discard("channel", "other")).rejects.toThrow(
+    "Storage unavailable",
+  );
+  expect(owner.snapshot()).toHaveLength(3);
+  release();
+  await expect(held).rejects.toThrow("Could not add");
+});
+
 it("joins an addition under way only when it asks for the same role", async () => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -77,9 +124,12 @@ it("joins an addition under way only when it asks for the same role", async () =
   const owner = createMemberAdditions(new AbortController().signal, add);
   const first = owner.add("channel", "agent");
   expect(owner.add("channel", "agent")).toBe(first);
+  // The wait is the exit, so the message names no surface.
   await expect(
     owner.add("channel", "agent", { role: "guest" }),
-  ).rejects.toThrow(/another role/);
+  ).rejects.toThrow(
+    "This member is already being added with another role. Wait for it to finish, then try again.",
+  );
   release();
   await first;
   expect(add).toHaveBeenCalledOnce();

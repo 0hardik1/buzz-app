@@ -10,7 +10,7 @@ import {
   soloAdminRecovery,
   soloAgentOwnership,
 } from "./solo-admins";
-import { isBatchAddition } from "../channel-members/members";
+import { additionExpired, isBatchAddition } from "../channel-members/members";
 import { withdraw } from "./withdraw";
 import type { ChannelQueries, ChannelSummary } from "./contracts";
 import type { RelayReader } from "./reader";
@@ -520,9 +520,9 @@ export function createChannelWrites(
           )
         );
       });
-      if (previous && Date.now() / 1000 - previous.event.created_at >= 15 * 60)
+      if (previous && additionExpired(previous))
         throw new Error(
-          `This agent-add request expired. Open Outbox, remove the “Add agent ${key.slice(0, 12)}” item, then add the agent again. Check channel membership first if the request was unconfirmed.`,
+          "This agent-add request expired. Discard it in People, then add the agent again.",
         );
       let owned: (() => boolean) | undefined;
       if (

@@ -206,8 +206,8 @@ function setup(
     },
     publish,
     sign,
-    omitMembership: () => {
-      omitMembership = true;
+    omitMembership: (value = true) => {
+      omitMembership = value;
     },
     holdRoster: () => {
       rosterRequested = new Promise<void>((resolve) => {
@@ -503,24 +503,93 @@ it("preserves ordinary channel admission defaults for an owner", async () => {
     test.owner.dispose();
   }
 });
-it("explains how to recover an expired failed invitation without republishing it", async () => {
+it.each(["refused", "unconfirmed"] as const)(
+  "discards a %s invitation only once it can no longer arrive, without republishing it",
+  async (outcome) => {
+    const test = setup();
+    const { session } = test.owner;
+    const add = () =>
+      session.channelWrites.addAgents(test.parent, [test.agent]);
+    try {
+      await test.ready();
+      if (outcome === "refused") test.setDenied(true);
+      else {
+        test.omitMembership();
+        test.afterPublish(() => {
+          throw new Error("Receipt lost");
+        });
+      }
+      const now = Date.now;
+      vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+      try {
+        await expect(add()).rejects.toThrow(
+          outcome === "refused" ? /Only channel admins/ : /Receipt lost/,
+        );
+        expect(test.publish).toHaveBeenCalledOnce();
+        const first = test.publish.mock.calls[0]?.[0].id;
+        expect(session.outbox?.snapshot()).toMatchObject([
+          {
+            event: { id: first },
+            delivery: outcome === "refused" ? "failed" : "unknown",
+          },
+        ]);
+        // An unconfirmed request may still arrive until the relay's intake
+        // window closes, so only a refused one can be given up before then.
+        await session.memberAdditions.discard(test.parent, test.agent);
+        expect(session.outbox?.snapshot()).toHaveLength(
+          outcome === "refused" ? 0 : 1,
+        );
+        if (outcome === "refused") return;
+        vi.mocked(Date.now).mockReturnValue(1_700_000_901_000);
+        test.omitMembership(false);
+        test.afterPublish(() => {});
+        for (let attempt = 0; attempt < 2; attempt++)
+          await expect(add()).rejects.toThrow(
+            "This agent-add request expired. Discard it in People, then add the agent again.",
+          );
+        expect(test.publish).toHaveBeenCalledOnce();
+        await session.memberAdditions.discard(test.parent, test.agent);
+        expect(session.outbox?.snapshot()).toEqual([]);
+        await add();
+        expect(test.publish).toHaveBeenCalledTimes(2);
+        expect(test.publish.mock.calls[1]?.[0].id).not.toBe(first);
+        expect(
+          session.channels
+            .list()
+            .channels.find((item) => item.id === test.parent)?.members,
+        ).toContain(test.agent);
+      } finally {
+        vi.restoreAllMocks();
+        expect(Date.now).toBe(now);
+      }
+    } finally {
+      test.owner.dispose();
+    }
+  },
+);
+it("blocks an expired refused invitation until it is discarded", async () => {
   const test = setup();
+  const { session } = test.owner;
+  const add = () => session.channelWrites.addAgents(test.parent, [test.agent]);
   try {
     await test.ready();
     test.setDenied(true);
     const now = Date.now;
     vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
     try {
-      await expect(
-        test.owner.session.channelWrites.addAgents(test.parent, [test.agent]),
-      ).rejects.toThrow(/Only channel admins/);
-      expect(test.publish).toHaveBeenCalledOnce();
+      await expect(add()).rejects.toThrow(/Only channel admins/);
+      const first = test.publish.mock.calls[0]?.[0].id;
       vi.mocked(Date.now).mockReturnValue(1_700_000_901_000);
       test.setDenied(false);
-      await expect(
-        test.owner.session.channelWrites.addAgents(test.parent, [test.agent]),
-      ).rejects.toThrow(/expired.*Outbox.*remove.*add the agent again/i);
+      await expect(add()).rejects.toThrow(
+        "This agent-add request expired. Discard it in People, then add the agent again.",
+      );
       expect(test.publish).toHaveBeenCalledOnce();
+      await session.memberAdditions.discard(test.parent, test.agent);
+      expect(session.outbox?.snapshot()).toEqual([]);
+      await add();
+      expect(test.publish).toHaveBeenCalledTimes(2);
+      expect(test.publish.mock.calls[1]?.[0].id).not.toBe(first);
     } finally {
       vi.restoreAllMocks();
       expect(Date.now).toBe(now);

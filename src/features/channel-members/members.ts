@@ -143,6 +143,51 @@ const batchPrefix = "member-add:batch:";
 export const isBatchAddition = (item: OutgoingEvent) =>
   !!item.recovery?.key.startsWith(batchPrefix);
 
+/** The relay takes a signed addition for 15 minutes. After that the same
+ * request can never be sent again. */
+export const additionExpired = (item: OutgoingEvent) =>
+  Date.now() / 1000 - item.event.created_at >= 15 * 60;
+
+/** Saved single additions to a channel that their owner may give up, for one
+ * person or everyone: those known not to have been sent, and unconfirmed
+ * agent requests the relay can no longer take. An unconfirmed member addition
+ * stays until Retry resolves it, as the outbox requires. */
+export const discardableAdditions = (
+  saved: readonly OutgoingEvent[],
+  channelId: string,
+  pubkey?: string,
+) =>
+  saved.filter(
+    (item) =>
+      item.event.kind === 9000 &&
+      !item.acknowledged &&
+      !isBatchAddition(item) &&
+      item.event.tags.some(
+        ([tag, value]) => tag === "h" && value === channelId,
+      ) &&
+      item.event.tags.some(
+        ([tag, value]) => tag === "p" && (!pubkey || value === pubkey),
+      ) &&
+      (item.delivery === "failed" ||
+        (item.delivery === "unknown" &&
+          !item.recovery &&
+          additionExpired(item))),
+  );
+
+/** Explicitly gives up this person's saved additions that cannot finish, so
+ * adding them again starts a new one. Nothing sent is undone. */
+export async function discardAdditions(
+  session: Pick<RelaySession, "outbox">,
+  channelId: string,
+  pubkey: string,
+) {
+  const outbox = session.outbox;
+  if (!outbox) return;
+  await outbox.ready();
+  for (const item of discardableAdditions(outbox.snapshot(), channelId, pubkey))
+    await outbox.dismiss(item.event.id);
+}
+
 export type MemberAdditionIntent = {
   id?: string;
   confirmed?: boolean;
@@ -282,7 +327,7 @@ async function addOneMember(
     intent.id = pending.event.id;
   if (pending && !sameRole && !channel()?.members?.includes(pubkey))
     throw new Error(
-      "An addition of this member with another role is still in Outbox. Retry it there to finish it, or remove it once it shows Not sent, then try again.",
+      "An earlier addition of this member with another role has not finished. Retry it where it was started, or discard it in People once it has failed, then try again.",
     );
 
   if (pending && !pending.acknowledged)
@@ -372,12 +417,9 @@ async function addOneMember(
     throw new Error(
       "The original addition receipt is unavailable. Refresh membership before trying again.",
     );
-  if (
-    pending?.delivery === "failed" &&
-    Date.now() / 1000 - pending.event.created_at >= 15 * 60
-  )
+  if (pending?.delivery === "failed" && additionExpired(pending))
     throw new Error(
-      "This addition expired. Remove its Not sent item in Outbox, then try again.",
+      "This addition expired. Discard it in People, then add them again.",
     );
 
   const id = pending?.event.id ?? outbox.send(invitation(), recovery);
