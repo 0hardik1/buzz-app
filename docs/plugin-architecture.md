@@ -776,9 +776,11 @@ ctx.reflect.get("sidebarSections")?.register({
 #### Bundled section components (internal preview)
 
 The service also has a bundled-only version-2 preview, `registerSource`.
-It is likely to change, is not exported from the author API, and rejects
-non-bundled owners. Version-1 registration and snapshots remain unchanged;
-plugin-development introspection currently lists only version-1 sections.
+It is likely to change and is type-visible through the author API's exported
+`SidebarSections` type. Registration is supported only for bundled owners;
+the runtime rejects non-bundled owners. Version-1 registration and snapshots
+remain unchanged; plugin-development introspection currently lists only
+version-1 sections.
 
 A source runs once and supplies live `{ id, defaultPosition, element, title? }`
 sections through its `render` callback. Use stable component types and opaque,
