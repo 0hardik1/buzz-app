@@ -1,0 +1,6 @@
+{
+  "id": "example.sidebar-host-demo",
+  "name": "Sidebar host hand test",
+  "apiVersion": 1,
+  "description": "Manual replacement and standalone navigation checks for the desktop sidebar."
+}
