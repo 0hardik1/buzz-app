@@ -12,20 +12,15 @@ export async function pageChoices(page, query = "") {
 }
 
 // The rail is the app's primary navigation: cards for Pins, Team, Solo and
-// the rest, each opening its list beside the conversation.
+// the rest, each opening its collection in a sheet over the rail.
 export function rail(page) {
   return page.getByRole("navigation", { name: "Apps", exact: true });
-}
-
-// Activity is Team's All view, the first row of the rail's Team card.
-export function activityRow(page) {
-  return rail(page).locator('[data-rail-team-view="all"]');
 }
 
 // Team's list, whichever view the rail selected. Its rows open conversations
 // in the reader beside it.
 export function conversationList(page) {
-  return page.locator("[data-activity-sidebar]");
+  return rail(page).locator("[data-rail-card-sheet] [data-activity-sidebar]");
 }
 
 // A channel's row in Team's list, by channel id.
@@ -37,28 +32,51 @@ export function channelRow(page, channelId) {
 
 // Team's Channels view lists every channel; its row opens the channel beside
 // the list.
-// A conversation opened directly, as from a link, collapses its list.
-export async function showConversationList(page) {
-  const show = page.getByRole("button", { name: /^Show .+ list$/ });
-  const list = conversationList(page);
-  // Right after a load neither the list nor its toggle is shown yet.
-  await expect
-    .poll(async () => (await show.isVisible()) || (await list.isVisible()))
-    .toBe(true);
-  if (await show.isVisible()) await show.click();
-  await expect(list).toBeVisible();
+// Direct conversation links leave the rail cards available.
+export async function showConversationList(page, section = "Team") {
+  await revealRail(page);
+  await expect(rail(page).locator('[data-rail-section="team"]')).toBeAttached();
+  const sheet = rail(page).locator("[data-rail-card-sheet]");
+  if (await sheet.isVisible()) {
+    if (
+      await sheet
+        .getByRole("heading", { name: section, exact: true })
+        .isVisible()
+    )
+      return;
+    await sheet.getByRole("button", { name: "Close expanded card" }).click();
+    await expect(sheet).toHaveCount(0);
+  }
+  await rail(page).getByRole("button", { name: section, exact: true }).click();
+  await expect(sheet).toBeVisible();
 }
-// A narrow detail column lays the list over the reader, and an open from the
-// list keeps it open; close it as a reader would to reach the conversation.
-// Pass `resized` after shrinking the window: the column turns narrow only once
-// the new size is measured.
-export async function hideNarrowConversationList(page, resized = false) {
-  const narrow = page.locator("[data-detail-workspace][data-narrow]");
-  if (resized) await expect(narrow).toHaveCount(1);
-  if (!(await narrow.count())) return;
-  const hide = page.getByRole("button", { name: /^Hide .+ list$/ }).first();
+
+export async function hideNarrowConversationList(page) {
+  if (page.viewportSize().width > 650) return;
+  await settleShellToggle(page);
+  const close = rail(page).getByRole("button", { name: "Close expanded card" });
+  if (await close.isVisible()) await close.click();
+  const hide = page.getByRole("button", {
+    name: "Hide navigation",
+    exact: true,
+  });
   if (await hide.isVisible()) await hide.click();
-  await expect(conversationList(page)).toBeHidden();
+}
+
+export async function showCollectionView(page, view) {
+  await showConversationList(page);
+  const names = {
+    all: "All",
+    channels: "Channels",
+    threads: "Threads",
+    dms: "DMs",
+    mentions: "Mentions",
+    reactions: "Reactions",
+  };
+  await rail(page)
+    .locator("[data-rail-card-sheet]")
+    .getByRole("tab", { name: names[view], exact: true })
+    .click();
 }
 // A conversation's row in Team's list, by the place it names: a DM's people,
 // a Solo chat's title or a channel's name.
@@ -71,17 +89,34 @@ export function conversationRow(page, name) {
 // Team's DMs view lists direct messages by their people.
 export async function openDm(page, name) {
   await revealRail(page);
-  await rail(page).locator('[data-rail-team-view="dms"]').click();
+  await showCollectionView(page, "dms");
   await conversationRow(page, name).click();
 }
 
 export async function openChannel(page, channelId) {
   await revealRail(page);
-  await rail(page).locator('[data-rail-team-view="channels"]').click();
+  await showCollectionView(page, "channels");
   await channelRow(page, channelId).click();
 }
 
+// Reveal the retained cards before using a header or a different card.
+export async function showRailCards(page) {
+  await revealRail(page);
+  await expect(rail(page).locator('[data-rail-section="team"]')).toBeAttached();
+  const sheet = rail(page).locator("[data-rail-card-sheet]");
+  if (await sheet.isVisible()) {
+    await sheet.getByRole("button", { name: "Close expanded card" }).click();
+    await expect(sheet).toHaveCount(0);
+  }
+  const expand = page.getByRole("button", {
+    name: "Show sidebar",
+    exact: true,
+  });
+  if (await expand.isVisible()) await expand.click();
+}
+
 export async function openPage(page, name, { connected = true } = {}) {
+  await showRailCards(page);
   // The community switcher appears after local startup has replaced the launch
   // view, in the rail's header; a narrow window keeps the rail behind its toggle.
   await revealRail(page);
@@ -108,6 +143,7 @@ export async function revealRail(page) {
 }
 
 export async function newChat(page) {
+  await showRailCards(page);
   // The community switcher appears after local startup has replaced the launch view.
   await revealRail(page);
   await expect(
@@ -238,7 +274,7 @@ export function settingsSections(page) {
 }
 
 export async function openSettings(page) {
-  await revealRail(page);
+  await showRailCards(page);
   await page.getByRole("button", { name: "Your profile", exact: true }).click();
   await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
   await expect(settingsDialog(page)).toBeVisible();
@@ -303,8 +339,7 @@ export async function settleDialogMotion(dialog) {
 }
 
 export async function openCommunityPicker(page) {
-  // A narrow window keeps the switcher in the rail's drawer.
-  await revealRail(page);
+  await showRailCards(page);
   await page.getByRole("button", { name: /^Community switcher:/ }).click();
   const picker = page.getByRole("dialog", {
     name: "Switch community",

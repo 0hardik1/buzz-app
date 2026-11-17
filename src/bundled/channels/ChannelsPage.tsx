@@ -1,6 +1,5 @@
 import { isSidebarSectionRoute } from "../../features/channel-navigation/sidebar-section-route";
 import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
-import { ConversationListToggle } from "../../features/conversation/ConversationListToggle";
 import { useInlineReply } from "../../features/messages/use-inline-reply";
 import { useChannelHistoryFocus } from "./useChannelHistoryFocus";
 import type { Conversation } from "../../features/conversation/service";
@@ -2472,7 +2471,6 @@ function ChannelWorkspace({
         )}
     </div>
   );
-  const listToggle = <ConversationListToggle />;
   const workspace = (
     <div
       data-channel-workspace={currentId ?? ""}
@@ -2539,23 +2537,12 @@ function ChannelWorkspace({
           data-attachment-drop-zone=""
         >
           {composingTeam && (
-            <PanelHeader
-              variant="conversation"
-              title="New message"
-              navigation={listToggle}
-            />
+            <PanelHeader variant="conversation" title="New message" />
           )}
           {unselected ? (
-            <>
-              <PanelHeader
-                variant="conversation"
-                title={null}
-                navigation={listToggle}
-              />
-              <div className={styles.unselected}>
-                <NoConversationSelected />
-              </div>
-            </>
+            <div className={styles.unselected}>
+              <NoConversationSelected />
+            </div>
           ) : composingMessage ? (
             <LiveNewMessage
               expanded={composingTeam}
@@ -2614,7 +2601,6 @@ function ChannelWorkspace({
                 draft.draft,
                 retiredSoloDraft.generation,
               ])}
-              navigation={listToggle}
               linkedId={draft.linked}
               region={draft.region}
               draft={draft.draft}
@@ -2668,7 +2654,6 @@ function ChannelWorkspace({
             <>
               {current && solo ? (
                 <SoloHeading
-                  leadingActions={listToggle}
                   chatMenus={chatMenus}
                   key={`${current.id}:${navigation?.entryId ?? ""}`}
                   session={queries}
@@ -2716,7 +2701,6 @@ function ChannelWorkspace({
                 <div className={styles.mainWorkspace}>
                   <PanelWorkspace
                     main
-                    leadingActions={current ? listToggle : undefined}
                     headerDivider={false}
                     tabMenu={tabMenu}
                     label="Channel tabs"
@@ -2915,7 +2899,6 @@ function ChannelWorkspace({
                   leadingActions={
                     threadAlone ? (
                       <span className="flex min-w-0 items-center gap-1">
-                        {listToggle}
                         {current && (
                           <IconButton
                             size="sm"

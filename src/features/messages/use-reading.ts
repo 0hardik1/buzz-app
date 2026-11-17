@@ -91,10 +91,10 @@ export function useReading({
           ?.closest("[data-panel-workspace]")
           ?.closest("[data-reading-thread]")
           ?.contains(node) ||
-        // The list beside the reader: the open conversation's row keeps
+        // The owning list or rail sheet: the open conversation's row keeps
         // focus while it is read. Another row's focus reads nothing.
         !!element
-          .closest("[data-detail-workspace]")
+          .closest("[data-detail-workspace], [data-detail-container]")
           ?.querySelector('[data-activity-sidebar] [aria-current="page"]')
           ?.contains(node) ||
         !!composer?.current?.contains(node));

@@ -11,7 +11,7 @@ test.use({
 
 // Browser-only: live CSS widths must reflow real message rows while durable
 // sidebar intent stays unchanged until release. Timings are diagnostic, not gates.
-for (const name of ["Resize sidebar", "Resize main and secondary panels"]) {
+for (const name of ["Resize app sidebar", "Resize main and secondary panels"]) {
   test(`${name} previews live wrapping and commits on release`, async ({
     page,
     app,
@@ -37,9 +37,10 @@ for (const name of ["Resize sidebar", "Resize main and secondary panels"]) {
     const handle = page.getByRole("separator", { name, exact: true });
     await expect(handle).toBeVisible();
     const results = await handle.evaluate(async (handle) => {
-      const sidebar = handle.getAttribute("aria-label") === "Resize sidebar";
+      const sidebar =
+        handle.getAttribute("aria-label") === "Resize app sidebar";
       const panel = sidebar
-        ? handle.previousElementSibling
+        ? document.getElementById("shell-rail")
         : handle.parentElement;
       const initial = panel.getBoundingClientRect().width;
       const grip = handle.getBoundingClientRect();
@@ -112,7 +113,7 @@ for (const name of ["Resize sidebar", "Resize main and secondary panels"]) {
     expect(results.liveRange).toBeGreaterThan(50);
     expect(results.final).toBeCloseTo(results.initial + 60, 0);
     expect(results.writesDuring).toBe(0);
-    expect(results.writesAfter).toBe(name === "Resize sidebar" ? 1 : 0);
+    expect(results.writesAfter).toBe(0);
     await settle(page, thread);
     expect(
       await thread.evaluate(
@@ -165,12 +166,6 @@ for (const name of ["Resize sidebar", "Resize main and secondary panels"]) {
         );
       }, anchor),
     ).toBeLessThan(4);
-    if (name === "Resize sidebar") {
-      await open(page, app);
-      await expect(
-        page.getByRole("separator", { name, exact: true }),
-      ).toHaveAttribute("aria-valuenow", String(Math.round(results.final)));
-    }
   });
 }
 

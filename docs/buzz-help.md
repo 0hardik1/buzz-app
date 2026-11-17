@@ -930,8 +930,8 @@ and are asked to sign in again in Buzz.
 - **Conversation list artwork**: Solo chats and direct messages show up to three
   other members' avatars. Channels keep their channel icon on a colored background
   chosen consistently from the first letter of the channel name.
-- **Conversation members**: the conversation name sits just below the centered avatars.
-  Click the centered avatars to open membership management. Avatars exclude you;
+- **Conversation members**: the conversation name sits just below the header avatars.
+  Click the header avatars to open membership management. Avatars exclude you;
   Solo chats show participating agents. The toolbar actions stay at the top right.
 - **Conversation timestamps**: sidebar times appear when you hover or focus a row.
   Touch devices keep them visible.
@@ -943,8 +943,7 @@ and are asked to sign in again in Buzz.
   in the Plugins card, which starts at the top and can be moved like any section.
   The **→ Open Plugins** row at the bottom of the Plugins card opens the plugin catalog.
   Each object card shows up to four rows, then **→ Open [section name]**;
-  **Open [section name]** opens a dedicated list in the main content area without expanding
-  the card. Back and Forward return between the list and its items. Pins remains uncapped. The Team card keeps
+  **Open [section name]** opens a sheet over the rail, keeping the reader in place. Pins remains uncapped. The Team card keeps
   **Activity**, **Channels**, **Threads**, **DMs**, **Mentions**, and **Drafts & sent**
   in a segmented strip that filters the rows inside the card without changing the
   main pane. Activity is the **All** view; its bell is the only segment with an
@@ -1069,10 +1068,9 @@ and are asked to sign in again in Buzz.
   and use the Left/Right arrow keys. Double-click the handle to reset the width.
   Team and plugin pages share the saved width within the same community
   and identity; narrow windows use a navigation drawer instead.
-- **Conversation lists**: the hamburger at the left of a Team or Solo header
-  toggles its list. This does not add a navigation visit or discard the current draft.
-  Solo drafts retain their Solo collection through reload and Back/Forward. The sidebar header’s **Create** button is always visible.
-  Pinned group DMs show up to three participants’ avatars together.
+- **Conversation lists**: open a card’s heading or **Open** row to browse its full
+  list in a sheet over the rail. The reader has no extra list column or collection
+  hamburger. Close the sheet with **Close expanded card** or Escape.
 - **Sidebar card controls**: plus and filter controls fade in on hover. Section
   grabbers brighten only when the pointer is close and appear immediately under it.
   Hovering elsewhere on the card keeps them hidden. Keyboard focus reveals controls
@@ -1101,7 +1099,7 @@ and are asked to sign in again in Buzz.
 - **Conversation headers**: large member avatars stay centered above the chat or
   channel name. Click the avatars to manage members or sharing. Other pane
   headers use compact title and action rows.
-- **Expanded details**: Team, Solo, and Activity keep their collection beside the reader.
+- **Expanded details**: Team, Solo, and Activity use the rail sheet for their collections.
   Profiles, channel details, split tabs, Terminal and other tools use full-height
   companion panes beside that reader. Thread headers float above the scrolling
   history with a blurred fade. Drag the divider to resize a split; narrow
@@ -1385,7 +1383,7 @@ available rather than silently discarding it.
   uses the same conversation tabs as Team: threads and tools open in full-height
   companion panes, retaining reply drafts while hidden. Its header includes the
   same DM controls and actions, including Huddle when supported and enabled.
-  Select the centered avatars in the header to open the DM's members. On the
+  Select the header avatars in the header to open the DM's members. On the
   Bestie page, ⌘F (Ctrl+F elsewhere) searches the Bestie conversation, and ⌘K
   (Ctrl+K elsewhere) offers **Search conversation with** your Bestie. A verified
   existing DM stays available if agent discovery fails.

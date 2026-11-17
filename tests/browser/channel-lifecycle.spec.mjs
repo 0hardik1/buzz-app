@@ -1,3 +1,4 @@
+import { showCollectionView } from "./navigation.mjs";
 import { chooseChannelAction, openChannelDetails } from "./channel-details.mjs";
 import {
   channelRow,
@@ -6,7 +7,6 @@ import {
   openChannel,
   openDm,
   openPage,
-  rail,
   revealRail,
   settlePanelMotion,
   showConversationList,
@@ -301,11 +301,7 @@ for (const action of ["archive", "hide"]) {
     }) => {
       await page.goto(app.origin);
       await openPage(page, "Team");
-      await rail(page)
-        .locator(
-          `[data-rail-team-view="${action === "archive" ? "channels" : "dms"}"]`,
-        )
-        .click();
+      await showCollectionView(page, action === "archive" ? "channels" : "dms");
       const rows = conversationList(page).locator("[data-conversation-row]");
       await expect(rows).toHaveCount(1);
       await channelRow(page, id).click();

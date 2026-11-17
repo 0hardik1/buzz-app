@@ -86,7 +86,7 @@ chrome, preserve a meaningful destination focus target, such as a named content
 region. Do not add a duplicate title or discard the focus handoff: pass `ref` and
 `tabIndex={-1}` to the shared heading to make it a focus landing after an action
 removes the controls it introduces; its recipe draws the keyboard-only ring. [Team's list](../../app/shell/RailConversationList.tsx) demonstrates
-body filters and [ListColumn](../../app/shell/ListColumn.tsx) list/detail ownership; [Solo chats](../../bundled/channels/ChannelsPage.tsx)
+body filters and [RailCardSheet](../../app/shell/RailCardSheet.tsx) rail-local collection presentation; [Solo chats](../../bundled/channels/ChannelsPage.tsx)
 demonstrates a working area with a persistent composer. Neither is a blanket visual
 template: check the adoption review before copying their surrounding chrome.
 
@@ -110,8 +110,7 @@ Main destinations use 16px vertical edge spacing: the header supplies the top
 inset and the composer supplies the bottom inset. The shell and feature hosts
 do not stack additional top padding around these shared owners.
 Messages reuses the list and scrollport recipes in
-`features/conversation/FeedList.module.css` inside the shell's list column
-(`app/shell/ListColumn.tsx`); its host retains top spacing and responsive presentation ownership. Channel artwork uses `channelAvatarSurface` from
+`features/conversation/FeedList.module.css` inside the shell’s rail sheet (`app/shell/RailCardSheet.tsx`); the host owns its placement. Channel artwork uses `channelAvatarSurface` from
 `features/channels/channel-icon.ts` so feed and rail colors stay consistent.
 Use `features/channels/ChannelAvatar` for channel artwork in rows and previews:
 the first two characters of the name, uppercase, inside the shared Avatar treatment.
@@ -128,22 +127,18 @@ Opening a split gives the workspace the available width; conversation readers
 retain their message-width preference within each pane. Narrow windows use the
 host's full-height overlay or detail destination rather than squeezing two columns.
 
-Messages and Solo keep their collections on the left and the selected
-conversation or new-message composer on the right, including direct conversation
-routes. Opening a sidebar card expands its collection in a nonmodal sheet over
-the rail instead: the reader stays mounted and does not move. The shell owns
-this local presentation, reusing `Panel`, the existing collection heading and
+Opening a sidebar card expands its collection in a nonmodal sheet over
+the rail: the reader stays mounted and does not move. The shell owns this
+local presentation, reusing `Panel`, the existing collection heading and
 filters, and `IconButton` for Close. Covered cards stay mounted but inert;
 Close or Escape returns focus to the opener. Opening the sheet creates no
 navigation visit; selecting a row uses the existing navigation owner.
-Collection headings use text without decorative
-icons; reader headers retain their centered membership avatars. The collection host
-reuses `RailConversationList`, `ChannelsPage` or `ConversationTab`, `PanelHeader`,
-and `PanelFrame` rather than presenting a dialog or dimming the list. Messages and Solo headers use a small secondary hamburger
-control to toggle their list in place. Direct opens collapse it; the reader's
-toggle expands it, and list selection preserves it on wide windows. At narrow widths,
-Messages and Solo expose an overlaid list that closes after selection. Back/Forward restores selections,
-drafts, and per-visit list visibility; toggling does not create a history visit.
+Messages, Inbox and Solo readers have no second collection column or
+collection hamburger. Saved section addresses open the matching rail sheet.
+Collection headings use text without decorative icons; reader headers retain
+their leading membership avatars. The collection host reuses
+`RailConversationList`; readers retain `ChannelsPage`, `ConversationTab`,
+`PanelHeader` and `PanelFrame`.
 `ConversationDetailPane` supplies the companion destination to nested readers,
 so profiles and tools split beside the same mounted conversation. Closing a tool
 keeps the reader and its draft intact.
@@ -278,7 +273,7 @@ stay open while interacting with the page when `dismissOnOutsideClick={false}`.
 The shared navigation-rail size and `surface-rail-card` role keep left and right
 cards consistent. Contributed content does not add another outer card.
 
-For a centered conversation identity with trailing tools, `closePlacement="start"`
+For a conversation identity with trailing tools, `closePlacement="start"`
 keeps Close at the leading edge and `headerActions` at the trailing edge.
 
 | Task | Shared starting point | Scrolling |
@@ -1377,13 +1372,13 @@ Workspace pane headers use a compact `PanelHeader`: a left-aligned title,
 its own larger spacing. Dividers remain optional; model cards retain their
 compact `card` variant.
 
-Conversation headers are the exception: `PanelHeader variant="conversation"`
-keeps the 48px membership avatars centered in the pane, with the conversation
-name immediately underneath, separated by 2px. The avatar/name block and
-trailing actions share the same top edge. Neighboring pane tabs and controls
-retain their compact toolbar alignment. Conversation tabs retain their compact
-strip above the identity; do not stack the strip's vertical padding inside the
-shared header.
+Conversation headers use `PanelHeader variant="conversation"` with 32px
+membership avatars at the leading edge and the truncating conversation name
+beside them. The avatars match the small toolbar buttons; trailing actions
+remain fixed at the opposite edge. Neighboring pane tabs and controls retain
+their compact toolbar alignment. Conversation tabs retain their compact strip
+above the identity; do not stack the strip’s vertical padding inside the shared
+header. History-overlay headers use a shorter, lighter blur-fade material.
 
 - **Leading identity:** static destinations use `PanelHeaderLabel`, including its
   icon slot and title typography. Omit the icon when there is no meaningful one.
@@ -1391,11 +1386,11 @@ shared header.
   conversation uses its membership identity. Do not invent tab semantics for a
   static page just to reproduce its appearance.
 - **Conversation membership identity:** channels, DMs and Solo chats show the
-  other members in a centered `SurfaceButton`; human previews exclude the viewer
+  other members in a leading `SurfaceButton`; human previews exclude the viewer
   and Solo previews retain participating agents. The control opens the existing
   membership manager. Conversation tabs supply their own membership identity;
   other selected tabs keep compact pane chrome.
-  Anchored conversation dialogs use the same centered avatar/name stack, with
+  Anchored conversation dialogs use the same leading avatar/name row, with
   Close at the leading edge and tools at the trailing edge.
 - **Trailing actions:** use `IconButton size="sm" variant="ghost"` with 1rem
   artwork, an action-specific `aria-label`, and a matching `title` hint. Ordinary

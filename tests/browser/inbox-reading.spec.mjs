@@ -1,4 +1,5 @@
-import { activityRow, conversationList } from "./navigation.mjs";
+import { showCollectionView } from "./navigation.mjs";
+import { conversationList } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open, settle, virtuaIdle } from "./timeline.mjs";
 import {
@@ -31,7 +32,7 @@ test("Inbox DM composer focus reads a visible peer arrival after dwell without r
       }),
     )
     .toEqual({ status: "reconciled", completeness: "snapshot" });
-  await activityRow(page).click();
+  await showCollectionView(page, "all");
   const dm = conversationList(page).locator('[data-activity-row="dm-peer"]');
   await expect(dm).toContainText("Inbox DM fixture reply");
   await expect(dm.getByRole("img", { name: "Unread" })).toBeVisible();

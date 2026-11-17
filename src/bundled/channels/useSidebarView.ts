@@ -235,7 +235,7 @@ export function useSidebarView(
           ...intent.current,
           scrollTop: list.current.scrollTop,
         };
-      // ResizableSidebar owns the record's width; keep its latest value.
+      // Preserve other saved view fields while updating the scroll position.
       writeView(scope, "channel-sidebar", {
         ...readView<object | null>(scope, "channel-sidebar", null),
         ...intent.current,

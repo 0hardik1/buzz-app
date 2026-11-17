@@ -4,6 +4,7 @@ import {
   hideNarrowConversationList,
   openChannel,
   openPage,
+  showConversationList,
 } from "./navigation.mjs";
 test.use({
   productionBroker: true,
@@ -52,24 +53,16 @@ test("conversation header opens its tools without moving history", async ({
   const identityBox = await identity.boundingBox();
   const titleBox = await title.boundingBox();
   const paneBox = await pane.boundingBox();
-  expect(identityBox.x + identityBox.width / 2).toBeCloseTo(
-    paneBox.x + paneBox.width / 2,
-    0,
-  );
-  expect(titleBox.x + titleBox.width / 2).toBeCloseTo(
-    paneBox.x + paneBox.width / 2,
-    0,
-  );
-  // The name capsule tucks up to 4px under the artwork's lower edge.
-  expect(titleBox.y).toBeGreaterThanOrEqual(
-    identityBox.y + identityBox.height - 4,
-  );
   const triggerBox = await trigger.boundingBox();
+  expect(identityBox.x).toBeLessThan(paneBox.x + paneBox.width / 4);
+  expect(titleBox.x).toBeGreaterThanOrEqual(identityBox.x + identityBox.width);
+  expect(titleBox.x + titleBox.width).toBeLessThan(triggerBox.x);
+  expect(identityBox.height).toBeCloseTo(triggerBox.height, 0);
   expect(identityBox.y).toBeCloseTo(triggerBox.y, 0);
-  expect(titleBox.y - (identityBox.y + identityBox.height)).toBeLessThanOrEqual(
-    4,
+  expect(titleBox.y + titleBox.height / 2).toBeCloseTo(
+    identityBox.y + identityBox.height / 2,
+    0,
   );
-  expect(triggerBox.x).toBeGreaterThan(identityBox.x + identityBox.width);
   await trigger.click();
   await expect(actions).toBeVisible();
   await animationsSettled(page.locator(".buzz-popover-popup:visible"), {
@@ -102,18 +95,9 @@ test("conversation header opens its tools without moving history", async ({
     path: testInfo.outputPath("header-tools-narrow.png"),
   });
   await page.keyboard.press("Escape");
-  // A narrow window keeps the opened row's list over the reader.
+  await showConversationList(page);
+  await expect(page.locator("[data-rail-card-sheet]")).toBeVisible();
+  await page.getByRole("button", { name: "Close expanded card" }).click();
   await hideNarrowConversationList(page);
-  await pane
-    .getByRole("button", { name: "Show Team list", exact: true })
-    .click();
-  await expect(
-    page.getByRole("region", { name: "Team", exact: true }),
-  ).toBeVisible();
-  await page
-    .getByRole("region", { name: "Team", exact: true })
-    .getByRole("button", { name: "Hide Team list", exact: true })
-    .first()
-    .click();
   await expect(editor).toHaveText("Keep my draft when returning to Messages");
 });

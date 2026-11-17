@@ -340,10 +340,6 @@
   }
   /* Collection headers and rows own equal insets at both pane edges. */
   .shell-workspace[data-full-width-workspace] .shell-body {
-    padding-inline: 0;
-  }
-  /* A full-width reader owns its edge insets, just as it does beside the list. */
-  .shell-workspace[data-list-column="closed"] .shell-body {
     grid-template-columns: minmax(0, 1fr);
     padding-inline: 0;
   }

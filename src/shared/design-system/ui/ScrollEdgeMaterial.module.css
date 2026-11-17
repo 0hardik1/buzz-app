@@ -15,14 +15,14 @@
   mask-image: linear-gradient(to bottom, black, transparent);
 }
 .root > span:nth-child(1) {
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(calc(var(--scroll-edge-blur, var(--blur-sm)) / 4));
 }
 .root > span:nth-child(2) {
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(calc(var(--scroll-edge-blur, var(--blur-sm)) / 2));
   mask-image: linear-gradient(to bottom, black 30%, transparent 85%);
 }
 .root > span:nth-child(3) {
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(var(--scroll-edge-blur, var(--blur-sm)));
   background: linear-gradient(
     to bottom,
     var(--scroll-edge-surface, var(--surface-popover)) 25%,

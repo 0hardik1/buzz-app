@@ -1,5 +1,6 @@
+import { showCollectionView } from "./navigation.mjs";
 import { expect, test } from "./fixture.mjs";
-import { channelRow, rail } from "./navigation.mjs";
+import { channelRow } from "./navigation.mjs";
 import {
   addToNewSection,
   openSectionMenu,
@@ -23,7 +24,7 @@ test("a DM's row menu keeps it in a section and restores it there after reload",
   app,
 }) => {
   await page.goto(app.origin);
-  await rail(page).locator('[data-rail-team-view="dms"]').click();
+  await showCollectionView(page, "dms");
   const dm = channelRow(page, "dm-move");
   await expect(dm).toBeVisible();
   const menu = await openSectionMenu(page, dm);

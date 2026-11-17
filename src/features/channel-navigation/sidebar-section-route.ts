@@ -31,3 +31,16 @@ export function sidebarSectionTarget(
     route: { version: 1, params: { kind: "sidebar-section", section } },
   };
 }
+
+/** Preserve saved collection addresses using the rail sheet presentation. */
+export function routedSidebarSection(target: OpenTarget): string | undefined {
+  if (target.kind !== "page") return;
+  if (target.pluginId === "buzz.inbox" && target.pageId === "inbox")
+    return "team";
+  if (target.pluginId !== "buzz.channels" || target.pageId !== "channels")
+    return;
+  if (!target.route) return "team";
+  const params = target.route.params;
+  if (isSidebarSectionRoute(params))
+    return params.section === "messages" ? "team" : params.section;
+}

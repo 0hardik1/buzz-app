@@ -1,8 +1,8 @@
+import { showCollectionView } from "./navigation.mjs";
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
 import {
-  activityRow,
   conversationList,
   hideNarrowConversationList,
   openPage,
@@ -194,7 +194,7 @@ test.describe("Inbox names after leaving a channel", () => {
       ),
     );
     await open(page, app);
-    await activityRow(page).click();
+    await showCollectionView(page, "all");
     // She mentioned the viewer, so Mentions lists it.
     await page
       .getByRole("tablist", { name: "Conversation view" })

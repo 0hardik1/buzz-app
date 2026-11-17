@@ -1649,17 +1649,12 @@
   /* Chat identity and toolbar controls share a top edge. */
   .panel-header[data-variant="conversation"] {
     padding-block-end: var(--space-2);
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
-    align-items: start;
+    flex-wrap: nowrap;
+    align-items: center;
   }
   /* Keep the first message clear at rest; the inset scrolls away with history. */
   :has(> .panel-header[data-history-overlay]) {
-    --history-header-inset: calc(
-      var(--space-16) +
-      var(--space-8) +
-      var(--space-2)
-    );
+    --history-header-inset: var(--space-16);
     --history-leading-space: var(--space-16);
   }
   .panel-header[data-history-overlay] {
@@ -1689,6 +1684,7 @@
     --scroll-edge-surface: var(--surface-panel);
     margin: 0;
     height: calc(var(--history-header-inset) + var(--space-4));
+    --scroll-edge-blur: var(--space-1);
   }
   :where(.conversation-history-viewport > [data-message-scroller])
     > :first-child {
@@ -1705,35 +1701,15 @@
     padding-block-start: var(--history-header-inset, 0px);
   }
   .panel-header[data-variant="conversation"] > .panel-header-title {
-    grid-area: 1 / 2;
-    flex-direction: column;
+    flex: 1 1 0;
+    flex-direction: row;
     overflow: visible;
-    text-align: center;
-    gap: 0;
+    text-align: start;
+    gap: var(--space-2);
   }
   .panel-header[data-variant="conversation"] > .panel-header-actions {
-    grid-area: 1 / 3;
-    justify-self: end;
-  }
-
-  /* Keep the name legible over scrolling history using the glass-button material. */
-  .panel-header[data-variant="conversation"]
-    .panel-header-title
-    > h2:not(:first-child) {
-    @apply glass-secondary;
-    max-width: 100%;
-    margin-block-start: calc(-1 * var(--space-1));
-    position: relative;
-    border-radius: var(--radius-pill);
-    padding: var(--space-1) var(--space-3);
-  }
-  @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
-    .panel-header[data-variant="conversation"]
-      .panel-header-title
-      > h2:not(:first-child) {
-      background: var(--surface-panel);
-      backdrop-filter: none;
-    }
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
   }
 
   /* Conversation identity composes PanelHeader; only its inner content lives here. */

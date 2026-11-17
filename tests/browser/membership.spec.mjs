@@ -364,10 +364,6 @@ burstTest(
     await expect(popup).toHaveCount(0);
     await expect(others).toBeFocused();
     await page.setViewportSize({ width: 390, height: 900 });
-    // The narrow reader keeps the list laid over it until it is dismissed.
-    await expect(
-      page.locator("[data-detail-workspace][data-narrow]"),
-    ).toHaveCount(1);
     await hideNarrowConversationList(page);
     await page.locator("html").evaluate((root) => {
       root.dataset.colorMode = "dark";

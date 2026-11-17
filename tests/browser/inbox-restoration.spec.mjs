@@ -1,4 +1,9 @@
-import { activityRow, conversationList, openPage } from "./navigation.mjs";
+import {
+  showCollectionView,
+  showConversationList,
+  conversationList,
+  openPage,
+} from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
 
@@ -18,8 +23,7 @@ test("Activity restores its conversation after visiting Messages and another pag
   app,
 }) => {
   await open(page, app);
-  const inboxTab = activityRow(page);
-  await inboxTab.click();
+  await showCollectionView(page, "all");
   const row = conversationList(page)
     .locator("[data-activity-event] [data-conversation-row]")
     .filter({ hasText: "Unread reply 1" });
@@ -40,6 +44,7 @@ test("Activity restores its conversation after visiting Messages and another pag
     await page.getByRole("button", { name: "Go back", exact: true }).click();
     await expect(tab).toHaveAttribute("aria-selected", "true");
     await expect(reader).toBeVisible();
+    await showConversationList(page);
     await expect(row).toHaveAttribute("aria-current", "page");
   }
   await page
@@ -48,7 +53,7 @@ test("Activity restores its conversation after visiting Messages and another pag
   await expect(tab).toHaveCount(0);
   await openPage(page, "Reminders");
   await expect(conversationList(page)).toHaveCount(0);
-  await inboxTab.click();
+  await showConversationList(page);
   await expect(conversationList(page)).toBeVisible();
   await expect(tab).toHaveCount(0);
 });

@@ -1,6 +1,6 @@
 import { settle } from "./timeline.mjs";
 import { test, expect } from "./fixture.mjs";
-import { openChannel } from "./navigation.mjs";
+import { hideNarrowConversationList, openChannel } from "./navigation.mjs";
 // A long transcript exercises virtual scrolling; browser frames verify that
 // provisional reply UI neither resizes history nor displaces its reading anchor.
 test.use({
@@ -73,14 +73,7 @@ test("reply preview keeps transcript in place", async ({
   ).toBeLessThan(2);
   await page.setViewportSize({ width: 480, height: 950 });
   await page.emulateMedia({ colorScheme: "dark" });
-  // A narrow window keeps Team's list over the reader until it is hidden.
-  await page
-    .getByRole("button", { name: "Hide Team list", exact: true })
-    .first()
-    .click();
-  await expect(
-    page.getByRole("button", { name: "Show Team list", exact: true }),
-  ).toBeVisible();
+  await hideNarrowConversationList(page);
   await message.scrollIntoViewIfNeeded();
   await settle(page);
   const narrowHeight = await history.evaluate((el) => el.clientHeight);

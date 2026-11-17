@@ -1,4 +1,5 @@
 import { test, expect } from "./fixture.mjs";
+import { showConversationList } from "./navigation.mjs";
 
 test.use({ largeSidebar: true, historyCounts: { alpha: 3, beta: 2 } });
 
@@ -9,7 +10,10 @@ test("large card sheets bound mounted rows and retain focus while reaching every
 }) => {
   await page.goto(app.origin);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
-  await rail.getByRole("button", { name: "Team", exact: true }).click();
+  await showConversationList(page);
+  await rail.getByRole("button", { name: "Close expanded card" }).click();
+  await expect(rail.locator("[data-rail-card-sheet]")).toHaveCount(0);
+  await showConversationList(page);
   const sheet = rail.locator("[data-rail-card-sheet]");
   const list = sheet.getByRole("list", { name: "Conversations", exact: true });
   const rows = list.getByRole("listitem");

@@ -1,6 +1,9 @@
 import { test, expect } from "./fixture.mjs";
 import {
-  activityRow,
+  showRailCards,
+  openPage,
+  showConversationList,
+  showCollectionView,
   conversationList,
   conversationRow,
 } from "./navigation.mjs";
@@ -21,6 +24,7 @@ test("the combined rail pins destinations and opens centered Messages", async ({
   app,
 }, testInfo) => {
   await page.goto(app.origin, { waitUntil: "domcontentloaded" });
+  await showRailCards(page);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
   for (const name of ["Pins", "Team", "Solo"])
     await expect(
@@ -72,9 +76,8 @@ test("the combined rail pins destinations and opens centered Messages", async ({
   ).toBeVisible();
   await page.goBack();
   // The app lands on Team.
-  await expect(
-    page.getByRole("region", { name: "Team", exact: true }),
-  ).toBeVisible();
+  await expect(page.locator("[data-rail-card-sheet]")).toBeVisible();
+  await showRailCards(page);
   const headerSearch = railHeader.getByRole("button", {
     name: "Search",
     exact: true,
@@ -105,6 +108,8 @@ test("the combined rail pins destinations and opens centered Messages", async ({
     [],
     newestAt,
   );
+  await openPage(page, "Team");
+  await showConversationList(page);
   const list = conversationList(page);
   const rows = list.locator("[data-activity-row]");
   const filters = page.getByRole("button", {
@@ -138,6 +143,7 @@ test("the combined rail pins destinations and opens centered Messages", async ({
     await expect(rows.nth(i)).toContainText(label);
   // The sort is remembered across a reload.
   await page.reload();
+  await showConversationList(page);
   await filters.click();
   await expect(
     page.getByRole("menuitemradio", { name: "A–Z", exact: true }),
@@ -146,16 +152,19 @@ test("the combined rail pins destinations and opens centered Messages", async ({
   await expect(rows.nth(0)).toHaveAttribute("data-activity-row", "alpha");
 
   // The DMs view lists people only, and it survives a reload.
-  const dmsView = rail.locator('[data-rail-team-view="dms"]');
+  const dmsView = page
+    .locator("[data-rail-card-sheet]")
+    .getByRole("tab", { name: "DMs", exact: true });
   await dmsView.click();
-  await expect(dmsView).toHaveAttribute("aria-current", /.+/);
+  await expect(dmsView).toHaveAttribute("aria-selected", "true");
   await expect(conversationRow(page, "Alice Fixture")).toBeVisible();
   await expect(conversationRow(page, "Alpha")).toHaveCount(0);
   await page.reload();
-  await expect(dmsView).toHaveAttribute("aria-current", /.+/);
+  await showConversationList(page);
+  await expect(dmsView).toHaveAttribute("aria-selected", "true");
   await expect(conversationRow(page, "Alice Fixture")).toBeVisible();
   await expect(conversationRow(page, "Alpha")).toHaveCount(0);
-  await activityRow(page).click();
+  await showCollectionView(page, "all");
   await expect(rows.nth(0)).toHaveAttribute("data-activity-row", "alpha");
 
   // Real geometry: the filter control shares the rows' leading content edge.
@@ -216,6 +225,7 @@ test("the combined rail pins destinations and opens centered Messages", async ({
     listAlpha.getByRole("img", { name: "Unread", exact: true }),
   ).toHaveCount(0);
   const currentConversation = page.url();
+  await showRailCards(page);
   await rail.getByRole("button", { name: "Add pin", exact: true }).click();
   const picker = page.getByRole("dialog", { name: "Add a pin", exact: true });
   await picker
@@ -253,8 +263,9 @@ test("the combined rail pins destinations and opens centered Messages", async ({
     pinnedAlpha.getByRole("img", { name: "Unread", exact: true }),
   ).toHaveCount(0);
 
-  await dmsView.click();
+  await showCollectionView(page, "dms");
   await expect(conversationRow(page, "Alice Fixture")).toBeVisible();
+  await showRailCards(page);
   await pins.getByRole("button", { name: "Alpha", exact: true }).click();
   await expect(editor).toHaveText("Keep this Messages draft");
   await page.reload();
@@ -263,6 +274,7 @@ test("the combined rail pins destinations and opens centered Messages", async ({
   ).toBeVisible();
   await expect(editor).toHaveText("Keep this Messages draft");
 
+  await showRailCards(page);
   await rail.getByRole("button", { name: "Add pin", exact: true }).click();
   await picker
     .getByRole("textbox", { name: "Find something to pin" })
@@ -336,6 +348,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   app,
 }, testInfo) => {
   await page.goto(app.origin, { waitUntil: "domcontentloaded" });
+  await showRailCards(page);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
   const messages = rail.locator('[data-rail-section="team"]');
   const solo = rail.locator('[data-rail-section="solo"]');
@@ -407,6 +420,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   );
   await expect.poll(order).toEqual(["pins", "navigation", "team", "solo"]);
   await page.reload();
+  await showRailCards(page);
   await expect.poll(order).toEqual(["pins", "navigation", "team", "solo"]);
   await solo.hover();
   await startDrag(
@@ -496,6 +510,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await expect(workflows).toBeVisible();
 
   // A pinned conversation is copied into a section, and stays pinned.
+  await showRailCards(page);
   await rail.getByRole("button", { name: "Add pin", exact: true }).click();
   const picker = page.getByRole("dialog", { name: "Add a pin", exact: true });
   await picker
@@ -568,52 +583,16 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   await expect(
     sectionPage.locator('[data-activity-row="beta"] [data-conversation-row]'),
   ).toBeVisible();
-  expect((await sectionPage.boundingBox()).x).toBeGreaterThanOrEqual(
-    compactRail.x + compactRail.width,
-  );
-  await expect
-    .soft(dock.getByRole("button", { name: "Project chats", exact: true }))
-    .toHaveAttribute("aria-current", "page");
-  await page.screenshot({ path: testInfo.outputPath("rail-compact-dark.png") });
-  await page.emulateMedia({ colorScheme: "light" });
-  await expect(page.locator("html")).toHaveAttribute(
-    "data-color-mode",
-    "light",
+  const expanded = await rail.boundingBox();
+  const sheetBox = await sectionPage.boundingBox();
+  expect(sheetBox.x).toBeGreaterThanOrEqual(expanded.x);
+  expect(sheetBox.x + sheetBox.width).toBeLessThanOrEqual(
+    expanded.x + expanded.width,
   );
   await page.screenshot({
-    path: testInfo.outputPath("rail-compact-light.png"),
+    path: testInfo.outputPath("rail-expanded-custom-sheet.png"),
   });
-  await page.setViewportSize({ width: 800, height: 950 });
-  await page.evaluate(() => {
-    document.documentElement.style.fontSize = "125%";
-  });
-  for (const icon of await dockIcons.all()) await expect(icon).toBeInViewport();
-  await expect(sectionPage).toBeInViewport();
-  await page.screenshot({
-    path: testInfo.outputPath("rail-compact-enlarged.png"),
-  });
-  await page.setViewportSize({ width: 1440, height: 950 });
-  await page.evaluate(() => {
-    document.documentElement.style.fontSize = "";
-  });
-  // A tooltip held open by the pointer is not the keyboard's.
-  await page.mouse.move(900, 500);
-  await dock.getByRole("button", { name: "Solo", exact: true }).focus();
-  await page.keyboard.press("Tab");
-  await expect(
-    dock.getByRole("button", { name: "Team", exact: true }),
-  ).toBeFocused();
-  await expect(
-    page.getByRole("tooltip", { name: "Team", exact: true }),
-  ).toBeVisible();
-  await page.keyboard.press("Enter");
-  await expect(
-    page.getByRole("region", { name: "Team", exact: true }),
-  ).toBeVisible();
-  await expect(dock).toBeVisible();
-  await page.goBack();
-  await expect(sectionPage).toBeVisible();
-  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await showRailCards(page);
   await expect(customBeta).toBeVisible();
   await expect
     .poll(order)
@@ -656,6 +635,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   });
 
   await page.reload();
+  await showRailCards(page);
   await expect(customBeta).toBeVisible();
   // A section's copy comes out of it; the conversation stays in Team.
   await customBeta.click({ button: "right" });
@@ -664,15 +644,13 @@ test("rail sections and rows can be arranged and a drop creates a named section"
     .click();
   await expect(customBeta).toHaveCount(0);
   await expect(pinnedBeta).toBeVisible();
-  await activityRow(page).click();
-  const messagesPage = page.getByRole("region", {
-    name: "Team",
-    exact: true,
-  });
+  await showCollectionView(page, "all");
+  const messagesPage = page.locator("[data-rail-card-sheet]");
   await expect(
     messagesPage.locator('[data-activity-row="beta"] [data-conversation-row]'),
   ).toBeVisible();
-  await expect(messages.locator("[data-rail-team-view]")).toHaveCount(5);
+  await showRailCards(page);
+  await expect(messages.getByRole("tab")).toHaveCount(5);
   await custom
     .getByRole("heading", { name: "Project chats", exact: true })
     .click({ button: "right" });
@@ -689,6 +667,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
   const fullBeta = messagesPage.locator(
     '[data-activity-row="beta"] [data-conversation-row]',
   );
+  await showCollectionView(page, "all");
   await fullBeta.click();
   await expect(
     page
@@ -696,6 +675,7 @@ test("rail sections and rows can be arranged and a drop creates a named section"
       .getByRole("textbox"),
   ).toBeVisible();
   await expect(fullBeta.getByRole("img", { name: "Unread" })).toHaveCount(0);
+  await showRailCards(page);
   await pinnedBeta.hover();
   await expect(
     rail.getByRole("button", { name: /^(?:Pin|Unpin) Beta$/ }),
@@ -776,6 +756,8 @@ test.describe("Solo rail", () => {
     app,
   }, testInfo) => {
     await page.goto(app.origin);
+    await showRailCards(page);
+    await showRailCards(page);
     const rail = page.getByRole("navigation", { name: "Apps", exact: true });
     const solo = rail.locator('[data-rail-section="solo"]');
     const alpha = solo.getByRole("button", { name: "Alpha", exact: true });
@@ -800,14 +782,16 @@ test.describe("Solo rail", () => {
         .getByText("Solo agent reply", { exact: true }),
     ).toBeVisible();
     // Team's list never holds a Solo chat.
-    await activityRow(page).click();
+    await showCollectionView(page, "all");
     const teamList = conversationList(page);
     await expect(teamList.locator('[data-activity-row="beta"]')).toBeVisible();
     await expect(teamList.locator('[data-activity-row="alpha"]')).toHaveCount(
       0,
     );
     await page.reload();
+    await showRailCards(page);
     await expect(alpha).toBeVisible();
+    await showConversationList(page);
     await expect(teamList.locator('[data-activity-row="beta"]')).toBeVisible();
     await expect(teamList.locator('[data-activity-row="alpha"]')).toHaveCount(
       0,
@@ -825,9 +809,11 @@ test.describe("Sidebar row limits", () => {
     app,
   }) => {
     await page.goto(app.origin);
+    await showRailCards(page);
+    await showRailCards(page);
     const rail = page.getByRole("navigation", { name: "Apps", exact: true });
     await rail.getByRole("button", { name: "Open Solo", exact: true }).click();
-    const collection = page.getByRole("region", { name: "Solo", exact: true });
+    const collection = page.locator("[data-rail-card-sheet]");
     await collection
       .getByRole("button", { name: "New message", exact: true })
       .click();
@@ -839,9 +825,7 @@ test.describe("Sidebar row limits", () => {
     await page.reload();
     await expect(draft.getByRole("textbox")).toHaveText("Keep this Solo draft");
     await expect(conversationList(page)).toBeHidden();
-    await page
-      .getByRole("button", { name: "Show Solo list", exact: true })
-      .click();
+    await showConversationList(page, "Solo");
     await expect(
       conversationList(page).locator("[data-activity-row]"),
     ).toHaveCount(6);
@@ -852,6 +836,8 @@ test.describe("Sidebar row limits", () => {
     app,
   }, testInfo) => {
     await page.goto(app.origin);
+    await showRailCards(page);
+    await showRailCards(page);
     const rail = page.getByRole("navigation", { name: "Apps", exact: true });
     const solo = rail.locator('[data-rail-section="solo"]');
     await expect(solo.locator("[data-rail-row]")).toHaveCount(4);
@@ -861,7 +847,7 @@ test.describe("Sidebar row limits", () => {
     });
     await more.focus();
     await page.keyboard.press("Enter");
-    const list = page.getByRole("region", { name: "Solo", exact: true });
+    const list = page.locator("[data-rail-card-sheet]");
     await expect(list.locator("[data-rail-row]")).toHaveCount(6);
     const previewText =
       "Solo preview stays on one line even when this message is long. "
@@ -903,7 +889,7 @@ test.describe("Sidebar row limits", () => {
     await expect(list.locator("[data-rail-row]")).toHaveCount(6);
     const selectedRow = list.locator('[data-activity-row="alpha"]');
     await expect(selectedRow).toBeVisible();
-    const reader = list.getByRole("region", {
+    const reader = page.getByRole("region", {
       name: "Conversation detail",
       exact: true,
     });
@@ -914,30 +900,20 @@ test.describe("Sidebar row limits", () => {
       path: testInfo.outputPath("solo-master-detail.png"),
     });
     const selectedUrl = page.url();
-    await reader
-      .getByRole("button", { name: "Hide Solo list", exact: true })
-      .click();
+    await showRailCards(page);
     await expect(selectedRow).toBeHidden();
     await expect(page).toHaveURL(selectedUrl);
-    await reader
-      .getByRole("button", { name: "Show Solo list", exact: true })
-      .click();
+    await showConversationList(page, "Solo");
     await expect(selectedRow).toBeVisible();
-    await page.goBack();
-    await expect(list.locator("[data-rail-row]")).toHaveCount(6);
     await page.reload();
-    await expect(list.locator("[data-rail-row]")).toHaveCount(6);
-    await page.goBack();
-    // The app lands on Team.
-    await expect(
-      page.getByRole("region", { name: "Team", exact: true }),
-    ).toBeVisible();
-    await page.goForward();
+    await expect(page.locator('[data-channel-timeline="alpha"]')).toBeVisible();
+    await showConversationList(page, "Solo");
     await expect(list.locator("[data-rail-row]")).toHaveCount(6);
     for (const row of await list.locator("[data-rail-row]").all()) {
       await row.click({ button: "right" });
       await page.getByRole("menuitem", { name: "Pin", exact: true }).click();
     }
+    await showRailCards(page);
     const pins = rail.locator('[data-rail-section="pins"]');
     await expect(pins.locator("[data-rail-row]")).toHaveCount(6);
     await expect(pins.getByRole("button", { name: /^Open Pins/ })).toHaveCount(
@@ -971,6 +947,7 @@ test.describe("Sidebar row limits", () => {
     await expect(page.getByRole("tooltip")).toHaveText("Alpha");
     await page.screenshot({ path: testInfo.outputPath("pins-grid-light.png") });
     await page.keyboard.press("Escape");
+    await showRailCards(page);
     await pinButtons.first().focus();
     await page.keyboard.press("Tab");
     await expect(
@@ -978,9 +955,7 @@ test.describe("Sidebar row limits", () => {
     ).toBeVisible();
     await page.keyboard.press("Escape");
     await page.setViewportSize({ width: 480, height: 900 });
-    await page
-      .getByRole("button", { name: "Show navigation", exact: true })
-      .click();
+    await showRailCards(page);
     await page.emulateMedia({ colorScheme: "dark" });
     await page.evaluate(() => {
       document.documentElement.style.fontSize = "125%";
@@ -1023,7 +998,11 @@ test.describe("Sidebar row limits", () => {
     }
     await expect(pinRows).toHaveCount(6);
     const customCard = rail.locator("[data-rail-section]").filter({
-      has: page.getByRole("heading", { name: "Saved chats", exact: true }),
+      has: page.getByRole("heading", {
+        name: "Saved chats",
+        exact: true,
+        includeHidden: true,
+      }),
     });
     await expect(customCard.locator("[data-rail-row]")).toHaveCount(4);
     await customCard
@@ -1034,12 +1013,9 @@ test.describe("Sidebar row limits", () => {
       exact: true,
     });
     await expect(customPage.locator("[data-rail-row]")).toHaveCount(6);
-    // The section opens on its first conversation; a reload keeps the
-    // conversation, and its list is one toggle away.
+    // The local sheet does not navigate; reload keeps the reader and the card reopens the full collection.
     await page.reload();
-    await page
-      .getByRole("button", { name: "Show Saved chats list", exact: true })
-      .click();
+    await showConversationList(page, "Saved chats");
     await expect(customPage.locator("[data-rail-row]")).toHaveCount(6);
     await expect(customCard.locator("[data-rail-row]")).toHaveCount(4);
     await page.screenshot({
@@ -1053,7 +1029,7 @@ test("Team's list aligns its view filters with its rows", async ({
   app,
 }, testInfo) => {
   await page.goto(app.origin);
-  const rail = page.getByRole("navigation", { name: "Apps", exact: true });
+  await showRailCards(page);
   const checkAlignment = async (view) => {
     const row = view.locator("[data-conversation-row]").first();
     await expect(row).toBeVisible();
@@ -1084,15 +1060,10 @@ test("Team's list aligns its view filters with its rows", async ({
         .getByRole("button", { name: "New message", exact: true }),
     ).toBeVisible();
     const insets = await row.evaluate((element) => {
-      const canvas = element.closest(".shell-body").getBoundingClientRect();
-      const workspace = element.closest("[data-detail-workspace]");
-      const reader = workspace.querySelector(
-        '[aria-label="Conversation detail"]',
-      );
-      const readerBox = reader.getBoundingClientRect();
-      const edge = readerBox.width
-        ? readerBox.left
-        : workspace.getBoundingClientRect().right;
+      const canvas = element
+        .closest("[data-rail-card-sheet]")
+        .getBoundingClientRect();
+      const edge = canvas.right;
       const box = element.getBoundingClientRect();
       const style = getComputedStyle(element);
       return {
@@ -1102,8 +1073,8 @@ test("Team's list aligns its view filters with its rows", async ({
     });
     expect(insets.right).toBeCloseTo(insets.left, 0);
   };
-  await rail.getByRole("button", { name: "Team", exact: true }).click();
-  const messages = page.getByRole("region", { name: "Team", exact: true });
+  await showConversationList(page);
+  const messages = page.locator("[data-rail-card-sheet]");
   const previewText =
     "Messages preview stays on one line even when this message is long. "
       .repeat(12)
@@ -1148,6 +1119,7 @@ test("rail card controls fade quietly and grabbers only reveal nearby", async ({
   app,
 }) => {
   await page.goto(app.origin);
+  await showRailCards(page);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
   const card = rail.locator('[data-rail-section="pins"]');
   const actions = card.locator("[data-rail-card-actions]");
@@ -1241,6 +1213,7 @@ test.describe("group DM pins", () => {
       page.locator('[data-channel-timeline="dm-group"]'),
     ).toBeVisible();
     const rail = page.getByRole("navigation", { name: "Apps", exact: true });
+    await showRailCards(page);
     await rail.getByRole("button", { name: "Add pin", exact: true }).click();
     const picker = page.getByRole("dialog", {
       name: "Add a pin",
@@ -1268,7 +1241,8 @@ test.describe("group DM pins", () => {
     await page.reload();
     await expect(avatars.locator('[title="Alice Fixture"]')).toHaveCount(1);
     await expect(avatars.locator('[title="Bob Fixture"]')).toHaveCount(1);
-    await rail.getByRole("button", { name: "Team", exact: true }).click();
+    await showConversationList(page);
+    await showRailCards(page);
     await pin.click();
     await expect(
       page.locator('[data-channel-timeline="dm-group"]'),

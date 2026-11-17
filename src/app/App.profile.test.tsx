@@ -29,6 +29,11 @@ const pageFailure =
   /^(This page isn’t available|Can’t connect|You don’t have access to this|This link doesn’t work)$/;
 
 composerDOMFixture();
+// jsdom has no Web Animations API; real sheet motion is covered in Playwright.
+Object.defineProperty(HTMLElement.prototype, "getAnimations", {
+  configurable: true,
+  value: () => [],
+});
 
 // jsdom has no IndexedDB; this flow keeps its message unsent.
 vi.mock("../features/relay/outbox-storage", () => ({
@@ -225,7 +230,20 @@ async function setup(
       connectionError ? "error" : "ready",
     ),
   );
+  if (!connectionError)
+    await waitFor(() =>
+      expect(current.navigation.snapshot().status).toBe("opened"),
+    );
+  await closeCardSheet(user);
   return user;
+}
+
+async function closeCardSheet(user: ReturnType<typeof userEvent.setup>) {
+  const close = screen.queryByRole("button", { name: "Close expanded card" });
+  if (close) {
+    await user.click(close);
+    await waitFor(() => expect(close).not.toBeInTheDocument());
+  }
 }
 
 async function openFixturePage(pageId: string, params?: string) {
@@ -326,6 +344,7 @@ it.each([
             pageId: "channels",
           });
         });
+        await closeCardSheet(user);
         const returned = await pins.findByRole("button", {
           name: "Planning",
         });

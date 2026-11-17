@@ -1,3 +1,4 @@
+import { showRailCards } from "./navigation.mjs";
 import { test as appTest } from "./fixture.mjs";
 import { test, expect } from "./playwright-test.mjs";
 import {
@@ -51,6 +52,7 @@ test.describe("plugin sidebar contributions", () => {
     "stay inside the rail beside Solo and Team",
     async ({ page, app }, testInfo) => {
       await page.goto(app.origin);
+      await showRailCards(page);
       const title = "Sidebar section fixture";
       const section = workspace(page);
 
@@ -107,7 +109,9 @@ test.describe("plugin sidebar contributions", () => {
           rail(page).locator('[data-rail-section="solo"]'),
         ).toBeVisible();
         await expect(
-          rail(page).locator('[data-rail-team-view="channels"]'),
+          rail(page)
+            .locator('[data-rail-section="team"]')
+            .getByRole("tab", { name: /^Channels/ }),
         ).toBeVisible();
 
         const geometry = await rail(page).evaluate((nav) => {
@@ -141,6 +145,7 @@ test.describe("plugin sidebar contributions", () => {
     "shows a drag preview for contributed sections",
     async ({ page, app }) => {
       await page.goto(app.origin);
+      await showRailCards(page);
       await showRail(page);
       const section = workspace(page);
       await expect(section).toBeVisible();
@@ -166,6 +171,7 @@ test.describe("plugin sidebar contributions", () => {
           window.fixtureSidebarWorkIconThrows = true;
         });
         await page.goto(app.origin);
+        await showRailCards(page);
         await showRail(page);
 
         await expect(
@@ -178,7 +184,9 @@ test.describe("plugin sidebar contributions", () => {
           rail(page).locator('[data-rail-section="solo"]'),
         ).toBeVisible();
         await expect(
-          rail(page).locator('[data-rail-team-view="channels"]'),
+          rail(page)
+            .locator('[data-rail-section="team"]')
+            .getByRole("tab", { name: /^Channels/ }),
         ).toBeVisible();
         await expect(
           page.getByText("Conversations couldn’t open."),

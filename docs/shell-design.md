@@ -84,8 +84,8 @@ semantic tokens, UI authoring rules and the local component reference.
   the surviving community trigger.
   Switching pages preserves the desktop sidebar’s collapse preference. The
   manual toggle appears only where the selected app supplies a sidebar.
-  The conversation list column keeps one saved per-community width and resize
-  behavior.
+  Collection cards open a sheet over the rail. Conversation readers have no
+  extra collection column or collection hamburger control.
   Settings opens in the shared expanded Dialog with an integrated sidebar; the
   workspace remains mounted underneath. Its portal fills the shell's workspace
   frame (navigation, main content and companion panels); the popup centers inside

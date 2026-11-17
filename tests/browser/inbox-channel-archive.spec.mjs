@@ -1,5 +1,6 @@
+import { showCollectionView } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
-import { channelRow, conversationList, openPage, rail } from "./navigation.mjs";
+import { channelRow, conversationList, openPage } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 
 const channel = "11111111-1111-4111-8111-111111111111";
@@ -32,7 +33,7 @@ test("excludes a channel-archived conversation across reload without clearing lo
   await expect(rows.getByRole("img", { name: "Unread" })).toHaveCount(0);
   // Mark the channel unread on this device, then archive it from its row
   // without opening it, which would read it.
-  await rail(page).locator('[data-rail-team-view="channels"]').click();
+  await showCollectionView(page, "channels");
   const lifecycle = channelRow(page, channel);
   const unread = lifecycle.getByRole("img", { name: "Unread" });
   await lifecycle.click({ button: "right" });
@@ -103,7 +104,7 @@ test("excludes a channel-archived conversation across reload without clearing lo
   ).toHaveCount(0);
   await openPage(page, "Activity");
   await expect(rows).toHaveCount(1);
-  await rail(page).locator('[data-rail-team-view="channels"]').click();
+  await showCollectionView(page, "channels");
   await expect(unread).toBeVisible();
   await expect(root).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);

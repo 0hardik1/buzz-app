@@ -6,9 +6,9 @@ import {
   openChannel,
   openCommunityPicker,
   rail,
-  revealRail,
   selectCommunity,
   showConversationList,
+  showRailCards,
 } from "./navigation.mjs";
 import { chooseChannelAction, openChannelDetails } from "./channel-details.mjs";
 import {
@@ -143,7 +143,7 @@ async function link(page, app, target) {
 }
 async function shellFits(page, width, bestieLabel = "Create an agent") {
   // The rail is a drawer behind its toggle at narrow widths.
-  await revealRail(page);
+  await showRailCards(page);
   const collapsed = width <= 650;
   const destinations = dockDestinations(page);
   await expect(destinations).toHaveText([bestieLabel, "Workflows"]);
@@ -243,6 +243,7 @@ test("joined sidebar and workspace surface, real link panel and compact communit
   await page.setViewportSize({ width: 1440, height: 832 });
   await open(page, app);
   await shellFits(page, 1440);
+  await showConversationList(page);
   const sidebar = await box(rail(page));
   const list = await box(conversationList(page));
   // A narrow link panel covers the conversation, removing it from the
@@ -253,14 +254,15 @@ test("joined sidebar and workspace surface, real link panel and compact communit
     includeHidden: true,
   });
   // The rail, list and main are flush regions inside one outer panel.
-  near(list.x, sidebar.x + sidebar.width);
+  expect(list.x).toBeGreaterThanOrEqual(sidebar.x);
+  expect(list.x + list.width).toBeLessThanOrEqual(sidebar.x + sidebar.width);
   const sidebarHandle = page.getByRole("separator", {
-    name: "Resize sidebar",
+    name: "Resize app sidebar",
   });
   const gripTarget = await box(sidebarHandle);
   near(gripTarget.width, 8);
   // The hit target starts at the seam so it cannot block list controls.
-  near(gripTarget.x, list.x + list.width);
+  near(gripTarget.x, sidebar.x + sidebar.width);
   await sidebarHandle.hover();
   await expect
     .poll(() =>
@@ -281,7 +283,7 @@ test("joined sidebar and workspace surface, real link panel and compact communit
   await expect(conversation).toHaveCSS("border-top-width", "0px");
   await expect(conversation).toHaveCSS("box-shadow", "none");
   const before = await box(conversation);
-  near(before.x, list.x + list.width + 1);
+  near(before.x, sidebar.x + sidebar.width);
   near(
     before.y,
     (await box(page.locator(".shell-header"))).y +
@@ -478,10 +480,6 @@ test("narrow link panels begin after the rendered sidebar", async ({
     .getByRole("separator", { name: "Resize app sidebar" })
     .press("End");
   await page.setViewportSize({ width: 800, height: 600 });
-  // The narrowed reader takes the list over it before the link is reached.
-  await expect(
-    page.locator("[data-detail-workspace][data-narrow]"),
-  ).toBeAttached();
   await link(page, app, "https://github.com/block/buzz/pull/7");
 
   const sidebar = await box(rail(page));

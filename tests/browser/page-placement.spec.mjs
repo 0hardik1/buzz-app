@@ -1,3 +1,4 @@
+import { showRailCards } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { channelRow, newChat, openPage, rail } from "./navigation.mjs";
 import { showChannels, showRail } from "./rail-helpers.mjs";
@@ -65,11 +66,14 @@ test("shared navigation preserves drafts and history across Solo and rail pages"
   await channelRow(page, "alpha").click();
   await expect(composer).toHaveText("Keep this draft");
   const reminders = pageEntry(page, "Reminders");
-  const channels = rail(page).locator('[data-rail-team-view="channels"]');
+  const channels = rail(page)
+    .locator('[data-rail-section="team"]')
+    .getByRole("button", { name: "Team", exact: true });
   // Enter the page through keyboard activation, not programmatic panel focus.
   for (const mode of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme: mode });
     for (const activation of ["Enter", "Space"]) {
+      await showRailCards(page);
       await reminders.focus();
       await reminders.press(activation);
       const heading = page.getByRole("heading", {
@@ -89,12 +93,13 @@ test("shared navigation preserves drafts and history across Solo and rail pages"
       await expect(page.getByRole("main")).toBeFocused();
       await channels.focus();
       await channels.press(activation);
-      await expect(reminders).not.toHaveAttribute("aria-current");
+      await expect(reminders).toHaveAttribute("aria-current", "page");
       await channelRow(page, "alpha").focus();
       await channelRow(page, "alpha").press(activation);
       await expect(composer).toHaveText("Keep this draft");
     }
   }
+  await showRailCards(page);
   const workflows = pageEntry(page, "Workflows");
   await workflows.click();
   await expect(workflows).toHaveAttribute("aria-current", "page");

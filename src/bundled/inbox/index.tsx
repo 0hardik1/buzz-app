@@ -12,9 +12,7 @@ import {
 import { Button } from "../../shared/design-system/ui/Button";
 import { EmptyState } from "../../shared/design-system/ui/EmptyState";
 import { communityRefusalTitle } from "../../features/federated-identity/CommunitySignIn";
-import { ConversationListToggle } from "../../features/conversation/ConversationListToggle";
 import { NoConversationSelected } from "../../features/conversation/NoConversationSelected";
-import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
 import { InboxPreview } from "./InboxPreview";
 import styles from "./Inbox.module.css";
 import {
@@ -145,11 +143,6 @@ function ActivityAddress({
   }, [navigation?.entryId, signedIn]);
   return status === "ready" && signedIn ? (
     <div className={styles.reader}>
-      <PanelHeader
-        variant="conversation"
-        title={null}
-        navigation={<ConversationListToggle />}
-      />
       <div className={styles.unselected}>
         <NoConversationSelected />
       </div>

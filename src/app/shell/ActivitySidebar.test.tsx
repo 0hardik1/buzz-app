@@ -465,9 +465,9 @@ test("a DM row is titled with its people, not DM", async () => {
   expect(row).not.toHaveTextContent(/^DM/);
 });
 
-test("a channel shows who posted last", () => {
+test("a channel keeps its monogram when a new post arrives", () => {
   setup([], { new: { createdAt: 600, content: "a post", authorId: alice } });
-  expect(faceOf("new")).toBe("A");
+  expect(faceOf("new")).toBe("FR");
   expect(screen.getByText("a post")).toBeInTheDocument();
 });
 

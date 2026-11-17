@@ -1,5 +1,6 @@
+import { openPage } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
-import { channelRow, openChannel, rail } from "./navigation.mjs";
+import { channelRow, openChannel } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { settle } from "./timeline.mjs";
 import {
@@ -37,7 +38,10 @@ async function open(page, app) {
 // Focus outside the reading surface. The timeline, its own composer and the
 // list beside it all read after dwell; a focused rail row reads nothing.
 const park = (page) =>
-  rail(page).locator('[data-rail-team-view="channels"]').focus();
+  page
+    .locator("[data-rail-card-sheet]")
+    .getByRole("tab", { name: "Channels", exact: true })
+    .focus();
 async function visible(page) {
   return history(page).evaluate((element) => {
     const viewport = element.getBoundingClientRect();
@@ -127,7 +131,7 @@ test("Messages startup waits for channel discovery before loading templates", as
   try {
     await page.goto(app.origin);
     // Team's Channels view mounts the Messages workspace.
-    await rail(page).locator('[data-rail-team-view="channels"]').click();
+    await openPage(page, "Team");
     await workspaceStarted;
     expect(catalogRequested).toBe(false);
   } finally {
@@ -172,9 +176,9 @@ test("built sidebar → visible dwell → durable journal → encrypted broker p
   expect(app.report.readPublications).toEqual([]);
   const ids = await visible(page);
   expect(ids.length).toBeGreaterThan(0);
-  // Typing under the conversation is reading it: the composer shares the
-  // timeline's edit scope, so its focus earns the same dwell as the list's.
-  await composer(page).focus();
+  // The selected row in the rail sheet still owns reading focus for its
+  // visible conversation; a filter tab above it does not.
+  await alpha(page).focus();
   await page.clock.runFor(299);
   expect((await journal(page)).state.frontiers).toEqual({});
   await page.clock.runFor(1);

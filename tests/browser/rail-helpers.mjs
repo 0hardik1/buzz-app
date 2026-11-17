@@ -1,5 +1,10 @@
 import { expect } from "@playwright/test";
-import { channelRow, rail, settleShellToggle } from "./navigation.mjs";
+import {
+  channelRow,
+  rail,
+  settleShellToggle,
+  showCollectionView,
+} from "./navigation.mjs";
 import { settle } from "./timeline.mjs";
 
 // A narrow window keeps the rail in a drawer behind "Show navigation"; a wide
@@ -20,7 +25,7 @@ export async function showRail(page) {
 // the view opens, leaving the list in its place.
 export async function showChannels(page) {
   await showRail(page);
-  await rail(page).locator('[data-rail-team-view="channels"]').click();
+  await showCollectionView(page, "channels");
   await expect(channelRow(page, "alpha")).toBeVisible();
 }
 
@@ -99,7 +104,7 @@ export async function openSoloList(page) {
 // view lists it, and its row opens it beside the list.
 export async function openInView(page, view, channelId) {
   await showRail(page);
-  await rail(page).locator(`[data-rail-team-view="${view}"]`).click();
+  await showCollectionView(page, view);
   await channelRow(page, channelId).click();
 }
 

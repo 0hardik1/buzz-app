@@ -1,4 +1,5 @@
-import { channelRow, openChannel, openPage, rail } from "./navigation.mjs";
+import { showCollectionView } from "./navigation.mjs";
+import { channelRow, openChannel, openPage } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 
 test.use({ productionBroker: true, historyCounts: { alpha: 1, beta: 1 } });
@@ -55,7 +56,7 @@ test("a community that refuses this key says so once, with no raw status", async
   app.relay.refuseSigned();
   await notice.getByRole("button", { name: "Check again" }).click();
   await openPage(page, "Team");
-  await rail(page).locator('[data-rail-team-view="channels"]').click();
+  await showCollectionView(page, "channels");
   await expect(channelRow(page, "beta")).toBeVisible();
   await expect(notice).toHaveCount(0);
 });

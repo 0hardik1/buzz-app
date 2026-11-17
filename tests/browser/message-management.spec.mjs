@@ -5,24 +5,9 @@ import { open } from "./timeline.mjs";
 import { readJournal } from "./reading.mjs";
 import { npubEncode } from "nostr-tools/nip19";
 
-// A resize re-measures the detail frame on the next rendering update; a
-// narrow frame lays Team's list over the reader, so wait for the measure and
-// close the list before the test works in the reader.
+// Keep the reader reachable after the shell switches to its narrow drawer.
 async function resizeTo(page, width, height) {
   await page.setViewportSize({ width, height });
-  await expect
-    .poll(() =>
-      page
-        .locator("[data-detail-workspace]")
-        .evaluate(
-          (frame) =>
-            frame.hasAttribute("data-narrow") ===
-            frame.clientWidth <
-              48 *
-                parseFloat(getComputedStyle(document.documentElement).fontSize),
-        ),
-    )
-    .toBe(true);
   await hideNarrowConversationList(page);
 }
 

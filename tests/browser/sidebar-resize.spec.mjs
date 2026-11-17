@@ -1,4 +1,5 @@
 import { test, expect } from "./fixture.mjs";
+import { showRailCards } from "./navigation.mjs";
 
 // Browser-only: CSS cascade and grid placement cannot be verified in jsdom.
 test("resizing the app rail keeps the conversation in the first grid row", async ({
@@ -6,6 +7,7 @@ test("resizing the app rail keeps the conversation in the first grid row", async
   app,
 }) => {
   await page.goto(app.origin, { waitUntil: "domcontentloaded" });
+  await showRailCards(page);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
   const handle = page.getByRole("separator", { name: "Resize app sidebar" });
   const body = page.locator(".shell-body");
@@ -37,11 +39,12 @@ test("resizing the app rail keeps the conversation in the first grid row", async
   await expect.poll(aligned).toBe(true);
 });
 
-test("compact Pins opens with its master list visible", async ({
+test("compact Pins opens its collection over the expanded rail", async ({
   page,
   app,
 }) => {
   await page.goto(app.origin, { waitUntil: "domcontentloaded" });
+  await showRailCards(page);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
   for (const title of ["Pins"]) {
@@ -57,11 +60,11 @@ test("compact Pins opens with its master list visible", async ({
     );
     await tile.click();
     const workspace = page.getByRole("region", {
-      name: `${title} workspace`,
+      name: title,
       exact: true,
     });
     await expect(workspace).toBeVisible();
-    await expect(workspace.locator('[data-list-open="true"]')).toBeVisible();
+    await expect(rail.locator("[data-rail-card-sheet]")).toBeVisible();
     await expect(
       workspace.getByRole("heading", { name: title, exact: true }),
     ).toBeVisible();

@@ -1,3 +1,4 @@
+import { openPage } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 
 // Browser contract for the shell's three columns: real routing and history
@@ -17,13 +18,17 @@ test("Activity lands on Team's list, and its rows open in the reader beside it",
 }) => {
   await page.goto(app.origin);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
-  const view = (name) => rail.locator(`[data-rail-team-view="${name}"]`);
+  const view = (name) =>
+    rail.locator("[data-rail-card-sheet]").getByRole("tab", {
+      name: { all: "All", threads: "Threads", dms: "DMs" }[name],
+      exact: true,
+    });
   const list = page.locator("[data-activity-sidebar]");
   const rows = list.locator("[data-activity-row]");
   const events = list.locator("[data-activity-event]");
 
   // Landing: the Activity row is current, the list is on All, nothing is open.
-  await expect(view("all")).toHaveAttribute("aria-current", /.+/);
+  await expect(view("all")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("No conversation selected")).toBeVisible();
   await expect(rows.first()).toBeVisible();
   await expect(events.first()).toBeVisible();
@@ -99,7 +104,8 @@ test("Activity lands on Team's list, and its rows open in the reader beside it",
     )
     .toBe(total);
 
-  // Activity is its own visit: Back reopens the conversation, Forward returns.
+  // An explicit Activity visit remains a history stop; local filters do not navigate.
+  await openPage(page, "Activity");
   await expect(page.getByText("No conversation selected")).toBeVisible();
   await page.goBack();
   await expect(page.getByText("No conversation selected")).toHaveCount(0);
@@ -121,8 +127,9 @@ test("an Activity link's filters apply to Team's list", async ({
   await expect(
     page
       .getByRole("navigation", { name: "Apps", exact: true })
-      .locator('[data-rail-team-view="mentions"]'),
-  ).toHaveAttribute("aria-current", /.+/);
+      .locator("[data-rail-card-sheet]")
+      .getByRole("tab", { name: "Mentions", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
   await expect(list.locator("[data-activity-row]")).toHaveCount(0);
   await expect(list.locator("[data-activity-event]").first()).toBeVisible();
 });

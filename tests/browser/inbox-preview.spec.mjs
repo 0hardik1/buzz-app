@@ -1,6 +1,6 @@
+import { showCollectionView } from "./navigation.mjs";
 import { finalizeEvent, generateSecretKey } from "nostr-tools";
 import {
-  activityRow,
   conversationList,
   openSettings,
   selectSettingsSection,
@@ -69,7 +69,7 @@ test("the Activity list shows reaction and thread rows and opens them directly",
   app.relay.publish("primary", solo, { requireSubscriber: false });
   app.relay.publish("primary", shared, { requireSubscriber: false });
   await open(page, app);
-  await activityRow(page).click();
+  await showCollectionView(page, "all");
   const list = conversationList(page);
   const reactionRows = list.getByRole("button", { name: /reacted with/ });
   // In both themes, at an intermediate width and with enlarged text.

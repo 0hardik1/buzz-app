@@ -41,7 +41,7 @@ export function AppDock({
           event.key === "Escape" &&
           !event.shiftKey &&
           !event.defaultPrevented &&
-          // The list column is portaled from here; its keys are not the rail's.
+          // Portaled menus and dialogs handle their own dismissal.
           event.target instanceof Node &&
           event.currentTarget.contains(event.target) &&
           !(

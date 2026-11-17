@@ -103,21 +103,21 @@
   margin-inline-end: 0;
 }
 
-/* Conversation identity artwork: twice the small member preview. */
+/* Conversation identity artwork matches the small header controls. */
 .root[data-size="large"] {
   padding-inline-end: var(--space-2);
 }
 .root[data-size="large"] .item {
   @apply glass-secondary;
   padding: 3px;
-  width: 3rem;
-  height: 3rem;
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
   margin-inline-end: calc(-1 * var(--space-2));
 }
 .root[data-size="large"] .count {
   @apply glass-secondary;
-  min-width: 3rem;
-  height: 3rem;
+  min-width: var(--size-control-sm);
+  height: var(--size-control-sm);
   margin-inline-end: calc(-1 * var(--space-2));
 }
 

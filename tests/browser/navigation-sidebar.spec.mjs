@@ -6,6 +6,7 @@ import {
   pageChoice,
   rail,
   selectCommunity,
+  showRailCards,
 } from "./navigation.mjs";
 import { checkDurationConsumer } from "./duration-layout.mjs";
 import { showChannels } from "./rail-helpers.mjs";
@@ -131,154 +132,6 @@ test("segmented selections slide but window resizing follows the selected tab im
   }
 });
 
-// The list column beside the reader resizes from its gutter.
-test("conversation list resizes from the full gutter and persists", async ({
-  page,
-  app,
-}) => {
-  await open(page, app);
-  const handle = page.getByRole("separator", {
-    name: "Resize sidebar",
-  });
-  const sidebar = handle.locator("xpath=preceding-sibling::div[1]");
-  await expect(sidebar.locator("[data-activity-sidebar]")).toBeVisible();
-  const before = await sidebar.boundingBox();
-  const grip = await handle.boundingBox();
-  expect(before).not.toBeNull();
-  expect(grip).not.toBeNull();
-  // The resize target begins at the seam, outside list action targets.
-  expect(grip.x).toBeCloseTo(before.x + before.width, 0);
-  expect(grip.width).toBe(8);
-  expect(grip.height).toBeGreaterThan(500);
-  await expect(handle).not.toHaveAttribute("title");
-  await expect(channelRow(page, "alpha")).not.toHaveAttribute("title");
-  await expect(handle).toHaveAttribute(
-    "data-tooltip",
-    "Drag to resize · Double-click to reset",
-  );
-  const tooltip = () =>
-    handle.evaluate((element) => {
-      const style = getComputedStyle(element, "::before");
-      return {
-        delay: style.transitionDelay,
-        opacity: style.opacity,
-        visibility: style.visibility,
-      };
-    });
-  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
-  // Hover must resolve to the resize target across the grip and both gutter edges.
-  expect(
-    await handle.evaluate((element) => {
-      const bounds = element.getBoundingClientRect();
-      return [1, bounds.width / 2, bounds.width - 1].map((offset) => {
-        const hit = document.elementFromPoint(
-          bounds.left + offset,
-          bounds.top + bounds.height / 2,
-        );
-        return hit === element && getComputedStyle(hit).cursor === "ew-resize";
-      });
-    }),
-  ).toEqual([true, true, true]);
-  await expect.poll(async () => (await tooltip()).delay).toBe("0.6s");
-  await expect.poll(tooltip).toMatchObject({
-    opacity: "1",
-    visibility: "visible",
-  });
-
-  await handle.press("ArrowRight");
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeGreaterThan(before.width);
-  const keyboardWidth = (await sidebar.boundingBox()).width;
-  const movedGrip = await handle.boundingBox();
-  await page.mouse.move(
-    movedGrip.x + movedGrip.width / 2,
-    movedGrip.y + movedGrip.height / 2,
-  );
-  await page.mouse.down();
-  await page.mouse.move(
-    movedGrip.x + movedGrip.width / 2 + 120,
-    movedGrip.y + movedGrip.height / 2,
-  );
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const hovered = document.querySelector(":hover");
-        return hovered ? getComputedStyle(hovered).cursor : undefined;
-      }),
-    )
-    .toBe("ew-resize");
-  await page.mouse.up();
-  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("");
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeGreaterThan(keyboardWidth + 100);
-  const resized = await sidebar.boundingBox();
-  await openPage(page, "Workflows");
-  await openPage(page, "Team");
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeCloseTo(resized.width, 0);
-
-  // Team's list is comfortable at 352px by default.
-  await handle.dblclick();
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeCloseTo(352, 0);
-
-  await handle.press("Home");
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeCloseTo(220, 0);
-  await handle.press("End");
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeCloseTo(520, 0);
-  // A window too small for the widest list, yet wide enough to keep it beside
-  // the reader, leaves the reader its room.
-  const wideViewport = page.viewportSize();
-  await page.setViewportSize({ width: 1100, height: wideViewport.height });
-  const constrained = await sidebar.boundingBox();
-  expect(constrained.width).toBeLessThan(520);
-  await expect(handle).toHaveAttribute(
-    "aria-valuenow",
-    String(Math.round(constrained.width)),
-  );
-
-  await page.setViewportSize(wideViewport);
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeCloseTo(520, 0);
-  await page.setViewportSize({ width: 1100, height: wideViewport.height });
-  await handle.press("ArrowLeft");
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeLessThan(constrained.width - 8);
-  await handle.press("End");
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeCloseTo(constrained.width, 0);
-  const constrainedGrip = await handle.boundingBox();
-  await page.mouse.move(
-    constrainedGrip.x + constrainedGrip.width / 2,
-    constrainedGrip.y + constrainedGrip.height / 2,
-  );
-  await page.mouse.down();
-  await page.mouse.move(
-    constrainedGrip.x + constrainedGrip.width / 2 - 32,
-    constrainedGrip.y + constrainedGrip.height / 2,
-  );
-  await page.mouse.up();
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeLessThan(constrained.width - 24);
-  const explicitlyResized = await sidebar.boundingBox();
-  await page.setViewportSize(wideViewport);
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeCloseTo(explicitlyResized.width, 0);
-});
-
 // Channel creation needs a connection that can write 9007.
 const creationSidebar = test.extend({ channelWriteKinds: [9, 9007, 30315] });
 creationSidebar(
@@ -286,6 +139,7 @@ creationSidebar(
   async ({ page, app }, testInfo) => {
     await page.goto(app.origin);
     await showChannels(page);
+    await showRailCards(page);
     const create = rail(page).getByRole("button", {
       name: "Create",
       exact: true,
@@ -371,8 +225,9 @@ test("community picker stays available across pages and restores focus after joi
   app,
 }) => {
   await open(page, app);
+  await showRailCards(page);
   const rail = page.getByRole("navigation", {
-    name: "Communities",
+    name: "Apps",
     exact: true,
   });
   await expect(
@@ -401,52 +256,6 @@ test("community picker stays available across pages and restores focus after joi
       exact: true,
     }),
   ).toBeFocused();
-});
-
-// The list's width is view state saved per community, as the sidebar's
-// collapsed groups were.
-test("Team's list width does not leak across communities", async ({
-  page,
-  app,
-}) => {
-  await open(page, app);
-  const handle = page.getByRole("separator", { name: "Resize sidebar" });
-  const list = handle.locator("xpath=preceding-sibling::div[1]");
-  const width = async () => (await list.boundingBox())?.width;
-  await handle.press("Home");
-  await expect.poll(width).toBeCloseTo(220, 0);
-  await selectCommunity(page, "Secondary");
-  await expect(button(page, "Community switcher: Secondary")).toBeVisible();
-  await expect.poll(width).toBeCloseTo(352, 0);
-  await selectCommunity(page, "Primary");
-  await expect.poll(width).toBeCloseTo(220, 0);
-});
-
-test("an invalid saved list width falls back", async ({ page, app }) => {
-  await open(page, app);
-  const handle = page.getByRole("separator", { name: "Resize sidebar" });
-  const sidebar = handle.locator("xpath=preceding-sibling::div[1]");
-  await handle.press("End");
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeCloseTo(520, 0);
-  await selectCommunity(page, "Secondary");
-  await expect(button(page, "Community switcher: Secondary")).toBeVisible();
-  await page.evaluate(() => {
-    const keys = Object.keys(localStorage).filter((key) =>
-      key.includes('"channel-sidebar"'),
-    );
-    if (keys.length !== 1)
-      throw new Error("The list width was not saved for its workspace");
-    localStorage.setItem(keys[0], JSON.stringify({ width: "wide" }));
-  });
-  await selectCommunity(page, "Primary");
-  await expect(button(page, "Community switcher: Primary")).toBeVisible();
-  await showChannels(page);
-  await expect(channelRow(page, "beta")).toBeVisible();
-  await expect
-    .poll(async () => (await sidebar.boundingBox())?.width)
-    .toBeCloseTo(352, 0);
 });
 
 test("rail loads relay-owned image icons for inactive communities without acquiring sessions", async ({

@@ -36,7 +36,6 @@ import {
   soloNeighbors,
   soloSuccessor,
 } from "../../features/channel-navigation/solo-successor";
-import type { OpenTarget } from "../../features/navigation/targets";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import {
   sidebarSectionTarget,
@@ -105,8 +104,6 @@ export function RailNavigation({
   sidebarSections,
   sidebarScope,
   section: pageSection,
-  openInSection,
-  listedSection,
   compact = false,
   onOpenSection,
   sectionAction,
@@ -124,13 +121,9 @@ export function RailNavigation({
   sidebarSections?: SidebarSections | undefined;
   /** A plugin's restriction narrows the cards to Solo under its banner. */
   sidebarScope?: SidebarScope | undefined;
-  /** Shows this section's full list in the shell's rail sheet or list column,
+  /** Shows this section's full list in the shell's rail sheet,
    * under the same `RailDrag` as the cards. */
   section?: string | undefined;
-  /** Opens a conversation with the list showing the section it was opened from. */
-  openInSection?: ((section: string, target: OpenTarget) => void) | undefined;
-  /** The section whose list is showing beside the cards. */
-  listedSection?: string | undefined;
   compact?: boolean;
   /** The shell can expand a card over the rail without navigating the reader. */
   onOpenSection?: (id: string) => void;
@@ -581,10 +574,6 @@ export function RailNavigation({
   }, [openSuccessor, pageSection, currentChannel, session, scope, navigator]);
   const activeDockSection =
     selectedSection ??
-    // A section a person made has no address: its open list marks it.
-    (listedSection && listedSection !== "team" && listedSection !== "solo"
-      ? listedSection
-      : undefined) ??
     (currentChannel?.channelType === "solo" ||
     (sectionRoute &&
       typeof sectionRoute === "object" &&
@@ -1017,17 +1006,7 @@ export function RailNavigation({
             onOpenSection(id);
             return;
           }
-          // A section a person made has no page of its own: open its first
-          // conversation beside its list.
-          const first =
-            id === "team" || id === "solo"
-              ? undefined
-              : membership
-                  .entries(id, [], byId)
-                  .find((entry) => entry.target.kind === "conversation");
-          if (first?.target.kind === "conversation" && openInSection)
-            openInSection(id, first.target);
-          else void navigator.open(sidebarSectionTarget(scope, id));
+          void navigator.open(sidebarSectionTarget(scope, id));
         }}
         isPinned={(entry) => pinned.has(entry.id)}
         onTogglePin={(entry, nextPinned) => {

@@ -1,7 +1,8 @@
+import { showCollectionView } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open, edge, settle } from "./timeline.mjs";
-import { channelRow, rail } from "./navigation.mjs";
+import { channelRow } from "./navigation.mjs";
 
 // These journeys cover real document boot, IndexedDB reload, React session
 // replacement and DOM continuity. Failure/corruption matrices live in Vitest.
@@ -581,7 +582,7 @@ test.describe("saved DM labels", () => {
     app,
   }) => {
     await open(page, app);
-    const dms = () => rail(page).locator('[data-rail-team-view="dms"]').click();
+    const dms = () => showCollectionView(page, "dms");
     const dm = channelRow(page, "dm-peer");
     await dms();
     await expect(dm).toContainText("Alice Fixture");
@@ -608,7 +609,7 @@ test.describe("saved DM labels", () => {
       app.relay.holdProfiles(app.participants);
       gate.release();
       // The live session opens Alpha; its profiles are still held.
-      await rail(page).locator('[data-rail-team-view="channels"]').click();
+      await showCollectionView(page, "channels");
       await channelRow(page, "alpha").click();
       await expect(
         page.getByRole("textbox", { name: "Message #Alpha", exact: true }),

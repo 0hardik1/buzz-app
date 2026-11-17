@@ -113,7 +113,7 @@ test("registered backdrops paint in order between the shell and its controls, an
   // The sidebar grip appears on hover. It sits on the seam of the joined
   // sidebar and conversation surface, so no backdrop reaches it: the pixels
   // beside it match the same seam well below it, with no gutter or floor.
-  const grip = page.getByRole("separator", { name: "Resize sidebar" });
+  const grip = page.getByRole("separator", { name: "Resize app sidebar" });
   await grip.hover();
   await expect
     .poll(() => grip.evaluate((el) => getComputedStyle(el, "::after").opacity))

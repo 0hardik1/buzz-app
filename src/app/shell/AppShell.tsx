@@ -1,3 +1,4 @@
+import { routedSidebarSection } from "../../features/channel-navigation/sidebar-section-route";
 import { ActivityNavigationProvider } from "./ActivityNavigation";
 import { PageNavigation } from "./PageNavigation";
 import { AppDock } from "./AppDock";
@@ -9,19 +10,18 @@ import { ResizeHandle } from "../../features/panels/ResizeHandle";
 import { RailNavigation } from "./RailNavigation";
 import { RailDrag } from "./RailArrangement";
 import { ChatIcons } from "../../features/conversation/ChatIconSlot";
-import { ListColumn } from "./ListColumn";
 import { SidePanelPresence } from "../../features/panels/side-panel-presence";
-import { useListSection } from "./list-section";
 import { useRailInputs } from "./rail-model";
 import { syncRail } from "./rail-sync";
-import { routedSection, useListColumn } from "./list-column";
 import { navigationOwner, orderPages } from "./presentation";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type ComponentProps,
   type ReactNode,
@@ -187,27 +187,27 @@ function AppShellContent({
     scope: string | undefined;
     opener: HTMLElement | null;
   }>();
-  const openRailSheet = (section: string) => {
-    listColumn.setOpen(false);
-    setSidebarOpen(true);
-    setNavigationOpen(true);
-    setRailSheet({
-      section,
-      scope: connection.scope,
-      opener:
-        document.activeElement instanceof HTMLElement
-          ? document.activeElement
-          : null,
-    });
-  };
+  const openRailSheet = useCallback(
+    (section: string) => {
+      setSidebarOpen(true);
+      setNavigationOpen(true);
+      setRailSheet({
+        section,
+        scope: connection.scope,
+        opener:
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null,
+      });
+    },
+    [connection.scope],
+  );
   const closeRailSheet = useCallback(() => setRailSheet(undefined), []);
   useEffect(() => {
     setRailSheet((current) =>
       current?.scope === connection.scope ? current : undefined,
     );
   }, [connection.scope]);
-  const listColumn = useListColumn(searchServices?.navigation);
-  const askList = listColumn.ask;
   const railScope = connection.viewer ? connection.scope : undefined;
   useEffect(
     () =>
@@ -215,12 +215,6 @@ function AppShellContent({
         ? syncRail(connection.session, railScope, connection.viewer)
         : undefined,
     [connection.session, railScope, connection.viewer],
-  );
-  const listSection = useListSection(
-    connection.session,
-    connection.viewer ? connection.scope : undefined,
-    searchServices?.navigation,
-    listColumn.list,
   );
   useRailInputs(connection.session, pages, searchServices?.sidebarSections);
   // Open side panels report themselves; the layout does not search for them.
@@ -235,37 +229,10 @@ function AppShellContent({
     [],
   );
   const hostNavigation = searchServices?.navigation;
-  // The sidebar opens destinations directly; only a section address lists.
-  const railNavigator = useMemo(
-    () =>
-      hostNavigation && {
-        ...hostNavigation,
-        open: ((target, options) => {
-          if (!routedSection(target)) askList("close");
-          return hostNavigation.open(target, options);
-        }) as typeof hostNavigation.open,
-      },
-    [hostNavigation, askList],
-  );
-  // A section opened on one of its conversations lists that section.
-  const openInSection = useCallback(
-    (section: string, target: OpenTarget) => {
-      askList({ section });
-      void hostNavigation?.open(target);
-    },
-    [hostNavigation, askList],
-  );
-  // Opens from the list keep it showing.
-  const listNavigator = useMemo(
-    () =>
-      hostNavigation && {
-        ...hostNavigation,
-        open: ((target, options) => {
-          askList("keep");
-          return hostNavigation.open(target, options);
-        }) as typeof hostNavigation.open,
-      },
-    [hostNavigation, askList],
+  const railNavigator = hostNavigation;
+  const navigationEntry = useSyncExternalStore(
+    hostNavigation?.subscribe ?? noNavigationSubscription,
+    () => hostNavigation?.snapshot().entry,
   );
   const shellScope = useMemo(
     () =>
@@ -318,12 +285,17 @@ function AppShellContent({
       : "Show navigation"
     : `${sidebarOpen ? "Hide" : "Show"} sidebar`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: Only a navigation attempt closes the drawer.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (navigationOpen && navigationToggle.current?.getClientRects().length) {
       document.getElementById("main-content")?.focus({ preventScroll: true });
     }
     setNavigationOpen(false);
   }, [navigationAttempt]);
+  useLayoutEffect(() => {
+    const section =
+      navigationEntry && routedSidebarSection(navigationEntry.target);
+    if (section && shellScope) openRailSheet(section);
+  }, [navigationEntry, openRailSheet, shellScope]);
   const dockPages = useMemo(
     () =>
       orderPages(
@@ -451,10 +423,6 @@ function AppShellContent({
           sidebarSections={searchServices.sidebarSections}
           sidebarScope={searchServices.sidebarScope}
           navigator={railNavigator}
-          openInSection={openInSection}
-          listedSection={
-            listColumn.list.open ? listSection?.section : undefined
-          }
           pages={pages}
           selected={selected}
           onSelect={onSelect}
@@ -558,16 +526,14 @@ function AppShellContent({
         }
         data-detail-container=""
         data-full-width-workspace={
-          !!listSection ||
+          selected === "buzz.channels/channels" ||
+          selected === "buzz.inbox/inbox" ||
           selected === "buzz.drafts-and-sent/drafts-sent" ||
           undefined
         }
         data-rail-open={visibleRail || undefined}
         data-rail-compact={compactRail || undefined}
         data-side-panel={sidePanels > 0 || undefined}
-        data-list-column={
-          listSection ? (listColumn.list.open ? "open" : "closed") : undefined
-        }
       >
         <ChatIcons value={searchServices?.conversation?.chatIcons}>
           <RailDrag>
@@ -627,37 +593,12 @@ function AppShellContent({
                                   }
                                 >
                                   <OpenCommunitySwitcher value={openSwitcher}>
-                                    <ListColumn
-                                      scope={connection.scope ?? "disconnected"}
-                                      list={listSection && listColumn.list}
-                                      setOpen={listColumn.setOpen}
-                                      title={listSection?.title ?? ""}
-                                      label={listSection?.label}
-                                      fill={!!listSection?.fill}
-                                      content={
-                                        listSection &&
-                                        shellScope &&
-                                        searchServices &&
-                                        listNavigator && (
-                                          <RailNavigation
-                                            key={connection.scope}
-                                            section={listSection.section}
-                                            session={connection.session}
-                                            scope={shellScope}
-                                            sidebarSections={
-                                              searchServices.sidebarSections
-                                            }
-                                            navigator={listNavigator}
-                                            openInSection={openInSection}
-                                            pages={pages}
-                                            selected={selected}
-                                            onSelect={onSelect}
-                                          />
-                                        )
-                                      }
+                                    <section
+                                      className="h-full min-h-0"
+                                      aria-label="Conversation detail"
                                     >
                                       {children}
-                                    </ListColumn>
+                                    </section>
                                   </OpenCommunitySwitcher>
                                 </div>
                               </div>
@@ -696,3 +637,5 @@ function AppShellContent({
     </div>
   );
 }
+
+const noNavigationSubscription = () => () => {};

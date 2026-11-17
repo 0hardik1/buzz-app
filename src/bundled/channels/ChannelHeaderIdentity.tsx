@@ -41,7 +41,7 @@ export function memberAccess(channel: AccessChannel | undefined) {
   return manageAccess;
 }
 
-/** Centered artwork opens access; the workspace header owns the visible name. */
+/** Leading artwork opens access; the workspace header owns the visible name. */
 export function ChannelHeaderIdentity({
   session,
   channelId,

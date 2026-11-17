@@ -79,13 +79,13 @@ export function ChannelMemberAvatars({
   if (!preview.length) {
     const Icon = solo ? RobotIcon : UsersIcon;
     return (
-      <span className="inline-flex size-12">
+      <span className="inline-flex size-8">
         <Avatar
           size="fill"
           shape="circle"
           alt=""
           fallback={solo ? "Agents" : "Members"}
-          fallbackContent={<Icon size="2rem" aria-hidden="true" />}
+          fallbackContent={<Icon size="1.25rem" aria-hidden="true" />}
         />
       </span>
     );

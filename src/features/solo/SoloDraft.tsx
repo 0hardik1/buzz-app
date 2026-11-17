@@ -7,7 +7,6 @@ import { startingChatTitle } from "./chat-title";
 import { ChatNotStarted } from "../relay/channel-writes";
 import { DraftSettings } from "./DraftSettings";
 import { SoloDraftView } from "./SoloPresentation";
-import { ConversationListToggle } from "../conversation/ConversationListToggle";
 import { useAgentChoices } from "../agents/use-choices";
 import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
 import { avatarMedia } from "../../shared/avatar-source";
@@ -918,7 +917,7 @@ export function SoloDraft({
   if (embedded) return composer;
   return (
     <SoloDraftView
-      navigation={navigation ?? <ConversationListToggle />}
+      navigation={navigation}
       identity={
         primaryAgent && primaryName
           ? {

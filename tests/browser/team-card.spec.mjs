@@ -1,6 +1,5 @@
 import { test, expect } from "./fixture.mjs";
 import { showRail } from "./rail-helpers.mjs";
-import { showConversationList } from "./navigation.mjs";
 test.use({
   productionBroker: true,
   enabledPlugins: ["buzz.drafts-and-sent"],
@@ -19,6 +18,14 @@ test("Team card filters in place and list rows drag onto sidebar cards", async (
   await page.goto(app.origin);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
   const card = rail.locator('[data-rail-section="team"]');
+  await expect(card).toBeAttached();
+  const restoredSheet = rail.locator("[data-rail-card-sheet]");
+  if (await restoredSheet.isVisible()) {
+    await restoredSheet
+      .getByRole("button", { name: "Close expanded card" })
+      .click();
+    await expect(restoredSheet).toHaveCount(0);
+  }
   for (const name of ["Activity", "Threads", "DMs", "Mentions", "Channels"])
     await expect(
       card.getByRole("tab", { name: new RegExp(`^${name}`) }),
@@ -98,24 +105,14 @@ test("Team card filters in place and list rows drag onto sidebar cards", async (
     card.getByRole("button", { name: "Team", exact: true }),
   ).toBeFocused();
 
-  // The reader's own list remains available for dragging onto the rail.
-  await showConversationList(page);
-  await page.locator("[data-detail-workspace]").evaluate(async (node) => {
-    await Promise.all(
-      node
-        .getAnimations({ subtree: true })
-        .filter(
-          (animation) =>
-            animation.effect?.getComputedTiming().iterations !== Infinity,
-        )
-        .map((animation) => animation.finished.catch(() => {})),
-    );
-  });
-  const dragAlpha = page
-    .getByRole("region", { name: "Team", exact: true })
-    .locator('[data-activity-row="alpha"] [data-conversation-row]');
+  await expect(
+    page.getByRole("button", { name: /^(Show|Hide) .+ list$/ }),
+  ).toHaveCount(0);
+  const dragAlpha = card.locator(
+    '[data-rail-row="channel:alpha"] [data-conversation-row]',
+  );
 
-  // Drop the list's row on the Pins card.
+  // Card rows still drag onto Pins after dismissing a sheet.
   const pins = rail.locator('[data-rail-section="pins"]');
   const from = await dragAlpha.boundingBox();
   const to = await pins.boundingBox();
@@ -138,7 +135,10 @@ test("Team card filters in place and list rows drag onto sidebar cards", async (
   });
   await expect(composer).toBeVisible();
   await composer.fill("Keep this draft while browsing cards");
-  const reader = page.locator("[data-list-page]");
+  const reader = page.getByRole("region", {
+    name: "Conversation detail",
+    exact: true,
+  });
   const readerBefore = await reader.boundingBox();
   const conversationUrl = page.url();
   await rail.getByRole("button", { name: "New section", exact: true }).click();

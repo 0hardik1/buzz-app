@@ -2,6 +2,12 @@
 import "@testing-library/jest-dom/vitest";
 import { stubAvatarBrowserApis } from "../features/agents/avatar-testing";
 stubAvatarBrowserApis();
+// jsdom has no Web Animations API; real sheet motion is covered in Playwright.
+Object.defineProperty(HTMLElement.prototype, "getAnimations", {
+  configurable: true,
+  value: () => [],
+});
+
 import {
   act,
   cleanup,
@@ -1060,7 +1066,7 @@ it.each(
         JSON.stringify({ version: 3, enabled: { "buzz.bestie": true } }),
       );
     const current = legacyPageFixture();
-    await screen.findByRole("button", { name: "Activity" });
+    await screen.findByRole("heading", { name: "Team" });
     const pageId = name.toLowerCase();
 
     act(() => {
@@ -1246,7 +1252,7 @@ it("cold Settings Close uses required Messages when Inbox is disabled", async ()
 
 it("Close returns to the immediately preceding failed destination, not an older retained workspace", async () => {
   const current = legacyPageFixture();
-  await screen.findByRole("button", { name: "Activity" });
+  await screen.findByRole("heading", { name: "Team" });
   await act(async () => {
     void current.navigation.open({
       version: 1,
@@ -1308,9 +1314,14 @@ async function activityTurnedOff() {
 /** Turns Activity off while it's open, then goes to Messages and Back. */
 async function backOntoTurnedOffActivity() {
   const current = legacyPageFixture();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "Activity" }),
-  );
+  await act(async () => {
+    await current.navigation.open({
+      version: 1,
+      kind: "page",
+      pluginId: "buzz.inbox",
+      pageId: "inbox",
+    });
+  });
   await waitFor(() =>
     expect(current.navigation.snapshot()).toMatchObject({
       status: "opened",
@@ -1433,7 +1444,7 @@ it("keeps the unavailable card for a turned-off external plugin while external p
         }
       : result;
   const current = legacyPageFixture();
-  await screen.findByRole("button", { name: "Activity" });
+  await screen.findByRole("heading", { name: "Team" });
   expect(current.plugins.snapshot().configuration).toMatchObject({
     status: "ready",
     externalPluginsPaused: true,
@@ -1468,7 +1479,7 @@ it("keeps the unavailable card for a turned-off external plugin while external p
 // its cards never leave for Messages as the page cards above do.
 it("a Settings section that isn’t available offers Try again, not Go to Messages", async () => {
   const current = legacyPageFixture();
-  await screen.findByRole("button", { name: "Activity" });
+  await screen.findByRole("heading", { name: "Team" });
   act(() => {
     void current.navigation.open({
       version: 1,
@@ -1508,7 +1519,7 @@ it("a Settings section that isn’t available offers Try again, not Go to Messag
 
 it("a turned-off plugin's Settings section offers Manage plugins, not Go to Messages", async () => {
   const current = legacyPageFixture();
-  await screen.findByRole("button", { name: "Activity" });
+  await screen.findByRole("heading", { name: "Team" });
   await act(() => current.plugins.change("disable", "buzz.agents"));
   act(() => {
     void current.navigation.open({

@@ -90,7 +90,7 @@ test("Settings retains the sidebar toggle across desktop and narrow layouts", as
   await toggle.click();
   await expect(rail(page)).toBeVisible();
   await expect(toggle).toHaveAccessibleName("Hide navigation");
-  await rail(page).locator('[data-rail-team-view="channels"]').focus();
+  await page.getByRole("button", { name: /^Community switcher:/ }).focus();
   await page.keyboard.press("Escape");
   await expect(rail(page)).toBeHidden();
   await expect(toggle).toBeFocused();

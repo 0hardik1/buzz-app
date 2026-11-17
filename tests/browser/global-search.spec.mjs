@@ -1,12 +1,11 @@
+import { showCollectionView } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { animationsSettled } from "./animations.mjs";
 import { wheel } from "./timeline.mjs";
 import {
-  activityRow,
   channelRow,
   conversationList,
   openChannel,
-  rail,
   showConversationList,
 } from "./navigation.mjs";
 
@@ -248,7 +247,7 @@ test.describe("public search destination", () => {
   }) => {
     await page.goto(app.origin);
     // Team's Channels view lists the channels this member has joined.
-    await rail(page).locator('[data-rail-team-view="channels"]').click();
+    await showCollectionView(page, "channels");
     await button(page, "Search Buzz").click();
     await page.getByRole("combobox", { name: "Search Buzz" }).fill("ope");
     const result = page
@@ -270,7 +269,7 @@ test.describe("public search destination", () => {
     await showConversationList(page);
     await expect(channelRow(page, app.openChannelId)).toHaveCount(0);
     await page
-      .getByRole("button", { name: /^Hide .+ list$/ })
+      .getByRole("button", { name: "Close expanded card" })
       .first()
       .click();
     await expect(conversationList(page)).toBeHidden();
@@ -590,7 +589,11 @@ test("keyboard selection follows its page while matching conversations arrive", 
     await expect(input).toHaveAttribute("aria-activedescendant", id);
     await input.press("Enter");
     await expect(dialog).toHaveCount(0);
-    await expect(activityRow(page)).toHaveAttribute("aria-current", /.+/);
+    await expect(
+      page
+        .locator("[data-rail-card-sheet]")
+        .getByRole("tab", { name: "All", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
   } finally {
     holding = false;
     for (const resolve of held.splice(0)) resolve();

@@ -1,7 +1,8 @@
+import { showCollectionView } from "./navigation.mjs";
 import { npubEncode } from "nostr-tools/nip19";
 import { openChannelDetails } from "./channel-details.mjs";
 import { test, expect } from "./fixture.mjs";
-import { activityRow, channelRow, conversationRow } from "./navigation.mjs";
+import { channelRow, conversationRow } from "./navigation.mjs";
 import { open } from "./timeline.mjs";
 
 test.use({
@@ -34,7 +35,7 @@ for (const cold of [false, true]) {
     try {
       await open(page, app);
       // Activity lists channels and DMs together.
-      await activityRow(page).click();
+      await showCollectionView(page, "all");
       if (cold) {
         await expect(fallback).toBeVisible();
         await expect.poll(() => labelReads().length).toBe(1);

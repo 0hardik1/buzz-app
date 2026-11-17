@@ -15,8 +15,8 @@
 }
 .headerPortrait {
   display: inline-flex;
-  width: calc(var(--space-8) + var(--space-4));
-  height: calc(var(--space-8) + var(--space-4));
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
 }
 
 .welcome {

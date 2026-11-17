@@ -514,9 +514,6 @@ for (const kind of ["mention", "thread reply"]) {
         await page.setViewportSize({ width, height: 650 });
         // The narrow window lays Team's list over the reader.
         if (width === 640) {
-          await expect(
-            page.locator("[data-detail-workspace][data-narrow]"),
-          ).toHaveCount(1);
           await hideNarrowConversationList(page);
         }
         await expect

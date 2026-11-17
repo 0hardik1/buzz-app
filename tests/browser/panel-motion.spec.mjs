@@ -74,7 +74,7 @@ test("joined header seams, drag feedback, and pointer-only overlay motion", asyn
   });
   const dock = page.locator("[data-panel-dock]");
   const resize = page.getByRole("separator", {
-    name: "Resize sidebar",
+    name: "Resize app sidebar",
   });
 
   await launch.click();
@@ -101,13 +101,13 @@ test("joined header seams, drag feedback, and pointer-only overlay motion", asyn
   await close.click();
   await expect(dock).toHaveCount(0);
 
-  // The hit target starts at the seam between Team's list and its reader; the
+  // The hit target starts at the seam between the rail and its reader; the
   // painted capsule stays centered on it.
-  const list = page.locator("[data-list-open] > :first-child");
+  const list = page.locator("#shell-rail");
   const scrollBounds = await conversationList(page).boundingBox();
   const resizeBounds = await resize.boundingBox();
   const sidebarBounds = await list.boundingBox();
-  const mainBounds = await page.locator("[data-list-page]").boundingBox();
+  const mainBounds = await page.locator(".shell-body").boundingBox();
   expect(mainBounds.x).toBeCloseTo(sidebarBounds.x + sidebarBounds.width);
   const railCenter = resizeBounds.x;
   expect(railCenter).toBeCloseTo(

@@ -1,3 +1,4 @@
+import { showCollectionView } from "./navigation.mjs";
 import { pauseClock } from "./clock.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 import { test, expect } from "./fixture.mjs";
@@ -10,7 +11,6 @@ import {
 import {
   channelRow,
   conversationList,
-  rail,
   showConversationList,
 } from "./navigation.mjs";
 import { channelUnread } from "./unread-state.mjs";
@@ -28,8 +28,7 @@ test.use({
 });
 // Team's Threads view lists each thread with activity as its own row, opened on
 // its own beside the list; Mentions lists mentions the same way.
-const teamView = (page, view) =>
-  rail(page).locator(`[data-rail-team-view="${view}"]`).click();
+const teamView = (page, view) => showCollectionView(page, view);
 // Team's Channels view, as open() left it; an opened thread may collapse it.
 const go = async (page, channelId) => {
   await showConversationList(page);

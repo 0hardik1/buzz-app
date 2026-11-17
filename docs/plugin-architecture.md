@@ -1103,8 +1103,8 @@ ctx.pages.register({
 });
 ```
 
-The page `sidebar` contribution is retired. The shell shows its rail and, for
-conversations, one list column; it has no slot for a page-owned sidebar. The
+The page `sidebar` contribution is retired. The shell shows its rail, with card
+collections opened in sheets over that rail; it has no slot for a page-owned sidebar. The
 registry still accepts `sidebar` so existing plugins activate, and the shell
 never renders it. A page that needs a list renders it inside its own component.
 

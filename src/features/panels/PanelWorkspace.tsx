@@ -140,7 +140,7 @@ export function PanelWorkspace({
   select(id: string): void;
   /** Header icon actions owned by the hosting page. */
   actions?: ReactNode;
-  /** Navigation at the leading edge, independent of centered membership artwork. */
+  /** Navigation at the leading edge, beside the membership identity. */
   leadingActions?: ReactNode;
   /**
    * Interactive conversation identity, presented above the permanent first

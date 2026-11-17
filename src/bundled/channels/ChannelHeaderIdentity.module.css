@@ -15,7 +15,7 @@
   cursor: pointer;
 }
 
-/* Stretch the existing access control across the sibling name capsule. */
+/* Stretch the existing access control across the sibling name. */
 [class~="panel-header-title"]:has(.identity) {
   position: relative;
 }
