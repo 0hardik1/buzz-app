@@ -105,10 +105,12 @@ semantic tokens, UI authoring rules and the local component reference.
   workspace navigation request retries it independently of the page body.
   Messages uses the conversation sidebar. Other pages show a sidebar only when
   they contribute `Page.sidebar`; apps without one hide the retained navigation.
-  `App.tsx` composes `PrimarySidebar` around `features/channel-navigation/ChannelInventory`. The inventory supplies channel rows,
-  notices, dialogs and scroll bindings through a render prop; PrimarySidebar owns
-  the common frame, Solo/Team arrangement and error fallback. The fallback retains
-  page navigation without remounting a failed inventory. There is no portal.
+  `App.tsx` composes `PrimarySidebar` around `bundled/channels/ChannelInventory`.
+  The inventory remains the single preferences, actions and view owner, supplying
+  notices, dialogs and scroll bindings through a render prop. Bundled Solo and
+  Team sources portal section content into stable, ordered shell containers.
+  PrimarySidebar owns the common frame, Solo/Team arrangement and error fallback.
+  The fallback retains page navigation without remounting a failed inventory.
   Sidebar session state resets on scope/connection generation without remounting
   unrelated pages. Its own error boundary keeps page navigation and Settings usable.
   Page buttons use shared navigation rows and focus the main region on selection.
