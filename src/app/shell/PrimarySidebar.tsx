@@ -7,8 +7,8 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { SoloRegions } from "../../features/channel-navigation/SoloRegions";
-import { SoloInventory } from "../../features/channel-navigation/SoloInventory";
+import { SoloRegions } from "../../bundled/channels/SoloRegions";
+import { SoloInventory } from "../../bundled/channels/SoloInventory";
 import {
   sidebarTarget,
   soloDraft,

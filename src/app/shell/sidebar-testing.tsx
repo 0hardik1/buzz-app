@@ -23,7 +23,7 @@ import { NewMenu } from "./NewMenu";
 import type { Agents } from "../../features/agents/service";
 import { PrimarySidebar } from "./PrimarySidebar";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
-import { SoloInventory } from "../../features/channel-navigation/SoloInventory";
+import { SoloInventory } from "../../bundled/channels/SoloInventory";
 import {
   conversationTarget,
   sidebarTarget,

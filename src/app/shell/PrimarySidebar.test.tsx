@@ -773,11 +773,9 @@ it("reveals Solo when New chat reopens the same destination after filtering it o
 });
 
 const soloFailure = vi.hoisted(() => ({ active: false }));
-vi.mock("../../features/channel-navigation/SoloInventory", async (original) => {
+vi.mock("../../bundled/channels/SoloInventory", async (original) => {
   const actual =
-    await original<
-      typeof import("../../features/channel-navigation/SoloInventory")
-    >();
+    await original<typeof import("../../bundled/channels/SoloInventory")>();
   return {
     ...actual,
     SoloInventory: (props: Parameters<typeof actual.SoloInventory>[0]) => {
