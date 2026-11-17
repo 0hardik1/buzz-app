@@ -616,7 +616,7 @@ function WorkflowCard({
       : locked || awaitingReadback
         ? "Waiting for the submitted change to be resolved."
         : !fields.editable
-          ? "Correct the YAML before changing the configured state."
+          ? "Correct the YAML before turning this workflow on or off."
           : !capability.availability.save
             ? "Saving is unavailable from this host."
             : undefined;
@@ -704,7 +704,7 @@ function WorkflowCard({
           disableHoverablePopup
         >
           <Switch
-            aria-label={`Enabled in configuration: ${name}`}
+            aria-label={`Enabled: ${name}`}
             aria-describedby={toggleReason ? reasonId : undefined}
             checked={enabled}
             disabled={!!toggleReason}
@@ -913,10 +913,10 @@ function WorkflowCard({
       {fields.editable && (
         <SettingsGroup>
           <SwitchPreferenceRow
-            label="Enabled in configuration"
+            label="Enabled"
             description={
               toggleReason ??
-              "Saved configuration only. Turning off does not confirm runs have stopped or cancel active runs."
+              "Turning off only affects future runs. Runs already in progress are not cancelled."
             }
             checked={enabled}
             disabled={!!toggleReason}
@@ -1939,10 +1939,6 @@ export function WorkflowLanding({
           onDismiss={() => setError(null)}
         />
       )}
-      <p className="workflow-page-footnote text-caption text-subtle">
-        Saved configuration only. Turning off does not confirm runs have stopped
-        or cancel active runs.
-      </p>
     </>
   );
 }
