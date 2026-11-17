@@ -1,11 +1,12 @@
 import { PROFILE_CACHE_BASE } from "./budget";
 import { ReadError } from "./errors";
 import type { Profile } from "./contracts";
-import { newer, type RelayEvent } from "./events";
+import type { RelayEvent } from "./events";
 import { foldProfiles } from "./profiles";
 import type { RelayReader } from "./reader";
 import {
   verifiedProfileSubject,
+  newerVerifiedProfile,
   type VerifiedProfileAuthority,
 } from "./verified-profile";
 
@@ -72,7 +73,8 @@ export function createProfileSearch(
       if (event.kind === 0 && !page.has(event.pubkey))
         page.set(event.pubkey, undefined);
       const subject = verifiedProfileSubject(event, current);
-      if (subject) page.set(subject, newer(page.get(subject), event));
+      if (subject)
+        page.set(subject, newerVerifiedProfile(page.get(subject), event));
     }
     for (const [pubkey, head] of page) {
       answers.delete(pubkey);

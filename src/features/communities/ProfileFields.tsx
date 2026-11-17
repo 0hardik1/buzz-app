@@ -32,6 +32,7 @@ export function ProfileFields({
   onBusyChange,
   showAvatar = true,
   showAbout = true,
+  showUsername = true,
   emptyAvatarStyle,
   autoFocus = false,
   nameRef,
@@ -44,6 +45,7 @@ export function ProfileFields({
   onBusyChange?(busy: boolean): void;
   showAvatar?: boolean;
   showAbout?: boolean;
+  showUsername?: boolean;
   emptyAvatarStyle?: "dotted-circle";
   /** Focuses the display name on mount, for pages whose only task is this form. */
   autoFocus?: boolean;
@@ -92,7 +94,7 @@ export function ProfileFields({
           }
         />
       </Field>
-      {verifiedName?.username && (
+      {showUsername && verifiedName?.username && (
         <Field label="Username">
           <Input value={`@${verifiedName.username}`} disabled />
         </Field>

@@ -1,3 +1,4 @@
+import type { ManagedProfile } from "../../features/profiles/managed-profile";
 import { ProviderProfileRow } from "./ProviderProfileRow";
 import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -132,9 +133,11 @@ function openedFrom(session: RelaySession, context: PanelProps["context"]) {
 export type PersonProfileInfoContent = {
   renderPersonFields?:
     | ((context: {
+        session: RelaySession | undefined;
         section: "personal" | "team" | "location";
         pubkey: string;
         verifiedUsername: string | undefined;
+        managed?: ManagedProfile;
         communityOrigin: string | undefined;
         renderRow: (
           title: string,
@@ -660,12 +663,16 @@ function ProfileDetails({
   const providerFields = (section: "personal" | "team" | "location") =>
     !displayAgent &&
     renderPersonFields?.({
+      session,
       section,
       pubkey,
       verifiedUsername:
         profile?.verified?.status === "checked"
           ? profile.verified.username
           : undefined,
+      ...(profile?.verified?.managed
+        ? { managed: profile.verified.managed }
+        : {}),
       communityOrigin: community?.communityOrigin,
       renderRow: (title, value, profileUsername) =>
         profileUsername && context ? (

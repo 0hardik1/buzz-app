@@ -21,6 +21,8 @@
   overflow-wrap: anywhere;
 }
 .portrait {
+  position: relative;
+  z-index: 1;
   padding: 0;
   border: 0;
   background: transparent;
@@ -56,7 +58,7 @@
   min-width: 0;
 }
 /* This short value and compact action fit side by side in the profile panel. */
-.publicKey :global(.buzz-preference-row-trailing) {
+.publicKey [class~="buzz-preference-row-trailing"] {
   grid-column: 2;
   grid-row: 1;
   justify-content: flex-end;
@@ -108,6 +110,10 @@
   gap: var(--space-4);
   min-width: 0;
 }
+/* The returning shared-layout portrait must also clear the body below the hero. */
+.profileContents > [data-profile-hero] {
+  z-index: 1;
+}
 .profileContents > :not([data-profile-hero]),
 .profileContents > [data-profile-hero] > :not([aria-hidden], .portrait) {
   transform-origin: center top;
@@ -136,6 +142,7 @@
 }
 .photoViewer {
   position: absolute;
+  z-index: 2;
   inset: 0;
   isolation: isolate;
   display: flex;

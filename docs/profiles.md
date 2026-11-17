@@ -199,3 +199,26 @@ alongside a transient list error; loading/error/partial discovery is not an
 empty membership claim; retry uses `refreshList`. Rows navigate using the existing
 scoped conversation destination when a valid community scope and navigation
 capability exist, otherwise remain plain text.
+
+## Managed directory details
+
+Communities may advertise a relay-signed managed profile companion (kind30383)
+to their existing verified-name profiles (kind30382). The client follows both
+kinds so pre-upgrade names keep working, prefers a companion at equal timestamps,
+and accepts details only from that community's advertised signing authority.
+These details are for display, never authorization.
+
+Provider fields appear in Personal info, Team and Location. Edit Profile groups
+them under “Managed by <source>” with a link to the directory. Username and
+timezone appear once. Photo and About remain editable; communities without a
+managed timezone retain the timezone picker and “Show on profile” control.
+The compact profile shows city and local time when a city is supplied; the full
+profile retains the time difference.
+
+Managed timezone and the suggested photo project from the signed snapshot, so
+viewers do not need the subject to run an updated client first. A chosen photo
+wins, and an explicit removal suppresses the directory default. The client
+records photo choices with `managed_photo_initialized` in user metadata and
+imports an absent default photo once. Work fields remain in the signed snapshot;
+the desktop never contacts a provider's directory API. Refresh timing belongs
+to the community's issuer and authentication policy.

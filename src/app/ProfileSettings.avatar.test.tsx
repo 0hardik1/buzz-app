@@ -54,6 +54,7 @@ function setup(
   selected: string | null = a,
   picture = "",
   inheritedPicture = "",
+  managedPicture?: string,
 ) {
   let state: ClientSnapshot = {
     status: "ready",
@@ -74,6 +75,36 @@ function setup(
       state = { ...state, selected };
       for (const fn of listeners) fn();
     });
+  const managedProfiles = new Map([
+    [
+      "a".repeat(64),
+      {
+        verified: {
+          displayName: "Alpha human",
+          username: "alpha",
+          issuerLabel: "Example",
+          verifiedAt: 1,
+          status: "checked",
+          multipleIssuers: false,
+          managed: {
+            version: 1,
+            source_label: "Directory",
+            source_url: "https://example.org/alpha",
+            fields: [],
+            picture: managedPicture,
+          },
+        },
+      },
+    ],
+  ]);
+  const managedSession = {
+    viewer: state.viewer,
+    profiles: {
+      snapshot: () => managedProfiles,
+      subscribe: () => () => {},
+      ensure: async () => {},
+    },
+  };
   const communities = {
     snapshot: () => state,
     subscribe: (fn: () => void) => {
@@ -82,7 +113,12 @@ function setup(
         listeners.delete(fn);
       };
     },
-    relay: { snapshot: () => ({ status: "unavailable" }) },
+    relay: {
+      snapshot: () =>
+        managedPicture
+          ? { status: "ready", viewer: state.viewer, session: managedSession }
+          : { status: "unavailable" },
+    },
     saveProfile,
   } as unknown as Communities;
   const profiles = new Map<
@@ -344,7 +380,7 @@ it("accepted but superseded publication retains the avatar draft for explicit re
       picture: "https://images.example/new.png",
       about: "Keep this",
     },
-    published("Alpha human"),
+    { ...published("Alpha human"), managed_photo_initialized: true },
   );
 });
 
@@ -456,7 +492,10 @@ it.each([
     expect(api.publishProfile).toHaveBeenCalledExactlyOnceWith(
       a,
       { name: "Changed", picture, about: "Keep this" },
-      published("Alpha human"),
+      {
+        ...published("Alpha human"),
+        ...(picture ? { managed_photo_initialized: true } : {}),
+      },
     );
     expect(fixture.saveProfile).toHaveBeenCalledExactlyOnceWith({
       name: "Changed",
@@ -513,3 +552,30 @@ it.each(["http://images.example/avatar.png", "data:image/png;base64,AA=="])(
     );
   },
 );
+
+it("lets a person remove a visible directory default that was never imported", async () => {
+  const fixture = setup(a, "", "", "https://images.example/directory.png");
+  const current = fixture.profiles.get(a);
+  if (!current) throw new Error("Missing profile fixture");
+  fixture.profiles.set(a, {
+    ...current,
+    existing: {
+      ...current.existing,
+      name: "legacy-handle",
+      display_name: "Alpha human",
+    },
+  });
+  await screen.findByDisplayValue("Alpha human");
+  fireEvent.click(screen.getByRole("button", { name: "Edit avatar" }));
+  expect(await screen.findByLabelText("Picture URL (optional)")).toHaveValue(
+    "https://images.example/directory.png",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Remove avatar" }));
+  save();
+  await screen.findByText("Profile updated");
+  expect(api.publishProfile).toHaveBeenCalledWith(
+    a,
+    expect.objectContaining({ picture: "", about: "Keep this" }),
+    expect.objectContaining({ managed_photo_initialized: true }),
+  );
+});

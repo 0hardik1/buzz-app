@@ -1618,7 +1618,10 @@ export function createChannelStore(
         }
       // Verified names first, so restored kind 0 names publish with them.
       savedVerified = profiles
-        .filter((event) => event.kind === VERIFIED_PROFILE_KIND)
+        .filter(
+          (event) =>
+            event.kind === VERIFIED_PROFILE_KIND || event.kind === 30383,
+        )
         .slice(-PROFILE_CACHE_BASE);
       directory.restoreVerified(savedVerified);
       const names = profiles.filter((event) => event.kind === 0);

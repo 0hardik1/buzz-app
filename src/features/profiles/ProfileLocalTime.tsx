@@ -11,11 +11,13 @@ export function ProfileLocalTime({
   timeZone,
   className,
   clockOnly = false,
+  city,
   inlineDetails = false,
 }: {
   timeZone: string | undefined;
   className: string;
   clockOnly?: boolean;
+  city?: string | undefined;
   /** Full profile row: clock and relative offset, without a repeated zone. */
   inlineDetails?: boolean;
 }) {
@@ -63,6 +65,7 @@ export function ProfileLocalTime({
   if (clockOnly) {
     return (
       <span className={className}>
+        {city ? `${city} · ` : ""}
         {new Intl.DateTimeFormat("en-US", {
           timeZone: zone,
           hour: "numeric",

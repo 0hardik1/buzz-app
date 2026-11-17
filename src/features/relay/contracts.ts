@@ -85,6 +85,8 @@ export type Profile = Readonly<{
   /** The kind-0 `name` (handle), when `name` above is a different display name. */
   username?: string;
   picture?: string;
+  /** A chosen or explicitly removed photo suppresses directory defaults. */
+  managedPhotoInitialized?: true;
   about?: string;
   /** Self-declared NIP-05 identifier; not proof of DNS verification. */
   nip05?: string;

@@ -1,7 +1,8 @@
 import { ByteLru, PROFILE_CACHE_BASE, PROFILE_ENTRY_BYTES } from "./budget";
-import { newer, type RelayEvent } from "./events";
+import type { RelayEvent } from "./events";
 import {
   VERIFIED_PROFILE_BATCH,
+  newerVerifiedProfile,
   verifiedProfile,
   verifiedProfileFilter,
   verifiedProfileSubject,
@@ -84,7 +85,10 @@ export function createVerifiedProfileDirectory(
         enabled = false;
         stopBatches();
       } else {
-        if (authority?.pubkey !== next.pubkey) {
+        if (
+          authority?.pubkey !== next.pubkey ||
+          authority?.managedKind !== next.managedKind
+        ) {
           stopBatches();
           heads.clear();
           answered.clear();
@@ -95,6 +99,7 @@ export function createVerifiedProfileDirectory(
         if (
           !enabled ||
           authority?.pubkey !== next.pubkey ||
+          authority.managedKind !== next.managedKind ||
           authority.multipleIssuers !== next.multipleIssuers ||
           authority.searchable !== next.searchable
         )
@@ -140,7 +145,7 @@ export function createVerifiedProfileDirectory(
     const subject = verifiedProfileSubject(event, authority);
     if (!subject || !wanted.has(subject)) return false;
     const old = heads.peek(subject);
-    if (newer(old, event) === old) return false;
+    if (newerVerifiedProfile(old, event) === old) return false;
     heads.set(subject, event);
     accepted.add(subject);
     return true;
@@ -179,7 +184,12 @@ export function createVerifiedProfileDirectory(
     batches.add(batch);
     try {
       stopWire = subscribe(
-        verifiedProfileFilter(currentAuthority.pubkey, chunk, since),
+        verifiedProfileFilter(
+          currentAuthority.pubkey,
+          chunk,
+          since,
+          currentAuthority.managedKind,
+        ),
         {
           event(event) {
             if (!active) return;

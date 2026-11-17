@@ -1462,3 +1462,32 @@ it("restores only into room the limit leaves, never over a checked head", async 
     h.directory.dispose();
   }
 });
+
+it("uses managed companions without dropping pre-upgrade verified names", () => {
+  const managedAuthority = { ...authority, managedKind: 30383 as const };
+  const legacy = projection();
+  expect(verifiedProfile(legacy, managedAuthority, true)?.username).toBe(
+    "alice",
+  );
+  const data = {
+    version: 1,
+    source_label: "Directory",
+    source_url: "https://example.org/people/alice",
+    fields: [],
+    city: "London",
+    timezone: "Europe/London",
+  };
+  const companion = eventDto(
+    signed(relay, {
+      kind: 30383,
+      content: JSON.stringify(data),
+      created_at: legacy.created_at,
+      tags: legacy.tags,
+    }),
+  );
+  expect(verifiedProfile(companion, managedAuthority, true)?.managed).toEqual(
+    data,
+  );
+  expect(verifiedProfile(companion, authority, true)).toBeUndefined();
+  expect(verifiedProfile(legacy, authority, true)?.username).toBe("alice");
+});

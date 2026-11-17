@@ -20,6 +20,7 @@ import type { RelaySession } from "../relay/session";
 import { UserStatusDisplay } from "../user-status/StatusDisplay";
 import { ProfileBackdrop } from "./ProfileBackdrop";
 import { ProfileLocalTime } from "./ProfileLocalTime";
+import { useProfileCity } from "./profile-source";
 import styles from "./ProfilePeek.module.css";
 type ProfilePeekProps = {
   trigger: ReactElement;
@@ -67,10 +68,12 @@ function LocalTime({
   );
   const status = useUserStatus(session.statuses, pubkey);
   const hasStatus = !!(status?.text || status?.emoji);
+  const city = useProfileCity(session, pubkey);
   return (
     <ProfileLocalTime
-      clockOnly={hasStatus}
-      inlineDetails={!hasStatus}
+      clockOnly={!!city || hasStatus}
+      inlineDetails={!city && !hasStatus}
+      city={city}
       timeZone={timeZone}
       className="text-caption text-secondary"
     />

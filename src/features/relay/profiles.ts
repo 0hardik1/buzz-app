@@ -50,6 +50,7 @@ export function foldProfiles(
         display_name?: unknown;
         name?: unknown;
         picture?: unknown;
+        managed_photo_initialized?: unknown;
         about?: unknown;
         nip05?: unknown;
         tz?: unknown;
@@ -68,6 +69,9 @@ export function foldProfiles(
           ...(handle && handle !== name ? { username: handle } : {}),
           ...agent,
           ...(picture ? { picture } : {}),
+          ...(body.managed_photo_initialized === true
+            ? { managedPhotoInitialized: true as const }
+            : {}),
           ...(typeof body.about === "string" && body.about.trim()
             ? { about: body.about.trim() }
             : {}),

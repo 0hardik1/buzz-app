@@ -389,7 +389,7 @@ describe("verified names for a search page", () => {
         ...(names.full ? [["full_name", names.full]] : []),
       ],
     });
-  function verifiedSetup(advertised: boolean) {
+  function verifiedSetup(advertised: boolean, managed = false) {
     const viewer = keypair(),
       relay = keypair(),
       stranger = keypair(),
@@ -420,6 +420,24 @@ describe("verified names for a search page", () => {
       }),
       assertion(relay, unasked.pubkey, { display: "unasked" }),
     ];
+    if (managed) {
+      const legacy = events[0];
+      if (!legacy) throw new Error("Missing legacy fixture");
+      events.unshift(
+        signed(relay, {
+          kind: 30383,
+          created_at: legacy.created_at,
+          tags: legacy.tags,
+          content: JSON.stringify({
+            version: 1,
+            source_label: "Directory",
+            source_url: "https://example.org/fname",
+            fields: [],
+            city: "London",
+          }),
+        }),
+      );
+    }
     // Transports admit signed events; the relay key decides, not the signature alone.
     const query = vi.fn(async (_filters: readonly ReadFilter[]) =>
       events.map((event) => eventDto(event)),
@@ -430,11 +448,40 @@ describe("verified names for a search page", () => {
       media: () => undefined,
       query,
       ...(advertised
-        ? { verifiedProfiles: { pubkey: relay.pubkey, multipleIssuers: false } }
+        ? {
+            verifiedProfiles: {
+              pubkey: relay.pubkey,
+              multipleIssuers: false,
+              ...(managed ? { managedKind: 30383 as const } : {}),
+            },
+          }
         : {}),
     });
     return { owner, query, relay, fake, renamed };
   }
+
+  it("reads managed companions for direct verification without requiring a prior search", async () => {
+    const t = verifiedSetup(true, true);
+    try {
+      const verified = await t.owner.session.directMessages.verified(
+        [t.fake.pubkey],
+        new AbortController().signal,
+      );
+      expect(t.query.mock.calls[0]?.[0]).toEqual([
+        {
+          kinds: [30382, 30383],
+          authors: [t.relay.pubkey],
+          "#d": [t.fake.pubkey],
+          limit: 2,
+        },
+      ]);
+      expect(verified?.profiles.get(t.fake.pubkey)?.managed?.city).toBe(
+        "London",
+      );
+    } finally {
+      t.owner.dispose();
+    }
+  });
 
   it("reads one bounded filter by the relay and keeps only its valid newest heads", async () => {
     const t = verifiedSetup(true);

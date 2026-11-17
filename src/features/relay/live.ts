@@ -2152,6 +2152,7 @@ export function subscribeRelayTraffic(
         filter.authors[0],
         filter["#d"],
         filter.since,
+        filter.kinds[1] ?? filter.kinds[0],
       );
       const sync: SyncWire = { filter: checked, sink, resumable: true };
       if (closed) {

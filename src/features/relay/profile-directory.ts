@@ -1,3 +1,4 @@
+import { profileTimeZone } from "../profiles/local-time";
 import { createVerifiedProfileDirectory } from "./verified-profile-directory";
 import {
   namePreference,
@@ -278,7 +279,9 @@ export function createProfileDirectory(
     const verifiedProfiles = verified?.snapshot() ?? new Map();
     if (verifiedProfiles.size) preference ??= namePreference();
     for (const [id, value] of verifiedProfiles) {
-      const { nameIsFallback: _fallback, ...base } = next.get(id) ?? {};
+      const original = next.get(id);
+      const { nameIsFallback: _fallback, ...base } = original ?? {};
+      const managedZone = profileTimeZone(value.managed?.timezone);
       next.set(
         id,
         Object.freeze({
@@ -286,6 +289,12 @@ export function createProfileDirectory(
           name: verifiedLabel(value, preference),
           username: value.username,
           verified: value,
+          ...(managedZone ? { tz: managedZone } : {}),
+          ...(!original?.picture &&
+          !original?.managedPhotoInitialized &&
+          value.managed?.picture
+            ? { picture: value.managed.picture }
+            : {}),
         }),
       );
     }
@@ -331,6 +340,7 @@ export function createProfileDirectory(
         old?.nameIsFallback === value.nameIsFallback &&
         old?.username === value.username &&
         old?.picture === value.picture &&
+        old?.managedPhotoInitialized === value.managedPhotoInitialized &&
         old?.about === value.about &&
         old?.nip05 === value.nip05 &&
         old?.tz === value.tz &&

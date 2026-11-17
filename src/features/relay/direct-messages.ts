@@ -6,10 +6,11 @@ import type { RelayReader } from "./reader";
 import type { Outbox } from "./outbox";
 import type { ProfileSearch } from "./profile-search";
 import type { ProfileQueries } from "./profile-directory";
-import { newer, type RelayEvent } from "./events";
+import type { RelayEvent } from "./events";
 import { typedPublicKey } from "../../shared/identity/public-key";
 import {
   verifiedProfile,
+  newerVerifiedProfile,
   verifiedProfileFilter,
   verifiedProfileSubject,
   type VerifiedProfile,
@@ -117,7 +118,14 @@ export function createDirectMessages(
       const active = AbortSignal.any([lifetime, signal]);
       const events = unasked.length
         ? await directoryReader.read(
-            [verifiedProfileFilter(authority.pubkey, unasked)],
+            [
+              verifiedProfileFilter(
+                authority.pubkey,
+                unasked,
+                undefined,
+                authority.managedKind,
+              ),
+            ],
             { signal: active, priority: "background" },
           )
         : [];
@@ -130,7 +138,7 @@ export function createDirectMessages(
         if (!event) continue;
         const subject = verifiedProfileSubject(event, authority);
         if (subject && pubkeys.includes(subject))
-          heads.set(subject, newer(heads.get(subject), event));
+          heads.set(subject, newerVerifiedProfile(heads.get(subject), event));
       }
       const profiles = new Map(
         [...heads].flatMap(([subject, event]) => {

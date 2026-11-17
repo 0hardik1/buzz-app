@@ -91,3 +91,17 @@ it("keeps the time difference in the full profile row without duplicating its la
   expect(screen.getByText(/5:41 AM.* · .*ahead/)).toBeTruthy();
   expect(screen.queryByText(/local time|Pacific\/Kiritimati/)).toBeNull();
 });
+
+it("shows the office city before the clock without a relative offset", () => {
+  vi.useFakeTimers({ now: new Date("2026-01-15T15:41:30Z") });
+  render(
+    <ProfileLocalTime
+      timeZone="UTC"
+      className="local-time"
+      clockOnly
+      city="London"
+    />,
+  );
+  expect(screen.getByText("London · 3:41 PM")).toBeVisible();
+  expect(screen.queryByText(/ahead|behind|local time/)).toBeNull();
+});

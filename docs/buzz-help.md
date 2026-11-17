@@ -1830,3 +1830,10 @@ occurs. It contains operation metadata, with no draft text or secrets. See
 ## Plugin account actions
 
 Plugins can add actions to your avatar menu. Profile-related actions may appear just above Settings; other plugin actions appear below it.
+
+### Directory-managed profile fields
+
+Some communities show directory-managed work details on profiles. Edit Profile
+places these read-only fields under “Managed by” with a link to their source.
+Your photo and About remain editable. Communities without a managed timezone
+keep the timezone picker and “Show on profile” checkbox.

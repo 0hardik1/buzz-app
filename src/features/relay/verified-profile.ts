@@ -1,5 +1,9 @@
+import {
+  parseManagedProfile,
+  type ManagedProfile,
+} from "../profiles/managed-profile.ts";
 import { PROFILE_CACHE_MAX } from "./budget.ts";
-import { hasEventProof, type RelayEvent } from "./events.ts";
+import { hasEventProof, newer, type RelayEvent } from "./events.ts";
 
 export const VERIFIED_PROFILE_KIND = 30382;
 export const VERIFIED_PROFILE_BATCH = 128;
@@ -13,6 +17,7 @@ const key = /^[0-9a-f]{64}$/;
 /** Explicit NIP-11 capability, bound to this community's stable signing key. */
 export type VerifiedProfileAuthority = Readonly<{
   pubkey: string;
+  managedKind?: 30383;
   multipleIssuers: boolean;
   /** People search also returns each found person's head (NIP-11
    * `public_profile.searchable`), so a missing one means there is none. */
@@ -23,6 +28,7 @@ export type VerifiedProfile = Readonly<{
   displayName: string;
   username: string;
   fullName?: string;
+  managed?: ManagedProfile;
   issuerLabel: string;
   verifiedAt: number;
   /** Observed on a completed current subscription, or retained while unreconciled. */
@@ -62,6 +68,7 @@ export function verifiedProfileDiscovery(
     throw new Error("Malformed profile discovery");
   return Object.freeze({
     pubkey: info.self,
+    ...(fields.managed_kind === 30383 ? { managedKind: 30383 as const } : {}),
     multipleIssuers: fields.multiple_issuers,
     ...(fields.searchable === true ? { searchable: true as const } : {}),
   });
@@ -72,7 +79,7 @@ export function savedVerifiedProfileAuthority(
   value: unknown,
 ): VerifiedProfileAuthority | undefined {
   if (!value || typeof value !== "object") return;
-  const { pubkey, multipleIssuers, searchable } = value as Record<
+  const { pubkey, multipleIssuers, searchable, managedKind } = value as Record<
     string,
     unknown
   >;
@@ -84,6 +91,7 @@ export function savedVerifiedProfileAuthority(
     return;
   return Object.freeze({
     pubkey,
+    ...(managedKind === 30383 ? { managedKind: 30383 as const } : {}),
     multipleIssuers,
     ...(searchable === true ? { searchable: true as const } : {}),
   });
@@ -106,7 +114,8 @@ export function verifiedProfileSubject(
 ): string | undefined {
   if (
     !hasEventProof(event) ||
-    event.kind !== VERIFIED_PROFILE_KIND ||
+    (event.kind !== VERIFIED_PROFILE_KIND &&
+      event.kind !== authority.managedKind) ||
     event.pubkey !== authority.pubkey
   )
     return;
@@ -126,7 +135,7 @@ export function verifiedProfile(
   const subject = verifiedProfileSubject(event, authority);
   if (
     !subject ||
-    event.content !== "" ||
+    (event.kind === VERIFIED_PROFILE_KIND && event.content !== "") ||
     (event.tags.length !== 7 && event.tags.length !== 8)
   )
     return;
@@ -158,9 +167,12 @@ export function verifiedProfile(
     verifiedAt > event.created_at
   )
     return;
+  const managed =
+    event.kind === 30383 ? parseManagedProfile(event.content) : undefined;
   return Object.freeze({
     displayName,
     username,
+    ...(managed ? { managed } : {}),
     ...(fullName !== undefined ? { fullName } : {}),
     issuerLabel,
     verifiedAt,
@@ -170,7 +182,7 @@ export function verifiedProfile(
 }
 
 export type VerifiedProfileFilter = Readonly<{
-  kinds: readonly [30382];
+  kinds: readonly [30382] | readonly [30382, 30383];
   authors: readonly [string];
   "#d": readonly string[];
   limit: number;
@@ -189,9 +201,11 @@ export function verifiedProfileFilter(
   authority: string,
   subjects: readonly string[],
   since?: number,
+  kind: 30382 | 30383 = VERIFIED_PROFILE_KIND,
 ): VerifiedProfileFilter {
   const unique = [...new Set(subjects)];
   if (
+    (kind !== 30382 && kind !== 30383) ||
     !key.test(authority) ||
     !unique.length ||
     unique.length > VERIFIED_PROFILE_BATCH ||
@@ -200,10 +214,21 @@ export function verifiedProfileFilter(
   )
     throw new Error("Invalid verified-profile subscription");
   return {
-    kinds: [VERIFIED_PROFILE_KIND],
+    kinds: kind === 30383 ? [30382, 30383] : [30382],
     authors: [authority],
     "#d": unique,
-    limit: unique.length,
+    limit: unique.length * (kind === 30383 ? 2 : 1),
     ...(since !== undefined ? { since } : {}),
   };
+}
+
+/** A companion wins ties with its atomically published legacy event; pre-upgrade names remain usable. */
+export function newerVerifiedProfile(
+  old: RelayEvent | undefined,
+  event: RelayEvent,
+): RelayEvent {
+  if (old && old.created_at === event.created_at && old.kind !== event.kind) {
+    return old.kind === 30383 ? old : event;
+  }
+  return newer(old, event);
 }

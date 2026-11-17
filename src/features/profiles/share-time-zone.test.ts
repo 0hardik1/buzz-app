@@ -17,6 +17,10 @@ import {
 const viewer = keypair();
 const community = "https://community.example.org";
 const zone = "Asia/Kolkata";
+const standardCommunities = () =>
+  ({
+    relay: { snapshot: () => ({ session: undefined }) },
+  }) as unknown as Communities;
 
 afterEach(resetSharedTimeZones);
 
@@ -43,7 +47,7 @@ function share(
     shared: shareDeviceTimeZone({
       community,
       viewer: viewer.pubkey,
-      communities: {} as Communities,
+      communities: standardCommunities(),
       read: events,
       inspect,
       publish,
@@ -162,7 +166,7 @@ it("publishes nothing after a failed strong read and tries again on the next rea
 });
 
 it("stands aside for a profile save that is running or started after it began", async () => {
-  const communities = {} as Communities;
+  const communities = standardCommunities();
   // A save running when the share begins.
   beginProfileSave(communities);
   const running = share(Promise.resolve([profile(viewer, { name: "Mic" })]), {
@@ -215,7 +219,7 @@ it("retries after a run abandoned during its strong read", async () => {
 });
 
 it("lets a save wait for a write it has handed to the writer", async () => {
-  const communities = {} as Communities;
+  const communities = standardCommunities();
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
   const { publish, shared } = share(
@@ -294,7 +298,7 @@ it("remembers on this device that a community was settled, across launches", asy
       await next.shareDeviceTimeZone({
         community,
         viewer: viewer.pubkey,
-        communities: {} as Communities,
+        communities: standardCommunities(),
         read: Promise.resolve(events),
         inspect: async () => profileFromEvent(events[0]),
         publish,
