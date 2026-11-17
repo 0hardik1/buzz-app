@@ -1315,7 +1315,8 @@ function Composer({
   const editLocked = useListedChannel(
     listed,
     channelId,
-    (channel) => !channelCan(channel, threadRootId ? "reply" : "post"),
+    (channel) =>
+      !!channel && !channelCan(channel, threadRootId ? "reply" : "post"),
   );
   const editDisabled = disabled || editLocked;
   const chips = useMemo(
