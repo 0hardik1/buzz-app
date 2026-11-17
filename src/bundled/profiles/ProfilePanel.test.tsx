@@ -1186,8 +1186,10 @@ it("shows historical verification time and issuer, discloses cache, and hides di
     expect(
       await screen.findByRole("heading", { name: "Alice Example" }),
     ).toBeVisible();
-    expect(screen.getByText("Name verified by Example")).toBeVisible();
-    expect(screen.getByText("Alice Example")).toBeVisible();
+    expect(
+      screen.getByText("Name verified by Example", { selector: "p" }),
+    ).toBeVisible();
+    expect(screen.getByText("@alice")).toBeVisible();
     expect(
       screen.getByText("@alice").closest("p")?.querySelector("svg"),
     ).not.toBeNull();
@@ -1221,7 +1223,11 @@ it("shows historical verification time and issuer, discloses cache, and hides di
     expect(
       screen.getByRole("region", { name: "Profile details" }),
     ).toHaveFocus();
-    expect(screen.getByText("Name verified by Example")).toBeVisible();
+    expect(
+      within(screen.getByRole("tabpanel", { name: "Info" })).getByText(
+        "Name verified by Example",
+      ),
+    ).toBeVisible();
     expect(screen.getByText(/Last verified/)).toHaveTextContent(/1970/);
     expect(screen.getByText(/current issuer endorsement/)).toBeVisible();
     act(() => live.state({ status: "connecting", routes: [] }));
@@ -1232,7 +1238,7 @@ it("shows historical verification time and issuer, discloses cache, and hides di
     expect(screen.getByText(/Cached evidence/)).toBeVisible();
     await act(async () => live.state({ status: "connected", routes: [] }));
     await waitFor(() =>
-      expect(screen.queryByText("Name verified by Example")).toBeNull(),
+      expect(screen.queryAllByText("Name verified by Example")).toHaveLength(0),
     );
     expect(screen.queryByText("Alice Example")).toBeNull();
     expect(screen.queryByText(/Cached verification/)).toBeNull();
