@@ -23,6 +23,9 @@ export function policyRelay({
   // deliver it to, so publish skips its delivery check for that community.
   let closedAcceptance;
   let presenceHeld = false;
+  // A NIP-FI front-door refusal: every signed request gets the relay's exact
+  // plain-text denial (buzz-auth `nip_fi/denial.rs`) until cleared.
+  let refusal;
   const presenceWaiters = [];
   report.presenceSnapshots = [];
   report.presencePublications = [];
@@ -72,6 +75,8 @@ export function policyRelay({
   }
   const heldEose = new Set();
   const pendingEose = [];
+  // Stored events the next replaying REQ for a channel sends before EOSE.
+  const replays = new Map();
   const pendingProfiles = [];
   const pendingUnread = [];
   const unreadHolds = [];
@@ -92,6 +97,8 @@ export function policyRelay({
           ? "observer"
           : undefined);
   report.wireFrames = [];
+  // Subscription ids are per socket: pair a frame with its socket to match it.
+  report.socketFrames = [];
   report.startupFrames = [];
   let emptyRoster = false;
   let heldContent = false;
@@ -103,6 +110,7 @@ export function policyRelay({
   };
   function emit(socket, frame) {
     report.wireFrames.push(frame);
+    report.socketFrames.push({ socket: sockets.indexOf(socket), frame });
     if (wsLimit)
       report.startupFrames.push({
         socket: sockets.indexOf(socket),
@@ -144,6 +152,13 @@ export function policyRelay({
     holdEose(channel) {
       heldEose.add(channel);
     },
+    /** Model a reconnect's replay: fixture events predate the client's
+     * wall-clock `since`, so the next REQ whose filter for `channel` asks for
+     * a replay (limit above zero) sends these events, up to that limit,
+     * before EOSE. Passing the limit or more cuts the replay. */
+    replayNext(community, channel, events) {
+      replays.set(`${community}/${channel}`, events);
+    },
     releaseEose(channel) {
       heldEose.delete(channel);
       for (let i = pendingEose.length - 1; i >= 0; i--) {
@@ -171,14 +186,20 @@ export function policyRelay({
     emptyRoster() {
       emptyRoster = true;
     },
+    // Quotas refuse primary's next matching read: every joined community
+    // reads its own roster and heads at startup.
     quotaNextRoster(seconds = 1) {
-      quotas.set("roster", seconds);
+      quotas.set("primary/roster", seconds);
     },
     quotaNextHead(channel, seconds = 1) {
-      quotas.set(channel, seconds);
+      quotas.set(`primary/${channel}`, seconds);
     },
     quotaNextOlder(channel, seconds = 1) {
-      quotas.set(`older:${channel}`, seconds);
+      quotas.set(`primary/older:${channel}`, seconds);
+    },
+    /** With `only`, just the signed requests to those paths. */
+    refuseSigned(status, body, only) {
+      refusal = status ? { status, body, only } : undefined;
     },
     async fetch(url, init) {
       try {
@@ -190,6 +211,14 @@ export function policyRelay({
           expect(new URL(url).pathname).toBe("/");
           return Response.json(discovery?.(communityOf(url)) ?? {});
         }
+        if (
+          refusal &&
+          (!refusal.only || refusal.only.includes(new URL(url).pathname))
+        )
+          return new Response(refusal.body, {
+            status: refusal.status,
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
         expect([
           "/query",
           "/profiles/search",
@@ -475,7 +504,7 @@ export function policyRelay({
         const channel = filter["#h"]?.[0];
         // Head catch-up is an exact top-level channel window, not a batched
         // sidebar preview that happens to contain that channel.
-        const quota = filter.kinds?.includes(39002)
+        const scope = filter.kinds?.includes(39002)
           ? "roster"
           : filter.kinds?.includes(9)
             ? filter.until === undefined
@@ -484,6 +513,7 @@ export function policyRelay({
                 : undefined
               : `older:${channel}`
             : undefined;
+        const quota = scope && `${community}/${scope}`;
         if (quotas.has(quota)) {
           const seconds = quotas.get(quota);
           quotas.delete(quota);
@@ -509,7 +539,7 @@ export function policyRelay({
           filter.until === undefined
         )
           return new Promise((resolve, reject) => {
-            const held = { pending: true, aborted: false };
+            const held = { community, pending: true, aborted: false };
             unreadHolds.push(held);
             const abort = () => {
               held.pending = false;
@@ -695,6 +725,15 @@ export function policyRelay({
               }
             }
             this.routes.set(id, filters);
+            for (const filter of filters) {
+              const key = `${this.community}/${filter["#h"]?.[0]}`;
+              const events = replays.get(key);
+              if (!events || !(filter.limit > 0) || filter["#h"].length !== 1)
+                continue;
+              replays.delete(key);
+              for (const event of events.slice(0, filter.limit))
+                emit(this, ["EVENT", id, event]);
+            }
             if (routes.some((route) => heldEose.has(route)))
               pendingEose.push({ socket: this, id, routes });
             else if (eoseMs) setTimeout(() => emit(this, ["EOSE", id]), eoseMs);

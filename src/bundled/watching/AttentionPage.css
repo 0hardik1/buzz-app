@@ -41,23 +41,12 @@
 .attention-markdown > :is(h1, h2, h3, h4, h5, h6) {
   margin: var(--space-4) 0 0;
 }
-.attention-markdown > :first-child {
-  margin-block-start: 0;
+.attention-markdown > :not(h1, h2, h3, h4, h5, h6) {
+  margin-block: 0;
 }
-.attention-markdown ul {
-  list-style-type: disc;
-}
-.attention-markdown ol {
-  list-style-type: decimal;
-}
-.attention-markdown pre {
-  overflow: auto;
-  margin: 0;
-}
-.attention-markdown ul,
-.attention-markdown ol {
-  margin: 0;
-  padding-inline-start: var(--space-5);
+.attention-markdown .attention-link {
+  text-decoration: underline;
+  cursor: pointer;
 }
 .attention-agent-head,
 .attention-actions {
@@ -158,6 +147,7 @@
   }
 }
 .attention-interest-head {
+  padding-block-start: var(--space-2);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -166,12 +156,6 @@
 .attention-interest-head > h4 {
   min-width: 0;
   overflow-wrap: anywhere;
-}
-@media (hover: hover) and (pointer: fine) {
-  .attention-interest-head:not(:hover, :focus-within) .attention-delete {
-    opacity: 0;
-    pointer-events: none;
-  }
 }
 .attention-instructions-preview {
   min-width: 0;

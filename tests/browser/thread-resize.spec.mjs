@@ -1,6 +1,7 @@
 import { test, expect } from "./fixture.mjs";
 import { frames, open, settle, wheel } from "./timeline.mjs";
 import { generateSecretKey, getPublicKey, finalizeEvent } from "nostr-tools";
+import { animationsSettled } from "./animations.mjs";
 
 test.use({
   productionBroker: true,
@@ -19,9 +20,12 @@ test("thread stays beside the channel whenever both panes fit", async ({
 }, testInfo) => {
   await open(page, app);
   await page.getByRole("separator", { name: "Resize sidebar" }).press("Home");
+  // A narrow thread covers the channel, removing it from the accessibility
+  // tree; its geometry still applies.
   const channel = page.getByRole("article", {
     name: "Conversation",
     exact: true,
+    includeHidden: true,
   });
   const input = channel.getByRole("textbox", { name: "Message #Alpha" });
   const draft =
@@ -143,11 +147,7 @@ test("thread preserves bottom and reading position through activity and composer
   // its region at once, but it stays mounted until its animation ends; its
   // removal is the last resize.
   const arrived = (row) =>
-    row
-      .locator("[data-message-activity]")
-      .evaluate((section) =>
-        Promise.all(section.getAnimations().map((motion) => motion.finished)),
-      );
+    animationsSettled(row.locator("[data-message-activity]"));
   const left = (row) =>
     expect(row.locator("[data-message-activity]")).toHaveCount(0);
   await expect(history.locator("[data-message-id]")).toHaveCount(33);
@@ -349,7 +349,7 @@ test.describe("exact history resize ownership", () => {
     const held = new Promise((r) => (release = r)),
       seen = new Promise((r) => (intercepted = r));
     let first = true;
-    await page.route("**/api/relay/**/query", async (route) => {
+    await page.route("**/api/relay/primary/query", async (route) => {
       if (
         !first ||
         !route

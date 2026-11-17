@@ -1,4 +1,5 @@
 import {
+  createContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -29,7 +30,7 @@ import {
 } from "./departure";
 import { CommunityDialog } from "./CommunityDialog";
 import type { FederatedIdentity } from "../federated-identity/service";
-import type { InviteLink } from "./invite-link";
+import type { JoinRequest } from "./invite-intent";
 import { CommunityPickerItem, MEMBERSHIP_SECTION } from "./CommunityPickerItem";
 import { communityDestination } from "./destination";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
@@ -46,32 +47,62 @@ import {
   communityActionLabel,
 } from "./names";
 import { useCommunityRole } from "./useCommunityRole";
+import type {
+  CommunityUnread,
+  CommunityUnreads,
+} from "../notifications/community-unread";
+
+const noUnreads: ReadonlyMap<string, CommunityUnread> = new Map();
 
 const noSubscription = () => () => {};
+
+/** Opens the shell's community switcher from a page. Absent where the shell
+ * doesn't mount the switcher. */
+export const OpenCommunitySwitcher = createContext<(() => void) | undefined>(
+  undefined,
+);
+
+/** A host that opens the switcher from elsewhere owns its open state, so it
+ * passes both props; otherwise the picker keeps the state itself. */
+type SwitcherState =
+  | { open: boolean; onOpenChange: (open: boolean) => void }
+  | { open?: undefined; onOpenChange?: undefined };
 
 /** Shell navigation only: selecting a community remains owned by Communities. */
 export function CommunityPicker({
   communities,
+  unreads,
   federatedIdentity,
   invite,
   onInviteClose,
   onSelect,
   onOpenTarget,
   settingsCards,
+  open,
+  onOpenChange,
 }: {
   communities: Communities;
+  /** Badges communities other than the selected one; absent shows none. */
+  unreads?: Pick<CommunityUnreads, "snapshot" | "subscribe"> | undefined;
   federatedIdentity?: FederatedIdentity | undefined;
-  invite?: (InviteLink & { requestId: number }) | undefined;
+  invite?: (JoinRequest & { requestId: number }) | undefined;
   onInviteClose?: ((requestId: number) => void) | undefined;
   settingsCards?: Pick<SettingsCards, "subscribe" | "has"> | undefined;
   onSelect?: ((id: string | null) => void) | undefined;
   /** Menu destinations (Invites, hosting) open through the host's navigation. */
   onOpenTarget?: ((target: OpenTarget) => void) | undefined;
-}) {
-  const [switcherOpen, setSwitcherOpen] = useState(false);
+} & SwitcherState) {
+  const [localOpen, setLocalOpen] = useState(false);
+  const switcherOpen = open ?? localOpen;
+  const setSwitcherOpen = onOpenChange ?? setLocalOpen;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [joining, setJoining] = useState(false);
   const navigated = useRef(false);
+  // However it opened, a fresh switcher returns focus to its trigger until a
+  // choice navigates.
+  useLayoutEffect(() => {
+    if (switcherOpen) navigated.current = false;
+  }, [switcherOpen]);
   const wasJoining = useRef(false);
   useEffect(() => {
     if (wasJoining.current && !joining) triggerRef.current?.focus();
@@ -183,16 +214,18 @@ export function CommunityPicker({
   const active = client.memberships.find(
     (membership) => membership.id === client.selected,
   );
+  const unread = useSyncExternalStore(
+    unreads?.subscribe ?? noSubscription,
+    () => unreads?.snapshot() ?? noUnreads,
+  );
+  const elsewhere = client.memberships.some(
+    (membership) =>
+      membership.id !== client.selected && unread.get(membership.id)?.unread,
+  );
   return (
     <>
       <nav aria-label="Communities" className={styles.picker}>
-        <PopoverRoot
-          open={switcherOpen}
-          onOpenChange={(open) => {
-            if (open) navigated.current = false;
-            setSwitcherOpen(open);
-          }}
-        >
+        <PopoverRoot open={switcherOpen} onOpenChange={setSwitcherOpen}>
           <PopoverTrigger
             render={
               <IconButton
@@ -200,7 +233,7 @@ export function CommunityPicker({
                 size="md"
                 variant="avatar"
                 shape="round"
-                aria-label={`Community switcher: ${active ? communityName(active) : client.memberships.length === 0 ? "Communities" : "Personal space"}`}
+                aria-label={`Community switcher: ${active ? communityName(active) : client.memberships.length === 0 ? "Communities" : "Personal space"}${elsewhere ? ", unread in other communities" : ""}`}
                 title={
                   active
                     ? communityName(active)
@@ -209,17 +242,22 @@ export function CommunityPicker({
                       : "Personal space"
                 }
                 icon={
-                  active ? (
-                    <Avatar
-                      size="small"
-                      shape="squircle"
-                      alt=""
-                      fallback={communityName(active)}
-                      src={active.publishedIcon ?? active.icon}
-                    />
-                  ) : (
-                    <GlobeIcon size={22} aria-hidden="true" />
-                  )
+                  <span className={styles.trigger}>
+                    {active ? (
+                      <Avatar
+                        size="small"
+                        shape="squircle"
+                        alt=""
+                        fallback={communityName(active)}
+                        src={active.publishedIcon ?? active.icon}
+                      />
+                    ) : (
+                      <GlobeIcon size={22} aria-hidden="true" />
+                    )}
+                    {elsewhere && (
+                      <span className={styles.triggerDot} aria-hidden="true" />
+                    )}
+                  </span>
                 }
               />
             }
@@ -277,6 +315,7 @@ export function CommunityPicker({
                   selected={selected}
                   viewer={client.viewer}
                   session={selected ? session : undefined}
+                  unread={selected ? undefined : unread.get(membership.id)}
                   manager={selected && invites && role.manager}
                   leaving={
                     leaving?.membership.id === membership.id && leaving.pending
@@ -324,6 +363,7 @@ export function CommunityPicker({
                     version: 1,
                     kind: "settings",
                     section: "block.builderlab/login",
+                    route: { version: 1, params: "create-community" },
                   });
                 }}
               />
@@ -338,6 +378,7 @@ export function CommunityPicker({
           federatedIdentity={federatedIdentity}
           mode="join"
           invite={invite}
+          submittedDestination={invite?.submitted === true}
           onJoined={(id) => select(id)}
           close={() => {
             setJoining(false);
@@ -371,7 +412,9 @@ export function CommunityPicker({
                 Cancel
               </Button>
               <Button
-                variant={leaving.intent === "leave" ? "destructive" : "primary"}
+                variant={
+                  leaving.intent === "leave" ? "destructive" : "prominent"
+                }
                 loading={leaving.pending}
                 onClick={() => void depart()}
               >
