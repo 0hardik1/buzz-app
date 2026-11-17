@@ -164,14 +164,14 @@ it("names people by shared, then searched, verified names and keeps what found t
   expect(withVerifiedNames(people, page, shared)).toEqual([
     {
       pubkey: key(1),
-      name: "fname",
+      name: "Fake Name",
       username: "fname",
       fullName: "Fake Name",
       profileNames: ["Fake", "fak"],
     },
     {
       pubkey: key(2),
-      name: "bname",
+      name: "Bea Name",
       username: "bname",
       fullName: "Bea Name",
       profileNames: ["Bea"],
@@ -496,6 +496,8 @@ it("names verified people by full name on a device that prefers it, and refolds 
       await vi.runOnlyPendingTimersAsync();
     });
     const shown = () => directory.queries.snapshot().get(person.pubkey)?.name;
+    expect(shown()).toBe("Ada Lovelace");
+    act(() => setNamePreference("username"));
     expect(shown()).toBe("ada");
     act(() => setNamePreference("full-name"));
     expect(shown()).toBe("Ada Lovelace");

@@ -23,10 +23,7 @@ import {
   threadPlacementPreference,
 } from "../features/messages/thread-preferences";
 
-import {
-  namePreference,
-  setNamePreference,
-} from "../features/profiles/name-preference";
+import { namePreference } from "../features/profiles/name-preference";
 import {
   followUpBehaviorPreference,
   setFollowUpBehaviorPreference,
@@ -782,10 +779,9 @@ it("offers a choice between usernames and full names only where the community ve
     for (const listener of listeners) listener();
   });
   const choice = screen.getByRole("combobox", { name: "Show people by" });
-  expect(choice).toHaveTextContent("Username");
+  expect(choice).toHaveTextContent("Full name");
   const user = userEvent.setup();
   await user.click(choice);
-  await user.click(await screen.findByRole("option", { name: "Full name" }));
-  expect(namePreference()).toBe("full-name");
-  setNamePreference("username");
+  await user.click(await screen.findByRole("option", { name: "Username" }));
+  expect(namePreference()).toBe("username");
 });

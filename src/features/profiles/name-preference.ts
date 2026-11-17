@@ -7,15 +7,15 @@ const preferenceKey = "buzz-name-preference.v1";
 const changedEvent = "buzz-name-preference-changed";
 let unsavedPreference: NamePreference | undefined;
 
-/** Device-local; the community's verified display name (the username) by default. */
+/** Device-local; verified full names by default, with usernames as fallback. */
 export function namePreference(): NamePreference {
   if (unsavedPreference !== undefined) return unsavedPreference;
   try {
-    return localStorage.getItem(preferenceKey) === "full-name"
-      ? "full-name"
-      : "username";
+    return localStorage.getItem(preferenceKey) === "username"
+      ? "username"
+      : "full-name";
   } catch {
-    return "username";
+    return "full-name";
   }
 }
 export function subscribeNamePreference(listener: () => void) {
@@ -36,7 +36,7 @@ export function useNamePreference() {
   return useSyncExternalStore(
     subscribeNamePreference,
     namePreference,
-    () => "username" as const,
+    () => "full-name" as const,
   );
 }
 export function setNamePreference(value: NamePreference): void {
