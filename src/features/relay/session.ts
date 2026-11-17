@@ -769,6 +769,39 @@ export function createRelaySession(
       settings?.signal?.throwIfAborted();
       if (closed || epoch !== accessEpoch)
         throw new DOMException("Stale relay search", "AbortError");
+    } else if (
+      channelTraffic &&
+      filters.every(
+        (filter) =>
+          filter["#p"]?.length === 1 &&
+          filter["#p"][0] === transport?.viewer &&
+          !filter["#h"]?.length &&
+          !!filter.kinds?.length &&
+          filter.kinds.every(chat),
+      )
+    ) {
+      // Mentions of the viewer reach public channels it has not joined. Read
+      // the metadata of those this session does not know, so visibility decides.
+      const unknown = [
+        ...new Set(
+          events.flatMap((event) => {
+            const tags = event.tags.filter(([name]) => name === "h");
+            const id = tags.length === 1 ? tags[0]?.[1] : undefined;
+            return chat(event.kind) && id && !channels.queries.get?.(id)
+              ? [id]
+              : [];
+          }),
+        ),
+      ];
+      if (unknown.length) {
+        await channels.queries.resolve?.(unknown, {
+          ...settings,
+          viewerLookup: true,
+        });
+        settings?.signal?.throwIfAborted();
+        if (closed || epoch !== accessEpoch)
+          throw new DOMException("Stale relay read", "AbortError");
+      }
     }
     const visible = accept(
       events,
@@ -3713,8 +3746,31 @@ export function createRelaySession(
   }
   traffic = transport?.subscribe?.({
     observer: (frame, generation) => activity.receive(frame, generation),
-    receive(events, provenance) {
+    mentions: true,
+    receive: function receive(events, provenance) {
       if (closed) return;
+      // A mention from a public channel the viewer has not joined can name a
+      // channel this session has not read. Read its metadata, then admit as usual.
+      const outside = provenance?.mention ? provenance.channelId : undefined;
+      if (outside && !channels.queries.get?.(outside)) {
+        const epoch = accessEpoch;
+        const generation = liveGeneration;
+        void channels.queries
+          .resolve?.([outside], { priority: "background", viewerLookup: true })
+          .then(
+            () => {
+              if (
+                !closed &&
+                epoch === accessEpoch &&
+                generation === liveGeneration &&
+                channels.queries.get?.(outside)
+              )
+                receive(events, provenance);
+            },
+            () => {},
+          );
+        return;
+      }
       receiveSidebar(events);
       reminders?.receive(events);
       const candidates = new Set(
@@ -3794,8 +3850,10 @@ export function createRelaySession(
       if (!closed && epoch === accessEpoch && generation === liveGeneration)
         inboxFeed.reactions.receive(events, provenance?.phase);
       const replay = provenance?.phase === "replay";
+      // Agents and other live listeners never hear the viewer's mention route.
       if (
         (provenance?.phase === "live" || replay) &&
+        !provenance?.mention &&
         (replayListeners.size || (!replay && liveEventListeners.size)) &&
         visible.length &&
         !closed &&

@@ -2,6 +2,7 @@ import { createInboxReactions } from "./inbox-reactions";
 import { byteSize } from "./budget";
 import type { ChannelQueries } from "./contracts";
 import type { RelayEvent, ReadFilter } from "./events";
+import { outsideChannel } from "./inbox";
 import type { RelayReader } from "./reader";
 
 const mentionKinds = [9, 40002];
@@ -74,10 +75,12 @@ export function createInboxFeed({
     if (!event.tags.some(([name, value]) => name === "p" && value === viewer))
       return false;
     const hs = event.tags.filter(([name]) => name === "h");
+    const outside =
+      hs.length === 1 ? channels.get?.(hs[0]?.[1] ?? "") : undefined;
     return (
       hs.length === 0 ||
       (hs.length === 1 &&
-        channels
+        (channels
           .list()
           .channels.some(
             (channel) =>
@@ -85,7 +88,8 @@ export function createInboxFeed({
               !channel.huddle &&
               !channel.cached &&
               channel.members?.includes(viewer),
-          ))
+          ) ||
+          (!!outside && outsideChannel(outside, viewer))))
     );
   };
   function project(events: readonly RelayEvent[]) {

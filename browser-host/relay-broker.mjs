@@ -1941,10 +1941,12 @@ export function relayBrokerPlugin({
               observer,
               interestRevision,
               presenceAuthors,
-              statusDeltas;
+              statusDeltas,
+              mentions;
             try {
               const body = JSON.parse(raw);
               statusDeltas = body.statusDeltas === true;
+              mentions = body.mentions === true;
               channels = liveChannels(body.channels);
               joined = liveJoined(channels, body.joined ?? []);
               interestRevision = body.interestRevision ?? 0;
@@ -2185,6 +2187,7 @@ export function relayBrokerPlugin({
                     });
                 },
                 presence: (event) => write("presence", event),
+                ...(mentions ? { mentions } : {}),
                 telemetry: (event, generation) => {
                   if (res.destroyed) return;
                   try {

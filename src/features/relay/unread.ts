@@ -1,7 +1,7 @@
 import type { ProfileQueries } from "./profile-directory";
 import { workflowOwner } from "./workflow-attribution";
 import { agentAudience } from "./audience";
-import type { InboxItem, InboxSnapshot } from "./inbox";
+import { outsideChannel, type InboxItem, type InboxSnapshot } from "./inbox";
 import type { ChannelMessage, ChannelQueries } from "./contracts";
 import type { RelayEvent } from "./events";
 import {
@@ -523,13 +523,22 @@ export function createUnread({
     }
     return found;
   };
+  const outside = (id: string) => {
+    const channel = channels.get?.(id);
+    return !!channel && outsideChannel(channel, viewer);
+  };
   const allowed = (id: string) =>
     channels
       .list()
       .channels.some(
         (channel) =>
           channel.id === id && !channel.cached && member(channel.members),
-      );
+      ) || outside(id);
+  /** Outside a channel, only its mentions of the viewer are evidence. */
+  const outsideEvidence = (event: RelayEvent) =>
+    contentKind(event)
+      ? mentionsViewer(event)
+      : event.tags.every(([name, id]) => name !== "e" || events.has(id ?? ""));
   const keyFor = (target: ReadTarget) =>
     `${target.channelId}:${targetKey(target)}`;
   /** Counted evidence, or a fetched parent/root kept only for structure. */
@@ -1439,14 +1448,21 @@ export function createUnread({
     indexEvidence();
     const state = reads.state();
     const items: InboxItem[] = [];
+    const listed = channels.list().channels;
+    const ids = new Set(listed.map((channel) => channel.id));
+    const others = [...byChannel.keys()].flatMap((id) => {
+      const channel = ids.has(id) ? undefined : channels.get?.(id);
+      return channel ? [channel] : [];
+    });
     if (!closed)
-      for (const channel of channels.list().channels) {
+      for (const channel of [...listed, ...others]) {
         if (
           channel.huddle ||
           channel.metadataPending ||
           channel.cached ||
           channel.archived ||
-          !channel.members?.includes(viewer)
+          (!channel.members?.includes(viewer) &&
+            !outsideChannel(channel, viewer))
         )
           continue;
         const dm = channel.channelType === "dm";
@@ -1775,7 +1791,13 @@ export function createUnread({
     const owners = channelOwnership((targetId) => retained.get(targetId));
     for (const [id, event] of retained) {
       const channels = owners(event);
-      if (!channels || [...channels].some((channel) => !allowed(channel)))
+      if (
+        !channels ||
+        [...channels].some((channel) => !allowed(channel)) ||
+        (contentKind(event) &&
+          [...channels].some(outside) &&
+          !mentionsViewer(event))
+      )
         events.delete(id);
     }
     indexed = false;
@@ -2373,7 +2395,11 @@ export function createUnread({
       )
         continue;
       const channels = owners(event);
-      if (!channels || [...channels].some((channel) => !allowed(channel)))
+      if (
+        !channels ||
+        [...channels].some((channel) => !allowed(channel)) ||
+        ([...channels].some(outside) && !outsideEvidence(event))
+      )
         continue;
       const size = new TextEncoder().encode(JSON.stringify(event)).byteLength;
       if (events.size >= 4096 || bytes + size > 8 * 1024 * 1024) {
