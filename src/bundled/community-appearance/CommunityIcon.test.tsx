@@ -100,6 +100,7 @@ it("offers a retry when the current icon can't be read", async () => {
   expect(screen.getByText("Icon unknown")).toBeVisible();
   published.readFails = false;
   await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(screen.getByRole("button", { name: "Choose image…" })).toHaveFocus();
   expect(await screen.findByText("Icon set")).toBeVisible();
 });
 
