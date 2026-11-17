@@ -315,6 +315,11 @@
 .channelSection + .channelSection {
   margin-top: var(--space-4);
 }
+[data-sidebar-slot]:has(> .channelSection)
+  ~ [data-sidebar-slot]
+  > .channelSection:first-child {
+  margin-top: var(--space-4);
+}
 .channelSection[data-drop-target] {
   border-radius: var(--radius-row);
   background: var(--affordance-panel-hover);

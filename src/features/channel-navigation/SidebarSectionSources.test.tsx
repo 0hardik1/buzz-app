@@ -57,7 +57,7 @@ function renderSources(sources: readonly RegisteredSidebarSectionSource[]) {
     >
       {(slots, sources) => (
         <>
-          {sources}
+          {sources()}
           {slots.map((slot) => (
             <SidebarSectionSlotView key={slot.key} slot={slot} />
           ))}
@@ -87,7 +87,7 @@ it.each([false, true])(
       >
         {(slots, nodes) => (
           <>
-            {nodes}
+            {nodes()}
             {slots.map((slot) => (
               <SidebarSectionSlotView key={slot.key} slot={slot} />
             ))}
@@ -98,7 +98,11 @@ it.each([false, true])(
     );
     expect(screen.getByText("Solo survives")).toBeInTheDocument();
     expect(screen.getByText("v1 survives")).toBeInTheDocument();
-    expect(ready).toHaveBeenLastCalledWith(true);
+    expect(ready).toHaveBeenLastCalledWith(
+      true,
+      expect.any(Array),
+      expect.any(Array),
+    );
   },
 );
 
@@ -122,7 +126,7 @@ it("settles after a live source stops publishing and later resumes", () => {
     >
       {(slots, nodes) => (
         <>
-          {nodes}
+          {nodes()}
           {slots.map((slot) => (
             <SidebarSectionSlotView key={slot.key} slot={slot} />
           ))}
@@ -132,10 +136,18 @@ it("settles after a live source stops publishing and later resumes", () => {
   );
   act(() => toggle(false));
   expect(screen.queryByText("Optional row")).toBeNull();
-  expect(ready).toHaveBeenLastCalledWith(true);
+  expect(ready).toHaveBeenLastCalledWith(
+    true,
+    expect.any(Array),
+    expect.any(Array),
+  );
   act(() => toggle(true));
   expect(screen.getByText("Optional row")).toBeInTheDocument();
-  expect(ready).toHaveBeenLastCalledWith(true);
+  expect(ready).toHaveBeenLastCalledWith(
+    true,
+    expect.any(Array),
+    expect.any(Array),
+  );
 });
 
 it("settles when another source emits an already-owned slot key", () => {
@@ -154,7 +166,7 @@ it("settles when another source emits an already-owned slot key", () => {
     >
       {(slots, nodes) => (
         <>
-          {nodes}
+          {nodes()}
           {slots.map((slot) => (
             <SidebarSectionSlotView key={slot.key} slot={slot} />
           ))}
@@ -164,7 +176,11 @@ it("settles when another source emits an already-owned slot key", () => {
   );
   expect(screen.getByText("first row")).toBeInTheDocument();
   expect(screen.queryByText("second row")).toBeNull();
-  expect(ready).toHaveBeenLastCalledWith(true);
+  expect(ready).toHaveBeenLastCalledWith(
+    true,
+    expect.any(Array),
+    expect.any(Array),
+  );
 });
 it("keeps preference order and valid opaque group ids, skipping only invalid or duplicate slots", () => {
   const source = owner("team", () => null);
@@ -298,7 +314,7 @@ it("keeps the host and healthy slots mounted through late activation, source fai
     >
       {(slots, sources) => (
         <>
-          {sources}
+          {sources()}
           <StatefulRow label="Host row" />
           {slots.map((slot) => (
             <SidebarSectionSlotView key={slot.key} slot={slot} />
@@ -310,12 +326,20 @@ it("keeps the host and healthy slots mounted through late activation, source fai
   const host = screen.getByRole("button", { name: "Host row" });
   fireEvent.click(host);
   host.focus();
-  expect(ready).toHaveBeenLastCalledWith(false);
+  expect(ready).toHaveBeenLastCalledWith(
+    false,
+    expect.any(Array),
+    expect.any(Array),
+  );
   update([flaky, healthy]);
   expect(screen.getByRole("button", { name: "Host row" })).toBe(host);
   expect(host).toHaveFocus();
   expect(screen.getByText("Host row menu")).toBeInTheDocument();
-  expect(ready).toHaveBeenLastCalledWith(true);
+  expect(ready).toHaveBeenLastCalledWith(
+    true,
+    expect.any(Array),
+    expect.any(Array),
+  );
   const row = screen.getByRole("button", { name: "Healthy row" });
   fireEvent.click(row);
   row.focus();
@@ -412,7 +436,7 @@ it("commits a changed environment once with fresh props even when surrounding na
       >
         {(slots, sources) => (
           <>
-            {sources}
+            {sources()}
             {slots.map((slot) => (
               <SidebarSectionSlotView key={slot.key} slot={slot} />
             ))}

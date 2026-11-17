@@ -1,3 +1,4 @@
+import { teamSidebarSlotsReady } from "../../bundled/channels/TeamSidebarSource";
 import {
   SidebarSectionSources,
   SidebarSectionSlotView,
@@ -254,14 +255,21 @@ function ScopedSidebar({
   }, [scope, view]);
   const filter = restriction ? "solo" : view.filter;
   const session = connection.session;
-  const [committedSlots, setCommittedSlots] = useState<string>();
+  const [committedSlots, setCommittedSlots] = useState<{
+    generation: string;
+    keys: readonly string[];
+    unavailable: readonly string[];
+  }>();
   const slotGeneration = `${scope}:${connection.generation}`;
   const sourcesSettled = useSyncExternalStore(
     props.sidebarRows?.subscribe ?? noSubscription,
     props.sidebarRows?.settled ?? (() => true),
   );
   const slotsCommitted = useCallback(
-    (ready: boolean) => setCommittedSlots(ready ? slotGeneration : undefined),
+    (ready: boolean, keys: readonly string[], unavailable: readonly string[]) =>
+      setCommittedSlots(
+        ready ? { generation: slotGeneration, keys, unavailable } : undefined,
+      ),
     [slotGeneration],
   );
   const setFilter = (filter: Filter) => setView({ filter, location });
@@ -322,7 +330,10 @@ function ScopedSidebar({
           cached={!!connection.cached}
           layoutReady={
             (filter === "team" || soloReady) &&
-            committedSlots === slotGeneration
+            committedSlots?.generation === slotGeneration
+          }
+          slotsReady={(ids) =>
+            teamSidebarSlotsReady(props.sidebarSections, committedSlots, ids)
           }
           preserveSidebar={preserveSidebar}
           connectionError={connection.error}
@@ -332,6 +343,7 @@ function ScopedSidebar({
             frame,
             before,
             content,
+            team,
             after,
             dialogs,
           }) => (
@@ -353,84 +365,97 @@ function ScopedSidebar({
                 sidebarRows: props.sidebarRows,
               }}
             >
-              {(slots, sources) => (
-                <>
-                  {sources}
-                  <ResizableSidebar scope={scope} className="shell-sidebar">
-                    <SidebarFrame
-                      label="Sidebar"
-                      header={header}
-                      panelId={panelId}
-                      {...frame}
-                      launchPending={
-                        committedSlots === slotGeneration
-                          ? frame.launchPending
-                          : "required"
-                      }
-                    >
-                      {/* Relay outages for every inventory recover through one
-                    automatic owner; its one notice shows on every page. */}
-                      {!connection.cached && (
-                        <RecoveryNotice
-                          recovery={connection.session.recovery}
-                        />
-                      )}
-                      <LiveSignIn
-                        session={connection.session}
-                        identity={communityIdentity(
-                          props.federatedIdentity,
-                          connection.origin,
-                        )}
-                        relay={connection.origin}
-                        memberships={props.memberships}
-                        tryAgain={() => props.relay.tryAgain()}
-                      />
-                      {before}
-                      <SidebarUnread
-                        listRef={sidebar.list}
-                        dmPreviews={dmPreviews}
+              {(slots, sources) => {
+                const teamContent = (
+                  <>
+                    {slots
+                      .filter((slot) => slot.scope === "team")
+                      .map((slot) => (
+                        <SidebarSectionSlotView key={slot.key} slot={slot} />
+                      ))}
+                    {content}
+                  </>
+                );
+                return (
+                  <>
+                    {sources("solo")}
+                    {team(sources("team"))}
+                    <ResizableSidebar scope={scope} className="shell-sidebar">
+                      <SidebarFrame
+                        label="Sidebar"
+                        header={header}
+                        panelId={panelId}
+                        {...frame}
+                        launchPending={
+                          committedSlots?.generation === slotGeneration
+                            ? frame.launchPending
+                            : "required"
+                        }
                       >
-                        <section
-                          aria-label={soloTitle}
-                          className={styles.sidebarGroup}
-                          hidden={filter === "team"}
-                        >
-                          {slots
-                            .filter((slot) => slot.scope === "solo")
-                            .map((slot) => (
-                              <SidebarSectionSlotView
-                                key={slot.key}
-                                slot={slot}
-                              />
-                            ))}
-                        </section>
-                        <div
-                          className={styles.sidebarGroup}
-                          hidden={filter === "solo"}
-                        >
-                          {filter === "all" ? (
-                            <InventoryGroup
-                              sidebar={sidebar}
-                              sectionKey="scope:team"
-                              title="Team"
-                              ownsCurrent={
-                                destination === "team" && !preserveSidebar
-                              }
-                              location={sidebarLocation}
-                            >
-                              {content}
-                            </InventoryGroup>
-                          ) : (
-                            content
+                        {/* Relay outages for every inventory recover through one
+                    automatic owner; its one notice shows on every page. */}
+                        {!connection.cached && (
+                          <RecoveryNotice
+                            recovery={connection.session.recovery}
+                          />
+                        )}
+                        <LiveSignIn
+                          session={connection.session}
+                          identity={communityIdentity(
+                            props.federatedIdentity,
+                            connection.origin,
                           )}
-                        </div>
-                      </SidebarUnread>
-                      {after}
-                    </SidebarFrame>
-                    {dialogs}
-                  </ResizableSidebar>
-                </>
-              )}
+                          relay={connection.origin}
+                          memberships={props.memberships}
+                          tryAgain={() => props.relay.tryAgain()}
+                        />
+                        {before}
+                        <SidebarUnread
+                          listRef={sidebar.list}
+                          dmPreviews={dmPreviews}
+                        >
+                          <section
+                            aria-label={soloTitle}
+                            className={styles.sidebarGroup}
+                            hidden={filter === "team"}
+                          >
+                            {slots
+                              .filter((slot) => slot.scope === "solo")
+                              .map((slot) => (
+                                <SidebarSectionSlotView
+                                  key={slot.key}
+                                  slot={slot}
+                                />
+                              ))}
+                          </section>
+                          <div
+                            className={styles.sidebarGroup}
+                            hidden={filter === "solo"}
+                          >
+                            {filter === "all" ? (
+                              <InventoryGroup
+                                sidebar={sidebar}
+                                sectionKey="scope:team"
+                                title="Team"
+                                ownsCurrent={
+                                  destination === "team" && !preserveSidebar
+                                }
+                                location={sidebarLocation}
+                              >
+                                {teamContent}
+                              </InventoryGroup>
+                            ) : (
+                              teamContent
+                            )}
+                          </div>
+                        </SidebarUnread>
+                        {after}
+                      </SidebarFrame>
+                      {dialogs}
+                    </ResizableSidebar>
+                  </>
+                );
+              }}
             </SidebarSectionSources>
           )}
         />

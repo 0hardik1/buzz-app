@@ -74,7 +74,8 @@ function createSlotStore() {
         old.slots.every(
           (slot, i) =>
             slot.key === slots[i]?.key &&
-            slot.defaultPosition === slots[i]?.defaultPosition,
+            slot.defaultPosition === slots[i]?.defaultPosition &&
+            slot.unavailable === slots[i]?.unavailable,
         )
       )
         return;
@@ -100,8 +101,17 @@ export function SidebarSectionSources({
   settled?: boolean;
   registry: SidebarSections | undefined;
   environment: SidebarSectionEnvironment;
-  children(slots: readonly SidebarSectionSlot[], sources: ReactNode): ReactNode;
-  onReady?: ((ready: boolean) => void) | undefined;
+  children(
+    slots: readonly SidebarSectionSlot[],
+    sources: (scope?: "solo" | "team") => ReactNode,
+  ): ReactNode;
+  onReady?:
+    | ((
+        ready: boolean,
+        keys: readonly string[],
+        unavailable: readonly string[],
+      ) => void)
+    | undefined;
 }) {
   const sources = useSyncExternalStore(
     registry?.sourceSubscribe ?? subscribe,
@@ -109,17 +119,19 @@ export function SidebarSectionSources({
     registry?.sourceSnapshot ?? snapshot,
   );
   const [store] = useState(createSlotStore);
-  const components =
+  const components = (scope?: "solo" | "team") =>
     registry &&
-    sources.map((source) => (
-      <SectionSource
-        key={contributionKey(source)}
-        source={source}
-        registry={registry}
-        environment={environment}
-        store={store}
-      />
-    ));
+    sources
+      .filter((source) => !scope || source.scope === scope)
+      .map((source) => (
+        <SectionSource
+          key={contributionKey(source)}
+          source={source}
+          registry={registry}
+          environment={environment}
+          store={store}
+        />
+      ));
   return (
     <Slots value={store}>
       <SlotList
@@ -172,6 +184,7 @@ function SectionSource({
         <Publication
           source={source}
           store={store}
+          unavailable
           sections={[
             {
               id: `${source.id}:unavailable`,
@@ -201,10 +214,12 @@ function Publication({
   source,
   store,
   sections,
+  unavailable = false,
 }: {
   source: RegisteredSidebarSectionSource;
   store: SlotStore;
   sections: readonly SidebarComponentSection[];
+  unavailable?: boolean;
 }) {
   const owner = contributionKey(source);
   const targets = useSyncExternalStore(
@@ -212,7 +227,10 @@ function Publication({
     store.targets,
     store.targets,
   );
-  const slots = sidebarSectionSlots(source, sections);
+  const slots = sidebarSectionSlots(source, sections).map((slot) => ({
+    ...slot,
+    unavailable,
+  }));
   const committed = slots
     .filter((slot) => targets.has(targetKey(source, slot.key)))
     .map((slot) => slot.key);
@@ -228,7 +246,7 @@ function Publication({
     const container = targets.get(targetKey(source, slot.key));
     return container
       ? createPortal(
-          <SlotContents element={slot.element} />,
+          <SlotContents element={slot.element} title={slot.title} />,
           container,
           slot.key,
         )
@@ -247,7 +265,13 @@ function SlotList({
   store: SlotStore;
   settled: boolean;
   children(slots: readonly SidebarSectionSlot[]): ReactNode;
-  onReady?: ((ready: boolean) => void) | undefined;
+  onReady?:
+    | ((
+        ready: boolean,
+        keys: readonly string[],
+        unavailable: readonly string[],
+      ) => void)
+    | undefined;
 }) {
   const values = useSyncExternalStore(
     store.subscribe,
@@ -268,18 +292,26 @@ function SlotList({
             .get(contributionKey(slot.source))
             ?.committed.includes(slot.key),
         );
+  const committedKeys = JSON.stringify(
+    ready ? slots.map((slot) => slot.key) : [],
+  );
+  const unavailableKeys = JSON.stringify(
+    slots.filter((slot) => slot.unavailable).map((slot) => slot.source.key),
+  );
   useLayoutEffect(() => {
-    onReady?.(ready);
-  }, [onReady, ready]);
+    onReady?.(ready, JSON.parse(committedKeys), JSON.parse(unavailableKeys));
+  }, [onReady, ready, committedKeys, unavailableKeys]);
   return children(slots);
 }
 
 function SectionUnavailable({
   retry,
   inventory = false,
+  title,
 }: {
   retry(): void;
   inventory?: boolean;
+  title?: string | undefined;
 }) {
   return (
     <>
@@ -288,20 +320,34 @@ function SectionUnavailable({
           ? "Conversations couldn’t open."
           : "This optional control is unavailable. Other settings and channel recovery remain available."}
       </p>
-      <Button size="sm" onClick={retry}>
-        {inventory ? "Retry sidebar" : "Retry"}
+      <Button
+        size="sm"
+        aria-label={title ? `Retry ${title}` : undefined}
+        onClick={retry}
+      >
+        {inventory && !title ? "Retry sidebar" : "Retry"}
       </Button>
     </>
   );
 }
 
-function SlotContents({ element }: { element: ReactNode }) {
+function SlotContents({
+  element,
+  title,
+}: {
+  element: ReactNode;
+  title?: string | undefined;
+}) {
   const [attempt, setAttempt] = useState(0);
   return (
     <ContributionBoundary
       resetIdentity={attempt}
       fallback={
-        <SectionUnavailable inventory retry={() => setAttempt((n) => n + 1)} />
+        <SectionUnavailable
+          inventory
+          title={title}
+          retry={() => setAttempt((n) => n + 1)}
+        />
       }
     >
       {element}

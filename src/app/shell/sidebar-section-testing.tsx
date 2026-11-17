@@ -1,13 +1,16 @@
 /** Real bundled registrations for direct shell fixtures that do not start the app runtime. */
 import { Context } from "@deepseek-ai/cordis";
-import { useEffect, useState, type ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import { bundledOwner } from "../../plugins/provenance";
 import { SidebarSectionsService } from "../../features/channel-navigation/sidebar-sections-service";
+import { teamSidebarSource } from "../../bundled/channels/TeamSidebarSource";
 import { soloSidebarSource } from "../../bundled/channels/SoloSidebarSource";
 import { PrimarySidebar as Shell } from "./PrimarySidebar";
 
 export function PrimarySidebar(props: ComponentProps<typeof Shell>) {
-  const [{ root, registry }] = useState(() => {
+  // This standalone registry owns no host resources. Keep it for the mounted
+  // fixture's lifetime, including StrictMode's effect cleanup/remount probe.
+  const [registry] = useState(() => {
     const root = new Context();
     root.provide("pluginStatus", {
       isActive: () => true,
@@ -19,14 +22,13 @@ export function PrimarySidebar(props: ComponentProps<typeof Shell>) {
         pluginOwner: bundledOwner({ id: "buzz.channels", revision: "bundled" }),
       })
       .sidebarSections?.registerSource?.(soloSidebarSource);
-    return { root, registry };
+    root
+      .extend({
+        pluginOwner: bundledOwner({ id: "buzz.channels", revision: "bundled" }),
+      })
+      .sidebarSections?.registerSource?.(teamSidebarSource);
+    return registry;
   });
-  useEffect(
-    () => () => {
-      void root.fiber.dispose();
-    },
-    [root],
-  );
   return (
     <Shell
       {...props}

@@ -773,6 +773,42 @@ ctx.reflect.get("sidebarSections")?.register({
 });
 ```
 
+#### Bundled section components (internal preview)
+
+The service also has a bundled-only version-2 preview, `registerSource`.
+It is likely to change, is not exported from the author API, and rejects
+non-bundled owners. Version-1 registration and snapshots remain unchanged;
+plugin-development introspection currently lists only version-1 sections.
+
+A source runs once and supplies live `{ id, defaultPosition, element, title? }`
+sections through its `render` callback. Use stable component types and opaque,
+stable section ids. The shell names each slot `<pluginId>/<sectionId>`, orders
+slots by rank and then ordinal key, and drops invalid or duplicate descriptors.
+Slot ids do not replace saved collapse, sort, filter or drag keys. Team ranks
+follow the existing saved group order, with version-1 contributions trailing in
+their existing saved order; there is no new order record or migration.
+
+Sources run beside the shell and portal their content into keyed containers.
+Only structure and committed keys cross the shell's store; current content stays
+in the source's React render. Team sources mount inside the shared Team drag
+context. Solo sources stay outside it and retain their existing nested drag
+context. Keep any context or synthetic-event owner needed by portaled content
+above its source, since React events follow the source ancestry.
+
+Each slot has its own error boundary and Retry. A source failure replaces its
+slots with one unavailable-and-Retry placeholder; a source returning no
+publication settles empty. Registrations and publications are fenced by owner
+incarnation, so disabling or replacing a source retires its old content.
+The bundled Channels inventory remains the one shell-mounted preferences,
+view, action and status owner. Its failures retain the whole-sidebar fallback;
+a thin Team source failure affects Team and its version-1 slots while Solo stays
+mounted. Both built-in sources require the required Channels plugin to activate.
+
+The viewport waits for every current section key to commit before consuming a
+saved scroll position. Container refs and portal publication settle during layout,
+before paint. Browser tests must still verify scrolling, group spacing, focus and
+drag hit testing: a DOM emulator cannot establish their geometry.
+
 ### Solo-only sidebar
 
 `sidebarScope.restrict({ id, scope: "solo", banner })` shows only the Solo

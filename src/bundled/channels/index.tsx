@@ -1,4 +1,5 @@
 import { soloSidebarSource } from "./SoloSidebarSource";
+import { teamSidebarSource } from "./TeamSidebarSource";
 import { StartLinkedChat, canStartLinkedChat } from "./StartLinkedChat";
 import { ChannelCompletion } from "./ChannelCompletion";
 import { channelQuery } from "./channel-query";
@@ -30,8 +31,9 @@ export const inject = [
   "adminAccess",
 ];
 export const apply: PluginModule["apply"] = (ctx) => {
-  registerCanvas(ctx);
   ctx.reflect.get("sidebarSections")?.registerSource?.(soloSidebarSource);
+  ctx.reflect.get("sidebarSections")?.registerSource?.(teamSidebarSource);
+  registerCanvas(ctx);
   ctx.conversation.registerCompletion({
     id: "channel-typeahead",
     title: "Channel",

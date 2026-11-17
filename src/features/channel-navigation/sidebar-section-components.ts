@@ -16,6 +16,7 @@ import type { SidebarRows } from "./sidebar-rows-service";
 /** Preview, likely to break. Elements must use stable component types. */
 export type SidebarComponentSection = Readonly<{
   id: string;
+  title?: string | undefined;
   /** Finite ascending rank; equal ranks use the full plugin/section id. */
   defaultPosition: number;
   element: ReactElement;
@@ -53,6 +54,7 @@ export type SidebarSectionSlot = Omit<SidebarComponentSection, "element"> & {
   key: string;
   source: RegisteredSidebarSectionSource;
   scope: "solo" | "team";
+  unavailable?: boolean | undefined;
 };
 
 /** Slot identity is independent of saved collapse, sort, filter and drag keys. */
