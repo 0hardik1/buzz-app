@@ -326,6 +326,14 @@ export const ROLE_GROUPS: RoleGroup[] = [
         status: "core",
       },
       {
+        token: "bg-surface-sidebar-card",
+        variable: "--surface-sidebar-card",
+        pointsAt:
+          "surface-message mixed equally with surface-panel in both modes",
+        use: "Grouped sidebar navigation cards; pair with navigation and standard text.",
+        status: "core",
+      },
+      {
         token: "bg-surface-composer",
         variable: "--surface-composer",
         pointsAt: "surface-panel light / neutral-4 dark",

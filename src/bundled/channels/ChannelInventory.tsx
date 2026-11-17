@@ -1723,6 +1723,21 @@ export function ChannelInventory({
         {startup.ready && list.status === "ready" && !channels.length && (
           <p className={styles.empty}>No channels yet.</p>
         )}
+        {startup.ready && (
+          <div className={styles.newSectionButton}>
+            <Button
+              size="sm"
+              variant="subtle"
+              disabled={!preferences.sectionCreationWritable}
+              onClick={(event) => {
+                createSectionTrigger.current = event.currentTarget;
+                setCreatingSection(true);
+              }}
+            >
+              New section
+            </Button>
+          </div>
+        )}
       </>
     ),
     after: (

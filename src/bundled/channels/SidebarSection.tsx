@@ -34,6 +34,7 @@ import {
   ChatUnreadIcon,
   DotsThreeIcon,
   Filter2Icon,
+  GripHorizontalIcon,
   PencilSimpleIcon,
   PlusIcon,
   TextAaIcon,
@@ -175,6 +176,11 @@ export function SidebarSection({
       ref={dropRef}
       className={styles.channelSection}
       data-sidebar-section={sectionKey}
+      data-sidebar-card={
+        (!sectionKey.startsWith("scope:") &&
+          !sectionKey.startsWith("solo-region:")) ||
+        undefined
+      }
       data-drop-target={dropTarget || undefined}
       data-drop-edge={dropEdge}
       data-section-dragging={dragging || undefined}
@@ -185,6 +191,25 @@ export function SidebarSection({
         revealActions
         actions={
           <>
+            {dragHandle && (
+              <span className={styles.sectionGrabber}>
+                <IconButton
+                  {...dragHandle.listeners}
+                  size="compact"
+                  aria-label={`Move ${title} section`}
+                  aria-keyshortcuts="ArrowUp ArrowDown"
+                  aria-description="Use the Up and Down arrow keys to move this section."
+                  icon={<GripHorizontalIcon size={18} />}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                      event.preventDefault();
+                      if (event.key === "ArrowUp") move?.up?.();
+                      else move?.down?.();
+                    }
+                  }}
+                />
+              </span>
+            )}
             {!hideMoreActions && (
               <MenuRoot open={menuOpen} onOpenChange={setMenuOpen}>
                 <MenuTrigger

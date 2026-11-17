@@ -4121,3 +4121,49 @@ it("keeps create-and-move focus pending until the new group slot commits", async
     preferences.dispose();
   }
 });
+
+it("creates a saved section from the bottom button and returns focus there", async () => {
+  let groups: SidebarGroups = { sections: [], assignments: {} };
+  const preferences = createSidebarPreferencesStore({
+    available: true,
+    read: async () => ({ ...groups, starred: [], muted: [] }),
+    writeStar: async () => [],
+    write: async (intent) => {
+      assert(intent.createSection);
+      groups = {
+        ...groups,
+        sections: [{ ...intent.createSection, order: 0 }],
+      };
+      return groups;
+    },
+  });
+  const h = fixture(preferences.queries);
+  const user = userEvent.setup();
+  try {
+    render(h.view("alpha"));
+    const button = await screen.findByRole("button", {
+      name: "New section",
+    });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Create new section",
+    });
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Section name" }),
+      "Release",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    await waitFor(() => expect(button).toHaveFocus());
+    expect(groups.sections).toEqual([
+      expect.objectContaining({ name: "Release" }),
+    ]);
+    expect(
+      await screen.findByLabelText("Release", { selector: "summary" }),
+    ).toBeVisible();
+  } finally {
+    cleanup();
+    preferences.dispose();
+  }
+});

@@ -101,6 +101,7 @@ const META_ROLES = new Set([
  * surface text sits on, whatever it is called.
  */
 const SURFACES = [
+  "--surface-sidebar-card",
   "--surface-base",
   "--surface-panel",
   "--surface-popover",

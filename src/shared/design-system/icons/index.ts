@@ -643,3 +643,9 @@ export const FoldIcon = defineIcon("tabler", TablerFoldIcon);
 
 import TablerCircleDottedIcon from "@tabler/icons-react/dist/esm/icons/IconCircleDotted.mjs";
 export const CircleDottedIcon = defineIcon("tabler", TablerCircleDottedIcon);
+
+import TablerGripHorizontalIcon from "@tabler/icons-react/dist/esm/icons/IconGripHorizontal.mjs";
+export const GripHorizontalIcon = defineIcon(
+  "tabler",
+  TablerGripHorizontalIcon,
+);

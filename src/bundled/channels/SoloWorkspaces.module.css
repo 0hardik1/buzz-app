@@ -48,7 +48,6 @@
 }
 
 .project[data-drop-target] {
-  border-radius: var(--radius-row);
   background: var(--affordance-panel-hover);
 }
 /* A composed workspace header's primary target spans its blank space. A header

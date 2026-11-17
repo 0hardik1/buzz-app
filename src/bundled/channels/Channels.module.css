@@ -312,16 +312,36 @@
   position: relative;
   flex-shrink: 0;
 }
+.channelSection[data-sidebar-card] {
+  min-width: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-container);
+  background: var(--surface-sidebar-card);
+}
+.sectionGrabber {
+  display: flex;
+}
+.sectionGrabber button {
+  cursor: grab;
+  touch-action: none;
+}
+.sectionGrabber button:active {
+  cursor: grabbing;
+}
+.newSectionButton {
+  display: flex;
+  justify-content: center;
+  padding-block: var(--space-4);
+}
 .channelSection + .channelSection {
-  margin-top: var(--space-4);
+  margin-top: var(--space-1);
 }
 [data-sidebar-slot]:has(> .channelSection)
   ~ [data-sidebar-slot]
   > .channelSection:first-child {
-  margin-top: var(--space-4);
+  margin-top: var(--space-1);
 }
 .channelSection[data-drop-target] {
-  border-radius: var(--radius-row);
   background: var(--affordance-panel-hover);
 }
 .createSectionSlot + .channelSection {
@@ -374,19 +394,20 @@
 .channelSection[data-drop-edge]::before {
   content: "";
   position: absolute;
-  inset-inline: 0;
-  height: calc(var(--space-1) / 2 + 1px);
+  inset-inline-start: 50%;
+  width: var(--space-16);
+  height: var(--space-half);
   border-radius: var(--radius-pill);
   background: var(--border-accent);
   pointer-events: none;
 }
 .channelSection[data-drop-edge="before"]::before {
-  top: calc(var(--space-2) * -1);
-  transform: translateY(-50%);
+  top: calc(var(--space-half) * -1);
+  transform: translate(-50%, -50%);
 }
 .channelSection[data-drop-edge="after"]::before {
-  bottom: calc(var(--space-2) * -1);
-  transform: translateY(50%);
+  bottom: calc(var(--space-half) * -1);
+  transform: translate(-50%, 50%);
 }
 .channelDragOverlay {
   display: flex;

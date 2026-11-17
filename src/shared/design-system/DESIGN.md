@@ -2277,3 +2277,16 @@ and IconButton actions, currently used by message reaction capsules and their
 Add reaction control. It supplies a 1.625rem height, square icon geometry, and
 content-width labelled controls. Features retain placement and behavior; the
 shared recipe owns sizing. Do not infer this treatment from product data attributes.
+
+### Sidebar section cards
+
+The primary sidebar's existing Team sections and Solo workspaces use the
+`surface-sidebar-card` fill, `radius-container` corners, and `space-3` insets,
+with `space-1` between adjacent cards. The fill mixes received-message and panel
+surfaces equally, matching the card treatment from the rail exploration.
+Scope headings remain unframed so cards do not acquire a second outer card.
+Keep NavigationSectionHeading and NavigationItem as the heading and row owners;
+features retain their existing drag, collapse, ordering and placement boundaries.
+Movable Team section cards expose a grip with ArrowUp/ArrowDown reordering in
+addition to the existing header drag and menu actions. The bottom New section
+button uses the existing section-creation dialog and preference write gates.

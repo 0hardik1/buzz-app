@@ -559,3 +559,29 @@ it("keeps the actions menu closed after it is hidden and shown again", async () 
   rerender(section(false));
   expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 });
+
+it("reorders from the card grip with arrow keys without collapsing the section", async () => {
+  const user = userEvent.setup();
+  const up = vi.fn();
+  const down = vi.fn();
+  const toggle = vi.fn();
+  render(
+    <SidebarSection
+      sectionKey="group:work"
+      title="Work"
+      open
+      onToggle={toggle}
+      dragHandle={{ ref: () => {} }}
+      move={{ up, down }}
+    >
+      <p>Conversation</p>
+    </SidebarSection>,
+  );
+  const grip = screen.getByRole("button", { name: "Move Work section" });
+  grip.focus();
+  await user.keyboard("{ArrowUp}{ArrowDown}");
+  expect(up).toHaveBeenCalledTimes(1);
+  expect(down).toHaveBeenCalledTimes(1);
+  expect(toggle).not.toHaveBeenCalled();
+  expect(grip).toHaveFocus();
+});

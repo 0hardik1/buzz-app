@@ -364,3 +364,37 @@ test("group landing edge follows list order when text size changes during a drag
     .toEqual(["group:missing", "group:work", "group:laptop"]);
   await expect.poll(() => app.report.sidebarPublications?.length ?? 0).toBe(1);
 });
+
+// The new grip must activate the real pointer sensor and hit the existing card
+// targets; a DOM emulator cannot establish that wiring or geometry.
+test("the card grip reorders saved sections and retains the order after reload", async ({
+  page,
+  app,
+}) => {
+  await page.goto(app.origin);
+  await openPage(page, "Messages");
+  const grip = page.getByRole("button", { name: "Move Laptop section" });
+  await page.locator('[data-sidebar-section="group:laptop"]').hover();
+  await grip.hover();
+  const start = await grip.boundingBox();
+  const target = await header(page, "work").boundingBox();
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    target.x + target.width / 2,
+    target.y + target.height / 2,
+    { steps: 8 },
+  );
+  await expect(
+    page.locator('[data-sidebar-section="group:work"]'),
+  ).toHaveAttribute("data-drop-edge", "before");
+  await page.mouse.up();
+  await expect
+    .poll(() => groups(page))
+    .toEqual(["group:laptop", "group:work", "group:missing"]);
+  await expect.poll(() => app.report.sidebarPublications?.length ?? 0).toBe(1);
+  await page.reload();
+  await expect
+    .poll(() => groups(page))
+    .toEqual(["group:laptop", "group:work", "group:missing"]);
+});

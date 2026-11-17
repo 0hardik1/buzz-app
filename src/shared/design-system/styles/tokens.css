@@ -783,6 +783,7 @@
   --neutral-standard-text: #0f0f0f; /* Designer-requested light primary text and inherited icons. */
   --bubble-neutral: #e9e9ea;
   --bubble-received: #f3f3f4;
+  --sidebar-card-fill: #f9f9fa; /* Equal sRGB mix of received bubble and panel. */
   --neutral-navigation-text: #404040; /* Tailwind neutral-700. */
   /* Designer-requested light status text: the brightest green and red, 35% of
      the way from step 11 to step 12, that keep AA on every light surface. */
@@ -932,6 +933,7 @@
   --neutral-quiet-hover: #2e2e2e;
   --bubble-neutral: #2e2e2e;
   --bubble-received: #292929;
+  --sidebar-card-fill: #222222; /* Equal sRGB mix of received bubble and panel. */
   --neutral-1: #000000;
   --neutral-2: #101010;
   --neutral-3: #1a1a1a;
@@ -1100,6 +1102,7 @@
 :root {
   --surface-base: var(--neutral-2);
   --surface-panel: var(--neutral-1);
+  --surface-sidebar-card: var(--sidebar-card-fill);
   --surface-composer: var(--surface-panel);
   --surface-popover: var(--neutral-1);
   --surface-elevated-glass: var(--popover-glass-fill);
@@ -1284,6 +1287,7 @@
   --shadow-panel: 0 0 0 1px rgba(255, 255, 255, 0.08);
   --surface-base: var(--neutral-1);
   --surface-panel: var(--neutral-3);
+  --surface-sidebar-card: var(--sidebar-card-fill);
   --surface-composer: var(--neutral-4);
   --surface-popover: var(--neutral-raised);
   --surface-elevated-glass: var(--popover-glass-fill);
