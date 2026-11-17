@@ -35,21 +35,23 @@ for (const role of ["owner", "member"]) {
     await page.goto(app.origin);
     await openSettings(page);
     await selectSettingsSection(page, "Manage plugins");
-    await setPluginEnabled(page, "Membership", true);
+    await setPluginEnabled(page, "Community appearance", true);
     const card = settingsSections(page).getByRole("button", {
       name: "Community icon",
       exact: true,
     });
     if (role === "member") {
-      await expect(
-        settingsSections(page).getByRole("button", {
-          name: "Membership",
-          exact: true,
-        }),
-      ).toHaveCount(0);
       await expect(card).toHaveCount(0);
       return;
     }
+    // Community icon doesn't depend on Membership.
+    await setPluginEnabled(page, "Membership", false);
+    await expect(
+      settingsSections(page).getByRole("button", {
+        name: "Membership",
+        exact: true,
+      }),
+    ).toHaveCount(0);
     await card.click();
     const dialog = settingsDialog(page);
     await expect(dialog.getByText("No icon", { exact: true })).toBeVisible();
