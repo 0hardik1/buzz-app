@@ -279,29 +279,43 @@ it("saves and clears a compaction window without changing other settings", async
   const h = await fixture({
     modelSelectionStatus: "valid",
     instructions: "Keep these instructions.",
+    autoCompactWindow: 40000,
   });
   const user = userEvent.setup();
-  const field = screen.getByRole("spinbutton", {
-    name: "Auto-compact window (tokens)",
+  const advanced = screen.getByRole("button", { name: "Advanced settings" });
+  expect(advanced).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("textbox", { name: "Auto-compact at" })).toBeNull();
+  await user.click(advanced);
+  const field = screen.getByRole("textbox", {
+    name: "Auto-compact at",
   });
-  expect(field).toHaveValue(null);
-  fireEvent.change(field, { target: { value: "100000" } });
+  expect(field).toHaveValue("40");
+  expect(field).toHaveAccessibleDescription("Thousands of tokens");
+  await user.click(field);
+  fireEvent.change(field, { target: { value: "40.0" } });
+  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  await user.tab();
+  expect(field).toHaveValue("40");
+  fireEvent.change(field, { target: { value: "250" } });
+  await user.click(advanced);
+  await user.click(advanced);
+  expect(field).toHaveValue("250");
   await user.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull(),
   );
-  expect(field).toHaveValue(100000);
+  expect(field).toHaveValue("250");
   fireEvent.change(field, { target: { value: "" } });
   await user.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull(),
   );
-  expect(field).toHaveValue(null);
+  expect(field).toHaveValue("");
   const updates = h.request.mock.calls.filter(([request]) =>
     request.url.endsWith("/update-agent"),
   );
   expect(updates.map(([request]) => JSON.parse(request.body ?? "{}"))).toEqual([
-    { agent_pubkey: "ab".repeat(32), auto_compact_window: 100000 },
+    { agent_pubkey: "ab".repeat(32), auto_compact_window: 250000 },
     { agent_pubkey: "ab".repeat(32), auto_compact_window: 0 },
   ]);
   expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveValue(
@@ -309,56 +323,60 @@ it("saves and clears a compaction window without changing other settings", async
   );
 });
 
-it.each(["0", "1.5", "2147483648"])(
+it.each(["0", "-1", "2147483.648", "1.0001"])(
   "does not save invalid compaction window %j",
   async (value) => {
     await fixture({ modelSelectionStatus: "valid" });
-    const field = screen.getByRole("spinbutton", {
-      name: "Auto-compact window (tokens)",
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Advanced settings" }));
+    const field = screen.getByRole("textbox", {
+      name: "Auto-compact at",
     });
     fireEvent.change(field, { target: { value } });
     expect(field).toHaveAccessibleDescription(
-      "Enter a positive whole token count, or leave blank for the default.",
+      expect.stringContaining(
+        "Enter a positive number or leave blank for default.",
+      ),
     );
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   },
 );
 
-it("keeps an unpersisted window draft and blocks invalid numeric retries", async () => {
+it("keeps an unpersisted window draft and blocks invalid retries", async () => {
   const h = await fixture({
-    autoCompactWindow: 100000,
+    autoCompactWindow: 1001,
     modelSelectionStatus: "valid",
   });
   const user = userEvent.setup();
-  const field = screen.getByRole("spinbutton", {
-    name: "Auto-compact window (tokens)",
-  }) as HTMLInputElement;
-  fireEvent.change(field, { target: { value: "200000" } });
+  await user.click(screen.getByRole("button", { name: "Advanced settings" }));
+  const field = screen.getByRole("textbox", {
+    name: "Auto-compact at",
+  });
+  expect(field).toHaveValue("1.001");
+  await user.click(field);
+  fireEvent.change(field, { target: { value: "200" } });
+  await user.tab();
   h.request.mockResolvedValueOnce({ status: 200, headers: {}, body: "{}" });
   await user.click(screen.getByRole("button", { name: "Save" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "The compaction setting was not saved.",
   );
-  expect(field).toHaveValue(200000);
+  expect(field).toHaveValue("200");
   expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   const updates = () =>
     h.request.mock.calls.filter(([request]) =>
       request.url.endsWith("/update-agent"),
     );
-  const badInput = vi
-    .spyOn(field.validity, "badInput", "get")
-    .mockReturnValue(true);
-  try {
-    fireEvent.input(field, { target: { value: "" } });
-    await user.click(screen.getByRole("button", { name: "Try again" }));
-    expect(updates()).toHaveLength(1);
-    expect(field).toHaveAccessibleDescription(
-      "Enter a positive whole token count, or leave blank for the default.",
-    );
-  } finally {
-    badInput.mockRestore();
-  }
-  fireEvent.input(field, { target: { value: "" } });
+  fireEvent.change(field, { target: { value: "invalid" } });
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  expect(updates()).toHaveLength(1);
+  expect(field).toHaveAccessibleDescription(
+    expect.stringContaining(
+      "Enter a positive number or leave blank for default.",
+    ),
+  );
+  fireEvent.change(field, { target: { value: "" } });
   await user.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   expect(updates()).toHaveLength(2);

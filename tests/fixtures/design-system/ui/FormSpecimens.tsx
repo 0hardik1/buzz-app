@@ -161,6 +161,11 @@ export function InputExamples() {
             <input type="url" placeholder="https://example.com/image.png" />
           </InputGroup>
         </Field>
+        <Field label="Outlined threshold (thousands)">
+          <InputGroup appearance="outlined" trailing="K">
+            <Input inputMode="decimal" defaultValue="40" />
+          </InputGroup>
+        </Field>
       </FormExample>
     </div>
   );

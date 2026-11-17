@@ -1178,6 +1178,10 @@ read and copied; disabled actions cannot change a value. Search clear restores
 input focus. SearchField `trailing` places auxiliary actions after Clear inside
 the shared frame. Features still own filtering, custom values, and async recovery.
 
+For an editable value alongside outlined preference controls, use
+`InputGroup appearance="outlined"`: a transparent fill and standard border,
+with the usual input focus and validation states.
+
 For a prominent composed value, use `Input textSize="large"` for the complete
 20px body-lg role. `InputGroup wrap` keeps fixed text affixes inside the same
 frame, reserving twelve characters for editing before moving an affix to its

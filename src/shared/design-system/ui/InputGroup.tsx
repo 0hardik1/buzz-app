@@ -7,9 +7,11 @@ export function InputGroup({
   trailing,
   wrap = false,
   surface = "inset",
+  appearance = "field",
   ...props
 }: Omit<ComponentProps<"div">, "className"> & {
   surface?: "inset" | "panel";
+  appearance?: "field" | "outlined";
   children?: ReactNode;
   leading?: ReactNode;
   trailing?: ReactNode;
@@ -18,6 +20,7 @@ export function InputGroup({
 }) {
   return (
     <div
+      data-appearance={appearance === "field" ? undefined : appearance}
       {...props}
       data-buzz-ui=""
       data-surface={surface}

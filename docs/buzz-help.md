@@ -1157,10 +1157,12 @@ available rather than silently discarding it.
   when that account holds this Buzz identity's backup, Buzz restores it instead
   of asking for QR pairing. The remote agent can answer while the desktop is off,
   but it cannot open files on that desktop.
-- In a Builderlab agent's settings, **Auto-compact window (tokens)** sets when
-  older context is automatically summarized. Enter a positive whole token count,
-  such as `100000`, or leave blank for the default. The window is capped at the
-  model's context budget and applies from the next turn after Save.
+- In a Builderlab agent's settings, expand **Advanced settings** to edit
+  **Auto-compact at**, which sets when older context is automatically
+  summarized. The input uses thousands of tokens, shown by the **K** suffix:
+  enter `40` for 40,000 tokens or `250` for 250,000. Leave blank for the default.
+  The window is capped at the model's context budget and applies from the next
+  turn after Save.
 - Some builds offer **AI setup → Automatic** when creating an
   agent. AI setup covers the harness, model, and thinking level. Buzz picks
   the first recommended harness that is set up on this

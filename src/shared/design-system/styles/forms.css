@@ -533,6 +533,10 @@
     min-width: var(--size-control-sm);
     flex-shrink: 0;
   }
+  .buzz-input-group:where([data-appearance="outlined"]) {
+    --border: var(--border-standard);
+    background: transparent;
+  }
   .buzz-input-group:has(input:is([data-invalid], [aria-invalid="true"])) {
     --border: var(--border-danger);
   }

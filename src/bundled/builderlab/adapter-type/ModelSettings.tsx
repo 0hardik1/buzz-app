@@ -10,9 +10,11 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AgentSaveButton } from "../../../features/agents/AgentSaveButton";
 import { ModelFamilyMenu } from "../../../features/agents/ModelFamilyMenu";
 import { BuilderlabLogoIcon } from "../../../shared/design-system/icons";
+import { Accordion } from "../../../shared/design-system/ui/Accordion";
 import { Button } from "../../../shared/design-system/ui/Button";
 import { Field } from "../../../shared/design-system/ui/Field";
 import { Input } from "../../../shared/design-system/ui/Input";
+import { InputGroup } from "../../../shared/design-system/ui/InputGroup";
 import { LoadingRegion } from "../../../shared/design-system/ui/LoadingRegion";
 import { PreferenceRow } from "../../../shared/design-system/ui/PreferenceRow";
 import { Select } from "../../../shared/design-system/ui/Select";
@@ -51,6 +53,8 @@ const accessDenied = (reason: unknown) =>
   reason instanceof Error && "status" in reason && reason.status === 403;
 const accountMismatchMessage =
   "Sign in to the Builderlab account that loaded these settings.";
+const formatCompaction = (tokens: number | undefined) =>
+  tokens === undefined ? "" : String(tokens / 1000);
 
 export function ModelSettings({
   client,
@@ -96,6 +100,7 @@ export function ModelSettings({
     signedIn && subject !== undefined && login.account?.subject !== subject;
   const email = mismatch && "email" in settings ? settings.email : undefined;
   const form = useId();
+  const compactionUnitId = useId();
   const notify = useToastNotification();
   const [saved, setSaved] = useState(agent);
   const [models, setModels] = useState<readonly RemoteAgentModel[]>();
@@ -103,9 +108,8 @@ export function ModelSettings({
   const [effort, setEffort] = useState(agent?.reasoningEffort ?? "");
   const [instructions, setInstructions] = useState(agent?.instructions ?? "");
   const [compaction, setCompaction] = useState(
-    String(agent?.autoCompactWindow ?? ""),
+    formatCompaction(agent?.autoCompactWindow),
   );
-  const [badCompactionInput, setBadCompactionInput] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>("");
@@ -136,8 +140,7 @@ export function ModelSettings({
     setModelId(agent.modelId ?? "");
     setEffort(agent.reasoningEffort ?? "");
     setInstructions(agent.instructions ?? "");
-    setCompaction(String(agent.autoCompactWindow ?? ""));
-    setBadCompactionInput(false);
+    setCompaction(formatCompaction(agent.autoCompactWindow));
   }, [agent]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision retries a failed catalog request while keeping the draft.
   useEffect(() => {
@@ -170,12 +173,15 @@ export function ModelSettings({
     modelId !== (saved?.modelId ?? "") ||
     effort !== (saved?.reasoningEffort ?? "");
   const instructionsChanged = instructions !== (saved?.instructions ?? "");
-  const compactionChanged =
-    compaction !== String(saved?.autoCompactWindow ?? "");
-  const autoCompactWindow = Number(compaction);
+  const autoCompactWindow = compaction.trim()
+    ? Number(`${compaction.trim()}e3`)
+    : 0;
   const validCompaction =
-    !badCompactionInput &&
-    (compaction.trim() === "" || validAutoCompactWindow(autoCompactWindow));
+    compaction.trim() === "" ||
+    (/^\d+(?:\.\d{1,3})?$/.test(compaction.trim()) &&
+      validAutoCompactWindow(autoCompactWindow));
+  const compactionChanged =
+    !validCompaction || autoCompactWindow !== (saved?.autoCompactWindow ?? 0);
   const saveModel =
     modelChanged ||
     (!instructionsChanged &&
@@ -229,7 +235,7 @@ export function ModelSettings({
       setSaved({ ...remote, instructions });
       setModelId(remote.modelId ?? "");
       setEffort(remote.reasoningEffort ?? "");
-      setCompaction(String(remote.autoCompactWindow ?? ""));
+      setCompaction(formatCompaction(remote.autoCompactWindow));
       if (saveModel && remote.modelSelectionStatus === "valid")
         notify("Model preferences saved", "success");
     } catch (reason) {
@@ -405,30 +411,66 @@ export function ModelSettings({
             ]}
             onValueChange={setEffort}
           />
-        </SettingsGroup>
-        <Field
-          label="Auto-compact window (tokens)"
-          description="Automatically summarize older context at this token count, limited by the model’s context budget. Leave blank for the default. Changes apply on the next turn."
-          error={
-            hasAccess && !validCompaction
-              ? "Enter a positive whole token count, or leave blank for the default."
-              : undefined
-          }
-        >
-          <Input
-            type="number"
-            min={1}
-            max={2_147_483_647}
-            step={1}
-            placeholder="Default"
-            value={compaction}
-            onInput={(event) =>
-              setBadCompactionInput(event.currentTarget.validity.badInput)
-            }
-            onChange={(event) => setCompaction(event.target.value)}
-            disabled={!saved || saving || !hasAccess}
+          <Accordion
+            variant="settings"
+            keepMounted
+            items={[
+              {
+                value: "Advanced settings",
+                title: "Advanced settings",
+                content: (
+                  <Field
+                    label="Auto-compact at"
+                    labelVisibility="hidden"
+                    error={
+                      hasAccess && !validCompaction
+                        ? "Enter a positive number or leave blank for default."
+                        : undefined
+                    }
+                  >
+                    <PreferenceRow
+                      title="Auto-compact at"
+                      trailing={
+                        <div className="w-32">
+                          <InputGroup
+                            appearance="outlined"
+                            trailing={
+                              <span id={compactionUnitId}>
+                                <span aria-hidden="true">K</span>
+                                <span className="sr-only">
+                                  Thousands of tokens
+                                </span>
+                              </span>
+                            }
+                          >
+                            <Input
+                              inputMode="decimal"
+                              aria-describedby={compactionUnitId}
+                              placeholder="Default"
+                              value={compaction}
+                              onChange={(event) =>
+                                setCompaction(event.target.value)
+                              }
+                              onBlur={() => {
+                                if (validCompaction)
+                                  setCompaction(
+                                    autoCompactWindow
+                                      ? formatCompaction(autoCompactWindow)
+                                      : "",
+                                  );
+                              }}
+                              disabled={!saved || saving || !hasAccess}
+                            />
+                          </InputGroup>
+                        </div>
+                      }
+                    />
+                  </Field>
+                ),
+              },
+            ]}
           />
-        </Field>
+        </SettingsGroup>
         {hasAccess && models?.length === 0 && (
           <p className="m-0 text-body-sm text-secondary">
             No models are available. Retry when the catalog is available.

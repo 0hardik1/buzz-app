@@ -304,6 +304,7 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
       "large text",
       "InputGroup wrapping affix",
       "InputGroup panel surface",
+      "InputGroup outlined appearance",
     ],
     status: "proposed",
     collection: "components",
