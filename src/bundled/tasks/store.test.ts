@@ -33,6 +33,7 @@ const head = (revision: string, content: object = {}, at = home) => ({
 });
 
 const relayKey = "e".repeat(64);
+const riley = "c".repeat(64);
 const dm = "44444444-4444-4444-8444-444444444444";
 const huddle = "55555555-5555-4555-8555-555555555555";
 const place = (d: string, more: string[][] = [["t", "stream"]]) => ({
@@ -77,6 +78,7 @@ function session(publish: () => Promise<string>, heads: object[] = []) {
       relayAuthor: relayKey,
       snapshotRead: read,
       configArtifactWriter: { sign, publish: vi.fn(publish) },
+      profiles: { snapshot: () => new Map([[riley, { name: "Riley" }]]) },
     } as unknown as RelaySession,
   };
 }
@@ -167,6 +169,110 @@ it("says why the relay refused, for an edit and for a move", async () => {
       home: away,
     }),
   ).rejects.toThrow("between places you can post in");
+});
+
+const refusedWith = (reason: string) =>
+  session(async () => {
+    throw new PublishRejected("rejected", reason);
+  }).session;
+
+it("says each relay reason in plain words, naming people it knows", async () => {
+  const base = taskOf(head("d".repeat(64))) as Task;
+  const save = (reason: string) =>
+    saveTask(refusedWith(reason), refusedWith(reason), fields, {
+      op: "update",
+      base,
+    });
+  await expect(
+    save(
+      `invalid: assignee-unreadable:${riley} — an assignee can't see this artifact`,
+    ),
+  ).rejects.toThrow(
+    "Riley can’t see where this task lives, so they can’t be assigned. Nothing was saved.",
+  );
+  await expect(
+    save(`invalid: assignee-unreadable:${riley},${"9".repeat(64)} — x`),
+  ).rejects.toThrow(
+    "Someone assigned can’t see where this task lives. Nothing was saved.",
+  );
+  await expect(
+    save(`invalid: assignee-agent:${riley} — an agent can't be an assignee`),
+  ).rejects.toThrow(
+    "Only people can be assigned, and Riley is an agent. Nothing was saved.",
+  );
+  await expect(
+    save("invalid: too-many-assignees: — a revision names at most 4 assignees"),
+  ).rejects.toThrow("A task can have up to 4 people assigned.");
+  await expect(
+    save("invalid: signer-agent: — an agent can't sign an artifact"),
+  ).rejects.toThrow("Only a person can save a task, not an agent.");
+  // A code it doesn't know, or text with no code: a plain line, never the
+  // relay's words or a key.
+  for (const reason of [
+    `invalid: something-new:${riley} — artifact jargon`,
+    "invalid: bad artifact tag",
+  ]) {
+    const error = await save(reason).catch((caught: unknown) => caught);
+    expect((error as Error).message).toBe(
+      "The community refused this change. Nothing was saved.",
+    );
+  }
+});
+
+it("resends once with the creator the relay keeps", async () => {
+  const forged = head("d".repeat(64));
+  forged.tags.push(["creator", "9".repeat(64)]);
+  const base = taskOf(forged) as Task;
+  let calls = 0;
+  const { session: relay, sign } = session(async () => {
+    calls++;
+    if (calls === 1)
+      throw new PublishRejected(
+        "rejected",
+        `invalid: creator-changed:${riley} — creator cannot change; resend with the named creator`,
+      );
+    return "";
+  });
+  const saved = await saveTask(relay, relay, fields, { op: "update", base });
+  expect(saved.status).toBe("saved");
+  expect(tagsOf(sign, 0)).toContainEqual(["creator", "9".repeat(64)]);
+  expect(tagsOf(sign, 1)).toContainEqual(["creator", riley]);
+  expect(saved.status === "saved" && saved.task.creator).toBe(riley);
+
+  // "none": the relay knows no creator, so the resend names none.
+  calls = 0;
+  const unknown = session(async () => {
+    calls++;
+    if (calls === 1)
+      throw new PublishRejected(
+        "rejected",
+        "invalid: creator-changed:none — creator cannot change",
+      );
+    return "";
+  });
+  await saveTask(unknown.session, unknown.session, fields, {
+    op: "update",
+    base,
+  });
+  expect(tagsOf(unknown.sign, 1).some(([name]) => name === "creator")).toBe(
+    false,
+  );
+});
+
+it("resends a creator only once", async () => {
+  const base = taskOf(head("d".repeat(64))) as Task;
+  let calls = 0;
+  const relay = session(async () => {
+    calls++;
+    throw new PublishRejected(
+      "rejected",
+      `invalid: creator-changed:${riley} — creator cannot change`,
+    );
+  }).session;
+  await expect(
+    saveTask(relay, relay, fields, { op: "update", base }),
+  ).rejects.toThrow("The community refused this change. Nothing was saved.");
+  expect(calls).toBe(2);
 });
 
 it("finds a create that landed unseen instead of making a second task", async () => {

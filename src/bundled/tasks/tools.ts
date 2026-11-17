@@ -529,8 +529,16 @@ export function addTaskTools(agents: Agents) {
           "Done or Cancelled needs evidence: say in one line why, such as the merged pull request or who said it's finished",
         );
       const task = await current(reads, id, signal);
+      // Only the people it adds: someone assigned who has since lost access
+      // doesn't block an edit, as the relay rules too.
       if (assignees)
-        await checkAssignees(session, reads, task.home, assignees, signal);
+        await checkAssignees(
+          session,
+          reads,
+          task.home,
+          assignees.filter((key) => !task.assignees.includes(key)),
+          signal,
+        );
       // The evidence comes first: no comment, no close.
       if (closing && evidence && task.status !== status)
         await postAgentComment(

@@ -35,6 +35,7 @@ const theirs = revision("c".repeat(64), "Their title");
 const project = "33333333-3333-4333-8333-333333333333";
 const launch = "44444444-4444-4444-8444-444444444444";
 const leo = "c".repeat(64);
+const riley = "9".repeat(64);
 const dm = "55555555-5555-4555-8555-555555555555";
 
 type Answer = ChannelReachState;
@@ -56,7 +57,10 @@ function setup(
     { id: home, name: "design", channelType: "stream", viewerRole: "member" },
     { id: launch, name: "launch", channelType: "stream", readOnly: true },
   ];
-  const profiles = new Map([[leo, { name: "Leo" }]]);
+  const profiles = new Map([
+    [leo, { name: "Leo" }],
+    [riley, { name: "Riley" }],
+  ]);
   const list = { status: "ready", channels };
   const metadata = (d: string, name: string, extra: string[][] = []) => ({
     id: d.slice(0, 8).padEnd(64, "0"),
@@ -165,6 +169,62 @@ it("keeps the person's text on a conflict, then saves over the newer version", a
   await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
   expect(signed[1]?.tags).toContainEqual(["prev", theirs.id]);
   expect(signed[1]?.tags).toContainEqual(["title", "My title"]);
+});
+
+it("names someone assigned who lost access, and unassigns only them", async () => {
+  const { session, signed } = setup(async () => "");
+  const assigned = taskOf({
+    ...revision("d".repeat(64), "Fix the header"),
+    tags: [
+      ...revision("d".repeat(64), "Fix the header").tags,
+      ["assignee", leo],
+      ["assignee", riley],
+    ],
+  }) as Task;
+  const onSaved = vi.fn();
+  render(
+    <TaskView
+      session={session}
+      task={assigned}
+      openConversation={() => {}}
+      onSaved={onSaved}
+    />,
+  );
+  expect(
+    await screen.findByText("Riley can’t see this task anymore."),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/Leo can’t see/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Unassign Riley" }));
+  await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
+  const tags = signed[0]?.tags ?? [];
+  expect(tags.filter(([name]) => name === "assignee")).toEqual([
+    ["assignee", leo],
+  ]);
+});
+
+it("names someone who lost access to a view-only reader, with no way to unassign", async () => {
+  const { session } = setup(async () => "", { [home]: opened(false) });
+  const assigned = taskOf({
+    ...revision("d".repeat(64), "Fix the header"),
+    tags: [
+      ...revision("d".repeat(64), "Fix the header").tags,
+      ["assignee", riley],
+    ],
+  }) as Task;
+  render(
+    <TaskView
+      session={session}
+      task={assigned}
+      openConversation={() => {}}
+      onSaved={() => {}}
+    />,
+  );
+  expect(
+    await screen.findByText("Riley can’t see this task anymore."),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /Unassign/ }),
+  ).not.toBeInTheDocument();
 });
 
 it("shows someone view-only there no edit controls, whatever their list says", () => {

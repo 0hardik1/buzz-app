@@ -161,6 +161,7 @@ function TaskDetails({
   const places = usePlaces(session, [task.home]);
   const project = projectOf(task, places);
   const home = places.get(task.home);
+  const readers = useReadersOf(session, task.home);
   // Immediate changes: status and assignees, on the revision shown.
   const change = async (next: Partial<TaskFields>) => {
     if (saving) return;
@@ -223,7 +224,7 @@ function TaskDetails({
             />
             <AssigneePicker
               session={session}
-              home={task.home}
+              readers={readers}
               assignees={task.assignees}
               disabled={saving}
               onChange={(assignees) => void change({ assignees })}
@@ -265,6 +266,18 @@ function TaskDetails({
           </>
         )}
       </div>
+      <LostAccess
+        session={session}
+        assignees={task.assignees}
+        readers={readers}
+        disabled={saving}
+        {...(canEdit && {
+          unassign: (lost: readonly string[]) =>
+            void change({
+              assignees: task.assignees.filter((key) => !lost.includes(key)),
+            }),
+        })}
+      />
       {task.description.trim() ? (
         <MarkdownDocument
           content={task.description}
@@ -377,25 +390,62 @@ function Assignees({
 }
 
 type Person = ReturnType<ReturnType<typeof usePeople>>;
+type Readers = Awaited<ReturnType<typeof readReaders>>;
+
+/** People assigned who can't see where the task lives: their access changed
+ * after they were assigned. Named, and whoever can edit can unassign them.
+ * Edits that don't add anyone still save while they stay. */
+function LostAccess({
+  session,
+  assignees,
+  readers,
+  disabled,
+  unassign,
+}: {
+  session: RelaySession;
+  assignees: readonly string[];
+  readers: Readers | undefined;
+  disabled: boolean;
+  unassign?: (lost: readonly string[]) => void;
+}) {
+  const person = usePeople(session, assignees);
+  const lost =
+    readers && !readers.anyone
+      ? assignees.filter((pubkey) => !readers.people.has(pubkey))
+      : [];
+  if (!lost.length) return null;
+  const names = listNames(lost.map((key) => person(key).name));
+  return (
+    <div className={styles.actions}>
+      <p className="text-body-sm text-subtle m-0">
+        {names} can’t see this task anymore.
+      </p>
+      {unassign ? (
+        <Button size="sm" disabled={disabled} onClick={() => unassign(lost)}>
+          {lost.length === 1 ? `Unassign ${names}` : "Unassign them"}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
 
 /** Up to four people, chosen from the people who can see the task. Agents
  * are never offered: a person always answers for the work. */
 function AssigneePicker({
   session,
-  home,
+  readers,
   assignees,
   disabled,
   onChange,
 }: {
   session: RelaySession;
-  home: string;
+  /** The members of its home and the places it is filed under. An open
+   * place has more readers than these; the relay checks everyone added. */
+  readers: Readers | undefined;
   assignees: readonly string[];
   disabled: boolean;
   onChange(assignees: readonly string[]): void;
 }) {
-  // Its members and those of the places it is filed under. An open place
-  // has more readers than these; the relay checks every assignee either way.
-  const readers = useReadersOf(session, home);
   const pubkeys = useMemo(
     () => [...new Set([...assignees, ...(readers?.people ?? [])])],
     [assignees, readers],
@@ -840,8 +890,7 @@ const listNames = (names: readonly string[]) =>
 
 /** Who can see what lives in `home`; undefined until read, or with no home. */
 function useReadersOf(session: RelaySession, home: string | undefined) {
-  const [readers, setReaders] =
-    useState<Awaited<ReturnType<typeof readReaders>>>();
+  const [readers, setReaders] = useState<Readers>();
   useEffect(() => {
     setReaders(undefined);
     if (!home) return;
