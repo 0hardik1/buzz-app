@@ -633,7 +633,8 @@ available. The `read` tool also shows `relayed_from` with the source pubkey and
 available display name. The signer remains `pubkey`; the relayed text has the source agent's
 authority, never the owner's. Other signers' tags are ignored. The source must
 be 64 lowercase hex characters; the first valid tag is used. This is attribution
-asserted by the owner's account, not a signature from the source agent.
+asserted by the owner's account, not a signature from the source agent. Relayed
+messages do not invoke owner-only folder or skill references.
 
 A plugin gives standing instructions to every turn with
 `ctx.agents.addInstructions({ id, text, when? })` (see
