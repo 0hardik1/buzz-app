@@ -352,7 +352,7 @@ function mountSources(
     },
   );
   const publishes = new Map<string, ComposerCompletionProps["publish"]>();
-  const registered = sources.map((source) => {
+  let registered = sources.map((source) => {
     const contribution = {
       id: source.id,
       key: `test.${source.id}/${source.id}`,
@@ -394,9 +394,18 @@ function mountSources(
     keys: { current: undefined },
     composing: { current: false },
   } as CompletionEditor;
+  const listeners = new Set<() => void>();
   render(
     <ComposerCompletions
-      registry={{ snapshot: () => registered, subscribe: () => () => {} }}
+      registry={{
+        snapshot: () => registered,
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+      }}
       editor={editor}
       input={{ current: input }}
       replace={replace}
@@ -419,7 +428,12 @@ function mountSources(
     } as unknown as Parameters<
       NonNullable<CompletionEditor["keys"]["current"]>
     >[0]) ?? false;
-  return { replace, press, publishes };
+  const unregister = (id: string) =>
+    act(() => {
+      registered = registered.filter((contribution) => contribution.id !== id);
+      for (const listener of listeners) listener();
+    });
+  return { replace, press, publishes, unregister };
 }
 const people = (result: Partial<CompletionResult> = {}): Source => ({
   id: "people",
@@ -572,6 +586,29 @@ it("drops a failed supplement's rows and refuses its later publications", async 
     " ",
   );
   error.mockRestore();
+});
+it("drops a supplement removed while the menu is open, with its hold", async () => {
+  const { replace, press, publishes, unregister } = mountSources([
+    people(),
+    groups({ items: [groupRow], holdAutoSelect: true }),
+  ]);
+  await screen.findByRole("option", { name: /^eng$/ });
+  const stale = publishes.get("groups");
+  unregister("groups");
+  expect(listed()).toEqual(["Eng Bot"]);
+  let late: ReturnType<ComposerCompletionProps["publish"]> | undefined;
+  act(() => {
+    late = stale?.({ items: [groupRow] });
+  });
+  expect(late).toBe(false);
+  expect(listed()).toEqual(["Eng Bot"]);
+  expect(press(" ")).toBe(true);
+  expect(replace).toHaveBeenCalledWith(
+    { mention: ENG_BOT },
+    expect.anything(),
+    expect.anything(),
+    " ",
+  );
 });
 it("keeps the winner's rows when a supplement's preview throws", async () => {
   const error = vi.spyOn(console, "error").mockImplementation(() => {});

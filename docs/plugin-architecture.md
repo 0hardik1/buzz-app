@@ -3145,7 +3145,9 @@ supplement's section sits under a host-drawn heading with its `title`, and so
 does the winner's when another section comes first and the winner draws no
 heading of its own. The first row is selected by default, so Enter and Tab take a
 supplement row ordered above the winner's; a terminator still accepts only the
-winner's exact match. Each row keeps its provider: a row is identified by
+winner's exact match. A supplement that publishes later with a lower `order`
+moves the default row until the user moves the selection, which then stays on
+its row while that row exists. Each row keeps its provider: a row is identified by
 provider and ID, and acceptance, `canSelect`, `disabled`, retry and status go to
 the provider that published it. Each provider keeps its own 50-row cap. A
 supplement decides no exact match. The host ignores its `spaceId`, `spacePending`,
@@ -3154,7 +3156,7 @@ shown rows, has or extends the typed name, or is still loading. Then a typed
 terminator never accepts the winner's exact match and types as text. A supplement
 that has not published yet for this query holds the same way, so supplements
 publish on mount, even with no rows. One that fails drops only its own section
-and holds nothing.
+and holds nothing. A hold has no time limit.
 
 Providers receive immutable observation/range evidence and `publish(result)`—not
 DOM, focus or replacement commands. Results contain stable IDs, labels, optional
