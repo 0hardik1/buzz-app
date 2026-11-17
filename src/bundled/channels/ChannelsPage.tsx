@@ -1661,7 +1661,12 @@ function ChannelWorkspace({
           detail.rootId,
         );
         if (entry && historyPanel(entry)) {
-          open(entry, false, detailSource ? "side" : undefined);
+          // A local push has already retained its parent. Applying the routed
+          // visit must select that tab without replacing its siblings again.
+          const alreadyOpen = tabState.entries.some(
+            (item) => panelTabId(item) === panelTabId(entry),
+          );
+          open(entry, alreadyOpen, detailSource ? "side" : undefined);
           if (detailSource && !detailReply) tabState.selectMain(undefined);
         } else navigation.complete({ status: "failed", reason: "unavailable" });
       }

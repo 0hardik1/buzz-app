@@ -1,3 +1,4 @@
+import { syncManagedProfile } from "./profile-source";
 import { profileFromEvent } from "../communities/api";
 import {
   profileSaveGeneration,
@@ -81,7 +82,8 @@ export function shareDeviceTimeZone(
   const previous = running.get(key);
   const current = (async () => {
     await previous;
-    return attemptShare(options);
+    const managed = await syncManagedProfile(options);
+    return managed ?? attemptShare(options);
   })();
   running.set(key, current);
   void current.finally(() => {

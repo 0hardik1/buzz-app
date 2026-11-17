@@ -31,7 +31,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
           linkRenderers={ctx.conversation.links}
         />
       ),
-      { supportsPersonInfoContent: true },
+      { supportsPersonInfoContent: true, supportsPersonFields: true },
     ),
   });
 };

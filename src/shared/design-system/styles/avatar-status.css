@@ -10,3 +10,7 @@
   border-radius: 0;
   mask: url("./avatar-squircle.svg") center / 100% 100% no-repeat;
 }
+
+.buzz-avatar-status-dot[data-status-tooltip] {
+  pointer-events: auto;
+}

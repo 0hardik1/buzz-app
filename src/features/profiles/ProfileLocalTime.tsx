@@ -10,9 +10,14 @@ import { localTimeLabel, profileTimeZone } from "./local-time";
 export function ProfileLocalTime({
   timeZone,
   className,
+  clockOnly = false,
+  inlineDetails = false,
 }: {
   timeZone: string | undefined;
   className: string;
+  clockOnly?: boolean;
+  /** Full profile row: clock and relative offset, without a repeated zone. */
+  inlineDetails?: boolean;
 }) {
   const { localTimeDetails } = useClockPreference();
   const zone = profileTimeZone(timeZone);
@@ -43,9 +48,30 @@ export function ProfileLocalTime({
     zone,
     now,
     new Intl.DateTimeFormat().resolvedOptions().timeZone,
-    { hourCycle: clockHourCycle(), difference: localTimeDetails },
+    {
+      ...(clockOnly || inlineDetails ? { locale: "en-US" } : {}),
+      hourCycle: clockOnly || inlineDetails ? "h12" : clockHourCycle(),
+      difference: inlineDetails || (!clockOnly && localTimeDetails),
+    },
   );
   if (!label) return null;
+  if (inlineDetails) {
+    return (
+      <span className={className}>{label.replace(" local time", "")}</span>
+    );
+  }
+  if (clockOnly) {
+    return (
+      <span className={className}>
+        {new Intl.DateTimeFormat("en-US", {
+          timeZone: zone,
+          hour: "numeric",
+          minute: "2-digit",
+          hourCycle: "h12",
+        }).format(now)}
+      </span>
+    );
+  }
   return (
     <>
       <p className={className}>{label}</p>

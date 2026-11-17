@@ -1,3 +1,7 @@
+import {
+  managedProfileTimeZone,
+  profilePhotoChoice,
+} from "../features/profiles/profile-source";
 import { useProfileGeneration } from "../features/relay/react";
 import { ProfileBackdrop } from "../features/profiles/ProfileBackdrop";
 import hero from "../features/profiles/ProfileHero.module.css";
@@ -255,7 +259,9 @@ export function ProfileSettings({
   // A profile without a `tz` key gets this device's zone by default, so the
   // control shows that zone as shared and any save writes it; unchecking
   // records the opt-out.
-  const tzByDefault = !!community && !!loaded && !("tz" in loaded.existing);
+  const managedTimeZone = managedProfileTimeZone(communityId);
+  const tzByDefault =
+    !managedTimeZone && !!community && !!loaded && !("tz" in loaded.existing);
   const persistedTz =
     community && loaded
       ? tzByDefault
@@ -369,6 +375,7 @@ export function ProfileSettings({
               </section>
               <SettingsGroup layout="form">
                 <form
+                  className="grid gap-4"
                   onSubmit={(event) => {
                     event.preventDefault();
                     if (
@@ -424,13 +431,17 @@ export function ProfileSettings({
                           await communityApi.publishProfile(
                             community.id,
                             next,
-                            tzChanged
-                              ? withTimeZone(latest.existing, tz)
-                              : // Any save shares the default zone the box
-                                // shows, unless a zone arrived since.
-                                tzByDefault
-                                ? withDeviceTimeZone(latest.existing, tz)
-                                : latest.existing,
+                            profilePhotoChoice(
+                              community.id,
+                              tzChanged
+                                ? withTimeZone(latest.existing, tz)
+                                : // Any save shares the default zone the box
+                                  // shows, unless a zone arrived since.
+                                  tzByDefault
+                                  ? withDeviceTimeZone(latest.existing, tz)
+                                  : latest.existing,
+                              next.picture,
+                            ),
                           );
                           // Once dispatched, finish on this session even if Settings closes.
                           const confirmed = await inspect(community.id);
@@ -484,7 +495,7 @@ export function ProfileSettings({
                       setError("");
                     }}
                   />
-                  {community && (
+                  {community && !managedTimeZone && (
                     <TimeZoneField
                       value={tz}
                       fallback={persistedTz}

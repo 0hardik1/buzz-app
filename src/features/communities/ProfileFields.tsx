@@ -76,23 +76,7 @@ export function ProfileFields({
           onChange={(picture) => onChange({ ...profile, picture })}
         />
       )}
-      <Field
-        label="Display name"
-        description={
-          verifiedName
-            ? `${
-                verifiedName.status === "checked"
-                  ? `Name verified by ${verifiedName.issuerLabel}`
-                  : `Cached verification from ${verifiedName.issuerLabel}`
-              }${
-                verifiedName.username &&
-                verifiedName.username !== verifiedName.name
-                  ? ` · @${verifiedName.username}`
-                  : ""
-              }`
-            : undefined
-        }
-      >
+      <Field label="Display name">
         <Input
           ref={nameRef}
           autoComplete="nickname"
@@ -108,6 +92,11 @@ export function ProfileFields({
           }
         />
       </Field>
+      {verifiedName?.username && (
+        <Field label="Username">
+          <Input value={`@${verifiedName.username}`} disabled />
+        </Field>
+      )}
       {(showAbout || repairAbout) && (
         <Field
           label="Profile description (optional)"

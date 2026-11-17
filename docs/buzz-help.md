@@ -282,6 +282,11 @@ mention anyone. Explicit agent watches on that room can still receive them.
   yours. With **Show time zone details on profiles** on in Settings →
   **Appearance**, it also shows how far ahead or behind you they are and their
   time zone name.
+  Some organization builds manage timezone defaults automatically and hide these
+  editing controls. They can also supply an initial profile photo when none is set;
+  you can still replace or remove that photo in Edit profile.
+  Linked people in profile fields open in a separate tab; closing it returns to
+  the original profile.
 - Where a community verifies names, the profile check appears beside the verified
   full name, or the verified username when no full name is supplied. The profile
   shows the issuer and verification time; cached verification has no check.
