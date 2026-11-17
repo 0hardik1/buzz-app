@@ -18,10 +18,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import type { RelaySession } from "../../features/relay/session";
-import {
-  RailConversationItem,
-  RailOpenConversations,
-} from "./RailConversationItem";
+import { RailConversationItem } from "./RailConversationItem";
 import type { NavigationScope } from "../../features/navigation/targets";
 import type { NavigationOpenOptions } from "../../features/navigation/controller";
 import { targetKey } from "../../features/navigation/targets";
@@ -815,6 +812,7 @@ export function RailNavigation({
         )}
         views={
           <div
+            className={styles.teamViewControls}
             data-rail-team-icons=""
             onPointerDownCapture={() => {
               cardPointer.current = true;
@@ -857,7 +855,11 @@ export function RailNavigation({
                   label: item.label,
                   icon: item.icon,
                   trailing:
-                    item.filter === "all" ? teamCount("all") : undefined,
+                    item.filter === "all" ? (
+                      <span className={styles.teamCount}>
+                        {teamCount("all")}
+                      </span>
+                    ) : undefined,
                   renderTab: (tab: ReactElement) => (
                     <TeamViewMenu session={session} filter={item.filter}>
                       {tab}
@@ -878,15 +880,6 @@ export function RailNavigation({
             />
           </div>
         }
-        renderOpen={(hidden, open) => (
-          <RailOpenConversations
-            session={session}
-            channels={channels}
-            hidden={hidden}
-            label="Open Team"
-            onClick={open}
-          />
-        )}
         action={creationAction}
       >
         {notice && <p className={styles.note}>{notice}</p>}
@@ -895,9 +888,10 @@ export function RailNavigation({
     const messageCard = shown("team", () =>
       pageSection ? (
         sectionPage
-      ) : showDrafts ? (
+      ) : (
         <TeamDraftRows
           session={session}
+          active={showDrafts}
           scope={scope}
           byId={byId}
           channelsById={channelsById}
@@ -906,13 +900,17 @@ export function RailNavigation({
             if (entry.target.kind !== "person")
               void navigator.open(entry.target);
           }}
-          render={renderTeam}
+          render={(rows, notice) =>
+            renderTeam(
+              showDrafts ? rows : cardRows,
+              showDrafts
+                ? notice
+                : cardRows.length
+                  ? undefined
+                  : "No conversations in this view",
+            )
+          }
         />
-      ) : (
-        renderTeam(
-          cardRows,
-          cardRows.length ? undefined : "No conversations in this view",
-        )
       ),
     );
     const soloCard = shown("solo", () =>
@@ -922,15 +920,6 @@ export function RailNavigation({
         <RailGroup
           id="solo"
           title="Solo"
-          renderOpen={(hidden, open) => (
-            <RailOpenConversations
-              session={session}
-              channels={channels}
-              hidden={hidden}
-              label="Open Solo"
-              onClick={open}
-            />
-          )}
           rows={soloChats.flatMap((channel) => {
             const entry = byId.get(`channel:${channel.id}`);
             return entry ? [sourceRow(entry, "solo")] : [];

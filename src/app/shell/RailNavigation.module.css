@@ -74,6 +74,11 @@
   min-width: 0;
 }
 
+/* Keep the switcher clear of the first conversation row. */
+.teamViewControls {
+  padding-block-end: var(--space-1);
+}
+
 /* Team keeps its view strip above the recent conversation rows. */
 .teamViews {
   display: flex;

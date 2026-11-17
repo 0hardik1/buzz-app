@@ -6,12 +6,13 @@ import { useDrafts } from "../../features/drafts-sent/drafts";
 import { useSent } from "../../features/drafts-sent/views";
 import { sentEntries, preview } from "../../features/drafts-sent/model";
 import { listed } from "../../features/drafts-sent/scope";
-import { MessageListRow } from "../../features/messages/MessageListRow";
+import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import type { RailEntry } from "./rail-pins";
 
-/** Mounted only while the card's Drafts & sent segment is visible. */
+/** Keep the card mounted while subscribing only to its visible Drafts & sent view. */
 export function TeamDraftRows({
   session,
+  active,
   scope,
   byId,
   channelsById,
@@ -20,6 +21,7 @@ export function TeamDraftRows({
   render,
 }: {
   session: RelaySession;
+  active: boolean;
   scope: NavigationScope;
   byId: ReadonlyMap<string, RailEntry>;
   channelsById: ReadonlyMap<string, ChannelSummary>;
@@ -30,15 +32,19 @@ export function TeamDraftRows({
     notice?: string,
   ): ReactNode;
 }) {
-  const drafts = useDrafts(session);
-  const { sent } = useSent(session, scope.viewer);
-  const items = [
-    ...drafts.entries.map((entry) => ({ entry, draft: true })),
-    ...sentEntries(sent.events, scope.viewer).map((entry) => ({
-      entry,
-      draft: false,
-    })),
-  ].sort((a, b) => (b.entry.createdAt ?? 0) - (a.entry.createdAt ?? 0));
+  const drafts = useDrafts(active ? session : undefined);
+  const { sent } = useSent(session, scope.viewer, active);
+  const items = (
+    active
+      ? [
+          ...drafts.entries.map((entry) => ({ entry, draft: true })),
+          ...sentEntries(sent.events, scope.viewer).map((entry) => ({
+            entry,
+            draft: false,
+          })),
+        ]
+      : []
+  ).sort((a, b) => (b.entry.createdAt ?? 0) - (a.entry.createdAt ?? 0));
   const rows = items.flatMap(({ entry: item, draft }) => {
     const channel = channelsById.get(item.channelId);
     const base = byId.get(`channel:${item.channelId}`);
@@ -64,12 +70,15 @@ export function TeamDraftRows({
       {
         entry,
         content: (
-          <MessageListRow
-            avatar={artwork(base)}
-            sender={base.label}
-            source={draft ? "Draft" : "Sent"}
-            time={null}
-            preview={preview(item.text, draft ? "Draft" : "Message")}
+          <NavigationItem
+            icon={artwork(base)}
+            label={preview(item.text, draft ? "Draft" : "Message")}
+            trailing={
+              draft ? <span className="text-caption">Draft</span> : undefined
+            }
+            aria-label={`${base.label}: ${preview(item.text, draft ? "Draft" : "Message")}`}
+            aria-description={preview(item.text, draft ? "Draft" : "Message")}
+            title={preview(item.text, draft ? "Draft" : "Message")}
             onClick={() => open(entry)}
           />
         ),

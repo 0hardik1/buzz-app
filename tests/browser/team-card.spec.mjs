@@ -1,12 +1,56 @@
 import { test, expect } from "./fixture.mjs";
 import { showRail } from "./rail-helpers.mjs";
+const longChannelName =
+  "proj-builderlab-apps-and-remote-development-design-review";
+
 test.use({
   productionBroker: true,
   enabledPlugins: ["buzz.drafts-and-sent"],
   readState: true,
   inboxDm: true,
   historyCounts: { alpha: 3, beta: 2 },
+  channelNames: { beta: longChannelName },
 });
+
+// Hold real animation timelines at deterministic interruption points.
+async function holdNextTransition(card, fraction) {
+  return card.evaluateHandle((card, fraction) => {
+    let animation;
+    const observer = new MutationObserver(() => {
+      animation = card
+        .getAnimations({ subtree: true })
+        .find(
+          (item) =>
+            item.id.startsWith("team-card-") && item.playState === "running",
+        );
+      if (!animation) return;
+      animation.pause();
+      animation.currentTime =
+        Number(animation.effect.getTiming().duration) * fraction;
+      observer.disconnect();
+    });
+    observer.observe(card, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["aria-selected"],
+    });
+    return {
+      started: () => !!animation,
+      sample() {
+        const style = getComputedStyle(animation.effect.target);
+        return {
+          x: new DOMMatrixReadOnly(style.transform).m41,
+          opacity: Number(style.opacity),
+          filter: style.filter,
+        };
+      },
+      release() {
+        observer.disconnect();
+        if (animation?.playState === "paused") animation.finish();
+      },
+    };
+  }, fraction);
+}
 
 // Team keeps view shortcuts above recent conversations; list rows still drag
 // onto the cards beside it.
@@ -15,6 +59,14 @@ test("Team card filters in place and list rows drag onto sidebar cards", async (
   app,
 }, testInfo) => {
   await page.setViewportSize({ width: 1920, height: 950 });
+  for (let i = 0; i < 6; i++)
+    app.append(
+      "primary",
+      "alpha",
+      `Sent preview ${i} that must stay inside a compact row`,
+      false,
+      true,
+    );
   await page.goto(app.origin);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
   const card = rail.locator('[data-rail-section="team"]');
@@ -58,13 +110,50 @@ test("Team card filters in place and list rows drag onto sidebar cards", async (
     "Drafts & sent",
   );
   const initialUrl = page.url();
+  await page.evaluate(() => document.fonts.ready);
+  // Long labels must truncate inside the card, keeping both rounded row ends.
+  expect(
+    await recent.evaluate((list) => {
+      const bounds = list.getBoundingClientRect();
+      return [...list.querySelectorAll(".navigation-item")].every((button) => {
+        const row = button.getBoundingClientRect();
+        return row.left >= bounds.left && row.right <= bounds.right;
+      });
+    }),
+  ).toBe(true);
+  const stableHeight = (await card.boundingBox()).height;
+  const headingNode = await card
+    .getByRole("button", { name: "Team", exact: true })
+    .elementHandle();
+  const sameHeight = () =>
+    expect
+      .poll(async () => (await card.boundingBox()).height)
+      .toBe(stableHeight);
   const channels = card.getByRole("tab", { name: "Channels", exact: true });
-  await channels.click();
-  await expect(channels).toHaveAttribute("aria-selected", "true");
-  await expect(recent.locator('[data-rail-row="channel:alpha"]')).toBeVisible();
-  await card.getByRole("tab", { name: "Mentions", exact: true }).click();
+  const firstMotion = await holdNextTransition(card, 0.5);
+  let secondMotion;
+  try {
+    await channels.click();
+    await expect
+      .poll(() => firstMotion.evaluate((held) => held.started()))
+      .toBe(true);
+    const before = await firstMotion.evaluate((held) => held.sample());
+    secondMotion = await holdNextTransition(card, 0);
+    await card.getByRole("tab", { name: "Mentions", exact: true }).click();
+    await expect
+      .poll(() => secondMotion.evaluate((held) => held.started()))
+      .toBe(true);
+    const after = await secondMotion.evaluate((held) => held.sample());
+    expect(after.x).toBeCloseTo(before.x, 4);
+    expect(after.opacity).toBeCloseTo(before.opacity, 4);
+    expect(after.filter).toBe(before.filter);
+  } finally {
+    await firstMotion.evaluate((held) => held.release());
+    await secondMotion?.evaluate((held) => held.release());
+  }
   await expect(card.getByText("No conversations in this view")).toBeVisible();
   expect(page.url()).toBe(initialUrl);
+  await sameHeight();
   const dms = card.getByRole("tab", { name: "DMs", exact: true });
   await dms.click();
   await expect(recent.locator('[data-rail-row="channel:alpha"]')).toHaveCount(
@@ -83,7 +172,22 @@ test("Team card filters in place and list rows drag onto sidebar cards", async (
     card.getByRole("tab", { name: "Drafts & sent", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
   expect(page.url()).toBe(initialUrl);
+  await expect(recent.locator("[data-rail-row]")).toHaveCount(4);
+  await sameHeight();
+  expect(await headingNode.evaluate((node) => node.isConnected)).toBe(true);
+  const rowGeometry = await recent.getByRole("button").evaluateAll((buttons) =>
+    buttons.map((button) => {
+      const row = button.getBoundingClientRect();
+      const label = button
+        .querySelector(".navigation-item-label")
+        .getBoundingClientRect();
+      return label.top >= row.top && label.bottom <= row.bottom;
+    }),
+  );
+  expect(rowGeometry).toEqual([true, true, true, true]);
+  await page.screenshot({ path: testInfo.outputPath("team-sent-compact.png") });
   await channels.click();
+  await sameHeight();
   await card.getByRole("button", { name: "Team", exact: true }).click();
   const sheet = rail.locator("[data-rail-card-sheet]");
   const index = sheet.getByRole("region", { name: "Team list", exact: true });
@@ -184,7 +288,10 @@ test("Team card filters in place and list rows drag onto sidebar cards", async (
     .locator('[data-activity-row="beta"] [data-conversation-row]')
     .click();
   await expect(
-    page.getByRole("textbox", { name: "Message #Beta", exact: true }),
+    page.getByRole("textbox", {
+      name: `Message #${longChannelName}`,
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(sheet).toBeVisible();
   await index

@@ -14,25 +14,45 @@ export function TeamCardTransition({
 }) {
   const content = useRef<HTMLDivElement>(null);
   const reduced = useReducedMotion();
+  const running = useRef<Animation | null>(null);
+  useLayoutEffect(() => () => running.current?.cancel(), []);
   useLayoutEffect(() => {
     const node = content.current;
-    if (!node || reduced || !direction) return;
+    if (!node) return;
+    if (reduced || !direction) {
+      running.current?.cancel();
+      running.current = null;
+      return;
+    }
     const style = getComputedStyle(node);
+    const interrupted =
+      running.current?.playState === "running" ||
+      running.current?.playState === "paused";
+    const from = interrupted
+      ? {
+          transform: style.transform,
+          opacity: style.opacity,
+          filter: style.filter,
+        }
+      : {
+          transform: `translateX(calc(${direction} * var(--space-6)))`,
+          opacity: "0.5",
+          filter: "blur(var(--space-half))",
+        };
+    running.current?.cancel();
     const animation = node.animate(
-      [
-        { transform: `translateX(${direction * 24}px)`, opacity: 0 },
-        { transform: "translateX(0)", opacity: 1 },
-      ],
+      [from, { transform: "translateX(0)", opacity: 1, filter: "blur(0px)" }],
       {
         id: `team-card-${view}`,
         duration:
-          Number.parseFloat(style.getPropertyValue("--duration-fast")) || 150,
+          Number.parseFloat(style.getPropertyValue("--duration-panel-enter")) ||
+          180,
         easing:
           style.getPropertyValue("--easing-enter").trim() ||
           "cubic-bezier(0.23, 1, 0.32, 1)",
       },
     );
-    return () => animation.cancel();
+    running.current = animation;
   }, [view, direction, reduced]);
   return (
     <div className={styles.viewport}>

@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type CSSProperties,
   type ReactElement,
 } from "react";
 import { createPortal } from "react-dom";
@@ -48,6 +49,7 @@ import {
   PlusIcon,
   ChatCircleIcon,
   ArrowRightIcon,
+  ArrowUpRightIcon,
   FolderSimpleIcon,
   GripHorizontalIcon,
   MinusIcon,
@@ -484,7 +486,6 @@ export function RailGroup({
   wrapContent,
   trailingEntryId,
   sortEntries,
-  renderOpen,
 }: {
   id: string;
   title: string;
@@ -502,7 +503,6 @@ export function RailGroup({
   wrapContent?: (content: ReactNode) => ReactNode;
   trailingEntryId?: string;
   sortEntries?: (a: RailEntry, b: RailEntry) => number;
-  renderOpen?: (hidden: readonly RailEntry[], open: () => void) => ReactNode;
 }) {
   const arrangement = useContext(ArrangementContext);
   // A section's page shares the cards' drag context: only the card is a
@@ -635,7 +635,7 @@ export function RailGroup({
         </div>
       </section>
     );
-  const cardContent = (
+  const previewContent = (
     <>
       {rowsLabel ? (
         <ul aria-label={rowsLabel} className={styles.rows}>
@@ -654,21 +654,29 @@ export function RailGroup({
         shown
       )}
       {notes}
-      {more &&
-        (renderOpen ? (
-          renderOpen(
-            preview.slice(shown.length).map((row) => row.props.entry),
-            () => arrangement?.openSection(id),
-          )
-        ) : (
-          <NavigationItem
-            label={`Open ${title}`}
-            data-rail-view-more=""
-            aria-label={`Open ${title}`}
-            icon={<ArrowRightIcon size={18} />}
-            onClick={() => arrangement?.openSection(id)}
-          />
-        ))}
+    </>
+  );
+  const cardContent = (
+    <>
+      {resizable ? (
+        <div
+          className={styles.previewSlots}
+          style={{ "--rail-card-row-count": rowLimit } as CSSProperties}
+        >
+          {previewContent}
+        </div>
+      ) : (
+        previewContent
+      )}
+      {more && !resizable && (
+        <NavigationItem
+          label={`Open ${title}`}
+          data-rail-view-more=""
+          aria-label={`Open ${title}`}
+          icon={<ArrowRightIcon size={18} />}
+          onClick={() => arrangement?.openSection(id)}
+        />
+      )}
     </>
   );
   const card = (
@@ -781,6 +789,12 @@ export function RailGroup({
               onDoubleClick={custom ? () => setNaming(true) : undefined}
             >
               {title}
+              <ArrowUpRightIcon
+                className={styles.openArrow}
+                data-navigation-reveal=""
+                size={16}
+                aria-hidden="true"
+              />
             </Button>
           )
         }
@@ -793,8 +807,8 @@ export function RailGroup({
       {resizable && preview.length > 1 && (
         <RailCardResize
           title={title}
-          count={Math.min(rowLimit, preview.length)}
-          max={preview.length}
+          count={rowLimit}
+          max={Math.max(rowLimit, preview.length)}
           onPreview={setPreviewRows}
           onCancel={() => setPreviewRows(undefined)}
           onCommit={(count) => {

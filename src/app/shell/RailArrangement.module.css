@@ -58,6 +58,20 @@
   list-style: none;
   gap: var(--space-half);
 }
+/* Match the shared compact navigation row and the list's inter-row gap. */
+.previewSlots {
+  block-size: calc(
+    var(--rail-card-row-count) *
+    (var(--space-6) + var(--space-1)) +
+    (var(--rail-card-row-count) - 1) *
+    var(--space-half)
+  );
+}
+.previewSlots .rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: calc(var(--space-6) + var(--space-1));
+}
 .avatarGrid {
   display: grid;
   width: 100%;
@@ -76,6 +90,14 @@
   padding: var(--space-3);
   border-radius: var(--radius-container);
   background: var(--surface-rail-card);
+}
+/* Keep the recessed cards distinct from the focused sheet in either theme. */
+:where([data-covered]) .group {
+  background: color-mix(
+    in srgb,
+    var(--surface-rail-card) 88%,
+    var(--text-standard)
+  );
 }
 .group[data-drop-target]:not([data-section-drag]) {
   background: color-mix(
@@ -155,6 +177,13 @@
 .grabber button:active {
   cursor: grabbing;
 }
+/* Shared heading reveal also applies while hovering the card's body. */
+@media (hover: hover) and (pointer: fine) {
+  .group:hover .openArrow {
+    opacity: 1;
+  }
+}
+
 /* Keep card geometry fixed while secondary controls fade in. */
 .group [data-rail-card-actions] {
   display: flex;

@@ -763,7 +763,8 @@ independent floating panels retain their usual contour.
 The window toolbar sits on `surface-window-underlay`: the navigation cards'
 composited background with a 5% theme tint, following the app's color mode. The sidebar
 and main content share one continuous `surface-panel` workspace with concentric
-28px corners: the navigation cards' 24px radius plus their 4px outer inset.
+28px top corners: the navigation cards' 24px radius plus their 4px outer inset.
+The workspace bottom corners are square so the surface meets the window edge.
 The shell owns this geometry; window-level modal portals remain outside it.
 
 Use the surface that matches the content and its position in the interface.

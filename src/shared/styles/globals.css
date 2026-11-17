@@ -303,7 +303,8 @@
     @apply relative grid min-h-0 min-w-0 flex-1;
     --shell-container-radius: calc(var(--radius-container) + var(--space-1));
     background: var(--surface-panel);
-    border-radius: var(--shell-container-radius);
+    border-radius: var(--shell-container-radius) var(--shell-container-radius) 0
+      0;
     overflow: clip;
     column-gap: 0;
     --shell-rail-width: var(--size-navigation-rail);

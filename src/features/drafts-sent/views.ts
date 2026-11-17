@@ -28,13 +28,14 @@ export type ViewState = {
 const noop = () => {};
 
 /** A live view of the viewer's own messages: new sends arrive without a refresh. */
-export function useSent(session: RelaySession, viewer: string) {
+export function useSent(session: RelaySession, viewer: string, enabled = true) {
   const [sent, setSent] = useState<ViewState>({
     status: "loading",
     events: [],
   });
   const refresh = useRef<() => void>(noop);
   useEffect(() => {
+    if (!enabled) return;
     let view: View;
     try {
       // Own edits and deletions ride along, so each message reads as it does in Buzz now.
@@ -56,7 +57,7 @@ export function useSent(session: RelaySession, viewer: string) {
       stop();
       view.dispose();
     };
-  }, [session, viewer]);
+  }, [session, viewer, enabled]);
   return { sent, refresh };
 }
 
