@@ -430,6 +430,10 @@ export type CompletionResult = Readonly<{
   status?: string;
   /** Optional explicit recovery. A new query or disposal revokes this action. */
   retry?: () => void;
+  /** Supplements only: something in the provider's whole source, not only its
+   * shown rows, has or extends the typed name, or that source is still
+   * loading. A terminator then never accepts the winner's exact match. */
+  holdAutoSelect?: boolean;
 }>;
 export type ComposerCompletionProps = CompletionContext &
   Readonly<{
@@ -443,6 +447,12 @@ export type ComposerCompletion = Readonly<{
   id: string;
   title: string;
   order?: number;
+  /** Adds rows beside the provider that owns the caret when this one's match
+   * has the same `start`; never owns it, so never opens alone. Its rows sit
+   * under a host-drawn `title`, sections in `order` then key. Publish on
+   * mount, even with no rows: until then the winner's exact match waits. Its
+   * `spaceId`, `spacePending`, `agent` and `group` are ignored. */
+  supplement?: true;
   /** Pure syntax matcher. Host prefers the closest trigger; order/key break ties. */
   match(
     observation: ComposerObservation,

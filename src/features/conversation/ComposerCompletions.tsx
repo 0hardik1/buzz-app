@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { RobotIcon } from "../../shared/design-system/icons/index";
 import { useCompletionPosition } from "./useCompletionPosition";
 import {
+  Fragment,
   useId,
   useCallback,
   useEffect,
@@ -19,6 +20,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
   type RefObject,
 } from "react";
 import type { Contribution } from "../../plugins/contributions";
@@ -35,16 +37,17 @@ import type {
 import { ContributionBoundary, contributionKey } from "./ContributionBoundary";
 import { IdentityMarks } from "./IdentityMarks";
 import {
+  byOrder,
   completionResult,
   matchCompletion,
+  type CompletionMatch,
   type HostCompletionEdit,
   type HostCompletionResult,
+  type HostCompletionSuggestion,
 } from "./completion";
 import type { CompletionEditor } from "./useCompletionEditor";
 import styles from "./Completions.module.css";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
-
-const RETRY = Symbol("retry-completion");
 
 /** The editor retains focus, so keyboard selection must open its own hint. */
 function EmojiCompletionName({
@@ -93,17 +96,25 @@ function EmojiCompletionName({
  * owner whose provider has not published by the end of its mount effects
  * clears it. A query opened elsewhere, by another provider, or after the
  * popup closed starts empty: `ComposerCompletions` evicts the store in its
- * closed render, so a carried result means only a continuing open query. */
+ * closed render, so a carried result means only a continuing open query.
+ * Results are kept per provider: the winner and each supplement beside it. */
+type Shown = Readonly<Record<number, HostCompletionResult>>;
 function createDisplay() {
-  let shown: { key: string; result: HostCompletionResult | undefined } = {
+  let shown: { key: string; results: Shown | undefined } = {
     key: "",
-    result: undefined,
+    results: undefined,
   };
   const listeners = new Set<() => void>();
   return {
-    read: (key: string) => (shown.key === key ? shown.result : undefined),
-    set(key: string, result: HostCompletionResult | undefined) {
-      shown = { key, result };
+    read: (key: string) => (shown.key === key ? shown.results : undefined),
+    set(key: string, source?: number, result?: HostCompletionResult) {
+      const results: Record<number, HostCompletionResult> =
+        shown.key === key ? { ...shown.results } : {};
+      if (source !== undefined) {
+        if (result) results[source] = result;
+        else delete results[source];
+      }
+      shown = { key, results: key ? results : undefined };
       for (const listener of listeners) listener();
     },
     subscribe(listener: () => void) {
@@ -231,7 +242,7 @@ export function ComposerCompletions({
   // that returned to text, starts empty as a first query does; its provider's
   // first publication fills it in the same task.
   useEffect(() => {
-    if (!open) display.set("", undefined);
+    if (!open) display.set("");
   }, [open, display]);
   if (!open || !match || !observation) return null;
   return (
@@ -242,6 +253,11 @@ export function ComposerCompletions({
         match.query.start,
         match.query.end,
         match.query.query,
+        match.supplements.map(({ provider, query }) => [
+          contributionKey(provider),
+          query.end,
+          query.query,
+        ]),
       ])}
       fallback={
         <span role="status">
@@ -255,6 +271,7 @@ export function ComposerCompletions({
         identityMarks={identityMarks}
         display={display}
         provider={match.provider}
+        supplements={match.supplements}
         query={match.query}
         observation={observation}
         editor={editor}
@@ -265,8 +282,20 @@ export function ComposerCompletions({
     </ContributionBoundary>
   );
 }
+type Source = CompletionMatch;
+type Row = Readonly<{
+  source: Source;
+  key: string;
+  item?: HostCompletionSuggestion;
+  heading?: string;
+}>;
+// A row's identity is its provider and its id: two providers may share ids.
+const rowKey = (source: Source, id?: string) =>
+  JSON.stringify([contributionKey(source.provider), id ?? null]);
+
 function OwnedCompletion({
   provider,
+  supplements: matched,
   registry,
   identityMarks,
   display,
@@ -279,6 +308,7 @@ function OwnedCompletion({
   ...context
 }: CompletionContext & {
   provider: Contribution<ComposerCompletion>;
+  supplements: readonly Source[];
   registry: ContributionReader<ComposerCompletion>;
   identityMarks?: ContributionReader<IdentityMark> | undefined;
   display: ReturnType<typeof createDisplay>;
@@ -315,15 +345,30 @@ function OwnedCompletion({
   );
   const list = useRef<HTMLDivElement>(null);
   const trigger = `${contributionKey(provider)}:${query.start}`;
-  const result = useSyncExternalStore(
+  // Fixed for this lifetime: a changed set of supplements remounts it.
+  const [{ winner, supplements, sources }] = useState(() => {
+    const winner: Source = { provider, query };
+    return {
+      winner,
+      supplements: matched,
+      sources: [winner, ...matched].sort((a, b) =>
+        byOrder(a.provider, b.provider),
+      ),
+    };
+  });
+  const results = useSyncExternalStore(
     display.subscribe,
     () => display.read(trigger),
     () => display.read(trigger),
   );
-  // This lifetime's own publication; a carried display is never acted on.
-  const latest = useRef<HostCompletionResult | undefined>(undefined);
-  // Only user navigation pins an ID; automatic selection follows the first result.
-  const [selected, setSelected] = useState<string | typeof RETRY>();
+  const result = results?.[contributionKey(provider)];
+  // This lifetime's own publications; a carried display is never acted on.
+  const latest = useRef(new Map<Source, HostCompletionResult>());
+  // A failed supplement is done for this lifetime: its section goes, it holds
+  // nothing back, and it can no longer publish or accept.
+  const failed = useRef(new Set<Source>());
+  // Only user navigation pins a row; automatic selection follows the first result.
+  const [selected, setSelected] = useState<string>();
   const [keyboardSelection, setKeyboardSelection] = useState<string>();
   const pointerMoved = useCallback(
     (event: Pick<PointerEvent, "clientX" | "clientY">) => {
@@ -354,63 +399,132 @@ function OwnedCompletion({
     current.current = { editor, replace };
   });
   const active = useCallback(
-    () =>
+    (source: Source) =>
       live.current &&
-      registry.snapshot().includes(provider) &&
+      !failed.current.has(source) &&
+      registry.snapshot().includes(source.provider) &&
       current.current.editor.valid(observation),
-    [provider, registry, observation],
+    [registry, observation],
   );
-  const [publish, setPublish] = useState<ComposerCompletionProps["publish"]>();
+  const [publishers, setPublishers] =
+    useState<ReadonlyMap<Source, ComposerCompletionProps["publish"]>>();
   useLayoutEffect(() => {
     live.current = true;
     let owned = true;
-    setPublish(() => (incoming: CompletionResult) => {
-      if (!owned || !active()) return false;
-      const next = completionResult(incoming, provider);
-      latest.current = next;
-      revealSelection.current = true;
-      display.set(trigger, next);
-      setSelected((previous) =>
-        next.items.some((item) => item.id === previous)
-          ? previous
-          : previous === RETRY && next.retry
-            ? RETRY
-            : undefined,
-      );
-      return () => {
-        if (latest.current !== next) return;
-        latest.current = undefined;
-        if (live.current) display.set(trigger, undefined);
-      };
-    });
+    const published = latest.current;
+    setPublishers(
+      new Map(
+        sources.map((source) => [
+          source,
+          (incoming: CompletionResult) => {
+            if (!owned || !active(source)) return false;
+            const next = completionResult(incoming, source.provider);
+            const slot = contributionKey(source.provider);
+            published.set(source, next);
+            revealSelection.current = true;
+            display.set(trigger, slot, next);
+            // A pinned row of this provider stays only while it still exists.
+            setSelected((previous) => {
+              if (!previous?.startsWith(`[${slot},`)) return previous;
+              const kept =
+                previous === rowKey(source)
+                  ? !!next.retry
+                  : next.items.some(
+                      (item) => previous === rowKey(source, item.id),
+                    );
+              return kept ? previous : undefined;
+            });
+            return () => {
+              if (published.get(source) !== next) return;
+              published.delete(source);
+              if (live.current) display.set(trigger, slot);
+            };
+          },
+        ]),
+      ),
+    );
     return () => {
       owned = false;
       live.current = false;
-      latest.current = undefined;
+      published.clear();
     };
-  }, [active, display, provider, trigger]);
-  // A carried result stands only until this query's provider has run its
+  }, [active, display, sources, trigger]);
+  // A carried result stands only until this query's providers have run their
   // mount effects, which precede this one; a provider that has not published
-  // by then leaves the popup closed, as for a first query, so a stale display
-  // is never painted.
+  // by then shows nothing, as for a first query, so a stale display is never
+  // painted. A provider no longer beside this query keeps nothing either.
   useEffect(() => {
-    if (publish && !latest.current) display.set(trigger, undefined);
-  }, [publish, display, trigger]);
-  const items = result?.items ?? [];
+    if (!publishers) return;
+    const published = new Set(
+      [...latest.current.keys()].map(({ provider }) =>
+        contributionKey(provider),
+      ),
+    );
+    for (const slot of Object.keys(display.read(trigger) ?? {}))
+      if (!published.has(Number(slot))) display.set(trigger, Number(slot));
+  }, [publishers, display, trigger]);
+  // The winner's exact match waits while a supplement has, or may have, a
+  // name the typed one is, or begins.
+  const held = () =>
+    supplements.some((source) => {
+      const published = latest.current.get(source);
+      return (
+        !failed.current.has(source) &&
+        (!published || published.holdAutoSelect === true)
+      );
+    });
+  // The winner's failure closes the popup; a supplement's drops only its own
+  // section, whether its provider or one of its previews throws.
+  const isolate = (source: Source, node: ReactNode) =>
+    source === winner ? (
+      node
+    ) : (
+      <ContributionBoundary
+        fallback={null}
+        onFailedChange={(failure) => {
+          if (!failure) return;
+          failed.current.add(source);
+          display.set(trigger, contributionKey(source.provider));
+        }}
+      >
+        {node}
+      </ContributionBoundary>
+    );
+  const rows: Row[] = [];
+  for (const source of sources) {
+    const shown = results?.[contributionKey(source.provider)];
+    const own: Row[] = [
+      ...(shown?.items ?? []).map((item) => ({
+        source,
+        key: rowKey(source, item.id),
+        item,
+      })),
+      ...(shown?.retry ? [{ source, key: rowKey(source) }] : []),
+    ];
+    // A supplement's rows sit under its title; the winner's too when rows
+    // precede them and the provider draws no heading of its own.
+    const first = own[0];
+    if (first && (source !== winner || (rows.length > 0 && !first.item?.group)))
+      own[0] = { ...first, heading: source.provider.title };
+    rows.push(...own);
+  }
+  const statuses = sources.flatMap((source) => {
+    const status = results?.[contributionKey(source.provider)]?.status;
+    return status ? [{ source, status }] : [];
+  });
   // Matching syntax is not evidence of pending work. Providers publish their
   // own status when needed; an empty/unpublished result must not flash a portal.
-  const visible = !!(items.length || result?.status || result?.retry);
-  const count = items.length + (result?.retry ? 1 : 0);
-  const index =
-    selected === RETRY && result?.retry
-      ? items.length
-      : items.findIndex((item) => item.id === selected);
+  const visible = !!(rows.length || statuses.length);
+  const count = rows.length;
+  const index = rows.findIndex((row) => row.key === selected);
   const selectedIndex = index < 0 ? 0 : index;
-  const status = result?.status;
   function accept(index: number, key = "click") {
-    const published = latest.current;
-    if (!active() || !published) return false;
-    if (index === items.length && result?.retry) {
+    const terminator = terminates(key);
+    const row = terminator ? undefined : rows[index];
+    const source = row?.source ?? winner;
+    const published = latest.current.get(source);
+    if (!active(source) || !published) return false;
+    if (row && !row.item) {
       if (!published.retry) return false;
       published.retry();
       return true;
@@ -418,12 +532,12 @@ function OwnedCompletion({
     // Publication is synchronous; React may still be displaying the previous
     // result. Keep the user's chosen ID, but use only its current evidence/edit.
     // The terminator names its own item, which that display may not have yet.
-    const id = terminates(key) ? published.spaceId : items[index]?.id;
+    const id = terminator ? published.spaceId : row?.item?.id;
     const item = published.items.find((item) => item.id === id);
     if (!item || item.disabled || item.canSelect?.(key) === false) return false;
     const accepted = current.current.replace(
       item.edit,
-      query,
+      source.query,
       observation,
       key,
     );
@@ -432,10 +546,12 @@ function OwnedCompletion({
   }
   useLayoutEffect(() => {
     const element = input.current;
-    // Escape must still dismiss an unpublished provider without advertising a
-    // nonexistent listbox. A settled empty result leaves ordinary keys alone;
-    // an undecided one still owns the terminator, with nothing to show yet.
-    if (!element || (!visible && result && !result.spacePending)) return;
+    // Escape must still dismiss an unpublished provider, or a supplement that
+    // still holds, without advertising a nonexistent listbox. A settled empty
+    // result leaves ordinary keys alone; an undecided one still owns the
+    // terminator, with nothing to show yet.
+    if (!element || (!visible && result && !result.spacePending && !held()))
+      return;
     if (visible) {
       element.setAttribute("aria-autocomplete", "list");
       element.setAttribute("aria-haspopup", "listbox");
@@ -466,7 +582,7 @@ function OwnedCompletion({
         (event.key === " " || !terminates(event.key))
       )
         return false;
-      if (!active()) {
+      if (!active(winner)) {
         // A displayed choice owns plain acceptance even when its final evidence
         // was revoked. Never turn a rejected edit into an unintended send.
         if ((event.key === "Enter" || event.key === "Tab") && count) {
@@ -481,10 +597,13 @@ function OwnedCompletion({
       // yet, so both terminator branches read the publication. Space is not
       // redirected away from an exact match the display showed: a publication
       // that moves it to another id leaves Space literal. The displayed row
-      // is never accepted on its own; only the publication selects.
-      const published = latest.current;
+      // is never accepted on its own; only the publication selects. A
+      // supplement holding the terminator leaves it literal too.
+      const published = latest.current.get(winner);
+      const waiting = terminates(event.key) && held();
       if (
         terminates(event.key) &&
+        !waiting &&
         published?.spaceId &&
         (!result?.spaceId || result.spaceId === published.spaceId)
       ) {
@@ -503,6 +622,7 @@ function OwnedCompletion({
       // decision is deferred to the resolver under the full rule.
       if (
         terminates(event.key) &&
+        !waiting &&
         published?.spacePending &&
         !published.spaceId &&
         current.current.replace(
@@ -523,8 +643,8 @@ function OwnedCompletion({
         const next =
           (selectedIndex + (event.key === "ArrowDown" ? 1 : count - 1)) % count;
         revealSelection.current = true;
-        if (compact) setKeyboardSelection(items[next]?.id);
-        setSelected(next === items.length ? RETRY : items[next]?.id);
+        if (compact) setKeyboardSelection(rows[next]?.key);
+        setSelected(rows[next]?.key);
         return true;
       }
       if ((event.key === "Enter" || event.key === "Tab") && count) {
@@ -550,17 +670,27 @@ function OwnedCompletion({
       element.removeAttribute("aria-activedescendant");
     };
   });
-  const Provider = provider.component;
   return (
     <>
-      {publish && (
-        <Provider
-          {...context}
-          observation={observation}
-          query={query}
-          publish={publish}
-        />
-      )}
+      {publishers &&
+        sources.map((source) => {
+          const Provider = source.provider.component;
+          const publish = publishers.get(source);
+          if (!publish) return null;
+          return (
+            <Fragment key={contributionKey(source.provider)}>
+              {isolate(
+                source,
+                <Provider
+                  {...context}
+                  observation={observation}
+                  query={source.query}
+                  publish={publish}
+                />,
+              )}
+            </Fragment>
+          );
+        })}
       {visible &&
         input.current &&
         createPortal(
@@ -579,131 +709,143 @@ function OwnedCompletion({
               ref={list}
               className={styles.list}
             >
-              {items.flatMap((item, i) => [
-                item.group && item.group !== items[i - 1]?.group && (
-                  // Read as the description of each row it heads.
+              {rows.flatMap((row, i) => {
+                const { item, source } = row;
+                const previous = rows[i - 1];
+                const group =
+                  item?.group &&
+                  (previous?.source !== source ||
+                    item.group !== previous.item?.group) &&
+                  item.group;
+                const heading = row.heading ?? group;
+                const lead = rows.findIndex((other) => other.source === source);
+                const describedBy = item?.group
+                  ? `${id}-group-${rows.findIndex((other) => other.source === source && other.item?.group === item.group)}`
+                  : rows[lead]?.heading
+                    ? `${id}-group-${lead}`
+                    : undefined;
+                const option = (
+                  // The textarea owns keyboard focus/selection via aria-activedescendant.
+                  // biome-ignore lint/a11y/useKeyWithClickEvents: Keyboard acceptance belongs to the focused textarea.
                   <div
-                    key={`group:${item.id}`}
-                    id={`${id}-group-${i}`}
-                    aria-hidden="true"
-                    className={styles.group}
+                    role="option"
+                    tabIndex={-1}
+                    aria-selected={i === selectedIndex}
+                    aria-disabled={item ? !!item.disabled : undefined}
+                    aria-label={
+                      compact && item?.detail
+                        ? `${item.label} ${item.detail}`
+                        : undefined
+                    }
+                    id={`${id}-${i}`}
+                    // The provider's identity for the row (a mention's key),
+                    // which its label no longer spells out.
+                    data-completion-id={item?.id}
+                    key={row.key}
+                    aria-describedby={describedBy}
+                    onPointerDown={(event) => {
+                      if (event.button === 0) event.preventDefault();
+                    }}
+                    onPointerMove={
+                      compact || named
+                        ? (event) => {
+                            // WebKit can report a pointermove when keyboard
+                            // scrolling moves another row under a resting pointer.
+                            if (compact && !pointerMoved(event)) return;
+                            revealSelection.current = false;
+                            setKeyboardSelection(undefined);
+                            setSelected(row.key);
+                          }
+                        : undefined
+                    }
+                    onClick={() => accept(i)}
+                    className={styles.option}
                   >
-                    {item.group}
-                  </div>
-                ),
-                // The textarea owns keyboard focus/selection via aria-activedescendant.
-                // biome-ignore lint/a11y/useKeyWithClickEvents: Keyboard acceptance belongs to the focused textarea.
-                <div
-                  role="option"
-                  tabIndex={-1}
-                  aria-selected={i === selectedIndex}
-                  aria-disabled={!!item.disabled}
-                  aria-label={
-                    compact && item.detail
-                      ? `${item.label} ${item.detail}`
-                      : undefined
-                  }
-                  id={`${id}-${i}`}
-                  // The provider's identity for the row (a mention's key),
-                  // which its label no longer spells out.
-                  data-completion-id={item.id}
-                  key={item.id}
-                  aria-describedby={
-                    item.group &&
-                    `${id}-group-${items.findIndex((row) => row.group === item.group)}`
-                  }
-                  onPointerDown={(event) => {
-                    if (event.button === 0) event.preventDefault();
-                  }}
-                  onPointerMove={
-                    compact || named
-                      ? (event) => {
-                          // WebKit can report a pointermove when keyboard
-                          // scrolling moves another row under a resting pointer.
-                          if (compact && !pointerMoved(event)) return;
-                          revealSelection.current = false;
-                          setKeyboardSelection(undefined);
-                          setSelected(item.id);
-                        }
-                      : undefined
-                  }
-                  onClick={() => accept(i)}
-                  className={styles.option}
-                >
-                  {item.preview && (
-                    <span aria-hidden="true" className={styles.preview}>
-                      {item.preview}
-                    </span>
-                  )}
-                  <span className={styles.label} data-completion-label>
-                    {compact ? (
-                      <EmojiCompletionName
-                        label={item.label}
-                        selected={i === selectedIndex}
-                        keyboardSelected={keyboardSelection === item.id}
-                      />
-                    ) : named ? (
-                      // Only the name ellipsizes; the agent mark stays visible.
-                      <span className={styles.nameRow}>
-                        <span className={styles.name}>{item.label}</span>
-                        {mention && item.edit.mention && (
-                          <IdentityMarks
-                            registry={identityMarks}
-                            pubkey={item.edit.mention.pubkey}
-                            profiles={context.session.profiles}
-                            className={styles.identityMarks}
-                          />
-                        )}
-                        {item.agent && (
-                          <span aria-hidden="true" className={styles.agentMark}>
-                            <RobotIcon />
+                    {!item ? (
+                      source === winner ? (
+                        "Retry suggestions"
+                      ) : (
+                        `Retry ${source.provider.title} suggestions`
+                      )
+                    ) : (
+                      <>
+                        {item.preview && (
+                          <span aria-hidden="true" className={styles.preview}>
+                            {isolate(source, item.preview)}
                           </span>
                         )}
-                        {item.agent && <span className="sr-only"> Agent</span>}
-                      </span>
-                    ) : (
-                      item.label
+                        <span className={styles.label} data-completion-label>
+                          {compact ? (
+                            <EmojiCompletionName
+                              label={item.label}
+                              selected={i === selectedIndex}
+                              keyboardSelected={keyboardSelection === row.key}
+                            />
+                          ) : named ? (
+                            // Only the name ellipsizes; the agent mark stays visible.
+                            <span className={styles.nameRow}>
+                              <span className={styles.name}>{item.label}</span>
+                              {mention &&
+                                source === winner &&
+                                item.edit.mention && (
+                                  <IdentityMarks
+                                    registry={identityMarks}
+                                    pubkey={item.edit.mention.pubkey}
+                                    profiles={context.session.profiles}
+                                    className={styles.identityMarks}
+                                  />
+                                )}
+                              {item.agent && (
+                                <span
+                                  aria-hidden="true"
+                                  className={styles.agentMark}
+                                >
+                                  <RobotIcon />
+                                </span>
+                              )}
+                              {item.agent && (
+                                <span className="sr-only"> Agent</span>
+                              )}
+                            </span>
+                          ) : (
+                            item.label
+                          )}
+                          {item.detail && (
+                            <small aria-hidden={compact || undefined}>
+                              {item.detail}
+                            </small>
+                          )}
+                        </span>
+                        {channel && i === selectedIndex && (
+                          <span aria-hidden="true" className={styles.acceptKey}>
+                            Enter
+                          </span>
+                        )}
+                      </>
                     )}
-                    {item.detail && (
-                      <small aria-hidden={compact || undefined}>
-                        {item.detail}
-                      </small>
-                    )}
-                  </span>
-                  {channel && i === selectedIndex && (
-                    <span aria-hidden="true" className={styles.acceptKey}>
-                      Enter
-                    </span>
-                  )}
-                </div>,
-              ])}
-              {result?.retry && (
-                // biome-ignore lint/a11y/useKeyWithClickEvents: Keyboard acceptance belongs to the focused textarea.
-                <div
-                  role="option"
-                  tabIndex={-1}
-                  id={`${id}-${items.length}`}
-                  aria-selected={selectedIndex === items.length}
-                  className={styles.option}
-                  onPointerDown={(event) => {
-                    if (event.button === 0) event.preventDefault();
-                  }}
-                  onPointerMove={
-                    compact || named
-                      ? (event) => {
-                          if (compact && !pointerMoved(event)) return;
-                          revealSelection.current = false;
-                          setSelected(RETRY);
-                        }
-                      : undefined
-                  }
-                  onClick={() => accept(items.length)}
-                >
-                  Retry suggestions
-                </div>
-              )}
+                  </div>
+                );
+                return [
+                  heading && (
+                    // Read as the description of each row it heads.
+                    <div
+                      key={`group:${row.key}`}
+                      id={`${id}-group-${i}`}
+                      aria-hidden="true"
+                      className={styles.group}
+                    >
+                      {heading}
+                    </div>
+                  ),
+                  option,
+                ];
+              })}
             </div>
-            {status && <p role="status">{status}</p>}
+            {statuses.map(({ source, status }) => (
+              <p role="status" key={contributionKey(source.provider)}>
+                {status}
+              </p>
+            ))}
           </section>,
           // A body sibling would sit behind a fullscreen modal and outside its
           // accessibility boundary. Ordinary composers keep the body portal.

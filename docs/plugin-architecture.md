@@ -3137,6 +3137,25 @@ Before the first publication the menu is also hidden: syntax matching is not evi
 of loading. Providers must publish an explicit status for actual pending work. Escape
 still revokes unpublished work, without exposing ARIA controls for a missing listbox.
 
+A provider registered with `supplement: true` never owns the caret. It mounts
+beside the winner when its own match has the same start, with its own query, and
+it never opens a menu alone. Each provider's rows form a section, and sections
+follow `order`, then the contribution key, with the winner among them. A
+supplement's section sits under a host-drawn heading with its `title`, and so
+does the winner's when another section comes first and the winner draws no
+heading of its own. The first row is selected by default, so Enter and Tab take a
+supplement row ordered above the winner's; a terminator still accepts only the
+winner's exact match. Each row keeps its provider: a row is identified by
+provider and ID, and acceptance, `canSelect`, `disabled`, retry and status go to
+the provider that published it. Each provider keeps its own 50-row cap. A
+supplement decides no exact match. The host ignores its `spaceId`, `spacePending`,
+`agent` and `group`. Its `holdAutoSelect: true` says that its whole source, not only its
+shown rows, has or extends the typed name, or is still loading. Then a typed
+terminator never accepts the winner's exact match and types as text. A supplement
+that has not published yet for this query holds the same way, so supplements
+publish on mount, even with no rows. One that fails drops only its own section
+and holds nothing.
+
 Providers receive immutable observation/range evidence and `publish(result)`—not
 DOM, focus or replacement commands. Results contain stable IDs, labels, optional
 detail/decorative previews, an optional `agent` flag (marked and announced only

@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { useEffect, useRef } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
+import { useEffect, useRef, useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ComposerCompletions } from "./ComposerCompletions";
 import type { CompletionEditor } from "./useCompletionEditor";
 import type {
   CompletionResult,
   ComposerCompletion,
+  ComposerCompletionProps,
   IdentityMark,
 } from "./contracts";
 import type { Contribution } from "../../plugins/contributions";
@@ -314,4 +321,328 @@ it("opens no query at a trigger inside a resolved chip", () => {
   mountPeople("buzz.mentions", { tokens: [{ start: 0, end: 2 }] });
   expect(screen.queryByRole("listbox")).toBeNull();
   expect(screen.queryByRole("option")).toBeNull();
+});
+
+const ENG_BOT = { pubkey: "e".repeat(64), name: "Eng Bot" };
+const BOB = { pubkey: "b".repeat(64), name: "Bob" };
+type Source = Readonly<{
+  id: string;
+  order?: number;
+  supplement?: true;
+  title?: string;
+  /** Undefined publishes nothing; a function throws while rendering. */
+  result?: CompletionResult | (() => never) | undefined;
+  /** Publishes `result` without keeping its withdrawal, then throws. */
+  crashAfterPublish?: true;
+}>;
+function mountSources(
+  sources: readonly Source[],
+  replace = vi.fn((..._: unknown[]) => true),
+) {
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: () => {},
+  });
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  const publishes = new Map<string, ComposerCompletionProps["publish"]>();
+  const registered = sources.map((source) => {
+    const contribution = {
+      id: source.id,
+      key: `test.${source.id}/${source.id}`,
+      pluginId: source.id === "people" ? "buzz.mentions" : `test.${source.id}`,
+      revision: "1",
+      title: source.title ?? source.id,
+      ...(source.order !== undefined ? { order: source.order } : {}),
+      ...(source.supplement ? { supplement: true as const } : {}),
+      match: ({ text, start }) =>
+        text.startsWith("@") ? { start: 0, end: start, query: "eng" } : null,
+      component: function Source({ publish }) {
+        const result = source.result;
+        if (typeof result === "function") result();
+        publishes.set(source.id, publish);
+        const [crashed, setCrashed] = useState(false);
+        if (crashed) throw new Error("broken supplement");
+        const published = useRef(publish);
+        useEffect(() => {
+          if (!result || typeof result === "function") return;
+          const withdraw = published.current(result);
+          if (!source.crashAfterPublish) return withdraw || undefined;
+          setCrashed(true);
+        }, []);
+        return null;
+      },
+    } satisfies Contribution<ComposerCompletion>;
+    if (source.id === "people") bundledContribution(contribution);
+    return contribution;
+  });
+  const input = document.createElement(
+    "div",
+  ) as unknown as ComposerInputElement;
+  document.body.append(input);
+  const editor = {
+    observation: { revision: 1, text: "@eng", start: 4, end: 4 },
+    valid: () => true,
+    observe: () => {},
+    invalidate: () => {},
+    keys: { current: undefined },
+    composing: { current: false },
+  } as CompletionEditor;
+  render(
+    <ComposerCompletions
+      registry={{ snapshot: () => registered, subscribe: () => () => {} }}
+      editor={editor}
+      input={{ current: input }}
+      replace={replace}
+      resolved={{ text: "@eng", recipients: [] }}
+      session={{ profiles: {} } as unknown as RelaySession}
+      scope="test"
+      channelId="c"
+    />,
+  );
+  const press = (key: string) =>
+    editor.keys.current?.({
+      key,
+      nativeEvent: { isComposing: false, keyCode: 0 },
+      shiftKey: false,
+      altKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      preventDefault: () => {},
+      stopPropagation: () => {},
+    } as unknown as Parameters<
+      NonNullable<CompletionEditor["keys"]["current"]>
+    >[0]) ?? false;
+  return { replace, press, publishes };
+}
+const people = (result: Partial<CompletionResult> = {}): Source => ({
+  id: "people",
+  title: "Mention",
+  order: -10,
+  result: {
+    items: [
+      {
+        id: "x",
+        label: "Eng Bot",
+        edit: { mention: ENG_BOT },
+      },
+    ],
+    spaceId: "x",
+    ...result,
+  },
+});
+const groups = (
+  result: CompletionResult | (() => never) | undefined,
+  order = -20,
+): Source => ({
+  id: "groups",
+  title: "Groups",
+  order,
+  supplement: true,
+  result,
+});
+const groupRow = {
+  id: "x",
+  label: "eng",
+  edit: { mentions: [BOB] },
+} as const;
+
+// Headings and rows as the listbox lays them out.
+const listed = () =>
+  [...screen.getByRole("listbox").children].map((node) => node.textContent);
+it("shows a supplement's rows under its title beside the winner, in provider order", async () => {
+  mountSources([people(), groups({ items: [groupRow] })]);
+  await screen.findByRole("option", { name: /^eng$/ });
+  // The winner's rows never read as part of the section above them.
+  expect(listed()).toEqual(["Groups", "eng", "Mention", "Eng Bot"]);
+  cleanup();
+  mountSources([people(), groups({ items: [groupRow] }, 10)]);
+  await screen.findByRole("option", { name: /^eng$/ });
+  // First, the winner looks as it does alone.
+  expect(listed()).toEqual(["Eng Bot", "Groups", "eng"]);
+});
+it("opens with a supplement's rows when the winner has none", async () => {
+  const { replace, press } = mountSources([
+    people({ items: [], spaceId: undefined }),
+    groups({ items: [groupRow] }),
+  ]);
+  await screen.findByRole("option", { name: /^eng$/ });
+  expect(listed()).toEqual(["Groups", "eng"]);
+  press("Enter");
+  expect(replace).toHaveBeenCalledWith(
+    { mentions: [BOB] },
+    expect.anything(),
+    expect.anything(),
+    "Enter",
+  );
+});
+it("never opens for a supplement alone", () => {
+  mountSources([groups({ items: [groupRow] })]);
+  expect(screen.queryByRole("listbox")).toBeNull();
+});
+it("accepts each row through its own provider when their ids collide", async () => {
+  const { replace, press } = mountSources([
+    people(),
+    groups({ items: [groupRow] }, 10),
+  ]);
+  fireEvent.click(await screen.findByRole("option", { name: /^eng$/ }));
+  expect(replace).toHaveBeenLastCalledWith(
+    { mentions: [BOB] },
+    { start: 0, end: 4, query: "eng" },
+    expect.anything(),
+    "click",
+  );
+  expect(
+    screen
+      .getAllByRole("option")
+      .map((row) => row.getAttribute("aria-selected")),
+  ).toEqual(["true", "false"]);
+  press("ArrowDown");
+  await screen.findByRole("option", { name: /^eng$/, selected: true });
+  press("Enter");
+  expect(replace).toHaveBeenLastCalledWith(
+    { mentions: [BOB] },
+    expect.anything(),
+    expect.anything(),
+    "Enter",
+  );
+});
+it("keeps Space from picking the winner's exact match while a supplement holds it", async () => {
+  const { replace, press } = mountSources([
+    people(),
+    groups({ items: [groupRow], holdAutoSelect: true }),
+  ]);
+  await screen.findByRole("option", { name: /^Eng Bot$/ });
+  expect(press(" ")).toBe(false);
+  expect(replace).not.toHaveBeenCalled();
+});
+it.each([
+  ["publishes no rows", { items: [] }],
+  [
+    "fails",
+    () => {
+      throw new Error("broken supplement");
+    },
+  ],
+] as const)(
+  "leaves Space to the winner when a supplement %s",
+  async (_, result) => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { replace, press } = mountSources([people(), groups(result)]);
+    await screen.findByRole("option", { name: /^Eng Bot$/ });
+    expect(press(" ")).toBe(true);
+    expect(replace).toHaveBeenCalledWith(
+      { mention: ENG_BOT },
+      expect.anything(),
+      expect.anything(),
+      " ",
+    );
+    error.mockRestore();
+  },
+);
+it("drops a failed supplement's rows and refuses its later publications", async () => {
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const { replace, press, publishes } = mountSources([
+    people(),
+    {
+      ...groups({ items: [groupRow], holdAutoSelect: true }),
+      crashAfterPublish: true,
+    },
+  ]);
+  await screen.findByRole("option", { name: /^Eng Bot$/ });
+  expect(listed()).toEqual(["Eng Bot"]);
+  let late: ReturnType<ComposerCompletionProps["publish"]> | undefined;
+  act(() => {
+    late = publishes.get("groups")?.({ items: [groupRow] });
+  });
+  expect(late).toBe(false);
+  expect(listed()).toEqual(["Eng Bot"]);
+  // Its hold went with it.
+  expect(press(" ")).toBe(true);
+  expect(replace).toHaveBeenCalledWith(
+    { mention: ENG_BOT },
+    expect.anything(),
+    expect.anything(),
+    " ",
+  );
+  error.mockRestore();
+});
+it("keeps the winner's rows when a supplement's preview throws", async () => {
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  function Broken(): never {
+    throw new Error("broken preview");
+  }
+  mountSources([
+    people(),
+    groups({ items: [{ ...groupRow, preview: <Broken /> }] }),
+  ]);
+  await screen.findByRole("option", { name: /^Eng Bot$/ });
+  expect(listed()).toEqual(["Eng Bot"]);
+  error.mockRestore();
+});
+it("lets Escape dismiss a supplement that has not answered beside an empty winner", () => {
+  const empty = people({ items: [], spaceId: undefined });
+  expect(mountSources([empty, groups(undefined)]).press("Escape")).toBe(true);
+  cleanup();
+  // A settled, empty popup leaves Escape to the composer.
+  expect(mountSources([empty, groups({ items: [] })]).press("Escape")).toBe(
+    false,
+  );
+});
+it("holds a pending exact match too while a supplement holds it", async () => {
+  const resolve = vi.fn();
+  const pending = {
+    items: [],
+    spaceId: undefined,
+    spacePending: { name: "eng", resolve },
+  };
+  const held = mountSources([
+    people(pending),
+    groups({ items: [groupRow], holdAutoSelect: true }),
+  ]);
+  await screen.findByRole("option", { name: /^eng$/ });
+  expect(held.press(" ")).toBe(false);
+  expect(held.replace).not.toHaveBeenCalled();
+  cleanup();
+  const free = mountSources([people(pending), groups({ items: [groupRow] })]);
+  await screen.findByRole("option", { name: /^eng$/ });
+  expect(free.press(" ")).toBe(true);
+  expect(free.replace).toHaveBeenCalledWith(
+    { pending: { name: "eng", resolve } },
+    expect.anything(),
+    expect.anything(),
+    " ",
+  );
+});
+it("holds Space until a supplement has answered", async () => {
+  const { replace, press } = mountSources([people(), groups(undefined)]);
+  await screen.findByRole("option", { name: /^Eng Bot$/ });
+  expect(press(" ")).toBe(false);
+  expect(replace).not.toHaveBeenCalled();
+});
+it("ignores a supplement's own exact match and agent mark, and retries it alone", async () => {
+  const retry = vi.fn();
+  const peopleRetry = vi.fn();
+  const { replace, press } = mountSources([
+    people({ spaceId: undefined, retry: peopleRetry }),
+    groups({
+      items: [{ ...groupRow, agent: true }],
+      spaceId: "x",
+      retry,
+    }),
+  ]);
+  expect(await screen.findByRole("option", { name: /^eng$/ })).not.toBeNull();
+  expect(press(" ")).toBe(false);
+  expect(replace).not.toHaveBeenCalled();
+  fireEvent.click(
+    screen.getByRole("option", { name: "Retry Groups suggestions" }),
+  );
+  expect(retry).toHaveBeenCalledOnce();
+  expect(peopleRetry).not.toHaveBeenCalled();
 });

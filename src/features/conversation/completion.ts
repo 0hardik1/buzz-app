@@ -33,45 +33,60 @@ export type HostCompletionSuggestion = Omit<CompletionSuggestion, "edit"> &
 export type HostCompletionResult = Omit<CompletionResult, "items"> &
   Readonly<{ items: readonly HostCompletionSuggestion[] }>;
 
+export type CompletionMatch = Readonly<{
+  provider: Contribution<ComposerCompletion>;
+  query: CompletionQuery;
+}>;
+const order = (value: ComposerCompletion) =>
+  Number.isFinite(value.order) ? (value.order ?? 0) : 0;
+/** Provider precedence: `order`, then contribution key. */
+export const byOrder = (
+  a: Contribution<ComposerCompletion>,
+  b: Contribution<ComposerCompletion>,
+) => order(a) - order(b) || a.key.localeCompare(b.key);
 export function matchCompletion(
   providers: readonly Contribution<ComposerCompletion>[],
   observation: ComposerObservation,
   context: CompletionContext,
   resolved: readonly Readonly<{ start: number; end: number }>[] = [],
-) {
-  const order = (value: ComposerCompletion) =>
-    Number.isFinite(value.order) ? (value.order ?? 0) : 0;
-  let winner:
-    | { provider: Contribution<ComposerCompletion>; query: CompletionQuery }
-    | undefined;
-  for (const provider of [...providers].sort(
-    (a, b) => order(a) - order(b) || a.key.localeCompare(b.key),
-  )) {
+): (CompletionMatch & { supplements: readonly CompletionMatch[] }) | undefined {
+  let winner: CompletionMatch | undefined;
+  const supplements: CompletionMatch[] = [];
+  for (const provider of [...providers].sort(byOrder)) {
     try {
       const query = provider.match(observation, context);
       // A later trigger owns the caret over a broad earlier query (e.g.
       // @Mary Jane :smile). Order/key resolve providers claiming the same start.
       // A trigger inside a resolved chip is not an open query.
       if (
-        validQuery(query, observation) &&
-        !resolved.some(
+        !validQuery(query, observation) ||
+        resolved.some(
           (span) => span.start <= query.start && query.start < span.end,
-        ) &&
-        (!winner || query.start > winner.query.start)
+        )
       )
-        winner = {
-          provider,
-          query: Object.freeze({
-            start: query.start,
-            end: query.end,
-            query: query.query,
-          }),
-        };
+        continue;
+      const match = Object.freeze({
+        provider,
+        query: Object.freeze({
+          start: query.start,
+          end: query.end,
+          query: query.query,
+        }),
+      });
+      if (provider.supplement === true) supplements.push(match);
+      else if (!winner || query.start > winner.query.start) winner = match;
     } catch {
       /* A broken optional matcher cannot break editing. */
     }
   }
-  return winner;
+  return (
+    winner && {
+      ...winner,
+      supplements: supplements.filter(
+        (match) => match.query.start === winner.query.start,
+      ),
+    }
+  );
 }
 function validQuery(
   query: CompletionQuery | null,
@@ -96,6 +111,9 @@ export function completionResult(
 ): HostCompletionResult {
   const ids = new Set<string>();
   const items: HostCompletionSuggestion[] = [];
+  // A supplement's rows sit under the host's heading for it and carry no
+  // agent mark; only its hold bears on the winner's exact match.
+  const supplement = provider?.supplement === true;
   for (const item of (Array.isArray(result?.items) ? result.items : []).slice(
     0,
     50,
@@ -153,9 +171,10 @@ export function completionResult(
         label: item.label,
         ...(typeof item.detail === "string" ? { detail: item.detail } : {}),
         preview: item.preview,
-        ...(item.agent === true ? { agent: true } : {}),
+        ...(item.agent === true && !supplement ? { agent: true } : {}),
         ...(typeof item.group === "string" &&
         item.group &&
+        !supplement &&
         provider &&
         isBundledContribution(provider)
           ? { group: item.group }
@@ -193,6 +212,9 @@ export function completionResult(
     items: Object.freeze(items),
     ...(typeof result.spaceId === "string" && ids.has(result.spaceId)
       ? { spaceId: result.spaceId }
+      : {}),
+    ...(supplement && result.holdAutoSelect === true
+      ? { holdAutoSelect: true }
       : {}),
     ...(result.spacePending &&
     typeof result.spacePending.name === "string" &&
