@@ -9,6 +9,58 @@ const entered = async (dialog) => {
   await expect(dialog).not.toHaveAttribute("data-starting-style");
   await animationsSettled(dialog, { subtree: true });
 };
+test("a focused result-group tab keeps its whole focus ring inside the scrolling track", async ({
+  page,
+  app,
+}) => {
+  await page.goto(app.origin);
+  await button(page, "Search Buzz").click();
+  const dialog = page.getByRole("dialog", { name: "Search Buzz" });
+  await entered(dialog);
+  const input = dialog.getByRole("combobox", { name: "Search Buzz" });
+  await input.fill("re");
+  const tabs = dialog
+    .getByRole("tablist", { name: "Result groups" })
+    .getByRole("tab");
+  await expect(tabs.nth(2)).toBeVisible();
+  const count = await tabs.count();
+  // In the field, Tab steps through the groups; past the last it moves on,
+  // by the clear button, to that group's tab. The arrows move between tabs.
+  const last = tabs.nth(count - 1);
+  for (
+    let step = 0;
+    step < count + 2 &&
+    !(await last.evaluate((tab) => tab === document.activeElement));
+    step++
+  )
+    await page.keyboard.press("Tab");
+  await expect(last).toBeFocused();
+  for (let index = count - 1; index >= 0; index--) {
+    if (index < count - 1) await page.keyboard.press("ArrowLeft");
+    await expect(tabs.nth(index)).toBeFocused();
+    // The ring is the outline and its offset around the tab; the list scrolls,
+    // so it clips anything past its own box.
+    const overflow = await tabs.nth(index).evaluate((tab) => {
+      const style = getComputedStyle(tab);
+      const ring =
+        Number.parseFloat(style.outlineWidth) +
+        Number.parseFloat(style.outlineOffset);
+      const list = tab.closest('[role="tablist"]').getBoundingClientRect();
+      const box = tab.getBoundingClientRect();
+      return {
+        drawn: style.outlineStyle !== "none" && ring > 0,
+        clipped: [
+          list.top - (box.top - ring),
+          box.bottom + ring - list.bottom,
+          list.left - (box.left - ring),
+          box.right + ring - list.right,
+        ].some((past) => past > 0.5),
+      };
+    });
+    expect(overflow).toEqual({ drawn: true, clipped: false });
+  }
+});
+
 test("search arrows traverse the conversation action and recent activity, Enter opens and Escape restores focus", async ({
   page,
   app,

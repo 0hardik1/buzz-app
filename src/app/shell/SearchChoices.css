@@ -526,10 +526,20 @@
     padding-top: var(--space-3);
   }
   /* Tabs share the track's width but keep their labels whole: when they
-     don't fit, the track scrolls instead. */
+     don't fit, the track scrolls instead. Scrolling clips both axes, so the
+     list takes the track's padding as room for the focus ring, as the panel
+     recipe does, and the selection keeps its inset. */
+  .search-peek-rail .buzz-tabs[data-variant="segmented"] {
+    padding: 0;
+  }
   .search-peek-rail .buzz-tabs[data-variant="segmented"] .buzz-tabs-list {
     overflow-x: auto;
     scrollbar-width: none;
+    padding: var(--space-1);
+    scroll-padding-inline: var(--space-1);
+  }
+  .search-peek-rail .buzz-tabs[data-variant="segmented"] .buzz-tabs-indicator {
+    inset-block: var(--space-1);
   }
   .search-peek-rail .buzz-tabs[data-variant="segmented"] .buzz-tabs-tab {
     flex: 1 0 auto;
