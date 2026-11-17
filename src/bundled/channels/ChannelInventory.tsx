@@ -1,6 +1,9 @@
 import { TeamSidebarSections, TeamSidebarSection } from "./TeamSidebarSource";
 import { revealCreatedChannel } from "../../features/channel-navigation/created-channel";
-import { openEmptyChannels } from "../../features/channel-navigation/routes";
+import {
+  newMessage,
+  openEmptyChannels,
+} from "../../features/channel-navigation/routes";
 import {
   useCallback,
   useEffect,
@@ -309,7 +312,7 @@ export function ChannelInventory({
   const composingMessage =
     target.kind === "page" &&
     target.pluginId === "buzz.channels" &&
-    target.route?.params === "new-message";
+    newMessage(target.route?.params) !== undefined;
   const preparingDm = composingMessage ? handoff?.preparingDm : undefined;
   const sidebarChannels = useMemo(
     () =>
@@ -1502,10 +1505,10 @@ export function ChannelInventory({
                       onRename={
                         preferences.sectionRenameWritable &&
                         section.key.startsWith("group:")
-                          ? async (name) => {
+                          ? async (edit) => {
                               await preferences.renameSection(
                                 section.key.slice(6),
-                                name,
+                                edit,
                               );
                             }
                           : undefined
@@ -1926,6 +1929,8 @@ export function ChannelInventory({
       <>
         {creatingSection && (
           <CreateSidebarSection
+            session={queries}
+            scope={queries.scope}
             writable={preferences.sectionCreationWritable}
             refreshing={preferences.status === "loading"}
             retry={preferences.reload}
@@ -1943,6 +1948,8 @@ export function ChannelInventory({
         )}
         {creatingFor && !creatingFor.surface?.signal?.aborted && (
           <CreateSidebarSection
+            session={queries}
+            scope={queries.scope}
             channelName={creatingFor.channel.name}
             writable={preferences.sectionCreationWritable}
             refreshing={preferences.status === "loading"}
