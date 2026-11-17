@@ -2034,7 +2034,7 @@ function verifying(
 }
 const aleksandr = { pubkey: "a".repeat(64), name: "jack" };
 const petrov = verifiedAs("Aleksandr", "aleksandr", "Aleksandr Petrov");
-const petrovRow = { name: "Aleksandr, Aleksandr Petrov · @aleksandr" };
+const petrovRow = { name: "Aleksandr Petrov, @aleksandr" };
 
 it("labels people by verified identity, never an editable handle, and opens the chosen key", async () => {
   const t = setup();
@@ -2068,7 +2068,7 @@ it("labels people by verified identity, never an editable handle, and opens the 
   screen.getByRole("option", {
     name: `jack ${labels.get(realJack.pubkey)}, @jack`,
   });
-  // Found by the editable "jack", Aleksandr is that name's namesake: Space
+  // Found by the editable "jack", Aleksandr Petrov is that name's namesake: Space
   // has no single exact name to pick.
   await t.user.keyboard(" ");
   expect(recipient()).toHaveValue("jack ");
@@ -2129,8 +2129,8 @@ it("relabels a recipient whose verification answers late, keeping a failed send'
   await t.user.click(send());
   await screen.findByRole("alert");
   release();
-  await screen.findByRole("button", { name: "Remove Aleksandr" });
-  screen.getByRole("textbox", { name: "Message Aleksandr" });
+  await screen.findByRole("button", { name: "Remove Aleksandr Petrov" });
+  screen.getByRole("textbox", { name: "Message Aleksandr Petrov" });
   expect(screen.getByRole("alert")).toBeVisible();
 });
 

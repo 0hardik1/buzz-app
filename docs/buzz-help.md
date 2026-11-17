@@ -804,7 +804,7 @@ and are asked to sign in again in Buzz.
   by"; change one of them to choose which fires. In the Mac app, **Buzz →
   Settings…** in the menu bar also opens Settings.
 - **Show people by**: in communities with verified names, **Settings → Appearance →
-  Interface → Show people by** defaults to **Full name**. People without a verified
+  Show people by** defaults to **Full name**. People without a verified
   full name show their verified username. Choose **Username** if you prefer; an
   existing choice is kept on this device.
 - **Message width**: choose **Narrow** or **Wide** in **Settings → Appearance →

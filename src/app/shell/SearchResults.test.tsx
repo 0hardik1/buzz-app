@@ -8566,7 +8566,7 @@ it("loads verified names for a settled search page in the background and shows t
     await act(async () => reads[0]?.release());
     await waitFor(() =>
       expect(within(people).getByRole("option")).toHaveTextContent(
-        /fnameFake Name · Start a direct message$/,
+        /Fake Name@fname · Start a direct message$/,
       ),
     );
     // Refining the query keeps the row by its verified full name and does not
@@ -8670,7 +8670,7 @@ it("reuses shared verified names and reads only the rest of a search page", asyn
       ).toEqual([
         // The exact profile name ranks first; the failed read keeps it.
         expect.stringMatching(/FakeStart a direct message$/),
-        expect.stringMatching(/fotherFake Other · Start a direct message$/),
+        expect.stringMatching(/Fake Other@fother · Start a direct message$/),
       ]),
     );
   } finally {

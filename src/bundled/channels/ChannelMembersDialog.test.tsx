@@ -1192,7 +1192,7 @@ it.each(["name", "npub"] as const)(
       by === "name" ? "gabi" : npubEncode(gabi.pubkey),
     );
     await t.user.click(
-      await screen.findByRole("button", { name: /^Add glilienfeld/ }),
+      await screen.findByRole("button", { name: /^Add Gabi Lilienfeld/ }),
     );
     await vi.waitFor(() =>
       expect(
@@ -1262,7 +1262,7 @@ it("names a pasted key once a later search returns its new verified head", async
   await t.user.clear(search);
   await t.user.type(search, "gabi");
   await t.user.click(
-    await screen.findByRole("button", { name: /^Add glilienfeld/ }),
+    await screen.findByRole("button", { name: /^Add Gabi Lilienfeld/ }),
   );
   await vi.waitFor(() =>
     expect(

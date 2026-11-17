@@ -1183,11 +1183,13 @@ it("shows historical verification time and issuer, discloses cache, and hides di
       );
       sink?.eose();
     });
-    expect(await screen.findByRole("heading", { name: "Alice" })).toBeVisible();
-    expect(screen.getByText(/Name verified by Example.*@alice/)).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Alice Example" }),
+    ).toBeVisible();
+    expect(screen.getByText("Name verified by Example")).toBeVisible();
     expect(screen.getByText("Alice Example")).toBeVisible();
     expect(
-      screen.getByText("Alice Example").closest("p")?.querySelector("svg"),
+      screen.getByText("@alice").closest("p")?.querySelector("svg"),
     ).not.toBeNull();
     const user = userEvent.setup();
     await user.click(screen.getByRole("tab", { name: "Info" }));
@@ -1225,7 +1227,7 @@ it("shows historical verification time and issuer, discloses cache, and hides di
     act(() => live.state({ status: "connecting", routes: [] }));
     expect(await screen.findByText(/Cached verification/)).toBeVisible();
     expect(
-      screen.getByText("Alice Example").closest("p")?.querySelector("svg"),
+      screen.getByText("@alice").closest("p")?.querySelector("svg"),
     ).toBeNull();
     expect(screen.getByText(/Cached evidence/)).toBeVisible();
     await act(async () => live.state({ status: "connected", routes: [] }));
