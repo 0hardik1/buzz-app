@@ -210,7 +210,7 @@ export function ProfileInfoBento({
         <InlineHeader title="Personal info" />
         <div className={styles.group}>
           {about && row("About", about, <InfoIcon size={24} />)}
-          {row("Username", `@${username}`, <AtIcon size={24} />)}
+          {row("LDAP", `@${username}`, <AtIcon size={24} />)}
           {extraFields("personal")}
           {email?.value && (
             <CopyTile
