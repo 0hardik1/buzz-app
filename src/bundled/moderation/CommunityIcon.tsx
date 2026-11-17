@@ -11,9 +11,6 @@ import { PreferenceRow } from "../../shared/design-system/ui/PreferenceRow";
 import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
 import { setCommunityIcon } from "./api";
 
-const message = (reason: unknown) =>
-  reason instanceof Error ? reason.message : String(reason);
-
 const read = async (community: string, signal: AbortSignal) =>
   (await fetchCommunityPresentation(community, signal)).publishedIcon;
 
@@ -92,7 +89,8 @@ export function CommunityIcon({
       setIcon(published);
       setStatus(done);
     } catch (reason) {
-      if (active()) setError(message(reason));
+      if (active())
+        setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       if (active()) setBusy(false);
     }

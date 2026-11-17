@@ -473,9 +473,8 @@ fn valid_member_command(event: &EventTemplate) -> bool {
         }
 }
 
-/** Match `iconCommand` in `src/features/communities/admin-protocol.ts`: only the
- * NIP-11 icon, cleared with "" or set to an inline raster image that fits the
- * signing bound. */
+/** Match `iconCommand` in `src/features/communities/admin-protocol.ts`; the
+ * relay validates the image itself. */
 fn valid_icon_command(event: &EventTemplate) -> bool {
     let [tag] = event.tags.as_slice() else {
         return false;
@@ -483,21 +482,13 @@ fn valid_icon_command(event: &EventTemplate) -> bool {
     let [name, icon] = tag.as_slice() else {
         return false;
     };
-    let image = ["png", "jpeg", "gif", "webp"].iter().any(|kind| {
-        icon.strip_prefix(&format!("data:image/{kind};base64,"))
-            .is_some_and(|data| {
-                let body = data.trim_end_matches('=');
-                !body.is_empty()
-                    && data.len() - body.len() <= 2
-                    && body
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
-            })
-    });
     event.content.is_empty()
         && name == "icon"
         && icon.len() <= COMMUNITY_ICON_BYTES
-        && (icon.is_empty() || image)
+        && (icon.is_empty()
+            || ["png", "jpeg", "gif", "webp"]
+                .iter()
+                .any(|kind| icon.starts_with(&format!("data:image/{kind};base64,"))))
 }
 
 // Match the broker's purpose-bound Canvas admission, including legacy untagged retries.

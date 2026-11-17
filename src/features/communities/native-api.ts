@@ -215,9 +215,7 @@ export async function nativeCommunityRequest(
     );
     if (result.event_id !== event.id || typeof result.accepted !== "boolean")
       throw new Error(
-        route === "icon"
-          ? "Icon change could not be confirmed"
-          : "Member change could not be confirmed",
+        `${route === "icon" ? "Icon" : "Member"} change could not be confirmed`,
       );
     return result;
   }
