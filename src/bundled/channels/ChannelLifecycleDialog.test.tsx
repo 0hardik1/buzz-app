@@ -71,6 +71,13 @@ it("keeps a paused delete's confirmation and offers Retry only after the pause, 
   fireEvent.click(screen.getByRole("button", { name: "Delete channel" }));
   await flush();
 
+  // Base UI schedules initial focus on a frame after the dialog reopens.
+  // Await that frame without advancing the separately controlled pause clock.
+  await act(
+    () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+  );
+
   const dialog = screen.getByRole("dialog", { name: "Delete Fixture?" });
   const retry = screen.getByRole("button", { name: "Retry" });
   expect(retry).toHaveAttribute("aria-disabled", "true");
