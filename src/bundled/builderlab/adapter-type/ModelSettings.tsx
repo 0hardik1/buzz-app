@@ -9,10 +9,14 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AgentSaveButton } from "../../../features/agents/AgentSaveButton";
 import { ModelFamilyMenu } from "../../../features/agents/ModelFamilyMenu";
-import { BuilderlabLogoIcon } from "../../../shared/design-system/icons";
+import {
+  BuilderlabLogoIcon,
+  InfoIcon,
+} from "../../../shared/design-system/icons";
 import { Accordion } from "../../../shared/design-system/ui/Accordion";
 import { Button } from "../../../shared/design-system/ui/Button";
 import { Field } from "../../../shared/design-system/ui/Field";
+import { IconButton } from "../../../shared/design-system/ui/IconButton";
 import { Input } from "../../../shared/design-system/ui/Input";
 import { InputGroup } from "../../../shared/design-system/ui/InputGroup";
 import { LoadingRegion } from "../../../shared/design-system/ui/LoadingRegion";
@@ -429,7 +433,17 @@ export function ModelSettings({
                     }
                   >
                     <PreferenceRow
-                      title="Auto-compact at"
+                      title={
+                        <span className="flex items-center gap-1">
+                          Auto-compact at
+                          <IconButton
+                            aria-label="About auto-compaction"
+                            title="Capped at the model’s available context. Leave blank for default."
+                            size="xs"
+                            icon={<InfoIcon size={16} />}
+                          />
+                        </span>
+                      }
                       trailing={
                         <div className="w-32">
                           <InputGroup

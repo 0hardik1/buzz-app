@@ -292,6 +292,13 @@ it("saves and clears a compaction window without changing other settings", async
   expect(field).toHaveValue("40");
   expect(field).toHaveAccessibleDescription("Thousands of tokens");
   expect(screen.getByText("K", { exact: true })).toBeVisible();
+  await user.hover(
+    screen.getByRole("button", { name: "About auto-compaction" }),
+  );
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(
+    "Capped at the model’s available context. Leave blank for default.",
+  );
+  await user.keyboard("{Escape}");
   await user.click(field);
   fireEvent.change(field, { target: { value: "40.0" } });
   expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
