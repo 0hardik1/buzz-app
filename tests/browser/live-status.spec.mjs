@@ -2,6 +2,7 @@ import { openChannelDetails } from "./channel-details.mjs";
 import { openPage } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 test.use({
+  channelDiagnostics: true, // Release builds do not render it.
   productionBroker: true,
   historyCounts: { alpha: 1, beta: 1 },
 });

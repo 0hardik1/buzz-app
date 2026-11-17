@@ -17,6 +17,7 @@ teammateKey[31] = 1;
 const teammate = getPublicKey(teammateKey);
 
 test.use({
+  channelDiagnostics: true, // Release builds do not render it.
   productionBroker: true,
   companionFixture: true,
   readState: true,

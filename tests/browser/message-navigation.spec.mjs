@@ -10,6 +10,7 @@ import {
 } from "./reading.mjs";
 
 test.use({
+  channelDiagnostics: true, // Release builds do not render it.
   pluginFixtures: true,
   exactMessages: true,
   historyCounts: { alpha: 103, beta: 0 },

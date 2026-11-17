@@ -2,7 +2,10 @@ import { openChannelDetails } from "./channel-details.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
 
-test.use({ historyCounts: { alpha: 1, beta: 1 } });
+test.use({
+  channelDiagnostics: true, // Release builds do not render it.
+  historyCounts: { alpha: 1, beta: 1 },
+});
 test("channel context menus retain keyboard focus without write capabilities", async ({
   page,
   app,

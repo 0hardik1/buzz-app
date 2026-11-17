@@ -123,6 +123,9 @@ export const test = base.extend({
   fixedKeys: [false, { option: true }],
   channelIds: [channels, { option: true }],
   developmentReact: [false, { option: true, scope: "worker" }],
+  // The release bundle plus Channel settings → Diagnostics, which only
+  // developer builds render. Only files whose journeys reach its tools opt in.
+  channelDiagnostics: [false, { option: true, scope: "worker" }],
   builderlabLogin: [false, { option: true, scope: "worker" }],
   // An FI build with no native host: the Builderlab plugin applies, signed out.
   federatedIdentity: [false, { option: true, scope: "worker" }],
@@ -208,6 +211,7 @@ export const test = base.extend({
       channelIds,
       pluginFixtures,
       developmentReact,
+      channelDiagnostics,
       compiledApp,
     },
     use,
@@ -995,6 +999,7 @@ export const test = base.extend({
         }),
         browserName,
         developmentReact,
+        channelDiagnostics,
         pluginFixtures,
         agentMessageDeletion,
         compiledBuild: {

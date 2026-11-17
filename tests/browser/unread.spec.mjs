@@ -21,6 +21,7 @@ const marked = (stored) => {
 
 const alphaId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 test.use({
+  channelDiagnostics: true, // Release builds do not render it.
   productionBroker: true,
   readState: true,
   pluginFixtures: true, // Existing read-only session exposure for owner barriers.

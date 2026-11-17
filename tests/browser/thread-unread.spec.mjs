@@ -11,6 +11,7 @@ import { openPage } from "./navigation.mjs";
 import { channelUnread } from "./unread-state.mjs";
 
 test.use({
+  channelDiagnostics: true, // Release builds do not render it.
   productionBroker: true,
   readState: true,
   threadUnread: true,

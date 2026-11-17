@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
 
+// Release builds do not render Diagnostics.
+test.use({ channelDiagnostics: true });
+
 test("channel settings owns its responsive side panel and returns keyboard focus", async ({
   page,
   app,

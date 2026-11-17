@@ -6,6 +6,7 @@ import { test, expect } from "./fixture.mjs";
 // Full built app + real local broker, signing, session, IndexedDB and rendering.
 // Only upstream I/O is modeled: equal 40ms HTTP/EVENT service delay, no live data.
 test.use({
+  channelDiagnostics: true, // Release builds do not render it.
   productionBroker: true,
   actionProfile: true,
   threadUnread: true,

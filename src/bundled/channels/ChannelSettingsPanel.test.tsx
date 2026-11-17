@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { createPortal } from "react-dom";
 import { afterEach, assert, expect, it, onTestFinished, vi } from "vitest";
 import { ChannelSettingsPanel } from "./ChannelSettingsPanel";
+import { developerMode } from "../../features/developer/mode";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import {
   ChannelLifecycleUnconfirmed,
@@ -26,9 +27,13 @@ import type { ChannelDetailsCapability } from "../../features/relay/channel-deta
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
-it("shows known channel details with diagnostics collapsed until requested", async () => {
+it("shows known channel details with diagnostics collapsed until requested in a developer build", async () => {
+  // Vitest's jsdom page is a development bundle on localhost, as `just web`
+  // and `just desktop` serve it.
+  expect(developerMode).toBe(true);
   const user = userEvent.setup();
   render(
     <ChannelSettingsPanel
@@ -61,6 +66,46 @@ it("shows known channel details with diagnostics collapsed until requested", asy
   expect(
     screen.getByRole("button", { name: "Refresh messages" }),
   ).toBeVisible();
+});
+
+it("leaves Diagnostics and its tools out of a release build", async () => {
+  // The gate is fixed when the module loads, as a release bundle fixes it.
+  vi.stubEnv("DEV", false);
+  vi.resetModules();
+  const release = await import("./ChannelSettingsPanel");
+  const rendered = vi.fn();
+  function Tool() {
+    rendered();
+    return <button type="button">Refresh messages</button>;
+  }
+  const { rerender } = render(
+    <release.ChannelSettingsPanel
+      scope="community:viewer"
+      channel={{ id: "alpha", name: "Alpha", members: ["one", "two"] }}
+      close={() => {}}
+    >
+      <Tool />
+    </release.ChannelSettingsPanel>,
+  );
+  const content = screen.getByRole("tabpanel", { name: "Channel settings" });
+  expect(screen.getByRole("heading", { name: "Alpha" })).toBeVisible();
+  expect(screen.getByText("alpha")).toBeVisible();
+  expect(screen.queryByText("Diagnostics")).not.toBeInTheDocument();
+  // Nothing trails the details list: no disclosure, wrapper or gap for one.
+  expect(content.querySelector("details")).toBeNull();
+  expect(content.lastElementChild?.tagName).toBe("DL");
+  rerender(
+    <release.ChannelSettingsPanel
+      scope="community:viewer"
+      channel={undefined}
+      close={() => {}}
+    >
+      <Tool />
+    </release.ChannelSettingsPanel>,
+  );
+  expect(content).toBeEmptyDOMElement();
+  // Its tools never render, so their hooks and subscriptions never run.
+  expect(rendered).not.toHaveBeenCalled();
 });
 
 it("closes with Escape or its close button without swallowing other keys", async () => {

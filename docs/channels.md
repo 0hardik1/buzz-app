@@ -393,7 +393,7 @@ is verified. Cleanup failure retains recovery for confirmation-only retry. A pag
 reopened during acknowledgement resets its recovered editor when retirement finishes.
 Local storage is a convenience for editable drafts. Only a
 definitively failed recovery operation can be removed (including through
-Diagnostics), releasing the preserved draft for editing or a changed recipient set. A changed set also invalidates the prepared destination.
+Diagnostics in developer builds), releasing the preserved draft for editing or a changed recipient set. A changed set also invalidates the prepared destination.
 Page exit cancels preparation and its delivery waiter, while the outbox retains
 ownership of already queued messages. Reopening recovers the pending event rather
 than enqueueing a duplicate.
@@ -415,7 +415,7 @@ reuse the sidebar’s action composition and persistent mutation/recovery owners
 Permission-gated lifecycle
 actions follow in **Leave → Archive → Delete** order, with Delete in the shared
 danger tone. DMs retain Hide conversation and the separate Remove from Messages
-action; their permissions are not inferred from stream channels. Members retains its adjacent button and Diagnostics remains inside Settings.
+action; their permissions are not inferred from stream channels. Members retains its adjacent button and Diagnostics, in developer builds, remains inside Settings.
 Session headings are unchanged, but their Channel actions menu lists the same
 channel menu panels. Header moves and dialog cancellation return focus
 to the ellipsis, while session creation hands focus to its composer. Read-only, cached, archived and DM eligibility stays
@@ -739,7 +739,7 @@ viewers without editing authority see neither edit controls nor an explanatory h
 Actionable errors and uncertain-save warnings remain visible.
 After an uncertain outcome, the edit controls re-enable so the save may be closed
 and reopened for check-only recovery, never a blind resend. The panel retains its
-own Close/Escape focus return, conversation and collapsed Diagnostics.
+own Close/Escape focus return, conversation and, in developer builds, collapsed Diagnostics.
 Names accept 1–120 code points and descriptions up to 1,000. Typing and paste
 are capped at those limits without splitting Unicode code points; a middle edit
 keeps the existing suffix and accepts only the inserted text that fits. Existing
@@ -1646,11 +1646,13 @@ heading line such as `# Title **bold**`, and one undo restores the typed charact
 lines themselves stay text in the composer and render as headings once sent. A single `~`
 never strikes, and pasted or restored delimiters stay literal text that still renders once
 sent. Reply counts open a bounded thread view; attachments are
-links. Routine freshness labels are not shown; Channel Settings → Diagnostics
-exposes refresh, outbox inspection and timings. Packaged builds do not
+links. Routine freshness labels are not shown. Channel Settings → Diagnostics
+exposes refresh, outbox inspection and timings in developer builds only
+(`just web`, `just desktop`): the panel gates the whole section on
+`developerMode`, so release builds neither render it nor mount its tools. Packaged builds do not
 include the development relay broker. GitHub fetches public data only; signed-in
 GitHub actions remain on GitHub. A saved-groups/stars failure keeps its specific
-reason under **Channel Settings → Diagnostics → Saved groups and stars**.
+reason under **Channel Settings → Diagnostics → Saved groups and stars**, in developer builds.
 `Preference query` includes reader queueing, transport and verification; use relay
 timings to separate those. `Preference decode` identifies the local decoder stage.
 The diagnostic does not trigger another request or change retry policy.

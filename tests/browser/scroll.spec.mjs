@@ -22,6 +22,7 @@ test.use({ historyCounts: { alpha: 640, beta: 80 } });
 // even with a 20-row head. The cursor journey below keeps ordinary-height rows.
 const readingTest = test.extend({ tallMessages: true });
 const editTest = readingTest.extend({
+  channelDiagnostics: true, // Its evidence export lives in Diagnostics.
   streamEvidence: [streamEvidence, { auto: true }],
 });
 

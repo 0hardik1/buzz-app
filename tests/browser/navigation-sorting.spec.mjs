@@ -4,7 +4,12 @@ import { open } from "./timeline.mjs";
 import { openPage } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 
-test.use({ productionBroker: true, savedSidebar: true, sortingSidebar: true });
+test.use({
+  channelDiagnostics: true, // Release builds do not render it.
+  productionBroker: true,
+  savedSidebar: true,
+  sortingSidebar: true,
+});
 
 // Pause real WAAPI animations at creation, before a busy renderer can finish
 // them. Seeking still exercises the browser's actual keyframes and geometry.

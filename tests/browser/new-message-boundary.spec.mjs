@@ -18,6 +18,7 @@ import {
 } from "./reading.mjs";
 
 appTest.use({
+  channelDiagnostics: true, // Release builds do not render it.
   productionBroker: true,
   readState: true,
   pluginFixtures: true,

@@ -16,6 +16,7 @@ import {
 } from "../../features/relay/channel-lifecycle";
 import { PublishNotSent, PublishRejected } from "../../features/relay/outbox";
 import { managesCommunity } from "../../features/communities/roster";
+import { developerMode } from "../../features/developer/mode";
 import type { CommunityMembership } from "../moderation/membership";
 import type { RelaySession } from "../../features/relay/session";
 import { MessageMarkdown } from "../../features/messages/MessageMarkdown";
@@ -66,6 +67,7 @@ export function ChannelSettingsPanel({
   channel: ChannelSummary | undefined;
   scope: string;
   close(): void;
+  /** Diagnostics tools. Developer builds only: release builds never mount them. */
   children: ReactNode;
   setupTools?: ReactNode;
   details?: ChannelDetailsCapability;
@@ -269,10 +271,12 @@ export function ChannelSettingsPanel({
           )}
           {editStatus}
           {setupTools}
-          <details className={styles.settingsDiagnostics}>
-            <summary>Diagnostics</summary>
-            <div className={styles.settingsTools}>{children}</div>
-          </details>
+          {developerMode && (
+            <details className={styles.settingsDiagnostics}>
+              <summary>Diagnostics</summary>
+              <div className={styles.settingsTools}>{children}</div>
+            </details>
+          )}
         </div>
       </div>
     </Panel>

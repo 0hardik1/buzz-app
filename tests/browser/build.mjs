@@ -17,6 +17,7 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 export async function buildApp(
   {
     developmentReact,
+    channelDiagnostics,
     builderlabLogin,
     federatedIdentity,
     pluginFixtures,
@@ -123,6 +124,25 @@ export async function buildApp(
         return code.replace(seam, "floor = () => 0,");
       },
     });
+    // Channel settings → Diagnostics renders only in developer builds. Files
+    // whose journeys reach its tools open that one gate and change nothing
+    // else in the release bundle; the gate is covered by the panel's unit tests.
+    if (channelDiagnostics)
+      config.plugins.push({
+        name: "fixture-channel-diagnostics",
+        enforce: "pre",
+        transform(code, id) {
+          if (
+            id !== join(root, "src/bundled/channels/ChannelSettingsPanel.tsx")
+          )
+            return;
+          const seam =
+            'import { developerMode } from "../../features/developer/mode";';
+          if (!code.includes(seam))
+            throw new Error("Missing channel diagnostics seam");
+          return code.replace(seam, "const developerMode = true;");
+        },
+      });
     if (startupFailureFixture)
       config.plugins.push({
         name: "fixture-startup-failure",

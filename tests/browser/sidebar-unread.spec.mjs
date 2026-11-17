@@ -10,6 +10,7 @@ const test = base.extend({
   streamEvidence: [streamEvidence, { auto: true }],
 });
 test.use({
+  channelDiagnostics: true, // Release builds do not render it.
   productionBroker: true,
   readState: true,
   largeSidebar: true,

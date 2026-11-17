@@ -25,7 +25,10 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test.use({ savedSidebar: true });
+test.use({
+  channelDiagnostics: true, // Release builds do not render it.
+  savedSidebar: true,
+});
 
 test("sidebar scrollbar stays close to the divider without clipping its native thumb", async ({
   page,

@@ -4,6 +4,7 @@ import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
 
 test.use({
+  channelDiagnostics: true, // Release builds do not render it.
   productionBroker: true,
   largeSidebar: true,
   historyCounts: { alpha: 20, beta: 20 },

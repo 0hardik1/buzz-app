@@ -37,6 +37,12 @@ test("Canvas confirmation backdrop dismisses only the top layer and retains the 
     name: "Channel settings",
     exact: true,
   });
+  // This is the release bundle: it shows the channel and no Diagnostics.
+  await expect(
+    settings.getByRole("heading", { name: "Alpha", exact: true }),
+  ).toBeVisible();
+  await expect(settings.locator("details")).toHaveCount(0);
+  await expect(settings.getByText("Diagnostics")).toHaveCount(0);
   const workspace = page.locator("[data-panel-workspace]");
   const settingsTab = workspace.getByRole("tab", {
     name: "Channel settings",
