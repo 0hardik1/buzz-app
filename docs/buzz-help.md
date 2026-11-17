@@ -960,7 +960,8 @@ and are asked to sign in again in Buzz.
   lines it lacks. Turn on **Show full content** to read a version as written.
   A save that fails keeps your draft, and you can save again. If a save could
   not be confirmed, it may still arrive: your draft is kept, and saving again
-  works once 15 minutes have passed since that save.
+  works once 15 minutes have passed since that save. If an earlier save is
+  still being sent, try again in a moment.
 - **Keyboard shortcuts** follow Slack where they can. Press ⌘/ (Ctrl+/ on
   Windows and Linux) to open **Settings → Shortcuts**, which lists them, lets
   you change most of them and also shows the fixed message-formatting keys. In
@@ -1051,8 +1052,11 @@ and are asked to sign in again in Buzz.
   invite the person again. After the invitation's 15-minute delivery window,
   Buzz verifies the original command and current membership before sending a
   fresh participation invitation; failed checks keep the original, and before
-  then Add asks you to wait. If an addition of a person or agent failed and has
-  expired, People reports it with **Discard**: discard it, then add them again.
+  then Add asks you to wait. If any other addition of a person or agent has
+  expired without being confirmed, People reports it with **Discard** and no
+  **Retry**: discard it, then add them again. If the addition may have been
+  sent, Discard checks the community first. One that did arrive is kept, and
+  People says so: use **Add** to finish it.
   Developer builds only: Outbox (**View channel details** → Diagnostics) also
   lists saved invitations. Its **Retry** finishes the original without
   re-inviting, so if that invitation was applied and the person was later

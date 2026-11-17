@@ -18,6 +18,13 @@ it("is on for a development bundle served from loopback", async () => {
   expect(await developerModeAt("http://127.0.0.1:1420/")).toBe(true);
 });
 
+it("leaves packaged desktop builds to the bundle's own flag", async () => {
+  // Their page's hostname is localhost, so only DEV, false in the production
+  // bundle they load, keeps them out. This development bundle is let through.
+  expect(await developerModeAt("tauri://localhost/")).toBe(true);
+  expect(await developerModeAt("http://tauri.localhost/")).toBe(false);
+});
+
 it("is off for a development bundle opened through another host", async () => {
   // `--host` and tunnels serve the same development bundle from elsewhere.
   expect(import.meta.env.DEV).toBe(true);

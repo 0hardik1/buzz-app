@@ -113,23 +113,38 @@ listed. Both keep it protected during the relay's 15-minute intake window.
 After expiry, both fence local delivery and check the original event ID with a
 fresh strong read. Verified absence can
 resolve it. If the command is recorded, a fresh signed roster reconciles its
-result. If that person has since been removed, Outbox **Retry** durably clears
-the old row without re-inviting them. An explicit **Add** from People still
+result. If that person has since been removed, Outbox **Retry**, in developer
+builds, durably clears the old row without re-inviting them. An explicit **Add** from People still
 re-invites them in one action, including when the old receipt remains. Add finishes its fresh
 membership check before atomically retiring the original and saving a new
 explicit Member invitation. Closing or restarting keeps either original recovery
 or the replacement receipt. Failed reads or storage, active delivery, and an echo
-contradicting negative readback keep recovery. This uses the existing Outbox/member/share actions, with no
-background retry or new control. If signed roles confirm that the earlier invite
+contradicting negative readback keep recovery. Nothing here retries in the
+background. If signed roles confirm that the earlier invite
 admitted a Guest, remove that person in People and invite them again. Recovery
-never silently promotes an existing Guest. A definitively failed invitation can
-also be replaced after explicitly giving it up: People reports it with
-**Discard** beside **Retry**, including one that expired on another surface or
-in an earlier launch, and adding the person again then sends a new invitation.
-In developer builds, removing it in Outbox does the same. Discard covers
-single additions known not to have been sent, and unconfirmed agent requests
-past the intake window. An unconfirmed member invitation is not discarded; Add
-or Retry resolves it through its recovery check.
+never silently promotes an existing Guest.
+
+Any other saved single addition that can no longer finish is replaced only
+after explicitly giving it up with **Discard** in People. Adding the person
+again then sends a new invitation. Discard covers two cases:
+
+- An addition known not to have been sent. People reports it with **Discard**
+  beside **Retry**; once it is past the intake window, **Retry** is not
+  offered. In developer builds, removing it in Outbox does the same.
+- An unconfirmed addition past the intake window, whoever started it: a member
+  invitation, an agent request, or one saved by an older client. It may have
+  reached the relay, so Discard first checks the original event ID with a
+  fresh strong read. Only verified absence gives it up: past the window it can
+  then never arrive. If the relay has it, or the read fails, it is kept and
+  People says so; Add then finishes it once the signed roster shows the
+  person.
+
+An unconfirmed addition still inside the intake window is never discarded; Add
+or Retry resolves it. Past the window, Add and Retry do not send a saved
+addition again. People reports it with **Discard** alone, including one that
+expired on another surface or in an earlier launch. The older invitation
+described above is the exception: People leaves it to Add, which retires it
+with the same check.
 
 ### General access
 

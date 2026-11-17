@@ -1784,10 +1784,14 @@ Canvas compare-and-swap, stale preconditions are refused atomically before mutat
 A proven conflict keeps the local draft and dismisses only that rejected outbox
 operation so a reviewed save can proceed. An earlier save that may still arrive
 (still sending, or unconfirmed within the relay's 15-minute intake window)
-remains in the outbox and blocks replacement; its error keeps the draft and says
+remains in the outbox and blocks replacement, and its error keeps the draft:
+one still sending says to try again in a moment, and an unconfirmed one says
 to save again once 15 minutes have passed since that save. One that cannot
 arrive (known not to have been sent, or unconfirmed and past the window) is
-discarded by the next save, which proceeds on the head it has just read.
+discarded by the next save, which proceeds on the head it has just read. If
+that earlier save did arrive, it is the head, so the head check refuses the
+new save first and nothing is discarded. The save looks for an unresolved save
+again after the discard, so one that began meanwhile still blocks.
 Standalone recipe saves follow the same rule. Neither needs the Outbox list,
 which only developer builds render. Exact signed retries keep their original precondition. The
 post-write different-head check remains conservative and also retains the draft.

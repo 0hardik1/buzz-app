@@ -148,10 +148,10 @@ export const isBatchAddition = (item: OutgoingEvent) =>
 export const additionExpired = (item: OutgoingEvent) =>
   Date.now() / 1000 - item.event.created_at >= 15 * 60;
 
-/** Saved single additions to a channel that their owner may give up, for one
- * person or everyone: those known not to have been sent, and unconfirmed
- * agent requests the relay can no longer take. An unconfirmed member addition
- * stays until Retry resolves it, as the outbox requires. */
+/** Saved single additions to a channel that can no longer finish, for one
+ * person or everyone: those known not to have been sent, and unconfirmed ones
+ * past the relay's intake window, whoever started them. `discardAdditions`
+ * gives up an unconfirmed one only after checking the relay for it. */
 export const discardableAdditions = (
   saved: readonly OutgoingEvent[],
   channelId: string,
@@ -169,23 +169,48 @@ export const discardableAdditions = (
         ([tag, value]) => tag === "p" && (!pubkey || value === pubkey),
       ) &&
       (item.delivery === "failed" ||
-        (item.delivery === "unknown" &&
-          !item.recovery &&
-          additionExpired(item))),
+        (item.delivery === "unknown" && additionExpired(item))),
   );
 
 /** Explicitly gives up this person's saved additions that cannot finish, so
- * adding them again starts a new one. Nothing sent is undone. */
+ * adding them again starts a new one, and returns the ones given up. An
+ * unconfirmed addition may have reached the relay. It is given up only when a
+ * strong read of its ID finds nothing: past the intake window it can then
+ * never arrive. One the relay has, or that cannot be checked, is kept.
+ * Nothing sent is undone. */
 export async function discardAdditions(
-  session: Pick<RelaySession, "outbox">,
+  session: Pick<RelaySession, "outbox" | "channelWrites">,
   channelId: string,
   pubkey: string,
 ) {
   const outbox = session.outbox;
-  if (!outbox) return;
+  const given: string[] = [];
+  if (!outbox) return given;
   await outbox.ready();
-  for (const item of discardableAdditions(outbox.snapshot(), channelId, pubkey))
-    await outbox.dismiss(item.event.id);
+  for (const item of discardableAdditions(
+    outbox.snapshot(),
+    channelId,
+    pubkey,
+  )) {
+    const id = item.event.id;
+    if (
+      item.delivery === "unknown" &&
+      // The session's own lifetime ends this read.
+      (await session.channelWrites.additionRecorded(
+        item.event,
+        new AbortController().signal,
+      ))
+    )
+      throw new Error(
+        "This addition reached the relay, so it was kept. Add them again to finish it.",
+      );
+    // The addition's own recovery releases one proven never to have arrived.
+    await outbox.dismiss(id, item.recovery);
+    // An attempt under way keeps its receipt.
+    if (!outbox.snapshot().some((saved) => saved.event.id === id))
+      given.push(id);
+  }
+  return given;
 }
 
 export type MemberAdditionIntent = {
@@ -417,7 +442,12 @@ async function addOneMember(
     throw new Error(
       "The original addition receipt is unavailable. Refresh membership before trying again.",
     );
-  if (pending?.delivery === "failed" && additionExpired(pending))
+  // Past the intake window neither a refused nor an unconfirmed request can
+  // be sent again, and only Discard checks whether an unconfirmed one arrived.
+  if (
+    (pending?.delivery === "failed" || pending?.delivery === "unknown") &&
+    additionExpired(pending)
+  )
     throw new Error(
       "This addition expired. Discard it in People, then add them again.",
     );

@@ -612,8 +612,13 @@ stored. Restored pending operations become `unknown` unless previously failed. C
 They do not publish automatically after restart. Explicit retry reuses the saved
 signed event. The Channels timeline exposes retries for failed/unknown messages. In
 developer builds only, the Outbox list in Channel Settings → Diagnostics also exposes
-restored pending operations and explicit removal; release builds render no Outbox list,
-and a failed operation is retried or discarded on the surface that sent it. Removing an item
+restored pending operations and explicit removal; release builds render no Outbox list.
+There, a message is retried in its timeline, a member addition is retried or
+discarded in People, and a Canvas or recipe save that can no longer land gives
+way to saving again. A release build has no general retry or removal for any
+other restored operation: each has only what its own surface offers, and a
+channel Create left behind by a reload has nothing (see
+[Channels](channels.md)). Removing an item
 stops retaining its local overlay; it is not a relay deletion.
 Session disposal cancels work and blocks late state changes. Cache clearing keeps
 the outbox: clearing fetched data is not cancelling a user's write.

@@ -1494,6 +1494,8 @@ being republished or silently re-dated. For ordinary messages, missing/failed
 readback retains uncertainty; inspect the conversation before explicitly sending
 another. Expired no-role Solo invitations have a narrower verified retirement
 path through [**Add** in People, or Outbox Retry in developer builds](solo/sharing.md).
+Any other expired unconfirmed member addition is given up only by **Discard**
+in People, after its own strong read of the event ID finds nothing.
 
 Protected media and uploads are native, because the webview cannot attach Blossom
 (kind 24242) authentication itself: `<img>`, `<video>` and `<audio>` send no custom

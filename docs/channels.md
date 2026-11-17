@@ -1653,7 +1653,8 @@ exposes refresh, outbox inspection and timings in developer builds only
 it before building the tools, and `LiveStatus`, which release builds keep for
 the live-updates notice, reads it before rendering its Diagnostics report.
 Release builds neither render the section nor mount its tools, and their bundle
-carries neither the tools nor that report. Packaged builds do not
+carries neither the tools nor that report, which the browser fixture build
+[checks](browser-testing.md). Packaged builds do not
 include the development relay broker. GitHub fetches public data only; signed-in
 GitHub actions remain on GitHub. A saved-groups/stars failure keeps its specific
 reason under **Channel Settings → Diagnostics → Saved groups and stars**, in developer builds.

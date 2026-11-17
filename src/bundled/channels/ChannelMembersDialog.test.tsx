@@ -1642,21 +1642,21 @@ it("discards an expired failed addition in People so the person can be added aga
   const original = t.publish.mock.calls[0]?.[0].id;
   t.fail("");
   afterIntakeWindow();
-  // Retry cannot resend the expired request, and names a control shown here.
-  await t.user.click(
-    screen.getByRole("button", { name: "Retry adding Morgan" }),
-  );
+  // Add cannot resend the expired request, and names a control shown here.
+  await t.user.click(screen.getByRole("button", { name: /Add Morgan/ }));
   const alert = await screen.findByText(
     /This addition expired\. Discard it in People, then add them again\./,
   );
   expect(alert).not.toHaveTextContent(/outbox/i);
+  // Retry would only repeat that refusal, so it is not offered.
+  expect(within(alert).getAllByRole("button")).toHaveLength(1);
   expect(t.publish).toHaveBeenCalledOnce();
   expect(t.session.outbox?.snapshot()).toMatchObject([
     { event: { id: original }, delivery: "failed" },
   ]);
   await t.user.click(
     within(alert).getByRole("button", {
-      name: "Discard failed addition of Morgan",
+      name: "Discard addition of Morgan",
     }),
   );
   await vi.waitFor(() => expect(t.session.outbox?.snapshot()).toEqual([]));
@@ -1670,6 +1670,81 @@ it("discards an expired failed addition in People so the person can be added aga
   await screen.findByText("Morgan is in the channel.");
   expect(t.publish).toHaveBeenCalledTimes(2);
   expect(t.publish.mock.calls[1]?.[0].id).not.toBe(original);
+});
+/** Leaves Morgan's addition unconfirmed: sent, with no answer from the relay. */
+async function loseReceipt(t: Awaited<ReturnType<typeof setup>>) {
+  t.publish.mockImplementationOnce(async () => {
+    throw new Error("Receipt lost");
+  });
+  await t.user.click(await t.search());
+  const alert = await screen.findByText(/Morgan: Receipt lost/);
+  // It may still arrive, so it can be retried and cannot be given up.
+  expect(
+    within(alert)
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label")),
+  ).toEqual(["Retry adding Morgan"]);
+  const original = t.publish.mock.calls[0]?.[0];
+  if (!original) throw new Error("Expected an addition");
+  afterIntakeWindow();
+  await t.user.click(screen.getByRole("button", { name: /Add Morgan/ }));
+  const expired = await screen.findByText(
+    /This addition expired\. Discard it in People, then add them again\./,
+  );
+  expect(t.publish).toHaveBeenCalledOnce();
+  expect(
+    within(expired)
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label")),
+  ).toEqual(["Discard addition of Morgan"]);
+  return { original, discard: within(expired).getByRole("button") };
+}
+it("discards an expired unconfirmed addition in People once the relay is shown not to have it", async () => {
+  const t = await setup();
+  const { original, discard } = await loseReceipt(t);
+  await t.user.click(discard);
+  await vi.waitFor(() => expect(t.session.outbox?.snapshot()).toEqual([]));
+  // The proof is a strong read of the request's own ID.
+  expect(
+    t.query.mock.calls.some(([filters]) =>
+      filters.some(
+        (filter) =>
+          filter.ids?.includes(original.id) && filter.consistency === "strong",
+      ),
+    ),
+  ).toBe(true);
+  await vi.waitFor(() =>
+    expect(screen.queryByText(/This addition expired/)).not.toBeInTheDocument(),
+  );
+  await t.user.click(screen.getByRole("button", { name: /Add Morgan/ }));
+  await screen.findByText("Morgan is in the channel.");
+  expect(t.publish).toHaveBeenCalledTimes(2);
+  expect(t.publish.mock.calls[1]?.[0].id).not.toBe(original.id);
+});
+it("keeps an expired unconfirmed addition the relay has, and says so", async () => {
+  const t = await setup();
+  const { original, discard } = await loseReceipt(t);
+  const read = t.query.getMockImplementation();
+  t.query.mockImplementation(async (filters) =>
+    filters.some((filter) => filter.ids?.includes(original.id))
+      ? [original]
+      : ((await read?.(filters)) ?? []),
+  );
+  await t.user.click(discard);
+  await screen.findByText(
+    "This addition reached the relay, so it was kept. Add them again to finish it.",
+  );
+  expect(t.session.outbox?.snapshot()).toMatchObject([
+    { event: { id: original.id }, delivery: "seen" },
+  ]);
+  // Delivered, it is no longer expired: Retry returns and the roster decides.
+  t.confirmRoster();
+  await t.user.click(
+    await screen.findByRole("button", { name: "Retry adding Morgan" }),
+  );
+  await screen.findByText("Morgan is in the channel.");
+  expect(screen.queryByText(/reached the relay/)).not.toBeInTheDocument();
+  expect(t.publish).toHaveBeenCalledOnce();
 });
 it("DMs cannot add people without a connection that adds to them", async () => {
   const t = await setup("dm");
@@ -3597,6 +3672,58 @@ it("routes a Solo owner's person and agent additions through their own paths", a
   ]);
 });
 
+it("leaves a Solo chat's expired older invitation to Add, which retires it after checking the relay", async () => {
+  const t = await setup("solo", false, true);
+  const id = "11111111-1111-4111-8111-111111111111";
+  // An older client saved invitations without a role or recovery.
+  t.publish.mockImplementationOnce(async () => {
+    throw new Error("Receipt lost");
+  });
+  const original = t.session.outbox?.send({
+    kind: 9000,
+    content: "",
+    tags: [
+      ["h", id],
+      ["p", t.person.pubkey],
+    ],
+  });
+  await vi.waitFor(() =>
+    expect(t.session.outbox?.snapshot()).toMatchObject([
+      { event: { id: original }, delivery: "unknown" },
+    ]),
+  );
+  afterIntakeWindow();
+  await t.user.click(screen.getByRole("button", { name: "Close" }));
+  await t.user.click(t.trigger);
+  await screen.findByText("Carl (you)");
+  // Add resolves this one itself, so People does not steer it to Discard.
+  expect(screen.queryByText(/expired/)).not.toBeInTheDocument();
+  await t.user.type(
+    screen.getByRole("searchbox", {
+      name: "Search people, agents and channels",
+    }),
+    "Morgan",
+  );
+  await t.user.click(
+    await screen.findByRole("button", { name: /^Add Morgan/ }),
+  );
+  await screen.findByText(/Morgan is in the chat\./);
+  expect(
+    t.query.mock.calls.some(([filters]) =>
+      filters.some(
+        (filter) =>
+          filter.ids?.includes(original ?? "") &&
+          filter.consistency === "strong",
+      ),
+    ),
+  ).toBe(true);
+  expect(t.publish).toHaveBeenCalledTimes(2);
+  expect(t.publish.mock.calls[1]?.[0]).toMatchObject({
+    tags: expect.arrayContaining([["role", "member"]]),
+  });
+  expect(t.publish.mock.calls[1]?.[0].id).not.toBe(original);
+});
+
 it("Solo agent search keeps the query after a rejected addition, then retries the same event", async () => {
   const t = await setup("solo", false, true);
   const input = screen.getByRole("searchbox");
@@ -3630,17 +3757,16 @@ it("discards an expired Solo agent addition in People so the agent can be added 
   const original = t.publish.mock.calls[0]?.[0].id;
   t.fail("");
   afterIntakeWindow();
-  await t.user.click(
-    screen.getByRole("button", { name: "Retry adding Fixture agent" }),
-  );
+  await t.user.click(screen.getByRole("button", { name: /Add Fixture agent/ }));
   const alert = await screen.findByText(
     /This agent-add request expired\. Discard it in People, then add the agent again\./,
   );
   expect(alert).not.toHaveTextContent(/outbox/i);
+  expect(within(alert).getAllByRole("button")).toHaveLength(1);
   expect(t.publish).toHaveBeenCalledOnce();
   await t.user.click(
     within(alert).getByRole("button", {
-      name: "Discard failed addition of Fixture agent",
+      name: "Discard addition of Fixture agent",
     }),
   );
   await vi.waitFor(() => expect(t.session.outbox?.snapshot()).toEqual([]));
@@ -3678,9 +3804,10 @@ it("offers Discard in People for an agent addition that expired on another surfa
   const alert = await screen.findByText(
     /Fixture agent: An earlier addition expired\. Discard it to add them again\./,
   );
+  expect(within(alert).getAllByRole("button")).toHaveLength(1);
   await t.user.click(
     within(alert).getByRole("button", {
-      name: "Discard failed addition of Fixture agent",
+      name: "Discard addition of Fixture agent",
     }),
   );
   await vi.waitFor(() => expect(t.session.outbox?.snapshot()).toEqual([]));

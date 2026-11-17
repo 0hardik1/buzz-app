@@ -27,8 +27,9 @@ export function createMemberAdditions(
     pubkeys: readonly string[],
     intents: ReadonlyMap<string, MemberAdditionIntent>,
   ) => Promise<ReadonlySet<string>>,
-  /** Durably gives up this person's saved additions that cannot finish. */
-  discard?: (channelId: string, pubkey: string) => Promise<void>,
+  /** Durably gives up this person's saved additions that cannot finish, and
+   * returns the ones it gave up. */
+  discard?: (channelId: string, pubkey: string) => Promise<readonly string[]>,
 ) {
   let snapshot: readonly Addition[] = [];
   const listeners = new Set<() => void>();
@@ -163,16 +164,22 @@ export function createMemberAdditions(
       update({ channelId, pubkey, pending: true, confirmed });
       return operation;
     },
-    /** Explicitly gives up this person's failed addition and stops reporting
-     * it. Their intent is kept, so only its observed dismissal permits a
-     * replacement write. */
+    /** Explicitly gives up this person's addition that cannot finish and
+     * stops reporting it. Their intent is kept, so only the dismissal of its
+     * own receipt permits a replacement write. */
     async discard(channelId: string, pubkey: string): Promise<void> {
       if (signal.aborted) throw new Error("The community connection closed.");
-      if (pending.has(JSON.stringify([channelId, pubkey])))
+      const key = JSON.stringify([channelId, pubkey]);
+      if (pending.has(key))
         throw new Error(
           "A member operation is already running. Wait for it to finish, then try again.",
         );
-      await discard?.(channelId, pubkey);
+      const given = (await discard?.(channelId, pubkey)) ?? [];
+      // Receipts show only a failed addition's dismissal. An unconfirmed one
+      // was given up here, after the relay was shown not to have it.
+      const intent = intents.get(key);
+      if (intent?.id && !intent.confirmed && given.includes(intent.id))
+        intent.dismissed = true;
       if (!signal.aborted)
         publish(
           snapshot.filter(

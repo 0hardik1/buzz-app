@@ -248,21 +248,21 @@ export function createChannelKit({
       throw error;
     }
   }
-  /** Whether an earlier unresolved save of the same record blocks a new one.
-   * Only a save that can still reach the relay does. One known not to have
-   * been sent, or older than the relay's 15-minute intake window, cannot land
-   * later: it is discarded, as after a proven conflict, so the reviewed save
-   * proceeds on the head just read. */
-  async function blocked(previous: OutgoingEvent | undefined) {
-    if (!previous || !outbox) return false;
+  /** Discards an earlier unresolved save of the same record that cannot land
+   * later: one known not to have been sent, or unconfirmed and older than the
+   * relay's 15-minute intake window. As after a proven conflict, the reviewed
+   * save then proceeds on the head just read. Any other unresolved save
+   * blocks, so callers look for one again afterwards: the discard takes time,
+   * and it leaves a save whose delivery has begun. */
+  async function discardSpent(previous: OutgoingEvent | undefined) {
     if (
-      previous.delivery !== "failed" &&
-      (previous.delivery !== "unknown" ||
-        Date.now() / 1000 - previous.event.created_at < 15 * 60)
+      previous &&
+      outbox &&
+      (previous.delivery === "failed" ||
+        (previous.delivery === "unknown" &&
+          Date.now() / 1000 - previous.event.created_at >= 15 * 60))
     )
-      return true;
-    await outbox.dismiss(previous.event.id);
-    return false;
+      await outbox.dismiss(previous.event.id);
   }
   /** One replaceable private-record write: fresh head check, unresolved-save
    * guard, enqueue, exact confirmation and selected-head readback. With
@@ -309,17 +309,22 @@ export function createChannelKit({
           throw new Error(
             "This saved recipe changed. Refresh the catalog and review your draft before replacing it.",
           );
-        const previous = local
-          ?.snapshot()
-          .find(
-            (e) =>
-              e.event.kind === 30078 &&
-              e.event.tags.some((t) => t[0] === "d" && t[1] === d) &&
-              !["accepted", "seen"].includes(e.delivery),
-          );
-        if (await blocked(previous))
+        const unresolved = () =>
+          local
+            ?.snapshot()
+            .find(
+              (e) =>
+                e.event.kind === 30078 &&
+                e.event.tags.some((t) => t[0] === "d" && t[1] === d) &&
+                !["accepted", "seen"].includes(e.delivery),
+            );
+        await discardSpent(unresolved());
+        const previous = unresolved();
+        if (previous)
           throw new Error(
-            "A save for this recipe is unresolved and may still arrive. Refresh, then save again once 15 minutes have passed since that save.",
+            previous.delivery === "sending"
+              ? "Another save of this recipe is still being sent. Try again in a moment."
+              : "A save for this recipe is unresolved and may still arrive. Refresh, then save again once 15 minutes have passed since that save.",
           );
         // Replaceable records use seconds. Do not create an ambiguous equal-time replacement.
         if (current && current.created_at >= Math.floor(Date.now() / 1000))
@@ -473,17 +478,23 @@ export function createChannelKit({
         options?.preserveApproval &&
         (!head || !(await approvedCanvas(head, viewer)));
       signal.throwIfAborted();
-      const pending = local
-        ?.snapshot()
-        .find(
-          (e) =>
-            e.event.kind === 40100 &&
-            e.event.tags.some((t) => t[0] === "h" && t[1] === channel) &&
-            !["accepted", "seen"].includes(e.delivery),
-        );
-      if (await blocked(pending))
+      const unresolved = () =>
+        local
+          ?.snapshot()
+          .find(
+            (e) =>
+              e.event.kind === 40100 &&
+              e.event.tags.some((t) => t[0] === "h" && t[1] === channel) &&
+              !["accepted", "seen"].includes(e.delivery),
+          );
+      await discardSpent(unresolved());
+      // Nothing awaits between this check and the send below.
+      const pending = unresolved();
+      if (pending)
         throw new Error(
-          "This channel has an unresolved Canvas save that may still arrive. Your draft is kept. Save again once 15 minutes have passed since that save.",
+          pending.delivery === "sending"
+            ? "Another Canvas save for this channel is still being sent. Your draft is kept. Try again in a moment."
+            : "This channel has an unresolved Canvas save that may still arrive. Your draft is kept. Save again once 15 minutes have passed since that save.",
         );
       if (head && head.created_at >= Math.floor(Date.now() / 1000))
         throw new Error("Please wait a second before saving Canvas again");

@@ -410,9 +410,10 @@ function ChannelWorkspace({
   const list = useChannelRoster(queries.channels);
   const initialList = useRef(list);
   useFirstChannel({ scope, cached, queries, list, membership });
-  // Only Diagnostics reads the result. The hook stays in every build because
-  // it also loads the account's groups, stars and mutes when nothing else has,
-  // and readers such as community unread wait for them without asking.
+  // Only Diagnostics reads the result. The hook also asks the session to load
+  // the account's groups, stars and mutes, once. The shell's New menu and the
+  // sidebar inventory ask too, so this call is not the only trigger. It stays
+  // so the page does not rely on them and the hook is not made conditional.
   const preferences = useSidebarPreferences(queries.sidebarPreferences);
   useEffect(() => {
     // Initial channel discovery cancels in-flight reads as it settles access.

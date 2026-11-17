@@ -831,8 +831,9 @@ export function ChannelMembersDialog({
       (key) => directAdditions[key]?.pending,
     ),
   ]);
-  // Saved additions that cannot finish. Discarding one is the only way to add
-  // its person again once it has expired.
+  // Saved additions that cannot finish. Discard gives up one known not to
+  // have been sent, and an unconfirmed one once the relay is shown not to
+  // have it.
   const stale = discardableAdditions(
     useSyncExternalStore(
       session.outbox?.subscribe ?? noSavedChanges,
@@ -911,21 +912,30 @@ export function ChannelMembersDialog({
   const channel =
     list.channels.find((item) => item.id === channelId) ??
     session.channels.get?.(channelId);
-  // An expired addition blocks its person wherever it was started, including
-  // an earlier launch, so it is reported before another attempt does.
+  const solo = channel?.channelType === "solo";
+  // People whose expired addition Add never sends again, so only Discard lets
+  // them be added. A Solo chat's older invitation without a role is not one:
+  // Add retires it after checking the relay itself.
+  const spent = new Set(
+    stale
+      .filter(
+        (item) =>
+          additionExpired(item) &&
+          !(solo && !item.event.tags.some(([tag]) => tag === "role")),
+      )
+      .map(named)
+      .filter((key) => !channel?.members?.includes(key)),
+  );
+  // Such an addition blocks its person wherever it was started, including an
+  // earlier launch, so it is reported before another attempt does.
   if (!memberActions) {
     const reported = new Set(
       [...refusals.values()].flatMap((item) => item.keys),
     );
-    for (const key of new Set(stale.filter(additionExpired).map(named)))
-      if (
-        !reported.has(key) &&
-        !busy.has(key) &&
-        !channel?.members?.includes(key)
-      )
+    for (const key of spent)
+      if (!reported.has(key) && !busy.has(key))
         refuse(expiredAddition, expiredAddition, key);
   }
-  const solo = channel?.channelType === "solo";
   const dm = channel?.channelType === "dm";
   const place = solo ? "chat" : dm ? "DM" : "channel";
   // The relay's moderation DM carries its notices; no one joins it.
@@ -1831,6 +1841,7 @@ export function ChannelMembersDialog({
       if (!signal || memberPending || (memberActions && !memberActions.canAdd))
         return;
       setNotice("");
+      setDiscardError("");
       if (memberActions) {
         // Plugin writes disable Add. Hand off before the dialog trap can queue
         // a recovery that would overwrite a later deliberate focus move.
@@ -1962,6 +1973,7 @@ export function ChannelMembersDialog({
       const signal = lifetime.current?.signal;
       if (!signal || memberActions || memberPending) return;
       setNotice("");
+      setDiscardError("");
       const added = await Promise.allSettled(
         keys.map((key) => session.memberAdditions.add(channelId, key)),
       );
@@ -2546,28 +2558,34 @@ export function ChannelMembersDialog({
                     key={group}
                     className="text-body-sm text-danger"
                   >
-                    {names}: {error}{" "}
-                    <Button
-                      variant="outline"
-                      aria-label={`Retry adding ${names}`}
-                      disabled={!canAdd || memberPending}
-                      onClick={() => {
-                        // Land where Add does, so the next step is the search.
-                        input.current?.focus();
-                        const [only] = keys;
-                        void (only && keys.length === 1
-                          ? add(only, label(only))
-                          : addAll(keys, `${names} are in the ${place}.`));
-                      }}
-                    >
-                      Retry
-                    </Button>
+                    {names}: {error}
+                    {/* Retry would only repeat an expired addition's refusal. */}
+                    {keys.some((key) => !spent.has(key)) && (
+                      <>
+                        {" "}
+                        <Button
+                          variant="outline"
+                          aria-label={`Retry adding ${names}`}
+                          disabled={!canAdd || memberPending}
+                          onClick={() => {
+                            // Land where Add does, so the next step is the search.
+                            input.current?.focus();
+                            const [only] = keys;
+                            void (only && keys.length === 1
+                              ? add(only, label(only))
+                              : addAll(keys, `${names} are in the ${place}.`));
+                          }}
+                        >
+                          Retry
+                        </Button>
+                      </>
+                    )}
                     {doomed.length > 0 && (
                       <>
                         {" "}
                         <Button
                           variant="outline"
-                          aria-label={`Discard failed addition of ${listNames(doomed)}`}
+                          aria-label={`Discard addition of ${listNames(doomed)}`}
                           onClick={() => void discard(doomed)}
                         >
                           Discard

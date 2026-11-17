@@ -71,7 +71,7 @@ it("discards a failed addition and stops reporting it, leaving others alone", as
     if (person === "held") await gate;
     throw new Error("Could not add");
   });
-  const discard = vi.fn(async () => {});
+  const discard = vi.fn(async (): Promise<readonly string[]> => []);
   const owner = createMemberAdditions(
     new AbortController().signal,
     add,
@@ -107,6 +107,33 @@ it("discards a failed addition and stops reporting it, leaving others alone", as
   expect(owner.snapshot()).toHaveLength(3);
   release();
   await expect(held).rejects.toThrow("Could not add");
+});
+
+it("lets the next addition replace only a receipt its discard gave up", async () => {
+  const seen: (boolean | undefined)[] = [];
+  const given: string[] = [];
+  const owner = createMemberAdditions(
+    new AbortController().signal,
+    async (_channel, _person, intent) => {
+      seen.push(intent.dismissed);
+      intent.id = "saved";
+      throw new Error("Could not add");
+    },
+    undefined,
+    undefined,
+    async () => given,
+  );
+  const add = () =>
+    expect(owner.add("channel", "person")).rejects.toThrow("Could not add");
+  await add();
+  // Giving up some other receipt, or nothing, leaves this one in charge.
+  given.push("another");
+  await owner.discard("channel", "person");
+  await add();
+  given.push("saved");
+  await owner.discard("channel", "person");
+  await add();
+  expect(seen).toEqual([undefined, undefined, true]);
 });
 
 it("joins an addition under way only when it asks for the same role", async () => {

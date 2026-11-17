@@ -1,7 +1,7 @@
 import { fixtureAliases } from "../relay-config.ts";
 import { build } from "./vite-server.mjs";
 import react from "@vitejs/plugin-react";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,21 @@ const PAIRING_IMPORT = 'import { PairingSettings } from "./PairingSettings";';
 
 // The panel owns the gate that it, its callers and its tools read for Diagnostics.
 const DIAGNOSTICS_PANEL = "src/bundled/channels/ChannelSettingsPanel.tsx";
+// Text only the Diagnostics tools render. A release bundle has none of it and
+// a bundle with Diagnostics has all of it, so a renamed label fails as well.
+const DIAGNOSTICS_LABELS = [
+  "Remove from outbox",
+  "Capture timings",
+  "Export timings",
+  "Partial roster",
+  "Refresh groups and stars",
+  "Refresh messages",
+  "Mark read through loaded messages",
+  "Read sync:",
+  "Live updates:",
+  "Last rejection:",
+  "Saved groups and stars:",
+];
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -218,7 +233,29 @@ export async function buildApp(
       });
     const start = performance.now();
     await build(config);
-    await use({ config, durationMs: performance.now() - start });
+    const durationMs = performance.now() - start;
+    // Development React makes the developer signal a runtime check, so that
+    // bundle carries the tools whether or not it shows them.
+    if (!developmentReact) {
+      const assets = join(directory, "dist/assets");
+      const scripts = await Promise.all(
+        (await readdir(assets))
+          .filter((name) => name.endsWith(".js"))
+          .map((name) => readFile(join(assets, name), "utf8")),
+      );
+      const carried = DIAGNOSTICS_LABELS.filter((label) =>
+        scripts.some((script) => script.includes(label)),
+      );
+      if (channelDiagnostics && carried.length < DIAGNOSTICS_LABELS.length)
+        throw new Error(
+          `The channel diagnostics bundle lacks ${JSON.stringify(DIAGNOSTICS_LABELS.filter((label) => !carried.includes(label)))}. Update DIAGNOSTICS_LABELS in tests/browser/build.mjs.`,
+        );
+      if (!channelDiagnostics && carried.length)
+        throw new Error(
+          `The release bundle carries Diagnostics tools: ${JSON.stringify(carried)}. Build them behind channelDiagnostics.`,
+        );
+    }
+    await use({ config, durationMs });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

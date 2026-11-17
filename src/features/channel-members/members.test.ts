@@ -11,6 +11,8 @@ import {
 } from "./members";
 
 const cleanups: (() => void)[] = [];
+const tooOld =
+  "This event is too old to retry and was not found on the relay. Check the conversation before sending it again.";
 it.each([
   ["guest", "member", false],
   ["guest", "guest", false],
@@ -74,6 +76,13 @@ function setup(
   const published: RelayEvent[] = [];
   const publish = vi.fn(async (event: RelayEvent) => {
     if (fail) throw unknown ? new Error(fail) : new PublishRejected(fail);
+    // The relay takes a signed event for 15 minutes. The desktop writer reads
+    // an older one back by ID instead of sending it, and refuses it if absent.
+    if (
+      event.created_at < Math.floor(Date.now() / 1000) - 15 * 60 &&
+      recordedInvitation?.id !== event.id
+    )
+      throw new PublishRejected(tooOld);
     if (apply) {
       members = [...new Set([...members, person.pubkey])];
       personRole = event.tags.find(([tag]) => tag === "role")?.[1] ?? joinRole;
@@ -655,25 +664,171 @@ it.each(["this session", "an earlier launch"])(
   },
 );
 
-it("keeps an unconfirmed addition when asked to discard it", async () => {
+const expired =
+  "This addition expired. Discard it in People, then add them again.";
+/** Leaves this person's addition unconfirmed, as `origin` does. */
+async function leaveUnconfirmed(
+  t: ReturnType<typeof setup>,
+  origin = "a lost acknowledgement",
+) {
+  t.setApply(false);
+  if (origin === "a lost acknowledgement") {
+    t.setFail("Receipt lost", true);
+    await expect(t.managedAdd()).rejects.toThrow(/Receipt lost/);
+    t.setFail("");
+  } else {
+    // The request is saved and signed, then the app closes before any answer.
+    t.publish.mockImplementationOnce(() => new Promise(() => {}));
+    void t.managedAdd().catch(() => {});
+    await vi.waitFor(() => expect(t.records()[0]?.signed).toBeDefined());
+    t.restart();
+    await t.ready();
+  }
+  t.setApply(true);
+  const id = t.records()[0]?.event.id;
+  if (!id) throw new Error("Expected a saved addition");
+  expect(t.session.outbox?.snapshot()).toMatchObject([
+    { event: { id }, delivery: "unknown" },
+  ]);
+  return id;
+}
+const afterIntakeWindow = () =>
+  vi.spyOn(Date, "now").mockReturnValue(Date.now() + 16 * 60 * 1000);
+
+it.each(["a lost acknowledgement", "a reload while sending"])(
+  "gives up an unconfirmed addition left by %s only once the relay is shown never to have received it",
+  async (origin) => {
+    const t = setup();
+    await t.ready();
+    const first = await leaveUnconfirmed(t, origin);
+    // It may still arrive, so it is kept and the relay is not asked about it.
+    await t.session.memberAdditions.discard(t.id, t.person.pubkey);
+    expect(t.records()).toMatchObject([
+      { event: { id: first }, delivery: "unknown" },
+    ]);
+    expect(t.invitationReads).toEqual([]);
+    const now = afterIntakeWindow();
+    try {
+      // The relay no longer takes it, so neither Add nor Retry sends it.
+      const sent = t.publish.mock.calls.length;
+      for (const retry of [true, false, false])
+        await expect(
+          t.session.memberAdditions.add(
+            t.id,
+            t.person.pubkey,
+            retry ? { retry } : {},
+          ),
+        ).rejects.toThrow(expired);
+      expect(t.publish).toHaveBeenCalledTimes(sent);
+      // A check that cannot be made proves nothing.
+      t.setInvitationReadFailure(true);
+      await expect(
+        t.session.memberAdditions.discard(t.id, t.person.pubkey),
+      ).rejects.toThrow(/Invitation read unavailable/);
+      expect(t.records()).toMatchObject([
+        { event: { id: first }, delivery: "unknown" },
+      ]);
+      await expect(t.managedAdd()).rejects.toThrow(expired);
+      t.setInvitationReadFailure(false);
+      await t.session.memberAdditions.discard(t.id, t.person.pubkey);
+      expect(t.invitationReads.at(-1)).toEqual([
+        {
+          kinds: [9000],
+          ids: [first],
+          authors: [t.viewer.pubkey],
+          limit: 1,
+          consistency: "strong",
+        },
+      ]);
+      expect(t.records()).toEqual([]);
+      expect(t.session.outbox?.snapshot()).toEqual([]);
+      expect(t.session.memberAdditions.snapshot()).toEqual([]);
+      await t.managedAdd();
+      expect(t.publish).toHaveBeenCalledTimes(sent + 1);
+    } finally {
+      now.mockRestore();
+    }
+    expect(t.publish.mock.lastCall?.[0].id).not.toBe(first);
+    expect(t.session.channels.list().channels[0]?.members).toContain(
+      t.person.pubkey,
+    );
+  },
+);
+
+it("keeps an unconfirmed addition the relay has, and Add then finishes it", async () => {
   const t = setup();
   await t.ready();
-  t.setApply(false);
-  t.setFail("Receipt lost", true);
-  await expect(t.managedAdd()).rejects.toThrow(/Receipt lost/);
-  const first = t.publish.mock.calls[0]?.[0].id;
-  const now = vi
-    .spyOn(Date, "now")
-    .mockReturnValue(Date.now() + 16 * 60 * 1000);
+  const first = await leaveUnconfirmed(t);
+  t.recordOriginal();
+  const now = afterIntakeWindow();
   try {
-    // It may have reached the relay, so only Retry may resolve it.
-    await t.session.memberAdditions.discard(t.id, t.person.pubkey);
+    await expect(t.managedAdd()).rejects.toThrow(expired);
+    await expect(
+      t.session.memberAdditions.discard(t.id, t.person.pubkey),
+    ).rejects.toThrow(
+      "This addition reached the relay, so it was kept. Add them again to finish it.",
+    );
+    // The read that found it is its delivery, so it is no longer expired.
+    expect(t.session.outbox?.snapshot()).toMatchObject([
+      { event: { id: first }, delivery: "seen" },
+    ]);
+    await expect(t.managedAdd()).rejects.toThrow(
+      /not confirmed in the member list/,
+    );
+    t.confirmPerson();
+    await t.managedAdd();
   } finally {
     now.mockRestore();
   }
-  expect(t.records()).toMatchObject([
-    { event: { id: first }, delivery: "unknown" },
-  ]);
+  expect(t.publish).toHaveBeenCalledOnce();
+  expect(t.session.outbox?.snapshot()).toEqual([]);
+  expect(t.session.memberAdditions.snapshot()).toEqual([]);
+});
+
+it("checks the relay before discarding an unconfirmed addition saved without recovery", async () => {
+  const t = setup();
+  await t.ready();
+  const first = await leaveUnconfirmed(t);
+  // An older client saved it this way.
+  t.legacy();
+  t.restart();
+  await t.ready();
+  expect(t.session.outbox?.snapshot()[0]?.recovery).toBeUndefined();
+  const now = afterIntakeWindow();
+  try {
+    // Add adopts the saved addition. That must not take Discard away.
+    await expect(t.managedAdd()).rejects.toThrow(expired);
+    expect(t.session.outbox?.snapshot()[0]?.recovery).toBeDefined();
+    t.recordOriginal();
+    await expect(
+      t.session.memberAdditions.discard(t.id, t.person.pubkey),
+    ).rejects.toThrow(/reached the relay/);
+    expect(t.records()).toMatchObject([{ event: { id: first } }]);
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it("discards an unconfirmed addition saved without recovery once the relay is shown not to have it", async () => {
+  const t = setup();
+  await t.ready();
+  const first = await leaveUnconfirmed(t);
+  t.legacy();
+  t.restart();
+  await t.ready();
+  const now = afterIntakeWindow();
+  try {
+    await t.session.memberAdditions.discard(t.id, t.person.pubkey);
+    expect(t.invitationReads.at(-1)?.[0]).toMatchObject({
+      ids: [first],
+      consistency: "strong",
+    });
+    expect(t.records()).toEqual([]);
+    await t.managedAdd();
+  } finally {
+    now.mockRestore();
+  }
+  expect(t.publish.mock.lastCall?.[0].id).not.toBe(first);
 });
 
 it("keeps the exact failed request when durable dismissal fails", async () => {

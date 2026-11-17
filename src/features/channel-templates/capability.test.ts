@@ -61,7 +61,10 @@ function fixture() {
       events.push(event);
       return event.id;
     }),
-    dismiss: vi.fn(async () => {}),
+    dismiss: vi.fn(async (id: string) => {
+      const index = pending.findIndex((item) => item.event.id === id);
+      if (index >= 0) pending.splice(index, 1);
+    }),
     retry: vi.fn(),
   };
   const reader: RelayReader = {
@@ -304,66 +307,244 @@ it("keeps drafts safe from stale Canvas, unresolved writes and access loss", asy
     content: "New",
   });
 });
+const kinds = ["recipe", "Canvas"] as const;
+/** An earlier save of the record or Canvas these tests save again. */
+const earlierSave = (kind: (typeof kinds)[number], created_at: number) =>
+  signed(
+    viewer,
+    kind === "recipe"
+      ? {
+          kind: 30078,
+          content: "Earlier",
+          tags: [
+            ["d", coordinate(record)],
+            ["t", KIT_TAG],
+          ],
+          created_at,
+        }
+      : {
+          kind: 40100,
+          content: "Earlier",
+          tags: [["h", channel]],
+          created_at,
+        },
+  );
+const stillSending = /is still being sent\..*Try again in a moment\.$/;
+const mayArrive = /unresolved.*may still arrive.*once 15 minutes have passed/;
 it.each(
-  (["recipe", "Canvas"] as const).flatMap((kind) =>
+  kinds.flatMap((kind) =>
     (
       [
-        ["failed", 60, true],
-        ["unknown", 16 * 60, true],
-        ["unknown", 14 * 60, false],
-        ["sending", 16 * 60, false],
+        ["failed", 60, undefined],
+        ["unknown", 16 * 60, undefined],
+        ["unknown", 14 * 60, mayArrive],
+        // Waiting out the intake window does not end a delivery under way.
+        ["sending", 16 * 60, stillSending],
+        ["sending", 5, stillSending],
       ] as const
-    ).map(([delivery, age, replaced]) => ({ kind, delivery, age, replaced })),
+    ).map(([delivery, age, refusal]) => ({ kind, delivery, age, refusal })),
   ),
 )(
-  "a $delivery $kind save made $age seconds ago is replaced by the next save: $replaced",
-  async ({ kind, delivery, age, replaced }) => {
+  "a $delivery $kind save made $age seconds ago blocks the next save with: $refusal",
+  async ({ kind, delivery, age, refusal }) => {
     const f = fixture();
     const now = 1_700_001_000;
     vi.spyOn(Date, "now").mockReturnValue(now * 1000);
     // It never reached the relay, which therefore has no head to conflict with.
-    const earlier = signed(
-      viewer,
-      kind === "recipe"
-        ? {
-            kind: 30078,
-            content: "Earlier",
-            tags: [
-              ["d", coordinate(record)],
-              ["t", KIT_TAG],
-            ],
-            created_at: now - age,
-          }
-        : {
-            kind: 40100,
-            content: "Earlier",
-            tags: [["h", channel]],
-            created_at: now - age,
-          },
-    );
+    const earlier = earlierSave(kind, now - age);
     f.pending.push({ event: earlier, delivery });
     const save = () =>
       kind === "recipe"
         ? f.capability.save(record.value, undefined)
         : f.canvas.save(channel, "Reviewed", undefined);
-    if (replaced) {
+    if (!refusal) {
       await save();
       expect(f.outbox.dismiss).toHaveBeenCalledExactlyOnceWith(earlier.id);
       expect(f.outbox.send).toHaveBeenCalledOnce();
       return;
     }
-    // It may still arrive: the message says when to try again, and names no
-    // surface a release build lacks.
-    const refusal = await save().then(
+    // The message says what to do, and names no surface a release build lacks.
+    const message = await save().then(
       () => undefined,
       (reason: Error) => reason.message,
     );
-    expect(refusal).toMatch(
-      /unresolved.*may still arrive.*once 15 minutes have passed/,
-    );
-    expect(refusal).not.toMatch(/outbox/i);
+    expect(message).toMatch(refusal);
+    if (refusal === stillSending) expect(message).not.toMatch(/15 minutes/);
+    expect(message).not.toMatch(/outbox/i);
     expect(f.outbox.dismiss).not.toHaveBeenCalled();
     expect(f.outbox.send).not.toHaveBeenCalled();
+  },
+);
+it.each(kinds)(
+  "an expired unconfirmed %s save that did land is a conflict, not a discard",
+  async (kind) => {
+    const f = fixture();
+    // Early enough that the fixture dates the next save after this one.
+    const now = 1_700_000_900;
+    vi.spyOn(Date, "now").mockReturnValue(now * 1000);
+    const earlier = earlierSave(kind, now - 16 * 60);
+    // The relay took it, but its acknowledgement was lost.
+    f.events.push(earlier);
+    f.pending.push({ event: earlier, delivery: "unknown" });
+    const save = (expected: string | undefined) =>
+      kind === "recipe"
+        ? f.capability.save(record.value, expected)
+        : f.canvas.save(channel, "Reviewed", expected);
+    // The draft was written before that save, so the moved head comes first.
+    if (kind === "recipe")
+      await expect(save(undefined)).rejects.toThrow(/changed/);
+    else await expect(save(undefined)).rejects.toThrow(CanvasConflictError);
+    expect(f.outbox.dismiss).not.toHaveBeenCalled();
+    expect(f.outbox.send).not.toHaveBeenCalled();
+    expect(f.pending).toHaveLength(1);
+    // Reviewed against it, the next save gives up only the spent receipt.
+    await save(earlier.id);
+    expect(f.outbox.dismiss).toHaveBeenCalledExactlyOnceWith(earlier.id);
+    expect(f.outbox.send).toHaveBeenCalledOnce();
+  },
+);
+it.each(
+  kinds.flatMap((kind) =>
+    (["its own delivery", "another save"] as const).map((began) => ({
+      kind,
+      began,
+    })),
+  ),
+)(
+  "a spent $kind save still blocks when $began began during its discard",
+  async ({ kind, began }) => {
+    const f = fixture();
+    const now = 1_700_001_000;
+    vi.spyOn(Date, "now").mockReturnValue(now * 1000);
+    const earlier = earlierSave(kind, now - 60);
+    f.pending.push({ event: earlier, delivery: "failed" });
+    vi.mocked(f.outbox.dismiss).mockImplementationOnce(async () => {
+      // The outbox leaves a save whose delivery is under way.
+      f.pending.splice(0, 1, {
+        event: began === "another save" ? earlierSave(kind, now) : earlier,
+        delivery: "sending",
+      });
+    });
+    await expect(
+      kind === "recipe"
+        ? f.capability.save(record.value, undefined)
+        : f.canvas.save(channel, "Reviewed", undefined),
+    ).rejects.toThrow(stillSending);
+    expect(f.outbox.send).not.toHaveBeenCalled();
+  },
+);
+it.each(
+  kinds.flatMap((kind) =>
+    (
+      [
+        ["refused", 60, undefined],
+        ["unconfirmed", 16 * 60, undefined],
+        ["unconfirmed", 14 * 60, mayArrive],
+        ["sending", 16 * 60, stillSending],
+      ] as const
+    ).map(([outcome, age, refusal]) => ({ kind, outcome, age, refusal })),
+  ),
+)(
+  "the outbox itself gives up a $outcome $kind save after $age seconds, or keeps it: $refusal",
+  async ({ kind, outcome, age, refusal }) => {
+    const f = fixture();
+    const relay: RelayEvent[] = [];
+    const publish = vi.fn(async (event: RelayEvent) => {
+      relay.push(event);
+    });
+    if (outcome === "refused")
+      publish.mockRejectedValueOnce(new PublishRejected("Refused"));
+    else if (outcome === "unconfirmed")
+      publish.mockRejectedValueOnce(new Error("Lost ACK"));
+    else publish.mockImplementationOnce(() => new Promise(() => {}));
+    const owner = createOutbox(
+      viewer.pubkey,
+      {
+        kinds: [30078, 40100],
+        sign: async (event) => signed(viewer, event),
+        publish,
+      },
+      { load: () => [], save: () => {} },
+    );
+    const kit = createChannelKit({
+      host: f.host,
+      reader: {
+        read: async (filters) =>
+          relay.filter((event) =>
+            filters.some((filter) => matchesEvent(event, filter)),
+          ),
+      },
+      outbox: owner.outbox,
+      local: owner.local,
+      ready: owner.outbox.ready(),
+      viewer: viewer.pubkey,
+      community,
+      signal: f.controller.signal,
+      canWrite: () => true,
+      delivered: async (id) => {
+        await vi.waitFor(() =>
+          expect(
+            owner.local.snapshot().find((item) => item.event.id === id)
+              ?.delivery,
+          ).toBe("accepted"),
+        );
+      },
+    });
+    try {
+      await owner.outbox.ready();
+      const earlier = owner.outbox.send(
+        kind === "recipe"
+          ? {
+              kind: 30078,
+              content: "Earlier",
+              tags: [
+                ["d", coordinate(record)],
+                ["t", KIT_TAG],
+              ],
+            }
+          : {
+              kind: 40100,
+              content: "Earlier",
+              tags: [
+                ["h", channel],
+                ["expected-revision", "none"],
+              ],
+            },
+      );
+      const state = () =>
+        owner.outbox.snapshot().find((item) => item.event.id === earlier);
+      await vi.waitFor(() =>
+        expect(state()?.delivery).toBe(
+          outcome === "refused"
+            ? "failed"
+            : outcome === "unconfirmed"
+              ? "unknown"
+              : "sending",
+        ),
+      );
+      if (outcome === "sending")
+        await vi.waitFor(() => expect(publish).toHaveBeenCalled());
+      const now = Date.now();
+      vi.spyOn(Date, "now").mockReturnValue(now + age * 1000);
+      const save =
+        kind === "recipe"
+          ? kit.capability.save(record.value, undefined)
+          : kit.canvas.save(channel, "Reviewed", undefined);
+      if (refusal) {
+        await expect(save).rejects.toThrow(refusal);
+        expect(state()).toBeDefined();
+        expect(publish).toHaveBeenCalledOnce();
+        return;
+      }
+      await save;
+      expect(state()).toBeUndefined();
+      expect(relay.map((event) => event.content)).toEqual([
+        kind === "recipe" ? JSON.stringify(record) : "Reviewed",
+      ]);
+    } finally {
+      owner.dispose();
+      f.controller.abort();
+    }
   },
 );
 it("never re-signs an expired uncertain operation and clears candidates on retirement", async () => {
@@ -660,7 +841,10 @@ it.each(["failed", "unknown"] as const)(
       delivery === "failed" ? /Canvas changed.*draft is kept/ : /conflict:/,
     );
     if (delivery === "failed") {
-      expect(f.outbox.dismiss).toHaveBeenCalledWith(f.pending[0]?.event.id);
+      expect(f.outbox.dismiss).toHaveBeenCalledExactlyOnceWith(
+        vi.mocked(f.outbox.send).mock.results[0]?.value,
+      );
+      expect(f.pending).toEqual([]);
       expect(f.delivered).not.toHaveBeenCalled();
     } else expect(f.outbox.dismiss).not.toHaveBeenCalled();
   },

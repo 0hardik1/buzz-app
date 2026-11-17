@@ -87,6 +87,14 @@ build fails rather than quietly producing a release bundle. Every other file sta
 release bundle, where the Canvas confirmation journey confirms Diagnostics is
 absent; `developmentReact` files get it through the app's own developer signal.
 
+Each of those two builds is also checked for the text only Diagnostics tools
+render, listed as `DIAGNOSTICS_LABELS` in `tests/browser/build.mjs`. A release
+bundle that carries any of it fails to build, so a tool that returns to the
+bundle is caught even where no journey looks for it. A `channelDiagnostics`
+bundle that lacks any of it fails too, which keeps the list current when a
+label is renamed. A `developmentReact` bundle is not checked: there the
+developer signal is read at run time, so the tools are always bundled.
+
 Declare `historyCounts` with `test.use` for built-app tests that do not need large
 histories, for example `{ alpha: 1, beta: 0 }`. Counts apply per community. Keep
 pagination, anchor and measurement datasets unchanged unless their behavior is
