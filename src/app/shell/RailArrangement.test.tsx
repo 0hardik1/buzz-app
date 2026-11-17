@@ -94,7 +94,9 @@ test.each([false, true])(
     expect(screen.getByRole("button", { name: "Chat 4" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Chat 5" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Chat 6" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Open Solo" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View more Solo" }));
+    expect(openSection).toHaveBeenCalledWith("solo");
+    openSection.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Solo" }));
     expect(openSection).toHaveBeenCalledWith("solo");
     if (withLeading) {

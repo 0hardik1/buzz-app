@@ -668,11 +668,11 @@ export function RailGroup({
       ) : (
         previewContent
       )}
-      {more && !resizable && (
+      {(resizable || more) && (
         <NavigationItem
-          label={`Open ${title}`}
+          label={resizable ? "View more" : `Open ${title}`}
           data-rail-view-more=""
-          aria-label={`Open ${title}`}
+          aria-label={resizable ? `View more ${title}` : `Open ${title}`}
           icon={<ArrowRightIcon size={18} />}
           onClick={() => arrangement?.openSection(id)}
         />

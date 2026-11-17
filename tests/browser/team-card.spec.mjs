@@ -188,7 +188,9 @@ test("Team card filters in place and list rows drag onto sidebar cards", async (
   await page.screenshot({ path: testInfo.outputPath("team-sent-compact.png") });
   await channels.click();
   await sameHeight();
-  await card.getByRole("button", { name: "Team", exact: true }).click();
+  await card
+    .getByRole("button", { name: "View more Team", exact: true })
+    .click();
   const sheet = rail.locator("[data-rail-card-sheet]");
   const index = sheet.getByRole("region", { name: "Team list", exact: true });
   const alpha = index.locator(
@@ -206,7 +208,7 @@ test("Team card filters in place and list rows drag onto sidebar cards", async (
     .press("Escape");
   await expect(sheet).toHaveCount(0);
   await expect(
-    card.getByRole("button", { name: "Team", exact: true }),
+    card.getByRole("button", { name: "View more Team", exact: true }),
   ).toBeFocused();
 
   await expect(
