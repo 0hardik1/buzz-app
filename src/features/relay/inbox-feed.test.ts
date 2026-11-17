@@ -1727,6 +1727,23 @@ it("a live mention from an unknown public stream reads its metadata first, then 
   expect(heard).toEqual([mention.id]);
   expect(h.session.channels.list().channels.map((c) => c.id)).toEqual(["room"]);
 });
+it("a mention from an unknown channel never reads its metadata before discovery makes the list ready", async () => {
+  const h = setup();
+  expect(h.session.channels.list().status).not.toBe("ready");
+  const mention = mentionIn(h, "lobby", "too early", 20);
+  h.live.receive([mention], mentionRoute("lobby"));
+  const work = h.session.inboxFeed.ensure();
+  (await take(h, 9)).resolve([mention]);
+  await work;
+  // A lookup would commit a ready list holding only this channel.
+  expect(
+    h.query.mock.calls.some(([filters]) =>
+      filters.some((filter) => filter["#d"]?.includes("lobby")),
+    ),
+  ).toBe(false);
+  expect(h.session.channels.list().status).not.toBe("ready");
+  expect(rows(h)).toEqual([]);
+});
 it("addressed history from an unknown public stream reads its metadata, then lists the mention", async () => {
   const h = setup();
   h.admit([h.viewer.pubkey]);

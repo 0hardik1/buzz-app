@@ -793,7 +793,8 @@ export function createRelaySession(
           }),
         ),
       ];
-      if (unknown.length) {
+      // Only into a ready list: a lookup must not stand in for discovery.
+      if (unknown.length && channels.queries.list().status === "ready") {
         await channels.queries.resolve?.(unknown, {
           ...settings,
           viewerLookup: true,
@@ -3753,6 +3754,8 @@ export function createRelaySession(
       // channel this session has not read. Read its metadata, then admit as usual.
       const outside = provenance?.mention ? provenance.channelId : undefined;
       if (outside && !channels.queries.get?.(outside)) {
+        // Only into a ready list; until then Activity history lists it.
+        if (channels.queries.list().status !== "ready") return;
         const epoch = accessEpoch;
         const generation = liveGeneration;
         void channels.queries

@@ -430,6 +430,16 @@ it.each(["button", "menu"] as const)(
   },
 );
 
+it("previews a mention from a public stream the viewer has not joined under its channel name", async () => {
+  const h = fixture({ outside: true });
+  render(previewAt(h));
+  await waitFor(() => expect(previewRows()).toHaveLength(3));
+  const row = previewRows().find((entry) =>
+    entry.textContent?.includes("Come see this"),
+  );
+  expect(row).toHaveTextContent("Lobby");
+});
+
 it("marks a mention from a public stream the viewer has not joined read without joining", async () => {
   const h = fixture({ withWriter: true, outside: true });
   render(h.view);
@@ -438,6 +448,7 @@ it("marks a mention from a public stream the viewer has not joined read without 
     entry.textContent?.includes("Come see this"),
   );
   if (!row) throw new Error("Missing outside row");
+  expect(row).toHaveTextContent("Lobby");
   fireEvent.click(within(row).getByRole("button", { name: /^Mark as read / }));
   await waitFor(() =>
     expect(h.journal()?.state.frontiers[`msg:${h.outside.id}`]).toBe(24),

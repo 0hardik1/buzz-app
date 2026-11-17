@@ -1177,9 +1177,10 @@ function InboxList({
                   );
                 }
                 const item = row.item;
-                const channel = list.channels.find(
-                  (candidate) => candidate.id === item.channelId,
-                );
+                const channel =
+                  list.channels.find(
+                    (candidate) => candidate.id === item.channelId,
+                  ) ?? session.channels.get?.(item.channelId);
                 const identity = rowIdentity(item, channel, profiles, name);
                 const { sender, context } = identity;
                 const unread = hasUnread(item);
