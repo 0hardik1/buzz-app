@@ -171,10 +171,10 @@ pub(crate) async fn federated_identity_request(
     if grant.authority != config.id {
         return Err("Plugin authority mismatch".into());
     }
-    let (server, destination) = match &request.relay {
+    let (server, (destination, exchange)) = match &request.relay {
         None if request.apps => (
             host.inner().clone(),
-            apps_destination(config, (&id, &revision), &request)?,
+            (apps_destination(config, (&id, &revision), &request)?, false),
         ),
         None => (host.inner().clone(), validate(config, &grant, &request)?),
         Some(relay) => {
@@ -194,7 +194,7 @@ pub(crate) async fn federated_identity_request(
     // adapter's session and assertion routes decide that the session ended,
     // so a 401 asks the session route once.
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    let response = if destination == config.endpoint("/v1/nip-fi/agent-grant") {
+    let response = if exchange {
         forward_agent_exchange(destination, &token, request).await?
     } else {
         forward(destination, &token, request, home.as_deref()).await?
@@ -390,7 +390,7 @@ fn community_destination(
     relay: &str,
     grant: &buzzodz_plugins::FederatedIdentityGrant,
     request: &Request,
-) -> Result<(FederatedIdentity, url::Url), String> {
+) -> Result<(FederatedIdentity, (url::Url, bool)), String> {
     let first = host
         .config()
         .ok_or("Federated identity is not configured")?;
@@ -418,11 +418,13 @@ fn community_destination(
     let destination = validate(config, &grant, request)?;
     Ok((server, destination))
 }
+/// A granted call's destination on the server of `config`, and whether it is
+/// that server's agent token exchange.
 fn validate(
     config: &super::config::Config,
     grant: &buzzodz_plugins::FederatedIdentityGrant,
     request: &Request,
-) -> Result<url::Url, String> {
+) -> Result<(url::Url, bool), String> {
     let path = &request.path;
     if path.len() > 2048
         || !super::config::canonical_path(path)
@@ -458,9 +460,9 @@ fn validate(
     // The public plugin operation is relative to apiBasePath. NIP-FA's
     // exchange itself lives under adapterBase, which may have another prefix.
     if path == &format!("{}v1/nip-fi/agent-grant", config.api_base_path) {
-        Ok(config.endpoint("/v1/nip-fi/agent-grant"))
+        Ok((config.endpoint("/v1/nip-fi/agent-grant"), true))
     } else {
-        Ok(destination)
+        Ok((destination, false))
     }
 }
 /// Bounds a request and refuses the headers only native may set.
@@ -550,10 +552,12 @@ mod tests {
             body: Some(hosted_exchange_form()),
             ..Request::default()
         };
+        let (destination, exchange) = validate(&config, &grant, &request).unwrap();
         assert_eq!(
-            validate(&config, &grant, &request).unwrap().as_str(),
+            destination.as_str(),
             "https://identity.example/nip-fa/v1/nip-fi/agent-grant"
         );
+        assert!(exchange);
         let ungranted = buzzodz_plugins::FederatedIdentityGrant {
             operations: vec![],
             ..grant
@@ -822,6 +826,136 @@ mod tests {
         assert_eq!(seen[1].target, "GET /mount/v1/session HTTP/1.1");
     }
     #[tokio::test]
+    async fn a_granted_exchange_sends_the_session_only_as_subject_token() {
+        use super::super::tests::{adapter, at_adapter, record, Memory};
+        let temp = tempfile::tempdir().unwrap();
+        let manager =
+            buzzodz_plugins::Manager::open(Some(temp.path().into()), "test", false).unwrap();
+        let source = temp.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("plugin.js"), "export function apply() {}").unwrap();
+        std::fs::write(source.join("manifest.json"), r#"{"id":"example.fi","name":"Example","apiVersion":1,"host":{"federatedIdentity":{"authority":"test","operations":[{"method":"POST","path":"/api/v1/nip-fi/agent-grant"}]}}}"#).unwrap();
+        buzzodz_plugins::sign_release(&source, &nostr::key::SecretKey::generate().to_secret_hex())
+            .unwrap();
+        let revision = manager
+            .install(&source)
+            .unwrap()
+            .plugins
+            .into_iter()
+            .find(|p| p.manifest.id == "example.fi")
+            .unwrap()
+            .revision;
+        manager.change("enable", "example.fi").unwrap();
+        let (base, server) = adapter(vec![serde_json::json!({"access_token":"grant"})]).await;
+        let store = std::sync::Arc::new(Memory::default());
+        let mut host = at_adapter(store.clone(), base.clone());
+        // Plain loopback wire fixture only, as `at_adapter` is.
+        std::sync::Arc::get_mut(&mut host.0)
+            .unwrap()
+            .config
+            .as_mut()
+            .unwrap()
+            .identity_origin = url::Url::parse(&base)
+            .unwrap()
+            .origin()
+            .ascii_serialization();
+        let session = record();
+        *store.raw.lock().unwrap() = Some(session.raw.clone());
+        {
+            let mut state = host.state();
+            state.snapshot.revision = session.record.revision.clone();
+            state.snapshot.status = super::super::Status::SignedIn;
+            state.session = Some(session.clone());
+        }
+        let app = tauri::test::mock_builder()
+            .manage(crate::PluginManager(Ok(manager)))
+            .manage(host)
+            .manage(Registrations::default())
+            .build(crate::app_context())
+            .unwrap();
+        let token = uuid::Uuid::new_v4().to_string();
+        federated_identity_register(
+            app.state(),
+            app.state(),
+            app.state(),
+            "example.fi".into(),
+            revision.clone(),
+            token.clone(),
+        )
+        .await
+        .unwrap();
+        let response = federated_identity_request(
+            app.state(),
+            app.state(),
+            app.state(),
+            "example.fi".into(),
+            revision,
+            token,
+            session.record.revision.clone(),
+            Request {
+                path: "/api/v1/nip-fi/agent-grant".into(),
+                method: "POST".into(),
+                body: Some(hosted_exchange_form()),
+                ..Request::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status, 200);
+        let seen = server.await.unwrap();
+        // The public operation under apiBasePath reaches the exchange under
+        // adapterBase, with no ambient credential.
+        assert_eq!(seen[0].target, "POST /mount/v1/nip-fi/agent-grant HTTP/1.1");
+        assert!(!seen[0]
+            .headers
+            .iter()
+            .any(|(name, _)| name == "authorization"));
+        let form: Vec<_> = url::form_urlencoded::parse(&seen[0].body).collect();
+        let subject: Vec<_> = form
+            .iter()
+            .filter(|(name, _)| name == "subject_token")
+            .map(|(_, value)| value.as_ref())
+            .collect();
+        assert_eq!(subject, [session.record.session_token.as_str()]);
+    }
+    #[test]
+    fn a_peer_servers_exchange_is_its_own_exchange() {
+        use super::super::config::Config;
+        let first = Config::parse(r#"{"version":1,"id":"test","identityOrigin":"https://identity.example","adapterBase":"https://identity.example","apiBasePath":"/api/","communityHosts":["relay.example"]}"#).unwrap();
+        let peer = Config::parse(r#"{"version":1,"id":"peer","identityOrigin":"https://peer.example","adapterBase":"https://peer.example/nip-fa","apiBasePath":"/goose/","communityHosts":["*.peer.example"]}"#).unwrap();
+        let peer = FederatedIdentity::with_store(
+            Some(peer),
+            String::new(),
+            String::new(),
+            std::sync::Arc::new(super::super::tests::Memory::default()),
+        );
+        let host = super::super::tests::with_customers(first, vec![peer], false);
+        let grant = buzzodz_plugins::FederatedIdentityGrant {
+            authority: "test".into(),
+            operations: vec![buzzodz_plugins::AuthenticatedOperation {
+                method: "POST".into(),
+                path: "/api/v1/nip-fi/agent-grant".into(),
+            }],
+        };
+        let relay = "wss://team.peer.example";
+        let request = Request {
+            path: "/goose/v1/nip-fi/agent-grant".into(),
+            method: "POST".into(),
+            body: Some(hosted_exchange_form()),
+            relay: Some(relay.into()),
+            ..Request::default()
+        };
+        let (server, (destination, exchange)) =
+            community_destination(&host, APPS_PLUGIN, relay, &grant, &request).unwrap();
+        assert_eq!(server.config().unwrap().id, "peer");
+        assert_eq!(
+            destination.as_str(),
+            "https://peer.example/nip-fa/v1/nip-fi/agent-grant"
+        );
+        // Dispatch follows this decision, not the build's first server.
+        assert!(exchange);
+    }
+    #[tokio::test]
     async fn forwarding_adds_only_the_native_bearer_and_returns_refusals() {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -887,7 +1021,7 @@ mod tests {
                 ..Request::default()
             };
             community_destination(&host, plugin, relay, &grant, &request).map(
-                |(server, destination)| {
+                |(server, (destination, _))| {
                     (server.config().unwrap().id.clone(), destination.to_string())
                 },
             )

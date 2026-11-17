@@ -1112,6 +1112,7 @@ it("shares one binding attempt across clients of one sign-in", async () => {
   const current = deferred<HostResponse>();
   vi.mocked(h.host.request)
     .mockImplementationOnce(() => current.promise)
+    .mockResolvedValueOnce(agentGrant())
     .mockResolvedValueOnce(response({ status: 1 }));
   const signIn = createAgentClient(h.session, h.owner).link(h.signal);
   const activation = h.client.activate(
@@ -1126,7 +1127,7 @@ it("shares one binding attempt across clients of one sign-in", async () => {
     vi
       .mocked(h.host.request)
       .mock.calls.map(([input]) => input.url.split("/").at(-1)),
-  ).toEqual(["current", "attest-agent"]);
+  ).toEqual(["current", "agent-grant", "attest-agent"]);
 });
 
 it.each(["network", "429"])(
