@@ -19,11 +19,18 @@ async function iconDataUrl(file: Blob) {
   const image = await createImageBitmap(file);
   const side = Math.min(image.width, image.height);
   const canvas = document.createElement("canvas");
-  for (const size of [256, 128]) {
-    canvas.width = canvas.height = size;
-    canvas
-      .getContext("2d")
-      ?.drawImage(
+  // Alpha-capable formats come first at every size; WebKit can't encode WebP
+  // and falls back to PNG. JPEG keeps photos small but has no alpha.
+  for (const type of ["image/webp", "image/png", "image/jpeg"])
+    for (const size of [256, 128]) {
+      canvas.width = canvas.height = size;
+      const context = canvas.getContext("2d");
+      if (!context) break;
+      if (type === "image/jpeg") {
+        context.fillStyle = "#fff";
+        context.fillRect(0, 0, size, size);
+      }
+      context.drawImage(
         image,
         (image.width - side) / 2,
         (image.height - side) / 2,
@@ -34,8 +41,6 @@ async function iconDataUrl(file: Blob) {
         size,
         size,
       );
-    // WebKit can't encode WebP and falls back to PNG; JPEG keeps photos small.
-    for (const type of ["image/webp", "image/png", "image/jpeg"]) {
       const url = canvas.toDataURL(type, 0.85);
       if (
         url.startsWith(`data:${type};`) &&
@@ -43,7 +48,6 @@ async function iconDataUrl(file: Blob) {
       )
         return url;
     }
-  }
   throw new Error("This image is too detailed to use as the community icon");
 }
 
@@ -61,6 +65,39 @@ export function CommunityIcon({
     connection.status === "ready" && connection.scope
       ? communityFromScope(connection.scope)
       : null;
+  const name = communityName ?? "this community";
+  return (
+    <section aria-labelledby="community-icon-title">
+      <Header
+        id="community-icon-title"
+        title="Community icon"
+        subtitle={`The picture everyone sees for ${name} in the community list.`}
+      />
+      {community ? (
+        // A new community or connection starts with fresh state.
+        <IconEditor
+          key={`${connection.scope}:${connection.generation}`}
+          community={community}
+          communityName={communityName}
+          active={active}
+        />
+      ) : (
+        <p role="status">Choose a connected community to change its icon.</p>
+      )}
+    </section>
+  );
+}
+
+function IconEditor({
+  community,
+  communityName,
+  active,
+}: {
+  community: string;
+  communityName?: string | undefined;
+  active(): boolean;
+}) {
+  const choose = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const initialRead = useRef<AbortController>(null);
   const [icon, setIcon] = useState<string>();
@@ -72,7 +109,6 @@ export function CommunityIcon({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: attempt retries the read.
   useEffect(() => {
-    if (!community) return;
     const controller = new AbortController();
     initialRead.current = controller;
     setIcon(undefined);
@@ -92,7 +128,6 @@ export function CommunityIcon({
   }, [community, attempt]);
 
   const save = async (next: () => Promise<string>, done: string) => {
-    if (!community) return;
     // A save supersedes a slower initial read.
     initialRead.current?.abort();
     setBusy(true);
@@ -122,90 +157,82 @@ export function CommunityIcon({
     }
   };
 
-  const name = communityName ?? "this community";
   return (
-    <section aria-labelledby="community-icon-title">
-      <Header
-        id="community-icon-title"
-        title="Community icon"
-        subtitle={`The picture everyone sees for ${name} in the community list.`}
+    <>
+      <input
+        ref={input}
+        type="file"
+        className="sr-only"
+        tabIndex={-1}
+        aria-label="Community icon image"
+        accept="image/gif,image/png,image/jpeg,image/webp"
+        disabled={busy}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void save(() => iconDataUrl(file), "Icon updated.");
+        }}
       />
-      {community ? (
-        <>
-          <input
-            ref={input}
-            type="file"
-            className="sr-only"
-            tabIndex={-1}
-            aria-label="Community icon image"
-            accept="image/gif,image/png,image/jpeg,image/webp"
-            disabled={busy}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) void save(() => iconDataUrl(file), "Icon updated.");
-            }}
-          />
-          <SettingsGroup>
-            <PreferenceRow
-              icon={
-                <Avatar
-                  src={icon}
-                  alt=""
-                  fallback={communityName ?? "?"}
-                  size="large"
-                  shape="squircle"
-                />
-              }
-              title={!loaded ? "Icon unknown" : icon ? "Icon set" : "No icon"}
-              subtitle={
-                error ? (
-                  <span role="alert">{error}</span>
-                ) : (
-                  <span role="status">
-                    {status ||
-                      "Square images work best. Buzz resizes them to fit."}
-                  </span>
-                )
-              }
-              trailing={
-                <>
-                  {!loaded && error && (
-                    <Button
-                      size="xs"
-                      disabled={busy}
-                      onClick={() => {
-                        setError("");
-                        setAttempt((n) => n + 1);
-                      }}
-                    >
-                      Retry
-                    </Button>
-                  )}
-                  {icon && (
-                    <Button
-                      size="xs"
-                      disabled={busy}
-                      onClick={() => void save(async () => "", "Icon removed.")}
-                    >
-                      Remove icon
-                    </Button>
-                  )}
-                  <Button
-                    size="xs"
-                    loading={busy}
-                    onClick={() => input.current?.click()}
-                  >
-                    Choose image…
-                  </Button>
-                </>
-              }
+      <SettingsGroup>
+        <PreferenceRow
+          icon={
+            <Avatar
+              src={icon}
+              alt=""
+              fallback={communityName ?? "?"}
+              size="large"
+              shape="squircle"
             />
-          </SettingsGroup>
-        </>
-      ) : (
-        <p role="status">Choose a connected community to change its icon.</p>
-      )}
-    </section>
+          }
+          title={!loaded ? "Icon unknown" : icon ? "Icon set" : "No icon"}
+          subtitle={
+            error ? (
+              <span role="alert">{error}</span>
+            ) : (
+              <span role="status">
+                {status || "Square images work best. Buzz resizes them to fit."}
+              </span>
+            )
+          }
+          trailing={
+            <>
+              {!loaded && error && (
+                <Button
+                  size="xs"
+                  disabled={busy}
+                  onClick={() => {
+                    choose.current?.focus();
+                    setError("");
+                    setAttempt((n) => n + 1);
+                  }}
+                >
+                  Retry
+                </Button>
+              )}
+              {icon && (
+                <Button
+                  size="xs"
+                  disabled={busy}
+                  onClick={() => {
+                    choose.current?.focus();
+                    void save(async () => "", "Icon removed.");
+                  }}
+                >
+                  Remove icon
+                </Button>
+              )}
+              <Button
+                ref={choose}
+                size="xs"
+                loading={busy}
+                onClick={() => input.current?.click()}
+              >
+                Choose image…
+              </Button>
+            </>
+          }
+        />
+      </SettingsGroup>
+    </>
   );
 }

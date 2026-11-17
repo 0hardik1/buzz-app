@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { RelayData } from "../../features/relay/service";
@@ -34,6 +34,8 @@ afterEach(() => {
   cleanup();
   setCommunityIcon.mockReset();
   published.readFails = false;
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 it("removes the icon and shows what the community now publishes", async () => {
@@ -50,6 +52,7 @@ it("removes the icon and shows what the community now publishes", async () => {
   expect(setCommunityIcon).toHaveBeenCalledWith("https://primary.example", "");
   expect(screen.getByText("No icon")).toBeVisible();
   expect(screen.queryByRole("button", { name: "Remove icon" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Choose image…" })).toHaveFocus();
 });
 
 it("keeps the published icon when the relay refuses the change", async () => {
@@ -122,6 +125,67 @@ it("starts no write when the card closes while an image decodes", async () => {
   decoded({ width: 1, height: 1 });
   await new Promise((resolve) => setTimeout(resolve));
   expect(setCommunityIcon).not.toHaveBeenCalled();
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
+});
+
+it("starts fresh when the selected community changes", async () => {
+  published.icon = ICON;
+  setCommunityIcon.mockImplementation(async (_community, icon: string) => {
+    published.icon = icon || undefined;
+  });
+  let current = connection;
+  const listeners = new Set<() => void>();
+  const switching = {
+    snapshot: () => current,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  } as unknown as RelayData;
+  render(
+    <CommunityIcon
+      relay={switching}
+      communityName="Hive"
+      active={() => true}
+    />,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Remove icon" }),
+  );
+  expect(await screen.findByText("Icon removed.")).toBeVisible();
+  published.icon = ICON;
+  current = { ...connection, scope: `https://other.example:${"0".repeat(64)}` };
+  act(() => {
+    for (const listener of listeners) listener();
+  });
+  expect(await screen.findByText("Icon set")).toBeVisible();
+  expect(screen.queryByText("Icon removed.")).toBeNull();
+});
+
+it("keeps a transparent icon's alpha when WebKit can only encode PNG", async () => {
+  vi.stubGlobal("createImageBitmap", async () => ({ width: 256, height: 256 }));
+  const fillRect = vi.fn();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    drawImage() {},
+    fillRect,
+  } as unknown as CanvasRenderingContext2D);
+  // Like WKWebView: WebP falls back to PNG, and the 256 px PNG is too large.
+  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation(
+    function (this: HTMLCanvasElement, type?: string) {
+      if (type === "image/jpeg") return "data:image/jpeg;base64,AAAA";
+      return `data:image/png;base64,${this.width === 256 ? "A".repeat(49_152) : "AAAA"}`;
+    },
+  );
+  render(
+    <CommunityIcon relay={relay} communityName="Hive" active={() => true} />,
+  );
+  await userEvent.upload(
+    screen.getByLabelText("Community icon image"),
+    new File(["x"], "icon.png", { type: "image/png" }),
+  );
+  expect(await screen.findByText("Icon updated.")).toBeVisible();
+  expect(setCommunityIcon).toHaveBeenCalledWith(
+    "https://primary.example",
+    "data:image/png;base64,AAAA",
+  );
+  expect(fillRect).not.toHaveBeenCalled();
 });
