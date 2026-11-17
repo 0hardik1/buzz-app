@@ -1077,6 +1077,8 @@ control. Its accessible name still comes from `aria-label`.
 
 An `xs` Button whose label starts with an icon reduces its leading padding to its
 4px vertical padding, so the icon sits evenly in the capsule's leading corner.
+An `xs` Button with a small leading dot uses `data-leading-dot` for a 10px leading
+inset; its trailing inset remains 12px.
 
 Utility icon actions share the rounded rectangle in resting, hover, pressed, and
 selected states. Avatar controls default to round; use `shape="round"` for deliberate

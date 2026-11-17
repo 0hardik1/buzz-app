@@ -1731,16 +1731,6 @@ export function SearchResults({
           },
         })
       : undefined;
-  /** Adds an operator to the typed text, for its picker to complete. */
-  const addOperator = (operator: string) => {
-    // Filters already chosen or typed stay with the question.
-    if (operator === "ask:") setChipQuery(chips, `ask: ${visibleQuery.trim()}`);
-    else
-      updateDisplayQuery(
-        `${visibleQuery.trimEnd()}${visibleQuery.trim() ? " " : ""}${operator}`,
-      );
-    input.current?.focus();
-  };
   const hints = asking ? (
     <div className="search-peek-hints">
       <Button
@@ -1766,35 +1756,6 @@ export function SearchResults({
       <span className="text-body-sm text-subtle">
         {askAgent?.name ?? "Your agent"} searches Buzz for you in a new chat
       </span>
-    </div>
-  ) : !scopedChannelId && !offline ? (
-    <div className="search-peek-hints">
-      {(
-        [
-          ["from:", "person"],
-          ["in:", "channel"],
-          ["during:", "date"],
-          ["ask:", askAgent?.name ?? "agent"],
-        ] as const
-      ).map(([operator, what]) => (
-        <Button
-          key={operator}
-          variant="outline-subtle"
-          size="xs"
-          tabIndex={-1}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => addOperator(operator)}
-        >
-          <span
-            className="search-peek-filter-dot"
-            data-operator={operator.slice(0, -1)}
-            aria-hidden="true"
-          />
-          <span>
-            {operator} {what}
-          </span>
-        </Button>
-      ))}
     </div>
   ) : undefined;
   const directoryPending = publicChannels.loading || personDirectory.loading;

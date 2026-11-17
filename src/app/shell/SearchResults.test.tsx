@@ -184,6 +184,12 @@ it("opens with a conversation action and recent channels in activity order", asy
     const [first, second] = recent.getAllByRole("option");
     expect(first).toHaveTextContent("latest");
     expect(second).toHaveTextContent("older");
+    expect(screen.queryByText("from: person")).toBeNull();
+    expect(screen.queryByText("in: channel")).toBeNull();
+    expect(screen.queryByText("during: date")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /^(from:|in:|during:|ask:)/ }),
+    ).toBeNull();
     fireEvent.click(action);
     expect(changeScope).toHaveBeenCalledExactlyOnceWith("older");
   } finally {
@@ -280,7 +286,7 @@ it("leads an empty search with other unmuted unread channels and DMs, selecting 
     ]);
     // Unread leads, before the conversation action, and is not repeated.
     expect(
-      screen
+      within(screen.getByRole("listbox"))
         .getAllByRole("group")
         .map((group) => group.getAttribute("aria-label")),
     ).toEqual(["Unread", "This conversation", "Recent activity"]);
@@ -661,7 +667,7 @@ it("ranks typed channel names and selects the best one for Enter", async () => {
       expect.stringMatching(/^xlar-/),
     ]);
     // The scope action follows named results, so it is not selected first.
-    const groups = screen
+    const groups = within(screen.getByRole("listbox"))
       .getAllByRole("group")
       .map((group) => group.getAttribute("aria-label"));
     expect(groups.indexOf("This conversation")).toBeGreaterThan(
@@ -813,7 +819,7 @@ it("leads with the group holding the best match and ranks archived channels afte
       expect.stringMatching(/^work-old/),
       expect.stringMatching(/^team-workspace/),
     ]);
-    const groups = screen
+    const groups = within(screen.getByRole("listbox"))
       .getAllByRole("group")
       .map((group) => group.getAttribute("aria-label"));
     expect(groups.slice(0, 2)).toEqual(["Pages", "Channels"]);
@@ -2204,7 +2210,7 @@ it("keeps a selected person and the delayed notice when channel results stream i
     // Once the highlight has moved, groups keep their places: the channel
     // that streamed in goes after the person's group, not above it.
     expect(
-      screen
+      within(screen.getByRole("listbox"))
         .getAllByRole("group")
         .slice(0, 2)
         .map((group) => group.getAttribute("aria-label")),
@@ -2972,7 +2978,7 @@ it("puts a remembered public channel first, even past eight joined matches", asy
     await waitFor(() => expect(optionNames("Channels")[0]).toBe("team-work"));
     expect(optionNames("Channels")).toHaveLength(5);
     expect(
-      screen
+      within(screen.getByRole("listbox"))
         .getAllByRole("group")
         .map((group) => group.getAttribute("aria-label"))
         .slice(0, 2),
@@ -3048,7 +3054,7 @@ it("keeps the remembered choice selected when a better match arrives late", asyn
     // The relay's exact public match arrives later, after the groups shown.
     await screen.findByRole("option", { name: /^wor/ });
     expect(
-      screen
+      within(screen.getByRole("listbox"))
         .getAllByRole("group")
         .map((group) => group.getAttribute("aria-label"))
         .slice(0, 2),
@@ -3300,11 +3306,11 @@ it("keeps a chosen Messages group, with its reason, while the text as typed isn'
       await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
     });
   const shown = () =>
-    screen.getByRole("tab", { selected: true }).textContent ?? "";
+    screen.getByRole("button", { pressed: true }).textContent ?? "";
   try {
     const view = render(<SearchResults {...props} query="design" />);
     await settle();
-    fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Messages/ }));
     expect(screen.getByRole("option", { name: /design notes/ })).toBeVisible();
 
     // design-crit still matches, but messages aren't searched yet.
@@ -8005,7 +8011,7 @@ it.each([
         chats.getAllByRole("option").map((row) => row.textContent),
       ).toEqual(chatOrder.map((name) => expect.stringContaining(name))),
     );
-    const labels = screen
+    const labels = within(screen.getByRole("listbox"))
       .getAllByRole("group")
       .map((group) => group.getAttribute("aria-label"));
     expect(labels.slice(0, groups.length)).toEqual(groups);
@@ -8103,7 +8109,7 @@ it.each([
     await waitFor(() => expect(chats.getAllByRole("option")).toHaveLength(3));
     if (named === "chat")
       expect(chats.getAllByRole("option")[0]).toHaveTextContent(/^scout/);
-    const labels = screen
+    const labels = within(screen.getByRole("listbox"))
       .getAllByRole("group")
       .map((group) => group.getAttribute("aria-label"));
     expect(labels.slice(0, groups.length)).toEqual(groups);
@@ -9608,7 +9614,9 @@ it("keeps chosen filters when ask: is added, and asks with them, across reopenin
     const chip = screen.getByRole("button", {
       name: "Remove channel buzz-bugs",
     });
-    fireEvent.click(await screen.findByRole("button", { name: "ask: Aria" }));
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "ask: deploy" },
+    });
     expect(chip).toBeInTheDocument();
     expect(input.current).toHaveValue("ask: deploy");
     fireEvent.click(await screen.findByRole("option", { name: /Aria/ }));

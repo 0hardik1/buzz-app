@@ -9,7 +9,7 @@ const entered = async (dialog) => {
   await expect(dialog).not.toHaveAttribute("data-starting-style");
   await animationsSettled(dialog, { subtree: true });
 };
-test("a focused result-group tab keeps its whole focus ring inside the scrolling track", async ({
+test("a focused result-group filter keeps its whole focus ring inside the workspace", async ({
   page,
   app,
 }) => {
@@ -19,41 +19,43 @@ test("a focused result-group tab keeps its whole focus ring inside the scrolling
   await entered(dialog);
   const input = dialog.getByRole("combobox", { name: "Search Buzz" });
   await input.fill("re");
-  const tabs = dialog
-    .getByRole("tablist", { name: "Result groups" })
-    .getByRole("tab");
-  await expect(tabs.nth(2)).toBeVisible();
-  const count = await tabs.count();
-  // In the field, Tab steps through the groups; past the last it moves on,
-  // by the clear button, to that group's tab. The arrows move between tabs.
-  const last = tabs.nth(count - 1);
+  const filters = dialog
+    .getByRole("group", { name: "Result groups" })
+    .getByRole("button");
+  await expect(filters.nth(2)).toBeVisible();
+  const count = await filters.count();
+  // In the field, Tab steps through groups before leaving for the clear
+  // button and then the filters. Each filter is a native Tab stop.
+  const first = filters.first();
   for (
     let step = 0;
     step < count + 2 &&
-    !(await last.evaluate((tab) => tab === document.activeElement));
+    !(await first.evaluate((filter) => filter === document.activeElement));
     step++
   )
     await page.keyboard.press("Tab");
-  await expect(last).toBeFocused();
-  for (let index = count - 1; index >= 0; index--) {
-    if (index < count - 1) await page.keyboard.press("ArrowLeft");
-    await expect(tabs.nth(index)).toBeFocused();
-    // The ring is the outline and its offset around the tab; the list scrolls,
-    // so it clips anything past its own box.
-    const overflow = await tabs.nth(index).evaluate((tab) => {
-      const style = getComputedStyle(tab);
+  await expect(first).toBeFocused();
+  for (let index = 0; index < count; index++) {
+    if (index > 0) await page.keyboard.press("Tab");
+    await expect(filters.nth(index)).toBeFocused();
+    // The workspace clips overflow, so the entire outline and its offset
+    // must fit inside that boundary, including filters on a wrapped row.
+    const overflow = await filters.nth(index).evaluate((filter) => {
+      const style = getComputedStyle(filter);
       const ring =
         Number.parseFloat(style.outlineWidth) +
         Number.parseFloat(style.outlineOffset);
-      const list = tab.closest('[role="tablist"]').getBoundingClientRect();
-      const box = tab.getBoundingClientRect();
+      const workspace = filter
+        .closest(".search-peek-workspace")
+        .getBoundingClientRect();
+      const box = filter.getBoundingClientRect();
       return {
         drawn: style.outlineStyle !== "none" && ring > 0,
         clipped: [
-          list.top - (box.top - ring),
-          box.bottom + ring - list.bottom,
-          list.left - (box.left - ring),
-          box.right + ring - list.right,
+          workspace.top - (box.top - ring),
+          box.bottom + ring - workspace.bottom,
+          workspace.left - (box.left - ring),
+          box.right + ring - workspace.right,
         ].some((past) => past > 0.5),
       };
     });

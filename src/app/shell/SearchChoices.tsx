@@ -17,7 +17,6 @@ import { Badge } from "../../shared/design-system/ui/Badge";
 import { Button } from "../../shared/design-system/ui/Button";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { SearchField } from "../../shared/design-system/ui/SearchField";
-import { Tabs } from "../../shared/design-system/ui/Tabs";
 import { isApplePlatform } from "../../features/shortcuts/format";
 import { MatchedLabel } from "../../features/search/MatchedLabel";
 import { useSearchHighlight } from "../../features/search/use-search-highlight";
@@ -869,11 +868,11 @@ export function SearchChoices({
       </div>
       <div className={peek?.ranked ? "search-peek-workspace" : "contents"}>
         {peek?.ranked && tabs.length > 0 && (
-          // Escape from one group returns to Top results, from a group tab
+          // Escape from one group returns to Top results, from a filter
           // as from the field, not out of search.
-          // biome-ignore lint/a11y/noStaticElementInteractions: Handles keys bubbling from its tabs.
-          <div
+          <fieldset
             className="search-peek-rail"
+            aria-label="Result groups"
             onKeyDown={(event) => {
               if (event.key !== "Escape" || !scoped) return;
               event.preventDefault();
@@ -881,50 +880,61 @@ export function SearchChoices({
               showScope(undefined);
             }}
           >
-            <Tabs
-              variant="segmented"
-              label="Result groups"
-              value={scoped?.label ?? ""}
-              onValueChange={(value) => showScope(value || undefined, false)}
-              items={[undefined, ...tabs].map((group, index) => ({
-                value: group?.label ?? "",
-                label:
-                  group?.label ??
-                  (query.trim() ? "Top results" : "Jump back in"),
-                panelId: peekPanelId(group?.label),
-                trailing: (
-                  <>
-                    {/* A landing group has no count yet. */}
-                    {(!group || group !== landing) && (
-                      <span className="search-peek-count">
-                        {group
-                          ? countOf(group)
-                          : `${ranked.reduce(
-                              (sum, item) =>
-                                sum +
-                                (item.browse ? 0 : resultRows(item).length),
-                              0,
-                            )}${ranked.some((item) => !item.browse && item.count?.endsWith("+")) ? "+" : ""}`}
-                      </span>
-                    )}
-                    {index === 1 && group !== landing && !!query.trim() && (
-                      <Badge size="xs" tone="success">
-                        Best match
-                      </Badge>
-                    )}
-                  </>
-                ),
-              }))}
-            />
-          </div>
+            {[undefined, ...tabs].map((group, index) => (
+              <Button
+                key={group?.label ?? ""}
+                id={`${peekPanelId(group?.label)}-filter`}
+                size="xs"
+                data-leading-dot=""
+                variant={
+                  scoped?.label === group?.label ? "subtle" : "outline-subtle"
+                }
+                aria-pressed={scoped?.label === group?.label}
+                aria-controls={peekPanelId(undefined)}
+                onClick={() => {
+                  if (scoped?.label !== group?.label)
+                    showScope(group?.label, false);
+                }}
+              >
+                <span
+                  className="search-peek-filter-dot"
+                  data-tone={group?.tone ?? "page"}
+                  aria-hidden="true"
+                />
+                {group?.label === "Direct messages"
+                  ? "DMs"
+                  : group?.label === "Recent searches"
+                    ? "Recents"
+                    : (group?.label ??
+                      (query.trim() ? "Top results" : "Jump back in"))}
+                {/* A landing group has no count yet. */}
+                {(!group || group !== landing) && (
+                  <span className="search-peek-count">
+                    {group
+                      ? countOf(group)
+                      : `${ranked.reduce(
+                          (sum, item) =>
+                            sum + (item.browse ? 0 : resultRows(item).length),
+                          0,
+                        )}${ranked.some((item) => !item.browse && item.count?.endsWith("+")) ? "+" : ""}`}
+                  </span>
+                )}
+                {index === 1 && group !== landing && !!query.trim() && (
+                  <Badge size="xs" tone="success">
+                    Best match
+                  </Badge>
+                )}
+              </Button>
+            ))}
+          </fieldset>
         )}
         <div
           className={peek?.ranked ? "search-peek-body" : "contents"}
           {...(peek?.ranked && tabs.length > 0
             ? {
-                role: "tabpanel",
-                id: peekPanelId(scoped?.label),
-                "aria-labelledby": `${peekPanelId(scoped?.label)}-tab`,
+                role: "region",
+                id: peekPanelId(undefined),
+                "aria-labelledby": `${peekPanelId(scoped?.label)}-filter`,
               }
             : {})}
         >

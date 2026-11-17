@@ -1111,7 +1111,9 @@ it("finds and opens saved conversations while the community is unreachable or st
     ).toEqual(["AlphaConversation · 1 member", "BetaConversation · 1 member"]);
     // A saved session has no message scope or open-channel view to offer.
     expect(within(dialog).queryByText(/^Search in Alpha/)).toBeNull();
-    expect(within(dialog).queryByRole("tab", { name: "Channels" })).toBeNull();
+    expect(
+      within(dialog).queryByRole("button", { name: "Channels" }),
+    ).toBeNull();
     // The author picker offers only people already known, and says the
     // people search that needs the relay waits for the connection.
     for (const text of ["from:al", "in:@al", "in:beta from:al"]) {
@@ -1614,14 +1616,14 @@ it("keeps an empty search's place only while unread does not lead it", async () 
   }
 });
 
-it("goes back to Top results on Escape from a clicked group tab, and closes on the next", async () => {
+it("goes back to Top results on Escape from a clicked group filter, and closes on the next", async () => {
   const t = memorySearch();
   try {
     await t.open();
     await userEvent.type(t.field(), "design");
-    const shown = () => screen.getByRole("tab", { selected: true });
+    const shown = () => screen.getByRole("button", { pressed: true });
     await userEvent.click(
-      await screen.findByRole("tab", { name: /^Channels/ }),
+      await screen.findByRole("button", { name: /^Channels/ }),
     );
     expect(shown()).toHaveAccessibleName(/^Channels/);
     expect(shown()).toHaveFocus();
