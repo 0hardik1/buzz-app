@@ -1771,6 +1771,8 @@ export class ClaudeRuntime {
         const directories = home ? [home, ...(shared ?? [])] : shared;
         const cwd = folder || workspace;
         const handle = entry.handle;
+        const context =
+          key && handle && this.conversationContext(agent, handle.owner, key);
         return {
           ...where(entry.config),
           cwd,
@@ -1793,9 +1795,8 @@ export class ClaudeRuntime {
           ...(handle
             ? { agent: { pubkey: handle.pubkey, relay: handle.relay } }
             : {}),
-          ...(key && handle
-            ? { context: this.conversationContext(agent, handle.owner, key) }
-            : {}),
+          // None for a conversation `conversationEnv` declines to describe.
+          ...(context && Object.keys(context).length ? { context } : {}),
           hook: (session, event, input) =>
             this.hook(agent, session, event, input),
           tools: tools(cwd),
