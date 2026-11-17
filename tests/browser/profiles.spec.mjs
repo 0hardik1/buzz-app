@@ -8,6 +8,9 @@ test("qualifies a whitespace namesake in Members and opens its exact profile", a
   page,
 }) => {
   const errors = watchPageErrors(page);
+  await page.addInitScript(() => {
+    localStorage.setItem("buzz-name-preference.v1", "username");
+  });
   await page.goto("/tests/fixtures/profiles.html?verified-name&name-collision");
   await page.waitForFunction(() => !!window.profilesFixture);
   const { key, npub } = await page.evaluate(() => ({

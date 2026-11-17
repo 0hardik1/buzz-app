@@ -5,6 +5,9 @@ for (const fullName of [true, false]) {
   test(`profile verification checkmark follows the verified ${fullName ? "full name" : "username"}`, async ({
     page,
   }, info) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("buzz-name-preference.v1", "username");
+    });
     await page.goto(
       `/tests/fixtures/profiles.html?verified-name${fullName ? "" : "&no-full-name"}`,
     );
