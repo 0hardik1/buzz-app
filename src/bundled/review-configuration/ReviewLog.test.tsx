@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { StrictMode } from "react";
+import { act, StrictMode } from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
@@ -91,4 +91,65 @@ it("keeps a failed page retryable", async () => {
   await screen.findByText("Log read failed");
   await user.click(screen.getByRole("button", { name: "Load earlier events" }));
   await screen.findByText("All available events loaded.");
+});
+
+it("replaces an open log on resubmission and ignores the previous in-flight read", async () => {
+  let finish!: (page: Awaited<ReturnType<typeof loadReviewLog>>) => void;
+  vi.mocked(loadReviewLog)
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    )
+    .mockResolvedValue({ entries: [], roots: [], more: false });
+  const view = render(
+    <ReviewLog
+      session={session}
+      channel="channel"
+      repository="example-org/project"
+      pr={1}
+      scope={{ id: "old", startedAt: 1 }}
+    />,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Log" }));
+  await screen.findByText("Loading review log…");
+  const oldSignal = vi.mocked(loadReviewLog).mock.calls[0]?.[5];
+  view.rerender(
+    <ReviewLog
+      session={session}
+      channel="channel"
+      repository="example-org/project"
+      pr={1}
+      scope={{ id: "new", startedAt: 2 }}
+    />,
+  );
+  await screen.findByText("All available events loaded.");
+  expect(oldSignal?.aborted).toBe(true);
+  expect(vi.mocked(loadReviewLog).mock.lastCall?.[6]).toEqual({
+    id: "new",
+    startedAt: 2,
+  });
+  await act(async () =>
+    finish({
+      entries: [
+        {
+          event: {
+            id: "stale",
+            kind: 9,
+            pubkey: "author",
+            created_at: 1,
+            tags: [],
+            content: "",
+          },
+          title: "Old submission event",
+          detail: "",
+        },
+      ],
+      roots: [],
+      more: false,
+    }),
+  );
+  expect(screen.queryByText(/Old submission event/)).toBeNull();
 });

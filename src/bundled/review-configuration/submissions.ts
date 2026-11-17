@@ -1,4 +1,4 @@
-import { recordReviewFailure } from "./review-log";
+import { recordReviewFailure, type ReviewLogScope } from "./review-log";
 import { reserveDailyReview } from "./daily-limit";
 import { validateAutomation, type AutomationLane } from "./automation-state";
 import {
@@ -73,6 +73,7 @@ export type Submission = {
   };
   generation?: string;
   submittedAt?: number;
+  log?: ReviewLogScope;
   pr: number;
   config: ReviewConfig;
   configRevision: string;
@@ -156,6 +157,12 @@ export async function decodeSubmission(
       (!Number.isSafeInteger(value.submittedAt) ||
         value.submittedAt <= 0 ||
         value.submittedAt > 8_640_000_000_000)) ||
+    (value.log !== undefined &&
+      (typeof value.log.id !== "string" ||
+        !UUID.test(value.log.id) ||
+        !Number.isSafeInteger(value.log.startedAt) ||
+        value.log.startedAt <= 0 ||
+        (value.log.triage !== undefined && value.log.triage !== true))) ||
     !Number.isSafeInteger(value.pr) ||
     value.pr < 1 ||
     value.submitter !== event.pubkey ||
@@ -767,6 +774,8 @@ async function notifyReviewers(
   documentation = "",
   laneId?: string,
   message = "",
+  log?: ReviewLogScope,
+  onProgress?: (record: SavedSubmission) => void,
 ) {
   const outbox = session.outbox;
   if (!outbox) throw new Error("Message delivery is unavailable.");
@@ -812,6 +821,14 @@ async function notifyReviewers(
       {
         ...record.value,
         notifying: true,
+        ...(!reminder
+          ? {
+              log: {
+                id: log?.id ?? crypto.randomUUID(),
+                startedAt: Math.trunc(Date.now()),
+              },
+            }
+          : {}),
         reminderMessage: message.trim(),
         ...(laneId ? { notifyingLane: laneId } : {}),
         device,
@@ -830,6 +847,7 @@ async function notifyReviewers(
       record,
       signal,
     );
+  onProgress?.(record);
   const receipts: string[] = [];
   for (const [index, thread] of record.value.threads.entries()) {
     const lane = submissionLane(record.value, index);
@@ -1062,6 +1080,7 @@ async function performSubmitReview(
     documentation: string;
     existingOnly?: boolean;
   },
+  log?: ReviewLogScope,
 ) {
   const outbox = session.outbox;
   const read = session.snapshotRead;
@@ -1157,6 +1176,15 @@ async function performSubmitReview(
         const value: Submission = {
           version: triaging ? 4 : previous ? 3 : 2,
           submittedAt: Math.floor(Date.now() / 1000),
+          ...(log
+            ? {
+                log: {
+                  ...log,
+                  startedAt: Math.trunc(Date.now()),
+                  ...(triaging ? { triage: true as const } : {}),
+                },
+              }
+            : {}),
           ...(previous || triaging ? { generation: crypto.randomUUID() } : {}),
           ...(triaging && currentFacts && saved.config.admission
             ? {
@@ -1321,6 +1349,10 @@ async function performSubmitReview(
             signal,
             false,
             documentation,
+            undefined,
+            "",
+            log,
+            onProgress,
           );
         for (const thread of deliveryThreads(record.value))
           if (thread.id) await outbox.acknowledge(thread.id);
@@ -1503,6 +1535,25 @@ async function performSubmitReview(
 export async function submitReview(
   ...args: Parameters<typeof performSubmitReview>
 ) {
+  let log: ReviewLogScope = {
+    id: crypto.randomUUID(),
+    startedAt: Math.trunc(Date.now()),
+  };
+  const progress = args[6];
+  // Recovery keeps the saved attempt; a new Submit must not adopt the previous
+  // completed log before validation has allowed the new attempt to be saved.
+  args[6] = (record) => {
+    if (
+      record.value.log &&
+      (!args[9] ||
+        record.value.notifying ||
+        record.value.log.id === args[12]?.id ||
+        !deliveryThreads(record.value).every((thread) => thread.delivered))
+    )
+      log = record.value.log;
+    progress(record);
+  };
+  args[12] = log;
   try {
     return await performSubmitReview(...args);
   } catch (reason) {
@@ -1524,6 +1575,7 @@ export async function submitReview(
         pr,
         message,
         signal,
+        log,
       );
     } catch {
       throw new Error(

@@ -317,8 +317,9 @@ including an explicit confirmation for an approval already performed on GitHub.
 Automatic approval restricts agents; it does not prohibit an explicit human
 approval. Buzz records reports, without independently verifying GitHub reviews.
 
-The on-demand Log reads retained submission revisions and review-thread messages;
-failed submissions append separate activity revisions when connected. Identical
-consecutive failures are coalesced. Pagination exposes the relay's history limit
+The on-demand Log shows only the current submission attempt. Submit again or
+delete/repost starts a fresh log; reminders and resumed delivery retain that log.
+Earlier signed revisions remain stored. Failed submissions also have separate
+logs when connected; repeated failures within the same attempt are coalesced. Pagination exposes the relay's history limit
 rather than claiming a truncated result is complete. Logging has no background
 lifecycle or separate polling loop; failures are awaited by submission callers.

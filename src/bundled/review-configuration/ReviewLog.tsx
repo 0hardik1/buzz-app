@@ -3,18 +3,25 @@ import { Accordion } from "../../shared/design-system/ui/Accordion";
 import { Button } from "../../shared/design-system/ui/Button";
 import type { RelaySession } from "../../features/relay/session";
 import { threadUrl } from "./submissions";
-import { loadReviewLog, loadLogMessages, type LogEntry } from "./review-log";
+import {
+  loadReviewLog,
+  loadLogMessages,
+  type LogEntry,
+  type LogScope,
+} from "./review-log";
 
 export function ReviewLog({
   session,
   channel,
   repository,
   pr,
+  scope,
 }: {
   session: RelaySession;
   channel: string;
   repository: string;
   pr: number;
+  scope?: LogScope | undefined;
 }) {
   return (
     <Accordion
@@ -24,10 +31,18 @@ export function ReviewLog({
           title: "Log",
           content: (
             <LogBody
+              key={
+                scope
+                  ? "id" in scope
+                    ? scope.id
+                    : (scope.generation ?? "legacy")
+                  : `${repository}:${pr}`
+              }
               session={session}
               channel={channel}
               repository={repository}
               pr={pr}
+              scope={scope}
             />
           ),
         },
@@ -41,11 +56,13 @@ function LogBody({
   channel,
   repository,
   pr,
+  scope,
 }: {
   session: RelaySession;
   channel: string;
   repository: string;
   pr: number;
+  scope?: LogScope | undefined;
 }) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [error, setError] = useState("");
@@ -56,6 +73,7 @@ function LogBody({
     { roots: string[]; cursor: { until: number; before_id: string } }[]
   >([]);
   const operation = useRef<AbortController | undefined>(undefined);
+  const currentScope = useRef(scope);
   const seenRoots = useRef(new Set<string>());
   const merge = (next: LogEntry[]) =>
     setEntries((old) =>
@@ -91,6 +109,7 @@ function LogBody({
           pending.roots,
           signal,
           pending.cursor,
+          currentScope.current,
         );
         if (controller.signal.aborted) return;
         merge(next.entries);
@@ -108,7 +127,15 @@ function LogBody({
           pr,
           offset,
           signal,
+          currentScope.current,
         );
+        if (
+          next.scope?.requests?.some(
+            (request) => !currentScope.current?.requests?.includes(request),
+          )
+        )
+          seenRoots.current.clear();
+        currentScope.current = next.scope ?? currentScope.current;
         const roots = next.roots.filter((root) => !seenRoots.current.has(root));
         // Bound each relay predicate; each batch keeps its own reply cursor.
         const batches: (Awaited<ReturnType<typeof loadLogMessages>> & {
@@ -116,7 +143,14 @@ function LogBody({
         })[] = [];
         for (let start = 0; start < roots.length; start += 100) {
           const batch = roots.slice(start, start + 100);
-          const page = await loadLogMessages(session, channel, batch, signal);
+          const page = await loadLogMessages(
+            session,
+            channel,
+            batch,
+            signal,
+            undefined,
+            currentScope.current,
+          );
           batches.push({ roots: batch, ...page });
         }
         if (controller.signal.aborted) return;
@@ -155,8 +189,8 @@ function LogBody({
   return (
     <section className="review-config-form" aria-label="Review timeline">
       <p className="text-caption text-subtle">
-        Saved workflow events and conversations, newest first. Expand an event
-        for its full record. Close and reopen Log to refresh.
+        Events and conversations for this submission, newest first. Expand an
+        event for its full record. Close and reopen Log to refresh.
       </p>
       {entries.map(({ event, title, detail }) => (
         <div key={event.id} className="review-config-form">

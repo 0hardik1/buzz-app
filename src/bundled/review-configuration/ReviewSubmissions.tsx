@@ -1,3 +1,4 @@
+import { submissionLogScope } from "./review-log";
 import { ReviewLog } from "./ReviewLog";
 import { HumanReviewActions } from "./HumanReviewActions";
 import { reviewHistoryChannel } from "./access";
@@ -1169,11 +1170,12 @@ export function ReviewSubmissions({
           />
           {table([result], false)}
           <ReviewLog
-            key={result.artifactId}
+            key={`${result.artifactId}:${result.value.log?.id ?? result.value.generation ?? "legacy"}`}
             session={session}
             channel={channel}
             repository={result.value.config.repository}
             pr={result.value.pr}
+            scope={submissionLogScope(result.value)}
           />
           {listError && (
             <p role="alert">
@@ -1239,11 +1241,12 @@ export function ReviewSubmissions({
           </LoadingRegion>
           {readable && selected && (
             <ReviewLog
-              key={selected.artifactId}
+              key={`${selected.artifactId}:${selected.value.log?.id ?? selected.value.generation ?? "legacy"}`}
               session={session}
               channel={channel}
               repository={selected.value.config.repository}
               pr={selected.value.pr}
+              scope={submissionLogScope(selected.value)}
             />
           )}
           {listError && (

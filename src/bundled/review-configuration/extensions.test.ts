@@ -16,13 +16,19 @@ import { validateConfig, type SavedReviewConfig } from "./configuration";
 import { reserveDailyReview } from "./daily-limit";
 import {
   submitReview,
+  deleteSubmission,
+  writeSubmission,
   loadSubmissions,
   remindSubmission,
   submissionLane,
   type SavedSubmission,
 } from "./submissions";
 import { reportHumanReview } from "./human-review";
-import { loadReviewLog, loadLogMessages } from "./review-log";
+import {
+  loadReviewLog,
+  loadLogMessages,
+  submissionLogScope,
+} from "./review-log";
 import { advanceReview } from "./automation";
 import type { ReviewSession } from "./session";
 
@@ -592,4 +598,372 @@ it("includes assigned human reviews in their personal collection without exposin
   expect(
     (await loadSubmissions(f.session(f.backup), [channel], signal())).rows,
   ).toEqual([]);
+});
+
+it("starts a fresh persisted log on resubmission, keeps reminders in it, and excludes earlier thread messages", async () => {
+  const f = await fixture();
+  const first = await f.submit();
+  const oldIds = f.events
+    .filter((event) => event.kind === 9)
+    .map((event) => event.id);
+  f.advance(125);
+  const again = await submitReview(
+    f.own,
+    channel,
+    f.saved,
+    "42",
+    [f.agent.pubkey],
+    signal(),
+    () => {},
+    true,
+    undefined,
+    () => {},
+  );
+  expect(again.value.log?.id).not.toBe(first.value.log?.id);
+  expect(again.value.threads.map((thread) => thread.id)).toEqual(
+    first.value.threads.map((thread) => thread.id),
+  );
+  const restored = await f.fresh(again);
+  expect(restored.value.log).toEqual(again.value.log);
+  const log = await loadReviewLog(
+    f.own,
+    channel,
+    f.saved.config.repository,
+    42,
+    0,
+    signal(),
+    submissionLogScope(restored.value),
+  );
+  expect(log.entries.length).toBeGreaterThan(0);
+  expect(
+    log.entries.every(
+      ({ event }) => JSON.parse(event.content).log.id === again.value.log?.id,
+    ),
+  ).toBe(true);
+  const previousThread = first.value.threads[0];
+  if (!previousThread?.id || !previousThread.request)
+    throw new Error("Expected the original review request");
+  const stale = signed(f.agent, {
+    kind: 9,
+    created_at: Math.floor(Date.now() / 1000),
+    content: "Old request finished late",
+    tags: [
+      ["h", channel],
+      ["e", previousThread.id, "", "reply"],
+      ["t", "buzz.review.status"],
+      ["r", previousThread.request],
+      ["ms", String(Date.now() % 1000)],
+    ],
+  });
+  f.events.push(stale);
+  const messages = await loadLogMessages(
+    f.own,
+    channel,
+    log.roots,
+    signal(),
+    undefined,
+    log.scope,
+  );
+  expect(messages.entries).toHaveLength(3);
+  expect(messages.entries.some(({ event }) => oldIds.includes(event.id))).toBe(
+    false,
+  );
+  f.advance(125);
+  const reminded = await remindSubmission(
+    f.own,
+    channel,
+    again,
+    signal(),
+    async () => "Open",
+    "",
+    submissionLane(again.value, 0)?.assignment,
+    "Please recheck",
+  );
+  expect(reminded.value.log).toEqual(again.value.log);
+  const oldLog = await loadReviewLog(
+    f.own,
+    channel,
+    f.saved.config.repository,
+    42,
+    0,
+    signal(),
+    submissionLogScope(first.value),
+  );
+  expect(oldLog.entries.length).toBeGreaterThan(0);
+  expect(
+    oldLog.entries.every(
+      ({ event }) => JSON.parse(event.content).log.id === first.value.log?.id,
+    ),
+  ).toBe(true);
+});
+
+it("starts separate logs for delete/repost and each blocked submission, even for the same failure", async () => {
+  const f = await fixture();
+  const first = await f.submit();
+  await deleteSubmission(f.own, channel, first, signal());
+  f.advance(125);
+  const next = await f.submit();
+  expect(next.value.log?.id).not.toBe(first.value.log?.id);
+  const log = await loadReviewLog(
+    f.own,
+    channel,
+    f.saved.config.repository,
+    42,
+    0,
+    signal(),
+  );
+  expect(log.roots).toEqual(next.value.threads.map((thread) => thread.id));
+  expect(log.entries.some(({ title }) => title === "Submission deleted")).toBe(
+    false,
+  );
+  const limited = {
+    ...f.saved,
+    config: { ...f.saved.config, maxPrsPerDay: 1 },
+  };
+  f.advance(125);
+  await expect(f.submit("43", limited)).rejects.toThrow("Daily PR limit");
+  const blocked = await loadReviewLog(
+    f.own,
+    channel,
+    f.saved.config.repository,
+    43,
+    0,
+    signal(),
+  );
+  f.advance(125);
+  await expect(f.submit("43", limited)).rejects.toThrow("Daily PR limit");
+  const blockedAgain = await loadReviewLog(
+    f.own,
+    channel,
+    f.saved.config.repository,
+    43,
+    0,
+    signal(),
+  );
+  expect(blockedAgain.scope).not.toEqual(blocked.scope);
+  expect(blockedAgain.entries).toHaveLength(1);
+  expect(blockedAgain.roots).toEqual([]);
+});
+
+it("pins logs across history pages without inventing submission starts", async () => {
+  const f = await fixture();
+  let row = await f.submit();
+  const firstLog = row.value.log;
+  for (let i = 0; i < 105; i++) {
+    f.advance(1000);
+    row = await writeSubmission(
+      f.own,
+      channel,
+      { ...row.value, device: crypto.randomUUID() },
+      row,
+      signal(),
+    );
+  }
+  const page = await loadReviewLog(
+    f.own,
+    channel,
+    f.saved.config.repository,
+    42,
+    0,
+    signal(),
+    submissionLogScope(row.value),
+  );
+  expect(page.more).toBe(true);
+  expect(page.entries).toHaveLength(100);
+  expect(page.entries.some(({ title }) => title === "Submission started")).toBe(
+    false,
+  );
+  // Another host starts a new attempt between page reads; the existing reader stays pinned.
+  f.advance(1000);
+  await submitReview(
+    f.own,
+    channel,
+    f.saved,
+    "42",
+    [f.agent.pubkey],
+    signal(),
+    () => {},
+    true,
+    undefined,
+    () => {},
+  );
+  const older = await loadReviewLog(
+    f.own,
+    channel,
+    f.saved.config.repository,
+    42,
+    100,
+    signal(),
+    page.scope,
+  );
+  expect(older.entries.length).toBeGreaterThan(0);
+  expect(
+    older.entries.every(
+      ({ event }) => JSON.parse(event.content).log.id === firstLog?.id,
+    ),
+  ).toBe(true);
+});
+
+it("keeps a failed new attempt separate when reviewer validation fails before resubmission is saved", async () => {
+  const f = await fixture();
+  const first = await f.submit();
+  f.events.splice(
+    f.events.findIndex(
+      (event) => event.kind === 0 && event.pubkey === f.agent.pubkey,
+    ),
+    1,
+  );
+  f.advance(125);
+  await expect(
+    submitReview(
+      f.own,
+      channel,
+      f.saved,
+      "42",
+      [f.agent.pubkey],
+      signal(),
+      () => {},
+      true,
+      undefined,
+      () => {},
+    ),
+  ).rejects.toThrow();
+  const failed = await loadReviewLog(
+    f.own,
+    channel,
+    f.saved.config.repository,
+    42,
+    0,
+    signal(),
+  );
+  expect(failed.entries).toHaveLength(1);
+  expect(failed.entries[0]?.title).toBe("Submission blocked");
+  expect(
+    failed.scope && "id" in failed.scope ? failed.scope.id : undefined,
+  ).not.toBe(first.value.log?.id);
+  expect((await f.fresh(first)).value.log).toEqual(first.value.log);
+});
+
+it("resumes uncertain delivery within its persisted log", async () => {
+  const f = await fixture();
+  f.failMessage();
+  await expect(f.submit()).rejects.toThrow();
+  const partial = (await loadSubmissions(f.own, channel, signal())).rows[0];
+  expect(partial?.value.log).toBeDefined();
+  f.advance(125);
+  const resumed = await f.submit();
+  expect(resumed.value.log).toEqual(partial?.value.log);
+  const log = await loadReviewLog(
+    f.own,
+    channel,
+    f.saved.config.repository,
+    42,
+    0,
+    signal(),
+    submissionLogScope(resumed.value),
+  );
+  expect(log.entries.some(({ title }) => title === "Submission blocked")).toBe(
+    true,
+  );
+});
+
+it("does not carry a previous triage thread, decision, or late report into a fresh resubmission", async () => {
+  const f = await fixture();
+  const first = await f.submit();
+  if (!first.value.log) throw new Error("Expected a submission log");
+  const triageRoot = signed(f.agent, {
+    kind: 9,
+    created_at: Math.floor(Date.now() / 1000),
+    content: "Triage root",
+    tags: [["h", channel]],
+  });
+  f.events.push(triageRoot);
+  const triageRequest = crypto.randomUUID();
+  const triaged = await writeSubmission(
+    f.own,
+    channel,
+    {
+      ...first.value,
+      version: 4,
+      generation: crypto.randomUUID(),
+      log: { ...first.value.log, triage: true },
+      triage: {
+        state: "admitted",
+        agent: f.agent.pubkey,
+        instructions: "Triage",
+        head: "a".repeat(40),
+        base: "b".repeat(40),
+        reviewers: [f.agent.pubkey],
+        decision: "c".repeat(64),
+        message: "Previous triage decision",
+        thread: { id: triageRoot.id, request: triageRequest, delivered: true },
+      },
+    },
+    first,
+    signal(),
+  );
+  const initialLog = await loadReviewLog(
+    f.own,
+    channel,
+    f.saved.config.repository,
+    42,
+    0,
+    signal(),
+    submissionLogScope(triaged.value),
+  );
+  expect(initialLog.roots).toContain(triageRoot.id);
+  f.advance(125);
+  const again = await submitReview(
+    f.own,
+    channel,
+    f.saved,
+    "42",
+    [f.agent.pubkey],
+    signal(),
+    () => {},
+    true,
+    undefined,
+    () => {},
+  );
+  const late = signed(f.agent, {
+    kind: 9,
+    created_at: Math.floor(Date.now() / 1000),
+    content: "Previous triage report",
+    tags: [
+      ["h", channel],
+      ["e", triageRoot.id, "", "reply"],
+      ["t", "buzz.review.triage"],
+      ["r", triageRequest],
+      ["ms", String(Date.now() % 1000)],
+    ],
+  });
+  f.events.push(late);
+  const log = await loadReviewLog(
+    f.own,
+    channel,
+    f.saved.config.repository,
+    42,
+    0,
+    signal(),
+    submissionLogScope(again.value),
+  );
+  expect(log.roots).not.toContain(triageRoot.id);
+  expect(log.scope?.requests).not.toContain(triageRequest);
+  expect(
+    log.entries.some(({ detail }) =>
+      detail.includes("Previous triage decision"),
+    ),
+  ).toBe(false);
+  expect(
+    (
+      await loadLogMessages(
+        f.own,
+        channel,
+        log.roots,
+        signal(),
+        undefined,
+        log.scope,
+      )
+    ).entries.some(({ event }) => event.id === late.id),
+  ).toBe(false);
 });
