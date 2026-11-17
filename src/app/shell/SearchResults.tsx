@@ -254,10 +254,26 @@ export function SearchResults({
 } & SearchInputProps) {
   const resolveName = useIdentityNames(session.names);
   const list = useChannelList(session.channels);
-  // `ask:` hands the question to the default agent instead of searching.
-  const askMatch = /^\s*ask:\s*/i.exec(query);
+  // Chosen filters render as chips ahead of the typed text: the query holds
+  // their exact operands first, then whatever the input shows.
+  const [chipState, setChipState] = useState<{
+    query: string;
+    chips: readonly SearchChip[];
+  }>();
+  const chips = chipState?.query === query ? chipState.chips : [];
+  const chipPrefix = chips.map(({ operand }) => `${operand} `).join("");
+  const displayQuery = chips.length
+    ? query.slice(chipPrefix.length)
+    : undefined;
+  // `ask:` hands the question to the default agent instead of searching. It
+  // follows any chosen filters, which stay in the question as they read.
+  const visibleQuery = displayQuery ?? query;
+  const askMatch = /^\s*ask:\s*/i.exec(visibleQuery);
   const asking = !!askMatch;
-  const question = askMatch ? query.slice(askMatch[0].length).trim() : "";
+  const askText = askMatch ? visibleQuery.slice(askMatch[0].length).trim() : "";
+  const question = askMatch
+    ? [...chips.map(({ text }) => text), askText].filter(Boolean).join(" ")
+    : "";
   const parsed = useMemo(
     () => parseSearchOperators(asking ? "" : query.trim()),
     [query, asking],
@@ -307,17 +323,6 @@ export function SearchResults({
   const sidebarHidden = (channel: ChannelSummary) =>
     channel.channelType === "dm" &&
     (savedHidden.has(channel.id) || dmVisibility.hidden.includes(channel.id));
-  // Chosen filters render as chips ahead of the typed text: the query holds
-  // their exact operands first, then whatever the input shows.
-  const [chipState, setChipState] = useState<{
-    query: string;
-    chips: readonly SearchChip[];
-  }>();
-  const chips = chipState?.query === query ? chipState.chips : [];
-  const chipPrefix = chips.map(({ operand }) => `${operand} `).join("");
-  const displayQuery = chips.length
-    ? query.slice(chipPrefix.length)
-    : undefined;
   const setChipQuery = (next: readonly SearchChip[], visible: string) => {
     const nextQuery = `${next.map(({ operand }) => `${operand} `).join("")}${visible}`;
     setChipState(next.length ? { query: nextQuery, chips: next } : undefined);
@@ -1664,13 +1669,12 @@ export function SearchResults({
       : undefined;
   /** Adds an operator to the typed text, for its picker to complete. */
   const addOperator = (operator: string) => {
-    if (operator === "ask:") onQueryChange(`ask: ${parsed.text}`);
-    else {
-      const visible = displayQuery ?? query;
+    // Filters already chosen or typed stay with the question.
+    if (operator === "ask:") setChipQuery(chips, `ask: ${visibleQuery.trim()}`);
+    else
       updateDisplayQuery(
-        `${visible.trimEnd()}${visible.trim() ? " " : ""}${operator}`,
+        `${visibleQuery.trimEnd()}${visibleQuery.trim() ? " " : ""}${operator}`,
       );
-    }
     input.current?.focus();
   };
   const hints = asking ? (
@@ -1682,11 +1686,16 @@ export function SearchResults({
         aria-label={`Remove Ask ${askAgent?.name ?? "your agent"}`}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
-          onQueryChange(question);
+          setChipQuery(chips, askText);
           input.current?.focus();
         }}
       >
-        <SparklesIcon size={14} aria-hidden="true" />
+        <SparklesIcon
+          size={14}
+          aria-hidden="true"
+          className="search-peek-filter-icon"
+          data-operator="ask"
+        />
         Ask {askAgent?.name ?? "your agent"}
         <XIcon size={12} aria-hidden="true" />
       </Button>
@@ -1712,6 +1721,11 @@ export function SearchResults({
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => addOperator(operator)}
         >
+          <span
+            className="search-peek-filter-dot"
+            data-operator={operator.slice(0, -1)}
+            aria-hidden="true"
+          />
           <span>
             {operator} {what}
           </span>

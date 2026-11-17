@@ -777,6 +777,9 @@ export function SearchChoices({
                     key={chip.operand}
                     type="button"
                     className="search-palette-author-chip"
+                    data-operator={chip.operand
+                      .slice(0, chip.operand.indexOf(":"))
+                      .toLowerCase()}
                     aria-label={chip.label}
                     title={chip.title}
                     onClick={() => onRemoveChip?.(chip)}

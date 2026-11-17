@@ -696,7 +696,7 @@ and are asked to sign in again in Buzz.
   question addressed to that agent; press Enter again to send it. If New chat
   already has an unsent draft, Ask keeps it and offers **Replace it**, which
   opens New chat with the question instead. Filters
-  such as `in:` stay part of the question. With an empty query, search lists
+  such as `from:` and `in:`, typed or chosen, stay part of the question. With an empty query, search lists
   your recent searches on this device.
 - **Channel, people, and message search** shows “Searching…” beside each section heading
   if a lookup takes more than a second; in the combined results, “Still

@@ -39,6 +39,47 @@
     }
   }
 
+  /* Each filter keeps the hue of what it names: people, conversations and
+     agents as their results show them, dates orange. A chosen filter is
+     tinted; one on offer leads with a dot. */
+  .search-palette [data-operator="from"] {
+    --filter-fill: var(--surface-categorical-green);
+    --filter-fill-hover: var(--surface-categorical-green-hover);
+    --filter-ink: var(--text-categorical-green);
+    --filter-dot: var(--icon-categorical-green);
+  }
+  .search-palette [data-operator="in"] {
+    --filter-fill: var(--surface-categorical-blue);
+    --filter-fill-hover: var(--surface-categorical-blue-hover);
+    --filter-ink: var(--text-categorical-blue);
+    --filter-dot: var(--icon-categorical-blue);
+  }
+  .search-palette [data-operator="during"] {
+    --filter-dot: var(--icon-categorical-orange);
+  }
+  .search-palette [data-operator="ask"] {
+    --filter-dot: var(--icon-categorical-amber);
+  }
+  .search-palette-author-chip[data-operator] {
+    background: var(--filter-fill, var(--affordance-subtle));
+    color: var(--filter-ink, var(--text-link));
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .search-palette-author-chip[data-operator]:hover {
+      background: var(--filter-fill-hover, var(--affordance-subtle-hover));
+    }
+  }
+  .search-peek-filter-dot {
+    flex: none;
+    width: var(--space-1h);
+    height: var(--space-1h);
+    border-radius: var(--radius-pill);
+    background: var(--filter-dot);
+  }
+  .search-peek-filter-icon {
+    color: var(--filter-dot);
+  }
+
   .search-palette-scope-row {
     display: flex;
     align-items: center;

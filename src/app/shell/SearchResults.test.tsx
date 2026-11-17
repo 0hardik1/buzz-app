@@ -9549,6 +9549,80 @@ it("asks for a search word when the text only excludes", async () => {
   }
 });
 
+it("keeps chosen filters when ask: is added, and asks with them", async () => {
+  const relay = keypair(),
+    viewer = keypair(),
+    agent = keypair();
+  const { owner } = operatorSession(viewer, relay, [
+    metadata(relay, "bugs", "buzz-bugs"),
+    roster(relay, "bugs", [viewer.pubkey]),
+  ]);
+  const source = owner.session.agentChoices;
+  const picked = { pubkey: agent.pubkey, name: "Aria", managed: true };
+  const choices = {
+    ...source.snapshot(),
+    complete: true,
+    identities: [picked],
+    selectable: [picked],
+    archives: { status: "unavailable", archived: [] },
+  } as ReturnType<typeof source.snapshot>;
+  const session = {
+    ...owner.session,
+    agentChoices: {
+      ...source,
+      snapshot: () => choices,
+      subscribe: () => () => {},
+      retain: () => () => {},
+      ensure: () => {},
+    },
+  } as typeof owner.session;
+  const openAsk = vi.fn();
+  const input = createRef<HTMLInputElement>();
+  function Host() {
+    const [query, setQuery] = useState("deploy in:#bu");
+    return (
+      <SearchResults
+        session={session}
+        query={query}
+        onQueryChange={setQuery}
+        input={input}
+        pages={[]}
+        openConversation={vi.fn()}
+        openAsk={openAsk}
+        sidebarScope={`wss://relay.example:${viewer.pubkey}`}
+      />
+    );
+  }
+  try {
+    render(<Host />);
+    fireEvent.click(
+      await within(
+        await screen.findByRole("group", { name: "Channels" }),
+      ).findByRole("option", { name: /buzz-bugs/ }),
+    );
+    const chip = screen.getByRole("button", {
+      name: "Remove channel buzz-bugs",
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "ask: Aria" }));
+    expect(chip).toBeInTheDocument();
+    expect(input.current).toHaveValue("ask: deploy");
+    fireEvent.click(await screen.findByRole("option", { name: /Aria/ }));
+    expect(openAsk).toHaveBeenCalledWith(
+      "in:#buzz-bugs deploy",
+      expect.objectContaining({ pubkey: agent.pubkey }),
+    );
+    // Removing Ask keeps the filter, and the question's words.
+    fireEvent.click(screen.getByRole("button", { name: "Remove Ask Aria" }));
+    expect(
+      screen.getByRole("button", { name: "Remove channel buzz-bugs" }),
+    ).toBeInTheDocument();
+    expect(input.current).toHaveValue("deploy");
+  } finally {
+    cleanup();
+    owner.dispose();
+  }
+});
+
 it("holds an early Enter while only Ask is offered, until message search answers", async () => {
   const relay = keypair(),
     viewer = keypair(),

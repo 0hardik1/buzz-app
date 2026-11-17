@@ -1181,8 +1181,11 @@
   /* Further categorical hues: a step-3 fill under a step-11 glyph, so result
    * kinds (channels, people, agents, plugins) read apart at a glance. */
   --surface-categorical-blue: var(--blue-3);
+  --surface-categorical-blue-hover: var(--blue-4);
+  --text-categorical-blue: var(--blue-12);
   --icon-categorical-blue: var(--blue-11);
   --surface-categorical-green: var(--green-3);
+  --surface-categorical-green-hover: var(--green-4);
   --text-categorical-green: var(--green-12);
   --icon-categorical-green: var(--green-11);
   --surface-categorical-amber: var(--amber-3);
@@ -1353,8 +1356,11 @@
   /* Further categorical hues: a step-3 fill under a step-11 glyph, so result
    * kinds (channels, people, agents, plugins) read apart at a glance. */
   --surface-categorical-blue: var(--blue-3);
+  --surface-categorical-blue-hover: var(--blue-4);
+  --text-categorical-blue: var(--blue-12);
   --icon-categorical-blue: var(--blue-11);
   --surface-categorical-green: var(--green-3);
+  --surface-categorical-green-hover: var(--green-4);
   --text-categorical-green: var(--green-12);
   --icon-categorical-green: var(--green-11);
   --surface-categorical-amber: var(--amber-3);
@@ -2149,6 +2155,7 @@
   --text-color-success: var(--text-success);
   --text-color-categorical-purple: var(--text-categorical-purple);
   --color-surface-categorical-purple: var(--surface-categorical-purple);
+  --text-color-categorical-blue: var(--text-categorical-blue);
   --text-color-categorical-green: var(--text-categorical-green);
   --text-color-categorical-amber: var(--text-categorical-amber);
   --text-color-search-match: var(--text-search-match);

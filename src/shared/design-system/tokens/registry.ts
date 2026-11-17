@@ -326,10 +326,24 @@ export const ROLE_GROUPS: RoleGroup[] = [
         status: "core",
       },
       {
+        token: "bg-surface-categorical-blue-hover",
+        variable: "--surface-categorical-blue-hover",
+        pointsAt: "blue-4 light / blue-4 dark",
+        use: "Hover on a surface-categorical-blue control.",
+        status: "core",
+      },
+      {
         token: "bg-surface-categorical-green",
         variable: "--surface-categorical-green",
         pointsAt: "green-3 light / green-3 dark",
         use: "Categorical green fill under icon-categorical-green.",
+        status: "core",
+      },
+      {
+        token: "bg-surface-categorical-green-hover",
+        variable: "--surface-categorical-green-hover",
+        pointsAt: "green-4 light / green-4 dark",
+        use: "Hover on a surface-categorical-green control.",
         status: "core",
       },
       {
@@ -799,6 +813,13 @@ export const ROLE_GROUPS: RoleGroup[] = [
         pointsAt:
           "icon-categorical-purple; the own bubble's link ink at Buzzin’",
         use: "Categorical state icons inside your own bubble, where the solid fill clears no purple.",
+        status: "core",
+      },
+      {
+        token: "text-categorical-blue",
+        variable: "--text-categorical-blue",
+        pointsAt: "blue-12 light / blue-12 dark",
+        use: "Categorical blue text, paired with surface-categorical-blue.",
         status: "core",
       },
       {
