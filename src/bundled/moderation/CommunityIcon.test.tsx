@@ -6,9 +6,15 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { RelayData } from "../../features/relay/service";
 import { CommunityIcon } from "./CommunityIcon";
 
-const published = vi.hoisted(() => ({ icon: "" as string | undefined }));
+const published = vi.hoisted(() => ({
+  icon: "" as string | undefined,
+  readFails: false,
+}));
 vi.mock("../../features/communities/community-icon", () => ({
-  fetchCommunityPresentation: async () => ({ publishedIcon: published.icon }),
+  fetchCommunityPresentation: async () => {
+    if (published.readFails) throw new Error("offline");
+    return { publishedIcon: published.icon };
+  },
 }));
 const setCommunityIcon = vi.hoisted(() => vi.fn());
 vi.mock("./api", () => ({ setCommunityIcon }));
@@ -27,6 +33,7 @@ const ICON = "data:image/png;base64,AAAA";
 afterEach(() => {
   cleanup();
   setCommunityIcon.mockReset();
+  published.readFails = false;
 });
 
 it("removes the icon and shows what the community now publishes", async () => {
@@ -60,4 +67,20 @@ it("keeps the published icon when the relay refuses the change", async () => {
     "invalid: actor not authorized: must be admin or owner",
   );
   expect(screen.getByText("Icon set")).toBeVisible();
+});
+
+it("reports an accepted change even when the readback fails", async () => {
+  published.icon = ICON;
+  setCommunityIcon.mockImplementation(async () => {
+    published.readFails = true;
+  });
+  render(
+    <CommunityIcon relay={relay} communityName="Hive" active={() => true} />,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Remove icon" }),
+  );
+  expect(await screen.findByText("Icon removed.")).toBeVisible();
+  expect(screen.getByText("No icon")).toBeVisible();
+  expect(screen.queryByRole("alert")).toBeNull();
 });

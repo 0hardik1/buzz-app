@@ -62,6 +62,7 @@ export function CommunityIcon({
       ? communityFromScope(connection.scope)
       : null;
   const input = useRef<HTMLInputElement>(null);
+  const initialRead = useRef<AbortController>(null);
   const [icon, setIcon] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -70,21 +71,33 @@ export function CommunityIcon({
   useEffect(() => {
     if (!community) return;
     const controller = new AbortController();
+    initialRead.current = controller;
     setIcon(undefined);
-    read(community, controller.signal).then(setIcon, () => {});
+    read(community, controller.signal).then(
+      (published) => {
+        if (!controller.signal.aborted) setIcon(published);
+      },
+      () => {},
+    );
     return () => controller.abort();
   }, [community]);
 
   const save = async (next: () => Promise<string>, done: string) => {
     if (!community) return;
+    // A save supersedes a slower initial read.
+    initialRead.current?.abort();
     setBusy(true);
     setError("");
     setStatus("");
     try {
       const value = await next();
       await setCommunityIcon(community, value);
-      // Read back what the community now publishes, not what was sent.
-      const published = await read(community, AbortSignal.timeout(12_000));
+      // Read back what the community now publishes; the relay accepted the
+      // change, so a failed readback falls back to what was sent.
+      const published = await read(
+        community,
+        AbortSignal.timeout(12_000),
+      ).catch(() => value || undefined);
       if (!active()) return;
       setIcon(published);
       setStatus(done);
