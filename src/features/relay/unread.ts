@@ -1839,10 +1839,20 @@ export function createUnread({
       .map((channel) => channel.id)
       .sort()
       .join(",");
+  // Metadata alone decides whether an outside channel's mentions are Activity.
+  const outsideEligibility = (members: ReadonlyMap<string, string>) => {
+    indexEvidence();
+    return new Map(
+      [...byChannel.keys()].flatMap((id) =>
+        members.has(id) ? [] : [[id, outside(id)] as const],
+      ),
+    );
+  };
   const initialList = channels.list();
   let archivedKey = inboxArchiveKey(initialList);
   let cachedChannels = cachedIds(initialList);
   let channelTypes = types(initialList);
+  let outsideChannels = outsideEligibility(channelTypes);
   let accessKey = [...channelTypes.keys()].sort().join(",");
   const stopChannels = channels.subscribeList(() => {
     const list = channels.list();
@@ -1853,6 +1863,10 @@ export function createUnread({
         channelTypes.get(id) !== type ? [id] : [],
       ),
     );
+    const nextOutside = outsideEligibility(nextTypes);
+    for (const [id, eligible] of nextOutside)
+      if (outsideChannels.get(id) !== eligible) changed.add(id);
+    outsideChannels = nextOutside;
     const confirmed = [...nextTypes.keys()].some((id) =>
       cachedChannels.has(id),
     );

@@ -1625,8 +1625,9 @@ it.each(["edit", "delete"] as const)(
 
 // Mentions of the viewer from public channels it has not joined.
 const PUBLIC_STREAM = [["t", "stream"], ["public"]];
-const mentionRoute = (channelId: string) =>
-  Object.freeze({ phase: "live" as const, channelId, mention: true as const });
+// Live traffic from an outside channel arrives only while the viewer has it open.
+const liveIn = (channelId: string) =>
+  Object.freeze({ phase: "live" as const, channelId });
 function outside(
   h: ReturnType<typeof setup>,
   id: string,
@@ -1657,15 +1658,7 @@ it("a public stream the viewer has not joined lists only its mentions of the vie
   const other = message(h.alice, "lobby", "names alice", 22, [
     ["p", h.alice.pubkey],
   ]);
-  // Agents hear the owner's live traffic here; the mention route is not theirs.
-  const heard: string[] = [];
-  h.session.subscribeLive((batch) =>
-    heard.push(...batch.events.map((event) => event.id)),
-  );
-  h.live.receive([mention, plain, other], mentionRoute("lobby"));
-  const joined = message(h.alice, "room", "joined channel", 23);
-  h.live.receive([joined], { phase: "live", channelId: "room" });
-  expect(heard).toEqual([joined.id]);
+  h.live.receive([mention, plain, other], liveIn("lobby"));
   expect(
     rows(h).map((row) => [row.channelId, row.messageId, row.mentioned]),
   ).toEqual([["lobby", mention.id, true]]);
@@ -1684,13 +1677,7 @@ it("a crafted mention in a private channel the viewer has not joined lists nothi
   h.admit([h.viewer.pubkey]);
   outside(h, "vault", [["t", "stream"], ["private"]]);
   const crafted = mentionIn(h, "vault", "crafted", 20);
-  h.live.receive([crafted], mentionRoute("vault"));
-  // Unknown to the viewer, so the session reads its metadata; it stays private.
-  (await take(h, 39000)).resolve([
-    metadata(h.relay, "vault", "vault", 10, [["t", "stream"], ["private"]]),
-  ]);
-  await vi.waitFor(() => expect(metadataReads(h)).toHaveLength(1));
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  h.live.receive([crafted], liveIn("vault"));
   expect(rows(h)).toEqual([]);
   expect(h.session.unread.attention("vault", crafted.id).status).toBe(
     "unknown",
@@ -1704,34 +1691,10 @@ it("a crafted mention in a private channel the viewer has not joined lists nothi
   expect(rows(h)).toEqual([]);
   expect(h.session.channels.get?.("vault")).toBeUndefined();
 });
-it("a live mention from an unknown public stream reads its metadata first, then lists and announces it", async () => {
-  const h = setup();
-  h.admit([h.viewer.pubkey]);
-  const heard: string[] = [];
-  h.session.subscribeIncoming((messages) =>
-    heard.push(...messages.map((item) => item.messageId)),
-  );
-  const mention = mentionIn(h, "lobby", "hello from outside", 20);
-  h.live.receive([mention], mentionRoute("lobby"));
-  expect(rows(h)).toEqual([]);
-  const read = await take(h, 39000);
-  expect(metadataReads(h).at(-1)?.[0][0]).toMatchObject({
-    kinds: [39000],
-    "#d": ["lobby"],
-  });
-  expect(heard).toEqual([]);
-  read.resolve([metadata(h.relay, "lobby", "Lobby", 10, PUBLIC_STREAM)]);
-  await vi.waitFor(() =>
-    expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]),
-  );
-  expect(heard).toEqual([mention.id]);
-  expect(h.session.channels.list().channels.map((c) => c.id)).toEqual(["room"]);
-});
-it("a mention from an unknown channel never reads its metadata before discovery makes the list ready", async () => {
+it("Activity history never reads an unknown channel's metadata before discovery makes the list ready", async () => {
   const h = setup();
   expect(h.session.channels.list().status).not.toBe("ready");
   const mention = mentionIn(h, "lobby", "too early", 20);
-  h.live.receive([mention], mentionRoute("lobby"));
   const work = h.session.inboxFeed.ensure();
   (await take(h, 9)).resolve([mention]);
   await work;
@@ -1787,6 +1750,7 @@ it("only a public stream or forum the viewer reads without joining is outside", 
     { channelType: undefined },
     { members: [viewer] },
     { archived: true },
+    { unlisted: true },
     { hidden: true },
     { cached: true },
     { metadataPending: true },
@@ -1808,13 +1772,13 @@ it("after leaving a public stream, its mentions list again once its metadata is 
   expect(h.session.channels.get?.("lobby")).toBeUndefined();
   expect(rows(h)).toEqual([]);
   const left = mentionIn(h, "lobby", "mention after leaving", 40);
-  h.live.receive([left], mentionRoute("lobby"));
+  const work = h.session.inboxFeed.ensure();
+  (await take(h, 9)).resolve([left]);
   (await take(h, 39000)).resolve([
     metadata(h.relay, "lobby", "lobby", 30, PUBLIC_STREAM),
   ]);
-  await vi.waitFor(() =>
-    expect(rows(h).map((row) => row.messageId)).toEqual([left.id]),
-  );
+  await work;
+  expect(rows(h).map((row) => row.messageId)).toEqual([left.id]);
   // Joined again, then left with the preview confirmed: the channel stays
   // readable, and only its mentions of the viewer stay unread evidence.
   outside(h, "lobby", PUBLIC_STREAM, members, 50);
@@ -1829,4 +1793,27 @@ it("after leaving a public stream, its mentions list again once its metadata is 
   expect(rows(h).map((row) => row.messageId)).toEqual([again.id, left.id]);
   expect(h.session.unread.attention("lobby", plain.id).status).toBe("unknown");
   expect(metadataReads(h)).toHaveLength(1);
+});
+it("an unlisted public stream the viewer has not joined is not outside, so its mentions list nothing", () => {
+  const h = setup();
+  h.admit([h.viewer.pubkey]);
+  outside(h, "hush", [...PUBLIC_STREAM, ["unlisted"]]);
+  expect(h.session.channels.get?.("hush")?.unlisted).toBe(true);
+  const mention = mentionIn(h, "hush", "unlisted mention", 20);
+  h.live.receive([mention], liveIn("hush"));
+  expect(rows(h)).toEqual([]);
+  expect(h.session.unread.attention("hush", mention.id).status).toBe("unknown");
+});
+it("archiving a public stream the viewer has not joined removes its mention from Activity at once", () => {
+  const h = setup();
+  h.admit([h.viewer.pubkey]);
+  outside(h, "lobby", PUBLIC_STREAM);
+  const mention = mentionIn(h, "lobby", "outside mention", 20);
+  h.live.receive([mention], liveIn("lobby"));
+  expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
+  outside(h, "lobby", [...PUBLIC_STREAM, ["archived", "true"]], undefined, 30);
+  expect(h.session.channels.get?.("lobby")?.archived).toBe(true);
+  expect(rows(h)).toEqual([]);
+  outside(h, "lobby", PUBLIC_STREAM, undefined, 40);
+  expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
 });

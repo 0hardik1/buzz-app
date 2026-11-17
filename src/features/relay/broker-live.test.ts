@@ -324,46 +324,6 @@ it("preserves validated replay/live provenance through production broker transpo
     owner.dispose();
   }
 });
-it("delivers mention traffic outside the interests only to a subscriber that asked for mentions", async () => {
-  vi.useFakeTimers();
-  for (const mentions of [true, false]) {
-    const f = fixture();
-    const t = await connectBrokerTransport();
-    const owner = required(t.subscribe)({
-      ...f.callbacks,
-      ...(mentions ? { mentions: true as const } : {}),
-    });
-    try {
-      f.accept(0);
-      await tick();
-      owner.update(["a"]);
-      required(f.interests[0]).resolve(new Response(null, { status: 200 }));
-      await tick();
-      const event = message(keypair(), "lobby", "outside", 1700000000, [
-        ["p", "a".repeat(64)],
-      ]);
-      f.frame("traffic", {
-        event,
-        provenance: { phase: "live", channelId: "lobby", mention: true },
-        interestRevision: 1,
-      });
-      // Without the mention mark, a channel outside the interests stays fenced.
-      f.frame("traffic", {
-        event,
-        provenance: { phase: "live", channelId: "lobby" },
-        interestRevision: 1,
-      });
-      await tick();
-      expect(f.callbacks.receive.mock.calls).toEqual(
-        mentions
-          ? [[[event], { phase: "live", channelId: "lobby", mention: true }]]
-          : [],
-      );
-    } finally {
-      owner.dispose();
-    }
-  }
-});
 it.each([undefined, { phase: "fresh" }, { phase: "live", channelId: ["a"] }])(
   "rejects malformed traffic provenance instead of calling it fresh: %j",
   async (provenance) => {

@@ -3747,33 +3747,8 @@ export function createRelaySession(
   }
   traffic = transport?.subscribe?.({
     observer: (frame, generation) => activity.receive(frame, generation),
-    mentions: true,
-    receive: function receive(events, provenance) {
+    receive(events, provenance) {
       if (closed) return;
-      // A mention from a public channel the viewer has not joined can name a
-      // channel this session has not read. Read its metadata, then admit as usual.
-      const outside = provenance?.mention ? provenance.channelId : undefined;
-      if (outside && !channels.queries.get?.(outside)) {
-        // Only into a ready list; until then Activity history lists it.
-        if (channels.queries.list().status !== "ready") return;
-        const epoch = accessEpoch;
-        const generation = liveGeneration;
-        void channels.queries
-          .resolve?.([outside], { priority: "background", viewerLookup: true })
-          .then(
-            () => {
-              if (
-                !closed &&
-                epoch === accessEpoch &&
-                generation === liveGeneration &&
-                channels.queries.get?.(outside)
-              )
-                receive(events, provenance);
-            },
-            () => {},
-          );
-        return;
-      }
       receiveSidebar(events);
       reminders?.receive(events);
       const candidates = new Set(
@@ -3853,10 +3828,8 @@ export function createRelaySession(
       if (!closed && epoch === accessEpoch && generation === liveGeneration)
         inboxFeed.reactions.receive(events, provenance?.phase);
       const replay = provenance?.phase === "replay";
-      // Agents and other live listeners never hear the viewer's mention route.
       if (
         (provenance?.phase === "live" || replay) &&
-        !provenance?.mention &&
         (replayListeners.size || (!replay && liveEventListeners.size)) &&
         visible.length &&
         !closed &&

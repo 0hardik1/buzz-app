@@ -275,13 +275,7 @@ export async function setup(
     events: ReturnType<typeof message>[],
     phase?: "replay" | "live",
     channelId = "room",
-    /** Heard on the viewer's mention route. */
-    mention?: true,
-  ) =>
-    callbacks.receive(
-      events,
-      phase ? { phase, channelId, ...(mention ? { mention } : {}) } : undefined,
-    );
+  ) => callbacks.receive(events, phase ? { phase, channelId } : undefined);
   if (!remote?.channelsMounted && !remote?.deferRoster) discover();
   const make = (text: string, age = 0, author = peer) =>
     message(author, "room", text, Math.floor(Date.now() / 1000) - age, [

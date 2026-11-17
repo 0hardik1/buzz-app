@@ -200,7 +200,6 @@ export function subscribeBrokerTraffic(
             presenceAuthors,
             interestRevision,
             statusDeltas: true,
-            ...(callbacks.mentions ? { mentions: true } : {}),
           }),
           signal: owned.signal,
         });
@@ -276,11 +275,7 @@ export function subscribeBrokerTraffic(
                 const scopes =
                   provenance.sourceChannels ??
                   (provenance.channelId ? [provenance.channelId] : []);
-                // A mention names a channel outside the interests by design.
-                if (
-                  (provenance.mention && callbacks.mentions) ||
-                  scopes.every((id) => currentChannel(id, revision))
-                )
+                if (scopes.every((id) => currentChannel(id, revision)))
                   callbacks.receive([verify(data.event)], provenance);
               } else if (kind === "presence") {
                 const event = verify(data);
@@ -337,7 +332,6 @@ export function subscribeBrokerTraffic(
                       : ![
                           "profiles",
                           "membership",
-                          "mentions",
                           "observer",
                           "presence",
                         ].includes(route.id),

@@ -92,6 +92,13 @@ pre-membership history without fresh shared admission. Inbox renders those share
 conversation rows directly; there is no second project/approval row merge or
 feed-owned reconciliation buffer and deletion-count abort.
 
+One exception to membership: a listed public stream or forum the viewer reads
+without joining (`outsideChannel`) contributes only messages that `p`-tag the
+viewer. Addressed history reads an unknown channel's metadata first, once
+discovery is ready, and its signed metadata alone decides eligibility. There is
+no live route for these channels; a running session lists their mentions on its
+next addressed history read, or live while the viewer has the channel open.
+
 Channel-archived rooms are excluded from the shared Inbox projection in every
 activity view. Signed archive/unarchive metadata invalidates that projection even
 when membership and channel type stay unchanged. Archiving removes their rows and

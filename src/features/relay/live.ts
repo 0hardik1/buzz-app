@@ -190,8 +190,6 @@ export type LiveProvenance = Readonly<{
   channelId?: string;
   /** Original wire scope for ambiguous channel traffic; never alert attribution. */
   sourceChannels?: readonly string[];
-  /** Heard only on the viewer's mention route: `channelId` is outside the interests. */
-  mention?: true;
 }>;
 export function liveProvenance(value: unknown): LiveProvenance {
   if (!value || typeof value !== "object")
@@ -221,9 +219,6 @@ export function liveProvenance(value: unknown): LiveProvenance {
     phase: input.phase,
     ...(typeof input.channelId === "string"
       ? { channelId: input.channelId }
-      : {}),
-    ...(input.mention === true && typeof input.channelId === "string"
-      ? { mention: true as const }
       : {}),
   });
 }
@@ -268,9 +263,6 @@ export type LiveCallbacks = {
   /** Decoded host DTO on the browser transport. */
   observer?(frame: ObserverFrame, generation: number): void;
   presence?(event: VerifiedEvent): void;
-  /** Also receive live mentions of the viewer from channels outside the
-   * interests, with the event's channel as provenance. */
-  mentions?: true;
   state(snapshot: LiveSnapshot): void;
   /** A global route (no channels) also reports whether it stayed continuous.
    * A channel route reports in `continuous` the channels whose replay resumed
@@ -885,8 +877,7 @@ export function subscribeRelayTraffic(
         1 - // Keep one wire for the silence probe.
         (joined.length ? setupConcurrency + replaySlots : 0) -
         (observer !== null ? 1 : 0) -
-        (presenceAuthors.length ? 1 : 0) -
-        (callbacks.mentions ? 1 : 0),
+        (presenceAuthors.length ? 1 : 0),
     );
     const joinedSlots = Math.max(
       0,
@@ -895,8 +886,7 @@ export function subscribeRelayTraffic(
         1 -
         (setupConcurrency + replaySlots) -
         (observer !== null ? 1 : 0) -
-        (presenceAuthors.length ? 1 : 0) -
-        (callbacks.mentions ? 1 : 0),
+        (presenceAuthors.length ? 1 : 0),
     );
     const admitted = new Set([
       ...joined.slice(0, joinedSlots * channelBatchSize),
@@ -906,7 +896,6 @@ export function subscribeRelayTraffic(
     const globals = new Set([
       "profiles",
       "membership",
-      ...(callbacks.mentions ? ["mentions"] : []),
       ...(observer !== null ? ["observer"] : []),
       ...(presenceAuthors.length ? ["presence"] : []),
     ]);
@@ -971,12 +960,11 @@ export function subscribeRelayTraffic(
       route.resumedChannels = new Set(
         scope(route).filter((id) => covered(route, `channel:${id}`)),
       );
-      // Presence, observer and mentions feeds establish nothing, so carry no obligation.
+      // Presence and observer feeds establish nothing, so carry no obligation.
       if (
         carrying &&
         id !== "presence" &&
         id !== "observer" &&
-        id !== "mentions" &&
         cursorKeys(route).every((key) => carrying?.has(key))
       )
         route.carried = true;
@@ -985,7 +973,7 @@ export function subscribeRelayTraffic(
     };
     for (const id of globals) {
       const route = add(id);
-      if (id === "presence" || id === "mentions") route.liveOnly = true;
+      if (id === "presence") route.liveOnly = true;
     }
     const batch: string[] = [];
     for (const id of remaining) {
@@ -1337,16 +1325,14 @@ export function subscribeRelayTraffic(
           ? [{ kinds: [20001], authors: presenceAuthors }]
           : route.id === "profiles"
             ? [{ kinds: [0, 10100, 30177] }]
-            : route.id === "mentions"
-              ? [{ kinds: [9, 40002], "#p": [viewer] }]
-              : route.id === "observer"
-                ? [{ kinds: [OBSERVER_KIND], "#p": [viewer] }]
-                : [
-                    { kinds: [44100, 44101], "#p": [viewer] },
-                    // NIP-CL: the relay sends a system channel's notices only
-                    // to a filter that asks for them with #t.
-                    { kinds: [44100, 44101], "#p": [viewer], "#t": ["system"] },
-                  ];
+            : route.id === "observer"
+              ? [{ kinds: [OBSERVER_KIND], "#p": [viewer] }]
+              : [
+                  { kinds: [44100, 44101], "#p": [viewer] },
+                  // NIP-CL: the relay sends a system channel's notices only
+                  // to a filter that asks for them with #t.
+                  { kinds: [44100, 44101], "#p": [viewer], "#t": ["system"] },
+                ];
       send([
         "REQ",
         wire,
@@ -1856,7 +1842,7 @@ export function subscribeRelayTraffic(
               ? incoming.tags.find(([name]) => name === "d")?.[1]
               : undefined;
         const channelId =
-          destination && (ids.includes(destination) || route.id === "mentions")
+          destination && ids.includes(destination)
             ? destination
             : !tags.length && route.channelId
               ? route.channelId
@@ -1934,17 +1920,6 @@ export function subscribeRelayTraffic(
             presenceAuthors.includes(incoming.pubkey)
           )
             callbacks.presence?.(incoming);
-        } else if (route.id === "mentions") {
-          // A channel with its own route delivers its mentions there.
-          if (
-            channelId &&
-            [9, 40002].includes(incoming.kind) &&
-            !interests.includes(channelId)
-          )
-            callbacks.receive(
-              [incoming],
-              Object.freeze({ phase: "live", channelId, mention: true }),
-            );
         } else if (route.id === "observer") {
           if (
             observer !== null &&

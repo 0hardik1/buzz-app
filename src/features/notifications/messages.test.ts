@@ -1182,7 +1182,7 @@ it("cancels a pending thread notification when metadata marks its room as a Hudd
   expect(h.show).not.toHaveBeenCalled();
 });
 
-it("notifies a mention from a public stream the viewer has not joined, and opens it without joining", async () => {
+it("notifies a mention in a public stream the viewer reads without joining, and opens it without joining", async () => {
   vi.spyOn(Date, "now").mockReturnValue(1_780_000_000_000);
   const h = await setup();
   h.emit([
@@ -1195,7 +1195,7 @@ it("notifies a mention from a public stream the viewer has not joined, and opens
   const mention = message(h.peer, "lobby", "come look", 1_780_000_000, [
     ["p", h.viewer.pubkey],
   ]);
-  h.emit([mention], "live", "lobby", true);
+  h.emit([mention], "live", "lobby");
   await vi.waitFor(() => expect(h.show).toHaveBeenCalledOnce());
   expect(h.show.mock.calls[0]?.[0]).toMatchObject({
     title: expect.stringContaining("#Lobby"),
@@ -1224,15 +1224,7 @@ it("never notifies a crafted mention from a private channel the viewer has not j
   const crafted = message(h.peer, "vault", "secret", 1_780_000_000, [
     ["p", h.viewer.pubkey],
   ]);
-  h.emit([crafted], "live", "vault", true);
-  // The session reads the unknown channel's metadata, which finds nothing readable.
-  await vi.waitFor(() =>
-    expect(
-      h.query.mock.calls.some(([filters]) =>
-        filters[0]?.kinds?.includes(39000),
-      ),
-    ).toBe(true),
-  );
+  h.emit([crafted], "live", "vault");
   await flush();
   expect(h.show).not.toHaveBeenCalled();
   expect(h.owner.session.unread.inbox().items).toEqual([]);

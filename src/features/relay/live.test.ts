@@ -118,7 +118,6 @@ function setup(
   batchSize = 10,
   random?: () => number,
   signatures?: SignatureVerifier,
-  mentions?: true,
 ) {
   const key = keypair(),
     sockets: Socket[] = [];
@@ -128,7 +127,6 @@ function setup(
     state: vi.fn<LiveCallbacks["state"]>(),
     established: vi.fn(),
     denied: vi.fn(),
-    ...(mentions ? { mentions } : {}),
   } satisfies LiveCallbacks;
   const owner = subscribeRelayTraffic(
     "wss://relay.test",
@@ -6573,56 +6571,4 @@ it("delivers a canonical sidebar event through the emitted wire into the real se
   } finally {
     owner.dispose();
   }
-});
-
-describe("mention route", () => {
-  const mentionRoute = (socket: Socket, viewer: string) =>
-    socket
-      .requests()
-      .find(
-        (request) =>
-          request[2]["#p"]?.includes(viewer) && request[2].kinds.includes(9),
-      );
-  it("exists only when asked for", async () => {
-    const h = setup(["a"]);
-    await h.first.auth();
-    expect(mentionRoute(h.first, h.key.pubkey)).toBeUndefined();
-    h.owner.dispose();
-  });
-  it("is live-only and delivers only channels outside the interests, marked as mentions", async () => {
-    const h = setup(["a"], undefined, undefined, undefined, undefined, true);
-    await h.first.auth();
-    const route = mentionRoute(h.first, h.key.pubkey);
-    assert.exists(route);
-    expect(filtersOf(route)).toEqual([
-      {
-        kinds: [9, 40002],
-        "#p": [h.key.pubkey],
-        since: expect.any(Number),
-        limit: 0,
-      },
-    ]);
-    const peer = keypair();
-    const at = Math.floor(Date.now() / 1000);
-    const viewer = [["p", h.key.pubkey]];
-    const outside = message(peer, "lobby", "outside", at, viewer);
-    const inside = message(peer, "a", "inside", at, viewer);
-    const reaction = signed(peer, {
-      kind: 7,
-      content: "+",
-      created_at: at,
-      tags: [["h", "lobby"], ...viewer],
-    });
-    for (const event of [outside, inside, reaction])
-      await h.first.receive(["EVENT", route[1], event]);
-    await vi.waitFor(() =>
-      expect(h.callbacks.receive).toHaveBeenCalledWith([outside], {
-        phase: "live",
-        channelId: "lobby",
-        mention: true,
-      }),
-    );
-    expect(h.callbacks.receive).toHaveBeenCalledTimes(1);
-    h.owner.dispose();
-  });
 });
