@@ -99,6 +99,7 @@ it("preserves provider labels and additional fields in each declared section", (
 
 it("updates the lead photo from the shared profile and respects photo removal and verification changes", async () => {
   const owner = createRelaySession(null);
+  vi.spyOn(owner.session, "media").mockImplementation((url) => url);
   const leadKey = "c".repeat(64);
   const verified = {
     displayName: "Example Lead",
