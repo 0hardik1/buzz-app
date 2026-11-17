@@ -302,7 +302,11 @@ export function SearchResults({
           label: `Remove channel ${channel.name}`,
           title: channel.id,
         });
-      else if (/^(after|before|on|during)$/.test(kind) && value)
+      // Only a date the parser reads; anything else is literal text.
+      else if (
+        /^(after|before|on|during)$/.test(kind) &&
+        !parseSearchOperators(operand).text
+      )
         restored.push({
           operand,
           text: operand,

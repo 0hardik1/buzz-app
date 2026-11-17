@@ -9637,6 +9637,48 @@ it("keeps chosen filters when ask: is added, and asks with them, across reopenin
   }
 });
 
+it("restores only dates the parser reads as chips, so literal text before ask: stays a search", async () => {
+  const relay = keypair(),
+    viewer = keypair();
+  const { owner } = operatorSession(viewer, relay, []);
+  const input = createRef<HTMLInputElement>();
+  try {
+    for (const query of [
+      "after:soon ask: deploy",
+      'during:"release ask: deploy',
+    ]) {
+      render(
+        <SearchResults
+          {...operatorProps}
+          session={owner.session}
+          query={query}
+          input={input}
+        />,
+      );
+      expect(input.current).toHaveValue(query);
+      expect(
+        screen.queryByRole("button", { name: /^Remove Ask/ }),
+      ).not.toBeInTheDocument();
+      cleanup();
+    }
+    render(
+      <SearchResults
+        {...operatorProps}
+        session={owner.session}
+        query="after:today ask: deploy"
+        input={input}
+      />,
+    );
+    expect(input.current).toHaveValue("ask: deploy");
+    expect(
+      screen.getByRole("button", { name: "Remove date after:today" }),
+    ).toBeInTheDocument();
+  } finally {
+    cleanup();
+    owner.dispose();
+  }
+});
+
 it("shows a recent search's filters by name, and searches again with them as chips", async () => {
   const relay = keypair(),
     viewer = keypair();
