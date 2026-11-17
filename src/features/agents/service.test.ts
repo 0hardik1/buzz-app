@@ -1,3 +1,6 @@
+import { AcpProcess } from "../agent-harness/acp/process";
+import { GOOSE } from "../../bundled/goose/goose";
+import { fakeSpawn } from "../../bundled/goose/goose-testing";
 import { UnattestedProfile } from "../relay/identity-archives";
 import { createSoloPreferences } from "../relay/solo-preferences";
 import type { ChannelKit } from "../channel-templates/capability";
@@ -66,6 +69,7 @@ import { huddleDescription } from "../huddle/lifecycle";
 import type { AgentIdentity } from "./native";
 import {
   type Agent,
+  type Agents,
   type AgentHandle,
   type AgentSession,
   AgentsService,
@@ -217,6 +221,7 @@ async function setup({
     | Pick<NonNullable<AgentType<Config>["sessionControls"]>, "state" | "run">
     | undefined,
   resumes = false,
+  supportsGuardedWake = undefined as AgentType<Config>["supportsGuardedWake"],
   /** Settings the type syncs across devices. */
   syncedSettings = undefined as AgentType<Config>["syncedSettings"],
   protection = undefined as true | undefined,
@@ -288,6 +293,7 @@ async function setup({
   const run =
     vi.fn<(delivery: Delivery<Config>) => void | Promise<void>>(answer);
   const type: AgentType<Config> = {
+    ...(supportsGuardedWake ? { supportsGuardedWake } : {}),
     id: typeId,
     title: "Echo",
     timeoutMs,
@@ -2236,27 +2242,40 @@ describe("a plugin's wake", () => {
       ]);
   });
 
-  it("throws outside a plugin, without text or a well-formed root, or for an agent this copy does not run", async () => {
-    const { service, plugin, native } = await setup();
-    await service.create({ type: "example/echo", name: "Echo" });
-    await held(native);
-    expect(() => service.wake(bot, { channel, text: "hi" })).toThrow(
-      /Only a plugin/,
-    );
-    expect(() => plugin.agents.wake(bot, { channel, text: " " })).toThrow(
-      /needs a channel and text/,
-    );
-    for (const bad of ["", "note1abc", "r".repeat(63), ` ${"a".repeat(64)}`])
+  it.each([false, true])(
+    "throws synchronously on invalid wake arguments (guarded: %s)",
+    async (guarded) => {
+      const { service, plugin, native } = await setup();
+      await service.create({ type: "example/echo", name: "Echo" });
+      await held(native);
+      const send = (
+        key: Parameters<Agents["wake"]>[0],
+        wake: Parameters<Agents["wake"]>[1],
+      ) =>
+        guarded
+          ? plugin.agents.wake(key, wake, { current: () => true })
+          : plugin.agents.wake(key, wake);
       expect(() =>
-        plugin.agents.wake(bot, { channel, root: bad, text: "hi" }),
-      ).toThrow(/64-hex event id/);
-    expect(() =>
-      plugin.agents.wake(bot, { channel, root, topLevel: true, text: "hi" }),
-    ).toThrow(/not both/);
-    expect(() => plugin.agents.wake(sibling, { channel, text: "hi" })).toThrow(
-      /does not run that agent/,
-    );
-  });
+        guarded
+          ? service.wake(bot, { channel, text: "hi" }, { current: () => true })
+          : service.wake(bot, { channel, text: "hi" }),
+      ).toThrow(/Only a plugin/);
+      expect(() => send(bot, { channel, text: " " })).toThrow(
+        /needs a channel and text/,
+      );
+      for (const bad of ["", "note1abc", "r".repeat(63), ` ${"a".repeat(64)}`])
+        expect(() => send(bot, { channel, root: bad, text: "hi" })).toThrow(
+          /64-hex event id/,
+        );
+      expect(() =>
+        send(bot, { channel, root, topLevel: true, text: "hi" }),
+      ).toThrow(/not both/);
+      if (!guarded)
+        expect(() => send(sibling, { channel, text: "hi" })).toThrow(
+          /does not run that agent/,
+        );
+    },
+  );
 
   it("comes from the agent itself through its run's handle, marked from where", async () => {
     const { service, run, plugin, native } = await setup();
@@ -2300,6 +2319,333 @@ describe("a plugin's wake", () => {
     await service.remove(bot);
     await settle();
     expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("guarded plugin wakes", () => {
+  const wake = { channel, root: "e".repeat(64), text: "Check current work" };
+  it("refuses unsupported guarded wakes before run and preserves ordinary wakes", async () => {
+    const f = await setup();
+    try {
+      await f.service.create({ type: "example/echo", name: "Echo" });
+      await expect(
+        f.plugin.agents.wake(bot, wake, { current: () => true }),
+      ).resolves.toEqual({ status: "dropped", reason: "refused" });
+      expect(f.run).not.toHaveBeenCalled();
+      const entered = runnerGate();
+      f.run.mockImplementationOnce(() => entered.resolve());
+      expect(f.plugin.agents.wake(bot, wake)).toBeUndefined();
+      await entered.promise;
+      expect(f.run).toHaveBeenCalledOnce();
+    } finally {
+      await f.ctx.fiber.dispose();
+    }
+  });
+
+  it("uses guarded delivery only after strict capability detection, without probe wakes", async () => {
+    const f = await setup({ supportsGuardedWake: true });
+    const oldWake = vi.fn();
+    const sendIfSupported = (agents: {
+      supportsGuardedWake?: unknown;
+      wake: Agents["wake"];
+    }) => {
+      if (agents.supportsGuardedWake === true)
+        return agents.wake(bot, wake, { current: () => false });
+      return undefined;
+    };
+    try {
+      await f.service.create({ type: "example/echo", name: "Echo" });
+      for (const flag of [undefined, false, "true", 1])
+        expect(
+          sendIfSupported({ supportsGuardedWake: flag, wake: oldWake }),
+        ).toBeUndefined();
+      expect(oldWake).not.toHaveBeenCalled();
+      await expect(sendIfSupported(f.plugin.agents)).resolves.toEqual({
+        status: "dropped",
+        reason: "stale",
+      });
+      expect(f.run).not.toHaveBeenCalled();
+      // @ts-expect-error malformed JavaScript callers still get a synchronous error
+      expect(() => f.plugin.agents.wake(bot, wake, {})).toThrow(
+        "current predicate",
+      );
+      expect(() =>
+        f.plugin.agents.wake(bot, wake, {
+          current: () => true,
+          // @ts-expect-error invalid caller signal
+          signal: {},
+        }),
+      ).toThrow();
+    } finally {
+      await f.ctx.fiber.dispose();
+    }
+  });
+
+  it("preserves void calls and synchronous queue errors while guarded calls return refused", async () => {
+    const f = await setup({ supportsGuardedWake: true });
+    const gate = runnerGate();
+    const started = runnerGate();
+    try {
+      await f.service.create({ type: "example/echo", name: "Echo" });
+      f.run.mockImplementationOnce(async () => {
+        started.resolve();
+        await gate.promise;
+      });
+      expect(f.plugin.agents.wake(bot, wake)).toBeUndefined();
+      await started.promise;
+      for (let i = 0; i < 32; i++)
+        expect(f.plugin.agents.wake(bot, wake)).toBeUndefined();
+      expect(() => f.plugin.agents.wake(bot, wake)).toThrow("busy");
+      await expect(
+        f.plugin.agents.wake(bot, wake, { current: () => true }),
+      ).resolves.toEqual({ status: "dropped", reason: "refused" });
+      expect(f.run).toHaveBeenCalledOnce();
+    } finally {
+      gate.resolve();
+      await f.ctx.fiber.dispose();
+    }
+  });
+
+  it.each(["aborted", "stale", "guard-error"] as const)(
+    "drops %s before queue admission",
+    async (reason) => {
+      const f = await setup({ supportsGuardedWake: true });
+      try {
+        await f.service.create({ type: "example/echo", name: "Echo" });
+        const signal = reason === "aborted" ? AbortSignal.abort() : undefined;
+        const current = () => {
+          if (reason === "guard-error")
+            throw new Error("Cannot read current state");
+          return reason !== "stale";
+        };
+        await expect(
+          f.plugin.agents.wake(bot, wake, {
+            ...(signal ? { signal } : {}),
+            current,
+          }),
+        ).resolves.toEqual({ status: "dropped", reason });
+        expect(f.run).not.toHaveBeenCalled();
+      } finally {
+        await f.ctx.fiber.dispose();
+      }
+    },
+  );
+
+  it.each([
+    "stale",
+    "aborted",
+    "guard-error",
+    "removed",
+    "disposed",
+    "membership",
+    "access",
+    "session",
+  ] as const)("drops a wake invalidated by %s while queued", async (change) => {
+    const f = await setup({ supportsGuardedWake: true });
+    const gate = runnerGate();
+    const started = runnerGate();
+    let caller!: Context;
+    const scope = f.plugin.plugin((ctx) => {
+      caller = ctx;
+    });
+    await scope.await();
+    try {
+      await f.service.create({ type: "example/echo", name: "Echo" });
+      f.run.mockImplementationOnce(async () => {
+        started.resolve();
+        await gate.promise;
+      });
+      f.plugin.agents.wake(bot, { ...wake, text: "Hold the lane" });
+      await started.promise;
+      let valid = true;
+      const abort = new AbortController();
+      const result = caller.agents.wake(bot, wake, {
+        signal: abort.signal,
+        current: () => {
+          if (!valid && change === "guard-error")
+            throw new Error("State unavailable");
+          return valid;
+        },
+      });
+      if (change === "aborted") abort.abort();
+      else if (change === "removed") await f.service.remove(bot);
+      else if (change === "disposed") await scope.dispose();
+      else if (change === "session") {
+        f.reconnecting();
+        f.recover();
+      } else if (change === "membership" || change === "access") {
+        const list = f.session.channels.list();
+        vi.spyOn(f.session.channels, "list").mockReturnValue({
+          ...list,
+          channels: list.channels.map((row) =>
+            row.id === channel
+              ? {
+                  ...row,
+                  visibility: "private",
+                  members: (row.members ?? []).filter(
+                    (key) => key !== (change === "membership" ? bot : viewer),
+                  ),
+                }
+              : row,
+          ),
+        });
+      } else valid = false;
+      gate.resolve();
+      await expect(result).resolves.toEqual({
+        status: "dropped",
+        reason:
+          change === "stale" || change === "aborted" || change === "guard-error"
+            ? change
+            : "unavailable",
+      });
+      expect(f.run).toHaveBeenCalledOnce();
+    } finally {
+      gate.resolve();
+      await f.ctx.fiber.dispose();
+    }
+  });
+
+  it("checks again after harness queue waits and resolves at handoff, before completion", async () => {
+    const f = await setup({ supportsGuardedWake: true });
+    const gate = runnerGate();
+    const entered = runnerGate<Delivery<Config>>();
+    let valid = true;
+    try {
+      await f.service.create({ type: "example/echo", name: "Echo" });
+      f.run.mockImplementationOnce((delivery) => {
+        entered.resolve(delivery);
+        delivery.workingUntil(gate.promise);
+        return gate.promise;
+      });
+      const dropped = f.plugin.agents.wake(bot, wake, {
+        current: () => valid,
+      });
+      const delivery = await entered.promise;
+      valid = false;
+      expect(delivery.current()).toBe(false);
+      await expect(dropped).resolves.toEqual({
+        status: "dropped",
+        reason: "stale",
+      });
+      gate.resolve();
+      const completed = runnerGate();
+      const abort = new AbortController();
+      f.run.mockImplementationOnce((next) => {
+        expect(next.current()).toBe(true);
+        next.accepted?.();
+        next.workingUntil(completed.promise);
+      });
+      const delivered = f.plugin.agents.wake(bot, wake, {
+        signal: abort.signal,
+        current: () => true,
+      });
+      try {
+        await expect(delivered).resolves.toEqual({ status: "delivered" });
+        abort.abort();
+        const accepted = f.run.mock.calls[1]?.[0];
+        expect(accepted?.current()).toBe(false);
+        expect(accepted?.trigger).toMatchObject({
+          type: "plugin",
+          plugin: "example",
+          text: wake.text,
+        });
+        accepted?.accepted?.();
+        await expect(delivered).resolves.toEqual({ status: "delivered" });
+      } finally {
+        completed.resolve();
+      }
+    } finally {
+      gate.resolve();
+      await f.ctx.fiber.dispose();
+    }
+  });
+
+  it.each(["stale", "stop", "delivered"] as const)(
+    "settles %s through the public API, host queue and real ACP delivery queue",
+    async (change) => {
+      const f = await setup({ supportsGuardedWake: true });
+      const transport = fakeSpawn({ hold: true });
+      const acp = await AcpProcess.start(transport.spawn, GOOSE, {
+        cwd: "/work",
+        serve: transport.serve,
+      });
+      const session = await acp.open({
+        cwd: "/work",
+        systemPrompt: "",
+        choice: () => ({ provider: "", model: "" }),
+      });
+      const gate = runnerGate();
+      const waiting = runnerGate();
+      session.beforeTurn = async () => {
+        waiting.resolve();
+        await gate.promise;
+      };
+      let valid = true;
+      try {
+        await f.service.create({ type: "example/echo", name: "Echo" });
+        f.run.mockImplementation((delivery) => {
+          delivery.workingUntil(
+            session.send(wake.text, {
+              current: delivery.current,
+              ...(delivery.accepted ? { accepted: delivery.accepted } : {}),
+              ...(delivery.acknowledged
+                ? { acknowledged: delivery.acknowledged }
+                : {}),
+              ...(delivery.step ? { step: delivery.step } : {}),
+            }),
+          );
+        });
+        const result = f.plugin.agents.wake(bot, wake, {
+          current: () => valid,
+        });
+        let settled = false;
+        void result?.then(() => {
+          settled = true;
+        });
+        await waiting.promise;
+        expect(settled).toBe(false);
+        expect(transport.geese[0]?.turns).toEqual([]);
+        if (change === "stale") valid = false;
+        if (change === "stop") await session.interrupt();
+        gate.resolve();
+        await expect(result).resolves.toEqual(
+          change === "delivered"
+            ? { status: "delivered" }
+            : {
+                status: "dropped",
+                reason: change === "stale" ? "stale" : "refused",
+              },
+        );
+        expect(transport.geese[0]?.turns).toHaveLength(
+          change === "delivered" ? 1 : 0,
+        );
+        transport.geese[0]?.turns[0]?.finish();
+        await session.idle();
+      } finally {
+        gate.resolve();
+        await acp.kill();
+        await f.ctx.fiber.dispose();
+      }
+    },
+  );
+
+  it("returns refused when a harness ignores a wake without accepting it", async () => {
+    const f = await setup({ supportsGuardedWake: true });
+    try {
+      await f.service.create({ type: "example/echo", name: "Echo" });
+      expect(() => f.service.wake(bot, wake, { current: () => true })).toThrow(
+        "Only a plugin",
+      );
+      await expect(
+        f.plugin.agents.wake(sibling, wake, { current: () => true }),
+      ).resolves.toEqual({ status: "dropped", reason: "unavailable" });
+      f.run.mockImplementationOnce(({ ignored }) => ignored?.());
+      await expect(
+        f.plugin.agents.wake(bot, wake, { current: () => true }),
+      ).resolves.toEqual({ status: "dropped", reason: "refused" });
+    } finally {
+      await f.ctx.fiber.dispose();
+    }
   });
 });
 

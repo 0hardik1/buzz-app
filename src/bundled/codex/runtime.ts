@@ -136,6 +136,7 @@ type Request = {
   finalDelivery?: Error | true;
   step?: (tool: string, target?: string) => void;
   acknowledged?: (input?: Readonly<{ steering?: true }>) => void;
+  accepted?: () => void;
   superseded?: () => void;
   /** Takes a title for a new Solo chat; see `Delivery.named`. */
   named?: (title: string) => void;
@@ -1832,6 +1833,7 @@ export class CodexRuntime {
       ...(project ? { project: `${project}\n` } : {}),
       answered,
       failActivity,
+      ...(delivery.accepted ? { accepted: delivery.accepted } : {}),
       ...(delivery.step ? { step: delivery.step } : {}),
       ...(delivery.acknowledged ? { acknowledged: delivery.acknowledged } : {}),
       ...(delivery.superseded ? { superseded: delivery.superseded } : {}),
@@ -1927,6 +1929,7 @@ export class CodexRuntime {
                 request.answered();
                 return;
               }
+              request.accepted?.();
               await active.rpc.request("turn/steer", {
                 threadId: active.threadId,
                 expectedTurnId: active.turnId,
@@ -3012,6 +3015,23 @@ export class CodexRuntime {
             at: Date.now(),
             ...(tools ? { tools } : {}),
           });
+        if (signal.aborted || (request.current && !request.current())) {
+          if (this.target && !resuming) {
+            // An empty remote thread has no rollout to resume on the next request.
+            const { [key]: _, ...kept } = entry.saved;
+            await this.storage.set(entry.storageKey, JSON.stringify(kept));
+            entry.saved = kept;
+          }
+          signal.throwIfAborted();
+          restoreNotes(request);
+          request.answered();
+          this.status(agent.key, key, "Idle");
+          active.finished = true;
+          ready();
+          return;
+        }
+        signal.throwIfAborted();
+        request.accepted?.();
         const turn = await rpc
           .request<{ turn: { id: string } }>("turn/start", {
             threadId: active.threadId,

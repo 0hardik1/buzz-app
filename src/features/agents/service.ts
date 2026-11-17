@@ -810,6 +810,10 @@ export type Delivery<Config = unknown> = Readonly<{
   ignored?(refusal?: MentionRefusal): void;
   /** The harness acknowledged this exact request. Not proof of model consumption. */
   acknowledged?(input?: Readonly<{ steering?: true }>): void;
+  /** Final guarded handoff to the prompt/steer transport. Call after the last
+   * current/signal check, with no asynchronous work before submission. This
+   * is separate from UI acknowledgement and does not imply model consumption. */
+  accepted?(): void;
   /** A newer acknowledged request owns this turn's activity; hide this message's
    * bubble without claiming success or changing the execution outcome. */
   superseded?(): void;
@@ -926,6 +930,9 @@ export type AgentVoiceConnection = Readonly<{
 }>;
 
 export type AgentType<Config = unknown> = {
+  /** Checks Delivery.current() and signal after waits, immediately before each
+   * prompt/steer handoff, then calls Delivery.accepted() at that handoff. */
+  readonly supportsGuardedWake?: true;
   /** Carries Delivery.session into tool context and sessionContext into the prompt. */
   sessionAdmission?: true;
   /** Huddles supplies a running agent owned by the current viewer.
@@ -1479,6 +1486,31 @@ export type Agents = {
    * comes from this plugin, not its owner, and is data. Throws when this copy does not run the agent or its queue is full;
    * like a mention, a queued wake is dropped if the agent stops running here. */
   wake(agent: AgentKey, wake: AgentWake): void;
+  /** Check `=== true` before passing guard options to `wake`. Older hosts can
+   * ignore extra arguments; never send a wake to probe for support. */
+  readonly supportsGuardedWake?: true;
+  /** Checks the caller's guard at admission and before
+   * prompt/steer submission. Delivered means transport handoff, not completion;
+   * cancellation cannot retract accepted input. Host authority still applies.
+   * Invalid arguments throw synchronously; guard errors drop the wake. */
+  wake(
+    agent: AgentKey,
+    wake: AgentWake,
+    options: Readonly<{ signal?: AbortSignal; current: () => boolean }>,
+  ): Promise<
+    Readonly<
+      | { status: "delivered" }
+      | {
+          status: "dropped";
+          reason:
+            | "aborted"
+            | "stale"
+            | "guard-error"
+            | "unavailable"
+            | "refused";
+        }
+    >
+  >;
   snapshot(): AgentsSnapshot;
   subscribe(listener: () => void): () => void;
   /** Calls `listener` when a turn this copy of the app runs for the agent
@@ -3528,16 +3560,88 @@ export class AgentsService extends Service implements Agents {
     added: () => this.tools(),
     repositories: repositoriesContext,
   });
-  wake(key: AgentKey, wake: AgentWake) {
-    const plugin = this.ctx.pluginOwner?.id;
-    if (!plugin) throw new Error("Only a plugin wakes an agent");
-    this.wakeIn(key, wake, { plugin });
+  readonly supportsGuardedWake = true as const;
+  wake(key: AgentKey, wake: AgentWake): void;
+  wake(
+    key: AgentKey,
+    wake: AgentWake,
+    options: Parameters<Agents["wake"]>[2],
+  ): ReturnType<Agents["wake"]>;
+  wake(
+    key: AgentKey,
+    wake: AgentWake,
+    options?: Parameters<Agents["wake"]>[2],
+  ) {
+    const owner = this.ctx.pluginOwner;
+    if (!owner) throw new Error("Only a plugin wakes an agent");
+    const trigger = this.pluginWake(wake, { plugin: owner.id });
+    if (options === undefined) return this.runners.wakeIn(key, trigger);
+    if (typeof options?.current !== "function")
+      throw new Error("A guarded wake needs a current predicate");
+    // Validate before returning a Promise, as with the wake arguments.
+    if (options.signal !== undefined) AbortSignal.any([options.signal]);
+    return this.guardedWake(key, trigger, options);
+  }
+  private async guardedWake(
+    key: AgentKey,
+    trigger: Extract<Trigger, { type: "plugin" }>,
+    options: Parameters<Agents["wake"]>[2],
+  ): ReturnType<Agents["wake"]> {
+    const ctx = this.ctx;
+    const owner = ctx.pluginOwner;
+    if (!owner) throw new Error("Only a plugin wakes an agent");
+    const { signal, current: isCurrent } = options;
+    const agent = this.ready(key);
+    const binding = agent && this.bindingOf(agent);
+    if (!agent || !binding) return { status: "dropped", reason: "unavailable" };
+    const epoch = binding.connection.epoch;
+    const lifetime = new AbortController();
+    let pending = true;
+    const release = ctx.effect(() => () => {
+      if (pending) lifetime.abort();
+    });
+    const available = () => {
+      const current = this.ready(key);
+      const address = { tags: [["h", trigger.channel]] };
+      return (
+        !lifetime.signal.aborted &&
+        ctx.pluginStatus.isActive(owner.id, owner.revision) &&
+        !binding.controller.signal.aborted &&
+        this.bindingOf(agent) === binding &&
+        binding.connection.epoch === epoch &&
+        binding.connection.since !== undefined &&
+        this.communities.snapshot().viewer === binding.viewer &&
+        current?.pubkey === agent.pubkey &&
+        current.owner === agent.owner &&
+        current.type === agent.type &&
+        this.member(current, address) === true &&
+        this.reads({ ...current, pubkey: binding.viewer }, address) === true
+      );
+    };
+    try {
+      return await this.runners.wakeGuarded(
+        key,
+        trigger,
+        { ...(signal ? { signal } : {}), current: isCurrent },
+        available,
+        AbortSignal.any([lifetime.signal, binding.controller.signal]),
+      );
+    } finally {
+      pending = false;
+      release();
+    }
   }
   private wakeIn(
     key: AgentKey,
-    { channel, root, topLevel, text }: AgentWake,
+    wake: AgentWake,
     source: Readonly<{ plugin: string } | { from: HandoffSource }>,
   ) {
+    this.runners.wakeIn(key, this.pluginWake(wake, source));
+  }
+  private pluginWake(
+    { channel, root, topLevel, text }: AgentWake,
+    source: Readonly<{ plugin: string } | { from: HandoffSource }>,
+  ): Extract<Trigger, { type: "plugin" }> {
     if (!channel || !text.trim())
       throw new Error("A wake needs a channel and text");
     // Harnesses find the thread from a well-formed id; any other would leave
@@ -3546,7 +3650,7 @@ export class AgentsService extends Service implements Agents {
       throw new Error("A wake's root must be the thread's 64-hex event id");
     if (topLevel !== undefined && (topLevel !== true || root !== undefined))
       throw new Error("A wake is in a thread or at the top level, not both");
-    this.runners.wakeIn(key, {
+    return {
       type: "plugin",
       ...source,
       channel,
@@ -3555,7 +3659,7 @@ export class AgentsService extends Service implements Agents {
       text,
       id: bytesToHex(crypto.getRandomValues(new Uint8Array(32))),
       at: Date.now(),
-    });
+    };
   }
   snapshot = () => this.state;
   subscribeSteps = (agent: AgentKey, listener: () => void) => {
