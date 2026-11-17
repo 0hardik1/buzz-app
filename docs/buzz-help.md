@@ -44,6 +44,8 @@ If agent voice stops, the compact player and Huddle window show the reason;
 leave and rejoin to retry.
 Final voice transcripts appear in the room with speaker credit and do not
 mention anyone. Explicit agent watches on that room can still receive them.
+An agent answers a typed mention in the Huddle chat in that message's thread.
+Select the reply summary under the message to open the thread in the main window.
 
 ## Identity and getting connected
 
