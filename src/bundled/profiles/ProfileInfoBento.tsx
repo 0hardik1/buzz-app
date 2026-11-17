@@ -61,7 +61,12 @@ function LeadPhoto({
       : undefined;
   return (
     <span className={styles.leadPhoto}>
-      <Avatar src={avatarMedia(picture, session.media)} alt="" fallback={name} size="fill" />
+      <Avatar
+        src={avatarMedia(picture, session.media)}
+        alt=""
+        fallback={name}
+        size="fill"
+      />
     </span>
   );
 }

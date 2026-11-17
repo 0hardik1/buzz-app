@@ -7,6 +7,7 @@
 .visibility {
   flex: none;
 }
+/* biome-ignore lint/correctness/noUnknownPseudoClass: CSS Modules references the shared choice recipe. */
 .visibility :global(.buzz-choice) {
   flex-direction: row-reverse;
   gap: var(--space-3);

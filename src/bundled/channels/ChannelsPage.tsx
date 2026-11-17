@@ -1736,6 +1736,7 @@ function ChannelWorkspace({
     routedThread,
     detailReply,
     detailSource,
+    tabState.entries,
     tabState.enterVisit,
     tabState.select,
     tabState.selectMain,

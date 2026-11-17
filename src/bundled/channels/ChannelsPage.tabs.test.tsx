@@ -1353,8 +1353,10 @@ it("opens another conversation's tab in its channel, but not the current channel
 it("retains a pushed profile tab when navigation applies its visit and returns on close", async () => {
   const host = createNavigationController(createMemoryHistory());
   const h = await page("stream", host.navigation, true);
-  const initial = h.navigation!;
-  const panel = h.panels.snapshot()[1]!;
+  const initial = h.navigation;
+  if (!initial) throw new Error("Missing navigation");
+  const panel = h.panels.snapshot()[1];
+  if (!panel) throw new Error("Missing profile panel");
   Object.assign(panel, {
     keepOpen: false,
     addressable: true,
@@ -1364,7 +1366,7 @@ it("retains a pushed profile tab when navigation applies its visit and returns o
         target,
         context,
       }: import("../../features/panels/service").PanelProps) => (
-        <button onClick={() => context?.push?.("person:lead")}>
+        <button type="button" onClick={() => context?.push?.("person:lead")}>
           {target === "person:parent" ? "Open lead" : "Lead profile"}
         </button>
       ),
@@ -1402,7 +1404,9 @@ it("retains a pushed profile tab when navigation applies its visit and returns o
     "person:lead",
   ]);
   const closes = screen.getAllByRole("button", { name: "Close App tab" });
-  await h.user.click(closes[1]!);
+  const close = closes[1];
+  if (!close) throw new Error("Missing second tab close button");
+  await h.user.click(close);
   present();
   expect(state.result.current.entries.map((entry) => entry.target)).toEqual([
     "person:parent",
