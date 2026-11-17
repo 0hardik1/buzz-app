@@ -6133,7 +6133,7 @@ it("lets a picked person or channel replace a typed filter of its kind", async (
   }
 });
 
-it("shows only messages once text sits beside an operator", async () => {
+it("shows only messages once text sits beside an operator, each still previewed", async () => {
   const relay = keypair(),
     viewer = keypair();
   const { owner, reads } = operatorSession(
@@ -6165,6 +6165,10 @@ it("shows only messages once text sits beside an operator", async () => {
     expect(
       screen.queryByRole("option", { name: /kalvin-reviewers/ }),
     ).toBeNull();
+    // Only messages, so no group filters, but the hit still previews.
+    expect(screen.queryByRole("group", { name: "Result groups" })).toBeNull();
+    const preview = screen.getByRole("complementary", { name: "Preview" });
+    await waitFor(() => expect(preview).toHaveTextContent(/kalvin found it/));
   } finally {
     cleanup();
     owner.dispose();

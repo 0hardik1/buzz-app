@@ -1765,6 +1765,9 @@ export function SearchResults({
   // none of their lookups.
   const resultsShown =
     !showAuthorPicker && !showDateChoices && !showChannelPicker;
+  /** Results with a preview beside them: not a question, a conversation's
+   * own search or a picker. */
+  const previewed = !asking && !scopedChannelId && resultsShown;
   const searchAnnouncement = useSearchAnnouncement(
     resultsShown && slowChannels,
     slowPeople,
@@ -2265,25 +2268,29 @@ export function SearchResults({
         isAction={isSearchAction}
         footer={offline}
         peek={{
-          ranked: !asking && !scopedChannelId && !hasOperator && resultsShown,
+          // A filter asks for messages only, so they aren't ranked with
+          // other results, but each still previews.
+          ranked: previewed && !hasOperator,
           hints,
           busy: !!query.trim() && (messagesPending || directoryPending),
           unsearched:
             search.tooShort || search.onlyExclusions
               ? { Messages: messageEmpty }
               : undefined,
-          preview: (row, tone, follow) => (
-            <SearchPreview
-              session={session}
-              cache={previews}
-              row={row}
-              tone={tone}
-              follow={follow}
-              terms={terms}
-              nameOf={nameOf}
-              whereOf={whereOf}
-            />
-          ),
+          preview: previewed
+            ? (row, tone, follow) => (
+                <SearchPreview
+                  session={session}
+                  cache={previews}
+                  row={row}
+                  tone={tone}
+                  follow={follow}
+                  terms={terms}
+                  nameOf={nameOf}
+                  whereOf={whereOf}
+                />
+              )
+            : undefined,
         }}
       >
         {dateOperator === "on" && (

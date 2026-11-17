@@ -114,15 +114,20 @@ export type SearchTone =
  * groups they fall in. Ranked, the Top results view shows a few rows of each
  * group, and Tab shows one group whole. */
 export type SearchPeek = {
+  /** Every kind of result ranked together, with group filters above. */
   ranked: boolean;
-  /** `tone` is the row's own hue, else that of the group it is in.
-   * `follow` is set while nobody has moved the highlight, so it follows the
-   * first row, which more typing or results still arriving may replace. */
-  preview: (
-    row: SearchDestination | undefined,
-    tone: SearchTone | undefined,
-    follow: PeekFollow | undefined,
-  ) => ReactNode;
+  /** The panel beside the results, ranked or not; left out where the
+   * results show no preview. `tone` is the row's own hue, else that of the
+   * group it is in. `follow` is set while nobody has moved the highlight, so
+   * it follows the first row, which more typing or results still arriving
+   * may replace. */
+  preview?:
+    | ((
+        row: SearchDestination | undefined,
+        tone: SearchTone | undefined,
+        follow: PeekFollow | undefined,
+      ) => ReactNode)
+    | undefined;
   /** Shown under the field, such as filters to add. */
   hints?: ReactNode;
   /** Results that may still arrive, so the list is busy. */
@@ -244,6 +249,8 @@ export function SearchChoices({
   const palette = useRef<HTMLDivElement>(null);
   // A hidden preview would still read; it mounts only where it shows.
   const narrow = useSyncExternalStore(watchNarrow, isNarrow);
+  const preview = peek?.preview;
+  const previewing = !!preview;
   const peekPanelPrefix = useId();
   const peekPanelId = (label: string | undefined) =>
     `${peekPanelPrefix}-group-${encodeURIComponent(label ?? "")}`;
@@ -406,7 +413,7 @@ export function SearchChoices({
         : {}),
   });
   const selected = highlight.active;
-  const moved = !!peek?.ranked && highlight.moved;
+  const moved = previewing && highlight.moved;
   // biome-ignore lint/correctness/useExhaustiveDependencies: Freezes the order just shown, once per text.
   useLayoutEffect(() => {
     if (!moved || frozen.current) return;
@@ -866,7 +873,7 @@ export function SearchChoices({
         />
         {peek?.hints}
       </div>
-      <div className={peek?.ranked ? "search-peek-workspace" : "contents"}>
+      <div className={previewing ? "search-peek-workspace" : "contents"}>
         {peek?.ranked && tabs.length > 0 && (
           // Escape from one group returns to Top results, from a filter
           // as from the field, not out of search.
@@ -929,7 +936,7 @@ export function SearchChoices({
           </fieldset>
         )}
         <div
-          className={peek?.ranked ? "search-peek-body" : "contents"}
+          className={previewing ? "search-peek-body" : "contents"}
           {...(peek?.ranked && tabs.length > 0
             ? {
                 role: "region",
@@ -1114,7 +1121,7 @@ export function SearchChoices({
             </div>
           </div>
         </div>
-        {peek?.ranked && !narrow && (
+        {preview && !narrow && (
           <aside className="search-peek-side" aria-label="Preview">
             {/* Not live: the highlighted row is already announced, and the
               preview changes with every keystroke. */}
@@ -1125,7 +1132,7 @@ export function SearchChoices({
                   (selected
                     ? undefined
                     : destinations.find(({ key }) => !isAction?.(key)));
-                return peek.preview(
+                return preview(
                   row,
                   row &&
                     (row.kind ??
@@ -1140,7 +1147,7 @@ export function SearchChoices({
         )}
       </div>
       {footer && <div className="search-palette-footer">{footer}</div>}
-      {peek?.ranked && (
+      {previewing && (
         <div
           className="search-peek-keys text-caption text-subtle"
           aria-hidden="true"
