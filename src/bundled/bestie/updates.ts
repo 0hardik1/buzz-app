@@ -29,20 +29,14 @@ const KEPT = 10;
 export type Receipt = Readonly<{
   id: string;
   part: string;
-  action:
-    | "on"
-    | "update"
-    | "adopt"
-    | "restore"
-    | "undo"
-    | "restart"
-    | "resolve";
+  action: "on" | "update" | "adopt" | "restore" | "undo" | "restart";
   /** Version labels, as `v2`, or `untracked`. */
   from: string;
   to: string;
   before: Interest | null;
   after: Interest;
-  status: "prepared" | "applied" | "failed" | "unresolved";
+  /** `kept`: left unresolved, then kept as it was by the owner. */
+  status: "prepared" | "applied" | "failed" | "unresolved" | "kept";
   accepts: boolean;
   at: number;
 }>;
@@ -297,8 +291,9 @@ export async function applyInterest(
   const live = shown ?? liveInterest(agent, feature);
   if (!live) throw new Error(`${feature.title} is partly saved.`);
   const current = live.value.instructions;
-  // A version this build doesn't have is a newer Buzz's to change.
-  if (op.action !== "undo" && interestState(current, feature).state === "ahead")
+  // A version this build doesn't have is a newer Buzz's to change, Undo
+  // and Restore backup too.
+  if (interestState(current, feature).state === "ahead")
     throw new Error(
       `${feature.title} was set by a newer Buzz. Update Buzz to change it here.`,
     );
@@ -366,7 +361,7 @@ function mark(receipts: Receipts, id: string, status: Receipt["status"]) {
 export function record(
   receipts: Receipts,
   feature: Feature,
-  action: "on" | "restart" | "resolve",
+  action: "on" | "restart",
   before: Interest | null,
   after: Interest,
 ) {
@@ -384,6 +379,15 @@ export function record(
       at: Date.now(),
     });
   } catch {}
+}
+
+/** Keep current: the owner keeps the Interest as it is now, which settles
+ * every change of the feature still left unresolved, not only the latest,
+ * so none comes back once a later one is trimmed away. Throws if storage
+ * refuses. */
+export function keep(receipts: Receipts, feature: Feature) {
+  for (const receipt of receipts.list(feature.id))
+    if (receipt.status === "unresolved") receipts.mark(receipt.id, "kept");
 }
 
 /** Settles each receipt of the feature left prepared, as by a crash or a

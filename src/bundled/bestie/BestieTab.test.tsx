@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { useSyncExternalStore } from "react";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Agent, AgentChange, Agents } from "../../features/agents/service";
@@ -1571,32 +1578,44 @@ it("offers Nightly review whose closing line was deleted the way it offers one s
   });
 });
 
-it("saves nothing from a dialog whose Interest changed after it opened, and won't put version 3 over a newer one", async () => {
+it("saves nothing from a dialog whose Interest changed after it opened, and closes it to review the latest", async () => {
   const user = userEvent.setup();
   const { relay } = community(ada.pubkey);
   const { agents, save } = host();
   const Tab = bestieTab(relay, agents).component;
   const { rerender } = render(<Tab agent={dreaming(dreamV2)} />);
-  await user.click(screen.getByRole("button", { name: "See changes" }));
-  const dialog = await screen.findByRole("dialog");
-  const newer = dreaming(
-    "<!-- buzz:bestie/dream.nightly v4 -->\nSteps from a newer Buzz.\n<!-- /buzz:bestie/dream.nightly -->",
-  );
-  rerender(<Tab agent={newer} />);
-  const update = within(dialog).getByRole("button", {
-    name: `Update to version ${dream.version}`,
-  });
-  expect(
-    within(dialog).getByText(
-      /changed after this opened, so this can't be saved/,
-    ),
-  ).toBeVisible();
-  expect(update).toBeDisabled();
-  await user.click(
-    within(dialog).getByRole("button", { name: "Show the latest" }),
-  );
-  expect(within(dialog).getByText(/was set by a newer Buzz/)).toBeVisible();
-  expect(update).toBeDisabled();
+  for (const [latest, row] of [
+    // The agent adds the owner's notes: Review, not Update, keeps them.
+    [
+      `${dreamV2}\n\n${ownLines}`,
+      `Nightly review was set up by hand. Version ${dream.version} is available.`,
+    ],
+    // A newer Buzz set it: nothing to do here.
+    [
+      "<!-- buzz:bestie/dream.nightly v4 -->\nSteps from a newer Buzz.\n<!-- /buzz:bestie/dream.nightly -->",
+      "Nightly review is version 4",
+    ],
+  ] as const) {
+    rerender(<Tab agent={dreaming(dreamV2)} />);
+    await user.click(screen.getByRole("button", { name: "See changes" }));
+    const dialog = await screen.findByRole("dialog");
+    rerender(<Tab agent={dreaming(latest)} />);
+    expect(
+      within(dialog).getByText(
+        /changed after this opened, so this can't be saved/,
+      ),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByRole("button", {
+        name: `Update to version ${dream.version}`,
+      }),
+    ).toBeDisabled();
+    await user.click(
+      within(dialog).getByRole("button", { name: "Show the latest" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText(row)).toBeVisible();
+  }
   expect(save).not.toHaveBeenCalled();
 });
 
@@ -1620,4 +1639,47 @@ it("says inside the dialog why a save was refused, keeping it open", async () =>
     "Attention changed. Review it and try again.",
   );
   expect(screen.getByRole("dialog")).toBeVisible();
+});
+
+it("opens a dialog without the alert of a save that failed before it", async () => {
+  const user = userEvent.setup();
+  const { relay } = community(ada.pubkey);
+  const { agents, save } = host();
+  save.mockRejectedValueOnce(
+    new Error("Attention changed. Review it and try again."),
+  );
+  const Tab = bestieTab(relay, agents).component;
+  render(<Tab agent={dreaming(dreamV2)} />);
+  // Update from the row fails, and says so beside it.
+  await user.click(screen.getByRole("button", { name: "Update" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Attention changed. Review it and try again.",
+  );
+  await user.click(screen.getByRole("button", { name: "See changes" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).queryByRole("alert")).toBeNull();
+  expect(
+    screen.queryByText("Attention changed. Review it and try again."),
+  ).toBeNull();
+});
+
+it("offers nothing to do to a Nightly review a newer Buzz set, not even Undo", async () => {
+  const user = userEvent.setup();
+  const { relay } = community(ada.pubkey);
+  const { agents, save } = host();
+  const Tab = bestieTab(relay, agents).component;
+  const { rerender } = render(<Tab agent={dreaming(dreamV2)} />);
+  await user.click(screen.getByRole("button", { name: "Update" }));
+  rerender(<Tab agent={dreaming(interestText(dream))} />);
+  expect(screen.getByRole("button", { name: "Undo" })).toBeVisible();
+  rerender(
+    <Tab
+      agent={dreaming(
+        "<!-- buzz:bestie/dream.nightly v4 -->\nSteps from a newer Buzz.\n<!-- /buzz:bestie/dream.nightly -->",
+      )}
+    />,
+  );
+  expect(screen.getByText("Nightly review is version 4")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  expect(save).toHaveBeenCalledTimes(1);
 });

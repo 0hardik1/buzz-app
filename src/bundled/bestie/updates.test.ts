@@ -15,6 +15,7 @@ import {
   applyInterest,
   DriftError,
   INTEREST_LIMIT,
+  keep,
   LATER_MS,
   type Receipt,
   Receipts,
@@ -616,4 +617,102 @@ it("refuses to put this build's version over one a newer Buzz set", async () => 
   expect(here.live()).toBe(newer);
   expect(here.save).not.toHaveBeenCalled();
   expect(receipts.list(dream.id)).toEqual([]);
+});
+
+it("won't undo or restore a backup over a version a newer Buzz set", async () => {
+  const here = attentionHere(v2);
+  const receipts = receiptsHere();
+  const update = await applyInterest(
+    here.agents,
+    here.agent(),
+    dream,
+    { action: "update" },
+    receipts,
+  );
+  const newer = marked(4, "Steps from a newer Buzz.");
+  here.agentWrites(newer);
+  here.save.mockClear();
+  for (const anyway of [false, true])
+    await expect(
+      applyInterest(
+        here.agents,
+        here.agent(),
+        dream,
+        { action: "undo", receipt: update, anyway },
+        receipts,
+      ),
+    ).rejects.toThrow("set by a newer Buzz");
+  expect(here.live()).toBe(newer);
+  expect(here.save).not.toHaveBeenCalled();
+});
+
+it("keeps a change left unresolved settled once the owner keeps it, through many restarts", () => {
+  const receipts = receiptsHere();
+  const interest: Interest = { type: "interest", instructions: v3 };
+  receipts.put({
+    id: "left",
+    part: dream.id,
+    action: "update",
+    from: "v2",
+    to: "v3",
+    before: { type: "interest", instructions: v2 },
+    after: interest,
+    status: "unresolved",
+    accepts: true,
+    at: 1,
+  });
+  expect(undoable(receipts, dream)?.status).toBe("unresolved");
+  keep(receipts, dream);
+  for (let count = 0; count < 11; count++)
+    record(receipts, dream, "restart", interest, interest);
+  expect(
+    receipts.list(dream.id).some(({ status }) => status === "unresolved"),
+  ).toBe(false);
+  expect(undoable(receipts, dream)).toBeUndefined();
+});
+
+it("settles every change left unresolved when the owner keeps the Interest, so none comes back", async () => {
+  const here = attentionHere(v2);
+  const receipts = receiptsHere();
+  const lost = () => here.save.mockRejectedValueOnce(new Error("timed out"));
+  // Update times out, then the agent edits.
+  lost();
+  await expect(
+    applyInterest(
+      here.agents,
+      here.agent(),
+      dream,
+      { action: "update" },
+      receipts,
+    ),
+  ).rejects.toThrow("timed out");
+  here.agentWrites(`${v2}\n\n${extra}`);
+  recover(receipts, dream, here.agent());
+  const first = undoable(receipts, dream);
+  expect(first?.status).toBe("unresolved");
+  // Restore backup times out too, and the agent edits again.
+  lost();
+  await expect(
+    applyInterest(
+      here.agents,
+      here.agent(),
+      dream,
+      { action: "undo", receipt: first as Receipt, anyway: true },
+      receipts,
+    ),
+  ).rejects.toThrow("timed out");
+  here.agentWrites(`${v2}\n\n${extra}\n\nA second edit.`);
+  recover(receipts, dream, here.agent());
+  expect(
+    receipts.list(dream.id).filter(({ status }) => status === "unresolved"),
+  ).toHaveLength(2);
+  keep(receipts, dream);
+  const interest = here.agent().attention["interest/bestie-dream"]
+    ?.value as Interest;
+  for (let count = 0; count < 11; count++)
+    record(receipts, dream, "restart", interest, interest);
+  expect(
+    receipts.list(dream.id).some(({ status }) => status === "unresolved"),
+  ).toBe(false);
+  expect(undoable(receipts, dream)).toBeUndefined();
 });

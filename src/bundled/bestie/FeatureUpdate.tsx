@@ -22,10 +22,10 @@ import {
   DriftError,
   INTEREST_LIMIT,
   type InterestOp,
+  keep,
   liveInterest,
   type Receipt,
   type Receipts,
-  record,
   recover,
   type ShownInterest,
   undoable,
@@ -84,6 +84,7 @@ export function FeatureUpdate({
   saving,
   run,
   error,
+  clearError,
 }: {
   agents: FeatureAgents;
   agent: Agent;
@@ -93,6 +94,8 @@ export function FeatureUpdate({
   run(task: () => Promise<void>): Promise<void>;
   /** Why the last save failed, shown in the dialog it was made from. */
   error?: string | undefined;
+  /** Forgets that, as a dialog opens: an earlier failure isn't its own. */
+  clearError(): void;
 }) {
   const [open, setOpen] = useState<Open>();
   // The additions left unchecked, by their text: the plan is worked out
@@ -111,7 +114,10 @@ export function FeatureUpdate({
     touched();
   }, [live, receipts, feature, agent]);
   if (!object || live === undefined) return null;
-  const view = (kind: Review) => setOpen({ kind, shown: object });
+  const view = (kind: Review) => {
+    clearError();
+    setOpen({ kind, shown: object });
+  };
   const latest = feature.version;
   const state = interestState(live, feature);
   const notes = feature.timer?.changes?.[latest]?.notes ?? [];
@@ -196,7 +202,15 @@ export function FeatureUpdate({
       />
     );
   let row: ReactNode = null;
-  if (last?.status === "unresolved")
+  // A newer Buzz's version has nothing this build can do to it.
+  if (state.state === "ahead")
+    row = (
+      <PreferenceRow
+        title={`${feature.title} is version ${state.version}`}
+        subtitle="Set by a newer Buzz. Update Buzz to change it here."
+      />
+    );
+  else if (last?.status === "unresolved")
     row = (
       <PreferenceRow
         title={`${feature.title} changed while an update was being saved`}
@@ -205,16 +219,9 @@ export function FeatureUpdate({
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
-              onClick={() => {
-                record(
-                  receipts,
-                  feature,
-                  "resolve",
-                  { type: "interest", instructions: live },
-                  { type: "interest", instructions: live },
-                );
-                touched();
-              }}
+              onClick={() =>
+                void run(async () => keep(receipts, feature)).finally(touched)
+              }
             >
               Keep current
             </Button>
@@ -223,13 +230,6 @@ export function FeatureUpdate({
             </Button>
           </div>
         }
-      />
-    );
-  else if (state.state === "ahead")
-    row = (
-      <PreferenceRow
-        title={`${feature.title} is version ${state.version}`}
-        subtitle="Set by a newer Buzz. Update Buzz to change it here."
       />
     );
   else if (state.state === "untracked" || state.state === "edited-markers")
@@ -277,7 +277,7 @@ export function FeatureUpdate({
     );
   const accepted = acceptedVersion(receipts, feature, live);
   const saved =
-    last?.status === "applied" ? (
+    state.state === "ahead" ? null : last?.status === "applied" ? (
       <PreferenceRow
         title={`Saved ${last.to === "untracked" ? "your earlier text" : `version ${last.to.slice(1)}`} · ${date(last.at)}`}
         subtitle="The text before is kept on this device."
@@ -303,11 +303,7 @@ export function FeatureUpdate({
   const from = "version" in shownState ? shownState.version : undefined;
   const steps = interestSection(text, feature)?.inside.trim() ?? text;
   const stale = !!open && JSON.stringify(open.shown) !== JSON.stringify(object);
-  // Only Undo and Restore backup put back a version this build doesn't have.
-  const ahead =
-    open?.kind !== "drift" &&
-    open?.kind !== "review" &&
-    shownState.state === "ahead";
+  const ahead = shownState.state === "ahead";
   const plan = open?.kind === "adopt" ? adoptPlan(text, feature) : undefined;
   const additions = plan?.parts.filter(({ kind }) => kind === "addition") ?? [];
   const differences =
@@ -342,18 +338,9 @@ export function FeatureUpdate({
       {stale && (
         <p>
           {feature.title} changed after this opened, so this can't be saved.{" "}
-          <Button
-            variant="outline"
-            onClick={() => open && setOpen({ ...open, shown: object })}
-          >
+          <Button variant="outline" onClick={close}>
             Show the latest
           </Button>
-        </p>
-      )}
-      {ahead && (
-        <p>
-          {feature.title} was set by a newer Buzz. Update Buzz to change it
-          here.
         </p>
       )}
       {error && (

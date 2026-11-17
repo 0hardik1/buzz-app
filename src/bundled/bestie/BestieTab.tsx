@@ -516,6 +516,7 @@ function FeatureSwitch({
           saving={saving}
           run={run}
           error={error}
+          clearError={() => setError(undefined)}
         />
       )}
       {/* A timer or Interest left without the rest, as when undoing a failed
