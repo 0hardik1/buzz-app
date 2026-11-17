@@ -242,28 +242,90 @@ it("a retired snapshot paces the next read from its settlement, after the broker
   }
 });
 
-it("a retired read that settles after disposal neither notifies nor reads again", async () => {
-  const h = setup();
-  let release!: (value: ReadonlyMap<string, "online">) => void;
-  h.read.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        release = resolve;
+it("disposal cancels a retired read, so its late refusal cannot reach a successor session", async () => {
+  const refusals = new Set<() => void>();
+  const old = setup();
+  let refuse!: () => void;
+  let signal!: AbortSignal;
+  // Like native reads: a cancel stops the request, and a refusal that does
+  // arrive is reported to every session for the same origin.
+  old.read.mockImplementationOnce(
+    (_authors, owned) =>
+      new Promise((_resolve, reject) => {
+        signal = owned;
+        refuse = () => {
+          if (owned.aborted) return;
+          for (const listener of refusals) listener();
+          reject(new Error("403"));
+        };
+        owned.addEventListener("abort", () => reject(owned.reason), {
+          once: true,
+        });
       }),
   );
   const listener = vi.fn();
-  h.owner.subscribe(key(3), listener);
+  old.owner.subscribe(key(3), listener);
   await vi.advanceTimersByTimeAsync(100);
-  expect(h.read).toHaveBeenCalledOnce();
-  h.owner.clear();
-  h.owner.dispose();
+  expect(old.read).toHaveBeenCalledOnce();
+  // A refusal elsewhere denies access, then the session is replaced.
+  old.owner.clear();
+  expect(signal.aborted).toBe(false);
+  old.owner.dispose();
+  expect(signal.aborted).toBe(true);
+  const successor = vi.fn();
+  refusals.add(successor);
   listener.mockClear();
-  release(new Map([[key(3), "online"]]));
+  refuse();
   await vi.advanceTimersByTimeAsync(120000);
+  expect(successor).not.toHaveBeenCalled();
   expect(listener).not.toHaveBeenCalled();
-  expect(h.read).toHaveBeenCalledOnce();
-  expect(h.owner.status(key(3))).toBe("unknown");
+  expect(old.read).toHaveBeenCalledOnce();
 });
+
+it.each([
+  ["held", false],
+  ["retired", true],
+])(
+  "leaving a community cancels its %s read, so the shared broker slot passes to the next community",
+  async (_name, retired) => {
+    const a = setup();
+    const b = setup();
+    let flight = false;
+    let signal!: AbortSignal;
+    // Like the development broker: one presence read in flight across all
+    // communities; a read that meets a held slot gets 204 (null).
+    a.read.mockImplementationOnce(
+      (_authors, owned) =>
+        new Promise((_resolve, reject) => {
+          signal = owned;
+          flight = true;
+          owned.addEventListener(
+            "abort",
+            () => {
+              flight = false;
+              reject(owned.reason);
+            },
+            { once: true },
+          );
+        }),
+    );
+    b.read.mockImplementation(async (authors) =>
+      flight ? null : new Map(authors.map((author) => [author, "online"])),
+    );
+    const leave = a.owner.subscribe(key(3), () => {});
+    await vi.advanceTimersByTimeAsync(100);
+    expect(a.read).toHaveBeenCalledOnce();
+    if (retired) a.owner.clear();
+    leave();
+    expect(signal.aborted).toBe(true);
+    b.owner.subscribe(key(4), () => {});
+    await vi.advanceTimersByTimeAsync(100);
+    expect(b.read).toHaveBeenCalledOnce();
+    expect(b.owner.status(key(4))).toBe("online");
+    a.owner.dispose();
+    b.owner.dispose();
+  },
+);
 
 it("local skips expire evidence; network failures enforce a minute delay even for new demand", async () => {
   const h = setup();

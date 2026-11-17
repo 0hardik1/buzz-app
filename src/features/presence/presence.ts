@@ -30,7 +30,10 @@ export function createPresence(
   let nextRead = Infinity,
     readGate = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** The read whose result still counts. */
   let controller: AbortController | undefined;
+  /** The read on the wire, retired or not, until it settles. */
+  let inflight: AbortController | undefined;
   let publisher: AbortController | undefined;
   let renewal: ReturnType<typeof setTimeout> | undefined;
   let stopPublisher: (() => void) | undefined;
@@ -121,7 +124,7 @@ export function createPresence(
     }
     if (!selected.size) {
       nextRead = Infinity;
-      controller = undefined; // Retire, do not abort: see clear().
+      abandon();
     }
     schedule();
     if (admitted || evicted)
@@ -156,7 +159,7 @@ export function createPresence(
       [...captured].map(([key, subject]) => [key, subject.revision]),
     );
     const owned = new AbortController();
-    controller = owned;
+    controller = inflight = owned;
     reading = true;
     readGate = now + 5000;
     nextRead = Infinity;
@@ -208,6 +211,7 @@ export function createPresence(
       nextRead = Math.max(nextRead, readGate);
       reading = false;
       if (controller === owned) controller = undefined;
+      if (inflight === owned) inflight = undefined;
       schedule();
     }
   }
@@ -215,9 +219,9 @@ export function createPresence(
     stopObservation?.();
     stopObservation = undefined;
     observedKeys = "";
-    // Retire, do not abort, a sent read: an abort settles here before the
-    // broker may admit it and start its gate, so pacing from that settlement
-    // would send the next read into the broker's busy window.
+    // Retire, do not abort, a sent read while demand remains: an abort settles
+    // here before the broker may admit it and start its gate, so pacing from
+    // that settlement would send the next read into the broker's busy window.
     controller = undefined;
     nextRead = Math.max(Date.now() + 100, readGate);
     if (publication) {
@@ -226,6 +230,13 @@ export function createPresence(
     }
     for (const subject of subjects.values()) change(subject, "unknown");
     schedule();
+  }
+  /** No demand remains: cancel the read on the wire, retired or not, so it
+   * frees the broker's shared presence slot for another community and a late
+   * refusal cannot reach a successor session. */
+  function abandon() {
+    controller = undefined;
+    inflight?.abort();
   }
   function stopPublishing() {
     publisher?.abort();
@@ -372,7 +383,7 @@ export function createPresence(
         }
         if (!subjects.size) {
           nextRead = Infinity;
-          controller = undefined; // Retire, do not abort: see clear().
+          abandon();
           clearTimeout(timer);
           observe();
         } else if (selected.size < 256 || priority !== subject.profiles > 0)
@@ -392,7 +403,7 @@ export function createPresence(
       stopObservation?.();
       stopPublishing();
       clearTimeout(timer);
-      controller?.abort();
+      abandon();
       subjects.clear();
       profiles.clear();
       selected.clear();
