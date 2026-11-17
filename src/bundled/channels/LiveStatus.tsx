@@ -9,6 +9,7 @@ import type { RelaySession } from "../../features/relay/session";
 import { useRecovery } from "../../features/relay/RecoveryNotice";
 import { liveRecoveryStatus } from "../../features/relay/live-recovery";
 import { Button } from "../../shared/design-system/ui/Button";
+import { channelDiagnostics } from "./ChannelSettingsPanel";
 import styles from "./LiveStatus.module.css";
 
 export function LiveStatus({
@@ -147,7 +148,10 @@ export function LiveStatus({
       );
     },
   };
-  if (diagnostics) {
+  // Diagnostics exists only in developer builds. Reading its gate here, not
+  // just where the report is requested, leaves the report out of a release
+  // bundle, which still needs this component for the notice below.
+  if (channelDiagnostics && diagnostics) {
     const connecting =
       snapshot.status === "connecting" ||
       (channelId && route?.status !== "live") ||

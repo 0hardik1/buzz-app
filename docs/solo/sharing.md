@@ -94,8 +94,10 @@ go in one kind 9000 per role, at most 100 each, and the roster is read once afte
 A relay without batch support adds only the first person an event names, so the
 roster decides who was added; anyone else, or anyone with an earlier addition
 still pending, gets the single addition, which reports their own failure. A batch
-is never resent, and stays in Outbox until everyone it names is in the roster or
-has their own addition; its **Retry** checks each person again. See the
+is never resent, and stays in the outbox until everyone it names is in the roster or
+has their own addition. It never blocks adding one of them again from People,
+which settles it. In developer builds, where Channel Settings → Diagnostics
+lists the Outbox, its **Retry** there checks each person again. See the
 relay's kind 9000 entry in block/buzz `NOSTR.md`.
 
 The sidebar's Shared mark is status only: it uses the verified current roster and
@@ -104,9 +106,12 @@ unclassified; absence of the indicator is **not** a privacy promise. Clicking th
 indicator opens the same dialog.
 
 An invitation saved by an older client without an explicit Member grant is never
-replayed as a participation invitation. **Retry** keeps it protected during the
-relay's 15-minute intake window. After expiry, Retry fences local delivery and
-checks the original event ID with a fresh strong read. Verified absence can
+replayed as a participation invitation. An explicit **Add** from People resolves
+it. So does **Retry** on its Outbox row, which only developer builds have:
+release builds do not render Channel Settings → Diagnostics, where Outbox is
+listed. Both keep it protected during the relay's 15-minute intake window.
+After expiry, both fence local delivery and check the original event ID with a
+fresh strong read. Verified absence can
 resolve it. If the command is recorded, a fresh signed roster reconciles its
 result. If that person has since been removed, Outbox **Retry** durably clears
 the old row without re-inviting them. An explicit **Add** from People still
@@ -118,7 +123,13 @@ contradicting negative readback keep recovery. This uses the existing Outbox/mem
 background retry or new control. If signed roles confirm that the earlier invite
 admitted a Guest, remove that person in People and invite them again. Recovery
 never silently promotes an existing Guest. A definitively failed invitation can
-also be replaced after explicitly dismissing it in Outbox.
+also be replaced after explicitly giving it up: People reports it with
+**Discard** beside **Retry**, including one that expired on another surface or
+in an earlier launch, and adding the person again then sends a new invitation.
+In developer builds, removing it in Outbox does the same. Discard covers
+single additions known not to have been sent, and unconfirmed agent requests
+past the intake window. An unconfirmed member invitation is not discarded; Add
+or Retry resolves it through its recovery check.
 
 ### General access
 

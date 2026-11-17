@@ -57,7 +57,10 @@ import { Panel } from "../../shared/design-system/ui/Panel";
 import { Button } from "../../shared/design-system/ui/Button";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { ChannelHeaderMenu } from "./ChannelHeaderMenu";
-import { ChannelSettingsPanel } from "./ChannelSettingsPanel";
+import {
+  ChannelSettingsPanel,
+  channelDiagnostics,
+} from "./ChannelSettingsPanel";
 import { ChannelJoinNotice } from "../../features/messages/ChannelJoinNotice";
 import { ChannelStateNotice, ChannelStateRegion } from "./ChannelStateNotice";
 import {
@@ -407,6 +410,9 @@ function ChannelWorkspace({
   const list = useChannelRoster(queries.channels);
   const initialList = useRef(list);
   useFirstChannel({ scope, cached, queries, list, membership });
+  // Only Diagnostics reads the result. The hook stays in every build because
+  // it also loads the account's groups, stars and mutes when nothing else has,
+  // and readers such as community unread wait for them without asking.
   const preferences = useSidebarPreferences(queries.sidebarPreferences);
   useEffect(() => {
     // Initial channel discovery cancels in-flight reads as it settles access.
@@ -2143,46 +2149,55 @@ function ChannelWorkspace({
       onOpenLink={openLink}
       close={closeSettings}
     >
-      <UnreadOptions session={queries} channelId={current?.id} />
-      <LiveStatus
-        live={queries.live}
-        channelId={current?.id}
-        partialRoster={list.coverage === "partial"}
-        diagnostics
-      />
-      <p>
-        {list.coverage === "partial" ? "Partial roster" : "Roster"} ·{" "}
-        {channels.length} channels
-      </p>
-      <Button type="button" onClick={() => queries.channels.refreshList?.()}>
-        Refresh channels
-      </Button>
-      {preferences.error && <p>Saved groups and stars: {preferences.error}</p>}
-      {preferences.status !== "unsupported" && (
-        <Button
-          type="button"
-          disabled={preferences.status === "loading"}
-          onClick={preferences.reload}
-        >
-          Refresh groups and stars
-        </Button>
-      )}
-      {current && (
-        <Button
-          type="button"
-          onClick={() => queries.channels.refresh?.(current.id)}
-        >
-          Refresh messages
-        </Button>
-      )}
-      {queries.outbox ? (
-        <OutboxStatus
-          outbox={queries.outbox}
-          profiling={queries.profiling}
-          memberAdditions={queries.memberAdditions}
-        />
-      ) : (
-        <RelayTimings profiling={queries.profiling} />
+      {channelDiagnostics && (
+        <>
+          <UnreadOptions session={queries} channelId={current?.id} />
+          <LiveStatus
+            live={queries.live}
+            channelId={current?.id}
+            partialRoster={list.coverage === "partial"}
+            diagnostics
+          />
+          <p>
+            {list.coverage === "partial" ? "Partial roster" : "Roster"} ·{" "}
+            {channels.length} channels
+          </p>
+          <Button
+            type="button"
+            onClick={() => queries.channels.refreshList?.()}
+          >
+            Refresh channels
+          </Button>
+          {preferences.error && (
+            <p>Saved groups and stars: {preferences.error}</p>
+          )}
+          {preferences.status !== "unsupported" && (
+            <Button
+              type="button"
+              disabled={preferences.status === "loading"}
+              onClick={preferences.reload}
+            >
+              Refresh groups and stars
+            </Button>
+          )}
+          {current && (
+            <Button
+              type="button"
+              onClick={() => queries.channels.refresh?.(current.id)}
+            >
+              Refresh messages
+            </Button>
+          )}
+          {queries.outbox ? (
+            <OutboxStatus
+              outbox={queries.outbox}
+              profiling={queries.profiling}
+              memberAdditions={queries.memberAdditions}
+            />
+          ) : (
+            <RelayTimings profiling={queries.profiling} />
+          )}
+        </>
       )}
     </ChannelSettingsPanel>
   );

@@ -8,7 +8,10 @@ import {
   type ReactNode,
 } from "react";
 import { ChannelHeaderMenu } from "../channels/ChannelHeaderMenu";
-import { ChannelSettingsPanel } from "../channels/ChannelSettingsPanel";
+import {
+  ChannelSettingsPanel,
+  channelDiagnostics,
+} from "../channels/ChannelSettingsPanel";
 import { ChannelMembersDialog } from "../channels/ChannelMembersDialog";
 import { UnreadOptions } from "../channels/UnreadBadge";
 import { ChannelBody } from "../channels/ChannelBody";
@@ -404,7 +407,9 @@ export function BestieConversation({
                   secondary.openConversationLink(channel.id, target)
                 }
               >
-                <UnreadOptions session={session} channelId={channel.id} />
+                {channelDiagnostics && (
+                  <UnreadOptions session={session} channelId={channel.id} />
+                )}
               </ChannelSettingsPanel>
             ),
           },

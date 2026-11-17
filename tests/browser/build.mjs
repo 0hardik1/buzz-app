@@ -10,6 +10,9 @@ import { fileURLToPath } from "node:url";
 const PAIRING_CARD = "src/bundled/pairing/MobileApp.tsx";
 const PAIRING_IMPORT = 'import { PairingSettings } from "./PairingSettings";';
 
+// The panel owns the gate that it, its callers and its tools read for Diagnostics.
+const DIAGNOSTICS_PANEL = "src/bundled/channels/ChannelSettingsPanel.tsx";
+
 const root = fileURLToPath(new URL("../../", import.meta.url));
 
 // Playwright owns this worker-scoped build. Only compiled assets are shared;
@@ -30,6 +33,7 @@ export async function buildApp(
 ) {
   const directory = await mkdtemp(join(tmpdir(), "buzz-browser-build-"));
   let pairingSwapped = false;
+  let diagnosticsOpened = false;
   try {
     const config = {
       root,
@@ -125,22 +129,28 @@ export async function buildApp(
       },
     });
     // Channel settings → Diagnostics renders only in developer builds. Files
-    // whose journeys reach its tools open that one gate and change nothing
-    // else in the release bundle; the gate is covered by the panel's unit tests.
+    // whose journeys reach its tools open that one gate, for the panel and for
+    // everything that reads it from the panel, and change nothing else in the
+    // release bundle; the gate is covered by the panel's unit tests.
     if (channelDiagnostics)
       config.plugins.push({
         name: "fixture-channel-diagnostics",
         enforce: "pre",
         transform(code, id) {
-          if (
-            id !== join(root, "src/bundled/channels/ChannelSettingsPanel.tsx")
-          )
-            return;
+          if (id !== join(root, DIAGNOSTICS_PANEL)) return;
           const seam =
             'import { developerMode } from "../../features/developer/mode";';
           if (!code.includes(seam))
             throw new Error("Missing channel diagnostics seam");
+          diagnosticsOpened = true;
           return code.replace(seam, "const developerMode = true;");
+        },
+        buildEnd(error) {
+          // A moved panel would otherwise build a bundle without Diagnostics.
+          if (!error && !diagnosticsOpened)
+            throw new Error(
+              `The channel diagnostics fixture never opened the gate in ${DIAGNOSTICS_PANEL}.`,
+            );
         },
       });
     if (startupFailureFixture)

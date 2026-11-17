@@ -12,8 +12,10 @@ import {
 import userEvent from "@testing-library/user-event";
 import { createPortal } from "react-dom";
 import { afterEach, assert, expect, it, onTestFinished, vi } from "vitest";
-import { ChannelSettingsPanel } from "./ChannelSettingsPanel";
-import { developerMode } from "../../features/developer/mode";
+import {
+  ChannelSettingsPanel,
+  channelDiagnostics,
+} from "./ChannelSettingsPanel";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import {
   ChannelLifecycleUnconfirmed,
@@ -32,8 +34,8 @@ afterEach(() => {
 
 it("shows known channel details with diagnostics collapsed until requested in a developer build", async () => {
   // Vitest's jsdom page is a development bundle on localhost, as `just web`
-  // and `just desktop` serve it.
-  expect(developerMode).toBe(true);
+  // and `just desktop` serve it. Callers build their tools behind this gate.
+  expect(channelDiagnostics).toBe(true);
   const user = userEvent.setup();
   render(
     <ChannelSettingsPanel
@@ -73,6 +75,7 @@ it("leaves Diagnostics and its tools out of a release build", async () => {
   vi.stubEnv("DEV", false);
   vi.resetModules();
   const release = await import("./ChannelSettingsPanel");
+  expect(release.channelDiagnostics).toBe(false);
   const rendered = vi.fn();
   function Tool() {
     rendered();
@@ -94,18 +97,17 @@ it("leaves Diagnostics and its tools out of a release build", async () => {
   // Nothing trails the details list: no disclosure, wrapper or gap for one.
   expect(content.querySelector("details")).toBeNull();
   expect(content.lastElementChild?.tagName).toBe("DL");
+  // Its tools never render, so their hooks and subscriptions never run.
+  expect(rendered).not.toHaveBeenCalled();
+  // A caller that reads the gate has no tools to pass.
   rerender(
     <release.ChannelSettingsPanel
       scope="community:viewer"
       channel={undefined}
       close={() => {}}
-    >
-      <Tool />
-    </release.ChannelSettingsPanel>,
+    />,
   );
   expect(content).toBeEmptyDOMElement();
-  // Its tools never render, so their hooks and subscriptions never run.
-  expect(rendered).not.toHaveBeenCalled();
 });
 
 it("closes with Escape or its close button without swallowing other keys", async () => {

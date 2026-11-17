@@ -1782,8 +1782,14 @@ Editor saves carry `expected-revision=<loaded
 head id>` (or `none` when absent); template seeds carry `none`. On relays supporting
 Canvas compare-and-swap, stale preconditions are refused atomically before mutation.
 A proven conflict keeps the local draft and dismisses only that rejected outbox
-operation so a reviewed save can proceed. Unknown outcomes remain in Outbox and
-block replacement; exact signed retries keep their original precondition. The
+operation so a reviewed save can proceed. An earlier save that may still arrive
+(still sending, or unconfirmed within the relay's 15-minute intake window)
+remains in the outbox and blocks replacement; its error keeps the draft and says
+to save again once 15 minutes have passed since that save. One that cannot
+arrive (known not to have been sent, or unconfirmed and past the window) is
+discarded by the next save, which proceeds on the head it has just read.
+Standalone recipe saves follow the same rule. Neither needs the Outbox list,
+which only developer builds render. Exact signed retries keep their original precondition. The
 post-write different-head check remains conservative and also retains the draft.
 
 **Compatibility gate:** deploy with a relay supporting Canvas revision preconditions

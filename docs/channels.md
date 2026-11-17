@@ -222,9 +222,9 @@ recover attempts. A failed or uncertain admission shows its error and leaves the
 form editable. Creating again with identical details republishes the same signed
 Create event, with the same UUID and signature, so a delivered first attempt is
 not duplicated; changed details abandon that attempt and sign a new one. Closing
-the dialog forgets the attempt and dismisses its Outbox entry. Nothing restores
+the dialog forgets the attempt and dismisses its outbox entry. Nothing restores
 after reopening, reload or session replacement, so a stale Create can never lock
-the form; an entry left behind by a reload stays unretried in the Outbox. Setup failures after admission produce a dismissible notice
+the form; an entry left behind by a reload stays unretried in the outbox, where only a developer build's Outbox list (Channel Settings → Diagnostics) shows it or removes it. Setup failures after admission produce a dismissible notice
 without navigating again; setup is never continued in the background. New-chat intent uses the Channels version-1
 page route `{ kind: "solo-draft", project?, agent? }` (see [Solo](solo/README.md));
 only that intent, never draft text, enters history.
@@ -1649,7 +1649,11 @@ sent. Reply counts open a bounded thread view; attachments are
 links. Routine freshness labels are not shown. Channel Settings → Diagnostics
 exposes refresh, outbox inspection and timings in developer builds only
 (`just web`, `just desktop`): the panel gates the whole section on
-`developerMode`, so release builds neither render it nor mount its tools. Packaged builds do not
+`developerMode` and exports that gate as `channelDiagnostics`. Its callers read
+it before building the tools, and `LiveStatus`, which release builds keep for
+the live-updates notice, reads it before rendering its Diagnostics report.
+Release builds neither render the section nor mount its tools, and their bundle
+carries neither the tools nor that report. Packaged builds do not
 include the development relay broker. GitHub fetches public data only; signed-in
 GitHub actions remain on GitHub. A saved-groups/stars failure keeps its specific
 reason under **Channel Settings → Diagnostics → Saved groups and stars**, in developer builds.
@@ -1665,7 +1669,8 @@ stale read cannot erase the retained local operation.
 Use `session.messages.send(channelId, text)` for channel messages or
 `session.messages.reply(channelId, resolvedRootId, text)` for thread replies. Confirmed sends
 leave the pending outbox automatically and remain in bounded retained data.
-**Outbox → Relay timings** captures and exports stage timings, including in-flight
+In developer builds, **Channel Settings → Diagnostics → Outbox → Relay timings**
+captures and exports stage timings, including in-flight
 signing and publishing, without logging message content.
 
 

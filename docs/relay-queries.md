@@ -610,8 +610,10 @@ Storage is partitioned by community endpoint and viewer; no private keys are
 stored. Restored pending operations become `unknown` unless previously failed. Confirmed
   records remain confirmed and do not re-enter the pending outbox.
 They do not publish automatically after restart. Explicit retry reuses the saved
-signed event. The Channels timeline exposes retries for failed/unknown messages. Its Outbox
-control also exposes restored pending operations and explicit removal. Removing an item
+signed event. The Channels timeline exposes retries for failed/unknown messages. In
+developer builds only, the Outbox list in Channel Settings → Diagnostics also exposes
+restored pending operations and explicit removal; release builds render no Outbox list,
+and a failed operation is retried or discarded on the surface that sent it. Removing an item
 stops retaining its local overlay; it is not a relay deletion.
 Session disposal cancels work and blocks late state changes. Cache clearing keeps
 the outbox: clearing fetched data is not cancelling a user's write.
@@ -811,8 +813,10 @@ fixture using ephemeral signing keys and an in-memory relay; messages containing
 `session.profiling.snapshot()` returns the latest 2,048 completed samples plus active
 spans. Samples contain stage, event/request ID, start, duration, outcome and optional
 work count. They never contain message content, filters, credentials or signatures.
-Open **Outbox → Relay timings → Capture timings** while a send is stuck; active
+In a developer build, open **Channel Settings → Diagnostics → Outbox → Relay
+timings → Capture timings** while a send is stuck; active
 spans show elapsed time. **Export timings** downloads JSON for comparison.
+Release builds do not render Diagnostics, so they have no timing capture.
 
 - `send.local`: synchronous insertion and view propagation.
 - `outbox.load`, `outbox.queue`, `outbox.persist`: hydration, queueing and durable transactions.

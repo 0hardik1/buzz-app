@@ -50,6 +50,16 @@ import {
 } from "./ChannelDetailsEditor";
 import { writeClipboardText } from "../../shared/clipboard";
 
+/**
+ * Whether Channel settings shows Diagnostics: developer builds only. The panel,
+ * the callers that build its tools and a tool that release builds share read
+ * this one binding, so a release build renders no section and its bundle leaves
+ * out what only Diagnostics uses. It is `developerMode` under another name, not
+ * a copy: the bundler folds only the original constant into the modules that
+ * read it.
+ */
+export { developerMode as channelDiagnostics };
+
 export function ChannelSettingsPanel({
   channel,
   scope,
@@ -67,8 +77,8 @@ export function ChannelSettingsPanel({
   channel: ChannelSummary | undefined;
   scope: string;
   close(): void;
-  /** Diagnostics tools. Developer builds only: release builds never mount them. */
-  children: ReactNode;
+  /** Diagnostics tools, built by the caller behind `channelDiagnostics`. */
+  children?: ReactNode;
   setupTools?: ReactNode;
   details?: ChannelDetailsCapability;
   /** With `membership`, offers the community owner/admin auto-join switch. */

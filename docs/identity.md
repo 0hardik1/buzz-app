@@ -1493,7 +1493,7 @@ authentication. Events older than 15 minutes get a strong ID readback instead of
 being republished or silently re-dated. For ordinary messages, missing/failed
 readback retains uncertainty; inspect the conversation before explicitly sending
 another. Expired no-role Solo invitations have a narrower verified retirement
-path through [Outbox Retry](solo/sharing.md).
+path through [**Add** in People, or Outbox Retry in developer builds](solo/sharing.md).
 
 Protected media and uploads are native, because the webview cannot attach Blossom
 (kind 24242) authentication itself: `<img>`, `<video>` and `<audio>` send no custom

@@ -81,7 +81,9 @@ restarts rebuild rather than reuse stale assets.
 
 Channel Settings → Diagnostics renders only in developer builds. Spec files
 whose journeys reach its tools set `channelDiagnostics: true`, which opens that
-one gate in an otherwise unchanged release bundle. Every other file stays on the
+one gate, for the panel and everything that reads it from the panel, in an
+otherwise unchanged release bundle. If the panel has moved or its gate has changed, the
+build fails rather than quietly producing a release bundle. Every other file stays on the
 release bundle, where the Canvas confirmation journey confirms Diagnostics is
 absent; `developmentReact` files get it through the app's own developer signal.
 
@@ -414,8 +416,9 @@ errors, paging, moving away from the threshold, or unmounting retire that intent
 manual retry without repeated wheel gestures resubmitting it. These are workflow
 controls, not latency guarantees under arbitrary scroll speed or relay load.
 
-Live-status checks keep routine connecting/pending progress in Conversation
-options → Diagnostics, with no warning-height flash. Bounded automatic quota
+Live-status checks keep routine connecting/pending progress in Channel
+Settings → Diagnostics, which they open with `channelDiagnostics` because only
+developer builds render it, with no warning-height flash. Bounded automatic quota
 recovery also stays there until fresh EOSE confirms recovery. Exhausted retries,
 unsupported quota pauses, other errors, limited coverage and deferred/failed
 rosters retain the visible warning and Retry. Held-EOSE controls span automatic
