@@ -45,6 +45,7 @@ import {
 import {
   CheckIcon,
   CopyIcon,
+  RobotIcon,
   XIcon,
 } from "../../shared/design-system/icons/index";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
@@ -781,7 +782,10 @@ function ProfileDetails({
             />
           </motion.button>
           <div className={styles.identity}>
-            <h2 className="text-heading">{headingName}</h2>
+            <h2 className="text-heading">
+              {displayAgent && <RobotIcon className={styles.agentIcon} />}
+              {headingName}
+            </h2>
             <StatusDisplay session={session} status={userStatus} />
           </div>
           {(canSetStatus || canMessage || canEdit) && (
