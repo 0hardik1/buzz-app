@@ -921,7 +921,7 @@ and are asked to sign in again in Buzz.
   activity. Threads shows channel threads.
   In Team, DMs shows direct messages, Mentions shows messages that mention you,
   and Channels shows channels only; Solo offers none of the three.
-  A channel's row shows the avatar of whoever posted there last.
+  A channel’s row keeps its color-matched, two-letter channel monogram as new messages arrive.
   Reactions lists reactions to your messages. The Solo list adds two views:
   Working shows Solo chats with an active agent; Waiting shows Solo chats where
   the other side spoke last and no agent is working. Scroll the filter buttons
@@ -946,16 +946,15 @@ and are asked to sign in again in Buzz.
   **Open [section name]** opens a dedicated list in the main content area without expanding
   the card. Back and Forward return between the list and its items. Pins remains uncapped. The Team card keeps
   **Activity**, **Channels**, **Threads**, **DMs**, **Mentions**, and **Drafts & sent**
-  in an icon strip above up to four recent conversations. Each view opens the
-  Team list; Activity is the **All** view. A small mark below a view indicates
-  unread conversations and disappears when all are read. The view
-  you choose is saved locally for this account and community. Bestie conversations
+  in a segmented strip that filters the rows inside the card without changing the
+  main pane. Activity is the **All** view; its bell is the only segment with an
+  unread mark. Drafts & sent shows Team drafts and sent messages in the card. Bestie conversations
   follow normal ordering; the Bestie plugin also appears under Plugins.
   Team's views keep Solo chats in the Solo collection.
   Expanded Team and Solo lists show one-line message previews and the same
   filter and sort controls; their selection is saved for each list.
   **Open [section name]** opens the full,
-  centered conversation list; selecting a row opens its conversation in the
+  conversation list in a sheet over the left rail; selecting a row opens its conversation in the
   reading area. **Solo** lists active Solo chats by recent activity, including
   chats you have just started before an agent replies. Its **+** opens New chat.
   Agents shows up to four available agents, ranked by existing
@@ -1078,17 +1077,17 @@ and are asked to sign in again in Buzz.
   grabbers brighten only when the pointer is close and appear immediately under it.
   Hovering elsewhere on the card keeps them hidden. Keyboard focus reveals controls
   immediately, and touch devices show them without waiting.
-- **Team card**: Activity, Channels, Threads, DMs, and Mentions show an unread mark
-  when their view has unread conversations. Drafts & sent sits beside these views.
+- **Resize Team and Solo cards**: move near a card’s bottom center to reveal its resize capsule. Drag down to show more rows or up to show fewer. The count is saved on this device for your account and community. Focus the capsule and use arrow keys to adjust it; Escape cancels a drag.
+- **Team card**: Activity, Channels, Threads, DMs, Mentions, and Drafts & sent
+  filter the card in place. Only Activity shows the aggregate unread mark.
   Right-click a view icon (or focus it and press Shift+F10) to mark that view's
   items read or unread. Marking unread applies on this device only. Threads and
   mentions affect their matching threads/messages, not unrelated channel activity.
-  Recent conversations appear below the strip; **Open Team** opens the remaining
-  conversations when more than four are available. The **Team** heading also opens
-  the full conversation list.
-  Opening Team this way selects no conversation: the main panel says
-  **No conversation selected** until you pick a row, and **+** starts a new
-  message. A view with nothing to show says so; with **Unread only** on, it says
+  Recent conversations appear below the strip; **Open Team** opens the full list
+  in a sheet over the rail. Card headings, including **Team** and **Solo**, open
+  the same kind of sheet. The current conversation and its draft stay in place.
+  Use **Close expanded card** or Escape to return to the cards.
+  A view with nothing to show says so; with **Unread only** on, it says
   **All caught up**.
   People and one-to-one DM avatars in sidebar cards show online, away, or offline
   presence when known; channels and group chats do not show a single presence dot.

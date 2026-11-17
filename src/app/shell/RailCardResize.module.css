@@ -1,0 +1,39 @@
+.handle {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--space-8) + var(--space-4));
+  height: var(--space-3);
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+.handle::after {
+  content: "";
+  position: absolute;
+  inset-inline: var(--space-2);
+  top: 50%;
+  height: var(--space-1);
+  transform: translateY(-50%);
+  border-radius: var(--radius-pill);
+  background: var(--text-subtle);
+  opacity: var(--rail-resize-proximity, 0);
+  transition: opacity var(--duration-fast) var(--easing-state);
+  pointer-events: none;
+}
+.handle:hover::after,
+.handle:focus-visible::after,
+.handle[data-resizing]::after {
+  opacity: 1;
+}
+@media (hover: none) {
+  .handle::after {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .handle::after {
+    transition: none;
+  }
+}

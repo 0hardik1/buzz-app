@@ -46,6 +46,7 @@ export function RailConversationList({
       ? `${scope.communityOrigin}:${scope.viewer}`
       : `${scope.communityOrigin}:${scope.viewer}:rail-page:${section}`,
   );
+  const scroll = useRef<HTMLDivElement>(null);
   const agentViews = section === "solo";
   const view = agentViews ? withoutTeamViews(saved) : withoutAgentViews(saved);
   // Whole conversations use the shared feed. Exact message/thread destinations
@@ -112,7 +113,7 @@ export function RailConversationList({
           agentViews={agentViews}
         />
       )}
-      <div className={feedStyles.scroll}>
+      <div ref={scroll} className={feedStyles.scroll}>
         <ConversationList
           session={session}
           navigator={navigator}
@@ -128,6 +129,7 @@ export function RailConversationList({
                 : undefined
           }
           wrapRow={wrapRow}
+          virtualScrollRef={scroll}
         />
         {extras.length > 0 && (
           <ul className={feedStyles.list} aria-label="Other destinations">

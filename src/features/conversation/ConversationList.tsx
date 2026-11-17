@@ -8,6 +8,7 @@ import {
   useContext,
   useCallback,
   type ReactNode,
+  type RefObject,
   memo,
   useEffect,
   useLayoutEffect,
@@ -16,6 +17,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { ConversationRows, type VirtualRowProps } from "./ConversationRows";
 import { selectProfiles } from "../relay/profile-selection";
 import type { RelaySession } from "../../features/relay/session";
 import type { ChannelSummary, Profile } from "../../features/relay/contracts";
@@ -393,6 +395,7 @@ export function ConversationList({
   home,
   within,
   wrapRow,
+  virtualScrollRef,
 }: {
   session: RelaySession;
   navigator: Navigation;
@@ -406,6 +409,8 @@ export function ConversationList({
   within?: ReadonlySet<string> | undefined;
   /** Keep host-owned row context actions around the shared feed renderer. */
   wrapRow?: WrapRow;
+  /** The collection host's existing scrollport; other hosts keep native rows. */
+  virtualScrollRef?: RefObject<HTMLElement | null>;
 }) {
   useEffect(() => session.channels.ensureList(), [session]);
   const ready = useSyncExternalStore(
@@ -484,15 +489,17 @@ export function ConversationList({
 
   return (
     <div className={styles.activity} data-activity-sidebar="">
-      <ul
-        className={feedStyles.list}
-        aria-label={filter === "reactions" ? "Reactions" : "Conversations"}
+      <ConversationRows
+        keys={order}
+        scrollRef={virtualScrollRef}
+        label={filter === "reactions" ? "Reactions" : "Conversations"}
       >
-        {order.map((key) => {
+        {(key, virtualRow) => {
           const id = key.slice(2);
           return key.startsWith("e:") ? (
             <EventRow
               key={key}
+              virtualRow={virtualRow}
               id={id}
               session={session}
               scope={scope}
@@ -508,6 +515,7 @@ export function ConversationList({
           ) : key.startsWith("r:") ? (
             <ReactionListRow
               key={key}
+              virtualRow={virtualRow}
               id={id}
               sender={sender}
               session={session}
@@ -520,6 +528,7 @@ export function ConversationList({
           ) : (
             <IndexedRow
               key={key}
+              virtualRow={virtualRow}
               id={id}
               wrapRow={wrapRow}
               scope={scope}
@@ -532,8 +541,8 @@ export function ConversationList({
               need={need}
             />
           );
-        })}
-      </ul>
+        }}
+      </ConversationRows>
       {settled && !keys.length && (
         <EmptyState
           frame="none"
@@ -672,6 +681,7 @@ const EventRow = memo(function EventRow({
   readOnOpen,
   need,
   wrapRow,
+  virtualRow,
 }: {
   id: string;
   session: RelaySession;
@@ -685,6 +695,7 @@ const EventRow = memo(function EventRow({
   readOnOpen: boolean;
   need: Need;
   wrapRow?: WrapRow;
+  virtualRow?: VirtualRowProps | undefined;
 }) {
   const notify = useToastNotification();
   const event = useConversationEvent(session, id);
@@ -717,13 +728,19 @@ const EventRow = memo(function EventRow({
       onPointerEnter={() => session.channels.prepare?.(event.channelId)}
       onFocus={() => session.channels.prepare?.(event.channelId)}
       avatar={
-        <Avatar
-          size="fill"
-          alt=""
-          fallback={name}
-          src={avatarMedia(profile?.picture, session.media)}
-          shape={profile?.isAgent ? "squircle" : "circle"}
-        />
+        channel &&
+        channel.channelType !== "dm" &&
+        channel.channelType !== "solo" ? (
+          <ChannelAvatar size="fill" name={channel.name} />
+        ) : (
+          <Avatar
+            size="fill"
+            alt=""
+            fallback={name}
+            src={avatarMedia(profile?.picture, session.media)}
+            shape={profile?.isAgent ? "squircle" : "circle"}
+          />
+        )
       }
       placeIcon={
         event.rootId ? (
@@ -746,7 +763,11 @@ const EventRow = memo(function EventRow({
     />
   );
   return (
-    <li data-activity-event={event.key} className={feedStyles.item}>
+    <li
+      {...virtualRow}
+      data-activity-event={event.key}
+      className={feedStyles.item}
+    >
       {wrapRow
         ? wrapRow(
             {
@@ -860,9 +881,11 @@ const ChannelActivityRow = memo(function ChannelActivityRow({
   unreadOnly,
   selected,
   onOpen,
+  virtualRow,
 }: {
   /** A stable host wrapper; the row describes itself to it. */
   wrapRow?: WrapRow;
+  virtualRow?: VirtualRowProps | undefined;
   scope: NavigationScope;
   session: RelaySession;
   record: ConversationRecord;
@@ -882,7 +905,6 @@ const ChannelActivityRow = memo(function ChannelActivityRow({
     : channel.preview
       ? messagePreview(channel.preview)
       : "";
-  const poster = dm || solo ? undefined : latest?.authorId;
   const content = (
     <ConversationRow
       layout="feed"
@@ -902,17 +924,8 @@ const ChannelActivityRow = memo(function ChannelActivityRow({
               shape: profiles.get(id)?.isAgent ? "squircle" : "circle",
             }))}
           />
-        ) : poster ? (
-          // A channel shows who posted last, not its initials.
-          <Avatar
-            size="fill"
-            alt=""
-            shape={profiles.get(poster)?.isAgent ? "squircle" : "circle"}
-            fallback={nameOf(poster)}
-            src={avatarMedia(profiles.get(poster)?.picture, session.media)}
-          />
         ) : !dm && !solo ? (
-          <ChannelAvatar size="fill" shape="squircle" name={channel.name} />
+          <ChannelAvatar size="fill" name={channel.name} />
         ) : (
           <Avatar
             size="fill"
@@ -950,7 +963,11 @@ const ChannelActivityRow = memo(function ChannelActivityRow({
     />
   );
   return (
-    <li data-activity-row={channel.id} className={feedStyles.item}>
+    <li
+      {...virtualRow}
+      data-activity-row={channel.id}
+      className={feedStyles.item}
+    >
       {wrapRow
         ? wrapRow(
             {
@@ -1017,6 +1034,7 @@ const ReactionListRow = memo(function ReactionListRow({
   selected,
   onOpen,
   need,
+  virtualRow,
 }: {
   id: string;
   sender: ConversationQuery["sender"];
@@ -1026,6 +1044,7 @@ const ReactionListRow = memo(function ReactionListRow({
   selected: Extract<OpenTarget, { kind: "conversation" }> | undefined;
   onOpen: Open;
   need: Need;
+  virtualRow?: VirtualRowProps | undefined;
 }) {
   const item = useConversationReaction(session, id, sender);
   const channel = useConversationRecord(
@@ -1043,7 +1062,11 @@ const ReactionListRow = memo(function ReactionListRow({
   );
   if (!item) return null;
   return (
-    <li data-activity-reaction={item.id} className={feedStyles.item}>
+    <li
+      {...virtualRow}
+      data-activity-reaction={item.id}
+      className={feedStyles.item}
+    >
       <ReactionRow
         item={item}
         session={session}

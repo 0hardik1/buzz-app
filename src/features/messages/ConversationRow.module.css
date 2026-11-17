@@ -3,7 +3,7 @@
  *   avatar | (icon) place ……… time / ✓
  *   avatar | preview …………… state
  *
- * The --conversation-row-* properties adjust density and unread color; their fallbacks
+ * The --conversation-row-* properties adjust density; their fallbacks
  * define the default composition. */
 /* Defaults are the "comfortable" density: minimums for the narrowest
  * sidebar. A wider sidebar gives the extra width to the preview. */
@@ -188,16 +188,13 @@
   width: var(--space-2);
   height: var(--space-2);
   border-radius: var(--radius-pill);
-  background: var(
-    --conversation-row-unread-color,
-    var(--text-navigation-unread)
-  );
+  background: var(--affordance-accent-prominent);
 }
 .avatarState .unreadDot {
   box-shadow: 0 0 0 var(--space-half) var(--surface-rail-card);
 }
 
-/* Selected labels and dots share the selected row's foreground. */
+/* Selected text follows the row; unread dots retain the theme accent. */
 
 /* A selected row takes the sidebar's accent; every part follows its ink. */
 [data-conversation-row][data-selected]
@@ -205,7 +202,7 @@
   color: inherit;
 }
 [data-conversation-row][data-selected] .unreadDot {
-  background: currentColor;
+  box-shadow: 0 0 0 var(--space-half) var(--surface-rail-card);
 }
 
 /* Mark as read: beside the time, on hover or keyboard focus, on unread rows;

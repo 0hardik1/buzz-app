@@ -1,0 +1,55 @@
+.sheet {
+  position: absolute;
+  inset: var(--space-4) var(--space-1) var(--space-1);
+  z-index: 3;
+  min-width: 0;
+  min-height: 0;
+  container: activity / inline-size;
+  transform: translateY(0);
+  opacity: 1;
+  transition:
+    transform var(--duration-panel-enter) var(--easing-enter),
+    opacity var(--duration-panel-enter) var(--easing-enter);
+  @starting-style {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+.sheet[data-leaving] {
+  transform: translateY(100%);
+  opacity: 0;
+  transition-duration: var(--duration-fast);
+}
+.dismiss {
+  position: absolute;
+  inset-block-start: var(--space-4);
+  inset-inline-end: var(--space-4);
+}
+.actionSpace {
+  display: block;
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+}
+html[data-keyboard-input] .sheet {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet {
+    transition: none;
+    transform: none;
+  }
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  --collection-content-inset: var(--space-4);
+}
+
+.content > :first-child {
+  flex: 1;
+  min-height: 0;
+}

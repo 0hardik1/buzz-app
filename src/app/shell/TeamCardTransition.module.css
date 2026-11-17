@@ -1,0 +1,5 @@
+.viewport {
+  overflow: clip;
+  overflow-clip-margin: var(--space-1);
+  min-width: 0;
+}

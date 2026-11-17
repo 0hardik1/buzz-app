@@ -922,7 +922,7 @@ details:not([open]) > summary .sectionChevron {
   width: 0.375rem;
   height: 0.375rem;
   border-radius: 50%;
-  background: var(--affordance-prominent-mark);
+  background: var(--affordance-accent-prominent);
 }
 .threadActivityDot {
   cursor: help;
@@ -1155,7 +1155,7 @@ details:not([open]) > summary .sectionChevron {
   background: currentColor;
 }
 .sidebar [data-selected] :is(.priorityDot, .threadActivityDot) {
-  background: var(--text-row-selected);
+  box-shadow: 0 0 0 var(--space-half) var(--surface-rail-card);
 }
 
 .conversationBody {

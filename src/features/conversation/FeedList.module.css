@@ -45,3 +45,14 @@
 .item {
   min-width: 0;
 }
+.virtualFrame {
+  padding: 0 var(--space-row-gap) var(--space-4);
+}
+.virtualList {
+  display: block;
+  padding: 0;
+  gap: 0;
+}
+.virtualList > .item {
+  padding-block-end: var(--space-half);
+}

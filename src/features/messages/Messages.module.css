@@ -948,7 +948,7 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   height: 0.5rem;
   flex-shrink: 0;
   border-radius: 50%;
-  background: var(--text-standard);
+  background: var(--affordance-accent-prominent);
 }
 .threadDraft {
   display: inline-flex;

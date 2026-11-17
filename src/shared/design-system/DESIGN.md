@@ -115,8 +115,8 @@ Messages reuses the list and scrollport recipes in
 `features/channels/channel-icon.ts` so feed and rail colors stay consistent.
 Use `features/channels/ChannelAvatar` for channel artwork in rows and previews:
 the first two characters of the name, uppercase, inside the shared Avatar treatment.
-A channel row in the conversation list shows the latest poster's avatar instead,
-and falls back to the channel artwork until a latest message is known.
+Channel rows, including thread and mention entries, retain the channel monogram
+and color as new messages arrive rather than showing the sender’s avatar.
 Access metadata retains its explicit public/private labels and icons.
 
 ### Detail panels
@@ -130,12 +130,18 @@ host's full-height overlay or detail destination rather than squeezing two colum
 
 Messages and Solo keep their collections on the left and the selected
 conversation or new-message composer on the right, including direct conversation
-routes and expanded sidebar cards. Collection headings use text without decorative
+routes. Opening a sidebar card expands its collection in a nonmodal sheet over
+the rail instead: the reader stays mounted and does not move. The shell owns
+this local presentation, reusing `Panel`, the existing collection heading and
+filters, and `IconButton` for Close. Covered cards stay mounted but inert;
+Close or Escape returns focus to the opener. Opening the sheet creates no
+navigation visit; selecting a row uses the existing navigation owner.
+Collection headings use text without decorative
 icons; reader headers retain their centered membership avatars. The collection host
 reuses `RailConversationList`, `ChannelsPage` or `ConversationTab`, `PanelHeader`,
 and `PanelFrame` rather than presenting a dialog or dimming the list. Messages and Solo headers use a small secondary hamburger
-control to toggle their list in place. Direct opens collapse it; **View more**
-expands it, and list selection preserves it on wide windows. At narrow widths,
+control to toggle their list in place. Direct opens collapse it; the reader's
+toggle expands it, and list selection preserves it on wide windows. At narrow widths,
 Messages and Solo expose an overlaid list that closes after selection. Back/Forward restores selections,
 drafts, and per-visit list visibility; toggling does not create a history visit.
 `ConversationDetailPane` supplies the companion destination to nested readers,

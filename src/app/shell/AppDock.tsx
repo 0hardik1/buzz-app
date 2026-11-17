@@ -13,6 +13,8 @@ export function AppDock({
   open = true,
   compact = false,
   onDismiss,
+  sheet,
+  sheetOpen = false,
   ...pages
 }: Omit<ComponentProps<typeof PageNavigation>, "placement"> & {
   children?: ReactNode;
@@ -21,6 +23,8 @@ export function AppDock({
   open?: boolean;
   compact?: boolean;
   onDismiss?: () => void;
+  sheet?: ReactNode;
+  sheetOpen?: boolean;
 }) {
   const scrollEdges = useScrollEdges("block");
   return (
@@ -52,33 +56,41 @@ export function AppDock({
         }
       }}
     >
-      {header && (
-        <div
-          className={`${sectionStyles.group} ${styles.heading} ${compact ? "buzz-dock-controls" : ""}`}
-        >
-          {header}
-        </div>
-      )}
       <div
-        className={styles.apps}
-        ref={scrollEdges}
-        data-scroll-fade="scrolled"
+        className={styles.base}
+        data-covered={sheetOpen || undefined}
+        inert={sheetOpen}
+        aria-hidden={sheetOpen || undefined}
       >
-        <SidebarNavigation>
-          {showPrimaryNavigation && (
-            <div className={`${sectionStyles.group} ${styles.primary}`}>
-              <NavigationSection>
-                <PageNavigation
-                  {...pages}
-                  placement={compact ? "dock" : "sidebar"}
-                />
-              </NavigationSection>
-            </div>
-          )}
-          {children}
-        </SidebarNavigation>
+        {header && (
+          <div
+            className={`${sectionStyles.group} ${styles.heading} ${compact ? "buzz-dock-controls" : ""}`}
+          >
+            {header}
+          </div>
+        )}
+        <div
+          className={styles.apps}
+          ref={scrollEdges}
+          data-scroll-fade="scrolled"
+        >
+          <SidebarNavigation>
+            {showPrimaryNavigation && (
+              <div className={`${sectionStyles.group} ${styles.primary}`}>
+                <NavigationSection>
+                  <PageNavigation
+                    {...pages}
+                    placement={compact ? "dock" : "sidebar"}
+                  />
+                </NavigationSection>
+              </div>
+            )}
+            {children}
+          </SidebarNavigation>
+        </div>
+        <div id="rail-drop-slot" className={styles.dropSlot} />
       </div>
-      <div id="rail-drop-slot" className={styles.dropSlot} />
+      {sheet}
     </nav>
   );
 }

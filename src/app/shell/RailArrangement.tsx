@@ -1,3 +1,5 @@
+import { RailCardResize } from "./RailCardResize";
+import { readView, writeView, subscribeView } from "../../shared/view-state";
 import { accepts, holdsCopy, ownSection, railSections } from "./rail-sections";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -17,6 +19,8 @@ import {
 import {
   createContext,
   useContext,
+  useId,
+  useSyncExternalStore,
   useLayoutEffect,
   useRef,
   useState,
@@ -68,7 +72,9 @@ type Group = {
   content: ReactNode;
 };
 type Arrangement = {
+  partition: string;
   pageSection?: string | undefined;
+  pageAction?: ReactNode;
   selectedSection?: string | undefined;
   openSection(id: string): void;
   groups: { id: string; title: string }[];
@@ -194,6 +200,7 @@ function Arrangement({
   isPinned,
   onTogglePin,
   pageSection,
+  pageAction,
   selectedSection,
   openSection,
   compact = false,
@@ -221,6 +228,7 @@ function Arrangement({
   isPinned(entry: RailEntry): boolean;
   onTogglePin(entry: RailEntry, pinned: boolean): void;
   pageSection?: string | undefined;
+  pageAction?: ReactNode;
   selectedSection?: string | undefined;
   openSection(id: string): void;
   compact?: boolean;
@@ -255,7 +263,9 @@ function Arrangement({
     return ok;
   };
   const value: Arrangement = {
+    partition,
     pageSection,
+    pageAction,
     renderSectionList,
     selectedSection,
     openSection,
@@ -471,9 +481,9 @@ export function RailGroup({
   leadingEntryIds = [],
   views,
   rowsLabel,
+  wrapContent,
   trailingEntryId,
   sortEntries,
-  pageContent,
   renderOpen,
 }: {
   id: string;
@@ -488,9 +498,10 @@ export function RailGroup({
   views?: ReactNode;
   /** An accessible collection name for conversation previews. */
   rowsLabel?: string;
+  /** Feature-owned transitions wrap rows and footer, leaving the header fixed. */
+  wrapContent?: (content: ReactNode) => ReactNode;
   trailingEntryId?: string;
   sortEntries?: (a: RailEntry, b: RailEntry) => number;
-  pageContent?: ReactNode;
   renderOpen?: (hidden: readonly RailEntry[], open: () => void) => ReactNode;
 }) {
   const arrangement = useContext(ArrangementContext);
@@ -508,6 +519,21 @@ export function RailGroup({
     disabled: listed,
     data: { section: id, label: title },
   });
+  const resizeKey = `rail-card-rows:${id}`;
+  const partition = arrangement?.partition ?? "";
+  const savedRows = useSyncExternalStore(
+    (notify) => subscribeView(partition, notify),
+    () => {
+      const value = readView<unknown>(partition, resizeKey, 4);
+      return typeof value === "number" && Number.isFinite(value)
+        ? Math.max(1, Math.floor(value))
+        : 4;
+    },
+    () => 4,
+  );
+  const [previewRows, setPreviewRows] = useState<number>();
+  const resizable = (id === "team" || id === "solo") && !unlimited;
+  const rowLimit = resizable ? (previewRows ?? savedRows) : 4;
   const grabber = useRef<HTMLSpanElement>(null);
   const titleButton = useRef<HTMLButtonElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
@@ -574,9 +600,8 @@ export function RailGroup({
   const preview = rows.filter(
     (row) => !leadingEntryIds.includes(row.props.entry.id),
   );
-  const shown = limited ? preview.slice(0, 4) : preview;
-  const more = limited && preview.length > 4;
-  if (arrangement?.pageSection === id && pageContent) return pageContent;
+  const shown = limited ? preview.slice(0, rowLimit) : preview;
+  const more = limited && preview.length > rowLimit;
   if (
     arrangement?.pageSection === id &&
     arrangement.renderSectionList &&
@@ -591,7 +616,15 @@ export function RailGroup({
   if (arrangement?.pageSection === id)
     return (
       <section className={feedStyles.page} aria-label={title}>
-        <Header title={title} actions={action} />
+        <Header
+          title={title}
+          actions={
+            <>
+              {action}
+              {arrangement.pageAction}
+            </>
+          }
+        />
         <div className={`${feedStyles.scroll} ${styles.pageRows}`}>
           {rows.map((row) => (
             <div key={row.key} className={styles.pageRow}>
@@ -602,6 +635,42 @@ export function RailGroup({
         </div>
       </section>
     );
+  const cardContent = (
+    <>
+      {rowsLabel ? (
+        <ul aria-label={rowsLabel} className={styles.rows}>
+          {shown.map((row) => (
+            <li key={row.key}>{row}</li>
+          ))}
+        </ul>
+      ) : avatarGrid ? (
+        <div
+          className={styles.avatarGrid}
+          data-pins-grid={id === "pins" ? "" : undefined}
+        >
+          {shown}
+        </div>
+      ) : (
+        shown
+      )}
+      {notes}
+      {more &&
+        (renderOpen ? (
+          renderOpen(
+            preview.slice(shown.length).map((row) => row.props.entry),
+            () => arrangement?.openSection(id),
+          )
+        ) : (
+          <NavigationItem
+            label={`Open ${title}`}
+            data-rail-view-more=""
+            aria-label={`Open ${title}`}
+            icon={<ArrowRightIcon size={18} />}
+            onClick={() => arrangement?.openSection(id)}
+          />
+        ))}
+    </>
+  );
   const card = (
     <div
       ref={(node) => {
@@ -611,6 +680,15 @@ export function RailGroup({
       className={styles.group}
       onPointerMove={(event) => {
         if (event.pointerType !== "mouse" || !grabber.current) return;
+        const card = event.currentTarget.getBoundingClientRect();
+        const resizeDistance = Math.hypot(
+          event.clientX - (card.left + card.width / 2),
+          event.clientY - card.bottom,
+        );
+        event.currentTarget.style.setProperty(
+          "--rail-resize-proximity",
+          String(Math.max(0, 1 - resizeDistance / 48)),
+        );
         const bounds = grabber.current.getBoundingClientRect();
         const distance = Math.hypot(
           Math.max(
@@ -633,6 +711,7 @@ export function RailGroup({
       }}
       onPointerLeave={(event) => {
         event.currentTarget.style.removeProperty("--rail-grabber-proximity");
+        event.currentTarget.style.removeProperty("--rail-resize-proximity");
       }}
       data-rail-section={id}
       data-drop-target={target || undefined}
@@ -665,6 +744,7 @@ export function RailGroup({
           }}
         />
       </span>
+
       <NavigationSection
         label={
           naming ? (
@@ -708,39 +788,21 @@ export function RailGroup({
       >
         {leading}
         {views}
-        {rowsLabel ? (
-          <ul aria-label={rowsLabel} className={styles.rows}>
-            {shown.map((row) => (
-              <li key={row.key}>{row}</li>
-            ))}
-          </ul>
-        ) : avatarGrid ? (
-          <div
-            className={styles.avatarGrid}
-            data-pins-grid={id === "pins" ? "" : undefined}
-          >
-            {shown}
-          </div>
-        ) : (
-          shown
-        )}
-        {notes}
-        {more &&
-          (renderOpen ? (
-            renderOpen(
-              preview.slice(shown.length).map((row) => row.props.entry),
-              () => arrangement?.openSection(id),
-            )
-          ) : (
-            <NavigationItem
-              label={`Open ${title}`}
-              data-rail-view-more=""
-              aria-label={`Open ${title}`}
-              icon={<ArrowRightIcon size={18} />}
-              onClick={() => arrangement?.openSection(id)}
-            />
-          ))}
+        {wrapContent ? wrapContent(cardContent) : cardContent}
       </NavigationSection>
+      {resizable && preview.length > 1 && (
+        <RailCardResize
+          title={title}
+          count={Math.min(rowLimit, preview.length)}
+          max={preview.length}
+          onPreview={setPreviewRows}
+          onCancel={() => setPreviewRows(undefined)}
+          onCommit={(count) => {
+            writeView(partition, resizeKey, count);
+            setPreviewRows(undefined);
+          }}
+        />
+      )}
     </div>
   );
   return custom ? (
@@ -821,11 +883,12 @@ export function RailDestinationRow({
   // The arrangement changes with every sidebar update. A row reads only what
   // it shows; its menu reads the rest while open.
   const listed = useContext(ListedContext);
+  const instance = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement>();
   const drag = useDraggable({
-    // A conversation can sit in a card and in the open list at once.
-    id: `row:${listed ? "list:" : ""}${section}:${entry.id}`,
+    // The same destination can be mounted in the sheet and retained list.
+    id: `row:${instance}`,
     data: {
       entry,
       source: section,

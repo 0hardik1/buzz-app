@@ -1,4 +1,5 @@
 .frame {
+  position: relative;
   display: flex;
   width: var(--shell-rail-width, var(--size-navigation-rail));
   opacity: 1;
@@ -13,6 +14,33 @@
   min-height: 0;
   padding: var(--space-1);
   gap: var(--space-1);
+}
+.base {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  gap: var(--space-1);
+  transform-origin: center top;
+  transition:
+    transform var(--duration-panel-enter) var(--easing-enter),
+    opacity var(--duration-panel-enter) var(--easing-enter);
+}
+.base[data-covered] {
+  transform: scale(0.96);
+  opacity: 0.5;
+}
+html[data-keyboard-input] .base {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .base {
+    transition: none;
+  }
+  .base[data-covered] {
+    transform: none;
+  }
 }
 .heading {
   display: flex;

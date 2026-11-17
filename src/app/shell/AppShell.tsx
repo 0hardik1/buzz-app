@@ -1,6 +1,8 @@
 import { ActivityNavigationProvider } from "./ActivityNavigation";
 import { PageNavigation } from "./PageNavigation";
 import { AppDock } from "./AppDock";
+import { AnimatePresence } from "motion/react";
+import { RailCardSheet } from "./RailCardSheet";
 import { ConnectionNotices } from "./ConnectionNotices";
 import styles from "./AppShell.module.css";
 import { ResizeHandle } from "../../features/panels/ResizeHandle";
@@ -180,6 +182,30 @@ function AppShellContent({
     return () => query.removeEventListener("change", update);
   }, []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [railSheet, setRailSheet] = useState<{
+    section: string;
+    scope: string | undefined;
+    opener: HTMLElement | null;
+  }>();
+  const openRailSheet = (section: string) => {
+    listColumn.setOpen(false);
+    setSidebarOpen(true);
+    setNavigationOpen(true);
+    setRailSheet({
+      section,
+      scope: connection.scope,
+      opener:
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null,
+    });
+  };
+  const closeRailSheet = useCallback(() => setRailSheet(undefined), []);
+  useEffect(() => {
+    setRailSheet((current) =>
+      current?.scope === connection.scope ? current : undefined,
+    );
+  }, [connection.scope]);
   const listColumn = useListColumn(searchServices?.navigation);
   const askList = listColumn.ask;
   const railScope = connection.viewer ? connection.scope : undefined;
@@ -364,6 +390,36 @@ function AppShellContent({
   );
   const dock = (
     <AppDock
+      sheetOpen={!!railSheet && railSheet.scope === connection.scope}
+      sheet={
+        <AnimatePresence>
+          {railSheet &&
+            railSheet.scope === connection.scope &&
+            shellScope &&
+            searchServices &&
+            railNavigator && (
+              <RailCardSheet
+                key={connection.scope}
+                opener={railSheet.opener}
+                close={closeRailSheet}
+              >
+                {(closeAction) => (
+                  <RailNavigation
+                    section={railSheet.section}
+                    sectionAction={closeAction}
+                    session={connection.session}
+                    scope={shellScope}
+                    sidebarSections={searchServices.sidebarSections}
+                    navigator={railNavigator}
+                    pages={pages}
+                    selected={selected}
+                    onSelect={onSelect}
+                  />
+                )}
+              </RailCardSheet>
+            )}
+        </AnimatePresence>
+      }
       showPrimaryNavigation={
         !(connection.viewer && connection.scope && searchServices?.navigation)
       }
@@ -389,6 +445,7 @@ function AppShellContent({
         <RailNavigation
           key={connection.scope}
           compact={compactRail}
+          onOpenSection={openRailSheet}
           session={connection.session}
           scope={shellScope}
           sidebarSections={searchServices.sidebarSections}

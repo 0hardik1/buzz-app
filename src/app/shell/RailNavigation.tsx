@@ -1,3 +1,6 @@
+import { TeamCardTransition } from "./TeamCardTransition";
+import { TeamDraftRows } from "./TeamDraftRows";
+import { Tabs } from "../../shared/design-system/ui/Tabs";
 import { TeamViewMenu } from "./TeamViewMenu";
 import { RailPinPicker } from "./RailPinPicker";
 import { RailEntryArtwork } from "./RailEntryArtwork";
@@ -33,7 +36,6 @@ import {
   soloNeighbors,
   soloSuccessor,
 } from "../../features/channel-navigation/solo-successor";
-import { routedSection } from "./list-column";
 import type { OpenTarget } from "../../features/navigation/targets";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import {
@@ -80,6 +82,7 @@ import { ChannelReadMenuItem } from "../../bundled/channels/ChannelReadMenuItem"
 import styles from "./RailNavigation.module.css";
 import {
   useConversationCount,
+  useConversationKeys,
   conversationIndex,
   type ConversationFilter,
   type ConversationQuery,
@@ -89,7 +92,6 @@ import {
   CollectionFilters,
   useActivityView,
   withoutAgentViews,
-  type ActivityView,
 } from "../../features/conversation/ConversationList";
 
 export function RailNavigation({
@@ -106,6 +108,8 @@ export function RailNavigation({
   openInSection,
   listedSection,
   compact = false,
+  onOpenSection,
+  sectionAction,
 }: {
   session: RelaySession;
   scope: NavigationScope;
@@ -120,14 +124,17 @@ export function RailNavigation({
   sidebarSections?: SidebarSections | undefined;
   /** A plugin's restriction narrows the cards to Solo under its banner. */
   sidebarScope?: SidebarScope | undefined;
-  /** Shows this section's full list instead of the cards: the shell's list
-   * column renders one beside the cards, under the same `RailDrag`. */
+  /** Shows this section's full list in the shell's rail sheet or list column,
+   * under the same `RailDrag` as the cards. */
   section?: string | undefined;
   /** Opens a conversation with the list showing the section it was opened from. */
   openInSection?: ((section: string, target: OpenTarget) => void) | undefined;
   /** The section whose list is showing beside the cards. */
   listedSection?: string | undefined;
   compact?: boolean;
+  /** The shell can expand a card over the rail without navigating the reader. */
+  onOpenSection?: (id: string) => void;
+  sectionAction?: ReactNode;
 }) {
   const partition = `${scope.communityOrigin}:${scope.viewer}`;
   const contributed = useSyncExternalStore(
@@ -166,12 +173,14 @@ export function RailNavigation({
     session.sidebarPreferences.snapshot,
   );
   const resolveName = useIdentityNames(session.names);
-  const [savedMessageView, setMessageView] = useActivityView(partition);
-  // Team offers no agent views; a saved one shows All.
-  const messageView = useMemo(
-    () => withoutAgentViews(savedMessageView),
-    [savedMessageView],
+  const [savedCardView, setCardView] = useActivityView(
+    `${partition}:team-card`,
   );
+  const cardView = withoutAgentViews(savedCardView);
+  const [showDrafts, setShowDrafts] = useState(false);
+  const [cardDirection, setCardDirection] = useState(0);
+  const cardPointer = useRef(false);
+  const cardKeys = useConversationKeys(session, { ...cardView, home: "team" });
   const { setPinned } = useRailPins(partition);
   // What the rail shows is built once for the session; this only draws it.
   const {
@@ -184,7 +193,6 @@ export function RailNavigation({
     pins,
     sections: membership,
     soloChats,
-    teamChats,
   } = useRailModel(session);
   // Only the shown entry draws the rail. An opening visit's other steps,
   // its start and its settling, change nothing here and render nothing.
@@ -764,7 +772,7 @@ export function RailNavigation({
       label: string;
       icon: ReactElement;
     }[] = [
-      { filter: "all", label: "Activity", icon: <ChatCircleIcon size={18} /> },
+      { filter: "all", label: "Activity", icon: <BellIcon size={18} /> },
       { filter: "channels", label: "Channels", icon: <HashIcon size={18} /> },
       {
         filter: "threads",
@@ -774,75 +782,113 @@ export function RailNavigation({
       { filter: "dms", label: "DMs", icon: <UsersIcon size={18} /> },
       { filter: "mentions", label: "Mentions", icon: <AtIcon size={18} /> },
     ];
-    const teamOpen = routedSection(navigation.entry.target) === "team";
-    const openTeamView = (filter: ActivityView["filter"]) => {
-      setMessageView({ ...messageView, filter });
-      void navigator.open(sidebarSectionTarget(scope, "team"));
-    };
-    const messageCard = shown("team", () => (
+    const cardRows = (pageSection ? [] : cardKeys).flatMap((key) => {
+      const event = key.startsWith("e:")
+        ? conversationIndex(session).event(key.slice(2))
+        : undefined;
+      const channelId =
+        event?.channelId ?? (key.startsWith("c:") ? key.slice(2) : undefined);
+      if (!channelId || hidden.has(channelId)) return [];
+      const base = byId.get(`channel:${channelId}`);
+      if (!base) return [];
+      const entry: RailEntry = event
+        ? {
+            ...base,
+            id: `activity:${event.key}`,
+            target: {
+              version: 1,
+              kind: "conversation",
+              scope,
+              channelId,
+              messageId: event.messageId,
+              ...(event.rootId ? { threadRootId: event.rootId } : {}),
+            },
+          }
+        : base;
+      return [sourceRow(entry, "team")];
+    });
+    const renderTeam = (
+      rows: { entry: RailEntry; content: ReactNode }[],
+      notice?: string,
+    ) => (
       <RailGroup
         id="team"
         title="Team"
-        rows={teamChats.flatMap((channel) => {
-          if (hidden.has(channel.id)) return [];
-          const entry = byId.get(`channel:${channel.id}`);
-          return entry ? [sourceRow(entry, "team")] : [];
-        })}
-        rowsLabel="Recent conversations"
+        rows={rows}
+        rowsLabel="Team conversations"
+        wrapContent={(content) => (
+          <TeamCardTransition
+            view={showDrafts ? "drafts" : cardView.filter}
+            direction={cardDirection}
+          >
+            {content}
+          </TeamCardTransition>
+        )}
         views={
-          <div className={styles.teamViews} data-rail-team-icons="">
-            {teamViews.map((item) => (
-              <TeamViewMenu
-                key={item.filter}
-                session={session}
-                filter={item.filter}
-              >
-                <span className={styles.teamView}>
-                  <Tooltip content={item.label}>
-                    <IconButton
-                      variant="ghost"
-                      shape="round"
-                      aria-label={item.label}
-                      icon={item.icon}
-                      data-rail-team-view={item.filter}
-                      aria-current={
-                        teamOpen && messageView.filter === item.filter
-                          ? "page"
-                          : undefined
-                      }
-                      aria-pressed={
-                        teamOpen && messageView.filter === item.filter
-                      }
-                      onClick={() => openTeamView(item.filter)}
-                    />
-                  </Tooltip>
-                  <span className={styles.teamCount}>
-                    {teamCount(item.filter)}
-                  </span>
-                </span>
-              </TeamViewMenu>
-            ))}
-            {teamPages
-              .filter((page) => page !== activityPage)
-              .map((page) => {
-                const { icon, image, label } = pagePresentation(page);
-                return (
-                  <Tooltip key={page.key} content={label}>
-                    <IconButton
-                      variant="ghost"
-                      shape="round"
-                      aria-label={label}
-                      icon={<PageIcon icon={icon} image={image} size={18} />}
-                      data-rail-team-view={page.key}
-                      aria-current={selected === page.key ? "page" : undefined}
-                      onClick={() => onSelect(page.key)}
-                    />
-                  </Tooltip>
+          <div
+            data-rail-team-icons=""
+            onPointerDownCapture={() => {
+              cardPointer.current = true;
+            }}
+            onKeyDownCapture={() => {
+              cardPointer.current = false;
+            }}
+          >
+            <Tabs
+              variant="segmented-icons"
+              size="sm"
+              label="Team card filter"
+              value={showDrafts ? "drafts" : cardView.filter}
+              onValueChange={(filter) => {
+                const order = [
+                  "all",
+                  "channels",
+                  "threads",
+                  "dms",
+                  "mentions",
+                  "drafts",
+                ];
+                const previous = showDrafts ? "drafts" : cardView.filter;
+                setCardDirection(
+                  cardPointer.current
+                    ? Math.sign(order.indexOf(filter) - order.indexOf(previous))
+                    : 0,
                 );
-              })}
+                cardPointer.current = false;
+                setShowDrafts(filter === "drafts");
+                if (filter !== "drafts")
+                  setCardView({
+                    ...cardView,
+                    filter: filter as ConversationFilter,
+                  });
+              }}
+              items={[
+                ...teamViews.map((item) => ({
+                  value: item.filter as string,
+                  label: item.label,
+                  icon: item.icon,
+                  trailing:
+                    item.filter === "all" ? teamCount("all") : undefined,
+                  renderTab: (tab: ReactElement) => (
+                    <TeamViewMenu session={session} filter={item.filter}>
+                      {tab}
+                    </TeamViewMenu>
+                  ),
+                })),
+                ...teamPages
+                  .filter((page) => page !== activityPage)
+                  .map((page) => {
+                    const { icon, image, label } = pagePresentation(page);
+                    return {
+                      value: "drafts",
+                      label,
+                      icon: <PageIcon icon={icon} image={image} size={18} />,
+                    };
+                  }),
+              ]}
+            />
           </div>
         }
-        pageContent={sectionPage}
         renderOpen={(hidden, open) => (
           <RailOpenConversations
             session={session}
@@ -853,8 +899,69 @@ export function RailNavigation({
           />
         )}
         action={creationAction}
-      />
-    ));
+      >
+        {notice && <p className={styles.note}>{notice}</p>}
+      </RailGroup>
+    );
+    const messageCard = shown("team", () =>
+      pageSection ? (
+        sectionPage
+      ) : showDrafts ? (
+        <TeamDraftRows
+          session={session}
+          scope={scope}
+          byId={byId}
+          channelsById={channelsById}
+          artwork={artwork}
+          open={(entry) => {
+            if (entry.target.kind !== "person")
+              void navigator.open(entry.target);
+          }}
+          render={renderTeam}
+        />
+      ) : (
+        renderTeam(
+          cardRows,
+          cardRows.length ? undefined : "No conversations in this view",
+        )
+      ),
+    );
+    const soloCard = shown("solo", () =>
+      pageSection ? (
+        sectionPage
+      ) : (
+        <RailGroup
+          id="solo"
+          title="Solo"
+          renderOpen={(hidden, open) => (
+            <RailOpenConversations
+              session={session}
+              channels={channels}
+              hidden={hidden}
+              label="Open Solo"
+              onClick={open}
+            />
+          )}
+          rows={soloChats.flatMap((channel) => {
+            const entry = byId.get(`channel:${channel.id}`);
+            return entry ? [sourceRow(entry, "solo")] : [];
+          })}
+          action={
+            <IconButton
+              size="sm"
+              variant={pageSection ? "glass" : "ghost"}
+              aria-label="New Solo chat"
+              icon={<PlusIcon size={16} strokeWidth={2} />}
+              onClick={() => newSoloChat()}
+            />
+          }
+        >
+          {!soloChats.length && (
+            <p className={styles.note}>No Solo chats yet.</p>
+          )}
+        </RailGroup>
+      ),
+    );
     return (
       <RailArrangement
         key={partition}
@@ -865,7 +972,15 @@ export function RailNavigation({
             section={id}
             title={title}
             heading={
-              <CollectionFilters title={title} actions={action}>
+              <CollectionFilters
+                title={title}
+                actions={
+                  <>
+                    {action}
+                    {sectionAction}
+                  </>
+                }
+              >
                 {null}
               </CollectionFilters>
             }
@@ -878,6 +993,7 @@ export function RailNavigation({
           />
         )}
         pageSection={pageSection}
+        pageAction={sectionAction}
         compact={!pageSection && compact}
         only={
           restriction && !pageSection
@@ -897,6 +1013,10 @@ export function RailNavigation({
         }
         selectedSection={activeDockSection}
         openSection={(id) => {
+          if (onOpenSection) {
+            onOpenSection(id);
+            return;
+          }
           // A section a person made has no page of its own: open its first
           // conversation beside its list.
           const first =
@@ -1066,39 +1186,7 @@ export function RailNavigation({
             id: "solo",
             title: "Solo",
             icon: <UserIcon size={22} />,
-            content: shown("solo", () => (
-              <RailGroup
-                id="solo"
-                title="Solo"
-                renderOpen={(hidden, open) => (
-                  <RailOpenConversations
-                    session={session}
-                    channels={channels}
-                    hidden={hidden}
-                    label="Open Solo"
-                    onClick={open}
-                  />
-                )}
-                rows={soloChats.flatMap((channel) => {
-                  const entry = byId.get(`channel:${channel.id}`);
-                  return entry ? [sourceRow(entry, "solo")] : [];
-                })}
-                pageContent={sectionPage}
-                action={
-                  <IconButton
-                    size="sm"
-                    variant={pageSection ? "glass" : "ghost"}
-                    aria-label="New Solo chat"
-                    icon={<PlusIcon size={16} strokeWidth={2} />}
-                    onClick={() => newSoloChat()}
-                  />
-                }
-              >
-                {!soloChats.length && (
-                  <p className={styles.note}>No Solo chats yet.</p>
-                )}
-              </RailGroup>
-            )),
+            content: soloCard,
           },
           ...contributed.map((section) => ({
             id: section.key,
@@ -1141,23 +1229,26 @@ export function RailNavigation({
       {pageSection ? (
         <CollectionCreationAction
           value={
-            <IconButton
-              aria-label="New message"
-              title="New message"
-              icon={<PlusIcon size={20} aria-hidden="true" />}
-              onClick={() =>
-                pageSection === "solo"
-                  ? newSoloChat()
-                  : void navigator.open({
-                      version: 1,
-                      kind: "page",
-                      pluginId: "buzz.channels",
-                      pageId: "channels",
-                      scope,
-                      route: { version: 1, params: "compose" },
-                    })
-              }
-            />
+            <>
+              <IconButton
+                aria-label="New message"
+                title="New message"
+                icon={<PlusIcon size={20} aria-hidden="true" />}
+                onClick={() =>
+                  pageSection === "solo"
+                    ? newSoloChat()
+                    : void navigator.open({
+                        version: 1,
+                        kind: "page",
+                        pluginId: "buzz.channels",
+                        pageId: "channels",
+                        scope,
+                        route: { version: 1, params: "compose" },
+                      })
+                }
+              />
+              {sectionAction}
+            </>
           }
         >
           {view()}

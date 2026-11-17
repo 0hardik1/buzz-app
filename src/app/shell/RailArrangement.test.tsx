@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
 import {
   act,
   cleanup,
@@ -355,4 +356,66 @@ test("a restriction shows one card under its banner and no way to add sections",
   expect(screen.queryByRole("button", { name: "New section" })).toBeNull();
   view.rerender(cards());
   expect(screen.getByRole("heading", { name: "Team" })).toBeTruthy();
+});
+
+test("Team and Solo row counts persist independently within their account/community", () => {
+  const entries: RailEntry[] = Array.from({ length: 6 }, (_, index) => ({
+    id: `channel:resize-${index}`,
+    label: `Resize chat ${index + 1}`,
+    kind: "chat",
+    target: {
+      version: 1,
+      kind: "conversation",
+      channelId: `resize-${index}`,
+      scope: { viewer: "a".repeat(64), communityOrigin: "https://example.org" },
+    },
+  }));
+  const rail = (partition: string) => (
+    <RailArrangement
+      partition={partition}
+      current={new Map(entries.map((entry) => [entry.id, entry]))}
+      renderEntry={(entry) => <NavigationItem label={entry.label} />}
+      isPinned={() => false}
+      onTogglePin={() => {}}
+      openSection={() => {}}
+      sections={["team", "solo"].map((id) => ({
+        id,
+        title: id,
+        content: (
+          <RailGroup
+            id={id}
+            title={id}
+            rows={entries.map((entry) => ({
+              entry,
+              content: <NavigationItem label={entry.label} />,
+            }))}
+          />
+        ),
+      }))}
+    />
+  );
+  const view = render(rail("resize-account-one"));
+  const team = screen.getByRole("slider", { name: "team visible rows" });
+  expect(team).toHaveAttribute("aria-valuenow", "4");
+  fireEvent.keyDown(team, { key: "ArrowDown" });
+  expect(team).toHaveAttribute("aria-valuenow", "5");
+  expect(screen.getByRole("button", { name: "Resize chat 5" })).toBeVisible();
+  expect(
+    screen.getByRole("slider", { name: "solo visible rows" }),
+  ).toHaveAttribute("aria-valuenow", "4");
+  view.unmount();
+  const restored = render(rail("resize-account-one"));
+  expect(
+    screen.getByRole("slider", { name: "team visible rows" }),
+  ).toHaveAttribute("aria-valuenow", "5");
+  restored.rerender(rail("resize-account-two"));
+  expect(
+    screen.getByRole("slider", { name: "team visible rows" }),
+  ).toHaveAttribute("aria-valuenow", "4");
+  fireEvent.keyDown(screen.getByRole("slider", { name: "solo visible rows" }), {
+    key: "Home",
+  });
+  expect(
+    screen.getByRole("slider", { name: "solo visible rows" }),
+  ).toHaveAttribute("aria-valuenow", "1");
 });
