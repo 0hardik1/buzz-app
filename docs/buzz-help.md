@@ -803,10 +803,6 @@ and are asked to sign in again in Buzz.
   the same key as another shortcut, Settings → Shortcuts marks it "Also used
   by"; change one of them to choose which fires. In the Mac app, **Buzz →
   Settings…** in the menu bar also opens Settings.
-- **Show people by**: in communities with verified names, **Settings → Appearance →
-  Show people by** defaults to **Full name**. People without a verified
-  full name show their verified username. Choose **Username** if you prefer; an
-  existing choice is kept on this device.
 - **Message width**: choose **Narrow** or **Wide** in **Settings → Appearance →
   Interface**. Narrow is the default; Wide gives messages and the composer
   50% more room when the pane is wide enough. The choice is saved on this device.

@@ -2068,7 +2068,7 @@ it("labels people by verified identity, never an editable handle, and opens the 
   screen.getByRole("option", {
     name: `jack ${labels.get(realJack.pubkey)}, @jack`,
   });
-  // Found by the editable "jack", Aleksandr Petrov is that name's namesake: Space
+  // Found by the editable "jack", Aleksandr is that name's namesake: Space
   // has no single exact name to pick.
   await t.user.keyboard(" ");
   expect(recipient()).toHaveValue("jack ");
