@@ -1509,7 +1509,9 @@ available rather than silently discarding it.
   since the proposal.
   Agent reads also show saved model and thinking choices for supported local
   harnesses. They distinguish explicit choices, harness defaults, Recommended
-  policy and unavailable settings. They do not report an active turn's model.
+  policy and unavailable settings. For Codex and Claude, they also include
+  current defaults when Buzz can resolve them, with the source or a reason
+  they are unknown. They do not prove an active session's model.
 - Your agents can search messages (`search`) by words, person, channel or DM,
   and date, and link each message they cite. They search with their own access:
   channels they're in and open channels. They don't find messages in your

@@ -14,6 +14,9 @@ import { canMessageAgent, createAgentChoices, deletingAgent } from "./choices";
 import { createAgentLibrary } from "./library";
 import type { AttentionSource } from "./attention-sources";
 import { appClient } from "../../buzz-mcp/app-client";
+import { ClaudeDefaults } from "../../bundled/claude-code/defaults";
+import { CodexProvider } from "../../bundled/codex/tabs";
+import type { AgentModelSettingsContext } from "./model-settings";
 import type { AgentToolAuthority, AgentToolProof } from "./tool-operation";
 import { callAttentionTool } from "../../buzz-mcp/attention";
 import { callSessionTool } from "../../buzz-mcp/session-tools";
@@ -15047,13 +15050,12 @@ it("changes instructions in place and discards a dismissed change draft", async 
 
 it("reads model selections through MCP by name and in lists without exposing config", async () => {
   const f = await setup();
+  const defaults = new ClaudeDefaults(memoryStorage());
   f.plugin.agents.register({
     ...f.type,
     id: "models",
-    readModelSettings: () => ({
-      model: { source: "configured", value: "model-a" },
-      effort: { source: "default" },
-    }),
+    readModelSettings: (config, context) =>
+      defaults.readModelSettings(config, context),
   });
   await f.service.create({ type: "example/echo", name: "Reader" });
   await f.service.create({ type: "example/models", name: "Model" });
@@ -15068,24 +15070,83 @@ it("reads model selections through MCP by name and in lists without exposing con
   const read = async (agent?: string) =>
     JSON.parse((await callTool(client, {}, "agent_read", { agent })) as string);
   try {
-    const expected = {
-      pubkey: sibling,
-      name: "Model",
-      type: "example/models",
-      instructions: "secret config",
-      synced: false,
-      modelSettings: {
-        model: { source: "configured", value: "model-a" },
-        effort: { source: "default" },
-      },
-    };
-    expect(await read("Model")).toEqual(expected);
-    expect(await read(sibling)).toEqual(expected);
-    expect(await read()).toContainEqual(expected);
+    for (const model of ["model-a", "model-b"]) {
+      await defaults.save({ model, effort: "high" });
+      const expected = {
+        pubkey: sibling,
+        name: "Model",
+        type: "example/models",
+        instructions: "secret config",
+        synced: false,
+        modelSettings: {
+          model: {
+            source: "default",
+            resolved: { value: model, source: "device" },
+          },
+          effort: {
+            source: "default",
+            resolved: { value: "high", source: "device" },
+          },
+        },
+      };
+      expect(await read("Model")).toEqual(expected);
+      expect(await read(sibling)).toEqual(expected);
+      expect(await read()).toContainEqual(expected);
+      const membership = f.service.find(sibling);
+      if (!membership) throw new Error("Missing local agent");
+      expect(await f.plugin.agents.readModelSettings?.(membership.key)).toEqual(
+        expected.modelSettings,
+      );
+    }
     expect(await read("Reader")).toMatchObject({
       modelSettings: { unavailable: expect.any(String) },
     });
   } finally {
+    await f.ctx.fiber.dispose();
+  }
+});
+
+it("reads execution placement from saved state before projecting native defaults", async () => {
+  const storage = memoryStorage();
+  const f = await setup({ storage });
+  const defaults = new ClaudeDefaults(memoryStorage());
+  await defaults.save({ model: "local-model", effort: "high" });
+  f.plugin.agents.register({
+    ...f.type,
+    id: "models",
+    execution: true,
+    readModelSettings: (config, context) =>
+      defaults.readModelSettings(config, context),
+  });
+  await f.service.create({ type: "example/models", name: "Model" });
+  const agent = f.service.find(bot);
+  if (!agent) throw new Error("Missing local agent");
+  const key = `buzz.agent.execution.v1:${agent.key}`;
+  // The synchronous copy can lag another writer; inspect the saved binding.
+  const get = storage.get;
+  const cached = vi
+    .spyOn(storage, "get")
+    .mockImplementation((entry) => (entry === key ? null : get(entry)));
+  try {
+    await storage.set(key, JSON.stringify({ provider: "example/remote" }));
+    expect(await f.service.readModelSettings(agent.key)).toEqual({
+      model: { source: "default", resolved: { unavailable: "remote" } },
+      effort: { source: "default", resolved: { unavailable: "remote" } },
+    });
+    await storage.set(key, "invalid");
+    expect(await f.service.readModelSettings(agent.key)).toEqual({
+      model: {
+        source: "default",
+        resolved: { unavailable: "execution-unavailable" },
+      },
+      effort: {
+        source: "default",
+        resolved: { unavailable: "execution-unavailable" },
+      },
+    });
+  } finally {
+    cached.mockRestore();
+    await storage.set(key, null);
     await f.ctx.fiber.dispose();
   }
 });
@@ -15116,7 +15177,7 @@ it("does not infer another device's model settings from its local type", async (
   }
 });
 
-it("reads confirmed synced model settings and refuses stale local choices", async () => {
+it("reads confirmed synced model settings and preserves execution's effort refusal", async () => {
   const subject: Subject = {
     owner: viewer,
     community: "https://relay.example.test",
@@ -15128,19 +15189,59 @@ it("reads confirmed synced model settings and refuses stale local choices", asyn
     binding: (agent) =>
       agent.pubkey === sibling ? { settings: { mode: "synced", subject } } : {},
   });
-  const project = vi.fn(({ reply }: Config) => ({
-    model: { source: "configured" as const, value: reply },
-    effort: { source: "default" as const },
-  }));
+  const provider = new CodexProvider(async (_id, options) => {
+    let exit!: (code: number | null) => void;
+    const exited = new Promise<number | null>((resolve) => {
+      exit = resolve;
+    });
+    return {
+      exited,
+      end: async () => {
+        exit(0);
+      },
+      kill: async () => {
+        exit(null);
+      },
+      write: async (line) => {
+        const wire = JSON.parse(line);
+        if (wire.id === undefined) return;
+        const result =
+          wire.method === "account/read"
+            ? { requiresOpenaiAuth: false }
+            : wire.method === "model/list"
+              ? {
+                  data: [
+                    {
+                      model: "synced-model",
+                      displayName: "Synced model",
+                      description: "",
+                      isDefault: true,
+                      defaultReasoningEffort: "medium",
+                      supportedReasoningEfforts: [
+                        { reasoningEffort: "medium", description: "" },
+                      ],
+                    },
+                  ],
+                  nextCursor: null,
+                }
+              : {};
+        options?.onStdout?.(`${JSON.stringify({ id: wire.id, result })}\n`);
+      },
+    };
+  }, memoryStorage());
+  await provider.check();
+  const project = vi.fn((config: Config, context?: AgentModelSettingsContext) =>
+    provider.readModelSettings(config, context),
+  );
   f.plugin.agents.register({
     ...f.type,
     id: "models",
     readModelSettings: project,
     syncedSettings: {
-      schema: { model: "string" },
+      schema: { model: "string", effort: "string" },
       withSynced: (config, settings) => ({
         ...config,
-        reply: settings.model ?? "",
+        ...settings,
       }),
     },
   });
@@ -15149,8 +15250,14 @@ it("reads confirmed synced model settings and refuses stale local choices", asyn
   await vi.waitFor(() => expect(f.plugin.agents.handle(bot)).toBeDefined());
   const handle = f.plugin.agents.handle(bot);
   if (!handle?.readAgents) throw new Error("Missing read handle");
+  const client = appClient(handle, {
+    read: vi.fn(),
+    memories: async () => ({ entries: [], partial: false }),
+  });
+  const read = async (agent?: string) =>
+    JSON.parse((await callTool(client, {}, "agent_read", { agent })) as string);
   try {
-    expect(await handle.readAgents(sibling)).toMatchObject({
+    expect(await read(sibling)).toMatchObject({
       modelSettings: { unavailable: "Its synced config could not be read" },
     });
     expect(project).not.toHaveBeenCalled();
@@ -15172,20 +15279,128 @@ it("reads confirmed synced model settings and refuses stale local choices", asyn
           generateSecretKey(),
         ) as RelayEvent,
       });
-    revise({ model: "synced-model" });
-    expect(await handle.readAgents(sibling)).toMatchObject({
-      modelSettings: {
-        model: { source: "configured", value: "synced-model" },
-      },
-    });
+    for (const effort of ["xhigh", "medium"]) {
+      revise({ model: "synced-model", effort });
+      const expected = {
+        model: {
+          source: "configured",
+          value: "synced-model",
+          resolved: { value: "synced-model", source: "configured" },
+        },
+        effort: {
+          source: "configured",
+          value: effort,
+          resolved:
+            effort === "xhigh"
+              ? { unavailable: "unsupported" }
+              : { value: "medium", source: "configured" },
+        },
+      };
+      expect(await read("Model")).toMatchObject({ modelSettings: expected });
+      expect(await read()).toContainEqual(
+        expect.objectContaining({ pubkey: sibling, modelSettings: expected }),
+      );
+      const agent = f.service.find(sibling);
+      if (!agent) throw new Error("Missing local agent");
+      expect(await f.plugin.agents.readModelSettings?.(agent.key)).toEqual(
+        expected,
+      );
+    }
     revise({ model: { secret: "invalid config" } });
-    expect(await handle.readAgents(sibling)).toMatchObject({
+    expect(await read(sibling)).toMatchObject({
       modelSettings: { unavailable: "Its synced config could not be read" },
     });
   } finally {
+    provider.dispose();
     await f.ctx.fiber.dispose();
   }
 });
+
+it.each(["edit", "delete"])(
+  "keeps instruction text and revision together when %s arrives during placement inspection",
+  async (change) => {
+    const subject: Subject = {
+      owner: viewer,
+      community: "https://relay.example.test",
+      subject: sibling,
+      channel: "9b353519-f4fe-4757-aef4-bec6cc0ae54c",
+      type: "buzz.agent.instructions",
+    };
+    const storage = memoryStorage();
+    const f = await setup({
+      storage,
+      binding: (agent) =>
+        agent.pubkey === sibling
+          ? { instructions: { mode: "synced", subject } }
+          : {},
+    });
+    f.plugin.agents.register<Config & { instructions?: string }>({
+      ...f.type,
+      id: "placed",
+      execution: true,
+      carry: ({ instructions }) => ({ instructions: instructions ?? "" }),
+    });
+    await f.service.create({ type: "example/echo", name: "Reader" });
+    await f.service.create({ type: "example/placed", name: "Placed" });
+    await vi.waitFor(() => expect(f.plugin.agents.handle(bot)).toBeDefined());
+    const handle = f.plugin.agents.handle(bot);
+    const agent = f.service.find(sibling);
+    if (!handle?.readAgents || !agent) throw new Error("Missing read agent");
+    const store = internals(f.service).configStore;
+    const revise = (text: string, op = "create") => {
+      const event = finalizeEvent(
+        {
+          kind: 45010,
+          created_at: 1,
+          content: JSON.stringify({ version: 1, text }),
+          tags: [["op", op]],
+        },
+        generateSecretKey(),
+      ) as RelayEvent;
+      store.applyRead(subject, store.capture(subject), { kind: "head", event });
+      return event.id;
+    };
+    const revision = revise("Before");
+    const entered = runnerGate();
+    const release = runnerGate();
+    const read = storage.read;
+    const held = vi.spyOn(storage, "read").mockImplementation(async (key) => {
+      if (key === `buzz.agent.execution.v1:${agent.key}`) {
+        entered.resolve();
+        await release.promise;
+      }
+      return read(key);
+    });
+    const pending = handle.readAgents("Placed");
+    try {
+      await entered.promise;
+      const next = revise("After", change === "delete" ? "delete" : "edit");
+      release.resolve();
+      const result = await pending;
+      expect(result).toMatchObject({
+        instructions: "Before",
+        synced: true,
+      });
+      expect(
+        result,
+        "Instruction revision must match captured text",
+      ).toMatchObject({ revision });
+      const current = (await handle.readAgents()) as unknown[];
+      expect(current).toContainEqual(
+        expect.objectContaining(
+          change === "delete"
+            ? { pubkey: sibling, unavailable: expect.any(String) }
+            : { pubkey: sibling, instructions: "After", revision: next },
+        ),
+      );
+    } finally {
+      release.resolve();
+      await pending;
+      held.mockRestore();
+      await f.ctx.fiber.dispose();
+    }
+  },
+);
 
 it("reads synced instructions it can't use as unavailable, not empty", async () => {
   const subject: Subject = {
