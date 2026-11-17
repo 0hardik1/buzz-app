@@ -416,6 +416,7 @@ export class GooseRuntime {
     signal,
     step,
     acknowledged,
+    accepted,
     superseded,
     interruptible,
     named,
@@ -587,6 +588,7 @@ export class GooseRuntime {
               : (threadReference(event)?.rootId ?? event.id),
             ...(step ? { step } : {}),
             ...(acknowledged ? { acknowledged } : {}),
+            ...(accepted ? { accepted } : {}),
             ...(superseded ? { superseded } : {}),
           });
         })();
