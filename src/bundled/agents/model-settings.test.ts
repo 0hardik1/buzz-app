@@ -28,6 +28,7 @@ it.each([
       agentProtection: { registerModels: vi.fn() },
       settingsCards: { register: vi.fn() },
       agents: {
+        harness: { mcp: { choice: async () => undefined, started: () => {} } },
         register: (registered: AgentType) => {
           type = registered;
         },
