@@ -1664,9 +1664,9 @@ function ChannelWorkspace({
         if (entry && historyPanel(entry)) {
           // A local push has already retained its parent. Applying the routed
           // visit must select that tab without replacing its siblings again.
-          const alreadyOpen = tabState.entries.some(
-            (item) => panelTabId(item) === panelTabId(entry),
-          );
+          const alreadyOpen = tabState
+            .getEntries()
+            .some((item) => panelTabId(item) === panelTabId(entry));
           open(entry, alreadyOpen, detailSource ? "side" : undefined);
           if (detailSource && !detailReply) tabState.selectMain(undefined);
         } else navigation.complete({ status: "failed", reason: "unavailable" });
@@ -1736,7 +1736,7 @@ function ChannelWorkspace({
     routedThread,
     detailReply,
     detailSource,
-    tabState.entries,
+    tabState.getEntries,
     tabState.enterVisit,
     tabState.select,
     tabState.selectMain,
