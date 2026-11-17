@@ -927,7 +927,7 @@ it("gives each turn of a kept session the plugins' instructions as they are now"
   expect(second).not.toContain("Run dibs_check first.");
   expect(third).not.toContain("<plugin-instructions");
   expect(BASE_PROMPT).toContain(
-    "a turn without any means no plugin instructions apply now",
+    "each turn replaces the set, and absence clears it",
   );
 });
 
@@ -1380,6 +1380,7 @@ it("resumes an idle session on the agent's new core memory", async () => {
 });
 
 it("starts each session from the host's core memory, reading only recent notes from the relay", async () => {
+  setLeanBasePromptPreference(false);
   const { deliver, claudes, core, memoryRead } = setup();
   const mention = (id: string) =>
     deliver({
@@ -1413,7 +1414,7 @@ it("starts each session from the host's core memory, reading only recent notes f
   core.mockResolvedValueOnce(undefined);
   await mention("2");
   await flush(10);
-  expect(asked("2")).toContain("## Incoming Turn Contract");
+  expect(asked("2")).toContain("## Agent Memory");
   expect(asked("2")).not.toContain("<core-memory>");
 });
 

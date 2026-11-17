@@ -4,8 +4,8 @@ const preferenceKey = "buzz-agents-lean-base-prompt.v1";
 let unsavedPreference: boolean | undefined;
 
 /** Device-local choice to give agents the lean base prompt: the Buzz
- * essentials in under 1 KB instead of the full guidance. On by default.
- * Read when a session starts; running sessions keep their prompt. */
+ * required contract without the optional guidance. On by default.
+ * Claude/Codex keep it until a new session; Goose/Pi refresh it on the next turn. */
 export function leanBasePromptPreference(): boolean {
   if (unsavedPreference !== undefined) return unsavedPreference;
   try {
@@ -29,7 +29,7 @@ export function setLeanBasePromptPreference(enabled: boolean): void {
 export const leanBasePromptSetting: DeviceSetting = {
   key: "agents.lean_base_prompt",
   description:
-    "Agents started here get the lean base prompt: only the Buzz essentials, under 1 KB. Off gives the full base prompt. Applies to new agent sessions.",
+    "Device-wide for all agents; any connected agent with settings access can change it. On (default) gives only the required Buzz contract; off appends full guidance. Claude/Codex need a new session; Goose/Pi apply it next turn.",
   schema: { type: "boolean" },
   read: () => ({
     value: leanBasePromptPreference(),

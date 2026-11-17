@@ -1,5 +1,8 @@
 import { expect, it, beforeEach } from "vitest";
-import { MENTION_PROMPT } from "../../features/agent-harness/base-prompt";
+import {
+  LEAN_BASE_PROMPT,
+  MENTION_PROMPT,
+} from "../../features/agent-harness/base-prompt";
 import type { EventData } from "../../features/relay/events";
 import { developerInstructions, turnInput } from "./prompt";
 import { setLeanBasePromptPreference } from "../../features/agent-harness/lean-base-prompt-preference";
@@ -73,4 +76,24 @@ it("names the agent's workspace for a thread in a conversation folder", () => {
   expect(developerInstructions(agent)).toContain(
     "Your persistent workspace is in your working directory:",
   );
+});
+
+it("builds Codex developer instructions with the lean contract enabled", () => {
+  setLeanBasePromptPreference(true);
+  try {
+    const prompt = developerInstructions({
+      name: "Codex",
+      pubkey: "b".repeat(64),
+    });
+    expect(prompt).toContain(LEAN_BASE_PROMPT);
+    expect(prompt).not.toContain("## Engineering Discipline");
+    expect(
+      developerInstructions(
+        { name: "Codex", pubkey: "b".repeat(64) },
+        "/workspace",
+      ),
+    ).toContain("Your workspace is `/workspace`");
+  } finally {
+    setLeanBasePromptPreference(false);
+  }
 });

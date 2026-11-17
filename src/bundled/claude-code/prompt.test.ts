@@ -3,7 +3,10 @@ import { quoted } from "../../features/agent-harness/turn-records";
 import type { ConversationWake } from "../../features/agents/service";
 import type { EventData } from "../../features/relay/events";
 import { BUZZ_PROMPT } from "../../buzz-mcp/prompt";
-import { mentionSection } from "../../features/agent-harness/base-prompt";
+import {
+  LEAN_BASE_PROMPT,
+  mentionSection,
+} from "../../features/agent-harness/base-prompt";
 import threadHandoff from "./session_handoff_thread.md?raw";
 import {
   promptMessage,
@@ -558,4 +561,29 @@ it("tells a turn a mention starts what it owes the mention, and a wake's turn no
   expect(system).not.toContain("MUST reply");
   expect(system).not.toContain("MUST publish");
   expect(system).not.toContain("belongs to a different session of you");
+});
+
+it("builds the real harness system prompt with the lean contract enabled", () => {
+  setLeanBasePromptPreference(true);
+  try {
+    const prompt = systemPrompt({
+      scope: "thread",
+      cwd: "/w",
+      instructions: "Be terse.",
+      memory: "A note.",
+    });
+    expect(prompt).toContain(LEAN_BASE_PROMPT);
+    expect(prompt).not.toContain("## Engineering Discipline");
+    expect(prompt).toContain("<agent-instructions>\nBe terse.");
+    expect(prompt).toContain("<core-memory>\nA note.");
+    expect(
+      systemPrompt({
+        scope: "thread",
+        cwd: "/project",
+        workspace: "/workspace",
+      }),
+    ).toContain("Your workspace is `/workspace`");
+  } finally {
+    setLeanBasePromptPreference(false);
+  }
 });

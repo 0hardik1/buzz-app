@@ -5,7 +5,9 @@ import { leanBasePromptPreference } from "./lean-base-prompt-preference";
 import leanPrompt from "./lean_base_prompt.md?raw";
 import mentionPrompt from "./mention_prompt.md?raw";
 
-export const BASE_PROMPT = basePrompt.trim();
+/** Required Buzz contract shared by every prompt mode. */
+export const LEAN_BASE_PROMPT = leanPrompt.trim();
+export const BASE_PROMPT = `${LEAN_BASE_PROMPT}\n\n${basePrompt.trim()}`;
 
 /** What the base prompt's Workspace Layout says of the working directory,
  * and what it says instead in a conversation working in a folder of its
@@ -25,9 +27,6 @@ const OWN_FOLDER = [
   ],
 ] as const;
 
-/** The lean base prompt, under 1 KB: only what Buzz routing and safety need. */
-export const LEAN_BASE_PROMPT = leanPrompt.trim();
-
 const LEAN_OWN_FOLDER = [
   "Your workspace is your working directory.",
   "Your workspace is `{workspace}`; your working directory is this conversation's own folder.",
@@ -40,14 +39,12 @@ export function basePromptFor(
   workspace?: string,
   lean = leanBasePromptPreference(),
 ) {
-  if (!lean) return ownFolderPrompt(workspace);
-  if (!workspace) return LEAN_BASE_PROMPT;
+  const prompt = lean ? LEAN_BASE_PROMPT : ownFolderPrompt(workspace);
+  if (!workspace) return prompt;
   const [from, to] = LEAN_OWN_FOLDER;
-  if (!LEAN_BASE_PROMPT.includes(from))
+  if (!prompt.includes(from))
     throw new Error(`The lean base prompt no longer says: ${from}`);
-  return LEAN_BASE_PROMPT.replace(from, () =>
-    to.replace("{workspace}", () => workspace),
-  );
+  return prompt.replace(from, () => to.replace("{workspace}", () => workspace));
 }
 
 function ownFolderPrompt(workspace?: string) {
