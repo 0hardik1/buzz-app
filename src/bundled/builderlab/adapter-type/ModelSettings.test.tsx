@@ -197,9 +197,16 @@ async function fixture(
       const update = JSON.parse(body ?? "{}");
       agent = {
         ...agent,
-        modelId: update.model_id,
-        reasoningEffort: update.reasoning_effort,
-        modelSelectionStatus: "valid",
+        ...(update.model_id !== undefined
+          ? {
+              modelId: update.model_id,
+              reasoningEffort: update.reasoning_effort,
+              modelSelectionStatus: "valid" as const,
+            }
+          : {}),
+        ...(update.summarization_threshold !== undefined
+          ? { summarizationThreshold: update.summarization_threshold }
+          : {}),
       };
       result = {};
     } else
@@ -213,6 +220,7 @@ async function fixture(
             status: 2,
             model_id: agent.modelId,
             reasoning_effort: agent.reasoningEffort,
+            summarization_threshold: agent.summarizationThreshold,
             model_selection_status: 1,
           },
         ],
@@ -267,6 +275,80 @@ async function choose(label: string, value: string) {
     await user.click(await screen.findByRole("option", { name: value }));
   }
 }
+it.each([50, 90, 0.00000001])(
+  "saves and reads back a %s percent compaction preference without changing other settings",
+  async (percentage) => {
+    const h = await fixture({
+      modelId: "model-one",
+      reasoningEffort: "high",
+      modelSelectionStatus: "valid",
+      instructions: "Keep these instructions.",
+    });
+    const field = screen.getByRole("spinbutton", { name: "Compact at (%)" });
+    expect(field).toHaveValue(80);
+    fireEvent.change(field, { target: { value: String(percentage) } });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Save" })).toBeNull(),
+    );
+    expect(field).toHaveValue(percentage);
+    const updates = h.request.mock.calls.filter(([request]) =>
+      request.url.endsWith("/update-agent"),
+    );
+    expect(updates).toHaveLength(1);
+    expect(JSON.parse(updates[0]?.[0].body ?? "{}")).toEqual({
+      agent_pubkey: "ab".repeat(32),
+      summarization_threshold: percentage / 100,
+    });
+    expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveValue(
+      "Keep these instructions.",
+    );
+  },
+);
+
+it.each(["", "0", "-1", "101"])(
+  "does not save invalid compaction percentage %j",
+  async (value) => {
+    const h = await fixture({
+      modelId: "model-one",
+      reasoningEffort: "high",
+      modelSelectionStatus: "valid",
+    });
+    const field = screen.getByRole("spinbutton", { name: "Compact at (%)" });
+    fireEvent.change(field, { target: { value } });
+    expect(field).toHaveAccessibleDescription(
+      "Enter a percentage greater than 0 and at most 100.",
+    );
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(
+      h.request.mock.calls.some(([request]) =>
+        request.url.endsWith("/update-agent"),
+      ),
+    ).toBe(false);
+  },
+);
+
+it("keeps the compaction draft when the server does not persist it", async () => {
+  const h = await fixture({
+    modelId: "model-one",
+    reasoningEffort: "high",
+    modelSelectionStatus: "valid",
+  });
+  const field = screen.getByRole("spinbutton", { name: "Compact at (%)" });
+  fireEvent.change(field, { target: { value: "90" } });
+  h.request.mockImplementationOnce(async () => ({
+    status: 200,
+    headers: {},
+    body: "{}",
+  }));
+  await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "The compaction setting was not saved.",
+  );
+  expect(field).toHaveValue(90);
+  expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+});
+
 it("keeps the Builderlab mark when no shared Harness control is supplied", async () => {
   await fixture();
   const mark = screen.getByText("Builderlab").querySelector("svg");

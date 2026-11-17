@@ -12,6 +12,7 @@ import { ModelFamilyMenu } from "../../../features/agents/ModelFamilyMenu";
 import { BuilderlabLogoIcon } from "../../../shared/design-system/icons";
 import { Button } from "../../../shared/design-system/ui/Button";
 import { Field } from "../../../shared/design-system/ui/Field";
+import { Input } from "../../../shared/design-system/ui/Input";
 import { LoadingRegion } from "../../../shared/design-system/ui/LoadingRegion";
 import { PreferenceRow } from "../../../shared/design-system/ui/PreferenceRow";
 import { Select } from "../../../shared/design-system/ui/Select";
@@ -49,6 +50,8 @@ const accessDenied = (reason: unknown) =>
   reason instanceof Error && "status" in reason && reason.status === 403;
 const accountMismatchMessage =
   "Sign in to the Builderlab account that loaded these settings.";
+const compactionPercentage = (ratio = 0.8) =>
+  String(Number((ratio * 100).toPrecision(15)));
 
 export function ModelSettings({
   client,
@@ -100,6 +103,9 @@ export function ModelSettings({
   const [modelId, setModelId] = useState(agent?.modelId ?? "");
   const [effort, setEffort] = useState(agent?.reasoningEffort ?? "");
   const [instructions, setInstructions] = useState(agent?.instructions ?? "");
+  const [compaction, setCompaction] = useState(
+    compactionPercentage(agent?.summarizationThreshold),
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>("");
@@ -130,6 +136,7 @@ export function ModelSettings({
     setModelId(agent.modelId ?? "");
     setEffort(agent.reasoningEffort ?? "");
     setInstructions(agent.instructions ?? "");
+    setCompaction(compactionPercentage(agent.summarizationThreshold));
   }, [agent]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision retries a failed catalog request while keeping the draft.
   useEffect(() => {
@@ -162,15 +169,26 @@ export function ModelSettings({
     modelId !== (saved?.modelId ?? "") ||
     effort !== (saved?.reasoningEffort ?? "");
   const instructionsChanged = instructions !== (saved?.instructions ?? "");
+  const compactionChanged =
+    compaction !== compactionPercentage(saved?.summarizationThreshold);
+  const threshold = Number(compaction) / 100;
+  const validCompaction =
+    compaction.trim() !== "" &&
+    Number.isFinite(threshold) &&
+    threshold > 0 &&
+    threshold <= 1;
   const saveModel =
     modelChanged ||
-    (!instructionsChanged && saved?.modelSelectionStatus !== "valid");
+    (!instructionsChanged &&
+      !compactionChanged &&
+      saved?.modelSelectionStatus !== "valid");
   const disabled =
     !hasAccess ||
     !saved ||
     saving ||
     !validInstructions(instructions) ||
-    (!instructionsChanged && !saveModel) ||
+    !validCompaction ||
+    (!instructionsChanged && !compactionChanged && !saveModel) ||
     (saveModel && (loading || !valid));
   const save = async () => {
     if (disabled || !saved) return;
@@ -183,21 +201,17 @@ export function ModelSettings({
         throw new Error(accountMismatchMessage);
       if (saved.status !== "Active")
         throw new Error("Only Active agents can have their settings edited.");
-      if (saveModel && instructionsChanged)
-        await client.configure(
-          saved.pubkey,
-          {
-            instructions,
-            modelId,
-            reasoningEffort: effort,
-          },
-          signal,
-        );
-      else if (saveModel)
-        await client.updateModel(saved, modelId, effort, signal);
-      else await client.updateInstructions(saved, instructions, signal);
+      await client.configure(
+        saved.pubkey,
+        {
+          ...(instructionsChanged ? { instructions } : {}),
+          ...(saveModel ? { modelId, reasoningEffort: effort } : {}),
+          ...(compactionChanged ? { summarizationThreshold: threshold } : {}),
+        },
+        signal,
+      );
       signal.throwIfAborted();
-      if (!saveModel) {
+      if (!saveModel && !compactionChanged) {
         setSaved({ ...saved, instructions });
         return;
       }
@@ -207,12 +221,17 @@ export function ModelSettings({
       signal.throwIfAborted();
       if (!remote)
         throw new Error("Agent not found in this Builderlab account.");
-      // Model readback must not replace the instructions draft with an omitted
-      // or stale value. Only model fields need server validity confirmation.
+      if (
+        compactionChanged &&
+        (remote.summarizationThreshold ?? 0.8) !== threshold
+      )
+        throw new Error("The compaction setting was not saved. Try again.");
+      // Readback must not replace the instructions draft with an omitted or stale value.
       setSaved({ ...remote, instructions });
       setModelId(remote.modelId ?? "");
       setEffort(remote.reasoningEffort ?? "");
-      if (remote.modelSelectionStatus === "valid")
+      setCompaction(compactionPercentage(remote.summarizationThreshold));
+      if (saveModel && remote.modelSelectionStatus === "valid")
         notify("Model preferences saved", "success");
     } catch (reason) {
       if (!signal.aborted && session.snapshot().status === "signed-in")
@@ -388,6 +407,25 @@ export function ModelSettings({
             onValueChange={setEffort}
           />
         </SettingsGroup>
+        <Field
+          label="Compact at (%)"
+          description="Automatically summarize older context at this percentage of the context budget. Default: 80%. Changes apply on the next turn."
+          error={
+            hasAccess && !validCompaction
+              ? "Enter a percentage greater than 0 and at most 100."
+              : undefined
+          }
+        >
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            step="any"
+            value={compaction}
+            onChange={(event) => setCompaction(event.target.value)}
+            disabled={!saved || saving || !hasAccess}
+          />
+        </Field>
         {hasAccess && models?.length === 0 && (
           <p className="m-0 text-body-sm text-secondary">
             No models are available. Retry when the catalog is available.
@@ -429,7 +467,7 @@ export function ModelSettings({
           form={form}
           saving={saving}
           disabled={disabled}
-          dirty={modelChanged || instructionsChanged}
+          dirty={modelChanged || instructionsChanged || compactionChanged}
         />
         {hasAccess && !failure && models?.length === 0 && (
           <div>

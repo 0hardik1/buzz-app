@@ -29,6 +29,7 @@ export type RemoteAgent = Readonly<{
   instructions?: string;
   modelId?: string;
   reasoningEffort?: string;
+  summarizationThreshold?: number;
   modelSelectionStatus?:
     | "valid"
     | "setup-required"
@@ -73,6 +74,11 @@ function modelSelectionStatus(
 }
 
 export const MAX_INSTRUCTIONS_LENGTH = 20_000;
+const validSummarizationThreshold = (value: unknown): value is number =>
+  typeof value === "number" &&
+  Number.isFinite(value) &&
+  value > 0 &&
+  value <= 1;
 const AGENT_NAME = /^[\w .-]{1,64}$/;
 const INVALID_NAME =
   "Use 1–64 letters, numbers, spaces, dots, hyphens or underscores for the agent name.";
@@ -471,17 +477,22 @@ export function createAgentClient(
     async configure(
       pubkey: string,
       settings: {
-        instructions: string;
-        modelId: string;
-        reasoningEffort: string;
+        instructions?: string;
+        modelId?: string;
+        reasoningEffort?: string;
+        summarizationThreshold?: number;
       },
       signal: AbortSignal,
     ): Promise<void> {
       if (
         !/^[0-9a-f]{64}$/.test(pubkey) ||
-        !validInstructions(settings.instructions) ||
-        !settings.modelId.trim() ||
-        !settings.reasoningEffort.trim()
+        (settings.instructions !== undefined &&
+          !validInstructions(settings.instructions)) ||
+        ((settings.modelId !== undefined ||
+          settings.reasoningEffort !== undefined) &&
+          (!settings.modelId?.trim() || !settings.reasoningEffort?.trim())) ||
+        (settings.summarizationThreshold !== undefined &&
+          !validSummarizationThreshold(settings.summarizationThreshold))
       )
         throw new Error(
           "Choose a model and reasoning effort and check the instructions.",
@@ -493,6 +504,7 @@ export function createAgentClient(
           agent_instructions: settings.instructions,
           model_id: settings.modelId,
           reasoning_effort: settings.reasoningEffort,
+          summarization_threshold: settings.summarizationThreshold,
         },
         signal,
       );
@@ -705,7 +717,9 @@ export function createAgentClient(
             typeof row.agent_pubkey !== "string" ||
             !/^[0-9a-f]{64}$/.test(row.agent_pubkey) ||
             (row.agent_instructions !== undefined &&
-              !validInstructions(row.agent_instructions)),
+              !validInstructions(row.agent_instructions)) ||
+            (row.summarization_threshold != null &&
+              !validSummarizationThreshold(row.summarization_threshold)),
         )
       )
         throw new Error("Builderlab returned an invalid agent list.");
@@ -718,6 +732,9 @@ export function createAgentClient(
           status: agentStatus(row.status),
           ...(createdAt === undefined ? {} : { createdAt }),
           instructions: row.agent_instructions ?? "",
+          ...(typeof row.summarization_threshold === "number"
+            ? { summarizationThreshold: row.summarization_threshold }
+            : {}),
           ...(typeof row.model_id === "string"
             ? { modelId: row.model_id }
             : {}),

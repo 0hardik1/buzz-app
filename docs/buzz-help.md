@@ -1157,6 +1157,9 @@ available rather than silently discarding it.
   when that account holds this Buzz identity's backup, Buzz restores it instead
   of asking for QR pairing. The remote agent can answer while the desktop is off,
   but it cannot open files on that desktop.
+- In a Builderlab agent's settings, **Compact at (%)** chooses when older context
+  is automatically summarized. The default is 80%; enter a percentage greater
+  than 0 and at most 100, then Save. The saved setting applies from the next turn.
 - Some builds offer **AI setup → Automatic** when creating an
   agent. AI setup covers the harness, model, and thinking level. Buzz picks
   the first recommended harness that is set up on this
