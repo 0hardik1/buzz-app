@@ -1,5 +1,6 @@
 import { useDndContext, useDraggable } from "@dnd-kit/core";
 import { ChannelSidebarRows } from "./ChannelSidebarRows";
+import { teamSidebarSource } from "../../bundled/channels/TeamSidebarSource";
 import type { RegisteredSidebarSectionSource } from "./sidebar-section-components";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
@@ -48,7 +49,13 @@ import type {
   SidebarRow,
 } from "./sidebar-rows-service";
 import { SidebarRowsService } from "./sidebar-rows-service";
-import { createRef, useState, type ReactNode, type ReactElement } from "react";
+import {
+  createRef,
+  useState,
+  type ReactNode,
+  type ReactElement,
+  type ComponentProps,
+} from "react";
 import userEvent from "@testing-library/user-event";
 import { ChannelHeaderMenu } from "../../bundled/channels/ChannelHeaderMenu";
 import { PrimarySidebar } from "../../app/shell/sidebar-section-testing";
@@ -3812,6 +3819,141 @@ it("restores a cold saved scroll only after the new Team slots have connected ro
     await screen.findByRole("button", { name: "alpha" });
     await waitFor(() => expect(writes).toEqual([{ top: 120, rows: 3 }]));
   } finally {
+    if (original)
+      Object.defineProperty(Element.prototype, "scrollTop", original);
+    else Reflect.deleteProperty(Element.prototype, "scrollTop");
+  }
+});
+
+it("restores saved scroll and completes focus recovery when the Team source throws, retaining Solo", async () => {
+  let failing = true;
+  const Component = teamSidebarSource.component;
+  const source = vi
+    .spyOn(teamSidebarSource, "component")
+    .mockImplementation((props: ComponentProps<typeof Component>) => {
+      if (failing) throw new Error("Team source failed");
+      return <Component {...props} />;
+    });
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  let finish!: () => void;
+  const heldWrite = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const preferences = createSidebarPreferencesStore({
+    available: true,
+    read: async () => ({
+      sections: [],
+      assignments: {},
+      starred: [],
+      muted: [],
+    }),
+    writeStar: async () => [],
+    write: async () => {
+      await heldWrite;
+      return { sections: [], assignments: {} };
+    },
+  });
+  const f = fixture(preferences.queries);
+  writeView(f.session.scope, "channel-sidebar", {
+    collapsed: [],
+    contributionOrder: [],
+    scrollTop: 120,
+    location: "conversation:alpha",
+  });
+  try {
+    render(f.view("alpha"));
+    await screen.findByRole("alert");
+    const solo = document.querySelector(
+      '[data-sidebar-slot="buzz.channels/solo"]',
+    );
+    assert(solo?.firstChild);
+    const soloContent = solo.firstChild;
+    const viewport = screen.getByRole("navigation", {
+      name: "Subscribed channels",
+    });
+    // The source fallback is a settled inventory, even though its expected rows are absent.
+    await waitFor(() => expect(viewport?.scrollTop).toBe(120));
+    expect(screen.queryByRole("button", { name: "alpha" })).toBeNull();
+
+    failing = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const row = await screen.findByRole("button", { name: "beta" });
+    const user = userEvent.setup();
+    row.focus();
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    await user.hover(
+      await screen.findByRole("menuitem", { name: "Move channel" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Create new…" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Move to new section",
+    });
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Section name" }),
+      "Release",
+    );
+    const form = within(dialog).getByRole("textbox").closest("form");
+    assert(form);
+    // Lose the row while its optimistic move requests focus. Recovery must finish
+    // on the shell's fallback control after the failed source's slot commits.
+    failing = true;
+    act(() => fireEvent.submit(form));
+    const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
+    expect(screen.queryByRole("button", { name: "beta" })).toBeNull();
+    expect(sidebar.querySelector("button")).toHaveFocus();
+    expect(solo).toContainElement(soloContent as HTMLElement);
+    expect(soloContent.isConnected).toBe(true);
+  } finally {
+    cleanup();
+    await act(async () => finish());
+    source.mockRestore();
+    error.mockRestore();
+    preferences.dispose();
+  }
+});
+
+it("restores saved scroll after reconnect only with the new generation's connected slots", async () => {
+  const f = fixture();
+  writeView(f.session.scope, "channel-sidebar", {
+    collapsed: [],
+    contributionOrder: [],
+    scrollTop: 120,
+    location: "conversation:alpha",
+  });
+  const writes: { top: number; rows: number }[] = [];
+  const offsets = new WeakMap<Element, number>();
+  const original = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "scrollTop",
+  );
+  Object.defineProperty(Element.prototype, "scrollTop", {
+    configurable: true,
+    get() {
+      return offsets.get(this) ?? 0;
+    },
+    set(top: number) {
+      const rows = this.querySelectorAll("[data-channel-id]").length;
+      writes.push({ top, rows });
+      // A disconnected portal cannot supply scroll height. This models ordering,
+      // while the browser regressions own actual layout and clamp measurements.
+      offsets.set(this, rows ? top : 0);
+    },
+  });
+  try {
+    render(f.view("alpha"));
+    await screen.findByRole("button", { name: "alpha" });
+    await waitFor(() => expect(writes).toEqual([{ top: 120, rows: 3 }]));
+    const previous = screen.getByRole("button", { name: "alpha" });
+    writes.length = 0;
+    f.connection({ ...f.snapshot, generation: f.snapshot.generation + 1 });
+    const current = screen.getByRole("button", { name: "alpha" });
+    expect(current).not.toBe(previous);
+    expect(previous.isConnected).toBe(false);
+    expect(writes).toEqual([{ top: 120, rows: 3 }]);
+  } finally {
+    cleanup();
     if (original)
       Object.defineProperty(Element.prototype, "scrollTop", original);
     else Reflect.deleteProperty(Element.prototype, "scrollTop");
