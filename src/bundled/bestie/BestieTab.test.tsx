@@ -884,6 +884,67 @@ it("offers to remove what is left of a check-in whose Interest or timer is gone"
   ]);
 });
 
+it("offers to remove a Self-review section left when Off saved Attention but not the instructions, on a Former Bestie too", async () => {
+  const user = userEvent.setup();
+  const { relay } = community(ada.pubkey);
+  const { agents, save } = host();
+  const Tab = bestieTab(relay, agents).component;
+  const base = { instructions: "head-1" };
+  const remembering = withFeature("Be brief.", memory, true);
+  const withLessons = withFeature(remembering, selfReview, true);
+  const on = {
+    ...ada,
+    config: { instructions: withLessons },
+    configBase: base,
+    attentionEnabled: true,
+    attention: {
+      "interest/bestie-self-review": { value: { type: "interest" } },
+      "watch/bestie-self-review": { value: { type: "timer", enabled: true } },
+    },
+  } as unknown as Agent;
+  const { rerender, unmount } = render(<Tab agent={on} />);
+  const self = () => screen.getByRole("switch", { name: "Self-review" });
+  expect(self()).toBeChecked();
+  // Off removes the Interest and the timer, then the section can't be saved.
+  save
+    .mockResolvedValueOnce(undefined)
+    .mockRejectedValueOnce(new Error("Connect to the community to save"));
+  await user.click(self());
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Connect to the community to save",
+  );
+  // What is left: the section, still in every turn's instructions.
+  const left = { ...on, attention: {} } as Agent;
+  rerender(<Tab agent={left} />);
+  expect(self()).not.toBeChecked();
+  const remove = () =>
+    screen.getByRole("button", {
+      name: "Remove",
+      description: "Self-review is partly saved",
+    });
+  save.mockClear();
+  await user.click(remove());
+  expect(save.mock.calls).toEqual([
+    [ada.key, { config: { instructions: remembering }, base }],
+  ]);
+  unmount();
+
+  // A Former Bestie's check-in switch can't be turned on, but Remove works.
+  const { relay: other } = community(bea.pubkey);
+  const former = formerBestieTab(other, agents);
+  const stop = former.subscribe?.(() => {});
+  await vi.waitFor(() => expect(former.when?.(left)).toBe(true));
+  const Former = former.component;
+  render(<Former agent={left} />);
+  expect(self()).toHaveAttribute("aria-disabled", "true");
+  save.mockClear();
+  await user.click(remove());
+  expect(save.mock.calls).toEqual([
+    [ada.key, { config: { instructions: remembering }, base }],
+  ]);
+  stop?.();
+});
+
 it("says a check-in paused in Attention is paused, and how to restart it", async () => {
   const user = userEvent.setup();
   const { relay } = community(ada.pubkey);
