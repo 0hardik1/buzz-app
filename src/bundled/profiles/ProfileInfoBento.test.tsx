@@ -99,7 +99,6 @@ it("preserves provider labels and additional fields in each declared section", (
 
 it("updates the lead photo from the shared profile and respects photo removal and verification changes", async () => {
   const owner = createRelaySession(null);
-  vi.spyOn(owner.session, "media").mockImplementation((url) => url);
   const leadKey = "c".repeat(64);
   const verified = {
     displayName: "Example Lead",
@@ -127,18 +126,22 @@ it("updates the lead photo from the shared profile and respects photo removal an
     ],
   ]);
   const listeners = new Set<() => void>();
-  vi.spyOn(owner.session.profiles, "snapshot").mockImplementation(
-    () => snapshot,
-  );
-  vi.spyOn(owner.session.profiles, "subscribe").mockImplementation(
-    (listener) => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+  const ensure = vi.fn().mockResolvedValue(undefined);
+  const session = {
+    ...owner.session,
+    media: (url: string) => url,
+    profiles: {
+      ...owner.session.profiles,
+      snapshot: () => snapshot,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+      ensure,
     },
-  );
-  const ensure = vi.spyOn(owner.session.profiles, "ensure").mockResolvedValue();
+  };
   vi.spyOn(providerProfile, "resolveProviderProfile").mockResolvedValue(
     leadKey,
   );
@@ -172,7 +175,7 @@ it("updates the lead photo from the shared profile and respects photo removal an
         username="person"
         about={undefined}
         timeZone={undefined}
-        session={owner.session}
+        session={session}
         open={undefined}
       />,
     );

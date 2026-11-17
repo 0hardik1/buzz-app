@@ -752,7 +752,7 @@ function ProfileDetails({
     );
   };
   useEffect(() => {
-    if (!photoOpen) return;
+    if (!photoOpen || !photoHost) return;
     photoClose.current?.focus();
     const outsidePhoto = (event: PointerEvent) => {
       const target = event.target;
@@ -773,7 +773,7 @@ function ProfileDetails({
     document.addEventListener("pointerdown", outsidePhoto, true);
     return () =>
       document.removeEventListener("pointerdown", outsidePhoto, true);
-  }, [photoOpen]);
+  }, [photoOpen, photoHost]);
 
   return (
     <section
