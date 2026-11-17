@@ -49,7 +49,7 @@ function setup(status = "ready", types = [type], initial: Agent[] = []) {
     },
   };
 }
-it("offers the retained prefabs and custom, disclosing tool access before creation", () => {
+it("offers tools and custom, disclosing each tool’s access before creation", () => {
   const { create } = setup();
   for (const preset of MESH_AGENT_PRESETS)
     expect(
@@ -63,9 +63,10 @@ it("offers the retained prefabs and custom, disclosing tool access before creati
     screen.getAllByText(/shell and files on this machine, plus Buzz access/),
   ).toHaveLength(2);
   expect(screen.getAllByText(/Chat: no tools/)).toHaveLength(2);
+  expect(screen.getByRole("region", { name: "Tools" })).toBeInTheDocument();
   expect(
-    screen.getByText(/Members serving its model can read/),
-  ).toBeInTheDocument();
+    screen.queryByText(/Create a helper, then add it to a conversation/),
+  ).not.toBeInTheDocument();
   expect(
     screen.getAllByText(/Tool output and core memory may be sent/),
   ).toHaveLength(2);

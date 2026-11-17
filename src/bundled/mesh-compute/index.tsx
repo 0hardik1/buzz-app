@@ -611,20 +611,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
         refreshDisabled={busy || !isTauri()}
         refresh={() => void refresh()}
       >
-        {community?.name &&
-          (status?.sharing && !otherCommunity ? (
-            <p className="m-0 text-body">
-              Sharing{" "}
-              <strong title={status.sharing}>
-                {modelNames[status.sharing] ?? status.sharing}
-              </strong>{" "}
-              with <strong>{community.name}</strong>
-            </p>
-          ) : (
-            <p className="m-0 text-body-sm text-secondary">
-              Shared compute for <strong>{community.name}</strong>
-            </p>
-          ))}
         {otherCommunity && (
           <section aria-label="Bound compute community">
             <p>
@@ -656,13 +642,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
         )}
         {isTauri() && status && !otherCommunity && (
           <section aria-label="Share compute">
-            <p className="m-0 text-body-sm text-secondary">
-              Let {community?.name ?? "this community"} run prompts on this
-              machine. Auto picks the best model for your hardware; you can also
-              choose one. Members serving your helper’s model can read its
-              prompts, conversation history and, in Agent mode, tool output and
-              core memory. Sharing resumes when you reopen Buzz.
-            </p>
             {status.sharing && status.download && !status.download.done && (
               <DownloadProgress download={status.download} />
             )}

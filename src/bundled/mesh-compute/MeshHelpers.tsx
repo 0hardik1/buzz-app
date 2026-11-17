@@ -64,11 +64,7 @@ export function MeshHelpers({ agents }: { agents: Agents }) {
   };
   return (
     <section aria-labelledby={title} className="grid gap-3">
-      <InlineHeader
-        id={title}
-        title="Helpers"
-        subtitle="Create a helper, then add it to a conversation. Members serving its model can read the prompts and conversation history sent to them. Find your helpers in Agents."
-      />
+      <InlineHeader id={title} title="Tools" />
       <SettingsGroup>
         {[...MESH_AGENT_PRESETS, null].map((preset) => {
           const name = preset?.name ?? "Custom agent";

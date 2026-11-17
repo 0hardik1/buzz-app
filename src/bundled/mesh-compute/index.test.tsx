@@ -338,6 +338,12 @@ it("starts sharing the selected model through the existing community lease", asy
   render(<Component />);
   await screen.findByRole("switch", { name: "Share compute" });
   expect(
+    screen.getByRole("heading", { name: "Shared compute" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText(/Auto picks the best model/),
+  ).not.toBeInTheDocument();
+  expect(
     screen.getByRole("switch", { name: "Share compute" }),
   ).not.toHaveAttribute("aria-disabled", "true");
   await userEvent.click(
