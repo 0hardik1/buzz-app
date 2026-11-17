@@ -20,7 +20,7 @@ import {
   taskOf,
   taskTags,
 } from "./model";
-import { canHoldTasks, readPlaces } from "./places";
+import { canHoldTasks, type Place, placeLabel, readPlaces } from "./places";
 
 export type TasksState = Readonly<{
   status: "loading" | "live" | "error";
@@ -301,9 +301,34 @@ export async function saveTask(
     );
   if (delivery.status === "refused" && delivery.refusal === "too-large")
     throw new Error("This task is too large to save. Shorten the description.");
-  if (delivery.status === "refused" && delivery.refusal === "invalid")
-    throw new Error(refusedText(delivery.message, session));
+  if (delivery.status === "refused" && delivery.refusal === "invalid") {
+    console.warn("The relay refused a task save:", delivery.message);
+    const places = await readPlaces(reader, [home], signal).catch(
+      () => new Map<string, Place>(),
+    );
+    const place = places.get(home);
+    throw new TaskRefused(
+      refusedText(
+        delivery.message,
+        session,
+        place ? placeLabel(place, places) : undefined,
+      ),
+      delivery.message,
+    );
+  }
   throw new Error("Couldn’t save the task. Try again.");
+}
+
+/** A save the relay refused as invalid: `message` in plain words for
+ * people, `relay` the relay's own text, for an agent to act on. */
+export class TaskRefused extends Error {
+  constructor(
+    message: string,
+    readonly relay: string,
+  ) {
+    super(message);
+    this.name = "TaskRefused";
+  }
 }
 
 /** A NIP-AR reason code and the keys it names, from a relay refusal of the
@@ -329,9 +354,13 @@ function keptCreator(message: string, sent: string | undefined) {
 }
 
 /** What to tell someone when the relay refuses a save as invalid: its
- * reason in plain words, naming people the app knows. Never the relay's
- * own text or a key. */
-function refusedText(message: string, session: RelaySession) {
+ * reason in plain words, naming people the app knows and the task's place,
+ * `where`, when known. Never the relay's own text or a key. */
+function refusedText(
+  message: string,
+  session: RelaySession,
+  where: string | undefined,
+) {
   const reason = reasonOf(message);
   const known = session.profiles.snapshot();
   const names = reason?.keys.map((key) => known.get(key)?.name);
@@ -344,8 +373,8 @@ function refusedText(message: string, session: RelaySession) {
   switch (reason?.code) {
     case "assignee-unreadable":
       return named
-        ? `${named} can’t see where this task lives, so they can’t be assigned. Nothing was saved.`
-        : "Someone assigned can’t see where this task lives. Nothing was saved.";
+        ? `${named} can’t see ${where ?? "where this task lives"}, so they can’t be assigned. Nothing was saved.`
+        : `One of the people assigned can’t see ${where ?? "where this task lives"}. Nothing was saved.`;
     case "assignee-agent":
       return named
         ? `Only people can be assigned, and ${named} ${names?.length === 1 ? "is an agent" : "are agents"}. Nothing was saved.`
@@ -355,6 +384,6 @@ function refusedText(message: string, session: RelaySession) {
     case "signer-agent":
       return "Only a person can save a task, not an agent. Nothing was saved.";
     default:
-      return "The community refused this change. Nothing was saved.";
+      return "This change isn’t allowed. Nothing was saved.";
   }
 }

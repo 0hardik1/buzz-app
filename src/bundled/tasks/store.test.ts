@@ -2,7 +2,7 @@ import { expect, it, vi } from "vitest";
 import { PublishRejected } from "../../features/relay/outbox";
 import type { RelaySession } from "../../features/relay/session";
 import { TASK_TYPE, type Task, type TaskFields, taskOf } from "./model";
-import { NOT_A_TASK_PLACE, readTask, saveTask } from "./store";
+import { NOT_A_TASK_PLACE, readTask, saveTask, TaskRefused } from "./store";
 
 const viewer = "a".repeat(64);
 const id = "11111111-1111-4111-8111-111111111111";
@@ -188,12 +188,24 @@ it("says each relay reason in plain words, naming people it knows", async () => 
       `invalid: assignee-unreadable:${riley} — an assignee can't see this artifact`,
     ),
   ).rejects.toThrow(
-    "Riley can’t see where this task lives, so they can’t be assigned. Nothing was saved.",
+    "Riley can’t see #2222, so they can’t be assigned. Nothing was saved.",
   );
   await expect(
     save(`invalid: assignee-unreadable:${riley},${"9".repeat(64)} — x`),
   ).rejects.toThrow(
-    "Someone assigned can’t see where this task lives. Nothing was saved.",
+    "One of the people assigned can’t see #2222. Nothing was saved.",
+  );
+  // A place it can't read is described, not named.
+  const unread = taskOf(head("d".repeat(64), {}, dm.replace("4444", "6666")));
+  await expect(
+    saveTask(
+      refusedWith(`invalid: assignee-unreadable:${riley} — x`),
+      refusedWith(""),
+      fields,
+      { op: "update", base: unread as Task },
+    ),
+  ).rejects.toThrow(
+    "Riley can’t see where this task lives, so they can’t be assigned. Nothing was saved.",
   );
   await expect(
     save(`invalid: assignee-agent:${riley} — an agent can't be an assignee`),
@@ -207,16 +219,24 @@ it("says each relay reason in plain words, naming people it knows", async () => 
     save("invalid: signer-agent: — an agent can't sign an artifact"),
   ).rejects.toThrow("Only a person can save a task, not an agent.");
   // A code it doesn't know, or text with no code: a plain line, never the
-  // relay's words or a key.
+  // relay's words or a key. Those go to the log, and to an agent's tool.
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   for (const reason of [
     `invalid: something-new:${riley} — artifact jargon`,
     "invalid: bad artifact tag",
   ]) {
     const error = await save(reason).catch((caught: unknown) => caught);
-    expect((error as Error).message).toBe(
-      "The community refused this change. Nothing was saved.",
+    expect(error).toBeInstanceOf(TaskRefused);
+    expect((error as TaskRefused).message).toBe(
+      "This change isn’t allowed. Nothing was saved.",
+    );
+    expect((error as TaskRefused).relay).toBe(reason);
+    expect(warn).toHaveBeenLastCalledWith(
+      "The relay refused a task save:",
+      reason,
     );
   }
+  warn.mockRestore();
 });
 
 it("resends once with the creator the relay keeps", async () => {
@@ -271,7 +291,7 @@ it("resends a creator only once", async () => {
   }).session;
   await expect(
     saveTask(relay, relay, fields, { op: "update", base }),
-  ).rejects.toThrow("The community refused this change. Nothing was saved.");
+  ).rejects.toThrow("This change isn’t allowed. Nothing was saved.");
   expect(calls).toBe(2);
 });
 

@@ -454,7 +454,7 @@ it("says the relay's reason in plain words when it refuses an assignee anyway", 
   await expect(
     call("tasks_update", { id, assignees: [person] }),
   ).rejects.toThrow(
-    "Riley can’t see where this task lives, so they can’t be assigned. Nothing was saved.",
+    `Riley can’t see #design, so they can’t be assigned. Nothing was saved. The relay said: invalid: assignee-unreadable:${person} — an assignee can't see this artifact`,
   );
 });
 
