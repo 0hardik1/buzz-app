@@ -1613,7 +1613,7 @@ export function SearchResults({
         ? `${name}: ${thread.preview}`
         : `${name} replied in a thread`,
       run: choose(destination.key, () =>
-        openConversation(channel.id, thread.latestMessageId, thread.rootId),
+        openConversation(channel.id, thread.rootId, thread.rootId),
       ),
     };
   };
