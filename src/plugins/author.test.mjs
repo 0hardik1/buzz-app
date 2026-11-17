@@ -86,7 +86,7 @@ export function apply(ctx: Context) {
   }
   const dockBadge: NotificationDockBadge = {
     id: "attention",
-    count: () => 3,
+    count: (allows) => allows({ version: 1, kind: "home" }) ? 3 : 0,
     subscribe: () => () => {},
   };
   ctx.notifications.dockBadge(dockBadge);
