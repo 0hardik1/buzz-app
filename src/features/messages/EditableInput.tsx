@@ -545,6 +545,7 @@ export function EditableInput({
     const initial = readComposerDocument(
       current.current.draft,
       current.current.decorationsFor(current.current.draft),
+      current.current.markdownMode,
     );
     let editor: EditorView;
     let separateHistory = false;
@@ -1425,6 +1426,8 @@ export function EditableInput({
     };
     const toggleFormat = (format: ComposerFormat) => {
       if (!editable() || composing.current || editor.composing) return;
+      if (current.current.markdownMode === "document" && format === "spoiler")
+        return;
       flushTokens();
       // Formatting operates on textblock contents, not the document's outer edges.
       if (editor.state.selection instanceof AllSelection) {
@@ -2168,7 +2171,11 @@ export function EditableInput({
           const format =
             primary &&
             composerFormats.find((item) => formatBindings(item).some(pressed));
-          if (format) {
+          if (
+            format &&
+            (current.current.markdownMode !== "document" ||
+              format.mark !== "spoiler")
+          ) {
             if (!event.repeat) toggleFormat(format.mark);
             return true;
           }
@@ -2482,7 +2489,7 @@ export function EditableInput({
             ) {
               const draft = documentEditorDraft(text);
               if (draft.document) {
-                const parsed = readComposerDocument(draft, []);
+                const parsed = readComposerDocument(draft, [], "document");
                 const paragraph =
                   parsed.childCount === 1 ? parsed.firstChild : null;
                 // Fallback blocks keep embedded source newlines; supported prose
@@ -2829,6 +2836,7 @@ export function EditableInput({
         const doc = readComposerDocument(
           next,
           current.current.decorationsFor(next),
+          current.current.markdownMode,
         );
         if (reset) {
           separateHistory = false;
