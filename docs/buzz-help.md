@@ -1490,6 +1490,16 @@ available rather than silently discarding it.
   follow-up that is due. Each wake uses model tokens, and the Attention plugin
   also runs the agent's other watches. Turning Remembers you off also turns the
   check-in off.
+- When Buzz ships a new version of **Nightly review**'s steps, the Bestie tab
+  says so under its switch, with what changed, and saves nothing until you
+  choose: **Update** (or **Take version N** when its steps were changed since),
+  **Later** for 7 days, or **Keep as is** until a newer version. Lines added
+  after its closing marker are kept. One set up by hand offers **Review
+  version N**, which keeps the blocks you leave checked and replaces the rest.
+  The text before each change is kept on this device, and **Undo** puts it back,
+  asking first if it has changed since. A check-in paused in the Attention tab
+  shows **Restart**, which runs it again from now with its steps unchanged;
+  turning a check-in off deletes its steps, with any changes to them.
 - Only the current Bestie checks in. Replacing or removing it stops its check-ins
   after this device reads the saved account choice, but leaves its memory
   guidance, stored memory, and private-channel memberships in place. A local or
