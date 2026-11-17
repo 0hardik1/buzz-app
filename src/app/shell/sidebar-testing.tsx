@@ -21,7 +21,7 @@ import {
 import type { OpenTarget } from "../../features/navigation/targets";
 import { NewMenu } from "./NewMenu";
 import type { Agents } from "../../features/agents/service";
-import { PrimarySidebar } from "./PrimarySidebar";
+import { PrimarySidebar } from "./sidebar-section-testing";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { SoloInventory } from "../../bundled/channels/SoloInventory";
 import {

@@ -48,7 +48,7 @@ import { SidebarRowsService } from "./sidebar-rows-service";
 import { createRef, useState, type ReactNode, type ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { ChannelHeaderMenu } from "../../bundled/channels/ChannelHeaderMenu";
-import { PrimarySidebar } from "../../app/shell/PrimarySidebar";
+import { PrimarySidebar } from "../../app/shell/sidebar-section-testing";
 import { buzzLinkTarget } from "../navigation/buzz-links";
 import {
   ChannelNavigationProvider,

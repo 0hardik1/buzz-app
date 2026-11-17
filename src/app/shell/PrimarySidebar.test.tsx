@@ -22,7 +22,7 @@ import { fixture, owners, id, viewer, scope, root } from "./sidebar-testing";
 import { federatedFixture } from "../../features/federated-identity/testing";
 import type { ChannelDetails } from "../../features/relay/channel-details-protocol";
 import { createSoloRegionFixture } from "../../features/channel-navigation/solo-navigation-testing";
-import { PrimarySidebar } from "./PrimarySidebar";
+import { PrimarySidebar } from "./sidebar-section-testing";
 import type { OpenTarget } from "../../features/navigation/targets";
 import { NewMenu } from "./NewMenu";
 import type { SidebarPreferences } from "../../features/relay/sidebar-preferences";

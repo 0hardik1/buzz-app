@@ -1,3 +1,4 @@
+import { soloSidebarSource } from "./SoloSidebarSource";
 import { StartLinkedChat, canStartLinkedChat } from "./StartLinkedChat";
 import { ChannelCompletion } from "./ChannelCompletion";
 import { channelQuery } from "./channel-query";
@@ -30,6 +31,7 @@ export const inject = [
 ];
 export const apply: PluginModule["apply"] = (ctx) => {
   registerCanvas(ctx);
+  ctx.reflect.get("sidebarSections")?.registerSource?.(soloSidebarSource);
   ctx.conversation.registerCompletion({
     id: "channel-typeahead",
     title: "Channel",
