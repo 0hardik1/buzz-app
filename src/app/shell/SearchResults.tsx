@@ -256,11 +256,75 @@ export function SearchResults({
   const list = useChannelList(session.channels);
   // Chosen filters render as chips ahead of the typed text: the query holds
   // their exact operands first, then whatever the input shows.
+  const profiles = useSyncExternalStore(
+    session.profiles.subscribe,
+    session.profiles.snapshot,
+  );
+  /**
+   * Reads chips back from a query's leading filter operands, as choosing them
+   * made them. A query remembered between openings, or searched again, keeps
+   * the exact operands but not the chips that show them by name.
+   */
+  const restoreChips = (text: string) => {
+    const restored: SearchChip[] = [];
+    const token = /(\S+)(?: |$)/y;
+    let end = 0;
+    for (let match = token.exec(text); match; match = token.exec(text)) {
+      const operand = match[1] ?? "";
+      const [, operator = "", value = ""] =
+        /^([a-z]+):(.*)$/i.exec(operand) ?? [];
+      const kind = operator.toLowerCase();
+      const pubkey = value.replace(/^@/, "");
+      const person =
+        (kind === "from" && isHexPubkey(value)) ||
+        (kind === "in" && value.startsWith("@") && isHexPubkey(pubkey));
+      const channel =
+        kind === "in" && !person
+          ? list.channels.find(({ id }) => id === value)
+          : undefined;
+      if (person) {
+        const name = resolveName(
+          pubkey,
+          profiles.get(pubkey)?.name ?? pubkey.slice(0, 10),
+        );
+        restored.push({
+          operand,
+          text: `${kind}:@${name}`,
+          edit: `${kind}:@${name.split(/\s/)[0]}`,
+          label: `Remove ${kind === "in" ? "conversation with" : "author"} ${name}`,
+          title: npubEncode(pubkey),
+        });
+      } else if (channel)
+        restored.push({
+          operand,
+          text: `in:#${channel.name}`,
+          edit: `in:#${channel.name}`,
+          label: `Remove channel ${channel.name}`,
+          title: channel.id,
+        });
+      else if (/^(after|before|on|during)$/.test(kind) && value)
+        restored.push({
+          operand,
+          text: operand,
+          edit: operand,
+          label: `Remove date ${operand}`,
+        });
+      else break;
+      end = token.lastIndex;
+    }
+    return { chips: restored, visible: text.slice(end) };
+  };
   const [chipState, setChipState] = useState<{
     query: string;
     chips: readonly SearchChip[];
   }>();
-  const chips = chipState?.query === query ? chipState.chips : [];
+  const [openingQuery] = useState(query);
+  const chips =
+    chipState?.query === query
+      ? chipState.chips
+      : query === openingQuery
+        ? restoreChips(query).chips
+        : [];
   const chipPrefix = chips.map(({ operand }) => `${operand} `).join("");
   const displayQuery = chips.length
     ? query.slice(chipPrefix.length)
@@ -288,10 +352,6 @@ export function SearchResults({
     !!authorPrompt &&
     !isHexPubkey(authorPrompt[2] ?? "") &&
     !isViewerHandle(authorPrompt[2] ?? "");
-  const profiles = useSyncExternalStore(
-    session.profiles.subscribe,
-    session.profiles.snapshot,
-  );
   const channels = useMemo(
     () =>
       list.channels.filter(
@@ -2079,14 +2139,26 @@ export function SearchResults({
                         {
                           label: "Recent searches",
                           destinations: recentSearches.map(
-                            (text): SearchDestination => ({
-                              key: `recent:${text}`,
-                              label: text,
-                              icon: ClockIcon,
-                              kind: "page",
-                              action: "Search again",
-                              run: () => onQueryChange(text),
-                            }),
+                            (text): SearchDestination => {
+                              const restored = restoreChips(text);
+                              return {
+                                key: `recent:${text}`,
+                                label: [
+                                  ...restored.chips.map((chip) => chip.text),
+                                  restored.visible,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" "),
+                                icon: ClockIcon,
+                                kind: "page",
+                                action: "Search again",
+                                run: () =>
+                                  setChipQuery(
+                                    restored.chips,
+                                    restored.visible,
+                                  ),
+                              };
+                            },
                           ),
                         },
                       ]

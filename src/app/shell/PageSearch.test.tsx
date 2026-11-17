@@ -1264,7 +1264,7 @@ async function askSearch(existingDraft?: {
   } as typeof owner.session;
   const scope = `wss://relay.example:${viewer.pubkey}`;
   const connection = { status: "ready", generation: 1, session, scope };
-  const community = { selected: "wss://relay.example", viewer: viewer.pubkey };
+  let community = { selected: "wss://relay.example", viewer: viewer.pubkey };
   const open = vi.fn(async () => {});
   const services = {
     shortcuts,
@@ -1310,6 +1310,9 @@ async function askSearch(existingDraft?: {
     scope,
     open,
     user,
+    switchCommunity() {
+      community = { ...community, selected: "wss://other.example" };
+    },
     draft: () => readView<unknown>(scope, "solo:new-draft", null),
     async dispose() {
       cleanup();
@@ -1376,6 +1379,30 @@ it("keeps an unsent New chat draft when asking, and opens New chat with the ques
     );
     expect(opened).toEqual([question]);
     expect(f.draft()).toEqual(question);
+  } finally {
+    await f.dispose();
+  }
+});
+
+it("does nothing on Replace once the person has switched community", async () => {
+  const unsent = { text: "my half-written note", recipients: [] };
+  const f = await askSearch(unsent);
+  try {
+    await f.user.keyboard("{Enter}");
+    const notice = await screen.findByRole("dialog", {
+      name: "New chat already has an unsent draft",
+    });
+    f.switchCommunity();
+    fireEvent.click(within(notice).getByRole("button", { name: "Replace it" }));
+    await vi.waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", {
+          name: "New chat already has an unsent draft",
+        }),
+      ).toBeNull(),
+    );
+    expect(f.draft()).toEqual(unsent);
+    expect(f.open).not.toHaveBeenCalled();
   } finally {
     await f.dispose();
   }

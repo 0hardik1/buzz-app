@@ -9549,7 +9549,7 @@ it("asks for a search word when the text only excludes", async () => {
   }
 });
 
-it("keeps chosen filters when ask: is added, and asks with them", async () => {
+it("keeps chosen filters when ask: is added, and asks with them, across reopening", async () => {
   const relay = keypair(),
     viewer = keypair(),
     agent = keypair();
@@ -9578,10 +9578,15 @@ it("keeps chosen filters when ask: is added, and asks with them", async () => {
   } as typeof owner.session;
   const openAsk = vi.fn();
   const input = createRef<HTMLInputElement>();
+  // Closing search unmounts the results; the query outlives them.
+  let reopen!: () => void;
   function Host() {
     const [query, setQuery] = useState("deploy in:#bu");
+    const [opening, setOpening] = useState(0);
+    reopen = () => setOpening((count) => count + 1);
     return (
       <SearchResults
+        key={opening}
         session={session}
         query={query}
         onQueryChange={setQuery}
@@ -9611,6 +9616,15 @@ it("keeps chosen filters when ask: is added, and asks with them", async () => {
       "in:#buzz-bugs deploy",
       expect.objectContaining({ pubkey: agent.pubkey }),
     );
+    // Reopened, the chip and Ask are read back from the remembered query.
+    act(() => reopen());
+    expect(
+      await screen.findByRole("button", { name: "Remove channel buzz-bugs" }),
+    ).toBeInTheDocument();
+    expect(input.current).toHaveValue("ask: deploy");
+    expect(
+      screen.getByRole("button", { name: "Remove Ask Aria" }),
+    ).toBeInTheDocument();
     // Removing Ask keeps the filter, and the question's words.
     fireEvent.click(screen.getByRole("button", { name: "Remove Ask Aria" }));
     expect(
@@ -9620,6 +9634,48 @@ it("keeps chosen filters when ask: is added, and asks with them", async () => {
   } finally {
     cleanup();
     owner.dispose();
+  }
+});
+
+it("shows a recent search's filters by name, and searches again with them as chips", async () => {
+  const relay = keypair(),
+    viewer = keypair();
+  const { owner } = operatorSession(viewer, relay, [
+    metadata(relay, "bugs", "buzz-bugs"),
+    roster(relay, "bugs", [viewer.pubkey]),
+  ]);
+  const usageScope = `recent-chips:${viewer.pubkey}`;
+  writeView(usageScope, "search-recent", ["in:bugs deploy"]);
+  const input = createRef<HTMLInputElement>();
+  function Host() {
+    const [query, setQuery] = useState("");
+    return (
+      <SearchResults
+        session={owner.session}
+        query={query}
+        onQueryChange={setQuery}
+        input={input}
+        pages={[]}
+        openConversation={vi.fn()}
+        usageScope={usageScope}
+      />
+    );
+  }
+  try {
+    render(<Host />);
+    fireEvent.click(
+      await within(
+        await screen.findByRole("group", { name: "Recent searches" }),
+      ).findByRole("option", { name: /in:#buzz-bugs deploy/ }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Remove channel buzz-bugs" }),
+    ).toBeInTheDocument();
+    expect(input.current).toHaveValue("deploy");
+  } finally {
+    cleanup();
+    owner.dispose();
+    clearViewScope(usageScope);
   }
 });
 
