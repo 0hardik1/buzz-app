@@ -999,10 +999,10 @@ available rather than silently discarding it.
 
 ## Choosing and customizing agents
 
-- Agents use a minimal required Buzz contract by default, without the fuller
-  engineering, repository, autonomy and memory-hygiene guidance. To restore that
-  guidance, turn off **Use lean base prompt** in **Settings → Agent setup →
-  Agent behavior**. It is on by default; turn it back on to use only the contract.
+- Agents use the required Buzz contract plus fuller engineering, repository,
+  autonomy and memory-hygiene guidance by default. To use only the contract,
+  turn on **Use lean base prompt** in **Settings → Agent setup → Agent behavior**.
+  It is off by default; explicit saved choices are preserved.
   Agents can also change `agents.lean_base_prompt` through the settings tools.
   This affects **all agents on this device**, and any connected agent with
   settings access can change it. Claude Code and Codex need a new session;
