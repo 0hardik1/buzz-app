@@ -832,8 +832,8 @@ export function ChannelMembersDialog({
     ),
   ]);
   // Saved additions that cannot finish. Discard gives up one known not to
-  // have been sent, and an unconfirmed one once the relay is shown not to
-  // have it.
+  // have been sent, and an unconfirmed one once the relay shows it never
+  // arrived or is no longer in effect.
   const stale = discardableAdditions(
     useSyncExternalStore(
       session.outbox?.subscribe ?? noSavedChanges,

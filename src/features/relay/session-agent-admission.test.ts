@@ -76,12 +76,18 @@ function setup(
         ),
       ],
     });
+  /** What the relay took, which it returns to a strong read of an ID once
+   * `answerIdReads` is on, and how often such a read found one. */
+  const taken: RelayEvent[] = [];
+  let answerIdReads = false;
+  let found = 0;
   const publish = vi.fn(async (_event: RelayEvent) => {
     const target = _event.tags.find(([name]) => name === "h")?.[1];
     if (denied) throw new PublishRejected("Only channel admins can add agents");
     const added = _event.tags.flatMap(([tag, key]) =>
       tag === "p" && key ? [key] : [],
     );
+    taken.push(_event);
     if (!omitMembership && target === parent)
       members = [...new Set([...members, ...added])];
     if (!omitMembership && target === child)
@@ -154,9 +160,23 @@ function setup(
           membership(parent, members),
           membership(child, childMembers),
         ];
-        return events.filter((event) =>
-          filters.some((filter) => matchesEvent(event, filter)),
-        );
+        const recorded = answerIdReads
+          ? taken.filter((event) =>
+              filters.some(
+                (filter) =>
+                  filter.consistency === "strong" &&
+                  filter.ids?.includes(event.id) &&
+                  matchesEvent(event, filter),
+              ),
+            )
+          : [];
+        found += recorded.length;
+        return [
+          ...recorded,
+          ...events.filter((event) =>
+            filters.some((filter) => matchesEvent(event, filter)),
+          ),
+        ];
       },
     },
     { outboxStorage: { load: () => [], save: () => {} } },
@@ -235,6 +255,16 @@ function setup(
     },
     setDenied: (value: boolean) => {
       denied = value;
+    },
+    /** The read-backs that follow a lost answer are lost with it. From here
+     * the relay returns what it took to a strong read of its ID. */
+    answerIdReads: () => {
+      answerIdReads = true;
+    },
+    found: () => found,
+    removeAgent: () => {
+      members = [viewer.pubkey];
+      clock++;
     },
     async ready() {
       owner.session.channels.ensureList();
@@ -561,6 +591,78 @@ it.each(["refused", "unconfirmed"] as const)(
       } finally {
         vi.restoreAllMocks();
         expect(Date.now).toBe(now);
+      }
+    } finally {
+      test.owner.dispose();
+    }
+  },
+);
+it.each([
+  ["has left the roster", "People"],
+  ["has left the roster", "addAgents"],
+  ["is still in the roster", "addAgents"],
+] as const)(
+  "settles a recorded request whose agent %s on Discard, then adds from %s",
+  async (roster, surface) => {
+    const test = setup();
+    const { session } = test.owner;
+    const add = () =>
+      session.channelWrites.addAgents(test.parent, [test.agent]);
+    const addInPeople = () =>
+      session.memberAdditions.add(test.parent, test.agent);
+    const discard = () =>
+      session.memberAdditions.discard(test.parent, test.agent);
+    const listed = () =>
+      session.channels.list().channels.find((item) => item.id === test.parent)
+        ?.members;
+    try {
+      await test.ready();
+      // The relay takes the request and admits the agent. Its answer is lost.
+      test.afterPublish(() => {
+        throw new Error("Receipt lost");
+      });
+      vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+      try {
+        await expect(add()).rejects.toThrow(/Receipt lost/);
+        test.afterPublish(() => {});
+        const first = test.publish.mock.calls[0]?.[0].id;
+        expect(session.outbox?.snapshot()).toMatchObject([
+          { event: { id: first }, delivery: "unknown" },
+        ]);
+        // An agent request is saved without recovery.
+        expect(session.outbox?.snapshot()[0]?.recovery).toBeUndefined();
+        test.answerIdReads();
+        if (roster === "has left the roster") test.removeAgent();
+        // Inside the window it is kept, and the relay is not asked for it.
+        await discard();
+        expect(test.found()).toBe(0);
+        expect(session.outbox?.snapshot()).toHaveLength(1);
+        vi.mocked(Date.now).mockReturnValue(1_700_000_901_000);
+        if (roster === "has left the roster") {
+          await expect(add()).rejects.toThrow(
+            "This agent-add request expired. Discard it in People, then add the agent again.",
+          );
+          await expect(addInPeople()).rejects.toThrow(
+            "This addition expired. Discard it in People, then add them again.",
+          );
+        }
+        expect(test.publish).toHaveBeenCalledOnce();
+        await discard();
+        // The relay has it, so the roster decided what became of it.
+        expect(test.found()).toBe(1);
+        expect(session.outbox?.snapshot()).toEqual([]);
+        expect(session.memberAdditions.snapshot()).toEqual([]);
+        await (surface === "People" ? addInPeople() : add());
+        expect(listed()).toContain(test.agent);
+        if (roster === "is still in the roster") {
+          // Confirmed, not given up: nothing is sent again.
+          expect(test.publish).toHaveBeenCalledOnce();
+          return;
+        }
+        expect(test.publish).toHaveBeenCalledTimes(2);
+        expect(test.publish.mock.calls[1]?.[0].id).not.toBe(first);
+      } finally {
+        vi.restoreAllMocks();
       }
     } finally {
       test.owner.dispose();

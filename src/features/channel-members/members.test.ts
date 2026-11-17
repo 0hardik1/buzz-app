@@ -8,6 +8,8 @@ import {
   addChannelMember,
   addChannelMembersAtOnce,
   canAddMembers,
+  discardAdditions,
+  discardableAdditions,
 } from "./members";
 
 const cleanups: (() => void)[] = [];
@@ -73,6 +75,7 @@ function setup(
   let failSave = false;
   let failAcknowledgement = false;
   let roleGate: { entered(): void; held: Promise<void> } | undefined;
+  let rosterGate: { entered(): void; held: Promise<void> } | undefined;
   const published: RelayEvent[] = [];
   const publish = vi.fn(async (event: RelayEvent) => {
     if (fail) throw unknown ? new Error(fail) : new PublishRejected(fail);
@@ -133,6 +136,18 @@ function setup(
             gate.entered();
             await gate.held;
           }
+          // One channel's roster alone, as a membership check reads it.
+          if (
+            rosterGate &&
+            filters.every(
+              (filter) => filter.kinds?.join() === "39002" && filter["#d"],
+            )
+          ) {
+            const gate = rosterGate;
+            rosterGate = undefined;
+            gate.entered();
+            await gate.held;
+          }
           if (
             failRoster &&
             (published.length || recordedInvitation) &&
@@ -170,7 +185,7 @@ function setup(
                 ]
               : []),
             personRole
-              ? signed(relay, {
+              ? signed(foreign ? person : relay, {
                   kind: 39002,
                   content: "",
                   created_at: clock,
@@ -263,6 +278,18 @@ function setup(
       roleGate = { entered, held };
       return { release, started };
     },
+    holdRosterRead: () => {
+      let release!: () => void;
+      let entered!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      rosterGate = { entered, held };
+      return { release, started };
+    },
     setRolesAvailable: (value: boolean) => {
       rolesAvailable = value;
     },
@@ -286,8 +313,8 @@ function setup(
     setApply: (value: boolean) => {
       apply = value;
     },
-    setForeign: () => {
-      foreign = true;
+    setForeign: (value = true) => {
+      foreign = value;
     },
     removeViewer: () => {
       members = [];
@@ -755,56 +782,263 @@ it.each(["a lost acknowledgement", "a reload while sending"])(
   },
 );
 
-it("keeps an unconfirmed addition the relay has, and Add then finishes it", async () => {
+const origins = [
+  "an ordinary addition",
+  "an older client's invitation",
+  "an agent request",
+] as const;
+/** Leaves an addition the relay recorded and applied, whose answer was lost.
+ * Only the ordinary one carries recovery. */
+async function leaveRecorded(
+  t: ReturnType<typeof setup>,
+  origin: (typeof origins)[number],
+) {
+  if (origin === "an agent request") await t.setAgent();
+  t.setLostReceipt(true);
+  await expect(
+    origin === "an agent request"
+      ? // As the composer, Bestie setup and a Huddle room add one.
+        t.session.channelWrites.addAgents(t.id, [t.person.pubkey])
+      : t.managedAdd(),
+  ).rejects.toThrow(/Receipt lost/);
+  t.setLostReceipt(false);
+  if (origin === "an older client's invitation") {
+    t.legacy();
+    t.restart();
+    await t.ready();
+  }
+  t.recordOriginal();
+  const [saved] = t.session.outbox?.snapshot() ?? [];
+  if (!saved) throw new Error("Expected a saved addition");
+  expect(saved.delivery).toBe("unknown");
+  expect(!!saved.recovery).toBe(origin === "an ordinary addition");
+  return saved.event.id;
+}
+const unchecked =
+  "The member list could not be checked, so this addition was kept. Try Discard again.";
+
+it.each(
+  origins.flatMap((origin) => [
+    [origin, "after Add adopted it"] as const,
+    [origin, "before any Add"] as const,
+  ]),
+)(
+  "gives up %s the relay recorded, %s, once the roster no longer lists them",
+  async (origin, order) => {
+    const t = setup();
+    await t.ready();
+    const first = await leaveRecorded(t, origin);
+    t.removePerson();
+    const discard = () =>
+      t.session.memberAdditions.discard(t.id, t.person.pubkey);
+    const kept = () => {
+      const saved = t.session.outbox?.snapshot() ?? [];
+      expect(saved).toMatchObject([
+        { event: { id: first }, delivery: "unknown" },
+      ]);
+      expect(discardableAdditions(saved, t.id, t.person.pubkey)).toHaveLength(
+        1,
+      );
+    };
+    // Inside the window it may still take effect: nothing is asked or given up.
+    const asked = t.invitationReads.length;
+    await discard();
+    expect(t.invitationReads).toHaveLength(asked);
+    expect(t.session.outbox?.snapshot()).toMatchObject([
+      { event: { id: first }, delivery: "unknown" },
+    ]);
+    const now = afterIntakeWindow();
+    try {
+      const sent = t.publish.mock.calls.length;
+      if (order === "after Add adopted it") {
+        for (const retry of [false, true])
+          await expect(
+            t.session.memberAdditions.add(
+              t.id,
+              t.person.pubkey,
+              retry ? { retry } : {},
+            ),
+          ).rejects.toThrow(expired);
+        expect(t.session.outbox?.snapshot()[0]?.recovery).toBeDefined();
+      }
+      if (origin === "an agent request")
+        await expect(
+          t.session.channelWrites.addAgents(t.id, [t.person.pubkey]),
+        ).rejects.toThrow(
+          "This agent-add request expired. Discard it in People, then add the agent again.",
+        );
+      // A roster that cannot be read, or that the relay did not sign, decides
+      // nothing, and the relay is not asked for the request.
+      t.setRosterFailure(true);
+      await expect(discard()).rejects.toThrow(unchecked);
+      t.setRosterFailure(false);
+      kept();
+      t.setForeign();
+      await expect(discard()).rejects.toThrow(unchecked);
+      t.setForeign(false);
+      kept();
+      expect(t.invitationReads).toHaveLength(asked);
+      // Nor does a relay that cannot say whether it has the request.
+      t.setInvitationReadFailure(true);
+      await expect(discard()).rejects.toThrow(/Invitation read unavailable/);
+      t.setInvitationReadFailure(false);
+      kept();
+      await expect(t.managedAdd()).rejects.toThrow(expired);
+      expect(t.publish).toHaveBeenCalledTimes(sent);
+
+      await discard();
+      expect(t.invitationReads.at(-1)).toEqual([
+        {
+          kinds: [9000],
+          ids: [first],
+          authors: [t.viewer.pubkey],
+          limit: 1,
+          consistency: "strong",
+        },
+      ]);
+      expect(t.records()).toEqual([]);
+      expect(t.session.outbox?.snapshot()).toEqual([]);
+      expect(t.session.memberAdditions.snapshot()).toEqual([]);
+      expect(t.publish).toHaveBeenCalledTimes(sent);
+      await t.managedAdd();
+      expect(t.publish).toHaveBeenCalledTimes(sent + 1);
+    } finally {
+      now.mockRestore();
+    }
+    expect(t.publish.mock.lastCall?.[0].id).not.toBe(first);
+    expect(t.session.channels.list().channels[0]?.members).toContain(
+      t.person.pubkey,
+    );
+  },
+);
+
+it.each(origins)(
+  "confirms %s the relay recorded when the roster lists them, without sending again",
+  async (origin) => {
+    const t = setup();
+    await t.ready();
+    const first = await leaveRecorded(t, origin);
+    const now = afterIntakeWindow();
+    try {
+      const sent = t.publish.mock.calls.length;
+      await expect(
+        discardAdditions(t.session, t.id, t.person.pubkey),
+      ).resolves.toEqual([]);
+      expect(t.records()).toMatchObject([
+        { event: { id: first }, acknowledged: true },
+      ]);
+      expect(t.session.outbox?.snapshot()).toEqual([]);
+      await t.managedAdd();
+      expect(t.publish).toHaveBeenCalledTimes(sent);
+      // The confirmed receipt does not stand in the way of a later addition.
+      t.removePerson();
+      await t.managedAdd();
+      expect(t.publish).toHaveBeenCalledTimes(sent + 1);
+    } finally {
+      now.mockRestore();
+    }
+    expect(t.publish.mock.lastCall?.[0].id).not.toBe(first);
+  },
+);
+
+it("gives up an unconfirmed addition the relay never received, even for someone since added another way", async () => {
   const t = setup();
   await t.ready();
   const first = await leaveUnconfirmed(t);
-  t.recordOriginal();
+  t.confirmPerson();
   const now = afterIntakeWindow();
   try {
-    await expect(t.managedAdd()).rejects.toThrow(expired);
     await expect(
-      t.session.memberAdditions.discard(t.id, t.person.pubkey),
-    ).rejects.toThrow(
-      "This addition reached the relay, so it was kept. Add them again to finish it.",
-    );
-    // The read that found it is its delivery, so it is no longer expired.
-    expect(t.session.outbox?.snapshot()).toMatchObject([
-      { event: { id: first }, delivery: "seen" },
-    ]);
-    await expect(t.managedAdd()).rejects.toThrow(
-      /not confirmed in the member list/,
-    );
-    t.confirmPerson();
+      discardAdditions(t.session, t.id, t.person.pubkey),
+    ).resolves.toEqual([first]);
+    expect(t.records()).toEqual([]);
     await t.managedAdd();
   } finally {
     now.mockRestore();
   }
   expect(t.publish).toHaveBeenCalledOnce();
-  expect(t.session.outbox?.snapshot()).toEqual([]);
-  expect(t.session.memberAdditions.snapshot()).toEqual([]);
 });
 
-it("checks the relay before discarding an unconfirmed addition saved without recovery", async () => {
+it("keeps a recorded addition as it was when the session ends during the roster check", async () => {
   const t = setup();
   await t.ready();
-  const first = await leaveUnconfirmed(t);
-  // An older client saved it this way.
-  t.legacy();
-  t.restart();
-  await t.ready();
-  expect(t.session.outbox?.snapshot()[0]?.recovery).toBeUndefined();
+  const first = await leaveRecorded(t, "an ordinary addition");
+  t.removePerson();
+  const asked = t.invitationReads.length;
   const now = afterIntakeWindow();
+  const roster = t.holdRosterRead();
   try {
-    // Add adopts the saved addition. That must not take Discard away.
+    const discarded = expect(
+      t.session.memberAdditions.discard(t.id, t.person.pubkey),
+    ).rejects.toThrow(unchecked);
+    await roster.started;
+    t.dispose();
+    await discarded;
+    expect(t.invitationReads).toHaveLength(asked);
+    expect(t.records()).toMatchObject([
+      { event: { id: first }, delivery: "unknown" },
+    ]);
+    // The next session can still discard it.
+    roster.release();
+    t.restart();
+    await t.ready();
+    await t.session.memberAdditions.discard(t.id, t.person.pubkey);
+    expect(t.records()).toEqual([]);
+  } finally {
+    roster.release();
+    now.mockRestore();
+  }
+});
+
+it("gives up a recorded invitation that Add adopts while Discard is checking it", async () => {
+  const t = setup();
+  await t.ready();
+  await leaveRecorded(t, "an older client's invitation");
+  t.removePerson();
+  const now = afterIntakeWindow();
+  const roster = t.holdRosterRead();
+  try {
+    const discarded = t.session.memberAdditions.discard(t.id, t.person.pubkey);
+    await roster.started;
     await expect(t.managedAdd()).rejects.toThrow(expired);
     expect(t.session.outbox?.snapshot()[0]?.recovery).toBeDefined();
-    t.recordOriginal();
-    await expect(
-      t.session.memberAdditions.discard(t.id, t.person.pubkey),
-    ).rejects.toThrow(/reached the relay/);
-    expect(t.records()).toMatchObject([{ event: { id: first } }]);
+    roster.release();
+    await discarded;
+    expect(t.records()).toEqual([]);
+    await t.managedAdd();
   } finally {
+    roster.release();
+    now.mockRestore();
+  }
+  expect(t.publish).toHaveBeenCalledTimes(2);
+});
+
+it("gives nothing up while an attempt is under way, including one that begins during the roster check", async () => {
+  const t = setup();
+  await t.ready();
+  const first = await leaveRecorded(t, "an ordinary addition");
+  t.removePerson();
+  const asked = t.invitationReads.length;
+  const now = afterIntakeWindow();
+  const roster = t.holdRosterRead();
+  try {
+    const discarded = discardAdditions(t.session, t.id, t.person.pubkey);
+    await roster.started;
+    // For example Outbox Retry in a developer build.
+    t.publish.mockImplementationOnce(() => new Promise(() => {}));
+    t.session.outbox?.retry(first);
+    roster.release();
+    await expect(discarded).resolves.toEqual([]);
+    // Pressed again while it is still being sent.
+    await expect(
+      discardAdditions(t.session, t.id, t.person.pubkey),
+    ).resolves.toEqual([]);
+    expect(t.invitationReads).toHaveLength(asked);
+    expect(t.session.outbox?.snapshot()).toMatchObject([
+      { event: { id: first }, delivery: "sending" },
+    ]);
+  } finally {
+    roster.release();
     now.mockRestore();
   }
 });

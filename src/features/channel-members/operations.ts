@@ -176,7 +176,7 @@ export function createMemberAdditions(
         );
       const given = (await discard?.(channelId, pubkey)) ?? [];
       // Receipts show only a failed addition's dismissal. An unconfirmed one
-      // was given up here, after the relay was shown not to have it.
+      // was given up here, once the relay showed it can no longer take effect.
       const intent = intents.get(key);
       if (intent?.id && !intent.confirmed && given.includes(intent.id))
         intent.dismissed = true;

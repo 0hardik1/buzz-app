@@ -1721,29 +1721,69 @@ it("discards an expired unconfirmed addition in People once the relay is shown n
   expect(t.publish).toHaveBeenCalledTimes(2);
   expect(t.publish.mock.calls[1]?.[0].id).not.toBe(original.id);
 });
-it("keeps an expired unconfirmed addition the relay has, and says so", async () => {
-  const t = await setup();
-  const { original, discard } = await loseReceipt(t);
+/** The relay returns Morgan's request to a read of its ID. */
+function recordOnRelay(
+  t: Awaited<ReturnType<typeof setup>>,
+  original: { id: string },
+) {
   const read = t.query.getMockImplementation();
   t.query.mockImplementation(async (filters) =>
     filters.some((filter) => filter.ids?.includes(original.id))
-      ? [original]
+      ? [original as never]
       : ((await read?.(filters)) ?? []),
   );
+}
+it("discards an expired unconfirmed addition the relay has once the member list does not show them", async () => {
+  const t = await setup();
+  const { original, discard } = await loseReceipt(t);
+  recordOnRelay(t, original);
+  // A member list that cannot be read decides nothing, and changes nothing.
+  const read = t.query.getMockImplementation();
+  t.query.mockImplementation(async (filters) => {
+    if (
+      filters.every(
+        (filter) => filter.kinds?.join() === "39002" && filter["#d"],
+      )
+    )
+      throw new Error("Roster offline");
+    return (await read?.(filters)) ?? [];
+  });
   await t.user.click(discard);
   await screen.findByText(
-    "This addition reached the relay, so it was kept. Add them again to finish it.",
+    "The member list could not be checked, so this addition was kept. Try Discard again.",
   );
   expect(t.session.outbox?.snapshot()).toMatchObject([
-    { event: { id: original.id }, delivery: "seen" },
+    { event: { id: original.id }, delivery: "unknown" },
   ]);
-  // Delivered, it is no longer expired: Retry returns and the roster decides.
-  t.confirmRoster();
+  if (read) t.query.mockImplementation(read);
   await t.user.click(
-    await screen.findByRole("button", { name: "Retry adding Morgan" }),
+    screen.getByRole("button", { name: "Discard addition of Morgan" }),
   );
+  await vi.waitFor(() => expect(t.session.outbox?.snapshot()).toEqual([]));
+  await vi.waitFor(() =>
+    expect(screen.queryByText(/This addition expired/)).not.toBeInTheDocument(),
+  );
+  expect(screen.queryByText(/could not be checked/)).not.toBeInTheDocument();
+  // Recorded but not in effect, it cannot apply again: adding starts anew.
+  await t.user.click(screen.getByRole("button", { name: /Add Morgan/ }));
   await screen.findByText("Morgan is in the channel.");
-  expect(screen.queryByText(/reached the relay/)).not.toBeInTheDocument();
+  expect(t.publish).toHaveBeenCalledTimes(2);
+  expect(t.publish.mock.calls[1]?.[0].id).not.toBe(original.id);
+});
+it("confirms an expired unconfirmed addition the relay has when the member list shows them", async () => {
+  const t = await setup();
+  const { original, discard } = await loseReceipt(t);
+  recordOnRelay(t, original);
+  t.confirmRoster();
+  await t.user.click(discard);
+  await vi.waitFor(() => expect(t.session.outbox?.snapshot()).toEqual([]));
+  await vi.waitFor(() =>
+    expect(screen.queryByText(/This addition expired/)).not.toBeInTheDocument(),
+  );
+  expect(screen.queryByText(/could not be checked/)).not.toBeInTheDocument();
+  // Nothing was given up, so nothing is sent again.
+  await t.user.click(screen.getByRole("button", { name: /Add Morgan/ }));
+  await screen.findByText("Morgan is in the channel.");
   expect(t.publish).toHaveBeenCalledOnce();
 });
 it("DMs cannot add people without a connection that adds to them", async () => {

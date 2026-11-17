@@ -143,6 +143,12 @@ const batchPrefix = "member-add:batch:";
 export const isBatchAddition = (item: OutgoingEvent) =>
   !!item.recovery?.key.startsWith(batchPrefix);
 
+/** What a single addition's receipt is saved under, for its owner alone. */
+const additionRecovery = (channelId: string, pubkey: string) => ({
+  key: `member-add:${channelId}:${pubkey}`,
+  value: "1",
+});
+
 /** The relay takes a signed addition for 15 minutes. After that the same
  * request can never be sent again. */
 export const additionExpired = (item: OutgoingEvent) =>
@@ -151,7 +157,8 @@ export const additionExpired = (item: OutgoingEvent) =>
 /** Saved single additions to a channel that can no longer finish, for one
  * person or everyone: those known not to have been sent, and unconfirmed ones
  * past the relay's intake window, whoever started them. `discardAdditions`
- * gives up an unconfirmed one only after checking the relay for it. */
+ * gives up an unconfirmed one only after checking the relay for it and, when
+ * the relay has it, the roster for its person. */
 export const discardableAdditions = (
   saved: readonly OutgoingEvent[],
   channelId: string,
@@ -174,10 +181,12 @@ export const discardableAdditions = (
 
 /** Explicitly gives up this person's saved additions that cannot finish, so
  * adding them again starts a new one, and returns the ones given up. An
- * unconfirmed addition may have reached the relay. It is given up only when a
- * strong read of its ID finds nothing: past the intake window it can then
- * never arrive. One the relay has, or that cannot be checked, is kept.
- * Nothing sent is undone. */
+ * unconfirmed addition may have reached the relay, so the relay is asked for
+ * it by ID. One it never received can never arrive past the intake window.
+ * One it recorded has had its effect, so the channel's current roster
+ * decides: a person it lists is confirmed, and one it does not list is given
+ * up, because the same request cannot apply again. An addition that cannot be
+ * checked is kept as it was. Nothing sent is undone. */
 export async function discardAdditions(
   session: Pick<RelaySession, "outbox" | "channelWrites">,
   channelId: string,
@@ -193,19 +202,43 @@ export async function discardAdditions(
     pubkey,
   )) {
     const id = item.event.id;
-    if (
-      item.delivery === "unknown" &&
-      // The session's own lifetime ends this read.
-      (await session.channelWrites.additionRecorded(
-        item.event,
-        new AbortController().signal,
-      ))
-    )
-      throw new Error(
-        "This addition reached the relay, so it was kept. Add them again to finish it.",
-      );
-    // The addition's own recovery releases one proven never to have arrived.
-    await outbox.dismiss(id, item.recovery);
+    if (item.delivery === "unknown") {
+      // The session's own lifetime ends these reads.
+      const signal = new AbortController().signal;
+      // Finding the request marks its receipt delivered, so the roster is
+      // read first: a check that fails must leave the receipt as it was.
+      const listed = await session.channelWrites
+        .listsMember(channelId, pubkey, signal)
+        .catch((cause: unknown) => {
+          throw new Error(
+            "The member list could not be checked, so this addition was kept. Try Discard again.",
+            { cause },
+          );
+        });
+      // An attempt that began meanwhile keeps its receipt.
+      if (
+        outbox.snapshot().find((saved) => saved.event.id === id)?.delivery !==
+        "unknown"
+      )
+        continue;
+      if (
+        (await session.channelWrites.additionRecorded(item.event, signal)) &&
+        listed
+      ) {
+        // Recorded and in effect: confirm it, as Add does.
+        await outbox.recover(id, additionRecovery(channelId, pubkey));
+        await outbox.acknowledge(id);
+        continue;
+      }
+    }
+    // The addition's own recovery releases an unconfirmed one, including
+    // one an Add adopted during the checks. One saved without recovery has
+    // no owner to match, so it is released without one.
+    const owned = outbox.snapshot().find((saved) => saved.event.id === id);
+    await outbox.dismiss(
+      id,
+      owned?.recovery ? additionRecovery(channelId, pubkey) : undefined,
+    );
     // An attempt under way keeps its receipt.
     if (!outbox.snapshot().some((saved) => saved.event.id === id))
       given.push(id);
@@ -308,7 +341,7 @@ async function addOneMember(
     ? savedRole === intent.role
     : savedRole === undefined || savedRole === "bot" || savedRole === "member";
 
-  const recovery = { key: `member-add:${channelId}:${pubkey}`, value: "1" };
+  const recovery = additionRecovery(channelId, pubkey);
   // A saved share may finish its exact Bot grant; it cannot authorize a new one.
   const recoveringSoloAgent =
     pending &&

@@ -133,18 +133,30 @@ again then sends a new invitation. Discard covers two cases:
   offered. In developer builds, removing it in Outbox does the same.
 - An unconfirmed addition past the intake window, whoever started it: a member
   invitation, an agent request, or one saved by an older client. It may have
-  reached the relay, so Discard first checks the original event ID with a
-  fresh strong read. Only verified absence gives it up: past the window it can
-  then never arrive. If the relay has it, or the read fails, it is kept and
-  People says so; Add then finishes it once the signed roster shows the
-  person.
+  reached the relay, so Discard asks the relay with two fresh strong reads:
+  the channel's signed roster, then the original event ID.
+  - The relay never received it: it is given up. Past the window it can then
+    never arrive.
+  - The relay recorded it and the roster does not list the person: it is
+    given up. It has had its effect, and the same request cannot apply again.
+  - The relay recorded it and the roster lists the person: it is confirmed,
+    and nothing is given up or sent again.
+  - Either read fails, or returns no roster signed by the relay: it is kept
+    exactly as it was. People says the member list could not be checked, or
+    shows the read's error, and Discard can be tried again.
 
-An unconfirmed addition still inside the intake window is never discarded; Add
-or Retry resolves it. Past the window, Add and Retry do not send a saved
-addition again. People reports it with **Discard** alone, including one that
-expired on another surface or in an earlier launch. The older invitation
-described above is the exception: People leaves it to Add, which retires it
-with the same check.
+  The roster is read first because finding the event marks its receipt
+  delivered, and a check that fails must change nothing.
+
+An unconfirmed addition still inside the intake window is never discarded, and
+neither is one with an attempt under way; Add or Retry resolves it. Past the
+window, Add and Retry do not send a saved addition again. People reports it
+with **Discard** alone, including one that expired on another surface or in an
+earlier launch. In a Solo chat the older invitation described above is treated
+differently: People does not report it as expired on its own and keeps
+**Retry** for it, because Add retires it after its own check of the event ID
+and the roster. A row that reports an error for that person still offers
+**Discard**.
 
 ### General access
 

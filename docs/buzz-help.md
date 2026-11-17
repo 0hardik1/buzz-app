@@ -959,9 +959,11 @@ and are asked to sign in again in Buzz.
   Canvas, with + marking lines only that version has and − marking current
   lines it lacks. Turn on **Show full content** to read a version as written.
   A save that fails keeps your draft, and you can save again. If a save could
-  not be confirmed, it may still arrive: your draft is kept, and saving again
-  works once 15 minutes have passed since that save. If an earlier save is
-  still being sent, try again in a moment.
+  not be confirmed, it may still arrive: your draft is kept, and you can save
+  again once 15 minutes have passed since that save. If that save did arrive,
+  the Canvas has changed, so saving again asks you to load the current
+  document first. If an earlier save is still being sent, try again in a
+  moment.
 - **Keyboard shortcuts** follow Slack where they can. Press ⌘/ (Ctrl+/ on
   Windows and Linux) to open **Settings → Shortcuts**, which lists them, lets
   you change most of them and also shows the fixed message-formatting keys. In
@@ -1055,8 +1057,11 @@ and are asked to sign in again in Buzz.
   then Add asks you to wait. If any other addition of a person or agent has
   expired without being confirmed, People reports it with **Discard** and no
   **Retry**: discard it, then add them again. If the addition may have been
-  sent, Discard checks the community first. One that did arrive is kept, and
-  People says so: use **Add** to finish it.
+  sent, Discard checks the community first. If it never arrived, or it arrived
+  but the person is no longer in the member list, it is discarded and you can
+  add them again. If it arrived and the person is in the member list, it is
+  confirmed and there is nothing more to do. If the check cannot be made, the
+  addition is kept and People says so: try **Discard** again.
   Developer builds only: Outbox (**View channel details** → Diagnostics) also
   lists saved invitations. Its **Retry** finishes the original without
   re-inviting, so if that invitation was applied and the person was later
