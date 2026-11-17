@@ -11,6 +11,7 @@ import type {
 } from "../conversation/contracts";
 import { useConversationPresentation } from "../conversation/ConversationPresentation";
 import { Button } from "../../shared/design-system/ui/Button";
+import { ToastNotice } from "../../shared/design-system/ui/Toast";
 import styles from "./LinkPreviews.module.css";
 
 /** A message shows this many cards before the rest fold behind one button. */
@@ -21,13 +22,18 @@ const noSubscribe = () => () => {};
 const noSnapshot = () => none;
 
 /** Opens `url` outside Buzz, as clicking the link's own anchor does when no
- * host handler takes it. */
-function openExternally(url: string) {
-  if (isTauri()) {
-    void invoke("plugin:opener|open_url", { url }).catch(() => {});
-    return;
+ * host handler takes it. Resolves false when the system opener refuses. */
+async function openExternally(url: string) {
+  if (!isTauri()) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return true;
   }
-  window.open(url, "_blank", "noopener,noreferrer");
+  try {
+    await invoke("plugin:opener|open_url", { url });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function LinkPreviews({
@@ -48,6 +54,7 @@ export function LinkPreviews({
   );
   const active = useConversationPresentation();
   const [open, setOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
   const live = useRef(true);
   useEffect(() => {
     live.current = true;
@@ -84,13 +91,24 @@ export function LinkPreviews({
                 )
                   return false;
                 // A link no panel takes opens in the browser, as its anchor does.
-                if (!onOpenLink(url)) openExternally(url);
+                if (!onOpenLink(url)) {
+                  setFailed(false);
+                  void openExternally(url).then(
+                    (opened) => live.current && setFailed(!opened),
+                  );
+                }
                 return true;
               }}
             />
           </ContributionBoundary>
         );
       })}
+      {failed && (
+        <ToastNotice
+          title="Couldn’t open the link in your browser."
+          onDismiss={() => setFailed(false)}
+        />
+      )}
       {(hidden > 0 || (open && cards.length > FOLD_AFTER)) && (
         <Button
           variant="ghost"

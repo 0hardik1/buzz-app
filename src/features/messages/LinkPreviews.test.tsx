@@ -13,6 +13,7 @@ import type {
   LinkPreviewProps,
   LinkPreviewRenderer,
 } from "../conversation/contracts";
+import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { LinkPreviews } from "./LinkPreviews";
 
 afterEach(() => {
@@ -155,5 +156,52 @@ it("opens it with the system opener on desktop, and not when a panel takes it", 
   handled = true;
   fireEvent.click(button);
   expect(tauri.invoke).toHaveBeenCalledTimes(1);
+  expect(opened).not.toHaveBeenCalled();
+});
+
+it("tells the viewer when the system opener refuses", async () => {
+  tauri.isTauri.mockReturnValue(true);
+  tauri.invoke.mockRejectedValue(new Error("refused"));
+  render(
+    <ToastProvider>
+      <LinkPreviews
+        urls={["https://docs.example/"]}
+        messageId="m"
+        registry={reader([entry("web", () => true, 100, card("web"))])}
+        onOpenLink={() => false}
+      />
+    </ToastProvider>,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "web https://docs.example/" }),
+  );
+  expect(
+    await screen.findByText("Couldn’t open the link in your browser."),
+  ).toBeTruthy();
+});
+
+it("opens nothing once the card's renderer has left the registry", () => {
+  const opened = vi.spyOn(window, "open").mockImplementation(() => null);
+  const onOpenLink = vi.fn(() => false);
+  const results: boolean[] = [];
+  const Recording = ({ url, open }: LinkPreviewProps) => (
+    <button type="button" onClick={() => results.push(open())}>
+      {url}
+    </button>
+  );
+  const live = [entry("web", () => true, 100, Recording)];
+  render(
+    <LinkPreviews
+      urls={["https://docs.example/"]}
+      messageId="m"
+      registry={{ snapshot: () => live, subscribe: () => () => {} }}
+      onOpenLink={onOpenLink}
+    />,
+  );
+  const button = screen.getByRole("button", { name: "https://docs.example/" });
+  live.length = 0;
+  fireEvent.click(button);
+  expect(results).toEqual([false]);
+  expect(onOpenLink).not.toHaveBeenCalled();
   expect(opened).not.toHaveBeenCalled();
 });
