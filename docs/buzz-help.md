@@ -498,8 +498,11 @@ and are asked to sign in again in Buzz.
   Agents make changes in a conversation's assigned folder first. When one is
   assigned, project folders and referenced folders only identify relevant code;
   their worktree rules do not apply. Otherwise, agents work in the chat's project
-  folders and follow their rules. Follow-up work reuses the existing branch's
-  worktree. Plugins can show progress as task status instead of chat posts.
+  folders and follow their rules. A folder chip counts as a referenced folder;
+  a checkout path typed in a message does not. Without an assigned folder or
+  project or referenced folders, agents make changes in a new worktree of the
+  repository, not on its default branch. Follow-up work reuses the existing
+  branch's worktree. Plugins can show progress as task status instead of chat posts.
   Folders are optional unless **Work in a new worktree** is on. In that mode,
   add at least one project folder; the form shows a message beside Folders
   until you add one or turn worktree mode off. In **New chat**, typing **#**

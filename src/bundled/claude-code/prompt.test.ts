@@ -241,6 +241,13 @@ it("points a conversation in its own folder to the agent's workspace", () => {
   expect(plain).not.toContain("this conversation's own folder");
 });
 
+it("requires a new worktree for a checkout path in a message without an assigned folder", () => {
+  const prompt = systemPrompt({ scope: "channel", cwd: "~/.buzz" });
+  expect(prompt).toContain(
+    "3. Otherwise, make changes in a new worktree of the repository, not on its default branch. This also applies when a message names the repository's checkout by path: a path written in a message is not an assigned folder or a referenced folder. For follow-up work on an existing branch or PR, reuse its worktree.",
+  );
+});
+
 it("names the agent first when it is known", () => {
   const prompt = systemPrompt({
     scope: "thread",
