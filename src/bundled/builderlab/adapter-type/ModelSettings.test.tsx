@@ -395,6 +395,34 @@ it("keeps an unpersisted window draft and blocks invalid retries", async () => {
   });
 });
 
+it("can restore Default after a committed window fails its confirmation read", async () => {
+  const h = await fixture({ modelSelectionStatus: "valid" });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Advanced settings" }));
+  const field = screen.getByRole("textbox", { name: "Auto-compact at" });
+  fireEvent.change(field, { target: { value: "250" } });
+  const implementation = h.request.getMockImplementation();
+  if (!implementation) throw new Error("Missing request fixture");
+  h.request
+    .mockImplementationOnce(implementation)
+    .mockResolvedValueOnce({ status: 400, headers: {}, body: "{}" });
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("HTTP 400");
+  fireEvent.change(field, { target: { value: "" } });
+  expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(field).toHaveValue("");
+  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  const updates = h.request.mock.calls.filter(([request]) =>
+    request.url.endsWith("/update-agent"),
+  );
+  expect(updates.map(([request]) => JSON.parse(request.body ?? "{}"))).toEqual([
+    { agent_pubkey: "ab".repeat(32), auto_compact_window: 250000 },
+    { agent_pubkey: "ab".repeat(32), auto_compact_window: 0 },
+  ]);
+});
+
 it("keeps the Builderlab mark when no shared Harness control is supplied", async () => {
   await fixture();
   const mark = screen.getByText("Builderlab").querySelector("svg");

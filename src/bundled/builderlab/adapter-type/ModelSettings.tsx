@@ -114,6 +114,7 @@ export function ModelSettings({
   const [compaction, setCompaction] = useState(
     formatCompaction(agent?.autoCompactWindow),
   );
+  const [compactionUnconfirmed, setCompactionUnconfirmed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>("");
@@ -145,6 +146,7 @@ export function ModelSettings({
     setEffort(agent.reasoningEffort ?? "");
     setInstructions(agent.instructions ?? "");
     setCompaction(formatCompaction(agent.autoCompactWindow));
+    setCompactionUnconfirmed(false);
   }, [agent]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision retries a failed catalog request while keeping the draft.
   useEffect(() => {
@@ -185,7 +187,9 @@ export function ModelSettings({
     (/^\d+(?:\.\d{1,3})?$/.test(compaction.trim()) &&
       validAutoCompactWindow(autoCompactWindow));
   const compactionChanged =
-    !validCompaction || autoCompactWindow !== (saved?.autoCompactWindow ?? 0);
+    compactionUnconfirmed ||
+    !validCompaction ||
+    autoCompactWindow !== (saved?.autoCompactWindow ?? 0);
   const saveModel =
     modelChanged ||
     (!instructionsChanged &&
@@ -210,6 +214,7 @@ export function ModelSettings({
         throw new Error(accountMismatchMessage);
       if (saved.status !== "Active")
         throw new Error("Only Active agents can have their settings edited.");
+      if (compactionChanged) setCompactionUnconfirmed(true);
       await client.configure(
         saved.pubkey,
         {
@@ -240,6 +245,7 @@ export function ModelSettings({
       setModelId(remote.modelId ?? "");
       setEffort(remote.reasoningEffort ?? "");
       setCompaction(formatCompaction(remote.autoCompactWindow));
+      setCompactionUnconfirmed(false);
       if (saveModel && remote.modelSelectionStatus === "valid")
         notify("Model preferences saved", "success");
     } catch (reason) {
