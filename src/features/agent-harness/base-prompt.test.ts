@@ -7,7 +7,7 @@ describe("lean base prompt", () => {
   });
 
   // Tripwire: all harnesses consume this contract, not just the size budget.
-  it("stays under 3 KB with the required Buzz contract", () => {
+  it("stays under 3 KiB with the required Buzz contract", () => {
     const lean = basePromptFor(undefined, true);
     expect(lean).toBe(LEAN_BASE_PROMPT);
     expect(new TextEncoder().encode(lean).length).toBeLessThan(3072);
@@ -30,6 +30,13 @@ describe("lean base prompt", () => {
       "except yourself",
       "never self-mentions",
       "Completion callbacks",
+      "Replies stay flat",
+      "replying to a top-level message starts its thread",
+      "Explicit identities",
+      "include a pubkey for each such name to notify",
+      "unresolved/ambiguous",
+      "Sending never changes membership",
+      "Unique member names still add recipients",
       "bold, italic or backticks",
     ])
       expect(lean).toContain(kept);
