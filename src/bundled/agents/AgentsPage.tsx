@@ -213,6 +213,7 @@ export function AgentsPage({
   const [sharedSelection, setSharedSelection] =
     useState<SharedAgentSelection>();
   const sharedTrigger = useRef<HTMLButtonElement | null>(null);
+  const [sharedWords, setSharedWords] = useState<readonly string[]>([]);
   const shared =
     connection.status === "ready" &&
     sharedSelection?.session === connection.session
@@ -849,6 +850,7 @@ export function AgentsPage({
                 sharedTrigger.current = trigger;
                 setSharedSelection(selection);
               }}
+              onSearch={setSharedWords}
             />
           ) : (
             <Teams
@@ -933,6 +935,7 @@ export function AgentsPage({
                       <SharedAgentPanel
                         key={shared.agent.id}
                         selection={shared}
+                        words={sharedWords}
                         agents={agents}
                         types={runnable}
                         onImported={leaveListing}
