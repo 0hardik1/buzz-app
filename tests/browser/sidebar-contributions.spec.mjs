@@ -23,8 +23,22 @@ const grabber = (page) =>
 
 // A pointer drag from the section's grabber, past the 6px activation distance.
 async function startDrag(page) {
-  const bounds = await grabber(page).boundingBox();
-  if (!bounds) throw new Error("Workspace grabber is unavailable");
+  // The cards above load their rows after the rail appears and push this one
+  // down: press only once they are listed and the grabber has stopped moving.
+  await expect(rail(page).locator("[data-rail-channel]").first()).toBeVisible();
+  let bounds;
+  let stable = 0;
+  await expect
+    .poll(
+      async () => {
+        const next = await grabber(page).boundingBox();
+        stable = next && bounds?.y === next.y ? stable + 1 : 0;
+        bounds = next;
+        return stable;
+      },
+      { intervals: [50], message: "the Workspace grabber stops moving" },
+    )
+    .toBeGreaterThanOrEqual(3);
   const x = bounds.x + bounds.width / 2;
   const y = bounds.y + bounds.height / 2;
   await page.mouse.move(x, y);
