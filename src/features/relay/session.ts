@@ -130,6 +130,7 @@ import {
 import { relayPartition, transportPartition } from "./partition";
 import { browserThreadFollows } from "./thread-follows";
 import { createMessages } from "./messages";
+import { reactionTarget as reactionTargetId } from "./reaction-target";
 import { retryRead } from "./read-retry";
 import { messageAuthor } from "./fold";
 import { createThreadView, resumeAfter, type ThreadResume } from "./threads";
@@ -1663,9 +1664,7 @@ export function createRelaySession(
       const target = contributionTargets[0]?.[1];
       const original = messageEvent(target ?? "");
       const reactionTarget =
-        original?.kind === 7
-          ? original.tags.find(([key]) => key === "e")?.[1]
-          : undefined;
+        original?.kind === 7 ? reactionTargetId(original) : undefined;
       const reactionSource = reactionTarget
         ? messageEvent(reactionTarget)
         : undefined;

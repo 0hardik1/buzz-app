@@ -43,6 +43,7 @@ async function setup(
     tags: [["h", id]],
     created_at: time,
   });
+  const extra: RelayEvent[] = [];
   const events = () => [
     signed(relay, {
       kind: 39000,
@@ -81,6 +82,7 @@ async function setup(
     own,
     root,
     canvas,
+    ...extra,
   ];
   const sign = vi.fn(async (event: EventTemplate) => signed(viewer, event));
   const publish = vi.fn(async (event: RelayEvent) => {
@@ -134,6 +136,10 @@ async function setup(
     viewer,
     peer,
     agent,
+    async readExtra(event: RelayEvent) {
+      extra.push(event);
+      await owner.session.read([{ ids: [event.id], limit: 1 }]);
+    },
     async grants(next: typeof grants) {
       grants = next;
       time++;
@@ -415,6 +421,10 @@ it.each([
           ?.delivery,
       ).toBe("accepted");
   });
+  if (!grants.replies || !grants.reactions) {
+    expect(h.publish).toHaveBeenCalledTimes(accepted.length);
+    return;
+  }
   const outbox = h.session.outbox;
   assert(outbox);
   for (const tags of [
@@ -537,25 +547,38 @@ it("allows reply attachments and rejects an upload finishing after its grant is 
   ).resolves.toEqual(result);
 });
 
-it("removes an owned reaction from a client that omitted its channel tag", async () => {
-  const h = await setup("guest", undefined, {
-    replies: false,
-    reactions: true,
-  });
+it("removes an old reaction by its last valid target after demotion", async () => {
+  const h = await setup("member");
   const outbox = h.session.outbox;
   assert.exists(outbox);
+  const context = signed(h.peer, {
+    kind: 0,
+    content: "{}",
+    tags: [],
+    created_at: 1700000000,
+  });
+  await h.readExtra(context);
   const reaction = outbox.send({
     kind: 7,
     content: "👍",
-    tags: [["e", h.root.id]],
+    tags: [
+      ["e", context.id],
+      ["e", h.root.id],
+    ],
   });
   await vi.waitFor(() =>
     expect(
       outbox.snapshot().find((item) => item.event.id === reaction)?.delivery,
     ).toBe("accepted"),
   );
-  await h.grants({ replies: false, reactions: false });
+  await h.role("guest");
   h.session.messages.remove([reaction]);
   await vi.waitFor(() => expect(h.publish).toHaveBeenCalledTimes(2));
-  expect(h.publish.mock.calls[1]?.[0].kind).toBe(5);
+  expect(h.publish.mock.calls[1]?.[0]).toMatchObject({
+    kind: 5,
+    tags: expect.arrayContaining([
+      ["h", id],
+      ["e", reaction],
+    ]),
+  });
 });

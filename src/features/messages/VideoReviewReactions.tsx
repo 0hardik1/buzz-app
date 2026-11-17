@@ -33,7 +33,7 @@ export function VideoReviewReactions({
     session.channels.list,
   );
   const disabled = !channels.channels.some(
-    (channel) => channel.id === channelId && channelCan(channel, "reply"),
+    (channel) => channel.id === channelId && channelCan(channel, "post"),
   );
   const [error, setError] = useState<string>();
   const select = (emoji: string) => {
