@@ -2625,6 +2625,63 @@ it.each(["shared", "owner"] as const)(
   },
 );
 
+it("names a Solo chat's directory person who has only a verified name from it", async () => {
+  const t = setup(false);
+  const outside = "e".repeat(64);
+  const people = vi.fn(async () => ({
+    people: [
+      {
+        pubkey: outside,
+        name: outside.slice(0, 10),
+        nameIsFallback: true as const,
+      },
+    ],
+    hasMore: false,
+  }));
+  const authority = { pubkey: "8".repeat(64), multipleIssuers: false };
+  const verified = vi.fn(async (pubkeys: readonly string[]) => ({
+    authority,
+    profiles: new Map(
+      pubkeys
+        .filter((pubkey) => pubkey === outside)
+        .map((pubkey) => [pubkey, { ...verifiedOutside }]),
+    ),
+  }));
+  Object.assign(t.session.profiles, { verifiedAuthority: () => authority });
+  const session = {
+    ...t.session,
+    directMessages: { ...t.session.directMessages, people, verified },
+  };
+  const publish = vi.fn();
+  render(
+    <MentionCompletion
+      session={session}
+      scope="test"
+      channelId="parent"
+      observation={{ revision: 1, text: "@Out", start: 4, end: 4 }}
+      publish={publish}
+      query={{ start: 0, end: 4, query: "Out" }}
+      inviteAgents
+    />,
+  );
+  await waitFor(() => expect(verified).toHaveBeenCalled());
+  const items = () =>
+    (publish.mock.lastCall?.[0] as CompletionResult | undefined)?.items ?? [];
+  await waitFor(() =>
+    expect(items().find((item) => item.label === "Outside")?.detail).toBe(
+      "@outside · Not in chat · Will not be notified",
+    ),
+  );
+});
+const verifiedOutside = {
+  displayName: "Outside",
+  username: "outside",
+  issuerLabel: "Example",
+  verifiedAt: 1,
+  status: "checked" as const,
+  multipleIssuers: false,
+};
+
 it("keeps a Solo owner's left-out members out of directory results", async () => {
   const t = setup(false);
   const stranger = "c".repeat(64);
