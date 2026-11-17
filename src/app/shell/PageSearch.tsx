@@ -128,11 +128,12 @@ export function PageSearch({
   const setSearchOpen = useCallback((next: boolean) => {
     if (!next && openRef.current) {
       const { query, scopedChannelId, browsing } = latest.current;
-      // Only search's own text and place come back on its next opening.
-      remembered.current =
-        escaped.current || scopedChannelId || browsing
-          ? undefined
-          : { query, place: { ...place.current }, at: Date.now() };
+      // Browse channels isn't search: closing it leaves what search kept.
+      if (!browsing)
+        remembered.current =
+          escaped.current || scopedChannelId
+            ? undefined
+            : { query, place: { ...place.current }, at: Date.now() };
       escaped.current = false;
     }
     openRef.current = next;

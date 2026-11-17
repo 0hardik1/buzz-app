@@ -1230,8 +1230,8 @@ it.each(
     else h.owner[stop]();
     let roster: RelayEvent | undefined;
     if (join) {
-      // Revocation purges discovery, so a join may accept only records
-      // read after it: the roster, then the metadata that lists it.
+      // Revocation purges discovery, so a join may accept only a roster
+      // read after it.
       roster = join.roster(other, viewer);
       join.setEvents([join.metadata, roster]);
     }
@@ -1240,11 +1240,8 @@ it.each(
       // A published command outlives revocation, usually its own effect, and
       // still confirms.
       await run;
-      if (roster && join)
-        expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith([
-          join.metadata,
-          roster,
-        ]);
+      if (roster)
+        expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith([roster]);
       else if (action === "hide")
         expect(h.owner.capability.snapshot().hidden).toEqual([id]);
       else expect(h.removed).toHaveBeenCalledExactlyOnceWith(id);
@@ -2374,7 +2371,7 @@ describe("join from a public preview", () => {
     }
   });
 
-  it("accepts the metadata read after the confirming roster, so the channel lists", async () => {
+  it("accepts the metadata it checked before sending with the confirming roster, so the channel lists", async () => {
     const h = preview();
     try {
       await h.owner.capability.run("join", id);
@@ -2382,139 +2379,18 @@ describe("join from a public preview", () => {
         h.metadata,
         expect.objectContaining({ kind: 39002 }),
       ]);
+      // Only the roster is read after sending.
       const strong = h.read.mock.calls
         .map(([filters]) => filters)
         .filter((filters) =>
           filters.every((filter) => filter.consistency === "strong"),
         )
         .map((filters) => filters.map((filter) => filter.kinds?.[0]));
-      expect(strong).toEqual([[39002], [39000]]);
+      expect(strong).toEqual([[39002]]);
     } finally {
       h.owner.dispose();
     }
   });
-
-  it.each([
-    ["retries a metadata read that fails briefly, so the channel lists", 1],
-    [
-      "keeps a confirmed join when the metadata read after it keeps failing",
-      Infinity,
-    ],
-  ])("%s", async (_name, failures) => {
-    const h = preview();
-    const currentRead = h.read.getMockImplementation();
-    assert(currentRead);
-    let failed = 0;
-    h.read.mockImplementation(async (filters, options) => {
-      if (
-        failed < failures &&
-        filters.some(
-          (filter) =>
-            filter.consistency === "strong" && filter.kinds?.includes(39000),
-        )
-      ) {
-        failed++;
-        throw new TypeError("fetch failed");
-      }
-      return currentRead(filters, options);
-    });
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      const joined = h.owner.capability.run("join", id);
-      await vi.advanceTimersByTimeAsync(10_000);
-      await joined;
-      expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith(
-        failures === 1
-          ? [
-              expect.objectContaining({ kind: 39000 }),
-              expect.objectContaining({ kind: 39002 }),
-            ]
-          : [expect.objectContaining({ kind: 39002 })],
-      );
-      expect(failed).toBe(failures === 1 ? 1 : 4);
-    } finally {
-      vi.useRealTimers();
-      h.owner.dispose();
-    }
-  });
-
-  it.each([
-    ["outlasts its own 5 s bound", 0, "bound"],
-    ["runs into the Join's deadline", 16_500, "deadline"],
-    ["outlives a cleared session", 0, "clear"],
-  ] as const)(
-    "when the metadata read after a confirmed roster %s",
-    async (_name, signing, end) => {
-      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-      // Node's native AbortSignal timer is not driven by Vitest's clock.
-      vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
-        const controller = new AbortController();
-        setTimeout(() => controller.abort(), milliseconds);
-        return controller.signal;
-      });
-      const h = preview();
-      const currentRead = h.read.getMockImplementation();
-      const currentSign = h.sign.getMockImplementation();
-      assert(currentRead && currentSign);
-      h.sign.mockImplementation(async (event) => {
-        await new Promise((resolve) => setTimeout(resolve, signing));
-        return currentSign(event);
-      });
-      // The metadata read never answers; only its signal ends it.
-      let reading = false;
-      h.read.mockImplementation(async (filters, options) => {
-        if (
-          !filters.some(
-            (filter) =>
-              filter.consistency === "strong" && filter.kinds?.includes(39000),
-          )
-        )
-          return currentRead(filters, options);
-        reading = true;
-        return new Promise((_resolve, reject) => {
-          const signal = options?.signal;
-          signal?.addEventListener("abort", () => reject(signal.reason), {
-            once: true,
-          });
-        });
-      });
-      try {
-        let outcome: unknown = "pending";
-        h.owner.capability.run("join", id).then(
-          () => {
-            outcome = "joined";
-          },
-          (error: unknown) => {
-            outcome = error;
-          },
-        );
-        await vi.advanceTimersByTimeAsync(signing);
-        expect(reading).toBe(true);
-        if (end === "clear") h.owner.clear();
-        else
-          await vi.advanceTimersByTimeAsync(
-            end === "bound" ? 4_900 : 20_000 - signing - 100,
-          );
-        await vi.advanceTimersByTimeAsync(end === "clear" ? 0 : 200);
-        if (end === "clear") {
-          // A cleared session's roster isn't the next session's to accept.
-          expect(h.acceptDiscovery).not.toHaveBeenCalled();
-          expect(outcome).toBeInstanceOf(ChannelLifecycleUnconfirmed);
-        } else {
-          // Ended by its bound or the Join's deadline, the read gives way to
-          // the confirmed roster: the Join stands.
-          expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith([
-            expect.objectContaining({ kind: 39002 }),
-          ]);
-          expect(outcome).toBe("joined");
-        }
-      } finally {
-        vi.useRealTimers();
-        vi.restoreAllMocks();
-        h.owner.dispose();
-      }
-    },
-  );
 
   it("reports an accepted but unconfirmed join, then a retry confirms it", async () => {
     const h = preview();

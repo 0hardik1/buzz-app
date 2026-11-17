@@ -123,6 +123,8 @@ export function createChannelLifecycle({
     id?: string | undefined;
     caller?: AbortSignal | undefined;
     published?: boolean;
+    /** Access changed after it began, purging what it read before. */
+    revoked?: boolean;
   };
   async function owned<T>(
     scope: Scope,
@@ -421,7 +423,8 @@ export function createChannelLifecycle({
       const id = lifecycleChannelId(value);
       busy = true;
       const scope: Scope = { id, caller };
-      const started = epoch;
+      // The metadata a Join last checked before sending.
+      let known: RelayEvent | undefined;
       try {
         await owned(scope, async (signal) => {
           // Joining starts from a nonmember preview, so membership-based
@@ -433,6 +436,7 @@ export function createChannelLifecycle({
               read([39002], id, signal, true),
             ]);
             const channel = lifecycleRecord(metadata, 39000, id, relayAuthor);
+            known = channel;
             const membership = lifecycleRecord(roster, 39002, id, relayAuthor);
             if (membership && hasTag(membership, "p", viewer)) {
               acceptDiscovery(channel ? [channel, membership] : [membership]);
@@ -548,29 +552,12 @@ export function createChannelLifecycle({
               const roster = lifecycleRecord(events, 39002, id, relayAuthor);
               if (roster && hasTag(roster, "p", viewer)) {
                 // A channel joined without opening it, as from Browse
-                // channels, has no metadata yet and can't list without it.
-                // Read after the roster, it is as current. A brief failure
-                // retries for up to 5 s. One that persists, or the Join's
-                // deadline or caller ending the read, keeps the confirmed
-                // roster; only a cleared or closed session drops it.
-                const bounded = AbortSignal.any([
-                  signal,
-                  AbortSignal.timeout(5000),
-                ]);
-                const metadata = await retryRead(
-                  (attempt) =>
-                    reread(attempt, () =>
-                      read([39000], id, attempt, false, true),
-                    ),
-                  bounded,
-                ).then(
-                  (found) => lifecycleRecord(found, 39000, id, relayAuthor),
-                  (error: unknown) => {
-                    if (started !== epoch) throw error;
-                    return undefined;
-                  },
+                // channels, lists only with its metadata. A Join doesn't
+                // change it, so the copy checked right before sending is
+                // current, unless access changed since and purged it.
+                acceptDiscovery(
+                  known && !scope.revoked ? [known, roster] : [roster],
                 );
-                acceptDiscovery(metadata ? [metadata, roster] : [roster]);
                 return;
               }
             } else {
@@ -631,9 +618,13 @@ export function createChannelLifecycle({
       // A channel-scoped invalidation retires a read, not the viewer's whole
       // refresh. Its cancellation can retry within the existing budget.
       if (!ids) refreshController?.abort();
-      for (const [controller, { id, published }] of controllers)
-        if (!published && (!ids || id === undefined || ids.includes(id)))
-          controller.abort();
+      for (const [controller, scope] of controllers) {
+        const { id, published } = scope;
+        if (!ids || id === undefined || ids.includes(id)) {
+          scope.revoked = true;
+          if (!published) controller.abort();
+        }
+      }
     },
     clear() {
       epoch++;

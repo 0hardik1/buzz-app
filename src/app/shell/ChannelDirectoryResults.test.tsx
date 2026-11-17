@@ -394,23 +394,32 @@ it("marks joined matches and says when nothing matches", async () => {
   }
 });
 
-it("leaves search as it was: ⌘K after browsing opens all of search, fresh", async () => {
+it("leaves search as it was: ⌘K after browsing reopens search where it was left", async () => {
   const t = connected();
   try {
     t.render();
+    await openSearch();
+    const search = () => screen.getByRole("combobox", { name: "Search Buzz" });
+    await userEvent.type(search(), "crit");
+    await userEvent.click(
+      await screen.findByRole("option", { name: /design-crit/ }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Search Buzz" })).toBeNull(),
+    );
+    // Browse starts from the whole list, and Escape there ends only Browse.
     await browse();
+    expect(field()).toHaveValue("");
     await userEvent.type(field(), "design");
     await waitFor(() => expect(rows()).toHaveLength(4));
-    await userEvent.click(screen.getByRole("row", { name: /^design-crit/ }));
+    await userEvent.keyboard("{Escape}");
     await waitFor(() =>
       expect(
         screen.queryByRole("dialog", { name: "Browse channels" }),
       ).toBeNull(),
     );
     await openSearch();
-    expect(screen.getByRole("combobox", { name: "Search Buzz" })).toHaveValue(
-      "",
-    );
+    expect(search()).toHaveValue("crit");
     // And browsing again starts from the whole list, not the last text.
     await userEvent.keyboard("{Escape}");
     await waitFor(() =>
