@@ -882,7 +882,7 @@ export function SearchChoices({
             }}
           >
             <Tabs
-              variant="panel"
+              variant="segmented"
               label="Result groups"
               value={scoped?.label ?? ""}
               onValueChange={(value) => showScope(value || undefined, false)}
