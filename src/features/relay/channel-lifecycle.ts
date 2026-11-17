@@ -123,7 +123,7 @@ export function createChannelLifecycle({
     id?: string | undefined;
     caller?: AbortSignal | undefined;
     published?: boolean;
-    /** Access changed after it began, purging what it read before. */
+    /** A revocation that may cover its channel came after it began. */
     revoked?: boolean;
   };
   async function owned<T>(
@@ -423,6 +423,7 @@ export function createChannelLifecycle({
       const id = lifecycleChannelId(value);
       busy = true;
       const scope: Scope = { id, caller };
+      const started = epoch;
       // The metadata a Join last checked before sending.
       let known: RelayEvent | undefined;
       try {
@@ -554,10 +555,22 @@ export function createChannelLifecycle({
                 // A channel joined without opening it, as from Browse
                 // channels, lists only with its metadata. A Join doesn't
                 // change it, so the copy checked right before sending is
-                // current, unless access changed since and purged it.
-                acceptDiscovery(
-                  known && !scope.revoked ? [known, roster] : [roster],
-                );
+                // current. A revocation that may cover this channel purges
+                // what was read before it, so read it once more. If that
+                // read fails, the confirmed roster stands; only a cleared
+                // or closed session drops it.
+                const metadata = !scope.revoked
+                  ? known
+                  : await reread(signal, () =>
+                      read([39000], id, signal, false, true),
+                    ).then(
+                      (found) => lifecycleRecord(found, 39000, id, relayAuthor),
+                      (error: unknown) => {
+                        if (started !== epoch) throw error;
+                        return undefined;
+                      },
+                    );
+                acceptDiscovery(metadata ? [metadata, roster] : [roster]);
                 return;
               }
             } else {

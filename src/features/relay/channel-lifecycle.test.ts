@@ -1229,19 +1229,29 @@ it.each(
     else if (stop === "scoped cancel") h.owner.cancel([id]);
     else h.owner[stop]();
     let roster: RelayEvent | undefined;
+    let metadata: RelayEvent | undefined;
     if (join) {
-      // Revocation purges discovery, so a join may accept only a roster
-      // read after it.
+      // Revocation purges discovery, so a join may accept only records
+      // read after it: the roster, then metadata read again.
       roster = join.roster(other, viewer);
-      join.setEvents([join.metadata, roster]);
+      metadata = h.record(39000, [
+        ["d", id],
+        ["t", "stream"],
+        ["name", "renamed"],
+        ["public"],
+      ]);
+      join.setEvents([metadata, roster]);
     }
     gate.resolve();
     if (stop === "scoped cancel" || stop === "cancel") {
       // A published command outlives revocation, usually its own effect, and
       // still confirms.
       await run;
-      if (roster)
-        expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith([roster]);
+      if (roster && metadata)
+        expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith([
+          metadata,
+          roster,
+        ]);
       else if (action === "hide")
         expect(h.owner.capability.snapshot().hidden).toEqual([id]);
       else expect(h.removed).toHaveBeenCalledExactlyOnceWith(id);
@@ -2387,6 +2397,86 @@ describe("join from a public preview", () => {
         )
         .map((filters) => filters.map((filter) => filter.kinds?.[0]));
       expect(strong).toEqual([[39002]]);
+    } finally {
+      h.owner.dispose();
+    }
+  });
+
+  it.each([
+    ["only other channels", "other", "reuses the checked metadata"],
+    ["every channel", "all", "keeps the roster when the metadata read fails"],
+  ] as const)(
+    "a revocation covering %s during confirmation %s",
+    async (_name, cancelled, _outcome) => {
+      const h = preview();
+      const currentRead = h.read.getMockImplementation();
+      assert(currentRead);
+      const started = deferred<void>();
+      const gate = deferred<void>();
+      let held = false;
+      h.read.mockImplementation(async (filters, options) => {
+        const strong = filters.every(
+          (filter) => filter.consistency === "strong",
+        );
+        if (strong && filters.some((filter) => filter.kinds?.includes(39000)))
+          throw new TypeError("fetch failed");
+        if (held || !strong) return currentRead(filters, options);
+        held = true;
+        started.resolve();
+        await gate.promise;
+        return currentRead(filters, options);
+      });
+      try {
+        const run = h.owner.capability.run("join", id);
+        await started.promise;
+        h.owner.cancel(cancelled === "other" ? ["other-channel"] : undefined);
+        gate.resolve();
+        await run;
+        expect(h.acceptDiscovery).toHaveBeenCalledExactlyOnceWith(
+          cancelled === "other"
+            ? [h.metadata, expect.objectContaining({ kind: 39002 })]
+            : [expect.objectContaining({ kind: 39002 })],
+        );
+        const strong = h.read.mock.calls
+          .map(([filters]) => filters)
+          .filter((filters) =>
+            filters.every((filter) => filter.consistency === "strong"),
+          )
+          .map((filters) => filters.map((filter) => filter.kinds?.[0]));
+        expect(strong).toEqual(
+          cancelled === "other" ? [[39002]] : [[39002], [39000]],
+        );
+      } finally {
+        h.owner.dispose();
+      }
+    },
+  );
+
+  it("drops a confirmed join when the session clears during the metadata read after a revocation", async () => {
+    const h = preview();
+    const currentRead = h.read.getMockImplementation();
+    assert(currentRead);
+    let rosterRead = false;
+    h.read.mockImplementation(async (filters, options) => {
+      const strong = filters.every((filter) => filter.consistency === "strong");
+      if (!strong) return currentRead(filters, options);
+      if (filters.some((filter) => filter.kinds?.includes(39000))) {
+        // The session clears while the metadata read is out.
+        h.owner.clear();
+        options?.signal?.throwIfAborted();
+      }
+      if (!rosterRead) {
+        rosterRead = true;
+        h.owner.cancel();
+      }
+      return currentRead(filters, options);
+    });
+    try {
+      await expect(h.owner.capability.run("join", id)).rejects.toBeInstanceOf(
+        ChannelLifecycleUnconfirmed,
+      );
+      // A cleared session's roster isn't the next session's to accept.
+      expect(h.acceptDiscovery).not.toHaveBeenCalled();
     } finally {
       h.owner.dispose();
     }
