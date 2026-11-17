@@ -291,6 +291,7 @@ it("saves and clears a compaction window without changing other settings", async
   });
   expect(field).toHaveValue("40");
   expect(field).toHaveAccessibleDescription("Thousands of tokens");
+  expect(screen.getByText("K", { exact: true })).toBeVisible();
   await user.click(field);
   fireEvent.change(field, { target: { value: "40.0" } });
   expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
@@ -311,6 +312,8 @@ it("saves and clears a compaction window without changing other settings", async
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull(),
   );
   expect(field).toHaveValue("");
+  expect(field).toHaveAttribute("placeholder", "Default");
+  expect(screen.queryByText("K", { exact: true })).toBeNull();
   const updates = h.request.mock.calls.filter(([request]) =>
     request.url.endsWith("/update-agent"),
   );

@@ -436,7 +436,9 @@ export function ModelSettings({
                             appearance="outlined"
                             trailing={
                               <span id={compactionUnitId}>
-                                <span aria-hidden="true">K</span>
+                                {compaction.trim() && (
+                                  <span aria-hidden="true">K</span>
+                                )}
                                 <span className="sr-only">
                                   Thousands of tokens
                                 </span>
