@@ -21,7 +21,7 @@ import { RecoveryNotice } from "../../features/relay/RecoveryNotice";
 import {
   ChannelInventory,
   sidebarEntryLocation,
-} from "../../features/channel-navigation/ChannelInventory";
+} from "../../bundled/channels/ChannelInventory";
 import { SidebarBoundary } from "../../features/channel-navigation/SidebarBoundary";
 import { SidebarFrame } from "../../features/channel-navigation/SidebarFrame";
 import { SidebarList } from "../../features/channel-navigation/SidebarList";

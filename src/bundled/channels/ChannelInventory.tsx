@@ -1,5 +1,5 @@
-import { revealCreatedChannel } from "./created-channel";
-import { openEmptyChannels } from "./routes";
+import { revealCreatedChannel } from "../../features/channel-navigation/created-channel";
+import { openEmptyChannels } from "../../features/channel-navigation/routes";
 import {
   useCallback,
   useEffect,
@@ -11,30 +11,30 @@ import {
   type ReactNode,
   type ComponentProps,
 } from "react";
-import { ChannelLifecycleMenu } from "../../bundled/channels/ChannelLifecycleMenu";
-import { lifecycleNoun } from "../../bundled/channels/ChannelLifecycleDialog";
-import type { ChannelLifecycleAction } from "../relay/channel-lifecycle-protocol";
-import { inTeamInventory } from "./team-inventory";
-import type { RelayData } from "../relay/service";
-import type { Agents } from "../agents/service";
-import type { RelaySession } from "../relay/session";
-import { useChannelList } from "../relay/react";
-import type { Navigation } from "../navigation/controller";
-import type { OpenTarget } from "../navigation/targets";
+import { ChannelLifecycleMenu } from "./ChannelLifecycleMenu";
+import { lifecycleNoun } from "./ChannelLifecycleDialog";
+import type { ChannelLifecycleAction } from "../../features/relay/channel-lifecycle-protocol";
+import { inTeamInventory } from "../../features/channel-navigation/team-inventory";
+import type { RelayData } from "../../features/relay/service";
+import type { Agents } from "../../features/agents/service";
+import type { RelaySession } from "../../features/relay/session";
+import { useChannelList } from "../../features/relay/react";
+import type { Navigation } from "../../features/navigation/controller";
+import type { OpenTarget } from "../../features/navigation/targets";
 import type {
   RegisteredSidebarSection,
   SidebarSections,
-} from "./sidebar-sections-service";
+} from "../../features/channel-navigation/sidebar-sections-service";
 import {
   sidebarRow,
   sidebarRowSortModes,
   sortSidebarRows,
   type SidebarRows,
   type RegisteredSidebarRows,
-} from "./sidebar-rows-service";
-import { useSidebarRowUnread } from "./useSidebarRowUnread";
-import type { SidebarSortMode } from "../relay/sidebar-sort";
-import type { SidebarFrame } from "./SidebarFrame";
+} from "../../features/channel-navigation/sidebar-rows-service";
+import { useSidebarRowUnread } from "../../features/channel-navigation/useSidebarRowUnread";
+import type { SidebarSortMode } from "../../features/relay/sidebar-sort";
+import type { SidebarFrame } from "../../features/channel-navigation/SidebarFrame";
 import { Button } from "../../shared/design-system/ui/Button";
 import {
   MenuGroup,
@@ -48,12 +48,12 @@ import {
   MenuSubmenuTrigger,
   MenuSeparator,
 } from "../../shared/design-system/ui/Menu";
-import type { ChannelSummary } from "../relay/contracts";
-import { useChannelRowMenu } from "../../bundled/channels/useChannelRowMenu";
+import type { ChannelSummary } from "../../features/relay/contracts";
+import { useChannelRowMenu } from "./useChannelRowMenu";
 import { ToastNotice } from "../../shared/design-system/ui/Toast";
-import { useRecoveryOwns } from "../relay/RecoveryNotice";
-import { rosterRecovering } from "../relay/live-recovery";
-import { clientMetrics } from "../developer/client-metrics";
+import { useRecoveryOwns } from "../../features/relay/RecoveryNotice";
+import { rosterRecovering } from "../../features/relay/live-recovery";
+import { clientMetrics } from "../../features/developer/client-metrics";
 import {
   BellIcon,
   BellSlashIcon,
@@ -63,52 +63,52 @@ import {
   PlusIcon,
   XIcon,
 } from "../../shared/design-system/icons";
-import { ChannelReadMenuItem } from "../../bundled/channels/ChannelReadMenuItem";
-import { ChannelCopyLinkMenuItem } from "../../bundled/channels/ChannelCopyLinkMenuItem";
-import { ChannelSidebarItem } from "../../bundled/channels/ChannelSidebarItem";
-import { ChannelSidebarRows } from "./ChannelSidebarRows";
-import { activeChannelRows } from "./active-channel-rows";
-import type { UnreadDmPreview } from "../../bundled/channels/SidebarUnread";
+import { ChannelReadMenuItem } from "./ChannelReadMenuItem";
+import { ChannelCopyLinkMenuItem } from "./ChannelCopyLinkMenuItem";
+import { ChannelSidebarItem } from "./ChannelSidebarItem";
+import { ChannelSidebarRows } from "../../features/channel-navigation/ChannelSidebarRows";
+import { activeChannelRows } from "../../features/channel-navigation/active-channel-rows";
+import type { UnreadDmPreview } from "./SidebarUnread";
 import {
   ChannelSidebarDnd,
   DraggableChannel,
   DraggableConversation,
   DroppableSidebarSection,
-} from "./ChannelSidebarDnd";
-import { channelIcon } from "../channels/channel-icon";
-import { SidebarGroupIcon } from "../../bundled/channels/SidebarGroupIcon";
-import { CreateSidebarSection } from "../../bundled/channels/CreateSidebarSection";
-import { useSidebarStartup } from "../../bundled/channels/useSidebarStartup";
-import { useChannelLabels } from "../../bundled/channels/useChannelLabels";
-import { useHiddenDms } from "../../bundled/channels/useHiddenDms";
-import { useSidebarPreferences } from "../../bundled/channels/useSidebarPreferences";
-import { useSidebarView } from "../../bundled/channels/useSidebarView";
-import { useSidebarFilters } from "../../bundled/channels/useSidebarFilters";
+} from "../../features/channel-navigation/ChannelSidebarDnd";
+import { channelIcon } from "../../features/channels/channel-icon";
+import { SidebarGroupIcon } from "./SidebarGroupIcon";
+import { CreateSidebarSection } from "./CreateSidebarSection";
+import { useSidebarStartup } from "./useSidebarStartup";
+import { useChannelLabels } from "./useChannelLabels";
+import { useHiddenDms } from "./useHiddenDms";
+import { useSidebarPreferences } from "./useSidebarPreferences";
+import { useSidebarView } from "./useSidebarView";
+import { useSidebarFilters } from "./useSidebarFilters";
 import {
   sidebarSections,
   contributedSidebarSectionKey,
   isChannelSectionKey,
   sidebarDropRowKinds,
   orderContributedSidebarSections,
-} from "../../bundled/channels/sidebar-sections";
-import { activityTranscript } from "../../bundled/channels/working-agents";
-import { SidebarContributionSection } from "./SidebarContributionSection";
+} from "./sidebar-sections";
+import { activityTranscript } from "./working-agents";
+import { SidebarContributionSection } from "../../features/channel-navigation/SidebarContributionSection";
 import {
   ContributionBoundary,
   contributionKey,
-} from "../conversation/ContributionBoundary";
+} from "../../features/conversation/ContributionBoundary";
 import {
   CreateChannelDialog,
   type CreateChannelInput,
-} from "../../bundled/channels/CreateChannelDialog";
+} from "./CreateChannelDialog";
 import { writeView } from "../../shared/view-state";
-import { useChannelReadAction } from "../../bundled/channels/useChannelReadAction";
+import { useChannelReadAction } from "./useChannelReadAction";
 import {
   type ChannelMenuSurface,
   useChannelNavigation,
-} from "./ChannelNavigationState";
-import { splitPartition } from "../relay/partition";
-import styles from "../../bundled/channels/Channels.module.css";
+} from "../../features/channel-navigation/ChannelNavigationState";
+import { splitPartition } from "../../features/relay/partition";
+import styles from "./Channels.module.css";
 import { avatarMedia } from "../../shared/avatar-source";
 import { useBestieConversation } from "../../app/shell/bestie-context";
 
