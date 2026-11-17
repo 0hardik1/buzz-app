@@ -356,6 +356,45 @@ it.each(["0", "-1", "1.5", "2147483648"])(
   },
 );
 
+it("does not treat bad numeric input as a default reset on retry", async () => {
+  const h = await fixture({
+    autoCompactWindow: 100000,
+    modelSelectionStatus: "valid",
+  });
+  const user = userEvent.setup();
+  const field = screen.getByRole("spinbutton", {
+    name: "Auto-compact window (tokens)",
+  }) as HTMLInputElement;
+  fireEvent.change(field, { target: { value: "200000" } });
+  h.request.mockResolvedValueOnce({ status: 500, headers: {}, body: "{}" });
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await screen.findByRole("button", { name: "Try again" });
+  const updates = () =>
+    h.request.mock.calls.filter(([request]) =>
+      request.url.endsWith("/update-agent"),
+    );
+  const badInput = vi
+    .spyOn(field.validity, "badInput", "get")
+    .mockReturnValue(true);
+  try {
+    fireEvent.input(field, { target: { value: "" } });
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(updates()).toHaveLength(1);
+    expect(field).toHaveAccessibleDescription(
+      "Enter a positive whole token count, or leave blank for the default.",
+    );
+  } finally {
+    badInput.mockRestore();
+  }
+  fireEvent.input(field, { target: { value: "" } });
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(updates()).toHaveLength(2);
+  expect(JSON.parse(updates()[1]?.[0].body ?? "{}")).toMatchObject({
+    auto_compact_window: 0,
+  });
+});
+
 it("keeps the compaction draft when the server does not persist it", async () => {
   const h = await fixture({
     modelId: "model-one",

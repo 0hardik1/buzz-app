@@ -105,6 +105,7 @@ export function ModelSettings({
   const [compaction, setCompaction] = useState(
     String(agent?.autoCompactWindow ?? ""),
   );
+  const [badCompactionInput, setBadCompactionInput] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>("");
@@ -136,6 +137,7 @@ export function ModelSettings({
     setEffort(agent.reasoningEffort ?? "");
     setInstructions(agent.instructions ?? "");
     setCompaction(String(agent.autoCompactWindow ?? ""));
+    setBadCompactionInput(false);
   }, [agent]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision retries a failed catalog request while keeping the draft.
   useEffect(() => {
@@ -172,7 +174,8 @@ export function ModelSettings({
     compaction !== String(saved?.autoCompactWindow ?? "");
   const autoCompactWindow = Number(compaction);
   const validCompaction =
-    compaction.trim() === "" || validAutoCompactWindow(autoCompactWindow);
+    !badCompactionInput &&
+    (compaction.trim() === "" || validAutoCompactWindow(autoCompactWindow));
   const saveModel =
     modelChanged ||
     (!instructionsChanged &&
@@ -419,6 +422,9 @@ export function ModelSettings({
             step={1}
             placeholder="Default"
             value={compaction}
+            onInput={(event) =>
+              setBadCompactionInput(event.currentTarget.validity.badInput)
+            }
             onChange={(event) => setCompaction(event.target.value)}
             disabled={!saved || saving || !hasAccess}
           />
