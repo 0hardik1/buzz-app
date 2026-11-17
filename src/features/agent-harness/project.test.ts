@@ -26,7 +26,9 @@ it("hands over the whole Canvas, naming the folders it works in", () => {
   const { section, directories } = project(canvas);
   expect(directories).toEqual(["~/app", "~/trees"]);
   expect(section).toMatch(/^<workspace-canvas>\n/);
-  expect(section).toContain("not your own workspace: `~/app`, `~/trees`.");
+  expect(section).toContain(
+    "This chat's work happens in these folders, not your own workspace: `~/app`, `~/trees`. To change files in a repository there, follow your worktree rules; your workspace keeps your notes.",
+  );
   expect(section).toContain(`${canvas.trim()}\n</workspace-canvas>`);
   expect(project("Just notes")).toEqual({
     section: expect.not.stringContaining("not your own workspace"),

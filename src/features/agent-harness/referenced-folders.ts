@@ -60,7 +60,7 @@ export async function referencedFolders(
     const directories = ids.filter((id) => listed.has(id));
     if (!directories.length) return NONE;
     return {
-      section: `<referenced-folders>\nThe owner's message references these folders on this device (literal paths): ${quoted(directories)}. \`cd\` into the one you need; your workspace keeps your notes.\n</referenced-folders>`,
+      section: `<referenced-folders>\nThe owner's message references these folders on this device (literal paths): ${quoted(directories)}. They tell you which repository or folder the request is about. To change files in a repository there, follow your worktree rules; your workspace keeps your notes.\n</referenced-folders>`,
       directories,
     };
   } catch (error) {

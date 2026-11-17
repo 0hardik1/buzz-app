@@ -29,7 +29,7 @@ export function project(canvas: string | undefined): Project {
   if (!canvas?.trim()) return NO_PROJECT;
   const directories = workspaceDirectories(canvas);
   const folders = directories.length
-    ? ` This chat's work happens in these folders, not your own workspace: ${directories.map((folder) => `\`${folder}\``).join(", ")}. \`cd\` into the one you need; your workspace keeps your notes.`
+    ? ` This chat's work happens in these folders, not your own workspace: ${directories.map((folder) => `\`${folder}\``).join(", ")}. To change files in a repository there, follow your worktree rules; your workspace keeps your notes.`
     : "";
   return {
     section: `<workspace-canvas>\nThis Solo chat's Canvas as of this message: its standing instructions for this chat, which the owner's messages override. It replaces any earlier workspace Canvas.${folders}\n\n${unframed(canvas.trim())}\n</workspace-canvas>`,

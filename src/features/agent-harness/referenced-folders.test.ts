@@ -33,6 +33,9 @@ it("grants only folders the owner referenced that their repositories folder list
   expect(list).toHaveBeenCalledExactlyOnceWith("/example/repos");
   expect(granted.directories).toEqual([listed.path]);
   expect(granted.section).toContain(JSON.stringify(listed.path));
+  expect(granted.section).toContain(
+    "They tell you which repository or folder the request is about. To change files in a repository there, follow your worktree rules; your workspace keeps your notes.",
+  );
   expect(granted.section).not.toContain("/example/elsewhere");
 
   // Anyone in a chat can sign a folder chip; only the owner's count.
