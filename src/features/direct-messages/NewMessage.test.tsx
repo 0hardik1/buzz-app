@@ -2140,6 +2140,41 @@ it("finds a person with no profile by their verified name and names them from it
   await screen.findByRole("button", { name: "Remove Aleksandr" });
 });
 
+it("Space waits while someone found by a verified name alone is unnamed", async () => {
+  const t = setup();
+  const profiled = { pubkey: "b".repeat(64), name: "Petrov" };
+  // Found by the verified name "petrov" alone: a possible namesake until named.
+  const unnamed = {
+    pubkey: aleksandr.pubkey,
+    name: aleksandr.pubkey.slice(0, 10),
+    nameIsFallback: true as const,
+  };
+  t.directMessages.people.mockImplementation(async (query) => ({
+    people: query.trim() ? [profiled, unnamed] : [],
+    hasMore: false,
+  }));
+  let release = () => {};
+  verifying(
+    t,
+    new Map([[aleksandr.pubkey, verifiedAs("Petrov", "petrov")]]),
+    new Promise<void>((resolve) => (release = resolve)),
+  );
+  t.mount();
+  await waitFor(() => expect(recipient()).toBeEnabled());
+  await t.user.type(recipient(), "petrov");
+  await screen.findByRole("option", { name: "Petrov" });
+  await t.user.keyboard(" ");
+  expect(recipient()).toHaveValue("petrov ");
+  expect(
+    screen.queryByRole("button", { name: "Remove Petrov" }),
+  ).not.toBeInTheDocument();
+  release();
+  // Named, they are the profile Petrov's namesake: still no single exact name.
+  await screen.findByRole("option", { name: /Petrov.*@petrov/ });
+  await t.user.keyboard("{Backspace} ");
+  expect(recipient()).toHaveValue("petrov ");
+});
+
 it("relabels a recipient whose verification answers late, keeping a failed send's error", async () => {
   const t = setup();
   t.directMessages.people.mockResolvedValue({

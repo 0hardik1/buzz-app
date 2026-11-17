@@ -18,13 +18,17 @@ import {
   publicKeyLabels,
   typedPublicKey,
 } from "../../shared/identity/public-key";
-import { SEARCH_MIN_CHARS } from "../../shared/search-debounce";
+import {
+  SEARCH_MIN_CHARS,
+  verifiedNamesSearchable,
+} from "../../shared/search-debounce";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { Button } from "../../shared/design-system/ui/Button";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { XIcon } from "../../shared/design-system/icons/index";
 import { usePeople, type Recipient } from "./usePeople";
 import {
+  hasUnnamed,
   useVerifiedNames,
   verifiedName,
   withVerifiedNames,
@@ -349,9 +353,16 @@ export function RecipientPicker({
   // no longer name continues it ("Avery" waits while "Avery Chen" exists).
   // A search still running, failed, or with more pages could hold that longer
   // name or a namesake, so Space waits for the full list. A verified person
-  // found by an editable profile name is that name's namesake too.
+  // found by an editable profile name is that name's namesake too. As in
+  // mentions, a list proves nobody else has the name only when the relay also
+  // matched verified names, and once everyone it found by one is named.
   const exactRecipient = () =>
-    listed && !directory.loading && !directory.error && !directory.tooShort
+    listed &&
+    !directory.loading &&
+    !directory.error &&
+    !directory.tooShort &&
+    (verifiedNamesSearchable(query) || !!typedPublicKey(query)) &&
+    !hasUnnamed(people, query)
       ? exactName(
           eligible,
           (person) => [...namesOf(person), ...(person.profileNames ?? [])],
