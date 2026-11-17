@@ -1029,6 +1029,12 @@ and are asked to sign in again in Buzz.
   for that community and identity. Collapsed section headings highlight when
   their channels have unread messages or thread replies. Muted channels do not
   highlight the heading.
+- **Custom Team sections** can have an optional Unicode or community emoji.
+  Choose it beside the name when creating a section, or use the section's
+  menu → **Rename section** to change its name or emoji, then **Rename**.
+  Open the emoji picker and choose **Remove emoji** to clear only the emoji;
+  the name and channels stay unchanged. These controls require
+  writable saved sidebar preferences.
 - **Dragging channels and DMs between sections**: drag a channel or DM row onto
   **Starred** or a saved group to move it there, or back to its home section:
   channels to **Channels** and DMs to **Direct messages**. **Channels** does not
