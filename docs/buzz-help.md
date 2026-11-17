@@ -1001,11 +1001,12 @@ available rather than silently discarding it.
 
 - Agents use a minimal required Buzz contract by default, without the fuller
   engineering, repository, autonomy and memory-hygiene guidance. To restore that
-  guidance, ask an agent to set the device setting `agents.lean_base_prompt` to
-  `false` through the settings tools; set it to `true` to use only the contract.
+  guidance, turn off **Use lean base prompt** in **Settings → Agent setup →
+  Agent behavior**. It is on by default; turn it back on to use only the contract.
+  Agents can also change `agents.lean_base_prompt` through the settings tools.
   This affects **all agents on this device**, and any connected agent with
   settings access can change it. Claude Code and Codex need a new session;
-  Goose and Pi apply it on their next turn. There is no dedicated UI toggle.
+  Goose and Pi apply it on their next turn.
 
 - An optional plugin can attach context to a native session. Follow-ups and
   reconnects keep that association. **New** starts another association. Each

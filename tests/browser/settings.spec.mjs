@@ -580,6 +580,23 @@ confirmedPresence(
     await expect(
       page.getByRole("region", { name: "Agent setup", exact: true }),
     ).toBeVisible();
+    const lean = page.getByRole("switch", { name: "Use lean base prompt" });
+    await expect(lean).toBeChecked();
+    await lean.focus();
+    await page.keyboard.press("Space");
+    await expect(lean).not.toBeChecked();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          localStorage.getItem("buzz-agents-lean-base-prompt.v1"),
+        ),
+      )
+      .toBe("off");
+    await profile.click();
+    await providers.click();
+    await expect(lean).not.toBeChecked();
+    await lean.click();
+    await expect(lean).toBeChecked();
     const remember = page.getByRole("switch", {
       name: "Remember mentioned agents",
     });

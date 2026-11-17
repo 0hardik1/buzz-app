@@ -1,3 +1,7 @@
+import {
+  setLeanBasePromptPreference,
+  useLeanBasePromptPreference,
+} from "../features/agent-harness/lean-base-prompt-preference";
 import { useState } from "react";
 import type { PageNavigation } from "../features/navigation/service";
 import type { Agents } from "../features/agents/service";
@@ -49,6 +53,10 @@ export function AgentSettings({
   /** Only the macOS app can keep the computer awake. */
   keepAwakeAvailable?: boolean;
 }) {
+  const leanBasePrompt = useLeanBasePromptPreference();
+  const [leanPromptError, setLeanPromptError] = useState<string | null>(null);
+  const changeLeanBasePrompt = (enabled: boolean) =>
+    setLeanPromptError(setLeanBasePromptPreference(enabled));
   const rememberAgents = useRememberAgentsPreference();
   const keepAwake = useKeepAwakePreference();
   const keepAwakeApplyError = useKeepAwakeApplyError();
@@ -71,6 +79,12 @@ export function AgentSettings({
       <div className="mt-section-gap">
         <InlineHeader title="Agent behavior" />
         <SettingsGroup>
+          <SwitchPreferenceRow
+            label="Use lean base prompt"
+            description="Use only the required Buzz contract for all agents on this device. Turn off to add fuller guidance. Claude Code and Codex need a new session; Goose and Pi apply changes next turn. Agents with settings access can also change this."
+            checked={leanBasePrompt}
+            onCheckedChange={changeLeanBasePrompt}
+          />
           <SwitchPreferenceRow
             label="Remember mentioned agents"
             description="Keep the same agents selected for your next message in this channel or thread."
@@ -120,6 +134,20 @@ export function AgentSettings({
           )}
         </SettingsGroup>
       </div>
+      {active && leanPromptError && (
+        <ToastNotice
+          title="Base prompt preference wasn’t saved"
+          description={leanPromptError}
+        >
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => changeLeanBasePrompt(leanBasePrompt)}
+          >
+            Retry saving base prompt preference
+          </Button>
+        </ToastNotice>
+      )}
       {active && mentionError && (
         <ToastNotice
           title="Agent preference wasn’t saved"
