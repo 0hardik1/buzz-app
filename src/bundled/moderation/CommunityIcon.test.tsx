@@ -84,3 +84,44 @@ it("reports an accepted change even when the readback fails", async () => {
   expect(screen.getByText("No icon")).toBeVisible();
   expect(screen.queryByRole("alert")).toBeNull();
 });
+
+it("offers a retry when the current icon can't be read", async () => {
+  published.icon = ICON;
+  published.readFails = true;
+  render(
+    <CommunityIcon relay={relay} communityName="Hive" active={() => true} />,
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn't load the current icon.",
+  );
+  expect(screen.getByText("Icon unknown")).toBeVisible();
+  published.readFails = false;
+  await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(await screen.findByText("Icon set")).toBeVisible();
+});
+
+it("starts no write when the card closes while an image decodes", async () => {
+  let decoded = (_: unknown) => {};
+  vi.stubGlobal(
+    "createImageBitmap",
+    () => new Promise((resolve) => (decoded = resolve)),
+  );
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    drawImage() {},
+  } as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue(ICON);
+  let open = true;
+  render(
+    <CommunityIcon relay={relay} communityName="Hive" active={() => open} />,
+  );
+  await userEvent.upload(
+    screen.getByLabelText("Community icon image"),
+    new File(["x"], "icon.png", { type: "image/png" }),
+  );
+  open = false;
+  decoded({ width: 1, height: 1 });
+  await new Promise((resolve) => setTimeout(resolve));
+  expect(setCommunityIcon).not.toHaveBeenCalled();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});

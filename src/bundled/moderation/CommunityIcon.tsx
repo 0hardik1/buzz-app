@@ -64,23 +64,32 @@ export function CommunityIcon({
   const input = useRef<HTMLInputElement>(null);
   const initialRead = useRef<AbortController>(null);
   const [icon, setIcon] = useState<string>();
+  const [loaded, setLoaded] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt retries the read.
   useEffect(() => {
     if (!community) return;
     const controller = new AbortController();
     initialRead.current = controller;
     setIcon(undefined);
+    setLoaded(false);
     read(community, controller.signal).then(
       (published) => {
-        if (!controller.signal.aborted) setIcon(published);
+        if (controller.signal.aborted) return;
+        setIcon(published);
+        setLoaded(true);
       },
-      () => {},
+      () => {
+        if (!controller.signal.aborted)
+          setError("Couldn't load the current icon.");
+      },
     );
     return () => controller.abort();
-  }, [community]);
+  }, [community, attempt]);
 
   const save = async (next: () => Promise<string>, done: string) => {
     if (!community) return;
@@ -91,6 +100,7 @@ export function CommunityIcon({
     setStatus("");
     try {
       const value = await next();
+      if (!active()) return;
       await setCommunityIcon(community, value);
       // Read back what the community now publishes; the relay accepted the
       // change, so a failed readback falls back to what was sent.
@@ -100,10 +110,13 @@ export function CommunityIcon({
       ).catch(() => value || undefined);
       if (!active()) return;
       setIcon(published);
+      setLoaded(true);
       setStatus(done);
     } catch (reason) {
-      if (active())
-        setError(reason instanceof Error ? reason.message : String(reason));
+      if (!active()) return;
+      setError(reason instanceof Error ? reason.message : String(reason));
+      // The save cancelled the initial read; read the icon again.
+      if (!loaded) setAttempt((n) => n + 1);
     } finally {
       if (active()) setBusy(false);
     }
@@ -144,7 +157,7 @@ export function CommunityIcon({
                   shape="squircle"
                 />
               }
-              title={icon ? "Icon set" : "No icon"}
+              title={!loaded ? "Icon unknown" : icon ? "Icon set" : "No icon"}
               subtitle={
                 error ? (
                   <span role="alert">{error}</span>
@@ -157,6 +170,18 @@ export function CommunityIcon({
               }
               trailing={
                 <>
+                  {!loaded && error && (
+                    <Button
+                      size="xs"
+                      disabled={busy}
+                      onClick={() => {
+                        setError("");
+                        setAttempt((n) => n + 1);
+                      }}
+                    >
+                      Retry
+                    </Button>
+                  )}
                   {icon && (
                     <Button
                       size="xs"
