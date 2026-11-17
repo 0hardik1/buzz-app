@@ -52,6 +52,7 @@ import { SidebarRowsService } from "./sidebar-rows-service";
 import {
   createRef,
   useState,
+  useLayoutEffect,
   type ReactNode,
   type ReactElement,
   type ComponentProps,
@@ -65,7 +66,7 @@ import {
   useChannelNavigation,
 } from "./ChannelNavigationState";
 import { readView, writeView } from "../../shared/view-state";
-import styles from "../../app/shell/PrimarySidebar.module.css";
+import styles from "../../bundled/channels/MessagesSidebar.module.css";
 import { BestieNavigationProvider } from "../../app/shell/BestieNavigation";
 import { PageNavigation } from "../../app/shell/PageNavigation";
 import { createAgentChoices } from "../agents/choices";
@@ -3960,6 +3961,47 @@ it("restores saved scroll after reconnect only with the new generation's connect
   }
 });
 
+it("keeps launch pending across a generation change until its source slots commit", async () => {
+  const commits: { pending: string | null; rows: number }[] = [];
+  const Component = teamSidebarSource.component;
+  function ObservedTeam(props: ComponentProps<typeof Component>) {
+    useLayoutEffect(() => {
+      const sidebar = document.querySelector('aside[aria-label="Sidebar"]');
+      assert(sidebar);
+      commits.push({
+        pending: sidebar.getAttribute("data-buzz-launch-pending"),
+        rows: sidebar.querySelectorAll("[data-channel-id]").length,
+      });
+    });
+    return <Component {...props} />;
+  }
+  const source = vi
+    .spyOn(teamSidebarSource, "component")
+    .mockImplementation(ObservedTeam);
+  try {
+    const f = fixture();
+    render(f.view("alpha"));
+    const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
+    await waitFor(() =>
+      expect(sidebar).not.toHaveAttribute("data-buzz-launch-pending"),
+    );
+    commits.length = 0;
+    f.connection({ ...f.snapshot, generation: f.snapshot.generation + 1 });
+    // The inventory is warm, but the new generation's portals must connect
+    // before launch.ts can treat this sidebar as ready to reveal.
+    const pending = commits.filter(({ rows }) => rows === 0);
+    expect(pending.length).toBeGreaterThan(0);
+    expect(pending.every(({ pending }) => pending === "required")).toBe(true);
+    expect(screen.getByRole("button", { name: "alpha" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("complementary", { name: "Sidebar" }),
+    ).not.toHaveAttribute("data-buzz-launch-pending");
+  } finally {
+    cleanup();
+    source.mockRestore();
+  }
+});
+
 it("keeps active Team drags out of the Solo row context", async () => {
   vi.stubGlobal("PointerEvent", MouseEvent);
   function Probe({ scope }: { scope: string }) {
@@ -3973,6 +4015,7 @@ it("keeps active Team drags out of the Solo row context", async () => {
   const team: RegisteredSidebarSectionSource = {
     version: 2,
     id: "drag-team",
+    context: "buzz.channels/messages",
     key: "example.plugin/drag-team",
     pluginId: "example.plugin",
     revision: "bundled",
