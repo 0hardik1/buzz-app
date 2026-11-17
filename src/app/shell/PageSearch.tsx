@@ -566,15 +566,15 @@ function CommunitySearch({
     viewer: client.viewer,
     communityOrigin: communityDestination(client.selected).url,
   };
-  const current = () => {
+  const inScope = () => {
     const now = services.communities.snapshot();
     return (
-      isOpen() &&
       now.viewer === scope.viewer &&
       now.selected === client.selected &&
       services.communities.relay.snapshot().session === connection.session
     );
   };
+  const current = () => isOpen() && inScope();
   const openConversation = (
     channelId: string,
     messageId?: string,
@@ -687,7 +687,15 @@ function CommunitySearch({
           else
             notify("New chat already has an unsent draft", "info", {
               label: "Replace it",
-              onClick: ask,
+              // The notice outlives search: after a community or session
+              // switch it does nothing rather than overwrite the old draft.
+              onClick: () => {
+                if (
+                  inScope() &&
+                  services.communities.relay.snapshot().scope === scopeKey
+                )
+                  ask();
+              },
             });
         }}
         openAgentSession={(pubkey) => {

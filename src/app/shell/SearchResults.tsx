@@ -254,10 +254,94 @@ export function SearchResults({
 } & SearchInputProps) {
   const resolveName = useIdentityNames(session.names);
   const list = useChannelList(session.channels);
-  // `ask:` hands the question to the default agent instead of searching.
-  const askMatch = /^\s*ask:\s*/i.exec(query);
+  // Chosen filters render as chips ahead of the typed text: the query holds
+  // their exact operands first, then whatever the input shows.
+  const profiles = useSyncExternalStore(
+    session.profiles.subscribe,
+    session.profiles.snapshot,
+  );
+  /**
+   * Reads chips back from a query's leading filter operands, as choosing them
+   * made them. A query remembered between openings, or searched again, keeps
+   * the exact operands but not the chips that show them by name.
+   */
+  const restoreChips = (text: string) => {
+    const restored: SearchChip[] = [];
+    const token = /(\S+)(?: |$)/y;
+    let end = 0;
+    for (let match = token.exec(text); match; match = token.exec(text)) {
+      const operand = match[1] ?? "";
+      const [, operator = "", value = ""] =
+        /^([a-z]+):(.*)$/i.exec(operand) ?? [];
+      const kind = operator.toLowerCase();
+      const pubkey = value.replace(/^@/, "");
+      const person =
+        (kind === "from" && isHexPubkey(value)) ||
+        (kind === "in" && value.startsWith("@") && isHexPubkey(pubkey));
+      const channel =
+        kind === "in" && !person
+          ? list.channels.find(({ id }) => id === value)
+          : undefined;
+      if (person) {
+        const name = resolveName(
+          pubkey,
+          profiles.get(pubkey)?.name ?? pubkey.slice(0, 10),
+        );
+        restored.push({
+          operand,
+          text: `${kind}:@${name}`,
+          edit: `${kind}:@${name.split(/\s/)[0]}`,
+          label: `Remove ${kind === "in" ? "conversation with" : "author"} ${name}`,
+          title: npubEncode(pubkey),
+        });
+      } else if (channel)
+        restored.push({
+          operand,
+          text: `in:#${channel.name}`,
+          edit: `in:#${channel.name}`,
+          label: `Remove channel ${channel.name}`,
+          title: channel.id,
+        });
+      // Only a date the parser reads; anything else is literal text.
+      else if (
+        /^(after|before|on|during)$/.test(kind) &&
+        !parseSearchOperators(operand).text
+      )
+        restored.push({
+          operand,
+          text: operand,
+          edit: operand,
+          label: `Remove date ${operand}`,
+        });
+      else break;
+      end = token.lastIndex;
+    }
+    return { chips: restored, visible: text.slice(end) };
+  };
+  const [chipState, setChipState] = useState<{
+    query: string;
+    chips: readonly SearchChip[];
+  }>();
+  const [openingQuery] = useState(query);
+  const chips =
+    chipState?.query === query
+      ? chipState.chips
+      : query === openingQuery
+        ? restoreChips(query).chips
+        : [];
+  const chipPrefix = chips.map(({ operand }) => `${operand} `).join("");
+  const displayQuery = chips.length
+    ? query.slice(chipPrefix.length)
+    : undefined;
+  // `ask:` hands the question to the default agent instead of searching. It
+  // follows any chosen filters, which stay in the question as they read.
+  const visibleQuery = displayQuery ?? query;
+  const askMatch = /^\s*ask:\s*/i.exec(visibleQuery);
   const asking = !!askMatch;
-  const question = askMatch ? query.slice(askMatch[0].length).trim() : "";
+  const askText = askMatch ? visibleQuery.slice(askMatch[0].length).trim() : "";
+  const question = askMatch
+    ? [...chips.map(({ text }) => text), askText].filter(Boolean).join(" ")
+    : "";
   const parsed = useMemo(
     () => parseSearchOperators(asking ? "" : query.trim()),
     [query, asking],
@@ -272,10 +356,6 @@ export function SearchResults({
     !!authorPrompt &&
     !isHexPubkey(authorPrompt[2] ?? "") &&
     !isViewerHandle(authorPrompt[2] ?? "");
-  const profiles = useSyncExternalStore(
-    session.profiles.subscribe,
-    session.profiles.snapshot,
-  );
   const channels = useMemo(
     () =>
       list.channels.filter(
@@ -307,17 +387,6 @@ export function SearchResults({
   const sidebarHidden = (channel: ChannelSummary) =>
     channel.channelType === "dm" &&
     (savedHidden.has(channel.id) || dmVisibility.hidden.includes(channel.id));
-  // Chosen filters render as chips ahead of the typed text: the query holds
-  // their exact operands first, then whatever the input shows.
-  const [chipState, setChipState] = useState<{
-    query: string;
-    chips: readonly SearchChip[];
-  }>();
-  const chips = chipState?.query === query ? chipState.chips : [];
-  const chipPrefix = chips.map(({ operand }) => `${operand} `).join("");
-  const displayQuery = chips.length
-    ? query.slice(chipPrefix.length)
-    : undefined;
   const setChipQuery = (next: readonly SearchChip[], visible: string) => {
     const nextQuery = `${next.map(({ operand }) => `${operand} `).join("")}${visible}`;
     setChipState(next.length ? { query: nextQuery, chips: next } : undefined);
@@ -1544,7 +1613,7 @@ export function SearchResults({
         ? `${name}: ${thread.preview}`
         : `${name} replied in a thread`,
       run: choose(destination.key, () =>
-        openConversation(channel.id, thread.latestMessageId, thread.rootId),
+        openConversation(channel.id, thread.rootId, thread.rootId),
       ),
     };
   };
@@ -1662,17 +1731,6 @@ export function SearchResults({
           },
         })
       : undefined;
-  /** Adds an operator to the typed text, for its picker to complete. */
-  const addOperator = (operator: string) => {
-    if (operator === "ask:") onQueryChange(`ask: ${parsed.text}`);
-    else {
-      const visible = displayQuery ?? query;
-      updateDisplayQuery(
-        `${visible.trimEnd()}${visible.trim() ? " " : ""}${operator}`,
-      );
-    }
-    input.current?.focus();
-  };
   const hints = asking ? (
     <div className="search-peek-hints">
       <Button
@@ -1682,41 +1740,22 @@ export function SearchResults({
         aria-label={`Remove Ask ${askAgent?.name ?? "your agent"}`}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
-          onQueryChange(question);
+          setChipQuery(chips, askText);
           input.current?.focus();
         }}
       >
-        <SparklesIcon size={14} aria-hidden="true" />
+        <SparklesIcon
+          size={14}
+          aria-hidden="true"
+          className="search-peek-filter-icon"
+          data-operator="ask"
+        />
         Ask {askAgent?.name ?? "your agent"}
         <XIcon size={12} aria-hidden="true" />
       </Button>
       <span className="text-body-sm text-subtle">
         {askAgent?.name ?? "Your agent"} searches Buzz for you in a new chat
       </span>
-    </div>
-  ) : !scopedChannelId && !offline ? (
-    <div className="search-peek-hints">
-      {(
-        [
-          ["from:", "person"],
-          ["in:", "channel"],
-          ["during:", "date"],
-          ["ask:", askAgent?.name ?? "agent"],
-        ] as const
-      ).map(([operator, what]) => (
-        <Button
-          key={operator}
-          variant="outline-subtle"
-          size="xs"
-          tabIndex={-1}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => addOperator(operator)}
-        >
-          <span>
-            {operator} {what}
-          </span>
-        </Button>
-      ))}
     </div>
   ) : undefined;
   const directoryPending = publicChannels.loading || personDirectory.loading;
@@ -1726,6 +1765,9 @@ export function SearchResults({
   // none of their lookups.
   const resultsShown =
     !showAuthorPicker && !showDateChoices && !showChannelPicker;
+  /** Results with a preview beside them: not a question, a conversation's
+   * own search or a picker. */
+  const previewed = !asking && !scopedChannelId && resultsShown;
   const searchAnnouncement = useSearchAnnouncement(
     resultsShown && slowChannels,
     slowPeople,
@@ -2065,14 +2107,26 @@ export function SearchResults({
                         {
                           label: "Recent searches",
                           destinations: recentSearches.map(
-                            (text): SearchDestination => ({
-                              key: `recent:${text}`,
-                              label: text,
-                              icon: ClockIcon,
-                              kind: "page",
-                              action: "Search again",
-                              run: () => onQueryChange(text),
-                            }),
+                            (text): SearchDestination => {
+                              const restored = restoreChips(text);
+                              return {
+                                key: `recent:${text}`,
+                                label: [
+                                  ...restored.chips.map((chip) => chip.text),
+                                  restored.visible,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" "),
+                                icon: ClockIcon,
+                                kind: "page",
+                                action: "Search again",
+                                run: () =>
+                                  setChipQuery(
+                                    restored.chips,
+                                    restored.visible,
+                                  ),
+                              };
+                            },
                           ),
                         },
                       ]
@@ -2214,25 +2268,29 @@ export function SearchResults({
         isAction={isSearchAction}
         footer={offline}
         peek={{
-          ranked: !asking && !scopedChannelId && !hasOperator && resultsShown,
+          // A filter asks for messages only, so they aren't ranked with
+          // other results, but each still previews.
+          ranked: previewed && !hasOperator,
           hints,
           busy: !!query.trim() && (messagesPending || directoryPending),
           unsearched:
             search.tooShort || search.onlyExclusions
               ? { Messages: messageEmpty }
               : undefined,
-          preview: (row, tone, follow) => (
-            <SearchPreview
-              session={session}
-              cache={previews}
-              row={row}
-              tone={tone}
-              follow={follow}
-              terms={terms}
-              nameOf={nameOf}
-              whereOf={whereOf}
-            />
-          ),
+          preview: previewed
+            ? (row, tone, follow) => (
+                <SearchPreview
+                  session={session}
+                  cache={previews}
+                  row={row}
+                  tone={tone}
+                  follow={follow}
+                  terms={terms}
+                  nameOf={nameOf}
+                  whereOf={whereOf}
+                />
+              )
+            : undefined,
         }}
       >
         {dateOperator === "on" && (

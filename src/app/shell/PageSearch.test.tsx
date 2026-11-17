@@ -1111,7 +1111,9 @@ it("finds and opens saved conversations while the community is unreachable or st
     ).toEqual(["AlphaConversation · 1 member", "BetaConversation · 1 member"]);
     // A saved session has no message scope or open-channel view to offer.
     expect(within(dialog).queryByText(/^Search in Alpha/)).toBeNull();
-    expect(within(dialog).queryByRole("tab", { name: "Channels" })).toBeNull();
+    expect(
+      within(dialog).queryByRole("button", { name: "Channels" }),
+    ).toBeNull();
     // The author picker offers only people already known, and says the
     // people search that needs the relay waits for the connection.
     for (const text of ["from:al", "in:@al", "in:beta from:al"]) {
@@ -1264,7 +1266,7 @@ async function askSearch(existingDraft?: {
   } as typeof owner.session;
   const scope = `wss://relay.example:${viewer.pubkey}`;
   const connection = { status: "ready", generation: 1, session, scope };
-  const community = { selected: "wss://relay.example", viewer: viewer.pubkey };
+  let community = { selected: "wss://relay.example", viewer: viewer.pubkey };
   const open = vi.fn(async () => {});
   const services = {
     shortcuts,
@@ -1310,6 +1312,9 @@ async function askSearch(existingDraft?: {
     scope,
     open,
     user,
+    switchCommunity() {
+      community = { ...community, selected: "wss://other.example" };
+    },
     draft: () => readView<unknown>(scope, "solo:new-draft", null),
     async dispose() {
       cleanup();
@@ -1376,6 +1381,30 @@ it("keeps an unsent New chat draft when asking, and opens New chat with the ques
     );
     expect(opened).toEqual([question]);
     expect(f.draft()).toEqual(question);
+  } finally {
+    await f.dispose();
+  }
+});
+
+it("does nothing on Replace once the person has switched community", async () => {
+  const unsent = { text: "my half-written note", recipients: [] };
+  const f = await askSearch(unsent);
+  try {
+    await f.user.keyboard("{Enter}");
+    const notice = await screen.findByRole("dialog", {
+      name: "New chat already has an unsent draft",
+    });
+    f.switchCommunity();
+    fireEvent.click(within(notice).getByRole("button", { name: "Replace it" }));
+    await vi.waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", {
+          name: "New chat already has an unsent draft",
+        }),
+      ).toBeNull(),
+    );
+    expect(f.draft()).toEqual(unsent);
+    expect(f.open).not.toHaveBeenCalled();
   } finally {
     await f.dispose();
   }
@@ -1587,14 +1616,14 @@ it("keeps an empty search's place only while unread does not lead it", async () 
   }
 });
 
-it("goes back to Top results on Escape from a clicked group tab, and closes on the next", async () => {
+it("goes back to Top results on Escape from a clicked group filter, and closes on the next", async () => {
   const t = memorySearch();
   try {
     await t.open();
     await userEvent.type(t.field(), "design");
-    const shown = () => screen.getByRole("tab", { selected: true });
+    const shown = () => screen.getByRole("button", { pressed: true });
     await userEvent.click(
-      await screen.findByRole("tab", { name: /^Channels/ }),
+      await screen.findByRole("button", { name: /^Channels/ }),
     );
     expect(shown()).toHaveAccessibleName(/^Channels/);
     expect(shown()).toHaveFocus();

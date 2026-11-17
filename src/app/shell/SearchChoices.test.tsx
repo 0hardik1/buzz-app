@@ -206,7 +206,7 @@ it("keeps Peek's group order once the highlight moves, adding late groups at the
     />
   );
   const order = () =>
-    screen
+    within(screen.getByRole("listbox"))
       .getAllByRole("group")
       .map((group) => group.getAttribute("aria-label"));
   const { rerender } = render(
@@ -250,7 +250,7 @@ it("puts a group that was still empty when the order froze after the ones shown"
     />
   );
   const order = () =>
-    screen
+    within(screen.getByRole("listbox"))
       .getAllByRole("group")
       .map((group) => group.getAttribute("aria-label"));
   // People is still looking: an empty group, not drawn.
@@ -313,7 +313,7 @@ it("moves Tab through Peek's groups, then on past the last and before the first"
   );
   const field = screen.getByRole("combobox");
   const shown = () =>
-    screen.getByRole("tab", { selected: true }).textContent ?? "";
+    screen.getByRole("button", { pressed: true }).textContent ?? "";
   expect(shown()).toMatch(/^Top results/);
   // Before the first group, Shift+Tab leaves the field.
   expect(fireEvent.keyDown(field, { key: "Tab", shiftKey: true })).toBe(true);
@@ -340,7 +340,7 @@ it("keeps an action-only group in place when Peek's order freezes", () => {
     />
   );
   const order = () =>
-    screen
+    within(screen.getByRole("listbox"))
       .getAllByRole("group")
       .map((group) => group.getAttribute("aria-label"));
   const { rerender } = render(
@@ -375,7 +375,7 @@ it("draws a long group Peek shows whole near the view, keeping the highlighted r
       ]}
     />,
   );
-  fireEvent.click(screen.getByRole("tab", { name: /^Channels/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Channels/ }));
   const field = screen.getByRole("combobox");
   for (let press = 0; press < 80; press++)
     fireEvent.keyDown(field, { key: "ArrowDown" });
@@ -429,8 +429,8 @@ it("keeps a chosen group while an edited query's results land, and lets it go if
   );
   const { rerender } = render(peekOf("design", 3, false));
   const shown = () =>
-    screen.getByRole("tab", { selected: true }).textContent ?? "";
-  fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+    screen.getByRole("button", { pressed: true }).textContent ?? "";
+  fireEvent.click(screen.getByRole("button", { name: /^Messages/ }));
   expect(shown()).toMatch(/^Messages/);
   // Edited, the new text's messages haven't come back yet.
   rerender(peekOf("design crit", 0, true));
@@ -441,11 +441,11 @@ it("keeps a chosen group while an edited query's results land, and lets it go if
   expect(screen.getAllByRole("option")).toHaveLength(2);
   // Top results chosen while results land stays chosen once they arrive.
   rerender(peekOf("design critique", 0, true));
-  fireEvent.click(screen.getByRole("tab", { name: /^Top results/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Top results/ }));
   rerender(peekOf("design critique", 2, false));
   expect(shown()).toMatch(/^Top results/);
   // A group that settles away is let go, and doesn't come back by itself.
-  fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Messages/ }));
   rerender(peekOf("design notes", 0, false));
   expect(shown()).toMatch(/^Top results/);
   rerender(peekOf("design notes", 2, false));
@@ -466,16 +466,16 @@ it("goes back to Top results on Escape while a chosen group's results land", () 
     />
   );
   const { rerender } = render(peekOf(3, false));
-  fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Messages/ }));
   rerender(peekOf(0, true));
   // fireEvent returns false when the default (closing search) was prevented.
   expect(
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" }),
   ).toBe(false);
   rerender(peekOf(3, false));
-  expect(screen.getByRole("tab", { selected: true }).textContent ?? "").toMatch(
-    /^Top results/,
-  );
+  expect(
+    screen.getByRole("button", { pressed: true }).textContent ?? "",
+  ).toMatch(/^Top results/);
 });
 
 it("keeps a chosen group while its source hasn't searched the text as typed", () => {
@@ -493,8 +493,8 @@ it("keeps a chosen group while its source hasn't searched the text as typed", ()
   );
   const { rerender } = render(peekOf(3));
   const shown = () =>
-    screen.getByRole("tab", { selected: true }).textContent ?? "";
-  fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+    screen.getByRole("button", { pressed: true }).textContent ?? "";
+  fireEvent.click(screen.getByRole("button", { name: /^Messages/ }));
   // "design c": the other sources settled, but messages weren't searched.
   rerender(peekOf(0, { Messages: "Type at least 3 characters." }));
   expect(shown()).toMatch(/^Messages/);
@@ -517,17 +517,17 @@ it("lets Escape through once Peek turns off under a chosen group", () => {
     />
   );
   const { rerender } = render(peekOf(true, 3));
-  fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Messages/ }));
   // A filter such as `in:` turns Peek off while its results load.
   rerender(peekOf(false, 0));
-  expect(screen.queryByRole("tab")).toBeNull();
+  expect(screen.queryByRole("group", { name: "Result groups" })).toBeNull();
   // fireEvent returns true when nothing prevented the default (closing).
   expect(
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" }),
   ).toBe(true);
   // Peek back on doesn't bring back the choice it let go.
   rerender(peekOf(true, 3));
-  expect(screen.getByRole("tab", { selected: true }).textContent ?? "").toMatch(
-    /^Top results/,
-  );
+  expect(
+    screen.getByRole("button", { pressed: true }).textContent ?? "",
+  ).toMatch(/^Top results/);
 });

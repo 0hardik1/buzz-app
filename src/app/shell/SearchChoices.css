@@ -39,6 +39,40 @@
     }
   }
 
+  /* Each filter keeps the hue of what it names: people, conversations and
+     agents as their results show them, dates orange. A chosen filter is
+     tinted; Ask keeps its icon in the same hue. */
+  .search-palette [data-operator="from"] {
+    --filter-fill: var(--surface-categorical-green);
+    --filter-fill-hover: var(--surface-categorical-green-hover);
+    --filter-ink: var(--text-categorical-green);
+    --filter-dot: var(--icon-categorical-green);
+  }
+  .search-palette [data-operator="in"] {
+    --filter-fill: var(--surface-categorical-blue);
+    --filter-fill-hover: var(--surface-categorical-blue-hover);
+    --filter-ink: var(--text-categorical-blue);
+    --filter-dot: var(--icon-categorical-blue);
+  }
+  .search-palette [data-operator="during"] {
+    --filter-dot: var(--icon-categorical-orange);
+  }
+  .search-palette [data-operator="ask"] {
+    --filter-dot: var(--icon-categorical-amber);
+  }
+  .search-palette-author-chip[data-operator] {
+    background: var(--filter-fill, var(--affordance-subtle));
+    color: var(--filter-ink, var(--text-link));
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .search-palette-author-chip[data-operator]:hover {
+      background: var(--filter-fill-hover, var(--affordance-subtle-hover));
+    }
+  }
+  .search-peek-filter-icon {
+    color: var(--filter-dot);
+  }
+
   .search-palette-scope-row {
     display: flex;
     align-items: center;
@@ -403,7 +437,7 @@
   .search-peek-side {
     display: flex;
     grid-column: 2;
-    grid-row: 1 / -1;
+    grid-row: 2;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
@@ -486,12 +520,27 @@
     flex: none;
     padding-bottom: var(--space-3);
   }
+  /* Group filters span the results and the preview below them. */
   .search-peek-rail {
-    grid-column: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    grid-column: 1 / -1;
     grid-row: 1;
     flex: none;
     min-width: 0;
+    margin: 0;
+    border: 0;
     padding: var(--space-2) var(--space-3);
+    padding-top: calc(var(--dialog-padding) + var(--space-3));
+  }
+  .search-peek-filter-dot {
+    flex: none;
+    width: var(--space-2);
+    height: var(--space-2);
+    border-radius: var(--radius-pill);
+    background: var(--peek-ink);
   }
   .search-peek-hints {
     display: flex;

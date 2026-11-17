@@ -184,6 +184,12 @@ it("opens with a conversation action and recent channels in activity order", asy
     const [first, second] = recent.getAllByRole("option");
     expect(first).toHaveTextContent("latest");
     expect(second).toHaveTextContent("older");
+    expect(screen.queryByText("from: person")).toBeNull();
+    expect(screen.queryByText("in: channel")).toBeNull();
+    expect(screen.queryByText("during: date")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /^(from:|in:|during:|ask:)/ }),
+    ).toBeNull();
     fireEvent.click(action);
     expect(changeScope).toHaveBeenCalledExactlyOnceWith("older");
   } finally {
@@ -280,7 +286,7 @@ it("leads an empty search with other unmuted unread channels and DMs, selecting 
     ]);
     // Unread leads, before the conversation action, and is not repeated.
     expect(
-      screen
+      within(screen.getByRole("listbox"))
         .getAllByRole("group")
         .map((group) => group.getAttribute("aria-label")),
     ).toEqual(["Unread", "This conversation", "Recent activity"]);
@@ -413,7 +419,7 @@ it("shows the first six unread conversations ahead of the rest", async () => {
   }
 });
 
-it("previews and opens the newest unread reply of a channel unread only through threads", async () => {
+it("previews the newest unread reply of a channel unread only through threads and opens its thread", async () => {
   const relay = keypair(),
     viewer = keypair(),
     larry = keypair(),
@@ -574,13 +580,13 @@ it("previews and opens the newest unread reply of a channel unread only through 
       "Thread reply, Larry: Only DM thread reply",
     );
     fireEvent.click(row("Larry") as HTMLElement);
-    expect(open).toHaveBeenLastCalledWith("solo", soloReply.id, soloRoot.id);
+    expect(open).toHaveBeenLastCalledWith("solo", soloRoot.id, soloRoot.id);
     expect(row("Moe")).not.toHaveTextContent("Thread reply,");
     fireEvent.click(row("Moe") as HTMLElement);
     expect(open).toHaveBeenLastCalledWith("pair");
-    // The row opens the reply it previews, in its thread.
+    // The row opens the thread it previews, which starts at its first unread reply.
     fireEvent.click(row("team") as HTMLElement);
-    expect(open).toHaveBeenLastCalledWith("team", newest.id, newerRoot.id);
+    expect(open).toHaveBeenLastCalledWith("team", newerRoot.id, newerRoot.id);
     // Reading that thread previews the other one's newest reply.
     const read = (rootId: string, messageId: string) =>
       act(async () => {
@@ -595,7 +601,7 @@ it("previews and opens the newest unread reply of a channel unread only through 
     );
     expect(row("team")).not.toHaveTextContent("audio");
     fireEvent.click(row("team") as HTMLElement);
-    expect(open).toHaveBeenLastCalledWith("team", older.id, root.id);
+    expect(open).toHaveBeenLastCalledWith("team", root.id, root.id);
     // Reading every thread takes the channel out of Unread.
     await read(root.id, older.id);
     await waitFor(() => expect(row("team")).toBeUndefined());
@@ -661,7 +667,7 @@ it("ranks typed channel names and selects the best one for Enter", async () => {
       expect.stringMatching(/^xlar-/),
     ]);
     // The scope action follows named results, so it is not selected first.
-    const groups = screen
+    const groups = within(screen.getByRole("listbox"))
       .getAllByRole("group")
       .map((group) => group.getAttribute("aria-label"));
     expect(groups.indexOf("This conversation")).toBeGreaterThan(
@@ -813,7 +819,7 @@ it("leads with the group holding the best match and ranks archived channels afte
       expect.stringMatching(/^work-old/),
       expect.stringMatching(/^team-workspace/),
     ]);
-    const groups = screen
+    const groups = within(screen.getByRole("listbox"))
       .getAllByRole("group")
       .map((group) => group.getAttribute("aria-label"));
     expect(groups.slice(0, 2)).toEqual(["Pages", "Channels"]);
@@ -2204,7 +2210,7 @@ it("keeps a selected person and the delayed notice when channel results stream i
     // Once the highlight has moved, groups keep their places: the channel
     // that streamed in goes after the person's group, not above it.
     expect(
-      screen
+      within(screen.getByRole("listbox"))
         .getAllByRole("group")
         .slice(0, 2)
         .map((group) => group.getAttribute("aria-label")),
@@ -2972,7 +2978,7 @@ it("puts a remembered public channel first, even past eight joined matches", asy
     await waitFor(() => expect(optionNames("Channels")[0]).toBe("team-work"));
     expect(optionNames("Channels")).toHaveLength(5);
     expect(
-      screen
+      within(screen.getByRole("listbox"))
         .getAllByRole("group")
         .map((group) => group.getAttribute("aria-label"))
         .slice(0, 2),
@@ -3048,7 +3054,7 @@ it("keeps the remembered choice selected when a better match arrives late", asyn
     // The relay's exact public match arrives later, after the groups shown.
     await screen.findByRole("option", { name: /^wor/ });
     expect(
-      screen
+      within(screen.getByRole("listbox"))
         .getAllByRole("group")
         .map((group) => group.getAttribute("aria-label"))
         .slice(0, 2),
@@ -3300,11 +3306,11 @@ it("keeps a chosen Messages group, with its reason, while the text as typed isn'
       await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
     });
   const shown = () =>
-    screen.getByRole("tab", { selected: true }).textContent ?? "";
+    screen.getByRole("button", { pressed: true }).textContent ?? "";
   try {
     const view = render(<SearchResults {...props} query="design" />);
     await settle();
-    fireEvent.click(screen.getByRole("tab", { name: /^Messages/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Messages/ }));
     expect(screen.getByRole("option", { name: /design notes/ })).toBeVisible();
 
     // design-crit still matches, but messages aren't searched yet.
@@ -6127,7 +6133,7 @@ it("lets a picked person or channel replace a typed filter of its kind", async (
   }
 });
 
-it("shows only messages once text sits beside an operator", async () => {
+it("shows only messages once text sits beside an operator, each still previewed", async () => {
   const relay = keypair(),
     viewer = keypair();
   const { owner, reads } = operatorSession(
@@ -6159,6 +6165,10 @@ it("shows only messages once text sits beside an operator", async () => {
     expect(
       screen.queryByRole("option", { name: /kalvin-reviewers/ }),
     ).toBeNull();
+    // Only messages, so no group filters, but the hit still previews.
+    expect(screen.queryByRole("group", { name: "Result groups" })).toBeNull();
+    const preview = screen.getByRole("complementary", { name: "Preview" });
+    await waitFor(() => expect(preview).toHaveTextContent(/kalvin found it/));
   } finally {
     cleanup();
     owner.dispose();
@@ -8005,7 +8015,7 @@ it.each([
         chats.getAllByRole("option").map((row) => row.textContent),
       ).toEqual(chatOrder.map((name) => expect.stringContaining(name))),
     );
-    const labels = screen
+    const labels = within(screen.getByRole("listbox"))
       .getAllByRole("group")
       .map((group) => group.getAttribute("aria-label"));
     expect(labels.slice(0, groups.length)).toEqual(groups);
@@ -8103,7 +8113,7 @@ it.each([
     await waitFor(() => expect(chats.getAllByRole("option")).toHaveLength(3));
     if (named === "chat")
       expect(chats.getAllByRole("option")[0]).toHaveTextContent(/^scout/);
-    const labels = screen
+    const labels = within(screen.getByRole("listbox"))
       .getAllByRole("group")
       .map((group) => group.getAttribute("aria-label"));
     expect(labels.slice(0, groups.length)).toEqual(groups);
@@ -9546,6 +9556,180 @@ it("asks for a search word when the text only excludes", async () => {
   } finally {
     cleanup();
     owner.dispose();
+  }
+});
+
+it("keeps chosen filters when ask: is added, and asks with them, across reopening", async () => {
+  const relay = keypair(),
+    viewer = keypair(),
+    agent = keypair();
+  const { owner } = operatorSession(viewer, relay, [
+    metadata(relay, "bugs", "buzz-bugs"),
+    roster(relay, "bugs", [viewer.pubkey]),
+  ]);
+  const source = owner.session.agentChoices;
+  const picked = { pubkey: agent.pubkey, name: "Aria", managed: true };
+  const choices = {
+    ...source.snapshot(),
+    complete: true,
+    identities: [picked],
+    selectable: [picked],
+    archives: { status: "unavailable", archived: [] },
+  } as ReturnType<typeof source.snapshot>;
+  const session = {
+    ...owner.session,
+    agentChoices: {
+      ...source,
+      snapshot: () => choices,
+      subscribe: () => () => {},
+      retain: () => () => {},
+      ensure: () => {},
+    },
+  } as typeof owner.session;
+  const openAsk = vi.fn();
+  const input = createRef<HTMLInputElement>();
+  // Closing search unmounts the results; the query outlives them.
+  let reopen!: () => void;
+  function Host() {
+    const [query, setQuery] = useState("deploy in:#bu");
+    const [opening, setOpening] = useState(0);
+    reopen = () => setOpening((count) => count + 1);
+    return (
+      <SearchResults
+        key={opening}
+        session={session}
+        query={query}
+        onQueryChange={setQuery}
+        input={input}
+        pages={[]}
+        openConversation={vi.fn()}
+        openAsk={openAsk}
+        sidebarScope={`wss://relay.example:${viewer.pubkey}`}
+      />
+    );
+  }
+  try {
+    render(<Host />);
+    fireEvent.click(
+      await within(
+        await screen.findByRole("group", { name: "Channels" }),
+      ).findByRole("option", { name: /buzz-bugs/ }),
+    );
+    const chip = screen.getByRole("button", {
+      name: "Remove channel buzz-bugs",
+    });
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "ask: deploy" },
+    });
+    expect(chip).toBeInTheDocument();
+    expect(input.current).toHaveValue("ask: deploy");
+    fireEvent.click(await screen.findByRole("option", { name: /Aria/ }));
+    expect(openAsk).toHaveBeenCalledWith(
+      "in:#buzz-bugs deploy",
+      expect.objectContaining({ pubkey: agent.pubkey }),
+    );
+    // Reopened, the chip and Ask are read back from the remembered query.
+    act(() => reopen());
+    expect(
+      await screen.findByRole("button", { name: "Remove channel buzz-bugs" }),
+    ).toBeInTheDocument();
+    expect(input.current).toHaveValue("ask: deploy");
+    expect(
+      screen.getByRole("button", { name: "Remove Ask Aria" }),
+    ).toBeInTheDocument();
+    // Removing Ask keeps the filter, and the question's words.
+    fireEvent.click(screen.getByRole("button", { name: "Remove Ask Aria" }));
+    expect(
+      screen.getByRole("button", { name: "Remove channel buzz-bugs" }),
+    ).toBeInTheDocument();
+    expect(input.current).toHaveValue("deploy");
+  } finally {
+    cleanup();
+    owner.dispose();
+  }
+});
+
+it("restores only dates the parser reads as chips, so literal text before ask: stays a search", async () => {
+  const relay = keypair(),
+    viewer = keypair();
+  const { owner } = operatorSession(viewer, relay, []);
+  const input = createRef<HTMLInputElement>();
+  try {
+    for (const query of [
+      "after:soon ask: deploy",
+      'during:"release ask: deploy',
+    ]) {
+      render(
+        <SearchResults
+          {...operatorProps}
+          session={owner.session}
+          query={query}
+          input={input}
+        />,
+      );
+      expect(input.current).toHaveValue(query);
+      expect(
+        screen.queryByRole("button", { name: /^Remove Ask/ }),
+      ).not.toBeInTheDocument();
+      cleanup();
+    }
+    render(
+      <SearchResults
+        {...operatorProps}
+        session={owner.session}
+        query="after:today ask: deploy"
+        input={input}
+      />,
+    );
+    expect(input.current).toHaveValue("ask: deploy");
+    expect(
+      screen.getByRole("button", { name: "Remove date after:today" }),
+    ).toBeInTheDocument();
+  } finally {
+    cleanup();
+    owner.dispose();
+  }
+});
+
+it("shows a recent search's filters by name, and searches again with them as chips", async () => {
+  const relay = keypair(),
+    viewer = keypair();
+  const { owner } = operatorSession(viewer, relay, [
+    metadata(relay, "bugs", "buzz-bugs"),
+    roster(relay, "bugs", [viewer.pubkey]),
+  ]);
+  const usageScope = `recent-chips:${viewer.pubkey}`;
+  writeView(usageScope, "search-recent", ["in:bugs deploy"]);
+  const input = createRef<HTMLInputElement>();
+  function Host() {
+    const [query, setQuery] = useState("");
+    return (
+      <SearchResults
+        session={owner.session}
+        query={query}
+        onQueryChange={setQuery}
+        input={input}
+        pages={[]}
+        openConversation={vi.fn()}
+        usageScope={usageScope}
+      />
+    );
+  }
+  try {
+    render(<Host />);
+    fireEvent.click(
+      await within(
+        await screen.findByRole("group", { name: "Recent searches" }),
+      ).findByRole("option", { name: /in:#buzz-bugs deploy/ }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Remove channel buzz-bugs" }),
+    ).toBeInTheDocument();
+    expect(input.current).toHaveValue("deploy");
+  } finally {
+    cleanup();
+    owner.dispose();
+    clearViewScope(usageScope);
   }
 });
 
