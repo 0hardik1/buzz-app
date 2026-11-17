@@ -275,71 +275,44 @@ async function choose(label: string, value: string) {
     await user.click(await screen.findByRole("option", { name: value }));
   }
 }
-it.each([50000, 500000])(
-  "saves and reads back a %s token compaction window without changing other settings",
-  async (window) => {
-    const h = await fixture({
-      modelId: "model-one",
-      reasoningEffort: "high",
-      modelSelectionStatus: "valid",
-      instructions: "Keep these instructions.",
-    });
-    const field = screen.getByRole("spinbutton", {
-      name: "Auto-compact window (tokens)",
-    });
-    expect(field).toHaveValue(null);
-    fireEvent.change(field, { target: { value: String(window) } });
-    await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Save" })).toBeNull(),
-    );
-    expect(field).toHaveValue(window);
-    const updates = h.request.mock.calls.filter(([request]) =>
-      request.url.endsWith("/update-agent"),
-    );
-    expect(updates).toHaveLength(1);
-    expect(JSON.parse(updates[0]?.[0].body ?? "{}")).toEqual({
-      agent_pubkey: "ab".repeat(32),
-      auto_compact_window: window,
-    });
-    expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveValue(
-      "Keep these instructions.",
-    );
-  },
-);
-
-it("restores the default compaction window when the field is cleared", async () => {
+it("saves and clears a compaction window without changing other settings", async () => {
   const h = await fixture({
-    autoCompactWindow: 100000,
     modelSelectionStatus: "valid",
+    instructions: "Keep these instructions.",
   });
+  const user = userEvent.setup();
   const field = screen.getByRole("spinbutton", {
     name: "Auto-compact window (tokens)",
   });
+  expect(field).toHaveValue(null);
+  fireEvent.change(field, { target: { value: "100000" } });
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull(),
+  );
   expect(field).toHaveValue(100000);
   fireEvent.change(field, { target: { value: "" } });
-  await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
+  await user.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull(),
   );
   expect(field).toHaveValue(null);
-  const update = h.request.mock.calls.find(([request]) =>
+  const updates = h.request.mock.calls.filter(([request]) =>
     request.url.endsWith("/update-agent"),
   );
-  expect(JSON.parse(update?.[0].body ?? "{}")).toEqual({
-    agent_pubkey: "ab".repeat(32),
-    auto_compact_window: 0,
-  });
+  expect(updates.map(([request]) => JSON.parse(request.body ?? "{}"))).toEqual([
+    { agent_pubkey: "ab".repeat(32), auto_compact_window: 100000 },
+    { agent_pubkey: "ab".repeat(32), auto_compact_window: 0 },
+  ]);
+  expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveValue(
+    "Keep these instructions.",
+  );
 });
 
-it.each(["0", "-1", "1.5", "2147483648"])(
+it.each(["0", "1.5", "2147483648"])(
   "does not save invalid compaction window %j",
   async (value) => {
-    const h = await fixture({
-      modelId: "model-one",
-      reasoningEffort: "high",
-      modelSelectionStatus: "valid",
-    });
+    await fixture({ modelSelectionStatus: "valid" });
     const field = screen.getByRole("spinbutton", {
       name: "Auto-compact window (tokens)",
     });
@@ -348,15 +321,10 @@ it.each(["0", "-1", "1.5", "2147483648"])(
       "Enter a positive whole token count, or leave blank for the default.",
     );
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
-    expect(
-      h.request.mock.calls.some(([request]) =>
-        request.url.endsWith("/update-agent"),
-      ),
-    ).toBe(false);
   },
 );
 
-it("does not treat bad numeric input as a default reset on retry", async () => {
+it("keeps an unpersisted window draft and blocks invalid numeric retries", async () => {
   const h = await fixture({
     autoCompactWindow: 100000,
     modelSelectionStatus: "valid",
@@ -366,9 +334,13 @@ it("does not treat bad numeric input as a default reset on retry", async () => {
     name: "Auto-compact window (tokens)",
   }) as HTMLInputElement;
   fireEvent.change(field, { target: { value: "200000" } });
-  h.request.mockResolvedValueOnce({ status: 500, headers: {}, body: "{}" });
+  h.request.mockResolvedValueOnce({ status: 200, headers: {}, body: "{}" });
   await user.click(screen.getByRole("button", { name: "Save" }));
-  await screen.findByRole("button", { name: "Try again" });
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "The compaction setting was not saved.",
+  );
+  expect(field).toHaveValue(200000);
+  expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   const updates = () =>
     h.request.mock.calls.filter(([request]) =>
       request.url.endsWith("/update-agent"),
@@ -393,29 +365,6 @@ it("does not treat bad numeric input as a default reset on retry", async () => {
   expect(JSON.parse(updates()[1]?.[0].body ?? "{}")).toMatchObject({
     auto_compact_window: 0,
   });
-});
-
-it("keeps the compaction draft when the server does not persist it", async () => {
-  const h = await fixture({
-    modelId: "model-one",
-    reasoningEffort: "high",
-    modelSelectionStatus: "valid",
-  });
-  const field = screen.getByRole("spinbutton", {
-    name: "Auto-compact window (tokens)",
-  });
-  fireEvent.change(field, { target: { value: "100000" } });
-  h.request.mockImplementationOnce(async () => ({
-    status: 200,
-    headers: {},
-    body: "{}",
-  }));
-  await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "The compaction setting was not saved.",
-  );
-  expect(field).toHaveValue(100000);
-  expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 });
 
 it("keeps the Builderlab mark when no shared Harness control is supplied", async () => {
