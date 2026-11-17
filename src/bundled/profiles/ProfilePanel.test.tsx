@@ -1333,7 +1333,7 @@ it("leaves an agent-hinted profile outside person Info composition", () => {
   }
 });
 
-it("expands the profile photo and returns focus on Escape", async () => {
+it("expands inside the visible profile pane, locks its scroll, and restores it on dismissal", async () => {
   const person = keypair();
   const event = profile(person, {
     name: "Photo person",
@@ -1365,12 +1365,34 @@ it("expands the profile photo and returns focus on Escape", async () => {
   };
   try {
     render(
-      <ProfilePanel
-        relay={relay}
-        target={profileTarget(person.pubkey) ?? ""}
-        close={() => {}}
-      />,
+      <div data-testid="profile-pane">
+        <div data-testid="profile-scroll" style={{ overflowY: "auto" }}>
+          <ProfilePanel
+            relay={relay}
+            target={profileTarget(person.pubkey) ?? ""}
+            close={() => {}}
+          />
+        </div>
+      </div>,
     );
+    const pane = screen.getByTestId("profile-pane");
+    const scroller = screen.getByTestId("profile-scroll");
+    scroller.scrollTop = 240;
+    Object.defineProperties(scroller, {
+      clientWidth: { configurable: true, value: 360 },
+      clientHeight: { configurable: true, value: 520 },
+    });
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({
+      top: 80,
+      left: 900,
+      width: 360,
+      height: 520,
+      right: 1260,
+      bottom: 600,
+      x: 900,
+      y: 80,
+      toJSON: () => ({}),
+    });
     const trigger = await screen.findByRole("button", {
       name: "Enlarge profile photo",
     });
@@ -1380,15 +1402,30 @@ it("expands the profile photo and returns focus on Escape", async () => {
     await waitFor(() =>
       expect(screen.getByAltText("Photo person")).toBeVisible(),
     );
+    const viewer = screen.getByLabelText("Expanded profile photo");
+    expect(viewer.parentElement).toBe(pane);
+    expect(scroller).not.toContainElement(viewer);
+    expect(viewer).toHaveStyle({
+      top: "80px",
+      left: "900px",
+      width: "360px",
+      height: "520px",
+    });
+    expect(scroller.style.overflowY).toBe("hidden");
+    expect(scroller.scrollTop).toBe(240);
     expect(screen.getByRole("button", { name: "Close photo" })).toHaveFocus();
     await user.click(screen.getByAltText("Photo person"));
     expect(trigger.closest("[inert]")).not.toBeNull();
     await user.click(document.body);
     await waitFor(() => expect(trigger.closest("[inert]")).toBeNull());
+    expect(scroller.style.overflowY).toBe("auto");
+    expect(scroller.scrollTop).toBe(240);
     await user.click(trigger);
     await user.keyboard("{Escape}");
     await waitFor(() => expect(trigger).toHaveFocus());
     expect(trigger.closest("[inert]")).toBeNull();
+    expect(scroller.style.overflowY).toBe("auto");
+    expect(scroller.scrollTop).toBe(240);
     expect(screen.getByRole("heading", { name: "Photo person" })).toBeVisible();
   } finally {
     cleanup();

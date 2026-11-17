@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { RelaySession } from "../../features/relay/session";
-import { searchedProfiles } from "../../features/relay/profile-search";
+import { resolveProviderProfile } from "./provider-profile";
 import { profileTarget } from "../../features/profiles/target";
 import { PreferenceRow } from "../../shared/design-system/ui/PreferenceRow";
 import styles from "./ProviderProfileRow.module.css";
@@ -13,7 +13,11 @@ export function ProviderProfileRow({
   username,
   session,
   open,
+  children,
+  className,
 }: {
+  children?: ReactNode;
+  className?: string | undefined;
   title: string;
   value: string;
   username: string;
@@ -31,27 +35,13 @@ export function ProviderProfileRow({
     setPending(true);
     setError(undefined);
     try {
-      const events = await session.searchProfiles(username, {
-        limit: 100,
-        signal: controller.signal,
-      });
-      controller.signal.throwIfAborted();
-      const candidates = searchedProfiles(
-        events,
-        session.profiles.verifiedAuthority?.(),
-      );
-      const verified = await session.directMessages.verified(
-        [...candidates.keys()],
+      const pubkey = await resolveProviderProfile(
+        session,
+        username,
         controller.signal,
       );
-      controller.signal.throwIfAborted();
-      const matches = [...(verified?.profiles ?? [])].filter(
-        ([, profile]) =>
-          profile.status === "checked" && profile.username === username,
-      );
-      const target =
-        matches.length === 1 ? profileTarget(matches[0]![0]) : undefined;
-      if (!target) throw new Error("No profile in this community");
+      const target = profileTarget(pubkey);
+      if (!target) throw new Error("Invalid profile identity");
       open(target);
     } catch {
       if (!controller.signal.aborted)
@@ -61,15 +51,17 @@ export function ProviderProfileRow({
     }
   };
   return (
-    <div>
-      <div className={styles.row}>
-        <PreferenceRow
-          title={title}
-          subtitle={
-            <span className="text-body-sm text-secondary">{value}</span>
-          }
-          trailing={<CaretRightIcon size={16} />}
-        />
+    <div className={className ? styles.custom : undefined}>
+      <div className={`${styles.row} ${className ?? ""}`}>
+        {children ?? (
+          <PreferenceRow
+            title={title}
+            subtitle={
+              <span className="text-body-sm text-secondary">{value}</span>
+            }
+            trailing={<CaretRightIcon size={16} />}
+          />
+        )}
         <button
           type="button"
           className={styles.open}

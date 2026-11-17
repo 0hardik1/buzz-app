@@ -10,6 +10,7 @@ export type ManagedProfile = Readonly<{
     value: string;
     username?: string;
   }>[];
+  coordinates?: Readonly<{ latitude: number; longitude: number }>;
   city?: string;
   timezone?: string;
   picture?: string;
@@ -66,6 +67,12 @@ export function parseManagedProfile(
       keys.add(f.key);
     }
     if (
+      (v.coordinates != null &&
+        (typeof v.coordinates !== "object" ||
+          !Number.isFinite(v.coordinates.latitude) ||
+          Math.abs(v.coordinates.latitude) > 90 ||
+          !Number.isFinite(v.coordinates.longitude) ||
+          Math.abs(v.coordinates.longitude) > 180)) ||
       (v.city != null && !text(v.city, 128)) ||
       (v.timezone != null && !text(v.timezone, 128)) ||
       (v.picture != null && !https(v.picture))

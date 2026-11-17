@@ -16,3 +16,8 @@
 .open:disabled {
   cursor: wait;
 }
+
+.custom {
+  display: flex;
+  flex-direction: column;
+}

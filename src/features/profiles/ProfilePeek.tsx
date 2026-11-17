@@ -257,6 +257,7 @@ export function ProfilePeek({
                   fallback={name}
                   size="fill"
                   shape={agent ? "squircle" : "circle"}
+                  statusBadgeSize="compact"
                   statusBadge={presence === "unknown" ? undefined : presence}
                 />
               </div>

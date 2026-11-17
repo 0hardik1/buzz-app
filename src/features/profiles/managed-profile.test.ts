@@ -24,3 +24,22 @@ it("accepts bounded directory fields and rejects unsafe links and malformed snap
     ).toBeUndefined();
   expect(parseManagedProfile(" ".repeat(16385))).toBeUndefined();
 });
+
+it("accepts bounded coordinates and rejects malformed locations", () => {
+  expect(
+    parseManagedProfile(
+      JSON.stringify({ ...valid, coordinates: { latitude: 0, longitude: 0 } }),
+    )?.coordinates,
+  ).toEqual({ latitude: 0, longitude: 0 });
+  for (const coordinates of [
+    { latitude: 91, longitude: 0 },
+    { latitude: 0, longitude: -181 },
+    { latitude: "10", longitude: 0 },
+    {},
+    [],
+  ]) {
+    expect(
+      parseManagedProfile(JSON.stringify({ ...valid, coordinates })),
+    ).toBeUndefined();
+  }
+});

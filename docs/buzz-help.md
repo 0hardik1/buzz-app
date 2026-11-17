@@ -1892,3 +1892,8 @@ Some communities show directory-managed work details on profiles. Edit Profile
 places these read-only fields under “Managed by” with a link to their source.
 Your photo and About remain editable. Communities without a managed timezone
 keep the timezone picker and “Show on profile” checkbox.
+
+Profile location cards may show a world map with current daylight and nighttime
+when the community supplies location coordinates. Select the pin to open Apple
+Maps. Enlarging a profile photo centers it within the profile pane; close it to
+resume scrolling.

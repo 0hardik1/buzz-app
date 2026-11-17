@@ -14,3 +14,7 @@
 .buzz-avatar-status-dot[data-status-tooltip] {
   pointer-events: auto;
 }
+
+.buzz-avatar-status[data-status-size="compact"] .buzz-avatar-status-dot {
+  width: calc(100% * 16 / 88);
+}

@@ -51,6 +51,9 @@ import { emptySync } from "../../src/features/communities/known-communities";
 import type { ClientSnapshot } from "../../src/features/communities/service";
 
 createAppearance();
+const managedProbe = new URLSearchParams(location.search).has(
+  "managed-profile",
+);
 const soloProbe = new URLSearchParams(location.search).has("solo");
 
 const viewer = keypair(),
@@ -162,10 +165,12 @@ function session() {
             },
           }
         : {}),
-      ...(new URLSearchParams(location.search).has("verified-name")
+      ...(managedProbe ||
+      new URLSearchParams(location.search).has("verified-name")
         ? {
             verifiedProfiles: {
               pubkey: authority.pubkey,
+              ...(managedProbe ? { managedKind: 30383 as const } : {}),
               multipleIssuers: false,
             },
             readVerifiedProfileAuthority: async () => null,
@@ -182,8 +187,50 @@ function session() {
             sink.event(
               eventDto(
                 signed(authority, {
-                  kind: 30382,
-                  content: "",
+                  kind: managedProbe ? 30383 : 30382,
+                  content: managedProbe
+                    ? JSON.stringify({
+                        version: 1,
+                        source_label: "Community directory",
+                        source_url: "https://example.org/people/viewer",
+                        city: "London, United Kingdom",
+                        timezone: "Europe/London",
+                        coordinates: { latitude: 51.5074, longitude: -0.1278 },
+                        fields: [
+                          {
+                            key: "email",
+                            section: "personal",
+                            label: "Email",
+                            value: "viewer@example.org",
+                          },
+                          {
+                            key: "team",
+                            section: "team",
+                            label: "Team",
+                            value: "Product design",
+                          },
+                          {
+                            key: "lead",
+                            section: "team",
+                            label: "Led by",
+                            value: "Mic",
+                            username: "mic",
+                          },
+                          {
+                            key: "tenure",
+                            section: "team",
+                            label: "Tenure",
+                            value: "3 years, 2 months",
+                          },
+                          {
+                            key: "location",
+                            section: "location",
+                            label: "Location",
+                            value: "London, United Kingdom",
+                          },
+                        ],
+                      })
+                    : "",
                   tags: [
                     ["d", viewer.pubkey],
                     ["p", viewer.pubkey],

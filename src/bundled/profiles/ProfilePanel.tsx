@@ -1,3 +1,7 @@
+import { createPortal } from "react-dom";
+import { ProfileInfoBento } from "./ProfileInfoBento";
+import { ProfileLocationPreview } from "./ProfileLocationPreview";
+import { useManagedProfile } from "../../features/profiles/profile-source";
 import type { ManagedProfile } from "../../features/profiles/managed-profile";
 import { ProviderProfileRow } from "./ProviderProfileRow";
 import { useToastNotification } from "../../shared/design-system/ui/Toast";
@@ -27,7 +31,6 @@ import { StatusEditor } from "../../features/user-status/StatusEditor";
 import { useStatusEditor } from "../../features/user-status/useStatusEditor";
 import { useUserStatus } from "../../features/user-status/useUserStatus";
 import { ProfilePublicMetadata } from "./ProfilePublicMetadata";
-import { ProfileLocalTime } from "../../features/profiles/ProfileLocalTime";
 import { relayOrigin } from "../../features/communities/destination";
 import type { Navigation } from "../../features/navigation/controller";
 import { ProfileChannels } from "./ProfileChannels";
@@ -39,6 +42,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useLayoutEffect,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
@@ -630,6 +634,48 @@ function ProfileDetails({
     !!scope && viewer === pubkey && session.statuses.writable;
 
   const [photoOpen, setPhotoOpen] = useState(false);
+  const [photoHost, setPhotoHost] = useState<HTMLElement>();
+  const [photoBounds, setPhotoBounds] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  }>();
+  useLayoutEffect(() => {
+    if (!photoOpen || !region.current) return;
+    let viewport = region.current.parentElement;
+    while (
+      viewport &&
+      !/(auto|scroll)/.test(getComputedStyle(viewport).overflowY)
+    ) {
+      viewport = viewport.parentElement;
+    }
+    if (!viewport) return;
+    const scroller = viewport;
+    setPhotoHost(scroller.parentElement ?? scroller);
+    const overflow = scroller.style.overflowY;
+    const scrollTop = scroller.scrollTop;
+    const update = () => {
+      const rect = scroller.getBoundingClientRect();
+      setPhotoBounds({
+        top: rect.top,
+        left: rect.left,
+        width: scroller.clientWidth,
+        height: scroller.clientHeight,
+      });
+    };
+    update();
+    scroller.style.overflowY = "hidden";
+    const observer = new ResizeObserver(update);
+    observer.observe(scroller);
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+      scroller.style.overflowY = overflow;
+      scroller.scrollTop = scrollTop;
+    };
+  }, [photoOpen]);
   const photoId = useId();
   const photoButton = useRef<HTMLButtonElement>(null);
   const photoClose = useRef<HTMLButtonElement>(null);
@@ -661,6 +707,7 @@ function ProfileDetails({
   }, [fullPhoto]);
   const reducedMotion = useReducedMotion();
   const [keyboardPhoto, setKeyboardPhoto] = useState(false);
+  const managed = useManagedProfile(session, pubkey);
   const providerFields = (section: "personal" | "team" | "location") =>
     !displayAgent &&
     renderPersonFields?.({
@@ -671,9 +718,7 @@ function ProfileDetails({
         profile?.verified?.status === "checked"
           ? profile.verified.username
           : undefined,
-      ...(profile?.verified?.managed
-        ? { managed: profile.verified.managed }
-        : {}),
+      ...(managed ? { managed } : {}),
       communityOrigin: community?.communityOrigin,
       renderRow: (title, value, profileUsername) =>
         profileUsername && context ? (
@@ -702,7 +747,9 @@ function ProfileDetails({
   };
   const closePhoto = () => {
     setPhotoOpen(false);
-    requestAnimationFrame(() => photoButton.current?.focus());
+    requestAnimationFrame(() =>
+      photoButton.current?.focus({ preventScroll: true }),
+    );
   };
   useEffect(() => {
     if (!photoOpen) return;
@@ -718,7 +765,9 @@ function ProfileDetails({
       setPhotoOpen(false);
       // Preserve focus on a control clicked outside the panel.
       if (region.current?.contains(target)) {
-        requestAnimationFrame(() => photoButton.current?.focus());
+        requestAnimationFrame(() =>
+          photoButton.current?.focus({ preventScroll: true }),
+        );
       }
     };
     document.addEventListener("pointerdown", outsidePhoto, true);
@@ -845,72 +894,80 @@ function ProfileDetails({
               ) : selected === "info" ? (
                 (displayAgent ? plainInfo : renderPersonInfo)(
                   <>
-                    {!displayAgent && (
-                      <section
-                        className="grid gap-3"
-                        aria-label="Personal info"
-                      >
-                        <h3 className="m-0 text-label">Personal info</h3>
-                        <SettingsGroup>
-                          <PreferenceRow
-                            title="Username"
-                            subtitle={
-                              <span className="text-body-sm text-secondary">
-                                {`@${profile?.verified?.username ?? profile?.username ?? profile?.name ?? name}`}
-                              </span>
-                            }
-                          />
-                          {providerFields("personal")}
-                          {profile?.about && (
-                            <PreferenceRow
-                              title="About"
-                              subtitle={
-                                <span className="text-body-sm text-secondary">
-                                  {profile.about}
-                                </span>
-                              }
-                            />
-                          )}
-                        </SettingsGroup>
-                      </section>
-                    )}
-                    {providerTeam && (
-                      <section className="grid gap-3" aria-label="Team">
-                        <h3 className="m-0 text-label">Team</h3>
-                        <SettingsGroup>{providerTeam}</SettingsGroup>
-                      </section>
-                    )}
-                    {(profile?.tz || providerLocation) && (
-                      <section className="grid gap-3" aria-label="Location">
-                        <h3 className="m-0 text-label">Location</h3>
-                        <SettingsGroup>
-                          {providerLocation}
-                          {profile?.tz && (
-                            <>
+                    {!displayAgent && managed ? (
+                      <ProfileInfoBento
+                        picture={picture ?? undefined}
+                        managed={managed}
+                        npub={npub}
+                        username={
+                          profile?.verified?.username ??
+                          profile?.username ??
+                          profile?.name ??
+                          name
+                        }
+                        about={profile?.about}
+                        timeZone={profile?.tz}
+                        session={session}
+                        open={
+                          context
+                            ? (target) => (context.push ?? context.open)(target)
+                            : undefined
+                        }
+                      />
+                    ) : (
+                      <>
+                        {!displayAgent && (
+                          <section
+                            className="grid gap-3"
+                            aria-label="Personal info"
+                          >
+                            <h3 className="m-0 text-label">Personal info</h3>
+                            <SettingsGroup>
                               <PreferenceRow
-                                title="Time zone"
+                                title="Username"
                                 subtitle={
                                   <span className="text-body-sm text-secondary">
-                                    {profile.tz
-                                      .replaceAll("_", " ")
-                                      .replaceAll("/", " · ")}
+                                    {`@${profile?.verified?.username ?? profile?.username ?? profile?.name ?? name}`}
                                   </span>
                                 }
                               />
-                              <PreferenceRow
-                                title="Local time"
-                                subtitle={
-                                  <ProfileLocalTime
-                                    timeZone={profile.tz}
-                                    className="text-body-sm text-secondary"
-                                    inlineDetails
-                                  />
-                                }
-                              />
-                            </>
-                          )}
-                        </SettingsGroup>
-                      </section>
+                              {providerFields("personal")}
+                              {profile?.about && (
+                                <PreferenceRow
+                                  title="About"
+                                  subtitle={
+                                    <span className="text-body-sm text-secondary">
+                                      {profile.about}
+                                    </span>
+                                  }
+                                />
+                              )}
+                            </SettingsGroup>
+                          </section>
+                        )}
+                        {providerTeam && (
+                          <section className="grid gap-3" aria-label="Team">
+                            <h3 className="m-0 text-label">Team</h3>
+                            <SettingsGroup>{providerTeam}</SettingsGroup>
+                          </section>
+                        )}
+                        {(profile?.tz ||
+                          managed?.timezone ||
+                          providerLocation) && (
+                          <section className="grid gap-3" aria-label="Location">
+                            <h3 className="m-0 text-label">Location</h3>
+                            <ProfileLocationPreview
+                              location={
+                                managed?.fields.find(
+                                  (field) => field.key === "location",
+                                )?.value || managed?.city
+                              }
+                              timeZone={managed?.timezone ?? profile?.tz}
+                              fallback={providerLocation}
+                            />
+                          </section>
+                        )}
+                      </>
                     )}
                     {displayAgent && profile?.about && (
                       <SettingsGroup layout="form">
@@ -926,50 +983,52 @@ function ProfileDetails({
                         />
                       </div>
                     )}
-                    <div className={styles.publicKey}>
-                      <SettingsGroup>
-                        <PreferenceRow
-                          title="Public key"
-                          subtitle={
-                            <code
-                              className={`${styles.keyValue} text-body-sm text-secondary`}
-                              title={npub}
-                            >
-                              {abbreviatedPublicKey(pubkey, 5) ?? npub}
-                            </code>
-                          }
-                          trailing={
-                            <Button
-                              size="compact"
-                              variant="subtle"
-                              aria-label="Copy npub"
-                              onClick={() => {
-                                setCopied(false);
-                                void Promise.resolve()
-                                  .then(() => writeClipboardText(npub))
-                                  .then(
-                                    () => setCopied(true),
-                                    () =>
-                                      notify(
-                                        "Could not copy the public key. Try again.",
-                                        "error",
-                                      ),
-                                  );
-                              }}
-                            >
-                              {copied ? (
-                                <CheckIcon size={16} aria-hidden="true" />
-                              ) : (
-                                <CopyIcon size={16} aria-hidden="true" />
-                              )}
-                              <span aria-live="polite">
-                                {copied ? "Copied" : "Copy"}
-                              </span>
-                            </Button>
-                          }
-                        />
-                      </SettingsGroup>
-                    </div>
+                    {(displayAgent || !managed) && (
+                      <div className={styles.publicKey}>
+                        <SettingsGroup>
+                          <PreferenceRow
+                            title="Public key"
+                            subtitle={
+                              <code
+                                className={`${styles.keyValue} text-body-sm text-secondary`}
+                                title={npub}
+                              >
+                                {abbreviatedPublicKey(pubkey, 5) ?? npub}
+                              </code>
+                            }
+                            trailing={
+                              <Button
+                                size="compact"
+                                variant="subtle"
+                                aria-label="Copy npub"
+                                onClick={() => {
+                                  setCopied(false);
+                                  void Promise.resolve()
+                                    .then(() => writeClipboardText(npub))
+                                    .then(
+                                      () => setCopied(true),
+                                      () =>
+                                        notify(
+                                          "Could not copy the public key. Try again.",
+                                          "error",
+                                        ),
+                                    );
+                                }}
+                              >
+                                {copied ? (
+                                  <CheckIcon size={16} aria-hidden="true" />
+                                ) : (
+                                  <CopyIcon size={16} aria-hidden="true" />
+                                )}
+                                <span aria-live="polite">
+                                  {copied ? "Copied" : "Copy"}
+                                </span>
+                              </Button>
+                            }
+                          />
+                        </SettingsGroup>
+                      </div>
+                    )}
                     {knownAgent && verifiedOwner && (
                       <ProfileAgentIdentity
                         session={session}
@@ -1022,46 +1081,65 @@ function ProfileDetails({
           )}
         />
       </div>
-      <AnimatePresence>
-        {photoOpen && picture && (
-          <motion.div
-            className={styles.photoViewer}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={photoTransition}
-            aria-label="Expanded profile photo"
-          >
-            <motion.img
-              ref={expandedPhoto}
-              layoutId={photoId}
-              transition={photoTransition}
-              className={styles.expandedPhoto}
-              initial={{
-                filter:
-                  reducedMotion || keyboardPhoto ? "blur(0px)" : "blur(8px)",
-              }}
-              animate={{ filter: "blur(0px)" }}
-              exit={{
-                filter:
-                  reducedMotion || keyboardPhoto ? "blur(0px)" : "blur(8px)",
-              }}
-              src={fullPhoto && readyPhoto === fullPhoto ? fullPhoto : picture}
-              alt={name}
-            />
-            <div className={styles.photoClose}>
-              <Button
-                ref={photoClose}
-                size="sm"
-                variant="subtle"
-                onClick={closePhoto}
+      {photoHost &&
+        createPortal(
+          <AnimatePresence>
+            {photoOpen && picture && (
+              <motion.div
+                className={styles.photoViewer}
+                style={photoBounds ?? {}}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={photoTransition}
+                data-buzz-ui=""
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closePhoto();
+                  }
+                }}
+                aria-label="Expanded profile photo"
               >
-                <XIcon size={16} aria-hidden="true" /> Close photo
-              </Button>
-            </div>
-          </motion.div>
+                <motion.img
+                  ref={expandedPhoto}
+                  layoutId={photoId}
+                  transition={photoTransition}
+                  className={styles.expandedPhoto}
+                  initial={{
+                    filter:
+                      reducedMotion || keyboardPhoto
+                        ? "blur(0px)"
+                        : "blur(8px)",
+                  }}
+                  animate={{ filter: "blur(0px)" }}
+                  exit={{
+                    filter:
+                      reducedMotion || keyboardPhoto
+                        ? "blur(0px)"
+                        : "blur(8px)",
+                  }}
+                  src={
+                    fullPhoto && readyPhoto === fullPhoto ? fullPhoto : picture
+                  }
+                  alt={name}
+                />
+                <div className={styles.photoClose}>
+                  <Button
+                    ref={photoClose}
+                    size="sm"
+                    variant="subtle"
+                    onClick={closePhoto}
+                  >
+                    <XIcon size={16} aria-hidden="true" /> Close photo
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          photoHost,
         )}
-      </AnimatePresence>
       {statusEditor.editor && scope && (
         <StatusEditor
           session={session}

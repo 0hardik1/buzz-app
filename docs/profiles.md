@@ -222,3 +222,12 @@ records photo choices with `managed_photo_initialized` in user metadata and
 imports an absent default photo once. Work fields remain in the signed snapshot;
 the desktop never contacts a provider's directory API. Refresh timing belongs
 to the community's issuer and authentication policy.
+
+The full profile groups directory fields into cards and shows a daylight map when
+the signed managed profile includes optional `coordinates: { latitude, longitude }`
+(decimal degrees, bounded to ±90/±180). Coordinate lookup belongs to the issuer;
+without coordinates the location remains an Apple Maps link. The client does not
+geocode directory locations or infer coordinates from timezones. Lead portraits
+resolve the verified community username and read the current Buzz profile photo.
+Expanded photos stay centered in the visible profile pane and lock its scrolling
+until dismissed, restoring the prior scroll position.
