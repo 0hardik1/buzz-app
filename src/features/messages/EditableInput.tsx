@@ -47,6 +47,9 @@ import {
   composerResource,
   brokenResources,
   resourceBlockingMarks,
+  composerGroup,
+  tokenRecipients,
+  type ComposerGroup,
 } from "./composer-document";
 import { scanMarkdown } from "../relay/message-content";
 import type {
@@ -94,6 +97,8 @@ import {
   pastedFiles,
 } from "./composer-clipboard";
 import {
+  distinctRecipients,
+  MAX_RECIPIENTS,
   mentionBoundary,
   mentionDraft,
   type MentionDraft,
@@ -708,12 +713,11 @@ export function EditableInput({
               {
                 source: safe.text.slice(item.start, item.end),
                 editAsText: !!item.editAsText,
-                recipient:
-                  safe.recipients.find(
-                    (recipient) =>
-                      recipient.start === item.start &&
-                      recipient.end === item.end,
-                  ) ?? null,
+                ...tokenRecipients(
+                  safe.recipients,
+                  safe.text.slice(item.start, item.end),
+                  item,
+                ),
               },
               null,
               state.doc.resolve(from).marks(),
@@ -726,7 +730,7 @@ export function EditableInput({
         // recipient provenance, and return a pending mention to its typed query.
         for (const token of next.tokens) {
           if (
-            token.node.attrs.recipient
+            token.node.attrs.recipient || token.node.attrs.group
               ? safe.recipients.some(
                   (item) =>
                     item.start === token.start && item.end === token.end,
@@ -851,13 +855,21 @@ export function EditableInput({
     };
     const insert = (
       text: string,
-      recipient?: MentionRecipient | readonly MentionRecipient[],
+      recipient?:
+        | MentionRecipient
+        | readonly MentionRecipient[]
+        | ComposerGroup,
       range?: { start: number; end: number },
       terminator?: string,
       focus = true,
       onTooLong?: () => void,
     ) => {
       if (!editable() || composing.current || editor.composing) return false;
+      const group =
+        recipient && "members" in recipient
+          ? composerGroup(recipient, `@${recipient.label}`)
+          : undefined;
+      if (group === null) return false;
       flushTokens();
       // The key that ended a name follows its mention in place of the space;
       // only text records its terminator before converting.
@@ -899,7 +911,24 @@ export function EditableInput({
         .filter((mark) => mark.type !== composerSchema.marks.recipient);
       text = text.replace(/\r\n?/g, "\n");
       const tr = closeHistory(editor.state.tr);
-      if (recipient) {
+      if (group) {
+        // One chip for every member; in code, the text alone.
+        const source = `@${group.label}`;
+        tr.replaceWith(
+          from,
+          to,
+          Fragment.fromArray([
+            $from.parent.type.spec.code
+              ? composerSchema.text(source, marks)
+              : composerSchema.nodes.token.create(
+                  { source, group, editAsText: false },
+                  null,
+                  marks,
+                ),
+            composerSchema.text(after, marks),
+          ]),
+        );
+      } else if (recipient) {
         const recipients: readonly MentionRecipient[] = Array.isArray(recipient)
           ? recipient
           : [recipient as MentionRecipient];
@@ -934,8 +963,9 @@ export function EditableInput({
           : editor.state.selection.map(tr.doc, tr.mapping),
       );
       if (
-        Array.isArray(recipient) &&
-        projectComposerDocument(tr.doc).draft.recipients.length > 32
+        (Array.isArray(recipient) || group) &&
+        distinctRecipients(projectComposerDocument(tr.doc).draft.recipients) >
+          MAX_RECIPIENTS
       )
         return false;
       if (
@@ -1096,11 +1126,29 @@ export function EditableInput({
         return true;
       const added = recipients.filter((person) => !existing.has(person.pubkey));
       const tr = closeHistory(editor.state.tr);
-      for (const person of [...source.draft.recipients].reverse()) {
-        if (requested.has(person.pubkey)) continue;
-        const end =
-          person.end + (source.draft.text[person.end] === " " ? 1 : 0);
-        tr.delete(source.position(person.start), source.position(end, -1));
+      // A group's members share its chip: the chip keeps the members still
+      // requested, and is plain text without them.
+      const spans = new Map<number, typeof source.draft.recipients>();
+      for (const person of source.draft.recipients)
+        spans.set(person.start, [...(spans.get(person.start) ?? []), person]);
+      for (const [start, people] of [...spans].reverse()) {
+        const span = people[0];
+        if (!span || people.every((person) => requested.has(person.pubkey)))
+          continue;
+        const token = source.tokens.find((item) => item.start === start);
+        const group =
+          token &&
+          composerGroup(token.node.attrs.group, token.node.attrs.source);
+        if (token && group) {
+          const members = group.members.filter((m) => requested.has(m.pubkey));
+          tr.setNodeMarkup(token.from, undefined, {
+            ...token.node.attrs,
+            group: members.length ? { label: group.label, members } : null,
+          });
+          continue;
+        }
+        const end = span.end + (source.draft.text[span.end] === " " ? 1 : 0);
+        tr.delete(source.position(start), source.position(end, -1));
       }
       if (added.length) {
         const at = Selection.atStart(tr.doc).from;
@@ -1125,7 +1173,7 @@ export function EditableInput({
       }
       const next = projectComposerDocument(tr.doc).draft;
       if (
-        next.recipients.length > 32 ||
+        distinctRecipients(next.recipients) > MAX_RECIPIENTS ||
         composerMarkdown(next).length > current.current.maxLength
       )
         return false;
@@ -1681,7 +1729,7 @@ export function EditableInput({
       if (!accept) return;
       const { tokens, draft } = projection();
       const tr = editor.state.tr;
-      let count = draft.recipients.length;
+      const counted = new Set(draft.recipients.map((item) => item.pubkey));
       // Later tokens first: earlier positions stay valid, and each boundary
       // check sees the text that now follows the token.
       for (const token of [...tokens].reverse()) {
@@ -1695,7 +1743,7 @@ export function EditableInput({
         const identity = identityLink(token.node.attrs.source);
         if (
           !identity ||
-          count >= 32 ||
+          (!counted.has(identity.pubkey) && counted.size >= MAX_RECIPIENTS) ||
           !mentionBoundary(
             projectComposerDocument(tr.doc).draft.text,
             token.end,
@@ -1713,7 +1761,7 @@ export function EditableInput({
             token.node.marks,
           ),
         );
-        count++;
+        counted.add(recipient.pubkey);
       }
       if (tr.docChanged) editor.dispatch(tr);
     };
@@ -2581,6 +2629,18 @@ export function EditableInput({
                 ...node.attrs,
                 recipient: null,
               });
+            // A group drops the member; without members it is plain text.
+            const group =
+              node.type.name === "token"
+                ? composerGroup(node.attrs.group, node.attrs.source)
+                : null;
+            if (group?.members.some((m) => m.pubkey === pubkey)) {
+              const members = group.members.filter((m) => m.pubkey !== pubkey);
+              tr.setNodeMarkup(pos, undefined, {
+                ...node.attrs,
+                group: members.length ? { label: group.label, members } : null,
+              });
+            }
             const mark = composerSchema.marks.recipient.isInSet(node.marks);
             if (mark?.attrs.pubkey === pubkey)
               tr.removeMark(pos, pos + node.nodeSize, mark);

@@ -74,3 +74,17 @@ it("drops leading namesake tags with their full-key qualifiers", () => {
   );
   expect(startingChatTitle(draft)).toBe("fix the build");
 });
+
+it("drops a leading group tag whole, even when it starts with a member's name", () => {
+  const label = "Ann's team";
+  const ann = { pubkey: "a".repeat(64), name: "Ann", label, start: 0, end: 11 };
+  const bo = { pubkey: "b".repeat(64), name: "Bo", label, start: 0, end: 11 };
+  const scout = { pubkey: "c".repeat(64), name: "Scout", start: 12, end: 18 };
+  const draft = typedDraft(
+    mentionDraft({
+      text: "@Ann's team @Scout do X",
+      recipients: [ann, bo, scout],
+    }),
+  );
+  expect(startingChatTitle(draft)).toBe("do X");
+});

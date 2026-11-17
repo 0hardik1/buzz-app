@@ -151,7 +151,9 @@ export function completionResult(
             !/^[0-9a-f]{64}$/.test(person.pubkey) ||
             typeof person.name !== "string" ||
             !person.name.trim(),
-        )
+        ) ||
+        (edit.label !== undefined &&
+          (typeof edit.label !== "string" || !edit.label.trim()))
       )
         continue;
     } else if ("mention" in edit) {
@@ -200,6 +202,9 @@ export function completionResult(
                           }),
                         ),
                       ),
+                      ...(edit.label !== undefined
+                        ? { label: edit.label }
+                        : {}),
                     }
                   : "mention" in edit
                     ? { mention: Object.freeze({ ...edit.mention }) }

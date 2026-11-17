@@ -252,3 +252,45 @@ it("sends chips of different keys sharing a name as `@Name (<hex>)`, others bare
     ),
   ).toBe(`@Honey (${"a".repeat(64)}) \`@Honey\``);
 });
+it("keeps a group's members only on the exact text `@label`", () => {
+  const crew = (label: string, text = "@crew hi", end = 5) =>
+    mentionDraft({
+      text,
+      recipients: [
+        { ...first, label, start: 0, end },
+        { ...second, label, start: 0, end },
+      ],
+    });
+  expect(crew("crew").recipients).toEqual([
+    { ...first, label: "crew", start: 0, end: 5 },
+    { ...second, label: "crew", start: 0, end: 5 },
+  ]);
+  // Another label, or a word that only starts with it, is prose.
+  expect(crew("team").recipients).toEqual([]);
+  expect(crew("crew", "@crews hi").recipients).toEqual([]);
+  // The group's span is removed once, so prose after it still counts.
+  expect(addressingOnly(crew("crew", "@crew "))).toBe(true);
+  expect(addressingOnly(crew("crew"))).toBe(false);
+});
+it("the recipient cap counts distinct people, keeping each one's spans", () => {
+  const people = Array.from({ length: 33 }, (_, i) => ({
+    pubkey: i.toString(16).padStart(64, "0"),
+    name: "x",
+  }));
+  const restored = mentionDraft({
+    text: "@all @x",
+    recipients: [
+      ...people.map((person) => ({
+        ...person,
+        label: "all",
+        start: 0,
+        end: 4,
+      })),
+      { ...people[0], start: 5, end: 7 },
+    ],
+  }).recipients;
+  expect(new Set(restored.map((item) => item.pubkey)).size).toBe(32);
+  expect(
+    restored.filter((item) => item.pubkey === people[0]?.pubkey),
+  ).toHaveLength(2);
+});
