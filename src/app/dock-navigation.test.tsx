@@ -74,6 +74,7 @@ afterEach(async () => {
   cleanup();
   await services?.dispose();
   services = undefined;
+  holdQueries = false;
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
@@ -81,6 +82,8 @@ afterEach(async () => {
   window.history.replaceState(null, "", "/");
 });
 
+// While set, relay reads never answer, so a conversation stays opening.
+let holdQueries = false;
 /** The app with Messages, Activity and Bestie in the dock; `channel` serves
  * channel alpha with one thread root. */
 function dockFixture({ channel = false } = {}) {
@@ -114,6 +117,7 @@ function dockFixture({ channel = false } = {}) {
           relayUrl: url.startsWith(elsewhere) ? elsewhere : origin,
         });
       if (url.endsWith("/query")) {
+        if (holdQueries) return new Promise<Response>(() => {});
         if (!channel) return Response.json([]);
         const filters = JSON.parse(String(options?.body)) as ReadFilter[];
         return Response.json(
@@ -276,3 +280,62 @@ it("opens Messages' own page when the remembered place is in another community",
     scope: scope(elsewhere),
   });
 });
+
+const channelsRoot: OpenTarget = {
+  version: 1,
+  kind: "page",
+  pluginId: "buzz.channels",
+  pageId: "channels",
+  scope: scope(),
+};
+// Close retires the visit at once; its fallback may never open.
+it.each([
+  [
+    "while its fallback is still opening",
+    {
+      version: 1,
+      kind: "conversation",
+      scope: scope(),
+      channelId: "beta",
+    } satisfies OpenTarget,
+    () => {
+      holdQueries = true;
+    },
+    "opening",
+  ],
+  [
+    "after its fallback failed",
+    {
+      version: 1,
+      kind: "page",
+      pluginId: "buzz.missing",
+      pageId: "missing",
+      scope: scope(),
+    } satisfies OpenTarget,
+    () => {},
+    "failed",
+  ],
+] as const)(
+  "doesn't reopen a closed visit when the dock switches away %s",
+  async (_, fallback, before, status) => {
+    const app = dockFixture();
+    await visit(app, activity);
+    const closed = app.navigation.snapshot().entry.id;
+    before();
+    act(() => app.navigation.dismiss([closed], fallback));
+    await waitFor(() =>
+      expect(app.navigation.snapshot()).toMatchObject({
+        status,
+        entry: { target: fallback },
+      }),
+    );
+    await bestie();
+    await userEvent.click(messagesTab());
+    await waitFor(() =>
+      expect(app.navigation.snapshot().entry.target).toMatchObject({
+        pluginId: "buzz.channels",
+      }),
+    );
+    expect(app.navigation.snapshot().entry.target).toEqual(channelsRoot);
+  },
+);

@@ -498,7 +498,12 @@ export function useAppNavigation(
   dockPages.current = pages;
   useEffect(() => {
     const remember = () => {
-      const { status, entry } = navigation.snapshot();
+      const { status, entry, retainedVisits } = navigation.snapshot();
+      // A closed visit is gone at once, whether or not its fallback opens.
+      if (retainedVisits)
+        for (const [owner, visit] of dockVisits.current)
+          if (!retainedVisits.includes(visit.id))
+            dockVisits.current.delete(owner);
       if (status !== "opened") return;
       const owner = dockOwner(dockPages.current, entry.target);
       if (!owner) return;
