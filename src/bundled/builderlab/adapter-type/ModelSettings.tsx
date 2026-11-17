@@ -22,6 +22,7 @@ import { useToastNotification } from "../../../shared/design-system/ui/Toast";
 import {
   MAX_INSTRUCTIONS_LENGTH,
   validInstructions,
+  validAutoCompactWindow,
   type AgentClient,
   type RemoteAgent,
   type RemoteAgentModel,
@@ -50,8 +51,6 @@ const accessDenied = (reason: unknown) =>
   reason instanceof Error && "status" in reason && reason.status === 403;
 const accountMismatchMessage =
   "Sign in to the Builderlab account that loaded these settings.";
-const compactionPercentage = (ratio = 0.8) =>
-  String(Number((ratio * 100).toPrecision(15)));
 
 export function ModelSettings({
   client,
@@ -104,7 +103,7 @@ export function ModelSettings({
   const [effort, setEffort] = useState(agent?.reasoningEffort ?? "");
   const [instructions, setInstructions] = useState(agent?.instructions ?? "");
   const [compaction, setCompaction] = useState(
-    compactionPercentage(agent?.summarizationThreshold),
+    String(agent?.autoCompactWindow ?? ""),
   );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -136,7 +135,7 @@ export function ModelSettings({
     setModelId(agent.modelId ?? "");
     setEffort(agent.reasoningEffort ?? "");
     setInstructions(agent.instructions ?? "");
-    setCompaction(compactionPercentage(agent.summarizationThreshold));
+    setCompaction(String(agent.autoCompactWindow ?? ""));
   }, [agent]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision retries a failed catalog request while keeping the draft.
   useEffect(() => {
@@ -170,13 +169,10 @@ export function ModelSettings({
     effort !== (saved?.reasoningEffort ?? "");
   const instructionsChanged = instructions !== (saved?.instructions ?? "");
   const compactionChanged =
-    compaction !== compactionPercentage(saved?.summarizationThreshold);
-  const threshold = Number(compaction) / 100;
+    compaction !== String(saved?.autoCompactWindow ?? "");
+  const autoCompactWindow = Number(compaction);
   const validCompaction =
-    compaction.trim() !== "" &&
-    Number.isFinite(threshold) &&
-    threshold > 0 &&
-    threshold <= 1;
+    compaction.trim() === "" || validAutoCompactWindow(autoCompactWindow);
   const saveModel =
     modelChanged ||
     (!instructionsChanged &&
@@ -206,7 +202,7 @@ export function ModelSettings({
         {
           ...(instructionsChanged ? { instructions } : {}),
           ...(saveModel ? { modelId, reasoningEffort: effort } : {}),
-          ...(compactionChanged ? { summarizationThreshold: threshold } : {}),
+          ...(compactionChanged ? { autoCompactWindow } : {}),
         },
         signal,
       );
@@ -223,14 +219,14 @@ export function ModelSettings({
         throw new Error("Agent not found in this Builderlab account.");
       if (
         compactionChanged &&
-        (remote.summarizationThreshold ?? 0.8) !== threshold
+        (remote.autoCompactWindow ?? 0) !== autoCompactWindow
       )
         throw new Error("The compaction setting was not saved. Try again.");
       // Readback must not replace the instructions draft with an omitted or stale value.
       setSaved({ ...remote, instructions });
       setModelId(remote.modelId ?? "");
       setEffort(remote.reasoningEffort ?? "");
-      setCompaction(compactionPercentage(remote.summarizationThreshold));
+      setCompaction(String(remote.autoCompactWindow ?? ""));
       if (saveModel && remote.modelSelectionStatus === "valid")
         notify("Model preferences saved", "success");
     } catch (reason) {
@@ -408,19 +404,20 @@ export function ModelSettings({
           />
         </SettingsGroup>
         <Field
-          label="Compact at (%)"
-          description="Automatically summarize older context at this percentage of the context budget. Default: 80%. Changes apply on the next turn."
+          label="Auto-compact window (tokens)"
+          description="Automatically summarize older context at this token count, limited by the model’s context budget. Leave blank for the default. Changes apply on the next turn."
           error={
             hasAccess && !validCompaction
-              ? "Enter a percentage greater than 0 and at most 100."
+              ? "Enter a positive whole token count, or leave blank for the default."
               : undefined
           }
         >
           <Input
             type="number"
-            min={0}
-            max={100}
-            step="any"
+            min={1}
+            max={2_147_483_647}
+            step={1}
+            placeholder="Default"
             value={compaction}
             onChange={(event) => setCompaction(event.target.value)}
             disabled={!saved || saving || !hasAccess}

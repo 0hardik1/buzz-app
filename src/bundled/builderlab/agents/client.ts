@@ -29,7 +29,7 @@ export type RemoteAgent = Readonly<{
   instructions?: string;
   modelId?: string;
   reasoningEffort?: string;
-  summarizationThreshold?: number;
+  autoCompactWindow?: number;
   modelSelectionStatus?:
     | "valid"
     | "setup-required"
@@ -74,11 +74,11 @@ function modelSelectionStatus(
 }
 
 export const MAX_INSTRUCTIONS_LENGTH = 20_000;
-const validSummarizationThreshold = (value: unknown): value is number =>
+export const validAutoCompactWindow = (value: unknown): value is number =>
   typeof value === "number" &&
-  Number.isFinite(value) &&
+  Number.isInteger(value) &&
   value > 0 &&
-  value <= 1;
+  value <= 2_147_483_647;
 const AGENT_NAME = /^[\w .-]{1,64}$/;
 const INVALID_NAME =
   "Use 1–64 letters, numbers, spaces, dots, hyphens or underscores for the agent name.";
@@ -480,7 +480,7 @@ export function createAgentClient(
         instructions?: string;
         modelId?: string;
         reasoningEffort?: string;
-        summarizationThreshold?: number;
+        autoCompactWindow?: number;
       },
       signal: AbortSignal,
     ): Promise<void> {
@@ -491,8 +491,9 @@ export function createAgentClient(
         ((settings.modelId !== undefined ||
           settings.reasoningEffort !== undefined) &&
           (!settings.modelId?.trim() || !settings.reasoningEffort?.trim())) ||
-        (settings.summarizationThreshold !== undefined &&
-          !validSummarizationThreshold(settings.summarizationThreshold))
+        (settings.autoCompactWindow !== undefined &&
+          settings.autoCompactWindow !== 0 &&
+          !validAutoCompactWindow(settings.autoCompactWindow))
       )
         throw new Error(
           "Choose a model and reasoning effort and check the instructions.",
@@ -504,7 +505,7 @@ export function createAgentClient(
           agent_instructions: settings.instructions,
           model_id: settings.modelId,
           reasoning_effort: settings.reasoningEffort,
-          summarization_threshold: settings.summarizationThreshold,
+          auto_compact_window: settings.autoCompactWindow,
         },
         signal,
       );
@@ -718,8 +719,8 @@ export function createAgentClient(
             !/^[0-9a-f]{64}$/.test(row.agent_pubkey) ||
             (row.agent_instructions !== undefined &&
               !validInstructions(row.agent_instructions)) ||
-            (row.summarization_threshold != null &&
-              !validSummarizationThreshold(row.summarization_threshold)),
+            (row.auto_compact_window != null &&
+              !validAutoCompactWindow(row.auto_compact_window)),
         )
       )
         throw new Error("Builderlab returned an invalid agent list.");
@@ -732,8 +733,8 @@ export function createAgentClient(
           status: agentStatus(row.status),
           ...(createdAt === undefined ? {} : { createdAt }),
           instructions: row.agent_instructions ?? "",
-          ...(typeof row.summarization_threshold === "number"
-            ? { summarizationThreshold: row.summarization_threshold }
+          ...(typeof row.auto_compact_window === "number"
+            ? { autoCompactWindow: row.auto_compact_window }
             : {}),
           ...(typeof row.model_id === "string"
             ? { modelId: row.model_id }

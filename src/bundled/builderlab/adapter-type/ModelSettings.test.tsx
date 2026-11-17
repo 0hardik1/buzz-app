@@ -204,8 +204,8 @@ async function fixture(
               modelSelectionStatus: "valid" as const,
             }
           : {}),
-        ...(update.summarization_threshold !== undefined
-          ? { summarizationThreshold: update.summarization_threshold }
+        ...(update.auto_compact_window !== undefined
+          ? { autoCompactWindow: update.auto_compact_window || undefined }
           : {}),
       };
       result = {};
@@ -220,7 +220,7 @@ async function fixture(
             status: 2,
             model_id: agent.modelId,
             reasoning_effort: agent.reasoningEffort,
-            summarization_threshold: agent.summarizationThreshold,
+            auto_compact_window: agent.autoCompactWindow,
             model_selection_status: 1,
           },
         ],
@@ -275,30 +275,32 @@ async function choose(label: string, value: string) {
     await user.click(await screen.findByRole("option", { name: value }));
   }
 }
-it.each([50, 90, 0.00000001])(
-  "saves and reads back a %s percent compaction preference without changing other settings",
-  async (percentage) => {
+it.each([50000, 500000])(
+  "saves and reads back a %s token compaction window without changing other settings",
+  async (window) => {
     const h = await fixture({
       modelId: "model-one",
       reasoningEffort: "high",
       modelSelectionStatus: "valid",
       instructions: "Keep these instructions.",
     });
-    const field = screen.getByRole("spinbutton", { name: "Compact at (%)" });
-    expect(field).toHaveValue(80);
-    fireEvent.change(field, { target: { value: String(percentage) } });
+    const field = screen.getByRole("spinbutton", {
+      name: "Auto-compact window (tokens)",
+    });
+    expect(field).toHaveValue(null);
+    fireEvent.change(field, { target: { value: String(window) } });
     await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Save" })).toBeNull(),
     );
-    expect(field).toHaveValue(percentage);
+    expect(field).toHaveValue(window);
     const updates = h.request.mock.calls.filter(([request]) =>
       request.url.endsWith("/update-agent"),
     );
     expect(updates).toHaveLength(1);
     expect(JSON.parse(updates[0]?.[0].body ?? "{}")).toEqual({
       agent_pubkey: "ab".repeat(32),
-      summarization_threshold: percentage / 100,
+      auto_compact_window: window,
     });
     expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveValue(
       "Keep these instructions.",
@@ -306,18 +308,44 @@ it.each([50, 90, 0.00000001])(
   },
 );
 
-it.each(["", "0", "-1", "101"])(
-  "does not save invalid compaction percentage %j",
+it("restores the default compaction window when the field is cleared", async () => {
+  const h = await fixture({
+    autoCompactWindow: 100000,
+    modelSelectionStatus: "valid",
+  });
+  const field = screen.getByRole("spinbutton", {
+    name: "Auto-compact window (tokens)",
+  });
+  expect(field).toHaveValue(100000);
+  fireEvent.change(field, { target: { value: "" } });
+  await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull(),
+  );
+  expect(field).toHaveValue(null);
+  const update = h.request.mock.calls.find(([request]) =>
+    request.url.endsWith("/update-agent"),
+  );
+  expect(JSON.parse(update?.[0].body ?? "{}")).toEqual({
+    agent_pubkey: "ab".repeat(32),
+    auto_compact_window: 0,
+  });
+});
+
+it.each(["0", "-1", "1.5", "2147483648"])(
+  "does not save invalid compaction window %j",
   async (value) => {
     const h = await fixture({
       modelId: "model-one",
       reasoningEffort: "high",
       modelSelectionStatus: "valid",
     });
-    const field = screen.getByRole("spinbutton", { name: "Compact at (%)" });
+    const field = screen.getByRole("spinbutton", {
+      name: "Auto-compact window (tokens)",
+    });
     fireEvent.change(field, { target: { value } });
     expect(field).toHaveAccessibleDescription(
-      "Enter a percentage greater than 0 and at most 100.",
+      "Enter a positive whole token count, or leave blank for the default.",
     );
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(
@@ -334,8 +362,10 @@ it("keeps the compaction draft when the server does not persist it", async () =>
     reasoningEffort: "high",
     modelSelectionStatus: "valid",
   });
-  const field = screen.getByRole("spinbutton", { name: "Compact at (%)" });
-  fireEvent.change(field, { target: { value: "90" } });
+  const field = screen.getByRole("spinbutton", {
+    name: "Auto-compact window (tokens)",
+  });
+  fireEvent.change(field, { target: { value: "100000" } });
   h.request.mockImplementationOnce(async () => ({
     status: 200,
     headers: {},
@@ -345,7 +375,7 @@ it("keeps the compaction draft when the server does not persist it", async () =>
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "The compaction setting was not saved.",
   );
-  expect(field).toHaveValue(90);
+  expect(field).toHaveValue(100000);
   expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 });
 
