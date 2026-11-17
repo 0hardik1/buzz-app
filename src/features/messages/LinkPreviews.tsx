@@ -1,3 +1,4 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { resolveMatch, type Contribution } from "../../plugins/contributions";
 import {
@@ -8,6 +9,7 @@ import type {
   ContributionReader,
   LinkPreviewRenderer,
 } from "../conversation/contracts";
+import { useConversationPresentation } from "../conversation/ConversationPresentation";
 import { Button } from "../../shared/design-system/ui/Button";
 import styles from "./LinkPreviews.module.css";
 
@@ -17,6 +19,16 @@ export const FOLD_AFTER = 3;
 const none: readonly Contribution<LinkPreviewRenderer>[] = [];
 const noSubscribe = () => () => {};
 const noSnapshot = () => none;
+
+/** Opens `url` outside Buzz, as clicking the link's own anchor does when no
+ * host handler takes it. */
+function openExternally(url: string) {
+  if (isTauri()) {
+    void invoke("plugin:opener|open_url", { url }).catch(() => {});
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
 
 export function LinkPreviews({
   urls,
@@ -34,6 +46,7 @@ export function LinkPreviews({
     registry?.snapshot ?? noSnapshot,
     registry?.snapshot ?? noSnapshot,
   );
+  const active = useConversationPresentation();
   const [open, setOpen] = useState(false);
   const live = useRef(true);
   useEffect(() => {
@@ -63,11 +76,17 @@ export function LinkPreviews({
             <Preview
               url={url}
               messageId={messageId}
-              open={() =>
-                live.current && registry?.snapshot().includes(renderer)
-                  ? onOpenLink(url)
-                  : false
-              }
+              open={() => {
+                if (
+                  !active ||
+                  !live.current ||
+                  !registry?.snapshot().includes(renderer)
+                )
+                  return false;
+                // A link no panel takes opens in the browser, as its anchor does.
+                if (!onOpenLink(url)) openExternally(url);
+                return true;
+              }}
             />
           </ContributionBoundary>
         );
