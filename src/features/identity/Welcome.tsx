@@ -22,7 +22,10 @@ import { communityDestination } from "../communities/destination";
 import { accountConsents } from "../communities/account-consent";
 import { FindCommunity, type JoinConsent } from "../communities/FindCommunity";
 import type { FoundCommunity } from "../communities/find-community";
-import type { createInviteIntent } from "../communities/invite-intent";
+import type {
+  createInviteIntent,
+  JoinRequest,
+} from "../communities/invite-intent";
 import {
   type Admission,
   admitCommunity,
@@ -175,8 +178,10 @@ export function Welcome({
    * `firstRun`, where the host has OS links, first run takes an invite link
    * that arrives before any identity exists.
    */
-  invites: Pick<ReturnType<typeof createInviteIntent>, "open"> &
-    Partial<Pick<ReturnType<typeof createInviteIntent>, "firstRun">>;
+  invites: {
+    open(invite: JoinRequest, viewer: string): void;
+    firstRun?: ReturnType<typeof createInviteIntent>["firstRun"];
+  };
   children: ReactNode;
   /**
    * The NIP-FI session as the bundled Builderlab plugin calls it
