@@ -34,7 +34,10 @@ import { IdentitySetup } from "./IdentitySetup";
 import { PrivateKey } from "./PrivateKey";
 import { SignOutDialog, WIPE_PHRASE } from "./SignOut";
 import { Welcome } from "./Welcome";
-import { createInviteIntent } from "../communities/invite-intent";
+import {
+  createInviteIntent,
+  type JoinRequest,
+} from "../communities/invite-intent";
 import { bindDeepLinks } from "../navigation/deep-links";
 import { createNavigationController } from "../navigation/controller";
 import { createMemoryHistory } from "../navigation/history";
@@ -4809,15 +4812,22 @@ afterEach(() => {
 /**
  * OS links through their owners, wired as `services.ts` wires them: the
  * deep-link ingress holds each link and offers an invite to first run through
- * the app's invite intent, whose snapshot is what the join dialog would open.
- * `launch` holds the links that started Buzz; `offers` records each offer's
- * code and whether first run took it.
+ * the app's invite intent. `requests.snapshot` is the last invite handed on
+ * for the join dialog to open. `launch` holds the links that started Buzz;
+ * `offers` records each offer's code and whether first run took it.
  */
 function osLinks(
   communities: ReturnType<typeof communitiesFor>,
   launch: string[] = [],
 ) {
-  const requests = createInviteIntent();
+  let opened: (JoinRequest & { viewer: string }) | undefined;
+  const requests = {
+    firstRun: createInviteIntent().firstRun,
+    open(invite: JoinRequest, viewer: string) {
+      opened = { ...invite, viewer };
+    },
+    snapshot: () => opened,
+  };
   const controller = createNavigationController(createMemoryHistory());
   const queue = [...launch];
   const offers: Array<[code: string, taken: boolean]> = [];
