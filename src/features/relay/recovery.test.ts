@@ -45,6 +45,8 @@ it("retries a failed read forever with a capped delay", () => {
     expect(read.retry).toHaveBeenCalledTimes(index);
     vi.advanceTimersByTime(1);
     expect(read.retry).toHaveBeenCalledTimes(index + 1);
+    // The delay timer marks its retry automatic (see RecoverySource.retry).
+    expect(read.retry).toHaveBeenLastCalledWith(true);
     // The notice stays up while the retry runs, then the read fails again.
     expect(recovery.snapshot().recovering).toBe(true);
     read.set("failed");
@@ -118,6 +120,7 @@ it("retryNow skips the wait and restarts the delay sequence", () => {
   expect(recovery.snapshot().attempt).toBe(4);
   recovery.retryNow();
   expect(read.retry).toHaveBeenCalledTimes(5);
+  expect(read.retry).toHaveBeenLastCalledWith(false);
   read.set("failed");
   expect(recovery.snapshot().attempt).toBe(0);
   vi.advanceTimersByTime(RECOVERY_DELAYS_MS[0] ?? 0);
@@ -181,6 +184,7 @@ it("retries settled sources too when asked to retry all", () => {
   recovery.retryAll();
   expect(denied.retry).toHaveBeenCalledTimes(1);
   expect(failed.retry).toHaveBeenCalledTimes(1);
+  expect(failed.retry).toHaveBeenLastCalledWith();
   recovery.dispose();
 });
 

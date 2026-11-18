@@ -1182,8 +1182,9 @@ test("the recovery tick's retry control keeps the broker's reconnect wait; an ex
       await delay(0); // Let the client clear its pending control.
     };
     traffic.retry(true);
+    // The broker applies a control before it answers, and a reconnect opens
+    // its socket synchronously: the response is the barrier.
     await control();
-    await delay(300);
     expect(h.sockets).toHaveLength(1);
     traffic.retry();
     await control();

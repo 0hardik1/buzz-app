@@ -310,14 +310,13 @@ export type LiveSubscription = {
     filter: VerifiedProfileFilter,
     sink: VerifiedProfileSink,
   ): () => void;
-  /** Retry failed reads now. `keepWait`: the automatic recovery tick, which
-   * leaves a reconnect this layer already scheduled to its own wait, so a
-   * fleet dropped at once still returns across the spread. */
+  /** Retry failed reads now. `keepWait`: the automatic recovery timer, which
+   * leaves a reconnect this layer already scheduled, or a handshake under way,
+   * to finish, so a fleet dropped at once still returns across the spread. */
   retry(keepWait?: boolean): void;
   /** A hint (wake, network, focus) that an open socket may have died unseen:
-   * probe it now and replace it if it does not answer in time. A reconnect
-   * waiting out its delay starts now. `network`: the network changed, so an
-   * earlier answer no longer proves this socket. */
+   * probe it now and replace it if it does not answer in time. `network`: the
+   * network changed, so an earlier answer no longer proves this socket. */
   check?(network?: boolean): void;
   dispose(): void;
 };
@@ -2326,7 +2325,15 @@ export function subscribeRelayTraffic(
       syncInterests();
     },
     retry(keepWait = false) {
-      if (closed || (keepWait && connection === "retrying")) return;
+      // The automatic timer leaves a scheduled reconnect, and a handshake
+      // still waiting for admission, to finish on their own.
+      if (
+        closed ||
+        (keepWait &&
+          !authenticated &&
+          (connection === "retrying" || connection === "connecting"))
+      )
+        return;
       clearTimeout(retryTimer);
       reconnectDelay = BASE_RECONNECT_DELAY;
       if (authenticated) {
@@ -2345,15 +2352,9 @@ export function subscribeRelayTraffic(
       } else connect();
     },
     check(network = false) {
-      if (closed) return;
-      // One client's own hint, not a fleet-wide drop: skip the wait.
-      if (connection === "retrying") {
-        clearTimeout(retryTimer);
-        reconnectDelay = BASE_RECONNECT_DELAY;
-        return connect();
-      }
       // A socket not yet admitted has its own deadline; a cooldown forbids requests.
-      if (!authenticated || checkDeadline || admission.delay()) return;
+      if (closed || !authenticated || checkDeadline || admission.delay())
+        return;
       if (!network && Date.now() - answeredAt < LIVE_CHECK_FRESH_MS) return;
       sendProbe();
       checkDeadline = setTimeout(() => {

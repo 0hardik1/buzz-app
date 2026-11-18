@@ -10,7 +10,9 @@ export type RecoveryStatus = "failed" | "busy" | "settled";
 export type RecoverySource = Readonly<{
   status(): RecoveryStatus;
   subscribe(listener: () => void): () => void;
-  retry(): void;
+  /** `automatic`: the delay timer's retry, not a signal or Retry. A source
+   * that already waits out its own reconnect may keep that wait. */
+  retry(automatic?: boolean): void;
   /** Credentials changed: read again after any read already in flight, even
    * one its status does not show (a ready catalog revalidating). Without it,
    * recovery waits out a `busy` read before retrying. */
@@ -180,16 +182,17 @@ export function createRecovery(
     timer = timers.setTimeout(() => {
       timer = undefined;
       attempt++;
-      run();
+      run(undefined, true);
     }, delay);
   }
-  function run(except?: RecoverySource) {
+  function run(except?: RecoverySource, automatic = false) {
     if (disposed) return;
     // Retries can publish synchronously; evaluate once after all of them.
     running = true;
     try {
       for (const source of sources)
-        if (source !== except && source.status() === "failed") source.retry();
+        if (source !== except && source.status() === "failed")
+          source.retry(automatic);
     } finally {
       running = false;
     }

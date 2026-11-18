@@ -49,8 +49,8 @@ export function liveRecoveryStatus(view: LiveRecoveryView): RecoveryStatus {
   // but nothing is in flight. Finite roster and head reads still count.
   const routes = view.status === "error" ? [] : view.routes;
   // "retrying" counts as failed so a long outage shows the recovery notice.
-  // The automatic tick leaves the live layer's own wait alone (retry keepWait);
-  // wake, network and focus hints skip it through checkLive.
+  // The automatic timer leaves the live layer's own wait alone (retry keepWait);
+  // a wake, network or Retry signal (retryNow, retryAll) starts it at once.
   if (
     view.status === "retrying" ||
     view.previews === "suspended" ||

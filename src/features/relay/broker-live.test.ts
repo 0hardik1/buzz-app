@@ -177,6 +177,37 @@ it("pre-header clicks preserve in-progress POST; duplicate controls coalesce", a
     owner.dispose();
   }
 });
+it("sends the automatic timer's keepWait on the retry control, and only that one", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const t = await connectBrokerTransport();
+  const owner = required(t.subscribe)(f.callbacks);
+  const bodies = () =>
+    vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => String(url).endsWith("/stream-retry"))
+      .map(([, init]) => JSON.parse(String(init?.body)));
+  try {
+    f.accept(0);
+    await tick();
+    f.publish(0);
+    await tick();
+    owner.retry(true);
+    await tick();
+    required(f.controls[0]).resolve(new Response(null, { status: 200 }));
+    await tick();
+    owner.retry();
+    await tick();
+    required(f.controls[1]).resolve(new Response(null, { status: 200 }));
+    await tick();
+    expect(bodies()).toEqual([
+      { streamId: expect.any(String), keepWait: true },
+      { streamId: expect.any(String) },
+    ]);
+  } finally {
+    owner.dispose();
+  }
+});
 it.each([false, true])(
   "successful retry clears its old control error without erasing a newer failure: %s",
   async (newerFailure) => {

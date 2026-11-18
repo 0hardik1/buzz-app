@@ -3294,11 +3294,6 @@ it.each([
     (h: ReturnType<typeof setup>) => h.owner.retry(),
     1000,
   ],
-  [
-    "a hint check skips",
-    (h: ReturnType<typeof setup>) => h.owner.check?.(),
-    1000,
-  ],
 ] as const)("%s the drawn reconnect wait", async (_name, act, reconnectAt) => {
   vi.useFakeTimers();
   const h = setup(["a"], undefined, undefined, () => 0.9);
@@ -3312,6 +3307,28 @@ it.each([
     expect(h.sockets).toHaveLength(reconnectAt === 1000 ? 2 : 1);
     await vi.advanceTimersByTimeAsync(reconnectAt === 1000 ? 0 : 1);
     expect(h.sockets).toHaveLength(2);
+  } finally {
+    h.owner.dispose();
+  }
+});
+
+it("the recovery timer's late retry leaves a handshake under way alone", async () => {
+  vi.useFakeTimers();
+  const h = setup(["a"], undefined, undefined, () => 0.9);
+  try {
+    await h.first.auth();
+    h.first.close(1006);
+    await vi.advanceTimersByTimeAsync(9000);
+    const second = h.sockets[1];
+    assert.exists(second);
+    // A broker forwards the timer's control late, after its own reconnect.
+    h.owner.retry(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.sockets).toHaveLength(2);
+    // The same socket completes admission.
+    await second.auth();
+    expect(h.sockets).toHaveLength(2);
+    expect(second.readyState).toBe(1);
   } finally {
     h.owner.dispose();
   }

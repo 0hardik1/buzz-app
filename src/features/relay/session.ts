@@ -1556,7 +1556,7 @@ export function createRelaySession(
     });
     for (const listener of liveListeners) notify(listener);
   };
-  /** `keepWait`: the automatic recovery tick (see LiveSubscription.retry). */
+  /** `keepWait`: the automatic recovery timer (see LiveSubscription.retry). */
   function retryLive(keepWait = false) {
     channels.retryList();
     revalidatePreviews(channels.suspendedPreviews());
@@ -2430,7 +2430,7 @@ export function createRelaySession(
   const recoverable = (
     subscribe: (listener: () => void) => () => void,
     status: () => RecoveryStatus,
-    retry: () => void,
+    retry: (automatic?: boolean) => void,
     reauthorize?: () => void,
   ): RecoverySource =>
     Object.freeze({
@@ -2445,7 +2445,7 @@ export function createRelaySession(
   const liveRecovery = recoverable(
     live.subscribe,
     () => liveRecoveryStatus(live.snapshot()),
-    () => retryLive(true),
+    (automatic) => retryLive(automatic),
   );
   const recovery = transport
     ? createRecovery([

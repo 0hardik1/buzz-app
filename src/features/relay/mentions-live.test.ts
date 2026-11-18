@@ -548,8 +548,13 @@ it("a deadline in the preparation continuation cannot publish or leave sending s
 it.each([
   ["waits out its drawn spread through the recovery ticks", undefined, 9000],
   [
-    "skips the spread for a wake, network or focus hint",
-    (h: ReturnType<typeof setup>) => h.session.checkLive(),
+    "skips the spread for a wake, network or focus signal",
+    (h: ReturnType<typeof setup>) => h.session.recovery?.retryNow(),
+    1000,
+  ],
+  [
+    "skips the spread for Try again",
+    (h: ReturnType<typeof setup>) => h.session.recovery?.retryAll(),
     1000,
   ],
   [
