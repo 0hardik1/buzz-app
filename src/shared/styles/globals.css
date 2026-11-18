@@ -247,7 +247,10 @@
     width: 100%;
     min-width: 0;
   }
-  .shell-background .shell-menu-search .buzz-button-label {
+  .shell-background
+    .shell-menu-search
+    > .buzz-button:not([data-shell-voice-jump])
+    .buzz-button-label {
     width: 100%;
     justify-content: flex-start;
   }
