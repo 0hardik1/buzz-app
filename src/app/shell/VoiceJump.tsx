@@ -24,6 +24,11 @@ import {
   channelIconLabel,
 } from "../../features/channels/channel-icon";
 import type { KeyBinding } from "../../features/shortcuts/bindings";
+import type { ShortcutBindingsSnapshot } from "../../features/shortcuts/preferences";
+import {
+  formatBinding,
+  isApplePlatform,
+} from "../../features/shortcuts/format";
 import { communityDestination } from "../../features/communities/destination";
 import { useIdentityNames } from "../../features/identity-names/react";
 import { sortParticipantNames } from "../../features/identity-names/participant-order";
@@ -55,9 +60,12 @@ export type VoiceJumpServices = Pick<
   AppServices,
   "communities" | "shortcuts" | "navigation"
 > &
-  Partial<Pick<AppServices, "decisions">>;
+  Partial<Pick<AppServices, "decisions" | "shortcutBindings">>;
 
 const VOICE_JUMP_ID = "voice-jump";
+const NO_OVERRIDES: ShortcutBindingsSnapshot = { overrides: {}, error: null };
+const noSubscribe = () => () => {};
+const noOverrides = () => NO_OVERRIDES;
 const VOICE_JUMP_BINDING: KeyBinding = { key: "k", mod: true, shift: true };
 
 type Phase =
@@ -104,34 +112,58 @@ export function VoiceJump({
     // The next opening starts with a key already fetched.
     prepareVoice();
   }, []);
+  // The hint follows the person's rebind, as Search's does.
+  const { overrides } = useSyncExternalStore(
+    services?.shortcutBindings?.subscribe ?? noSubscribe,
+    services?.shortcutBindings?.snapshot ?? noOverrides,
+  );
+  const binding = overrides[VOICE_JUMP_ID] ?? VOICE_JUMP_BINDING;
   if (!services || !decisions || !available) return null;
+  const label = `Jump by voice (${formatBinding(binding, isApplePlatform(navigator.platform)).text})`;
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => (next ? setOpen(true) : close())}
-      title="Jump by voice"
-      presentation="search"
-      size="default"
-      motion="none"
-      dismissOnOutsideClick
-      initialFocus={input}
-      finalFocus={() =>
-        opened.current ? conversationFocusTarget(opened.current) || false : true
-      }
-    >
-      {open && (
-        <VoiceJumpBody
-          services={services}
-          decisions={decisions}
-          input={input}
-          again={again}
-          go={(place) => {
-            opened.current = place.channelId;
-            close();
-          }}
-        />
-      )}
-    </Dialog>
+    <>
+      <IconButton
+        data-shell-voice-jump=""
+        variant="ghost"
+        shape="round"
+        aria-label="Jump by voice"
+        title={label}
+        aria-pressed={open}
+        icon={<MicrophoneIcon size={16} aria-hidden="true" />}
+        onClick={() => {
+          opened.current = undefined;
+          setOpen(true);
+        }}
+      />
+      <Dialog
+        open={open}
+        onOpenChange={(next) => (next ? setOpen(true) : close())}
+        title="Jump by voice"
+        presentation="search"
+        size="default"
+        motion="none"
+        dismissOnOutsideClick
+        initialFocus={input}
+        finalFocus={() =>
+          opened.current
+            ? conversationFocusTarget(opened.current) || false
+            : true
+        }
+      >
+        {open && (
+          <VoiceJumpBody
+            services={services}
+            decisions={decisions}
+            input={input}
+            again={again}
+            go={(place) => {
+              opened.current = place.channelId;
+              close();
+            }}
+          />
+        )}
+      </Dialog>
+    </>
   );
 }
 
