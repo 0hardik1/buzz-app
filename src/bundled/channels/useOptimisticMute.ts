@@ -30,12 +30,10 @@ export function useOptimisticMute(
     };
   }, [write]);
 
-  /** `onSaved` runs once this change is saved, and never when it fails. */
   const change = useCallback(function change(
     channelId: string,
     name: string,
     muted: boolean,
-    onSaved?: () => void,
   ) {
     const active = lifetime.current;
     if (!active) return;
@@ -57,12 +55,10 @@ export function useOptimisticMute(
       try {
         // The session owns saving; leaving Messages must not cancel the intent.
         await active.write(channelId, muted);
+        finish();
       } catch (error) {
         finish(error instanceof Error ? error.message : String(error));
-        return;
       }
-      finish();
-      onSaved?.();
     })();
   }, []);
   const dismiss = useCallback((channelId: string) => {
