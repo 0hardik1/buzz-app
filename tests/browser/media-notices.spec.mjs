@@ -13,11 +13,20 @@ test("plain media viewer hides inert notices and restores their controls", async
   await page.goto("/tests/fixtures/media-notices.html");
   const opener = page.getByRole("link", { name: "Open image attachment" });
   const host = page.locator("#buzz-toast-root");
-  const notice = host.getByText("Ready to update!");
+  const notice = host.getByText("Update failed", { exact: true });
   const viewer = page.getByRole("dialog", {
     name: "Image attachment",
     exact: true,
   });
+
+  await page.evaluate(() => window.finishDownload());
+  await page
+    .getByRole("button", {
+      name: "Update ready. Restart Buzz to install",
+      exact: true,
+    })
+    .click();
+  await expect.poll(() => page.evaluate(() => window.report.installs)).toBe(1);
 
   // Arrival after opening must be hidden too, without dismissing the notice.
   await opener.click();
@@ -25,7 +34,7 @@ test("plain media viewer hides inert notices and restores their controls", async
   await expect(
     viewer.getByRole("button", { name: "Close fullscreen viewer" }),
   ).toBeFocused();
-  await page.evaluate(() => window.finishDownload());
+  await page.evaluate(() => window.failInstall());
   await expect(notice).toBeAttached();
   await expect(notice).toBeHidden();
   await expect(host).toHaveAttribute("inert", "");
@@ -77,15 +86,17 @@ test("plain media viewer hides inert notices and restores their controls", async
     el.inert = false;
     el.removeAttribute("aria-hidden");
   });
-  await host.getByRole("button", { name: "Update now", exact: true }).click();
+  await host.getByRole("button", { name: "Retry", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => window.report))
     .toEqual({
+      checks: 2,
       installs: 1,
-      restarts: 1,
+      restarts: 0,
     });
+  await expect(host.getByText("You're on the latest version.")).toBeVisible();
   await host
     .getByRole("button", { name: "Dismiss update notification" })
     .click();
-  await expect(notice).toHaveCount(0);
+  await expect(host.getByRole("dialog")).toHaveCount(0);
 });

@@ -2,6 +2,7 @@ import { MediaMenuDownloadProvider } from "../../src/features/messages/MediaDown
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AttachmentImage } from "../../src/features/messages/AttachmentImage";
+import { UpdateAction } from "../../src/features/updates/UpdateAction";
 import { UpdateNotice } from "../../src/features/updates/UpdateNotice";
 import { createUpdates } from "../../src/features/updates/updates";
 import { ToastProvider } from "../../src/shared/design-system/ui/Toast";
@@ -13,22 +14,35 @@ let finishDownload: () => void;
 const download = new Promise<void>((resolve) => {
   finishDownload = resolve;
 });
-const report = { installs: 0, restarts: 0 };
+let failInstall: (error: Error) => void;
+const install = new Promise<void>((_, reject) => {
+  failInstall = reject;
+});
+const report = { checks: 0, installs: 0, restarts: 0 };
 const updates = createUpdates({
   desktop: true,
-  check: async () => ({
-    version: "1.2.3",
-    download: () => download,
-    install: async () => {
-      report.installs++;
-    },
-    close: async () => {},
-  }),
+  check: async () => {
+    report.checks++;
+    if (report.checks > 1) return null;
+    return {
+      version: "1.2.3",
+      download: () => download,
+      install: async () => {
+        report.installs++;
+        await install;
+      },
+      close: async () => {},
+    };
+  },
   relaunch: async () => {
     report.restarts++;
   },
 });
-Object.assign(window, { finishDownload: () => finishDownload(), report });
+Object.assign(window, {
+  finishDownload: () => finishDownload(),
+  failInstall: () => failInstall(new Error("read-only location")),
+  report,
+});
 window.addEventListener("pagehide", () => updates.dispose());
 const root = document.getElementById("root");
 const toastRoot = document.getElementById("buzz-toast-root");
@@ -47,6 +61,7 @@ createRoot(root).render(
         />
       </MediaMenuDownloadProvider>
       <div inert>Other inert content remains visible</div>
+      <UpdateAction updates={updates} />
       <UpdateNotice updates={updates} />
     </ToastProvider>
   </StrictMode>,
