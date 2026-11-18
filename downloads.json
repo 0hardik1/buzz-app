@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "channel": "stable",
-  "version": "1.0.4",
-  "release": "v1.0.4",
+  "version": "1.0.5",
+  "release": "v1.0.5",
   "downloads": {
-    "macos-arm64": "https://github.com/block/buzz-app/releases/download/v1.0.4/Buzz_1.0.4_aarch64.dmg",
-    "macos-x64": "https://github.com/block/buzz-app/releases/download/v1.0.4/Buzz_1.0.4_x64.dmg",
-    "windows-x64": "https://github.com/block/buzz-app/releases/download/v1.0.4/Buzz_1.0.4_x64_unsigned.exe",
-    "linux-appimage": "https://github.com/block/buzz-app/releases/download/v1.0.4/Buzz_1.0.4_x86_64.AppImage",
-    "linux-deb": "https://github.com/block/buzz-app/releases/download/v1.0.4/Buzz_1.0.4_amd64.deb"
+    "macos-arm64": "https://github.com/block/buzz-app/releases/download/v1.0.5/Buzz_1.0.5_aarch64.dmg",
+    "macos-x64": "https://github.com/block/buzz-app/releases/download/v1.0.5/Buzz_1.0.5_x64.dmg",
+    "windows-x64": "https://github.com/block/buzz-app/releases/download/v1.0.5/Buzz_1.0.5_x64_unsigned.exe",
+    "linux-appimage": "https://github.com/block/buzz-app/releases/download/v1.0.5/Buzz_1.0.5_x86_64.AppImage",
+    "linux-deb": "https://github.com/block/buzz-app/releases/download/v1.0.5/Buzz_1.0.5_amd64.deb"
   }
 }
