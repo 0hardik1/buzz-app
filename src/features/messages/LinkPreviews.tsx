@@ -1,4 +1,3 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { resolveMatch, type Contribution } from "../../plugins/contributions";
 import {
@@ -10,6 +9,10 @@ import type {
   LinkPreviewRenderer,
 } from "../conversation/contracts";
 import { useConversationPresentation } from "../conversation/ConversationPresentation";
+import {
+  OPEN_IN_BROWSER_FAILED,
+  openInBrowser,
+} from "../conversation/open-in-browser";
 import { Button } from "../../shared/design-system/ui/Button";
 import { ToastNotice } from "../../shared/design-system/ui/Toast";
 import styles from "./LinkPreviews.module.css";
@@ -20,21 +23,6 @@ export const FOLD_AFTER = 3;
 const none: readonly Contribution<LinkPreviewRenderer>[] = [];
 const noSubscribe = () => () => {};
 const noSnapshot = () => none;
-
-/** Opens `url` outside Buzz, as clicking the link's own anchor does when no
- * host handler takes it. Resolves false when the system opener refuses. */
-async function openExternally(url: string) {
-  if (!isTauri()) {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return true;
-  }
-  try {
-    await invoke("plugin:opener|open_url", { url });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export function LinkPreviews({
   urls,
@@ -95,7 +83,7 @@ export function LinkPreviews({
                 // A link no panel takes opens in the browser, as its anchor does.
                 if (!onOpenLink(url)) {
                   setFailed(false);
-                  void openExternally(url).then(
+                  void openInBrowser(url).then(
                     (opened) => live.current && setFailed(!opened),
                   );
                 }
@@ -107,7 +95,7 @@ export function LinkPreviews({
       })}
       {active && failed && (
         <ToastNotice
-          title="Couldn’t open the link in your browser."
+          title={OPEN_IN_BROWSER_FAILED}
           onDismiss={() => setFailed(false)}
         />
       )}
