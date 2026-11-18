@@ -1496,8 +1496,9 @@ available rather than silently discarding it.
   runs where the harness's hooks see those calls (Codex and Claude Code).
   Protected agents load none. If that plugin is enabled but not running, new
   sessions load none until it runs. Without such a plugin nothing changes:
-  each harness keeps its own default. Codex agents load none of your MCP
-  servers, and Claude agents load the ones in your Claude Code configuration.
+  each harness keeps its own default. Codex agents load the MCP servers your
+  Codex configuration turns on, Claude agents load the ones in your Claude Code
+  configuration, and Goose agents load none of your Goose MCP servers.
 - **Settings → Agent details → Previous versions** expands saved revisions for
   agents whose configuration syncs here. Settings and instructions appear together
   in one feed, newest first, with a label on each version. Versions are kept
