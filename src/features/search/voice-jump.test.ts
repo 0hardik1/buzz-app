@@ -57,7 +57,16 @@ describe("jumpPlaces", () => {
       lastActivityAt: 100,
       description: "Design reviews",
     },
-    { id: "dm", name: "", channelType: "dm", lastActivityAt: 300 },
+    // The relay marks every DM `hidden`.
+    {
+      id: "dm",
+      name: "",
+      channelType: "dm",
+      hidden: true,
+      lastActivityAt: 300,
+    },
+    { id: "secret", name: "secret", channelType: "stream", hidden: true },
+    { id: "huddle", name: "huddle", channelType: "stream", huddle: true },
     {
       id: "chat",
       name: "Plan the offsite",
@@ -142,7 +151,7 @@ describe("jumpPlaces", () => {
 
   it("uses a conversation's preview when none of its messages are loaded", () => {
     const [place] = jumpPlaces({
-      channels: [channels[2] as ChannelSummary],
+      channels: channels.filter(({ id }) => id === "chat"),
       name: (channel) => channel.name,
       window: () => empty,
       activity: [],
