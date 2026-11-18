@@ -224,10 +224,7 @@ export type ComposerGroup = Readonly<{
 /** A group chip's attribute as the editor may trust it: a label its `source`
  * is `@label` of, and 1 to 32 distinct, well-formed members. Anything else is
  * prose. */
-export function composerGroup(
-  value: unknown,
-  source: unknown,
-): ComposerGroup | null {
+export function composerGroup(value: unknown, source: unknown) {
   if (!value || typeof value !== "object") return null;
   const { label, members } = value as Record<string, unknown>;
   if (
@@ -255,7 +252,7 @@ export function tokenRecipients(
   recipients: readonly DraftRecipient[],
   source: string,
   range: { start: number; end: number },
-): { recipient: MentionRecipient | null; group: ComposerGroup | null } {
+) {
   const on = recipients.filter(
     (item) => item.start === range.start && item.end === range.end,
   );
