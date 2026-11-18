@@ -35,15 +35,16 @@ function chatTitle(
   for (const recipient of [...draft.recipients].sort(
     (a, b) => a.start - b.start,
   )) {
-    // A group's members share its `@label` span, which counts once.
-    if (recipient.start < draftStart && recipient.end === draftStart) continue;
+    // A group's `@label` stays: Solo naming rereads the sent text, where it
+    // names no tagged person.
+    if (recipient.label !== undefined) break;
     if (
       recipient.start < draftStart ||
       draft.text.slice(draftStart, recipient.start).trim()
     )
       break;
     const leading = text.slice(start).match(/^\s*/)?.[0].length ?? 0;
-    const tag = `@${recipient.label ?? recipient.name}`;
+    const tag = `@${recipient.name}`;
     if (!text.startsWith(tag, start + leading)) break;
     start += leading + tag.length;
     // A namesake is sent with its full key; that qualifier is part of the tag.

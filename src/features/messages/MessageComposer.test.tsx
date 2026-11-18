@@ -12693,7 +12693,7 @@ it("a labelled mentions edit is one chip, sent as `@label` with each member once
   expect(
     // The namesakes' names say which key each one is.
     screen.getByRole("img", {
-      name: "Person Crew, 2 recipients: Honey · rcaj, Honey · 04hu",
+      name: "Group Crew, 2 recipients: Honey · rcaj, Honey · 04hu",
     }),
   ).toHaveTextContent("@Crew · 2");
   // A member also mentioned alone is still one recipient.

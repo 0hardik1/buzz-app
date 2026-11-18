@@ -120,6 +120,7 @@ const GroupChip = memo(function GroupChip({
   return (
     <InlineChip
       address={{ kind: "person", id: label }}
+      kindName="Group"
       face={{ label, loading: false, resolved: true }}
       qualifier={{
         text: `· ${count}`,

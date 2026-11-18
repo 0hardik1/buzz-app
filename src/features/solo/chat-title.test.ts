@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { startingChatTitle } from "./chat-title";
+import { isStartingChatTitle, startingChatTitle } from "./chat-title";
 import { mentionDraft } from "../messages/mention-draft";
 import { typedDraft } from "../messages/composer-testing";
 
@@ -75,16 +75,31 @@ it("drops leading namesake tags with their full-key qualifiers", () => {
   expect(startingChatTitle(draft)).toBe("fix the build");
 });
 
-it("drops a leading group tag whole, even when it starts with a member's name", () => {
-  const label = "Ann's team";
-  const ann = { pubkey: "a".repeat(64), name: "Ann", label, start: 0, end: 11 };
-  const bo = { pubkey: "b".repeat(64), name: "Bo", label, start: 0, end: 11 };
-  const scout = { pubkey: "c".repeat(64), name: "Scout", start: 12, end: 18 };
-  const draft = typedDraft(
-    mentionDraft({
-      text: "@Ann's team @Scout do X",
-      recipients: [ann, bo, scout],
+it("keeps a leading group tag, so Solo naming matches the sent text", () => {
+  const member = (pubkey: string, name: string, label: string) => ({
+    pubkey: pubkey.repeat(64),
+    name,
+    label,
+    start: 0,
+    end: label.length + 1,
+  });
+  const title = (text: string, label: string) =>
+    startingChatTitle(
+      typedDraft(
+        mentionDraft({
+          text,
+          recipients: [member("a", "Ann", label), member("b", "Bo", label)],
+        }),
+      ),
+    );
+  expect(title("@crew do X", "crew")).toBe("@crew do X");
+  // The sent text tags no one named `@crew`, so its reading keeps the label too.
+  expect(
+    isStartingChatTitle(title("@crew do X", "crew"), {
+      text: "@crew do X",
+      recipients: [],
     }),
-  );
-  expect(startingChatTitle(draft)).toBe("do X");
+  ).toBe(true);
+  // A label that starts with a member's name is never cut at that name.
+  expect(title("@Ann's team do X", "Ann's team")).toBe("@Ann's team do X");
 });
