@@ -173,33 +173,33 @@ export function FeatureUpdate({
         }
       />
     ) : (
-      <PreferenceRow
-        title={title}
-        subtitle={subtitle}
-        trailing={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => hide(later)}>
-              {later ? "Later" : "Keep as is"}
-            </Button>
+      // An offer's text is the owner's reason to choose, so its actions go
+      // below it: beside it, two or three buttons would leave the title and
+      // summary a few letters wide in the agent panel.
+      <fieldset aria-label={title} className="m-0 min-w-0 p-0">
+        <PreferenceRow title={title} subtitle={subtitle} />
+        <div className="flex flex-wrap gap-2 pb-3">
+          <Button variant="outline" onClick={() => hide(later)}>
+            {later ? "Later" : "Keep as is"}
+          </Button>
+          <Button
+            variant={review === "changes" ? "outline" : "prominent"}
+            disabled={saving}
+            onClick={() => view(review)}
+          >
+            {reviewLabel}
+          </Button>
+          {review === "changes" && (
             <Button
-              variant={review === "changes" ? "outline" : "prominent"}
+              variant="prominent"
               disabled={saving}
-              onClick={() => view(review)}
+              onClick={() => void apply({ action: "update" })}
             >
-              {reviewLabel}
+              Update
             </Button>
-            {review === "changes" && (
-              <Button
-                variant="prominent"
-                disabled={saving}
-                onClick={() => void apply({ action: "update" })}
-              >
-                Update
-              </Button>
-            )}
-          </div>
-        }
-      />
+          )}
+        </div>
+      </fieldset>
     );
   let row: ReactNode = null;
   // A newer Buzz's version has nothing this build can do to it.

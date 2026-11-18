@@ -1505,6 +1505,38 @@ it("hides Nightly review's update for now with Later, and keeps a way to review 
   expect(save).not.toHaveBeenCalled();
 });
 
+it("puts an update offer's buttons on their own line below its text", () => {
+  const { relay } = community(ada.pubkey);
+  const { agents } = host();
+  const Tab = bestieTab(relay, agents, navigation, settingsCards).component;
+  const offers = [
+    {
+      agent: dreaming(dreamV2),
+      title: `Version ${dream.version} of Nightly review is ready`,
+      buttons: ["Later", "See changes", "Update"],
+    },
+    {
+      agent: dreaming(`${dreamV2}\n\n${ownLines}`),
+      title: `Nightly review was set up by hand. Version ${dream.version} is available.`,
+      buttons: ["Keep as is", `Review version ${dream.version}`],
+    },
+  ];
+  for (const { agent, title, buttons } of offers) {
+    const { unmount } = render(<Tab agent={agent} />);
+    const offer = screen.getByRole("group", { name: title });
+    // The row keeps the full width for its title and summary.
+    const row = within(offer).getByText(title).closest(".buzz-preference-row");
+    expect(row?.querySelector(".buzz-preference-row-trailing")).toBeNull();
+    for (const name of buttons) {
+      const button = within(offer).getByRole("button", { name });
+      expect(row?.contains(button)).toBe(false);
+      const position = row?.compareDocumentPosition(button) ?? 0;
+      expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    unmount();
+  }
+});
+
 it("adopts a Nightly review set up by hand as version 3 with the lines it chose to keep", async () => {
   const user = userEvent.setup();
   const { relay } = community(ada.pubkey);
