@@ -221,6 +221,21 @@ function VoiceJumpBody({
       if (next !== undefined && next !== said) live(next);
     });
   };
+  /** A short pause in speech: jump if the words so far reach 0.5, and
+   * otherwise keep listening, so only a long pause can come up empty. */
+  const settle = (said: string) => {
+    const current = run.current;
+    const scope = scopeNow();
+    if (current.done || !scope || !said.trim()) return;
+    void ask(said, scope.communityOrigin).then((result) => {
+      if (run.current !== current || current.done) return;
+      if (
+        result.outcome === "found" &&
+        result.probability >= VOICE_JUMP_THRESHOLD
+      )
+        goTo(result.place);
+    });
+  };
   /** Once speech ends or Enter is pressed: the best match at 0.5 or more. */
   const submit = (spoken: string) => {
     const said = spoken.trim();
@@ -264,6 +279,7 @@ function VoiceJumpBody({
       // The dictation hook keeps the newest callbacks, so this is current.
       live(next);
     },
+    onPause: (spoken) => settle(spoken),
     onEnd: (spoken) => submitRef.current(spoken),
     onError: (message) => setPhase({ kind: "failed", message }),
   });

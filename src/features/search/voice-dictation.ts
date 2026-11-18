@@ -3,15 +3,19 @@
 // deltas on a data channel. Native code answers the offer
 // (`voice_search_connect`) with a key it fetched ahead of time
 // (`voice_search_prepare`), so the key stays out of the webview and
-// listening starts after one round trip. A pause in speech, or a second
-// press, ends the utterance.
+// listening starts after one round trip. A short pause in speech is
+// reported while listening goes on; a long one, or a second press, ends the
+// utterance.
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const DELTA = "conversation.item.input_audio_transcription.delta";
 const COMPLETED = "conversation.item.input_audio_transcription.completed";
-/** Speech that stops producing text this long has ended. */
+/** Speech that stops producing text this long has paused: reported, but
+ * listening goes on. */
 const PAUSE_MS = 800;
+/** Speech that stops producing text this long has ended. */
+const END_MS = 3_000;
 /** Nothing heard this long after starting ends the attempt. */
 const SILENCE_MS = 8_000;
 
@@ -65,11 +69,14 @@ export function mergeTranscript(current: string, event: RealtimeEvent) {
 
 export function useVoiceDictation({
   onText,
+  onPause,
   onEnd,
   onError,
 }: {
   /** The transcript so far, each time it grows. */
   onText: (text: string) => void;
+  /** The transcript so far, once speech pauses briefly; listening goes on. */
+  onPause?: (text: string) => void;
   /** The finished transcript, once speech pauses or the person stops. */
   onEnd: (text: string) => void;
   onError?: (message: string) => void;
@@ -78,8 +85,8 @@ export function useVoiceDictation({
   const run = useRef<{ stop: () => void; cancel: () => void } | undefined>(
     undefined,
   );
-  const callbacks = useRef({ onText, onEnd, onError });
-  callbacks.current = { onText, onEnd, onError };
+  const callbacks = useRef({ onText, onPause, onEnd, onError });
+  callbacks.current = { onText, onPause, onEnd, onError };
 
   /** Ends listening and reports what was heard. */
   const stop = useCallback(() => run.current?.stop(), []);
@@ -93,11 +100,13 @@ export function useVoiceDictation({
     let peer: RTCPeerConnection | undefined;
     let text = "";
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let pause: ReturnType<typeof setTimeout> | undefined;
     let ended = false;
     const finish = (report: boolean) => {
       if (ended) return;
       ended = true;
       clearTimeout(timer);
+      clearTimeout(pause);
       peer?.close();
       for (const track of stream?.getTracks() ?? []) track.stop();
       run.current = undefined;
@@ -134,7 +143,12 @@ export function useVoiceDictation({
         if (next === text) return;
         text = next;
         callbacks.current.onText(text.trim());
-        wait(PAUSE_MS);
+        clearTimeout(pause);
+        pause = setTimeout(
+          () => callbacks.current.onPause?.(text.trim()),
+          PAUSE_MS,
+        );
+        wait(END_MS);
       });
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
