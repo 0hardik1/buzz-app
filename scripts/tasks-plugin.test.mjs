@@ -1000,7 +1000,9 @@ it("does not offer a destructive reset after storage access fails", async () => 
 });
 
 it("reports missing host controls and Web Locks before mounting task editors", async () => {
-  const { compatibilityError } = await import("./plugin.js");
+  const { compatibilityError } = await import(
+    "../examples/plugins/tasks/plugin.js"
+  );
   const ui = {
     Calendar: {},
     PopoverRoot: {},
