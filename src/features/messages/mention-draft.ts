@@ -1,3 +1,4 @@
+import { forwardReference, type ForwardReference } from "./forward-clipboard";
 import { canonicalChatCard } from "./chat-cards";
 import {
   projectComposerDocument,
@@ -54,6 +55,7 @@ export type PendingMention = Readonly<{
 }>;
 export type MentionDraft = {
   text: string;
+  forward?: ForwardReference | null;
   /** Chat links staged above the editor; serialized with the caption. */
   chatCards?: readonly string[];
   /** GIF image Markdown staged in the attachment row; sent after the caption. */
@@ -122,6 +124,9 @@ export function mentionDraft(value: unknown): MentionDraft {
     : record.sessionCards;
   return {
     text,
+    ...("forward" in record
+      ? { forward: forwardReference(record.forward) ?? null }
+      : {}),
     ...(Array.isArray(cards) && cards.length
       ? {
           chatCards: cards
@@ -152,6 +157,7 @@ export function mentionDraft(value: unknown): MentionDraft {
  * tags of its own, and the ones earlier releases saved are not content. */
 export function hasDraftContent(value: MentionDraft, files = 0): boolean {
   return (
+    !!value.forward ||
     files > 0 ||
     !!value.chatCards?.length ||
     !!value.gifs?.length ||
@@ -167,7 +173,12 @@ export function legacyFollowupDraft(value: MentionDraft): boolean {
 /** Selected recipients and nothing else: no prose outside their spans and no
  * attached chat or GIF. */
 export function addressingOnly(value: MentionDraft): boolean {
-  if (!value.recipients.length || value.chatCards?.length || value.gifs?.length)
+  if (
+    value.forward ||
+    !value.recipients.length ||
+    value.chatCards?.length ||
+    value.gifs?.length
+  )
     return false;
   return !withoutSpans(value.text, value.recipients).trim();
 }
