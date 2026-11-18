@@ -40,3 +40,75 @@ A type declares `harnessMcp: { report(agent), inspect?(agent, server) }`, or `ha
 - The chat-title thread turns every listed server off by name.
 - The report says `calls: true` while Codex hooks are on (`features.hooks`) and Buzz's hook bridge serves the agent's threads.
 - MCP tool hook events carry the raw `mcp_server`, and `mcp_tool` when known, behind Codex's model-visible `mcp__<server>__<tool>` name. Buzz matches the name to the thread's server names and the tools its status listed; a name that matches no single server carries neither. Buzz's own bridge server is never named.
+
+### Goose
+
+- Reports use Goose's native configured-extension metadata without starting
+  those servers. Native servers are off by default in Buzz. Tool lists come from
+  the agent's sessions or an explicit inspection.
+- Goose 1.59.0's per-session API omits saved inline environment values (`envs`,
+  including its `env` alias) and working directories. The adapter reads only the
+  saved configuration needed to detect this loss, marks affected servers failed
+  with a reason in the report, and refuses inspection or any selection that
+  would launch them. They can still be left Off while other servers are
+  selected; the no-control path is unchanged. Environment values and paths are
+  never included in the report. Full support needs a lossless native
+  configuration-reference API.
+- A choice adds only configured native MCP extensions to the session's existing
+  Buzz and platform tools. Tool restrictions use the control-supplied `known` tools minus its `off`
+  tools to create a session allowlist, including after a restart. An empty
+  allowlist keeps the server out. Goose treats an empty `available_tools` list as
+  unrestricted. Native server filters remain in effect, and no per-agent choice
+  writes native configuration or global tool permissions.
+- Before the next prompt, the adapter updates the session's native extension
+  selection and reads back the admitted tools. A failed check closes the session
+  before inference. Native permission mode is unchanged. Ordinary no-control
+  sessions keep the existing extension set. Mesh and helper
+  sessions keep their fixed native exclusions.
+- The report and choices accept configured MCP extensions only. The built-in
+  Summon/delegate platform extension stays excluded even if a choice names it.
+  Goose children inherit MCP servers without forwarding their ordinary call or
+  result events to the parent, so Buzz cannot gate them.
+- This adapter exposes no plugin call hooks and omits `calls: true`. A policy
+  plugin must leave tools that require per-call approval off.
+- Inspection opens a separate process with only the selected native extension,
+  lists its tools and stops the process on every exit path. It makes no model
+  turn or tool call; Goose's provider may refresh its model catalog during
+  setup.
+
+### Claude Code
+
+- Reports read names from the user's `.claude.json`, its entry for the agent's
+  workspace and the workspace's `.mcp.json`. Project servers that Claude has not
+  approved are off by default. Live tools and state go to the control after a
+  session's readback; reporting starts no server.
+- Controlled launches apply server denies and per-tool permission denies without
+  changing native configuration. A changed choice replaces the conversation's
+  process before its next turn; controlled sessions do not take an uncontrolled
+  spare. With no control, ordinary launches keep their existing arguments and
+  defaults.
+- Model discovery uses a temporary safe-mode process for every agent, including
+  without a control. It disables tools, native MCP, session persistence and
+  workspace instruction loading. It retains native model and effort defaults and
+  explicit agent model/effort choices; it does not send a model turn.
+- Read-back uses `mcp_status` for server metadata and `get_context_usage` for
+  the admitted tools. The discovered catalog can still contain denied tools.
+  Tool choices and hook inputs keep the catalog names (such as `search.docs`);
+  native permission rules use Claude’s normalized names (such as `search_docs`).
+  An admitted tool with no unique catalog identity stops the session before a
+  turn. An unexpected server can already have started before read-back stops the
+  session.
+- The existing generic `PreToolUse` callbacks see native MCP calls, including
+  native preallowed tools, so the report advertises `calls: true`.
+  Pre/post/failure tool events carry the verified raw server and tool names;
+  unresolved MCP-looking names carry `mcp_unresolved: true` for plugin policy.
+  Verified Buzz SDK tools carry neither. The adapter supplies hook routing, not
+  a separate call gate or execution ledger. Claude continues after callback
+  errors or timeout; a policy plugin must return a denial within the hook
+  budget.
+- Inspection requires the selected server to be enabled in Claude's native
+  configuration, including native project approval, before starting a process.
+  It denies every other known server, checks for unexpected servers before
+  returning tools, and stops its process on success, error or cancellation. It
+  makes no model turn or tool call. Protected and helper launches keep strict
+  MCP configuration; execution targets keep their host's behavior.

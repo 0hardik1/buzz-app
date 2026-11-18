@@ -3,7 +3,12 @@ import {
   snapshotJSON,
   writeJSON,
 } from "../../features/agent-protection/json-stream";
-import { CLAUDE_HOOK_EVENTS, type ClaudeHook } from "./hooks";
+import { CLAUDE_HOOK_EVENTS, type ClaudeHook, type ClaudeTurn } from "./hooks";
+import { mcpChoice, mcpName, mcpSettings, type ClaudeMcp } from "./mcp";
+import type {
+  HarnessMcpServer,
+  HarnessMcpTool,
+} from "../../features/agents/harness-mcp";
 // One `claude` process driven over its stream-json protocol: the protocol the
 // Claude Agent SDK speaks to the same binary, so no Node runtime is needed. The
 // process stays alive between turns; messages sent while it works are folded
@@ -31,6 +36,8 @@ export type ActivityReceipt = Readonly<{
   acknowledged?: (input?: Readonly<{ steering?: true }>) => void;
   accepted?: () => void;
   superseded?: () => void;
+  /** Supplies the admitted origin before native writes, independently of replay acknowledgement. */
+  admitting?: (steered: boolean) => ClaudeTurn | undefined;
 }>;
 
 export type Spawn = (
@@ -40,6 +47,7 @@ export type Spawn = (
 
 export type ClaudeLaunch = Readonly<{
   protection?: ClaudeProtection;
+  mcp?: ClaudeMcp;
   cwd: string;
   /** Folders besides `cwd` that the session may work in and stay in. */
   directories?: readonly string[];
@@ -70,7 +78,7 @@ export type ClaudeLaunch = Readonly<{
   tools?: ToolServer;
   hook?: ClaudeHook;
   /** The agent it works for: the `buzz` it runs acts as that agent. */
-  agent?: Readonly<{ pubkey: string; relay: string }>;
+  agent?: Readonly<{ pubkey: string; relay: string; owner?: string }>;
 }>;
 
 /** Answers the in-process server's JSON-RPC for the conversation a process
@@ -139,6 +147,16 @@ export const ENV: Readonly<Record<string, string | null>> = {
 };
 
 export class ClaudeProcess {
+  private mcp: ClaudeMcp | undefined;
+  private owner: string | undefined;
+  private hookTurn: ClaudeTurn | undefined;
+  private mcpServers: readonly HarnessMcpServer[] = [];
+  private mcpToolCatalog = new Map<string, readonly string[]>();
+  private mcpToolNames = new Map<
+    string,
+    { server: string; tool: string } | null
+  >();
+  private readonly buzzMcpTools = new Set<string>();
   private protection: ClaudeProtection | undefined;
   private protectionLifetime = new AbortController();
   private protectedInstructions = "";
@@ -295,6 +313,12 @@ export class ClaudeProcess {
               "--disable-slash-commands",
             ]
           : []),
+        ...(!security && launch.mcp?.choice === "none"
+          ? ["--strict-mcp-config"]
+          : []),
+        ...(launch.mcp
+          ? ["--settings", JSON.stringify(mcpSettings(launch.mcp))]
+          : []),
         ...(launch.discovery
           ? [
               "--safe-mode",
@@ -427,18 +451,23 @@ export class ClaudeProcess {
   async initialize(
     launch: Pick<
       ClaudeLaunch,
-      "systemPrompt" | "tools" | "protection" | "hook" | "agent"
+      "systemPrompt" | "tools" | "protection" | "hook" | "agent" | "mcp"
     >,
   ) {
     if (launch.agent)
       // An inherited token that acts for nobody fails every `buzz` call, so a
       // process that cannot act as its agent is stopped, as other harnesses do.
-      await this.process.actAs?.(launch.agent).catch((error: unknown) => {
-        void this.kill();
-        throw error;
-      });
+      await this.process
+        .actAs?.({ pubkey: launch.agent.pubkey, relay: launch.agent.relay })
+        .catch((error: unknown) => {
+          void this.kill();
+          throw error;
+        });
     try {
       if (launch.tools) this.tools = launch.tools;
+      this.mcp = launch.mcp;
+      this.owner = launch.agent?.owner;
+      this.mcpServers = launch.mcp?.servers ?? [];
       this.hook = launch.protection ? undefined : launch.hook;
       const { written, answer } = this.request({
         subtype: "initialize",
@@ -521,6 +550,31 @@ export class ClaudeProcess {
             )
           : [];
       });
+      if (launch.mcp) {
+        const timer = setTimeout(() => void this.kill(), 15_000);
+        try {
+          const { servers, loaded } = await this.readMcp();
+          const configured = [
+            ...new Map(
+              [
+                ...this.mcpServers,
+                ...servers.filter(
+                  (row) =>
+                    !this.mcpServers.some(({ name }) => name === row.name),
+                ),
+              ].map((row) => [row.name, row]),
+            ).values(),
+          ];
+          this.mcpServers = configured;
+          launch.mcp.started(
+            this.sessionId ?? "initial",
+            loaded,
+            mcpChoice(launch.mcp, configured),
+          );
+        } finally {
+          clearTimeout(timer);
+        }
+      }
     } catch (error) {
       await this.kill();
       await this.exited;
@@ -547,6 +601,134 @@ export class ClaudeProcess {
   /** The models this session can switch to, without sending a turn. */
   models() {
     return this.listed;
+  }
+  /** Native catalog and the separately permission-filtered model tool list. */
+  async readMcp() {
+    for (;;) {
+      const status = await this.call({ subtype: "mcp_status" });
+      const rows = (status.response as Message | undefined)?.mcpServers;
+      if (status.subtype !== "success" || !Array.isArray(rows))
+        throw new Error("Claude could not verify its MCP servers");
+      const native = this.mcp?.inspect
+        ? rows
+        : rows.filter((row) => row?.name !== TOOL_SERVER);
+      if (
+        native.some(
+          (row) =>
+            typeof row?.name !== "string" ||
+            (this.mcp?.inspect && row.name !== this.mcp.inspect),
+        )
+      )
+        throw new Error("Claude listed an unexpected MCP server");
+      if (native.some((row) => row.status === "pending")) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        continue;
+      }
+      const servers: (HarnessMcpServer & {
+        tools?: readonly HarnessMcpTool[];
+      })[] = native.map((row) => ({
+        name: row.name,
+        default: row.status !== "disabled",
+        ...(["connected", "failed", "needs-auth", "disabled"].includes(
+          row.status,
+        )
+          ? {
+              state: row.status as
+                | "connected"
+                | "failed"
+                | "needs-auth"
+                | "disabled",
+            }
+          : {}),
+        ...(Array.isArray(row.tools)
+          ? {
+              tools: row.tools
+                .filter((tool: Message) => typeof tool?.name === "string")
+                .map((tool: Message) => ({
+                  name: tool.name as string,
+                  ...(typeof tool.description === "string" && {
+                    description: tool.description,
+                  }),
+                })),
+            }
+          : {}),
+      }));
+      const context = await this.call({ subtype: "get_context_usage" });
+      const tools = (context.response as Message | undefined)?.mcpTools;
+      if (context.subtype !== "success" || !Array.isArray(tools))
+        throw new Error("Claude could not verify its admitted MCP tools");
+      const catalog = new Map<
+        string,
+        { server: string; tool: string } | null
+      >();
+      const admitted = new Map<
+        string,
+        { server: string; tool: string } | null
+      >();
+      const add = (
+        map: typeof catalog,
+        name: string,
+        server: string,
+        tool: string,
+      ) => {
+        const prior = map.get(name);
+        map.set(
+          name,
+          prior === null ||
+            (prior && (prior.server !== server || prior.tool !== tool))
+            ? null
+            : { server, tool },
+        );
+      };
+      this.mcpToolCatalog = new Map(
+        rows
+          .filter(
+            (row) => typeof row?.name === "string" && Array.isArray(row.tools),
+          )
+          .map((row) => [
+            row.name,
+            row.tools
+              .filter((tool: Message) => typeof tool?.name === "string")
+              .map((tool: Message) => tool.name),
+          ]),
+      );
+      for (const row of rows)
+        if (typeof row?.name === "string" && Array.isArray(row.tools))
+          for (const tool of row.tools)
+            if (typeof tool?.name === "string") {
+              const name = `mcp__${mcpName(row.name)}__${mcpName(tool.name)}`;
+              add(catalog, name, row.name, tool.name);
+              if (row.name === TOOL_SERVER) this.buzzMcpTools.add(name);
+            }
+      const admittedTools: { server: string; tool: string }[] = [];
+      for (const tool of tools)
+        if (
+          typeof tool?.name === "string" &&
+          typeof tool.serverName === "string"
+        ) {
+          const native = this.catalogCall(tool.name, tool.serverName);
+          if (!native) {
+            if (tool.serverName === TOOL_SERVER) continue;
+            throw new Error("Claude could not verify an admitted MCP tool");
+          }
+          add(admitted, tool.name, native.server, native.tool);
+          admittedTools.push(native);
+        }
+      this.mcpToolNames = new Map([...catalog, ...admitted]);
+      const loaded = servers
+        .filter((row) => row.state !== "disabled")
+        .map(({ name, state, tools: catalog }) => ({
+          name,
+          ...(state && state !== "disabled" && { state }),
+          tools: admittedTools
+            .filter((tool) => tool.server === name)
+            .map(
+              ({ tool }) =>
+                catalog?.find((item) => item.name === tool) ?? { name: tool },
+            ),
+        }));
+      return { servers, loaded };
+    }
   }
   /** The effort a turn without a pick runs at, when Claude reports it. */
   async readEffort() {
@@ -578,6 +760,16 @@ export class ClaudeProcess {
         ok: false,
         error: "Claude is not running",
       });
+    const steered = this.active;
+    const admitted = activity.admitting?.(steered);
+    // Steering can reduce the turn's trust, never restore an owner's origin
+    // after work from another source joined the same native turn.
+    const prior = this.hookTurn?.trigger;
+    if (
+      !steered ||
+      (prior?.type === "mention" && prior.event.pubkey === this.owner)
+    )
+      this.hookTurn = admitted || undefined;
     // The model first: effort applies to whichever model runs.
     this.setModel(model !== undefined || !this.busy ? model : this.pickedModel);
     this.setEffort(effort !== undefined || !this.busy ? effort : this.effort);
@@ -706,7 +898,10 @@ export class ClaudeProcess {
     this.effort = effort;
     void this.call({
       subtype: "apply_flag_settings",
-      settings: { effortLevel: level },
+      settings: {
+        ...(this.mcp ? mcpSettings(this.mcp) : {}),
+        effortLevel: level,
+      },
     }).then((answer) => {
       if (answer.subtype !== "success")
         console.warn("Claude did not change its effort", answer.error);
@@ -728,6 +923,7 @@ export class ClaudeProcess {
   private settle(settled: Settled) {
     this.callEpoch++;
     this.pending = 0;
+    if (!this.active) this.hookTurn = undefined;
     this.receipts.clear();
     this.activeReceipts.clear();
     this.lastError = undefined;
@@ -800,7 +996,10 @@ export class ClaudeProcess {
       this.working = message.state !== "idle";
       if (!this.working) this.callEpoch++;
       // A turn of its own, such as a background task's, is new work.
-      if (starts) this.renew();
+      if (starts) {
+        this.hookTurn = undefined;
+        this.renew();
+      }
       if (!this.working && this.pending) this.done();
       if (!this.active) this.stopping = false;
       if (active !== this.active) this.onActivity?.();
@@ -886,6 +1085,40 @@ export class ClaudeProcess {
       if (this.pending) this.done();
     }
   }
+  /** Native names are lossy; only a unique catalog name can identify a tool. */
+  private catalogCall(name: string, server: string) {
+    const tools = this.mcpToolCatalog
+      .get(server)
+      ?.filter((tool) => `mcp__${mcpName(server)}__${mcpName(tool)}` === name);
+    const tool = tools?.length === 1 ? tools[0] : undefined;
+    return tool === undefined ? undefined : { server, tool };
+  }
+  private nativeCall(name: unknown) {
+    if (typeof name !== "string" || !name.startsWith("mcp__")) return;
+    const found = this.mcpToolNames.get(name);
+    return found?.server !== TOOL_SERVER ? (found ?? undefined) : undefined;
+  }
+  /** Raw MCP identity is metadata, never inferred from lossy name segments. */
+  private hookInput(event: string, input: unknown) {
+    if (!["PreToolUse", "PostToolUse", "PostToolUseFailure"].includes(event))
+      return input;
+    if (!input || typeof input !== "object" || Array.isArray(input))
+      return input;
+    const {
+      mcp_server: _server,
+      mcp_tool: _tool,
+      mcp_unresolved: _unresolved,
+      ...value
+    } = input as Message;
+    const native = this.nativeCall(value.tool_name);
+    return native
+      ? { ...value, mcp_server: native.server, mcp_tool: native.tool }
+      : typeof value.tool_name === "string" &&
+          value.tool_name.startsWith("mcp__") &&
+          !this.buzzMcpTools.has(value.tool_name)
+        ? { ...value, mcp_unresolved: true }
+        : value;
+  }
   private done() {
     const error = this.lastError;
     this.settle(
@@ -932,6 +1165,18 @@ export class ClaudeProcess {
           error: { code: -32603, message: String(error?.message ?? error) },
         })),
       });
+      const listed = (
+        (response.response as Message | undefined)?.mcp_response as
+          | Message
+          | undefined
+      )?.result as Message | undefined;
+      if (
+        (request.message as Message | undefined)?.method === "tools/list" &&
+        Array.isArray(listed?.tools)
+      )
+        for (const tool of listed.tools)
+          if (typeof tool?.name === "string")
+            this.buzzMcpTools.add(`mcp__${TOOL_SERVER}__${tool.name}`);
     } else if (
       request.subtype === "hook_callback" &&
       this.protection &&
@@ -1118,7 +1363,8 @@ export class ClaudeProcess {
             ? ((await this.hook?.(
                 this.sessionId ?? "",
                 event,
-                request.input,
+                this.hookInput(event, request.input),
+                this.hookTurn,
               )) ?? {})
             : request.callback_id === "final" && this.final(request.input)
               ? { continue: false }

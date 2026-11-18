@@ -7,6 +7,8 @@
 // goose acts in Buzz with the in-process Buzz tools over loopback HTTP MCP,
 // signed by the agent's native-held key; the runtime only reports a turn that
 // fails.
+import { GooseMcp } from "./mcp";
+import type { HarnessMcpKit } from "../../features/agents/harness-mcp";
 import type { Context } from "../../buzz-mcp/client";
 import {
   MemoryReads,
@@ -64,12 +66,17 @@ import {
 import { readAuthorNames } from "../../features/agent-harness/author-names";
 import { ownerCanvas, readProject } from "../../features/agent-harness/project";
 import {
-  type GooseProcess,
+  GooseProcess,
   REQUEST_TIMEOUT_MS,
   type ServeMcp,
   type ToolServer,
 } from "./goose";
-import { AgentProcess, AgentSessions, localSessions } from "./sessions";
+import {
+  AgentProcess,
+  AgentSessions,
+  absolute,
+  localSessions,
+} from "./sessions";
 import { sessionTags } from "./transcript";
 
 export type Config = Readonly<{
@@ -132,6 +139,9 @@ export function sessionTitle(
 }
 
 type Entry = {
+  mcp?: GooseMcp;
+  /** Native metadata/inspection processes, retained until their exit. */
+  inspections: Map<() => Promise<void>, Promise<unknown>>;
   lifetime: AbortController;
   protected?: boolean;
   /** Its own goose, stopped once the agent goes. */
@@ -191,6 +201,7 @@ export class GooseRuntime {
     private readonly agentStore: AgentStore = localStore(),
     /** What agents on Recommended run on; found at the first such run. */
     private readonly recommended?: RecommendedRun,
+    private readonly mcpKit?: HarnessMcpKit,
   ) {
     // Once found, agents on Recommended take it up.
     this.unfollow = recommended?.subscribe(() => this.sync(this.synced));
@@ -207,6 +218,73 @@ export class GooseRuntime {
     // alongside.
     const finding = this.recommended.find();
     if (this.recommended.current() === undefined) await finding;
+  }
+
+  harnessMcp(agent: Agent) {
+    if (agent.protection)
+      return Promise.resolve({
+        tools: true,
+        servers: [],
+      });
+    const entry = this.entry(agent.key, this.settings(agent.config));
+    const mcp = entry.mcp;
+    return mcp
+      ? this.nativeMcp(entry, (process) => mcp.report(process))
+      : Promise.resolve(undefined);
+  }
+  inspectMcp(agent: Agent, server: string) {
+    if (agent.protection)
+      return Promise.reject(new Error("A protected agent loads no MCP server"));
+    const entry = this.entry(agent.key, this.settings(agent.config));
+    const mcp = entry.mcp;
+    if (!mcp)
+      return Promise.reject(new Error("Goose MCP inspection is unavailable"));
+    return this.nativeMcp(entry, async (process) => {
+      const cwd = await absolute(
+        this.desktop.resolveDirectory,
+        entry.config.workspace,
+      );
+      return mcp.inspect(process, cwd, server, entry.lifetime.signal);
+    });
+  }
+  private nativeMcp<T>(
+    entry: Entry,
+    run: (process: GooseProcess, cwd: string) => Promise<T>,
+  ) {
+    const signal = entry.lifetime.signal;
+    let process: GooseProcess | undefined;
+    const cancel = () => void process?.kill().catch(() => undefined);
+    const stop = async () => {
+      if (process) {
+        await process.kill();
+        await process.exited;
+      }
+      entry.inspections.delete(stop);
+    };
+    const done = Promise.resolve().then(async () => {
+      signal.addEventListener("abort", cancel, { once: true });
+      try {
+        signal.throwIfAborted();
+        const cwd = await this.desktop.resolveDirectory("~");
+        signal.throwIfAborted();
+        // Keep ownership of a pending spawn through cancellation. The process
+        // callback stops a late spawn; cleanup still waits for its actual exit.
+        process = await GooseProcess.start(this.desktop.spawn, {
+          cwd,
+          onProcess: (p) => {
+            process = p;
+            if (signal.aborted) cancel();
+          },
+        });
+        signal.throwIfAborted();
+        return await run(process, cwd);
+      } finally {
+        signal.removeEventListener("abort", cancel);
+        await stop();
+      }
+    });
+    entry.inspections.set(stop, done);
+    return done;
   }
 
   /** What each of the agent's sessions started with. */
@@ -262,6 +340,18 @@ export class GooseRuntime {
         } catch (error) {
           failure = { error };
         }
+        const inspections = await Promise.allSettled(
+          [...(entry?.inspections ?? [])].map(async ([stop, done]) => {
+            await done.catch(() => undefined);
+            // A failed kill retains its owner so retirement can retry it.
+            if (entry?.inspections.has(stop)) await stop();
+          }),
+        );
+        const rejected = inspections.find(
+          (result) => result.status === "rejected",
+        );
+        if (rejected?.status === "rejected")
+          failure ??= { error: rejected.reason };
         try {
           await entry?.stopping;
           await entry?.worker?.shutdown();
@@ -854,6 +944,7 @@ export class GooseRuntime {
     if (existing) return existing;
     const entry: Entry = {
       lifetime: new AbortController(),
+      inspections: new Map(),
       config: initial,
       team: "",
       sessions: undefined as unknown as AgentSessions,
@@ -865,10 +956,12 @@ export class GooseRuntime {
         (handler) => this.serve(handler),
         undefined,
         () => entry.handle,
+        () => entry.mcp,
       ),
       contexts: new Map(),
       policies: new Map(),
     };
+    if (this.mcpKit) entry.mcp = new GooseMcp(this.mcpKit, () => entry.handle);
     // Every session of the agent shares them, so they read the settings, the
     // handle and the conversation's place as they are when called.
     const tools: ToolServer = async (conversation, message, workSignal) => {
@@ -946,6 +1039,7 @@ export class GooseRuntime {
         (handler) => this.serve(handler),
         protection,
         () => entry.handle,
+        () => entry.mcp,
       );
       const worker = entry.worker;
       const { stopping } = entry;

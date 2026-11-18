@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Context } from "@deepseek-ai/cordis";
+import { createHarnessMcp } from "../../features/agents/harness-mcp";
+import { localStore } from "../../features/agents/store";
+import type { HarnessMcpKit } from "../../features/agents/harness-mcp";
+import { transport as mcpTransport } from "./mcp-testing";
 import type { AddedTool } from "../../buzz-mcp/session-tools";
 import {
   type RecommendedRun,
@@ -76,6 +81,7 @@ function setup(
     solo?: Set<string>;
     added?: readonly AddedTool[];
     hold?: boolean;
+    mcpKit?: HarnessMcpKit;
     reply?: string;
     thread?: readonly EventData[];
     scope?: "thread" | "channel";
@@ -206,8 +212,9 @@ function setup(
     // Each given to the agent, so none without one.
     (agent) => (agent === undefined ? [] : (options.added ?? [])),
     options.repositories,
-    undefined,
+    localStore(storage),
     options.recommended,
+    options.mcpKit,
   );
   const published: { kind: number; content: string; tags: string[][] }[] = [];
   const agent = {
@@ -269,6 +276,95 @@ function setup(
     },
   };
 }
+
+it("reports no native MCP servers for a protected agent without spawning Goose", async () => {
+  const wire = mcpTransport();
+  const f = setup({
+    mcpKit: { choice: async () => ({ fixture: true }), started: () => {} },
+    wrap: wire.wrap,
+  });
+  const agent = {
+    ...f.agent,
+    config: DEFAULT_CONFIG,
+    protection: { provider: "fixture", policy: {} },
+  } as unknown as Agent;
+  try {
+    expect(await f.runtime.harnessMcp(agent)).toMatchObject({
+      tools: true,
+      servers: [],
+    });
+    await expect(f.runtime.inspectMcp(agent, "fixture")).rejects.toThrow(
+      "A protected agent loads no MCP server",
+    );
+    expect(f.spawn).not.toHaveBeenCalled();
+    expect(f.fake.processes).toEqual([]);
+  } finally {
+    f.runtime.dispose();
+  }
+});
+
+it("checks the same protected Goose session before each prompt", async () => {
+  // The fixture advertises native protection. This covers adapter ordering.
+  const wire = mcpTransport();
+  const held = gated("_goose/unstable/session/extensions/list");
+  const base: AgentProtection = {
+    ...protection("policy", () => f),
+    spawn: (options) => held.wrap(wire.wrap(f.fake.spawn))("goose", options),
+  };
+  const running = {
+    key: self,
+    type: "buzz.goose/goose",
+    protection: { provider: "fixture", policy: {} },
+  } as Agent;
+  const mcp = createHarnessMcp(
+    () => ({}) as Context["pluginStatus"],
+    (key) => (key === self ? running : undefined),
+    () => [
+      {
+        key: running.type,
+        pluginId: "buzz.goose",
+        harnessMcp: { report: async () => undefined },
+      },
+    ],
+  );
+  const kit = mcp.kitFor(
+    new Context().extend({
+      pluginOwner: { id: "buzz.goose", revision: "1" },
+    } as never),
+  );
+  const started = vi.fn(kit.started);
+  const f = setup({
+    hold: true,
+    scope: "channel",
+    protection: base,
+    mcpKit: { ...kit, started },
+  });
+  try {
+    for (const turn of [1, 2]) {
+      await f.deliver(message(String(turn), "Protected protocol turn"));
+      await vi.waitFor(() => expect(held.waiting()).toEqual(["session-1"]));
+      expect(f.goose()?.turns.length ?? 0).toBe(turn - 1);
+      expect(started).toHaveBeenCalledTimes(turn - 1);
+      held.release();
+      await vi.waitFor(() => expect(f.goose()?.turns).toHaveLength(turn));
+      expect(started).toHaveBeenNthCalledWith(
+        turn,
+        expect.objectContaining({ key: self }),
+        "session-1",
+        [],
+        { fixture: false, other: false },
+      );
+      f.goose()?.turns.at(-1)?.finish();
+    }
+    expect(f.spawn).not.toHaveBeenCalled();
+    expect(
+      wire.requests.some(({ method }) => method.endsWith("extensions/add")),
+    ).toBe(false);
+  } finally {
+    held.release();
+    f.runtime.dispose();
+  }
+});
 
 it("reads a protected Goose file under containment and reviews the captured text before sending", async () => {
   const check = vi.fn<AgentProtection["check"]>().mockResolvedValue();

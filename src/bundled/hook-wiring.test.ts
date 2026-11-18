@@ -89,7 +89,10 @@ it.each(["claude", "codex", "pi"] as const)(
     expect(await hook?.("a".repeat(64), "session", "PreToolUse", {})).toEqual(
       name === "pi"
         ? { block: "[Buzz plugin: reply-first] Wait" }
-        : { decision: "block", reason: "[Buzz plugin: reply-first] Wait" },
+        : {
+            decision: "block",
+            reason: "[Buzz plugin: reply-first] Wait",
+          },
     );
     expect(dispatchHook).toHaveBeenCalledOnce();
     if (name === "pi") {

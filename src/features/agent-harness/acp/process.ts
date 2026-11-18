@@ -10,6 +10,7 @@ import { AcpSession, type ConfigOptions } from "./session";
 import { allow, errorMessage } from "./steps";
 import type {
   AcpHooks,
+  AcpSessionSetup,
   Choice,
   McpServer,
   PlatformTools,
@@ -246,7 +247,7 @@ export class AcpProcess {
        * of appending it, for small models that a long prompt throws off. */
       replacePrompt?: boolean;
       /** Keys the harness can find the session by later; only a harness
-       * whose `newSessionMeta` sends them keeps them. */
+       * whose session setup sends them keeps them. */
       tags?: Readonly<Record<string, string>>;
       /** Given the session as soon as the harness has opened it, before it
        * is set up, so a caller can close one whose open then fails. */
@@ -287,9 +288,21 @@ export class AcpProcess {
         void this.close(session);
       }
     });
+    let setup: AcpSessionSetup | undefined;
     let sessionId: string;
     let opened: ConfigOptions;
     try {
+      const prepared = hooks.prepareSession?.(
+        buzz,
+        {
+          ...(title ? { title } : {}),
+          provider,
+          ...(launch.platform ? { platform: launch.platform } : {}),
+          ...(launch.tags ? { tags: launch.tags } : {}),
+        },
+        this,
+      );
+      setup = prepared instanceof Promise ? await prepared : prepared;
       ({ sessionId, ...opened } = (await this.request(
         "session/new",
         {
@@ -301,14 +314,7 @@ export class AcpProcess {
               content: [{ type: "text", text: systemPrompt }],
             },
           }),
-          ...(hooks.newSessionMeta && {
-            _meta: hooks.newSessionMeta(buzz, {
-              ...(title ? { title } : {}),
-              provider,
-              ...(launch.platform ? { platform: launch.platform } : {}),
-              ...(launch.tags ? { tags: launch.tags } : {}),
-            }),
-          }),
+          ...(setup && { _meta: setup.meta }),
         },
         REQUEST_TIMEOUT_MS,
       )) as ConfigOptions & { sessionId: string });
@@ -333,6 +339,9 @@ export class AcpProcess {
       throw new Error(STOPPED);
     }
     try {
+      const beforePrompt = setup?.beforePrompt;
+      if (beforePrompt)
+        session.beforePrompt = (signal) => beforePrompt(sessionId, signal);
       if (systemPrompt && hooks.systemPrompt)
         await hooks.systemPrompt(
           this,
@@ -515,9 +524,9 @@ export class AcpProcess {
     params: Record<string, unknown>,
   ) {
     let reply: Wire;
-    if (method === "session/request_permission")
+    if (method === "session/request_permission") {
       reply = { jsonrpc: "2.0", id, result: { outcome: allow(params) } };
-    else
+    } else
       reply = {
         jsonrpc: "2.0",
         id,

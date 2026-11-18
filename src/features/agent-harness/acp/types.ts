@@ -17,7 +17,7 @@ export type ServeMcp = (handler: McpHandler) => Promise<HostMcpServer>;
 export type ResolveDirectory = (path: string) => Promise<string>;
 
 /** Harness-specific built-in tool entries for `session/new`, opaque here and
- * interpreted only by the harness's `newSessionMeta`. */
+ * interpreted only by the harness's session setup. */
 export type PlatformTools = readonly unknown[];
 
 /** How a burst of work ended: every message sent so far has been answered,
@@ -79,6 +79,11 @@ export type McpServer = Readonly<{
   headers: HostMcpServer["headers"];
 }>;
 
+export type AcpSessionSetup = Readonly<{
+  meta: Record<string, unknown>;
+  beforePrompt?(sessionId: string, signal: AbortSignal): Promise<void>;
+}>;
+
 /** What a harness adds to, or does in place of, plain ACP. Each hook is
  * optional: without it the client uses plain ACP's way, or none. */
 export type AcpHooks = Readonly<{
@@ -98,8 +103,8 @@ export type AcpHooks = Readonly<{
   /** Whether the harness names an untitled session itself, read once per
    * process. Without it, a session opened to be named keeps its title. */
   names?(process: AcpProcess): Promise<boolean>;
-  /** `session/new`'s `_meta`. */
-  newSessionMeta?(
+  /** Metadata and controls for a single `session/new`. */
+  prepareSession?(
     buzz: McpServer | undefined,
     open: Readonly<{
       title?: string;
@@ -107,7 +112,8 @@ export type AcpHooks = Readonly<{
       platform?: PlatformTools;
       tags?: Readonly<Record<string, string>>;
     }>,
-  ): Record<string, unknown>;
+    process: AcpProcess,
+  ): AcpSessionSetup | Promise<AcpSessionSetup>;
   /** Appends `text` to a new session's system prompt; a throw closes it.
    * Without it, ACP's `systemPrompt` carries it when advertised, else it
    * leads the session's first prompt. */

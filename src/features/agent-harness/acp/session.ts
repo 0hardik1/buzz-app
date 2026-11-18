@@ -34,6 +34,8 @@ export const valuesOf = (options: readonly ConfigValue[] = []): string[] =>
  * steered into it, when the harness can steer; one that arrives as the turn
  * ends, or asks for another model, runs as the next turn. */
 export class AcpSession {
+  /** Reconcile the harness's native tools before sending a prompt. */
+  beforePrompt?: (signal: AbortSignal) => Promise<void>;
   /** The conversation it serves. */
   conversation: string | undefined;
   /** Takes the first name the harness generates for it; a titled session gets
@@ -425,6 +427,12 @@ export class AcpSession {
         try {
           await this.beforeTurn?.();
           await this.select(model, effort);
+          if (this.beforePrompt)
+            await this.beforePrompt(this.signal).catch(async (error) => {
+              this.fail(errorMessage(error));
+              await this.acp.close(this);
+              throw error;
+            });
           // A harness may ignore a level its model lacks, and keep one across
           // a model switch without its being set again.
           if (kept && !this.levels.includes(kept))
