@@ -213,7 +213,7 @@ export function harnessKit(sources: Sources) {
     return found;
   };
 
-  return Object.freeze({
+  const kit: Omit<HarnessKit, "mcp"> = {
     async conversation(
       { trigger, agent, channelId, signal }: Delivery,
       scope: HarnessScope,
@@ -471,5 +471,6 @@ export function harnessKit(sources: Sources) {
         ],
       });
     },
-  } satisfies Omit<HarnessKit, "mcp">);
+  };
+  return Object.freeze(kit);
 }
