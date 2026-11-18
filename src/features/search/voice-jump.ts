@@ -8,9 +8,11 @@ import { messagePreviewText } from "../conversation/message-preview-text";
 
 /** Goes to the likeliest place at or above this probability. */
 export const VOICE_JUMP_THRESHOLD = 0.5;
-/** While words are still arriving, goes only at or above this. Measured on
- * Jev: "Take me to buzz" puts 0.49 on the wrong #buzz-* channel, and "Take
- * me to buzz sec" puts 0.96 on #buzz-security. */
+/** While words are still arriving, goes only at or above this, and only
+ * once the same place stays on top through another word. Measured on Jev:
+ * "Take me to buzz" puts 0.49 on the wrong #buzz-* channel, and "Take me to
+ * buzz sec" puts 0.96 on #buzz-security. A sure answer can still be early:
+ * "the conversation about the jev" is sure of #jev before "clock" lands. */
 export const VOICE_JUMP_LIVE_THRESHOLD = 0.8;
 /** The most places Jev chooses among (a choice allows 255 options). */
 const MAX_PLACES = 200;
@@ -157,10 +159,27 @@ export function jumpPlaces(sources: JumpSources): JumpPlace[] {
   return [...detailed, ...recentThreads].slice(0, MAX_PLACES);
 }
 
+/** A place Jev gave a real share of its probability, with its option label. */
+export type JumpCandidate = Readonly<{
+  place: JumpPlace;
+  label: string;
+  probability: number;
+}>;
+
+/** Candidates shown below this share are noise. */
+const CANDIDATE_MIN = 0.1;
+const MAX_CANDIDATES = 3;
+
 export type VoiceJump =
-  | Readonly<{ outcome: "found"; place: JumpPlace; probability: number }>
+  | Readonly<{
+      outcome: "found";
+      place: JumpPlace;
+      probability: number;
+      /** The likeliest places, most likely first; the found one leads. */
+      candidates: readonly JumpCandidate[];
+    }>
   /** No place is likely enough. */
-  | Readonly<{ outcome: "none" }>
+  | Readonly<{ outcome: "none"; candidates: readonly JumpCandidate[] }>
   | Readonly<{ outcome: "failed"; reason: DecisionFailure }>;
 
 const LABEL_LIMIT = 90;
@@ -198,7 +217,8 @@ export async function pickPlace(
   community: string | undefined,
   threshold = VOICE_JUMP_THRESHOLD,
 ): Promise<VoiceJump> {
-  if (!spoken.trim() || !places.length) return { outcome: "none" };
+  if (!spoken.trim() || !places.length)
+    return { outcome: "none", candidates: [] };
   const labels = placeOptions(places);
   const options: Record<string, string> = {};
   for (const label of labels) options[label] = "";
@@ -231,11 +251,41 @@ export async function pickPlace(
   if (result.outcome !== "answered")
     return { outcome: "failed", reason: result.reason };
   const answer = result.answers.place;
-  if (answer?.type !== "choice" || answer.choice === NONE)
-    return { outcome: "none" };
+  if (answer?.type !== "choice") return { outcome: "none", candidates: [] };
+  const candidates = labels
+    .map((label, index) => ({
+      place: places[index] as JumpPlace,
+      label,
+      probability: answer.probabilities[label] ?? 0,
+    }))
+    .filter(({ probability }) => probability >= CANDIDATE_MIN)
+    .sort((a, b) => b.probability - a.probability)
+    .slice(0, MAX_CANDIDATES);
+  if (answer.choice === NONE) return { outcome: "none", candidates };
   const probability =
     answer.probabilities[answer.choice] ?? answer.confidence ?? 0;
   const place = places[labels.indexOf(answer.choice)];
-  if (!place || probability < threshold) return { outcome: "none" };
-  return { outcome: "found", place, probability };
+  if (!place || probability < threshold) return { outcome: "none", candidates };
+  return { outcome: "found", place, probability, candidates };
+}
+
+export type LiveLead = Readonly<{ key: string; words: number }>;
+
+/** While words are still landing, whether to jump on this check: only once
+ * the same place has stayed sure (at the live threshold) through another
+ * word, so a longer name still being said can take over. */
+export function holdsLead(
+  lead: LiveLead | undefined,
+  result: VoiceJump,
+  said: string,
+): { jump: boolean; lead: LiveLead | undefined } {
+  if (
+    result.outcome !== "found" ||
+    result.probability < VOICE_JUMP_LIVE_THRESHOLD
+  )
+    return { jump: false, lead: undefined };
+  const words = said.trim().split(/\s+/).length;
+  if (lead?.key !== result.place.key)
+    return { jump: false, lead: { key: result.place.key, words } };
+  return { jump: words > lead.words, lead };
 }

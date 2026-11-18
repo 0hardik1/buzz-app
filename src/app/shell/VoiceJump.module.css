@@ -12,3 +12,10 @@
   min-height: var(--text-body-sm--line-height);
   @apply text-body-sm text-subtle;
 }
+.candidates {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0 var(--space-1);
+  list-style: none;
+}

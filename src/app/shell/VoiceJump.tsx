@@ -13,6 +13,7 @@ import { EmptyState } from "../../shared/design-system/ui/EmptyState";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { SearchField } from "../../shared/design-system/ui/SearchField";
 import { ShimmerText } from "../../shared/design-system/ui/ShimmerText";
+import { ChoiceRow } from "../../shared/design-system/ui/ChoiceRow";
 import { MicrophoneIcon } from "../../shared/design-system/icons/index";
 import type { KeyBinding } from "../../features/shortcuts/bindings";
 import { communityDestination } from "../../features/communities/destination";
@@ -27,10 +28,12 @@ import {
   useVoiceSearchAvailable,
 } from "../../features/search/voice-dictation";
 import {
+  holdsLead,
+  type JumpCandidate,
   type JumpPlace,
   jumpPlaces,
+  type LiveLead,
   pickPlace,
-  VOICE_JUMP_LIVE_THRESHOLD,
   VOICE_JUMP_THRESHOLD,
   type VoiceJump as JumpResult,
 } from "../../features/search/voice-jump";
@@ -144,6 +147,8 @@ function VoiceJumpBody({
   const resolveName = useIdentityNames(session.names);
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>({ kind: "listening" });
+  // The likeliest places for the words so far, refined as words land.
+  const [candidates, setCandidates] = useState<readonly JumpCandidate[]>([]);
   // Each listen or edit starts a new epoch; answers from an older one are
   // dropped. Within one, answers are kept by text, so the final check reuses
   // the live check of the same words.
@@ -153,6 +158,8 @@ function VoiceJumpBody({
     answers: Map<string, Promise<JumpResult>>;
     live: boolean;
     pending?: string | undefined;
+    /** The place a live check was last sure of, and at how many words. */
+    lead?: LiveLead | undefined;
     done: boolean;
   }>({ epoch: 0, answers: new Map(), live: false, done: false });
   const restart = useCallback(() => {
@@ -197,8 +204,12 @@ function VoiceJumpBody({
         : {}),
     });
   };
+  const show = (result: JumpResult) => {
+    if (result.outcome !== "failed") setCandidates(result.candidates);
+  };
   /** While words are still landing: one check at a time, always on the
-   * newest words, and a jump only when Jev is already sure. */
+   * newest words, and a jump only once Jev stays sure of the same place
+   * through another word, so a longer name still being said can win. */
   const live = (said: string) => {
     const current = run.current;
     const scope = scopeNow();
@@ -211,11 +222,10 @@ function VoiceJumpBody({
     void ask(said, scope.communityOrigin).then((result) => {
       if (run.current !== current || current.done) return;
       current.live = false;
-      if (
-        result.outcome === "found" &&
-        result.probability >= VOICE_JUMP_LIVE_THRESHOLD
-      )
-        return goTo(result.place);
+      show(result);
+      const held = holdsLead(current.lead, result, said);
+      current.lead = held.lead;
+      if (held.jump && result.outcome === "found") return goTo(result.place);
       const next = current.pending;
       current.pending = undefined;
       if (next !== undefined && next !== said) live(next);
@@ -229,6 +239,7 @@ function VoiceJumpBody({
     if (current.done || !scope || !said.trim()) return;
     void ask(said, scope.communityOrigin).then((result) => {
       if (run.current !== current || current.done) return;
+      show(result);
       if (
         result.outcome === "found" &&
         result.probability >= VOICE_JUMP_THRESHOLD
@@ -251,6 +262,7 @@ function VoiceJumpBody({
     setPhase({ kind: "matching" });
     void ask(said, scope.communityOrigin).then((result) => {
       if (run.current !== current || current.done) return;
+      show(result);
       if (
         result.outcome === "found" &&
         result.probability >= VOICE_JUMP_THRESHOLD
@@ -286,6 +298,7 @@ function VoiceJumpBody({
   const { start, stop, cancel } = dictation;
   const listen = useCallback(() => {
     restart();
+    setCandidates([]);
     setText("");
     setPhase({ kind: "listening" });
     void start();
@@ -326,6 +339,7 @@ function VoiceJumpBody({
           // Typing takes over from the microphone.
           cancel();
           restart();
+          setCandidates([]);
           setPhase({ kind: "listening" });
           setText(next);
         }}
@@ -368,9 +382,32 @@ function VoiceJumpBody({
           }
         />
       ) : (
-        <p className={styles.status} aria-live="polite">
-          {status}
-        </p>
+        <>
+          {phase.kind !== "failed" && candidates.length > 0 && (
+            <ul className={styles.candidates} aria-label="Likeliest places">
+              {candidates.map(({ place, label, probability }) => (
+                <li key={place.key}>
+                  <Button
+                    variant="ghost"
+                    size="row"
+                    onClick={() => {
+                      cancel();
+                      goTo(place);
+                    }}
+                  >
+                    <ChoiceRow
+                      label={label}
+                      trailing={`${Math.round(probability * 100)}%`}
+                    />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className={styles.status} aria-live="polite">
+            {status}
+          </p>
+        </>
       )}
     </div>
   );
