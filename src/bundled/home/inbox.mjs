@@ -2243,14 +2243,34 @@ export function apply(ctx) {
     }, [open]);
     useEffect(() => {
       if (!open) return;
-      const outside = (event) => {
-        if (!anchor.current?.contains(event.target)) setOpen(false);
+      // As in the context editor: a press inside can move focus out before
+      // the click arrives, and that is not leaving the menu.
+      let pressed = false;
+      let release;
+      const press = (event) => {
+        if (!anchor.current?.contains(event.target)) return setOpen(false);
+        pressed = true;
+        clearTimeout(release);
       };
-      document.addEventListener("pointerdown", outside, true);
-      document.addEventListener("focusin", outside);
+      const lift = () => {
+        clearTimeout(release);
+        release = setTimeout(() => {
+          pressed = false;
+        }, 0);
+      };
+      const focus = (event) => {
+        if (!pressed && !anchor.current?.contains(event.target)) setOpen(false);
+      };
+      document.addEventListener("pointerdown", press, true);
+      document.addEventListener("pointerup", lift, true);
+      document.addEventListener("pointercancel", lift, true);
+      document.addEventListener("focusin", focus);
       return () => {
-        document.removeEventListener("pointerdown", outside, true);
-        document.removeEventListener("focusin", outside);
+        clearTimeout(release);
+        document.removeEventListener("pointerdown", press, true);
+        document.removeEventListener("pointerup", lift, true);
+        document.removeEventListener("pointercancel", lift, true);
+        document.removeEventListener("focusin", focus);
       };
     }, [open]);
 
@@ -2466,18 +2486,37 @@ export function apply(ctx) {
 
     useEffect(() => {
       if (!editing) return;
-      const dismissOutside = (event) => {
-        if (
-          !panel.current?.contains(event.target) &&
-          !anchor.current?.contains(event.target)
-        )
-          close(false);
+      const inside = (target) =>
+        panel.current?.contains(target) || anchor.current?.contains(target);
+      // A press on a button in the panel can move focus out of it before the
+      // click arrives: WebKit does not focus a clicked button, and the shell
+      // may then focus something of its own. That is not leaving the panel.
+      let pressed = false;
+      let release;
+      const press = (event) => {
+        if (!inside(event.target)) return close(false);
+        pressed = true;
+        clearTimeout(release);
       };
-      document.addEventListener("pointerdown", dismissOutside, true);
-      document.addEventListener("focusin", dismissOutside);
+      const lift = () => {
+        clearTimeout(release);
+        release = setTimeout(() => {
+          pressed = false;
+        }, 0);
+      };
+      const focus = (event) => {
+        if (!pressed && !inside(event.target)) close(false);
+      };
+      document.addEventListener("pointerdown", press, true);
+      document.addEventListener("pointerup", lift, true);
+      document.addEventListener("pointercancel", lift, true);
+      document.addEventListener("focusin", focus);
       return () => {
-        document.removeEventListener("pointerdown", dismissOutside, true);
-        document.removeEventListener("focusin", dismissOutside);
+        clearTimeout(release);
+        document.removeEventListener("pointerdown", press, true);
+        document.removeEventListener("pointerup", lift, true);
+        document.removeEventListener("pointercancel", lift, true);
+        document.removeEventListener("focusin", focus);
       };
     }, [editing, close]);
 
