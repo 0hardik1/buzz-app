@@ -5,12 +5,13 @@ import type { DecisionFailure, Decisions } from "../decisions/service";
 import type { ChannelSummary, ChannelWindow } from "../relay/contracts";
 import type { InboxItem } from "../relay/inbox";
 import { messagePreviewText } from "../conversation/message-preview-text";
-import { soundsLike } from "./sounds-like";
+import { nameWords, soundsLike } from "./sounds-like";
 
 /** Goes to the likeliest place at or above this probability. */
 export const VOICE_JUMP_THRESHOLD = 0.5;
-/** While words are still arriving, goes only at or above this, and only
- * once the same place stays on top through another word. Measured on Jev:
+/** While words are still arriving, goes only at or above this, and, when a
+ * longer name could still be being said, only once the same place stays on
+ * top through another word. Measured on Jev:
  * "Take me to buzz" puts 0.49 on the wrong #buzz-* channel, and "Take me to
  * buzz sec" puts 0.96 on #buzz-security. A sure answer can still be early:
  * "the conversation about the jev" is sure of #jev before "clock" lands. */
@@ -277,19 +278,41 @@ export async function pickPlace(
 
 export type LiveLead = Readonly<{ key: string; words: number }>;
 
-/** While words are still landing, whether to jump on this check: only once
- * the same place has stayed sure (at the live threshold) through another
- * word, so a longer name still being said can take over. */
+const wordsOf = (name: string) =>
+  new Set(nameWords(name).map((word) => word.toLowerCase()));
+
+/** Whether another place's name holds every word of this one's and more,
+ * so a speaker who has said this name may still be saying that one: #jev
+ * before "Jev clock", #buzz before #buzz-security. */
+export function extendable(
+  place: JumpPlace,
+  places: readonly JumpPlace[],
+): boolean {
+  if (place.kind === "thread") return false;
+  const own = wordsOf(place.name);
+  if (!own.size) return false;
+  return places.some((other) => {
+    if (other.key === place.key || other.kind === "thread") return false;
+    const theirs = wordsOf(other.name);
+    return theirs.size > own.size && [...own].every((word) => theirs.has(word));
+  });
+}
+
+/** While words are still landing, whether to jump on this check: at once
+ * when Jev is sure, unless a longer name could still be being said; then
+ * only once the same place stays sure through another word. */
 export function holdsLead(
   lead: LiveLead | undefined,
   result: VoiceJump,
   said: string,
+  places: readonly JumpPlace[],
 ): { jump: boolean; lead: LiveLead | undefined } {
   if (
     result.outcome !== "found" ||
     result.probability < VOICE_JUMP_LIVE_THRESHOLD
   )
     return { jump: false, lead: undefined };
+  if (!extendable(result.place, places)) return { jump: true, lead };
   const words = said.trim().split(/\s+/).length;
   if (lead?.key !== result.place.key)
     return { jump: false, lead: { key: result.place.key, words } };

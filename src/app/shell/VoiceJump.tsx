@@ -264,7 +264,7 @@ function VoiceJumpBody({
       if (run.current !== current || current.done) return;
       current.live = false;
       show(result);
-      const held = holdsLead(current.lead, result, said);
+      const held = holdsLead(current.lead, result, said, current.places ?? []);
       current.lead = held.lead;
       if (held.jump && result.outcome === "found") return goTo(result.place);
       const next = current.pending;

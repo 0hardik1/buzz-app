@@ -327,66 +327,77 @@ describe("mergeTranscript", () => {
 });
 
 describe("holdsLead", () => {
-  const jev = {
-    key: "channel:jev",
-    kind: "channel",
-    channelId: "jev",
-    name: "jev",
-    at: 1,
-  } as JumpPlace;
-  const clock = {
-    key: "thread:clock",
-    kind: "thread",
-    channelId: "jev",
-    name: "Jev clock",
-    at: 2,
-  } as JumpPlace;
+  const channel = (id: string, name: string) =>
+    ({
+      key: `channel:${id}`,
+      kind: "channel",
+      channelId: id,
+      name,
+      at: 1,
+    }) as JumpPlace;
+  const jev = channel("jev", "jev");
+  const clock = channel("clock", "Jev live clock canvas plugin");
+  const kernel = channel("kernel", "kernel");
+  const all = [jev, clock, kernel];
   const found = (place: JumpPlace, probability: number) =>
     ({ outcome: "found", place, probability, candidates: [] }) as const;
 
-  it("waits for the same sure place to hold through another word", () => {
+  it("jumps at once when no longer name could still be being said", () => {
+    expect(
+      holdsLead(undefined, found(kernel, 0.9), "take me to kernel", all).jump,
+    ).toBe(true);
+    expect(
+      holdsLead(undefined, found(clock, 0.9), "the jev clock", all).jump,
+    ).toBe(true);
+  });
+
+  it("waits a word when a longer name holds the sure one's words", () => {
     const first = holdsLead(
       undefined,
       found(jev, 0.9),
       "the conversation about the jev",
+      all,
     );
     expect(first.jump).toBe(false);
-    // A longer name still being said takes over instead of jumping early.
-    const next = holdsLead(
-      first.lead,
-      found(clock, 0.9),
-      "the conversation about the jev clock",
-    );
-    expect(next.jump).toBe(false);
+    // The longer name takes over and, being the longest, goes at once.
     expect(
       holdsLead(
-        next.lead,
-        found(clock, 0.95),
+        first.lead,
+        found(clock, 0.9),
         "the conversation about the jev clock",
+        all,
+      ).jump,
+    ).toBe(true);
+    // The same place staying sure through another word goes too.
+    expect(
+      holdsLead(
+        first.lead,
+        found(jev, 0.9),
+        "the conversation about the jev",
+        all,
       ).jump,
     ).toBe(false);
     expect(
       holdsLead(
-        next.lead,
-        found(clock, 0.95),
-        "the conversation about the jev clock please",
+        first.lead,
+        found(jev, 0.9),
+        "the conversation about the jev please",
+        all,
       ).jump,
     ).toBe(true);
   });
 
   it("drops the lead when no place is sure", () => {
-    const first = holdsLead(undefined, found(jev, 0.9), "take me to jev");
-    const unsure = holdsLead(
-      first.lead,
-      found(jev, 0.6),
-      "take me to jev stuff",
-    );
-    expect(unsure).toEqual({ jump: false, lead: undefined });
+    const first = holdsLead(undefined, found(jev, 0.9), "take me to jev", all);
+    expect(
+      holdsLead(first.lead, found(jev, 0.6), "take me to jev stuff", all),
+    ).toEqual({ jump: false, lead: undefined });
     expect(
       holdsLead(
         first.lead,
         { outcome: "none", candidates: [] },
         "take me to jev x",
+        all,
       ).lead,
     ).toBeUndefined();
   });
