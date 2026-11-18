@@ -308,7 +308,6 @@ it("reports no native MCP servers for a protected agent without spawning Goose",
 });
 
 it("checks the same protected Goose session before each prompt", async () => {
-  // The fixture advertises native protection. This covers adapter ordering.
   const wire = mcpTransport();
   const held = gated("_goose/unstable/session/extensions/list");
   const base: AgentProtection = {

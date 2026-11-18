@@ -146,7 +146,6 @@ export function sessionTitle(
 
 type Entry = {
   mcp?: GooseMcp;
-  /** Native metadata/inspection processes, retained until their exit. */
   inspections: Map<() => Promise<void>, Promise<unknown>>;
   lifetime: AbortController;
   protected?: boolean;
@@ -274,8 +273,6 @@ export class GooseRuntime {
         signal.throwIfAborted();
         const cwd = await this.desktop.resolveDirectory("~");
         signal.throwIfAborted();
-        // Keep ownership of a pending spawn through cancellation. The process
-        // callback stops a late spawn; cleanup still waits for its actual exit.
         process = await GooseProcess.start(this.desktop.spawn, {
           cwd,
           onProcess: (p) => {
@@ -284,7 +281,6 @@ export class GooseRuntime {
           },
         });
         signal.throwIfAborted();
-        // Let an active inspection clean up its native session before stopping.
         signal.removeEventListener("abort", cancel);
         return await run(process, signal);
       } finally {
@@ -352,7 +348,6 @@ export class GooseRuntime {
         const inspections = await Promise.allSettled(
           [...(entry?.inspections ?? [])].map(async ([stop, done]) => {
             await done.catch(() => undefined);
-            // A failed kill retains its owner so retirement can retry it.
             if (entry?.inspections.has(stop)) await stop();
           }),
         );

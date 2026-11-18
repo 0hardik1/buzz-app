@@ -57,9 +57,13 @@ export function transport({ failDelete = false } = {}) {
   let failTools = false;
   const permissions = new Map<string, string | null>();
   let toolBarrier: (() => void) | undefined;
-  const wrap =
-    (base: typeof fake.spawn): typeof fake.spawn =>
-    async (id, options: HostProcessOptions = {}) => {
+  let promptCount = 0;
+  const promptWaiters: { target: number; resolve: () => void }[] = [];
+  const wrap = (base: typeof fake.spawn) => {
+    const spawn: typeof fake.spawn = async (
+      id,
+      options: HostProcessOptions = {},
+    ) => {
       const process = await base(id, options);
       let sequence = 0;
       return {
@@ -139,12 +143,25 @@ export function transport({ failDelete = false } = {}) {
               })),
             });
           }
-          return process.write(data);
+          const written = await process.write(data);
+          if (method === "session/prompt") {
+            promptCount++;
+            for (const wait of promptWaiters)
+              if (promptCount >= wait.target) wait.resolve();
+          }
+          return written;
         },
       };
     };
+    return spawn;
+  };
   return {
     fake,
+    prompted: (target: number) =>
+      new Promise<void>((resolve) => {
+        if (promptCount >= target) resolve();
+        else promptWaiters.push({ target, resolve });
+      }),
     spawn: wrap(fake.spawn),
     wrap,
     requests,

@@ -8,9 +8,10 @@ import { native, transport } from "./mcp-testing";
 import { GooseMcp } from "./mcp";
 import { GooseRuntime, DEFAULT_CONFIG } from "./runtime";
 
-function present<T>(value: T | undefined): T {
+function present<T>(value: T | undefined) {
   if (value === undefined) throw new Error("Expected the protocol fixture");
-  return value;
+  const fixture: T = value;
+  return fixture;
 }
 
 async function setup(initial: HarnessMcpAnswer = { fixture: true }) {
@@ -266,7 +267,7 @@ describe("Goose native MCP sessions", () => {
           off: ["write_marker"],
           known: ["read_echo", "write_marker"],
         },
-      }); // The active turn keeps its selection.
+      });
       expect(
         t.requests.filter(
           (r) => r.method === "_goose/unstable/session/extensions/add",
@@ -275,7 +276,8 @@ describe("Goose native MCP sessions", () => {
       present(t.native.turns.at(-1)).finish();
       await first.done;
       const second = session.send("Next turn");
-      await vi.waitFor(() => expect(t.native.turns).toHaveLength(2));
+      await t.prompted(2);
+      expect(t.native.turns).toHaveLength(2);
       expect(t.kit.started).toHaveBeenLastCalledWith(
         t.who,
         session.id,
@@ -303,7 +305,8 @@ describe("Goose native MCP sessions", () => {
         },
       });
       const third = session.send("All off");
-      await vi.waitFor(() => expect(t.native.turns).toHaveLength(3));
+      await t.prompted(3);
+      expect(t.native.turns).toHaveLength(3);
       expect(t.kit.started).toHaveBeenLastCalledWith(t.who, session.id, [], {
         fixture: {
           off: ["read_echo", "write_marker"],
@@ -566,7 +569,6 @@ describe("Goose tools-only lifecycle", () => {
           await vi.advanceTimersByTimeAsync(0);
           expect(requestStop).not.toHaveBeenCalled();
         }
-        // Passing the old stop timeout is not evidence that the process exited.
         await vi.advanceTimersByTimeAsync(6_000);
         if (stage === "opening") expect(requestStop).toHaveBeenCalled();
         expect(retired).toBe(false);

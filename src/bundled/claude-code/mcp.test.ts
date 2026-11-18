@@ -17,7 +17,6 @@ import type {
 } from "../../features/agents/service";
 import { localStore } from "../../features/agents/state";
 
-/** Fixed native protocol evidence, independent of the policy sent at launch. */
 function native(
   servers = ["alpha"],
   admitted = ["read_echo"],
@@ -86,17 +85,20 @@ function native(
   };
   return { ...fake, spawn };
 }
-const settings = (): ClaudeMcp => ({
-  choice: {
-    alpha: { off: ["write_marker"], known: ["read_echo", "write_marker"] },
-    beta: false,
-  },
-  servers: [
-    { name: "alpha", default: true },
-    { name: "beta", default: true },
-  ],
-  started: vi.fn(),
-});
+const settings = () => {
+  const mcp: ClaudeMcp = {
+    choice: {
+      alpha: { off: ["write_marker"], known: ["read_echo", "write_marker"] },
+      beta: false,
+    },
+    servers: [
+      { name: "alpha", default: true },
+      { name: "beta", default: true },
+    ],
+    started: vi.fn(),
+  };
+  return mcp;
+};
 
 it.each([
   {
@@ -264,7 +266,6 @@ it.each([
       },
       undefined,
     );
-    // Native hook policy belongs to plugins; an unresolved name does not kill the process.
     expect(fake?.killed).toBe(false);
     await process.kill();
   },

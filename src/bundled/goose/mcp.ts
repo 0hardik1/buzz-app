@@ -1,5 +1,3 @@
-// Native configured Goose extensions. Raw launch configuration stays inside this
-// adapter; plugins receive only names, state and the tools a session listed.
 import type {
   HarnessMcpAnswer,
   HarnessMcpKit,
@@ -45,7 +43,7 @@ export class GooseMcp {
     private readonly who: () => Who | undefined,
   ) {}
 
-  private async configured(p: AcpProcess): Promise<Configured[]> {
+  private async configured(p: AcpProcess) {
     const { extensions } = (await request(p, "config/extensions/list")) as {
       extensions: {
         configKey: string;
@@ -67,11 +65,9 @@ export class GooseMcp {
         key: "extensions",
         isSecret: false,
       })) as { value: Record<string, Saved> });
-    } catch {
-      // An unverifiable configuration can still be left Off, but never launched.
-    }
+    } catch {}
     const settings = Object.entries(saved ?? {});
-    return extensions
+    const listed: Configured[] = extensions
       .filter((e) => mcp(e) && e.configKey !== "buzz")
       .map((e) => {
         if (
@@ -110,6 +106,7 @@ export class GooseMcp {
           }),
         };
       });
+    return listed;
   }
   async report(p: AcpProcess) {
     const configured = await this.configured(p);
@@ -140,7 +137,6 @@ export class GooseMcp {
     signal.throwIfAborted();
     const cleanup = new AbortController();
     let deadline: ReturnType<typeof setTimeout> | undefined;
-    // Let a pending open return its ID so we can delete the history row.
     const cancelling = () => {
       deadline = setTimeout(
         () => cleanup.abort(signal.reason),
@@ -193,7 +189,6 @@ export class GooseMcp {
     entry: Pick<Configured, "name" | "key">,
     signal?: AbortSignal,
   ) {
-    // An inspection timeout needs to leave Goose alive for session/delete.
     const listed = request(
       p,
       "tools/list",
@@ -235,7 +230,6 @@ export class GooseMcp {
             (!entry.extension.available_tools?.length ||
               entry.extension.available_tools.includes(name)),
         );
-        // Goose interprets [] as unrestricted: all-off must omit the extension.
         if (available?.length)
           selected.push({
             ...entry,
@@ -247,8 +241,8 @@ export class GooseMcp {
       if (entry.unavailable) throw new Error(entry.unavailable);
     return { selected, applied };
   }
-  hooks(base: AcpHooks): AcpHooks {
-    return {
+  hooks(base: AcpHooks) {
+    const hooks: AcpHooks = {
       ...base,
       prepareSession: async (buzz, open, process) => {
         const setup = await base.prepareSession?.(buzz, open, process);
@@ -335,5 +329,6 @@ export class GooseMcp {
         };
       },
     };
+    return hooks;
   }
 }

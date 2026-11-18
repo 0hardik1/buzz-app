@@ -344,7 +344,6 @@ export class ClaudeRuntime {
       );
     const abort = new AbortController();
     const lifetime = AbortSignal.any([abort.signal, signal]);
-    // Register before configuration or spawning can yield to retirement.
     const done = Promise.resolve()
       .then(() => this.inspectTools(agent, server, lifetime))
       .finally(() => this.inspections.delete(abort));

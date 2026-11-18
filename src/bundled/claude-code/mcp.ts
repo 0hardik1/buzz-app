@@ -15,11 +15,14 @@ export type ClaudeMcp = Readonly<{
     applied: HarnessMcpChoice | "none",
   ): void;
 }>;
-const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-const strings = (value: unknown): string[] =>
+const object = (value: unknown) => {
+  const record: Record<string, unknown> =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  return record;
+};
+const strings = (value: unknown) =>
   Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
@@ -94,7 +97,6 @@ async function readMcpConfig(
   ] as const)
     for (const [name, definition] of Object.entries(object(servers))) {
       if (name === "buzz") continue;
-      // Claude's local definition wins over the workspace project file.
       if (needsApproval && Object.hasOwn(object(local.mcpServers), name))
         continue;
       const rejectedProject =
@@ -116,7 +118,6 @@ async function readMcpConfig(
       rows.set(name, {
         server: { name, default: !off, ...(off && { state: "disabled" }) },
         definition: object(definition),
-        // Dynamic entries do not carry Claude's project approval checks.
         inspectable: approvedProject,
       });
     }
@@ -155,8 +156,6 @@ export async function inspectMcpConfig(
       "Claude inspection could not verify this server's project approval",
     );
   const { definition } = entry;
-  // Claude varies helper cwd and credential access by source. An inspection
-  // registers its server dynamically, so source-sensitive helpers stay native.
   if (definition.headersHelper != null)
     throw new Error(
       "Claude inspection cannot run this server's headers helper",
@@ -167,10 +166,10 @@ export async function inspectMcpConfig(
 export function mcpChoice(
   mcp: ClaudeMcp,
   names: readonly HarnessMcpServer[] = mcp.servers,
-): HarnessMcpChoice | "none" {
+) {
   const choice = mcp.choice;
   if (choice === "none") return "none";
-  return Object.fromEntries(
+  const picked: HarnessMcpChoice = Object.fromEntries(
     Object.entries({
       ...Object.fromEntries(
         names.map((server) => [server.name, server.default]),
@@ -178,6 +177,7 @@ export function mcpChoice(
       ...choice,
     }).map(([name, pick]) => [name, pick ?? false]),
   );
+  return picked;
 }
 export function mcpSettings(mcp: ClaudeMcp) {
   const choice = mcpChoice(mcp);

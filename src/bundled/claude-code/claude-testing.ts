@@ -8,6 +8,22 @@ import type {
 } from "../../features/host/service";
 import manifest from "./manifest.json";
 
+export function counter() {
+  let count = 0;
+  const waiting: { target: number; resolve: () => void }[] = [];
+  return {
+    hit: () => {
+      count++;
+      for (const wait of waiting) if (count >= wait.target) wait.resolve();
+    },
+    reached: (target: number) =>
+      new Promise<void>((resolve) => {
+        if (count >= target) resolve();
+        else waiting.push({ target, resolve });
+      }),
+  };
+}
+
 export type FakeClaude = {
   id: string;
   options: HostProcessOptions;
@@ -32,6 +48,7 @@ export type FakeClaude = {
   exitOnKill: boolean;
   /** The agents its Buzz credential was asked to act as, in order. */
   actedAs: Readonly<{ pubkey: string; relay: string }>[];
+  prompted(count: number): Promise<void>;
   emit(message: Record<string, unknown>): void;
   finish(result?: Readonly<{ error?: string }>): void;
   exit(code: number | null, stderr?: string): void;
@@ -108,6 +125,7 @@ export function fakeSpawn(known = new Set<string>()) {
     let open = 0;
     let started = false;
     let alive = true;
+    const taken = counter();
     const fake: FakeClaude = {
       id,
       options,
@@ -121,6 +139,7 @@ export function fakeSpawn(known = new Set<string>()) {
       killed: false,
       exitOnKill: true,
       actedAs: [],
+      prompted: taken.reached,
       emit(message) {
         if (alive) options.onStdout?.(`${JSON.stringify(message)}\n`);
       },
@@ -209,6 +228,7 @@ export function fakeSpawn(known = new Set<string>()) {
       }
       const content = (message.message as { content: string }).content;
       fake.prompts.push(content);
+      taken.hit();
       fake.efforts.push(fake.effort);
       fake.models.push(fake.model);
       if (!started) {

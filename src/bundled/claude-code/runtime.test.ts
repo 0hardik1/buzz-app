@@ -37,7 +37,13 @@ import {
   type AgentToolAuthority,
 } from "../../features/agents/tool-operation";
 import type { MemoryEntry } from "../../features/agents/memory";
-import { CLAUDES, type FakeClaude, fakeSpawn, flush } from "./claude-testing";
+import {
+  CLAUDES,
+  counter,
+  type FakeClaude,
+  fakeSpawn,
+  flush,
+} from "./claude-testing";
 import { RESUMED_PROMPT, TOP_LEVEL_PROMPT } from "../../buzz-mcp/prompt";
 import { ClaudeRuntime, config, DEFAULT_CONFIG, modelName } from "./runtime";
 import type { AddedTool } from "../../buzz-mcp/session-tools";
@@ -298,9 +304,13 @@ function setup(
   );
   /** The tools plugins add, as the runtime reads them at each use. */
   const added: AddedTool[] = [];
+  const hooked = counter();
   const hook = vi.fn<
     NonNullable<ConstructorParameters<typeof ClaudeRuntime>[7]>
-  >(async () => ({}));
+  >(async () => {
+    hooked.hit();
+    return {};
+  });
   const runtime = new ClaudeRuntime(
     host,
     (key) => ownerReads(relay, pubkeyOf(key)),
@@ -416,6 +426,7 @@ function setup(
   return {
     runtime,
     hook,
+    hooked: hooked.reached,
     transcriptReaders,
     added,
     deliver,
@@ -2319,7 +2330,8 @@ it.each([false, true])(
           input: { tool_name: "mcp__alpha__read_echo" },
         },
       });
-      await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(1));
+      await f.hooked(1);
+      expect(call).toHaveBeenCalledTimes(1);
       expect(call.mock.calls[0]?.[4]?.trigger.type).toBe("plugin");
     } finally {
       f.runtime.dispose();
@@ -2363,15 +2375,19 @@ it("keeps owner-only admitted work direct and permits a fresh owner turn after m
         },
       });
     ask("owner-only");
-    await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(1));
+    await f.hooked(1);
+    expect(call).toHaveBeenCalledTimes(1);
     expect(call.mock.calls[0]?.[4]?.trigger).toEqual(owner("2"));
     await f.deliver(pluginWake(root.id));
-    await vi.waitFor(() => expect(process?.prompts).toHaveLength(3));
+    await process?.prompted(3);
+    expect(process?.prompts).toHaveLength(3);
     process?.finish();
     await f.deliver(owner("3"));
-    await vi.waitFor(() => expect(process?.prompts).toHaveLength(4));
+    await process?.prompted(4);
+    expect(process?.prompts).toHaveLength(4);
     ask("fresh-owner");
-    await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(2));
+    await f.hooked(2);
+    expect(call).toHaveBeenCalledTimes(2);
     expect(call.mock.calls[1]?.[4]?.trigger).toEqual(owner("3"));
   } finally {
     f.runtime.dispose();
@@ -2441,7 +2457,8 @@ it("does not let an owner delivery that fails admission relabel a running plugin
         input: { tool_name: "mcp__alpha__read_echo" },
       },
     });
-    await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(1));
+    await f.hooked(1);
+    expect(call).toHaveBeenCalledTimes(1);
     expect(call.mock.calls[0]?.[4]?.trigger.type).toBe("plugin");
   } finally {
     release?.();
@@ -2476,7 +2493,8 @@ it("does not turn unknown autonomous native work into a direct turn through owne
         ],
       }),
     });
-    await vi.waitFor(() => expect(process?.prompts).toHaveLength(2));
+    await process?.prompted(2);
+    expect(process?.prompts).toHaveLength(2);
     process?.emit({
       type: "control_request",
       request_id: "mcp-unknown-origin",
@@ -2489,7 +2507,8 @@ it("does not turn unknown autonomous native work into a direct turn through owne
         input: { tool_name: "mcp__alpha__read_echo" },
       },
     });
-    await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(1));
+    await f.hooked(1);
+    expect(call).toHaveBeenCalledTimes(1);
     expect(call.mock.calls[0]?.[4]).toBeUndefined();
   } finally {
     f.runtime.dispose();
@@ -2999,6 +3018,7 @@ it("runs a watch on anyone's event as a one-off turn that sees it as data", asyn
     claudes,
     published,
     hook: call,
+    hooked,
   } = setup([], {
     hold: true,
     mcp: true,
@@ -3040,7 +3060,8 @@ it("runs a watch on anyone's event as a one-off turn that sees it as data", asyn
       input: { tool_name: "mcp__alpha__read_echo" },
     },
   });
-  await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(1));
+  await hooked(1);
+  expect(call).toHaveBeenCalledTimes(1);
   expect(call.mock.calls[0]?.[4]?.trigger).toEqual(trigger);
   // Its tools have no conversation, so a send must name its channel.
   const sent = (await mcp(claude, 1, "tools/call", {
@@ -4459,15 +4480,20 @@ describe("a conversation given its own folder", () => {
         return new TextEncoder().encode(JSON.stringify(value));
       },
     });
+    const startedOnce = counter();
     const started = vi.fn();
     runtime.mcp = {
       choice: async () => ({}),
-      started,
+      started: (...args) => {
+        started(...args);
+        startedOnce.hit();
+      },
     };
     try {
       await assign(data, "/repos/worktree");
       await deliver({ type: "mention", event: mention });
-      await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1));
+      await startedOnce.reached(1);
+      expect(started).toHaveBeenCalledTimes(1);
       expect(started.mock.calls[0]?.[3]).toEqual({ alpha: true });
       await vi.waitFor(() =>
         expect(claudes().some((process) => process.prompts.length > 0)).toBe(

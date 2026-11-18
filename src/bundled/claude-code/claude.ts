@@ -103,9 +103,9 @@ type Message = Record<string, unknown> & { type?: string; subtype?: string };
 type McpStatus = Readonly<{ name: string; status?: string; tools?: unknown }>;
 type McpIdentity = { server: string; tool: string };
 
-function mcpTools(raw: unknown): HarnessMcpTool[] {
+function mcpTools(raw: unknown) {
   if (!Array.isArray(raw)) return [];
-  return raw
+  const tools: HarnessMcpTool[] = raw
     .filter((tool) => typeof tool?.name === "string")
     .map((tool) => ({
       name: tool.name,
@@ -113,6 +113,7 @@ function mcpTools(raw: unknown): HarnessMcpTool[] {
         description: tool.description,
       }),
     }));
+  return tools;
 }
 
 /** A model Claude lists as one a session can switch to. */
@@ -630,14 +631,15 @@ export class ClaudeProcess {
   models() {
     return this.listed;
   }
-  private async readMcpStatus(signal?: AbortSignal): Promise<McpStatus[]> {
+  private async readMcpStatus(signal?: AbortSignal) {
     const status = await this.call({ subtype: "mcp_status" }, signal);
     const rows = (status.response as Message | undefined)?.mcpServers;
     if (status.subtype !== "success" || !Array.isArray(rows))
       throw new Error("Claude could not verify its MCP servers");
     if (rows.some((row) => typeof row?.name !== "string"))
       throw new Error("Claude listed an invalid MCP server");
-    return rows;
+    const statuses: McpStatus[] = rows;
+    return statuses;
   }
 
   /** Inspection never prompts, and accepts only the one registered server. */
@@ -699,8 +701,6 @@ export class ClaudeProcess {
       .map(({ name }) => `mcp__${mcpName(name)}__`);
   }
 
-  /** A startup snapshot. Connecting servers still participate in the policy
-   * check, even when they cannot yet contribute tools. */
   private async readMcp() {
     let rows = await this.readMcpStatus();
     const context = await this.call({ subtype: "get_context_usage" });
@@ -715,7 +715,6 @@ export class ClaudeProcess {
         )
         .map(({ name }) => name),
     );
-    // Refresh once if an already admitted tool outpaced the status snapshot.
     if (tools.some((tool) => pending.has(tool?.serverName)))
       rows = await this.readMcpStatus();
     const catalog = this.mcpCatalog(rows);
@@ -775,8 +774,6 @@ export class ClaudeProcess {
     const { names } = this.mcpCatalog(rows);
     const matches = (name: string) =>
       this.mcpPending.some((prefix) => name.startsWith(prefix));
-    // Pending servers may collide with names from the original snapshot.
-    // Refresh those prefixes from one catalog, preserving any ambiguity.
     this.mcpToolNames = new Map([
       ...[...this.mcpToolNames].filter(([name]) => !matches(name)),
       ...[...names].filter(([name]) => matches(name)),
@@ -815,8 +812,6 @@ export class ClaudeProcess {
       });
     const steered = this.active;
     const admitted = activity.admitting?.(steered);
-    // Steering can reduce the turn's trust, never restore an owner's origin
-    // after work from another source joined the same native turn.
     const prior = this.hookTurn?.trigger;
     if (
       !steered ||
@@ -916,7 +911,7 @@ export class ClaudeProcess {
     return { written, answer, id };
   }
   /** Sends a control request and resolves with Claude's response. */
-  private async call(request: Message, signal?: AbortSignal): Promise<Message> {
+  private async call(request: Message, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const { written, answer, id } = this.request(request);
     const reply = written.then(() => answer);
@@ -1153,7 +1148,6 @@ export class ClaudeProcess {
       if (this.pending) this.done();
     }
   }
-  /** Native names are lossy; only a unique catalog name can identify a tool. */
   private catalogCall(
     name: string,
     server: string,
@@ -1172,7 +1166,6 @@ export class ClaudeProcess {
     const found = this.mcpToolNames.get(name);
     return found?.server !== TOOL_SERVER ? (found ?? undefined) : undefined;
   }
-  /** Raw MCP identity is metadata, never inferred from lossy name segments. */
   private async hookInput(event: string, input: unknown) {
     if (!["PreToolUse", "PostToolUse", "PostToolUseFailure"].includes(event))
       return input;
@@ -1189,8 +1182,6 @@ export class ClaudeProcess {
       typeof name === "string" &&
       this.mcpPending.some((prefix) => name.startsWith(prefix))
     ) {
-      // A newly connected server may collide with a name already in the map.
-      // Leave time for the policy hook, and keep an unverifiable call unresolved.
       this.mcpRefresh ??= this.refreshMcp()
         .then(
           () => true,
