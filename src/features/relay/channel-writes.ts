@@ -6,6 +6,7 @@ import type { Outbox, OutboxRecovery } from "./outbox";
 import type { RelayWriter } from "./transport";
 import {
   promoteSoloAdmins,
+  SoloAdminSetupExpired,
   soloAdminKey,
   soloAdminRecovery,
   soloAgentOwnership,
@@ -585,7 +586,9 @@ export function createChannelWrites(
   const starts = new Map<string, Promise<void>>();
   const adminSetups = new Map<string, Promise<void>>();
   /** Publication retries also call this after reload. The create's local
-   * receipt retains the original recipients until every grant is recorded. */
+   * receipt retains the original recipients until every grant is recorded, or
+   * until the grants are too old for the relay to take: then the receipt is
+   * retired, and the chat continues with the roles the relay has. */
   function prepareOpening(id: string): Promise<void> | undefined {
     const pending = (receipts ?? outbox)
       ?.snapshot()
@@ -620,7 +623,10 @@ export function createChannelWrites(
         relayAuthor,
         signal,
         freshOwnership,
-      );
+      ).catch((error: unknown) => {
+        // Waiting longer cannot finish it, and would hold every message.
+        if (!(error instanceof SoloAdminSetupExpired)) throw error;
+      });
       signal.throwIfAborted();
       await finishRecovery(saved.event.id, recovery);
     })();

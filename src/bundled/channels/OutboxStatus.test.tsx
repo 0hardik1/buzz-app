@@ -555,7 +555,7 @@ it.each(["agent", "team", "solo", "agent-share"] as const)(
   },
 );
 
-it("abandons expired admin setup durably through Outbox and releases the chat gate", async () => {
+it("abandons blocked admin setup durably through Outbox and releases the chat gate", async () => {
   const viewer = keypair(),
     relay = keypair(),
     agent = keypair();
@@ -578,7 +578,8 @@ it("abandons expired admin setup durably through Outbox and releases the chat ga
     },
   ];
   const events = new Map<string, RelayEvent>([[creation.id, creation]]);
-  const now = Date.now();
+  // Inside the relay's window, where setup still holds the chat: past it the
+  // next send continues with current roles on its own.
   const clock = vi
     .spyOn(Date, "now")
     .mockReturnValue((creation.created_at + 14 * 60) * 1000);
@@ -671,9 +672,8 @@ it("abandons expired admin setup durably through Outbox and releases the chat ga
       within(confirmation).getByRole("button", { name: "Cancel" }),
     );
     expect(outbox.snapshot().some((item) => item.recovery)).toBe(true);
-    clock.mockReturnValue(now);
     await expect(session.channelWrites.prepareOpening(channel)).rejects.toThrow(
-      "expired",
+      "not verified as owned",
     );
     failRemoval = true;
     fireEvent.click(remove());
@@ -689,7 +689,7 @@ it("abandons expired admin setup durably through Outbox and releases the chat ga
     );
     expect(outbox.snapshot().some((item) => item.recovery)).toBe(true);
     await expect(session.channelWrites.prepareOpening(channel)).rejects.toThrow(
-      "expired",
+      "not verified as owned",
     );
     failRemoval = false;
     fireEvent.click(confirm);

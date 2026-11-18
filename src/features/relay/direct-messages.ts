@@ -333,6 +333,47 @@ export function createDirectMessages(
         active.addEventListener("abort", abort, { once: true });
         if (active.aborted) abort();
         else inspect();
+      }).catch(async (error: unknown) => {
+        // The relay takes a signed event for 15 minutes. An unconfirmed
+        // message older than that can never be confirmed by sending it again,
+        // and its receipt would hold whatever waits on it forever. A strong
+        // read by ID decides: the relay has it, or it is given up so it can
+        // be sent again. A read that fails changes nothing.
+        const item = journal.snapshot().find((entry) => entry.event.id === id);
+        if (
+          item?.delivery !== "unknown" ||
+          Date.now() / 1000 - item.event.created_at < 15 * 60
+        )
+          throw error;
+        const events = await reader
+          .read(
+            [
+              {
+                ids: [id],
+                kinds: [9],
+                authors: [transport.viewer],
+                "#h": [channelId],
+                limit: 1,
+                consistency: "strong",
+              },
+            ],
+            { signal: active, fresh: true },
+          )
+          .catch(() => {
+            throw error;
+          });
+        active.throwIfAborted();
+        if (events.some((event) => event.id === id)) return;
+        // A retry that began during the read keeps it.
+        if (
+          journal.snapshot().find((entry) => entry.event.id === id)
+            ?.delivery !== "unknown"
+        )
+          throw error;
+        await outbox.dismiss(id, item.recovery);
+        throw new Error(
+          "This message never reached the conversation and is too old to send again, so it was removed. Send it again.",
+        );
       });
     },
   });

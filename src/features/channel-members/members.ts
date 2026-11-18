@@ -181,12 +181,13 @@ export const discardableAdditions = (
 
 /** Explicitly gives up this person's saved additions that cannot finish, so
  * adding them again starts a new one, and returns the ones given up. An
- * unconfirmed addition may have reached the relay, so the relay is asked for
- * it by ID. One it never received can never arrive past the intake window.
- * One it recorded has had its effect, so the channel's current roster
- * decides: a person it lists is confirmed, and one it does not list is given
- * up, because the same request cannot apply again. An addition that cannot be
- * checked is kept as it was. Nothing sent is undone. */
+ * unconfirmed addition may have reached the relay, and one it never received
+ * can never arrive past the intake window, so the channel's current roster
+ * decides. A person it does not list is given up without asking further:
+ * recorded or not, the same request cannot apply again. For a person it
+ * lists, the relay is asked for the request by ID: one it recorded is
+ * confirmed, and one it never received is given up. An addition that cannot
+ * be checked is kept as it was. Nothing sent is undone. */
 export async function discardAdditions(
   session: Pick<RelaySession, "outbox" | "channelWrites">,
   channelId: string,
@@ -205,8 +206,10 @@ export async function discardAdditions(
     if (item.delivery === "unknown") {
       // The session's own lifetime ends these reads.
       const signal = new AbortController().signal;
-      // Finding the request marks its receipt delivered, so the roster is
-      // read first: a check that fails must leave the receipt as it was.
+      // Finding the request marks its receipt delivered, which ends the
+      // offer to discard it. So the roster is read first, and the request is
+      // looked for only when the roster lists the person: a check or a
+      // dismissal that fails must leave the receipt as it was.
       const listed = await session.channelWrites
         .listsMember(channelId, pubkey, signal)
         .catch((cause: unknown) => {
@@ -222,8 +225,8 @@ export async function discardAdditions(
       )
         continue;
       if (
-        (await session.channelWrites.additionRecorded(item.event, signal)) &&
-        listed
+        listed &&
+        (await session.channelWrites.additionRecorded(item.event, signal))
       ) {
         // Recorded and in effect: confirm it, as Add does.
         await outbox.recover(id, additionRecovery(channelId, pubkey));

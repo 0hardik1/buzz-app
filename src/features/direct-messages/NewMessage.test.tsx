@@ -1489,6 +1489,39 @@ it("locks during opening and delivery, waits for confirmation, and retries the s
   expect(t.directMessages.delivered).toHaveBeenCalledTimes(2);
 });
 
+it("unlocks with its draft once Retry send gives up a message that can never arrive", async () => {
+  const t = setup();
+  t.mount();
+  t.directMessages.delivery.mockReturnValue("unknown");
+  const gone =
+    "This message never reached the conversation and is too old to send again, so it was removed. Send it again.";
+  t.directMessages.delivered
+    .mockRejectedValueOnce(new Error("Delivery uncertain"))
+    // Past the relay's window the delivery check removes it and says so.
+    .mockImplementationOnce(async () => {
+      await t.outbox.dismiss();
+      throw new Error(gone);
+    });
+  await t.user.click(await screen.findByRole("option", { name: "Person 1" }));
+  await t.user.type(screen.getByRole("textbox"), "Keep this draft");
+  await t.user.click(send());
+  await screen.findByRole("button", { name: "Retry send" });
+  expect(recipient()).toBeDisabled();
+  await t.user.click(screen.getByRole("button", { name: "Retry send" }));
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent(gone),
+  );
+  // Nothing holds the page any more, and what was written is still there.
+  expect(
+    screen.queryByRole("button", { name: "Retry send" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("textbox")).toHaveTextContent("Keep this draft");
+  await waitFor(() => expect(send()).toBeEnabled());
+  await t.user.click(send());
+  await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
+  expect(t.messages.send).toHaveBeenCalledTimes(2);
+});
+
 it("preserves recipients and draft after opening fails and across remount", async () => {
   const t = setup();
   const view = t.mount();

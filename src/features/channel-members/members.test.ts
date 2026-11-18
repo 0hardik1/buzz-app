@@ -723,7 +723,7 @@ const afterIntakeWindow = () =>
   vi.spyOn(Date, "now").mockReturnValue(Date.now() + 16 * 60 * 1000);
 
 it.each(["a lost acknowledgement", "a reload while sending"])(
-  "gives up an unconfirmed addition left by %s only once the relay is shown never to have received it",
+  "gives up an unconfirmed addition left by %s only once it can no longer arrive and the roster does not list them",
   async (origin) => {
     const t = setup();
     await t.ready();
@@ -747,26 +747,13 @@ it.each(["a lost acknowledgement", "a reload while sending"])(
           ),
         ).rejects.toThrow(expired);
       expect(t.publish).toHaveBeenCalledTimes(sent);
-      // A check that cannot be made proves nothing.
+      // The roster does not list them, and the request can never apply again,
+      // so the relay is not asked for it: it could answer nothing that matters.
+      const asked = t.invitationReads.length;
       t.setInvitationReadFailure(true);
-      await expect(
-        t.session.memberAdditions.discard(t.id, t.person.pubkey),
-      ).rejects.toThrow(/Invitation read unavailable/);
-      expect(t.records()).toMatchObject([
-        { event: { id: first }, delivery: "unknown" },
-      ]);
-      await expect(t.managedAdd()).rejects.toThrow(expired);
-      t.setInvitationReadFailure(false);
       await t.session.memberAdditions.discard(t.id, t.person.pubkey);
-      expect(t.invitationReads.at(-1)).toEqual([
-        {
-          kinds: [9000],
-          ids: [first],
-          authors: [t.viewer.pubkey],
-          limit: 1,
-          consistency: "strong",
-        },
-      ]);
+      t.setInvitationReadFailure(false);
+      expect(t.invitationReads).toHaveLength(asked);
       expect(t.records()).toEqual([]);
       expect(t.session.outbox?.snapshot()).toEqual([]);
       expect(t.session.memberAdditions.snapshot()).toEqual([]);
@@ -878,24 +865,22 @@ it.each(
       t.setForeign(false);
       kept();
       expect(t.invitationReads).toHaveLength(asked);
-      // Nor does a relay that cannot say whether it has the request.
-      t.setInvitationReadFailure(true);
-      await expect(discard()).rejects.toThrow(/Invitation read unavailable/);
-      t.setInvitationReadFailure(false);
-      kept();
       await expect(t.managedAdd()).rejects.toThrow(expired);
       expect(t.publish).toHaveBeenCalledTimes(sent);
+      // A dismissal that fails keeps the request discardable. The relay has
+      // it, and finding it would mark it delivered, so it is not looked for:
+      // the roster already decided.
+      const read = t.invitationReads.length;
+      t.setSaveFailure(true);
+      await expect(discard()).rejects.toThrow(/Storage unavailable/);
+      t.setSaveFailure(false);
+      kept();
 
+      // Nor does it matter whether the relay could say it has the request.
+      t.setInvitationReadFailure(true);
       await discard();
-      expect(t.invitationReads.at(-1)).toEqual([
-        {
-          kinds: [9000],
-          ids: [first],
-          authors: [t.viewer.pubkey],
-          limit: 1,
-          consistency: "strong",
-        },
-      ]);
+      t.setInvitationReadFailure(false);
+      expect(t.invitationReads).toHaveLength(read);
       expect(t.records()).toEqual([]);
       expect(t.session.outbox?.snapshot()).toEqual([]);
       expect(t.session.memberAdditions.snapshot()).toEqual([]);
@@ -1043,7 +1028,7 @@ it("gives nothing up while an attempt is under way, including one that begins du
   }
 });
 
-it("discards an unconfirmed addition saved without recovery once the relay is shown not to have it", async () => {
+it("discards an unconfirmed addition saved without recovery once it can no longer arrive", async () => {
   const t = setup();
   await t.ready();
   const first = await leaveUnconfirmed(t);
@@ -1052,11 +1037,10 @@ it("discards an unconfirmed addition saved without recovery once the relay is sh
   await t.ready();
   const now = afterIntakeWindow();
   try {
+    const asked = t.invitationReads.length;
     await t.session.memberAdditions.discard(t.id, t.person.pubkey);
-    expect(t.invitationReads.at(-1)?.[0]).toMatchObject({
-      ids: [first],
-      consistency: "strong",
-    });
+    // The roster does not list them, so the request is not looked for.
+    expect(t.invitationReads).toHaveLength(asked);
     expect(t.records()).toEqual([]);
     await t.managedAdd();
   } finally {

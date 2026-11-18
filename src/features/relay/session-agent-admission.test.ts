@@ -648,8 +648,9 @@ it.each([
         }
         expect(test.publish).toHaveBeenCalledOnce();
         await discard();
-        // The relay has it, so the roster decided what became of it.
-        expect(test.found()).toBe(1);
+        // The roster decided what became of it. Only an agent it lists is
+        // looked for on the relay, which has the request.
+        expect(test.found()).toBe(roster === "is still in the roster" ? 1 : 0);
         expect(session.outbox?.snapshot()).toEqual([]);
         expect(session.memberAdditions.snapshot()).toEqual([]);
         await (surface === "People" ? addInPeople() : add());

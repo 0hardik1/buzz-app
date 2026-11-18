@@ -1699,12 +1699,12 @@ async function loseReceipt(t: Awaited<ReturnType<typeof setup>>) {
   ).toEqual(["Discard addition of Morgan"]);
   return { original, discard: within(expired).getByRole("button") };
 }
-it("discards an expired unconfirmed addition in People once the relay is shown not to have it", async () => {
+it("discards an expired unconfirmed addition in People once the roster is shown not to list them", async () => {
   const t = await setup();
   const { original, discard } = await loseReceipt(t);
   await t.user.click(discard);
   await vi.waitFor(() => expect(t.session.outbox?.snapshot()).toEqual([]));
-  // The proof is a strong read of the request's own ID.
+  // The roster does not list them, so the request itself is not looked for.
   expect(
     t.query.mock.calls.some(([filters]) =>
       filters.some(
@@ -1712,7 +1712,7 @@ it("discards an expired unconfirmed addition in People once the relay is shown n
           filter.ids?.includes(original.id) && filter.consistency === "strong",
       ),
     ),
-  ).toBe(true);
+  ).toBe(false);
   await vi.waitFor(() =>
     expect(screen.queryByText(/This addition expired/)).not.toBeInTheDocument(),
   );
@@ -1781,9 +1781,14 @@ it("confirms an expired unconfirmed addition the relay has when the member list 
     expect(screen.queryByText(/This addition expired/)).not.toBeInTheDocument(),
   );
   expect(screen.queryByText(/could not be checked/)).not.toBeInTheDocument();
-  // Nothing was given up, so nothing is sent again.
-  await t.user.click(screen.getByRole("button", { name: /Add Morgan/ }));
+  // Nothing was given up: they are shown as in the channel, with nothing
+  // left to add and nothing sent again.
   await screen.findByText("Morgan is in the channel.");
+  await vi.waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: /Add Morgan/ }),
+    ).not.toBeInTheDocument(),
+  );
   expect(t.publish).toHaveBeenCalledOnce();
 });
 it("DMs cannot add people without a connection that adds to them", async () => {

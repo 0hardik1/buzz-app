@@ -88,11 +88,16 @@ behavior on the label, so a rename touches copy only.
   admin targets across interruptions; retries reconstruct the same grants and
   confirm their recorded IDs before sending. A recorded grant stays complete
   after a later demotion or removal. Expired, unrecorded grants are never re-dated.
-  Outbox offers **Abandon admin setup** once the create is delivered. Confirming
-  retires its recovery receipt while keeping the chat and granted
+  A grant carries the create's timestamp, so once the create is 15 minutes old
+  a grant the relay does not have can never be sent. The next send or retry in
+  that chat then retires the recovery receipt instead of failing: recorded
+  grants stand, and the chat continues with the roles the relay has. Inside
+  the window an unfinished setup still holds the chat's messages.
+  In developer builds, Outbox offers **Abandon admin setup** once the create is
+  delivered, which retires the receipt sooner while keeping the chat and granted
   roles. Grant publication and retirement share the receipt’s durable ownership
-  lock, so another window’s unfinished signature cannot publish after abandonment.
-  After confirming, retry the opening message with current roles or send a new
+  lock, so another window’s unfinished signature cannot publish after either.
+  Afterwards, retry the opening message with current roles or send a new
   message if its signed timestamp has expired. This needs no relay update
   and does not migrate existing members' roles or change tool-created grants.
 - The Buzz tools' `channel_create` with `solo` sends the same create for any

@@ -1998,6 +1998,17 @@ export function ChannelMembersDialog({
           ),
         ),
       );
+      // Discard confirms an addition the relay applied instead of giving it
+      // up. Reading the roster moves that person out of the people to add;
+      // a read that fails leaves them listed until the roster next loads.
+      const roster = await session.channelWrites
+        .refreshMembership(channelId)
+        .catch(() => undefined);
+      const present = keys.filter((key) => roster?.members?.includes(key));
+      if (present.length && !lifetime.current?.signal.aborted)
+        setNotice(
+          `${listNames(present)} ${present.length > 1 ? "are" : "is"} in the ${place}.`,
+        );
     } catch (error) {
       setDiscardError(
         error instanceof Error

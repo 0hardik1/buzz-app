@@ -1495,9 +1495,11 @@ readback retains uncertainty; inspect the conversation before explicitly sending
 another. Expired no-role Solo invitations have a narrower verified retirement
 path through [**Add** in People, or Outbox Retry in developer builds](solo/sharing.md).
 Any other expired unconfirmed member addition is settled by **Discard** in
-People, after fresh strong reads of the channel's signed roster and of the event
-ID: it is given up when the relay never received it, or recorded it for someone
-the roster no longer lists, and confirmed when the roster lists them. In
+People, after a fresh strong read of the channel's signed roster. It is given up
+when the roster does not list the person, whether the relay never received it or
+recorded it for someone who has since left. When the roster lists them, a fresh
+strong read of the event ID decides: it is confirmed when the relay has the
+event, and given up when the relay never received it. In
 developer builds, **Remove from outbox** also drops one saved without recovery
 (an agent request, or an older client's invitation) with no read.
 

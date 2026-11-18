@@ -613,11 +613,33 @@ They do not publish automatically after restart. Explicit retry reuses the saved
 signed event. The Channels timeline exposes retries for failed/unknown messages. In
 developer builds only, the Outbox list in Channel Settings → Diagnostics also exposes
 restored pending operations and explicit removal; release builds render no Outbox list.
-There, a message is retried in its timeline, a member addition is retried or
-discarded in People, and a Canvas or recipe save that can no longer land gives
-way to saving again. A release build has no general retry or removal for any
-other restored operation: each has only what its own surface offers, and a
-channel Create left behind by a reload has nothing (see
+There, every operation that can block its author is resolved where it was
+started:
+
+- A message is retried in its timeline, or deleted from its menu. An edit or a
+  deletion is retried or discarded in its notice.
+- A reaction, or the removal of one, is retried or discarded under its message.
+- A member addition is retried or discarded in People.
+- A Canvas or recipe save that can no longer land gives way to saving again.
+- A first message, a forward or an agent share that stayed unconfirmed past
+  the 15-minute intake window is asked for by ID on the next **Retry** in its
+  own dialog, and removed when the relay never received it, so it can be sent
+  again. Bestie setup does the same for its welcome message.
+- Solo admin setup that cannot finish inside the window ends there: the next
+  send in that chat continues with the roles the relay has.
+- Workflow commands, huddle chat messages and product feedback are dismissed
+  in their own notices.
+
+No operation is discarded while it may still arrive: an unconfirmed one is
+given up only past the intake window, and only after a fresh strong read shows
+the relay does not have it.
+
+What a release build cannot clear shows nothing and blocks nothing; it only
+holds one of the outbox's 256 places: a failed huddle-ended notice, a delivered
+agent-share receipt whose dialog closed before it was acknowledged (sharing the
+same copy to the same place again clears it), failed agent-record and catalog
+publications, an unconfirmed operation in a channel the viewer has since left,
+and a channel Create left behind by a reload (see
 [Channels](channels.md)). Removing an item
 stops retaining its local overlay; it is not a relay deletion.
 Session disposal cancels work and blocks late state changes. Cache clearing keeps

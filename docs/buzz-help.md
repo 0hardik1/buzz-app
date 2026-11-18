@@ -385,6 +385,13 @@ and are asked to sign in again in Buzz.
   color; on your own messages they take a neutral gray instead. A reaction
   never shows a `:shortcode:` as text: it draws the community's custom emoji
   with that name, or a neutral smiley when there is none or its image can't load.
+  If adding or removing your reaction fails, Buzz says so under the message
+  and offers **Retry reaction** and **Discard reaction update**. If Buzz
+  cannot tell whether it was sent, you can retry it, and discard it once it is
+  15 minutes old. Discard then checks the community first: a reaction update
+  that did arrive is kept, and one that never arrived is removed. After 15
+  minutes it can no longer be retried, so only Discard is offered. Until it is
+  resolved you cannot change your reactions to that message.
 - In the fullscreen video viewer, comments and emoji reactions at the current
   frame stay attached to that video when you move through a thread's media.
 - Right-click an uploaded image to **Copy image**, **Copy image URL**, or
@@ -446,6 +453,11 @@ and are asked to sign in again in Buzz.
   without sharable attachment metadata (including custom emoji), show an
   explanation before sending. Forward and Copy as forward are disabled; **Copy link** is available
   in the dialog. A link still requires access to the original conversation.
+  A forward, a first message in **New message**, or a shared agent copy that
+  could not be confirmed is kept so **Retry** can check it again. Once it is 15
+  minutes old it can no longer be sent: Retry then checks the community,
+  confirms it if it arrived, and otherwise removes it and asks you to send it
+  again.
 - Select text in a message, such as by double-clicking a word, then right-click
   the highlight and choose **Quote highlight** (or press Q) to add it to that
   conversation's draft as a quote, ready for your reply below it. Published
@@ -484,10 +496,14 @@ and are asked to sign in again in Buzz.
   Chat access. Other people's agents get ordinary participation; later additions
   use Bot. Existing members keep their saved roles.
   If admin setup is interrupted, **Retry** on the opening message attempts to
-  finish it without restoring later demotions or removals. If setup is blocked,
-  choose **Abandon admin setup** in Outbox as soon as the chat exists. This keeps
-  the chat and current roles and stops unfinished setup in other windows. Then
-  retry the opening message, or send a new one if the original has expired.
+  finish it without restoring later demotions or removals. Setup that still
+  has not finished 15 minutes after you started the chat can no longer finish,
+  so it ends: the chat keeps the roles it has, and your next message sends. An
+  opening message that old can no longer be sent either; delete it from its
+  menu and send it again.
+  Developer builds only: **Abandon admin setup** in Outbox ends setup sooner,
+  as soon as the chat exists. It keeps the chat and current roles and stops
+  unfinished setup in other windows.
   Solo conversations continue at the chat's top level
   rather than requiring a new thread for each reply. Where available, use
   **Model and effort** in the composer before sending; Solo keeps those choices

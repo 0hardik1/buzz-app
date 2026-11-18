@@ -282,6 +282,134 @@ it("retries a rejected first message with the same signed event", async () => {
     t.owner.dispose();
   }
 });
+describe("an unconfirmed first message the relay can no longer take", () => {
+  const recovery = { key: "direct-message:new", value: "{}" };
+  /** Sends a first message that gets no answer, then refuses every retry as
+   * the relay does an event older than its 15-minute window. */
+  async function unconfirmed() {
+    const t = setup();
+    await t.dm.open([t.other.pubkey], new AbortController().signal);
+    t.publish
+      .mockRejectedValueOnce(new Error("Connection lost"))
+      .mockRejectedValue(new PublishRejected("Event too old"));
+    const message = t.owner.session.messages.send(
+      id,
+      "Keep me",
+      [],
+      [],
+      recovery,
+    );
+    const outbox = t.owner.session.outbox;
+    if (!outbox) throw new Error("No outbox");
+    const saved = () =>
+      outbox.snapshot().find((item) => item.event.id === message);
+    await vi.waitFor(() => expect(saved()?.delivery).toBe("unknown"));
+    const confirm = () =>
+      t.dm.delivered(message, id, new AbortController().signal);
+    const sent = t.publish.mock.calls[0]?.[0];
+    if (!sent) throw new Error("Nothing was sent");
+    const read = t.query.getMockImplementation();
+    if (!read) throw new Error("No relay");
+    /** What the relay answers when asked for the message by ID. */
+    const relay = (answer: () => RelayEvent[]) =>
+      t.query.mockImplementation(async (filters) =>
+        filters.some((filter) => filter.ids?.includes(message))
+          ? answer()
+          : read(filters),
+      );
+    const expire = () =>
+      vi.spyOn(Date, "now").mockReturnValue(Date.now() + 16 * 60 * 1000);
+    return { ...t, message, outbox, saved, confirm, sent, relay, expire };
+  }
+
+  it("keeps it inside the window, where it may still arrive", async () => {
+    const t = await unconfirmed();
+    try {
+      await expect(t.confirm()).rejects.toThrow("Event too old");
+      expect(t.saved()?.delivery).toBe("unknown");
+      expect(
+        t.query.mock.calls.some(([filters]) =>
+          filters.some(
+            (filter) =>
+              filter.ids?.includes(t.message) &&
+              filter.consistency === "strong",
+          ),
+        ),
+      ).toBe(false);
+    } finally {
+      t.owner.dispose();
+    }
+  });
+
+  it("gives it up once the relay never can receive it, so it can be sent again", async () => {
+    const t = await unconfirmed();
+    const clock = t.expire();
+    try {
+      // The dead end: every retry is refused, and the receipt stays.
+      t.outbox.retry(t.message);
+      await vi.waitFor(() =>
+        expect(t.saved()?.error).toContain("Event too old"),
+      );
+      expect(t.saved()?.delivery).toBe("unknown");
+      await expect(t.confirm()).rejects.toThrow(
+        "never reached the conversation and is too old to send again",
+      );
+      expect(t.saved()).toBeUndefined();
+      expect(
+        t.query.mock.calls.some(([filters]) =>
+          filters.some(
+            (filter) =>
+              filter.ids?.includes(t.message) &&
+              filter.consistency === "strong",
+          ),
+        ),
+      ).toBe(true);
+      t.publish.mockReset().mockResolvedValue(undefined);
+      const again = t.owner.session.messages.send(
+        id,
+        "Keep me",
+        [],
+        [],
+        recovery,
+      );
+      await t.dm.delivered(again, id, new AbortController().signal);
+    } finally {
+      clock.mockRestore();
+      t.owner.dispose();
+    }
+  });
+
+  it("keeps it when the relay did receive it, and confirms it", async () => {
+    const t = await unconfirmed();
+    const clock = t.expire();
+    try {
+      t.relay(() => [t.sent]);
+      await t.confirm();
+      expect(t.saved()?.delivery).toBe("seen");
+      await t.outbox.acknowledge(t.message);
+      expect(t.saved()).toBeUndefined();
+    } finally {
+      clock.mockRestore();
+      t.owner.dispose();
+    }
+  });
+
+  it("keeps it when the relay cannot be asked", async () => {
+    const t = await unconfirmed();
+    const clock = t.expire();
+    try {
+      t.relay(() => {
+        throw new Error("Relay offline");
+      });
+      await expect(t.confirm()).rejects.toThrow("Event too old");
+      expect(t.saved()?.delivery).toBe("unknown");
+      expect(t.saved()?.recovery).toEqual(recovery);
+    } finally {
+      clock.mockRestore();
+      t.owner.dispose();
+    }
+  });
+});
 it("reads paginated verified profiles, excludes the viewer, and cancels with the caller", async () => {
   const t = setup();
   try {

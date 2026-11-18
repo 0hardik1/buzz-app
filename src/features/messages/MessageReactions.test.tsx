@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ConversationPresentation } from "../conversation/ConversationPresentation";
+import { discardReaction } from "../conversation/ReactionTool";
 import { MessageReactionControls, MessageReactions } from "./MessageReactions";
 import { PREVIEW_REST_MS } from "../../shared/design-system/ui/hoverIntent";
 import { createRelaySession } from "../relay/session";
@@ -23,7 +24,7 @@ import {
   signed,
 } from "../relay/testing";
 import type { LiveCallbacks } from "../relay/live";
-import type { RelayEvent } from "../relay/events";
+import type { ReadFilter, RelayEvent } from "../relay/events";
 import type {
   ComposerTool,
   ContributionReader,
@@ -49,6 +50,7 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLElement.prototype, "showPopover");
   for (const owner of owners.splice(0)) owner.dispose();
   localStorage.clear();
+  vi.restoreAllMocks();
 });
 const registry = <T,>(
   entries: ReturnType<ContributionReader<T>["snapshot"]>,
@@ -102,9 +104,29 @@ function harness(
 ) {
   const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
   let live!: LiveCallbacks;
+  /** How the relay answers a strong read by ID: with the events it `has`,
+   * or by failing. Every such filter is recorded. */
+  const check: { has: RelayEvent[]; fail?: Error; asked: ReadFilter[] } = {
+    has: [],
+    asked: [],
+  };
   const owner = createRelaySession(
     {
       ...wire.transport,
+      query(filters, signal) {
+        const strong = filters.filter(
+          (filter) => filter.consistency === "strong" && filter.ids,
+        );
+        if (!strong.length) return wire.transport.query(filters, signal);
+        check.asked.push(...strong);
+        return check.fail
+          ? Promise.reject(check.fail)
+          : Promise.resolve(
+              check.has.filter((event) =>
+                strong.some((filter) => filter.ids?.includes(event.id)),
+              ),
+            );
+      },
       ...(media ? { media } : {}),
       writer: { sign: async (template) => signed(viewer, template), publish },
       subscribe(callbacks) {
@@ -157,8 +179,49 @@ function harness(
       )
     );
   }
-  return { ...owner, live, wire, publish, Controls };
+  /** The session runs three reads at a time. Answers the scripted ones still
+   * open, so a read that follows is not queued behind them. */
+  const idle = () => {
+    for (const open of wire.pending.splice(0)) open.respond([]);
+  };
+  return { ...owner, live, wire, publish, check, idle, Controls };
 }
+/** The relay takes a signed event for 15 minutes. As the native writer does,
+ * an older one is looked up, never sent again. */
+const TOO_OLD =
+  "This event is too old to retry and was not found on the relay. Check the conversation before sending it again.";
+const intake =
+  (relay: (event: RelayEvent) => Promise<void>) =>
+  async (event: RelayEvent) => {
+    if (event.created_at < Math.floor(Date.now() / 1000) - 15 * 60)
+      throw new PublishRejected(TOO_OLD);
+    await relay(event);
+  };
+const refused = async () => {
+  throw new PublishRejected("Nope");
+};
+/** Dispatched and never answered. */
+const unanswered = async () => {
+  throw new Error("Connection lost");
+};
+const settle = () =>
+  act(async () => {
+    await flush();
+    await flush();
+  });
+/** Moves the clock past the intake window of everything sent so far. */
+const expire = () => {
+  const now = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => now + 16 * 60_000);
+};
+const picker = () =>
+  within(screen.getByTestId("reaction-controls")).getByRole<HTMLButtonElement>(
+    "button",
+    { name: "Choose reaction" },
+  );
+const retry = () => screen.queryByRole("button", { name: "Retry reaction" });
+const discard = () =>
+  screen.queryByRole("button", { name: "Discard reaction update" });
 it("shows one bubble per emoji, counts unique people, and removes all my duplicate events", async () => {
   const mine = react(),
     duplicate = react(viewer, 3),
@@ -900,6 +963,244 @@ it("rolls back a failed last-reaction removal and retries it after remount", asy
   });
   expect(publish.mock.calls[1]?.[0]).toEqual(original);
   expect(screen.queryByRole("button", { name: "👍: You" })).toBeNull();
+});
+
+it("leaves a refused reaction past the relay's window only a Discard, which lets the person react again", async () => {
+  const publish = vi.fn(intake(refused));
+  const h = harness([], publish);
+  render(<h.Controls />);
+  fireEvent.click(picker());
+  await settle();
+  expire();
+  fireEvent.click(retry() as HTMLElement);
+  await settle();
+  // The retry reproduced the dead end: refused, never sent, still blocking.
+  const [stuck] = h.session.outbox?.snapshot() ?? [];
+  expect(stuck?.delivery).toBe("failed");
+  expect(stuck?.error).toBe(TOO_OLD);
+  expect(picker().disabled).toBe(true);
+  expect(screen.getByRole("status").textContent).toContain(
+    "Couldn’t update reaction, and it is too old to retry.",
+  );
+  expect(retry()).toBeNull();
+  fireEvent.click(discard() as HTMLElement);
+  await settle();
+  expect(h.session.outbox?.snapshot()).toEqual([]);
+  // Known not to have been sent, so the relay is not asked.
+  expect(h.check.asked).toEqual([]);
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.queryByRole("button", { name: "👍: You" })).toBeNull();
+  // The person reacts again with a new event.
+  publish.mockImplementation(async () => {});
+  expect(picker().disabled).toBe(false);
+  fireEvent.click(picker());
+  await settle();
+  const sent = publish.mock.calls.at(-1)?.[0];
+  expect(sent?.kind).toBe(7);
+  expect(sent?.id).not.toBe(stuck?.event.id);
+  expect(screen.getByRole("button", { name: "👍: You" })).toBeTruthy();
+});
+
+it("says how long an unconfirmed reaction must wait before it can be discarded", async () => {
+  const h = harness([], vi.fn(intake(unanswered)));
+  render(<h.Controls />);
+  fireEvent.click(picker());
+  await settle();
+  expect(screen.getByRole("status").textContent).toContain(
+    "Reaction delivery not confirmed. Retry it, or discard it once it is 15 minutes old.",
+  );
+  // The rule holds for a caller that does not go through the button.
+  const [sent] = h.session.outbox?.snapshot() ?? [];
+  await expect(
+    discardReaction(h.session, sent?.event.id ?? ""),
+  ).rejects.toThrow(
+    "This reaction update may still be delivered. Retry it, or discard it once it is 15 minutes old.",
+  );
+  expect(h.session.outbox?.snapshot()).toHaveLength(1);
+  expect(h.check.asked).toEqual([]);
+});
+
+it("discards a refused reaction inside the window without asking the relay", async () => {
+  const h = harness([react(other)], vi.fn(intake(refused)));
+  render(<h.Controls />);
+  fireEvent.click(picker());
+  await settle();
+  expect(screen.getByRole("status").textContent).toContain(
+    "Couldn’t update reaction.",
+  );
+  expect(retry()).toBeTruthy();
+  fireEvent.click(discard() as HTMLElement);
+  await settle();
+  expect(h.session.outbox?.snapshot()).toEqual([]);
+  expect(h.check.asked).toEqual([]);
+  // What the relay has is what shows: their reaction, not mine.
+  expect(
+    screen.getByRole("button", { name: `👍: ${other.pubkey.slice(0, 10)}` }),
+  ).toBeTruthy();
+  expect(picker().disabled).toBe(false);
+});
+
+it("keeps an unconfirmed reaction that may still arrive, and discards it once the relay never can receive it", async () => {
+  const publish = vi.fn(intake(unanswered));
+  const h = harness([], publish);
+  render(<h.Controls />);
+  fireEvent.click(picker());
+  await settle();
+  const [sent] = h.session.outbox?.snapshot() ?? [];
+  expect(sent?.delivery).toBe("unknown");
+  // It may still reach the relay: shown as mine, with Retry and no Discard.
+  expect(screen.getByRole("button", { name: "👍: You" })).toBeTruthy();
+  expect(retry()).toBeTruthy();
+  expect(discard()).toBeNull();
+  expire();
+  fireEvent.click(retry() as HTMLElement);
+  await settle();
+  // The dead end: the same event can never be sent, and nothing confirms it.
+  expect(h.session.outbox?.snapshot()[0]?.delivery).toBe("unknown");
+  expect(h.session.outbox?.snapshot()[0]?.error).toBe(
+    `Retry blocked: ${TOO_OLD}`,
+  );
+  expect(picker().disabled).toBe(true);
+  expect(screen.getByRole("status").textContent).toContain(
+    "Reaction delivery not confirmed, and it is too old to retry.",
+  );
+  expect(retry()).toBeNull();
+  // A relay that cannot be asked keeps it.
+  h.check.fail = new Error("Relay unavailable");
+  h.idle();
+  fireEvent.click(discard() as HTMLElement);
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Couldn’t check whether this reaction update was delivered, so it was kept. Try Discard again.",
+  );
+  expect(h.session.outbox?.snapshot()).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "👍: You" })).toBeTruthy();
+  // The relay never received it: given up, and no longer shown as mine.
+  delete h.check.fail;
+  h.check.asked.length = 0;
+  fireEvent.click(discard() as HTMLElement);
+  await waitFor(() => expect(h.session.outbox?.snapshot()).toEqual([]));
+  expect(h.check.asked).toEqual([
+    {
+      kinds: [7],
+      ids: [sent?.event.id],
+      authors: [viewer.pubkey],
+      limit: 1,
+      consistency: "strong",
+    },
+  ]);
+  expect(h.session.outbox?.snapshot()).toEqual([]);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.queryByRole("button", { name: "👍: You" })).toBeNull();
+  publish.mockImplementation(async () => {});
+  fireEvent.click(picker());
+  await settle();
+  expect(publish.mock.calls.at(-1)?.[0].id).not.toBe(sent?.event.id);
+  expect(screen.getByRole("button", { name: "👍: You" })).toBeTruthy();
+});
+
+it("keeps an unconfirmed reaction the relay did receive, and says so", async () => {
+  const publish = vi.fn(intake(unanswered));
+  const h = harness([], publish);
+  const view = render(<h.Controls />);
+  fireEvent.click(picker());
+  await settle();
+  const sent = publish.mock.calls[0]?.[0];
+  if (!sent) throw new Error("Reaction was not published");
+  // Opened again after the window: Discard stands alone.
+  view.unmount();
+  expire();
+  render(<h.Controls />);
+  expect(retry()).toBeNull();
+  h.check.has.push(sent);
+  h.idle();
+  fireEvent.click(discard() as HTMLElement);
+  // Settled as delivered: nothing is left to retry or discard.
+  await waitFor(() => expect(h.session.outbox?.snapshot()).toEqual([]));
+  expect(
+    (
+      await screen.findByText(
+        "This reaction update had already been delivered, so it was kept.",
+      )
+    ).getAttribute("role"),
+  ).toBe("status");
+  expect(publish).toHaveBeenCalledTimes(1);
+  expect(retry()).toBeNull();
+  expect(discard()).toBeNull();
+  // The reaction the relay has stays mine, and can be removed as usual.
+  publish.mockImplementation(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "👍: You" }));
+  await settle();
+  const removal = publish.mock.calls.at(-1)?.[0];
+  expect(removal?.kind).toBe(5);
+  expect(removal?.tags).toContainEqual(["e", sent.id]);
+  expect(screen.queryByRole("button", { name: "👍: You" })).toBeNull();
+});
+
+it("restores my reaction when an unconfirmed removal never reached the relay", async () => {
+  const publish = vi.fn(intake(unanswered));
+  const mine = react();
+  const h = harness([mine], publish);
+  render(<h.Controls />);
+  fireEvent.click(screen.getByRole("button", { name: "👍: You" }));
+  await settle();
+  const [removal] = h.session.outbox?.snapshot() ?? [];
+  expect(removal?.event.kind).toBe(5);
+  expect(removal?.delivery).toBe("unknown");
+  // Shown as removed while the removal may still arrive.
+  expect(screen.queryByRole("button", { name: "👍: You" })).toBeNull();
+  expect(discard()).toBeNull();
+  expire();
+  fireEvent.click(retry() as HTMLElement);
+  await settle();
+  expect(picker().disabled).toBe(true);
+  h.idle();
+  fireEvent.click(discard() as HTMLElement);
+  await waitFor(() => expect(h.session.outbox?.snapshot()).toEqual([]));
+  expect(h.check.asked.at(-1)).toMatchObject({
+    kinds: [5],
+    ids: [removal?.event.id],
+  });
+  // The relay still has the reaction, so it is mine again and can be removed.
+  const pill = screen.getByRole("button", { name: "👍: You" });
+  publish.mockImplementation(async () => {});
+  fireEvent.click(pill);
+  await settle();
+  const again = publish.mock.calls.at(-1)?.[0];
+  expect(again?.kind).toBe(5);
+  expect(again?.id).not.toBe(removal?.event.id);
+  expect(again?.tags).toContainEqual(["e", mine.id]);
+});
+
+it("keeps an unconfirmed removal the relay did receive", async () => {
+  const publish = vi.fn(intake(unanswered));
+  const h = harness([react()], publish);
+  const view = render(<h.Controls />);
+  fireEvent.click(screen.getByRole("button", { name: "👍: You" }));
+  await settle();
+  const sent = publish.mock.calls[0]?.[0];
+  if (!sent) throw new Error("Removal was not published");
+  view.unmount();
+  expire();
+  render(<h.Controls />);
+  h.check.has.push(sent);
+  h.idle();
+  fireEvent.click(discard() as HTMLElement);
+  await waitFor(() => expect(h.session.outbox?.snapshot()).toEqual([]));
+  expect(
+    (
+      await screen.findByText(
+        "This reaction update had already been delivered, so it was kept.",
+      )
+    ).getAttribute("role"),
+  ).toBe("status");
+  // Removed on the relay, so removed here, and the person can react again.
+  expect(screen.queryByRole("button", { name: "👍: You" })).toBeNull();
+  publish.mockImplementation(async () => {});
+  fireEvent.click(picker());
+  await settle();
+  expect(publish.mock.calls.at(-1)?.[0].kind).toBe(7);
+  expect(screen.getByRole("button", { name: "👍: You" })).toBeTruthy();
 });
 
 it("retires reaction previews while retaining the reaction delivery owner", async () => {

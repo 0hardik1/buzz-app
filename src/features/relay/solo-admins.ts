@@ -96,6 +96,18 @@ function readSoloAdminSetup(item: OutgoingEvent) {
     return { channel, admins, recovery: item.recovery };
 }
 
+/** A grant carries its create's timestamp, and the relay takes an event for
+ * 15 minutes. Past that a grant the relay does not have can never be sent, so
+ * the setup can only end with the roles the chat has. */
+export class SoloAdminSetupExpired extends Error {
+  constructor() {
+    super(
+      "Chat admin setup expired. The chat continues with its current roles.",
+    );
+    this.name = "SoloAdminSetupExpired";
+  }
+}
+
 /** Reconstruct the exact same promotions after interruption. Their timestamp
  * and channel come from the saved create, so retries never invent a new grant
  * that could undo a later demotion or removal. */
@@ -145,14 +157,12 @@ export async function promoteSoloAdmins(
     // A recorded grant remains complete even when its recipient was demoted.
     if (await recorded()) continue;
     if (Date.now() / 1000 - create.created_at >= 15 * 60)
-      throw new Error(
-        "Chat admin setup expired. Abandon setup in Outbox to continue with current roles, or start a new chat.",
-      );
+      throw new SoloAdminSetupExpired();
     const ownership = await owned?.(admin, admins);
     const checkOwnership = () => {
       if (!ownership?.())
         throw new Error(
-          "An opening agent is not verified as owned by the chat creator. Retry this message or choose Abandon admin setup in Outbox to continue with current roles.",
+          "An opening agent is not verified as owned by the chat creator. Retry this message. The chat continues with current roles once setup is 15 minutes old.",
         );
     };
     checkOwnership();
@@ -176,7 +186,7 @@ export async function promoteSoloAdmins(
     )?.[3];
     if (!role || !["member", "bot", "admin"].includes(role))
       throw new Error(
-        "An opening agent's access changed. Choose Abandon admin setup in Outbox to continue with current roles.",
+        "An opening agent's access changed. The chat continues with current roles once setup is 15 minutes old.",
       );
     checkOwnership();
     const signed = await writer.sign(template, signal);

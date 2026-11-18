@@ -380,6 +380,55 @@ it("abandons expired setup while signing is held without granting or releasing i
   }
 });
 
+it("continues with the roles the chat has once an unfinished setup is too old to send", async () => {
+  const h = setup();
+  const owner = await h.open();
+  const publish = h.adminPublish.getMockImplementation();
+  assert.exists(publish);
+  // The relay records the first grant and refuses the second for good.
+  h.adminPublish
+    .mockImplementationOnce(publish)
+    .mockRejectedValue(new Error("Grant refused"));
+  const clock = vi.spyOn(Date, "now");
+  try {
+    const { message } = h.start(owner);
+    const outbox = owner.session.outbox;
+    assert.exists(outbox);
+    const holding = () =>
+      outbox
+        .snapshot()
+        .some((item) => item.recovery?.key === soloAdminKey(h.channel));
+    await vi.waitFor(() =>
+      expect(
+        outbox.snapshot().find((item) => item.event.id === message)?.delivery,
+      ).toBe("failed"),
+    );
+    // Inside the relay's window the grant may still be sent, so setup holds.
+    await expect(
+      owner.session.channelWrites.prepareOpening(h.channel),
+    ).rejects.toThrow("Grant refused");
+    expect(holding()).toBe(true);
+    clock.mockReturnValue(Date.now() + 16 * 60 * 1000);
+    const granted = h.adminPublish.mock.calls.length;
+    const fresh = owner.session.messages.send(
+      h.channel,
+      "Continue with current roles",
+      h.agents,
+    );
+    await vi.waitFor(() => expect(h.events.has(fresh)).toBe(true));
+    expect(holding()).toBe(false);
+    // No grant is re-dated or resent, and the recorded one stands.
+    expect(h.adminPublish).toHaveBeenCalledTimes(granted);
+    expect(h.agents.map((key) => h.roles.get(key))).toEqual([
+      "admin",
+      "member",
+    ]);
+    expect(h.events.has(message)).toBe(false);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
 it.each(["transferred", "missing", "unavailable"] as const)(
   "refreshes cached ownership before opening grants when the relay profile is %s",
   async (change) => {

@@ -128,25 +128,32 @@ Any other saved single addition that can no longer finish is replaced only
 after explicitly giving it up with **Discard** in People. Adding the person
 again then sends a new invitation. Discard covers two cases:
 
-- An addition known not to have been sent. People reports it with **Discard**
-  beside **Retry**; once it is past the intake window, **Retry** is not
-  offered. In developer builds, removing it in Outbox does the same.
+- An addition known not to have been sent. When an **Add** in the open People
+  dialog fails, People reports it with **Discard** beside **Retry**. One that
+  failed on another surface or in an earlier launch is reported once it is
+  past the intake window, with **Discard** alone, because **Retry** is not
+  offered then. In developer builds, removing it in Outbox does the same.
 - An unconfirmed addition past the intake window, whoever started it: a member
   invitation, an agent request, or one saved by an older client. It may have
-  reached the relay, so Discard asks the relay with two fresh strong reads:
-  the channel's signed roster, then the original event ID.
-  - The relay never received it: it is given up. Past the window it can then
-    never arrive.
-  - The relay recorded it and the roster does not list the person: it is
-    given up. It has had its effect, and the same request cannot apply again.
-  - The relay recorded it and the roster lists the person: it is confirmed,
-    and nothing is given up or sent again.
-  - Either read fails, or returns no roster signed by the relay: it is kept
+  reached the relay, and past the window it can no longer arrive, so Discard
+  reads the channel's signed roster with a fresh strong read.
+  - The roster does not list the person: it is given up, and the relay is not
+    asked for the event. Whether the relay never received it, or recorded it
+    for someone who has since left, the same request cannot apply again.
+  - The roster lists the person: a second fresh strong read asks the relay for
+    the original event ID. If the relay recorded it, it is confirmed: nothing
+    is given up or sent again, and People shows the person as in the channel.
+    If the relay never received it, it is given up.
+  - A read fails, or returns no roster signed by the relay: it is kept
     exactly as it was. People says the member list could not be checked, or
     shows the read's error, and Discard can be tried again.
 
-  The roster is read first because finding the event marks its receipt
-  delivered, and a check that fails must change nothing.
+  The event is looked for only when the roster lists the person, because
+  finding it marks its receipt delivered, which ends the offer to discard it.
+  So neither a read that fails nor a dismissal that fails changes the receipt:
+  it stays unconfirmed, and Discard is still offered. Only an addition found
+  on the relay for a listed person is marked delivered, and that one is
+  confirmed, not given up.
 
 An unconfirmed addition still inside the intake window is never discarded, and
 neither is one with an attempt under way; Add or Retry resolves it. Past the

@@ -393,7 +393,12 @@ is verified. Cleanup failure retains recovery for confirmation-only retry. A pag
 reopened during acknowledgement resets its recovered editor when retirement finishes.
 Local storage is a convenience for editable drafts. Only a
 definitively failed recovery operation can be removed (including through
-Diagnostics in developer builds), releasing the preserved draft for editing or a changed recipient set. A changed set also invalidates the prepared destination.
+Diagnostics in developer builds), releasing the preserved draft for editing or a changed recipient set.
+An uncertain one older than the relay's 15-minute intake window can never be
+confirmed by sending it again, so its next **Retry** (a first message, a forward,
+or an agent share) asks the relay for the event by ID with a fresh strong read:
+one the relay has is confirmed; one it never received is removed, and the dialog
+says to send it again; a read that fails keeps it. A changed set also invalidates the prepared destination.
 Page exit cancels preparation and its delivery waiter, while the outbox retains
 ownership of already queued messages. Reopening recovers the pending event rather
 than enqueueing a duplicate.
@@ -1739,9 +1744,28 @@ reactions. Messages without reactions do not show it. The Emoji plugin supplies
 the emoji-only picker
 through its optional conversation tool `reactionComponent`; the shared message
 row owns publication. The picker opens outside the scrolling list, closes on
-selection or Escape, and returns focus to the plus button. Failed or unconfirmed
-reaction delivery offers Retry reaction through the same outbox. Read-only
+selection or Escape, and returns focus to the plus button. Read-only
 connections and archived channels do not expose the action.
+
+A reaction, or the removal of one, that failed or stayed unconfirmed is reported
+under its message through the same outbox, and holds that person's further
+reactions to that message until it is resolved there:
+
+- Inside the relay's 15-minute intake window it offers **Retry reaction**. One
+  known not to have been sent also offers **Discard reaction update**, which
+  drops it without asking the relay: nothing was applied, so the message
+  already shows what the relay has. An unconfirmed one may still arrive, so it
+  cannot be discarded yet, and its status says when it can.
+- Past the window the relay can no longer take the event, so **Retry reaction**
+  is not offered and **Discard reaction update** stands alone. For an
+  unconfirmed one, Discard first asks the relay for the event by ID with a
+  fresh strong read. One the relay never received is given up, and the message
+  returns to the reactions the relay has. One the relay has is kept: reading
+  it settles it as delivered, and a notice says it was kept. A read that fails
+  keeps it and says so, and Discard can be tried again.
+
+The controls follow the event's age when the row renders; no timer swaps them
+at the 15-minute mark.
 
 The composer shows its GIF tab as soon as relay support is confirmed. Unsupported
 results are retried when the picker reopens; the broker caches confirmed support
