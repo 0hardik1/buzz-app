@@ -433,32 +433,34 @@ function mountSources(
     });
   return { replace, press, publishes, unregister };
 }
-const people = (result: Partial<CompletionResult> = {}): Source => ({
-  id: "people",
-  title: "Mention",
-  order: -10,
-  result: {
-    items: [
-      {
-        id: "x",
-        label: "Eng Bot",
-        edit: { mention: ENG_BOT },
-      },
-    ],
-    spaceId: "x",
-    ...result,
-  },
-});
+const people = (result: Partial<CompletionResult> = {}) =>
+  ({
+    id: "people",
+    title: "Mention",
+    order: -10,
+    result: {
+      items: [
+        {
+          id: "x",
+          label: "Eng Bot",
+          edit: { mention: ENG_BOT },
+        },
+      ],
+      spaceId: "x",
+      ...result,
+    },
+  }) satisfies Source;
 const groups = (
   result: CompletionResult | (() => never) | undefined,
   order = -20,
-): Source => ({
-  id: "groups",
-  title: "Groups",
-  order,
-  supplement: true,
-  result,
-});
+) =>
+  ({
+    id: "groups",
+    title: "Groups",
+    order,
+    supplement: true,
+    result,
+  }) satisfies Source;
 const groupRow = {
   id: "x",
   label: "eng",
