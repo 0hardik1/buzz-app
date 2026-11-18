@@ -12,6 +12,7 @@ import {
   type AcpProcess,
   REQUEST_TIMEOUT_MS,
 } from "../../features/agent-harness/acp/process";
+import { abortable } from "../../features/agent-harness/acp/agent-sessions";
 import type { AcpHooks } from "../../features/agent-harness/acp/types";
 
 type Who = Pick<AgentHandle, "key" | "protection">;
@@ -31,7 +32,9 @@ const request = (
   p: AcpProcess,
   method: string,
   params: Record<string, unknown> = {},
-) => p.request(`_goose/unstable/${method}`, params, REQUEST_TIMEOUT_MS);
+  timeout: number | null = REQUEST_TIMEOUT_MS,
+) => p.request(`_goose/unstable/${method}`, params, timeout ?? undefined);
+const INSPECTION_CLEANUP_MS = 5_000;
 const mcp = (e: { extension?: Extension }) =>
   e.extension?.type === "mcp" && e.extension.server?.name !== "buzz";
 
@@ -127,34 +130,76 @@ export class GooseMcp {
   }
   async inspect(p: AcpProcess, cwd: string, name: string, signal: AbortSignal) {
     signal.throwIfAborted();
-    const configured = (await this.configured(p)).find((e) => e.name === name);
+    const configured = (await abortable(this.configured(p), signal)).find(
+      (e) => e.name === name,
+    );
     if (!configured)
       throw new Error(`Goose has no configured MCP server named ${name}`);
     if (configured.unavailable) throw new Error(configured.unavailable);
     signal.throwIfAborted();
-    const { sessionId } = (await p.request(
-      "session/new",
-      {
-        cwd,
-        mcpServers: [],
-        _meta: { enabledExtensions: [configured.extension] },
-      },
-      REQUEST_TIMEOUT_MS,
-    )) as { sessionId: string };
-    signal.throwIfAborted();
-    const { tools } = await this.tools(p, sessionId, configured);
-    signal.throwIfAborted();
-    return tools;
+    const cleanup = new AbortController();
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    // Let a pending open return its ID so we can delete the history row.
+    const cancelling = () => {
+      deadline = setTimeout(
+        () => cleanup.abort(signal.reason),
+        INSPECTION_CLEANUP_MS,
+      );
+    };
+    signal.addEventListener("abort", cancelling, { once: true });
+    try {
+      const { sessionId } = (await abortable(
+        p.request(
+          "session/new",
+          {
+            cwd,
+            mcpServers: [],
+            _meta: { enabledExtensions: [configured.extension], hidden: true },
+          },
+          REQUEST_TIMEOUT_MS,
+        ),
+        cleanup.signal,
+      )) as { sessionId: string };
+      if (typeof sessionId !== "string" || !sessionId)
+        throw new Error("Goose did not return an inspection session ID");
+      try {
+        signal.throwIfAborted();
+        const { tools } = await this.tools(
+          p,
+          sessionId,
+          configured,
+          AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
+        );
+        return tools;
+      } finally {
+        await abortable(
+          p.request("session/delete", { sessionId }, INSPECTION_CLEANUP_MS),
+          cleanup.signal,
+        ).catch((error: unknown) => {
+          signal.throwIfAborted();
+          throw error;
+        });
+        signal.throwIfAborted();
+      }
+    } finally {
+      signal.removeEventListener("abort", cancelling);
+      clearTimeout(deadline);
+    }
   }
   private async tools(
     p: AcpProcess,
     sessionId: string,
     entry: Pick<Configured, "name" | "key">,
+    signal?: AbortSignal,
   ) {
-    const { tools } = (await request(p, "tools/list", {
-      sessionId,
-      extensionName: entry.key,
-    })) as {
+    // An inspection timeout needs to leave Goose alive for session/delete.
+    const listed = request(
+      p,
+      "tools/list",
+      { sessionId, extensionName: entry.key },
+      signal ? null : REQUEST_TIMEOUT_MS,
+    );
+    const { tools } = (await abortable(listed, signal)) as {
       tools: {
         name: string;
         description?: string;

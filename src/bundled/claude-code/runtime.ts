@@ -92,7 +92,7 @@ import {
 import { sessionPrompts } from "../../features/agents/session-prompts";
 import { standaloneSessions } from "../../features/agents/standalone-sessions";
 import { ClaudeProcess } from "./claude";
-import { configuredMcp } from "./mcp";
+import { configuredMcp, inspectMcpConfig } from "./mcp";
 import type {
   HarnessMcpAnswer,
   HarnessMcpKit,
@@ -334,47 +334,28 @@ export class ClaudeRuntime {
     signal: AbortSignal,
   ) {
     signal.throwIfAborted();
-    const report = await this.harnessMcp(agent);
-    signal.throwIfAborted();
-    const selectedServer = report?.servers.find((row) => row.name === server);
-    if (agent.protection || !report || !selectedServer)
+    if (agent.protection || this.target || (await this.isRemote(agent.key)))
       throw new Error("This agent cannot inspect that MCP server");
-    if (!selectedServer.default)
-      throw new Error(
-        "Enable this MCP server in Claude before inspecting its tools",
-      );
+    const cwd = this.resolveConfig(agent.config).workspace;
+    const path = (await this.host.resolveDirectory?.(cwd)) ?? cwd;
+    const definition = await inspectMcpConfig(
+      this.host.readFile?.bind(this.host),
+      path,
+      server,
+    );
     let process: ClaudeProcess | undefined;
     const abort = () => void process?.kill().catch(() => undefined);
     signal.addEventListener("abort", abort, { once: true });
     try {
       signal.throwIfAborted();
-      const cwd = this.resolveConfig(agent.config).workspace;
       process = await ClaudeProcess.spawn(this.spawn, {
         cwd,
-        mcp: {
-          choice: {},
-          servers: report.servers,
-          inspect: server,
-          started: () => {},
-        },
+        inspectMcp: true,
       });
       signal.throwIfAborted();
-      await process.initialize({
-        systemPrompt: "",
-        mcp: {
-          choice: {},
-          servers: report.servers,
-          inspect: server,
-          started: () => {},
-        },
-      });
+      const tools = await process.inspectMcpTools(server, definition);
       signal.throwIfAborted();
-      const { servers } = await process.readMcp();
-      signal.throwIfAborted();
-      const selected = servers.find((row) => row.name === server);
-      if (selected?.state !== "connected")
-        throw new Error("The selected MCP server did not connect");
-      return selected.tools ?? [];
+      return tools;
     } finally {
       signal.removeEventListener("abort", abort);
       if (process) {

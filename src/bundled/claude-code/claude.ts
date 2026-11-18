@@ -48,6 +48,8 @@ export type Spawn = (
 export type ClaudeLaunch = Readonly<{
   protection?: ClaudeProtection;
   mcp?: ClaudeMcp;
+  /** Isolated probe whose launcher reads its config as the first stdin line. */
+  inspectMcp?: boolean;
   cwd: string;
   /** Folders besides `cwd` that the session may work in and stay in. */
   directories?: readonly string[];
@@ -98,6 +100,20 @@ const FINAL_TOOL = `mcp__${TOOL_SERVER}__(${MESSAGE_TOOLS.join("|")})`;
 const FINAL_NAME = new RegExp(`^${FINAL_TOOL}$`);
 
 type Message = Record<string, unknown> & { type?: string; subtype?: string };
+type McpStatus = Readonly<{ name: string; status?: string; tools?: unknown }>;
+type McpIdentity = { server: string; tool: string };
+
+function mcpTools(raw: unknown): HarnessMcpTool[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((tool) => typeof tool?.name === "string")
+    .map((tool) => ({
+      name: tool.name,
+      ...(typeof tool.description === "string" && {
+        description: tool.description,
+      }),
+    }));
+}
 
 /** A model Claude lists as one a session can switch to. */
 export type ClaudeModel = Readonly<{
@@ -151,7 +167,8 @@ export class ClaudeProcess {
   private owner: string | undefined;
   private hookTurn: ClaudeTurn | undefined;
   private mcpServers: readonly HarnessMcpServer[] = [];
-  private mcpToolCatalog = new Map<string, readonly string[]>();
+  private mcpPending: string[] = [];
+  private mcpRefresh: Promise<boolean> | undefined;
   private mcpToolNames = new Map<
     string,
     { server: string; tool: string } | null
@@ -285,7 +302,8 @@ export class ClaudeProcess {
     let claude: ClaudeProcess | undefined;
     const early: string[] = [];
     const earlyErrors: string[] = [];
-    const process = await spawn(pinned ?? "claude", {
+    const program = pinned ?? (launch.inspectMcp ? "claude-inspect" : "claude");
+    const process = await spawn(program, {
       args: [
         "--output-format",
         "stream-json",
@@ -328,6 +346,15 @@ export class ClaudeProcess {
               "--no-session-persistence",
             ]
           : ["--permission-mode", "bypassPermissions"]),
+        ...(launch.inspectMcp
+          ? [
+              "--strict-mcp-config",
+              "--no-session-persistence",
+              "--no-chrome",
+              "--settings",
+              '{"disableClaudeAiConnectors":true}',
+            ]
+          : []),
         ...(launch.directories ?? []).flatMap((folder) => [
           "--add-dir",
           folder,
@@ -356,9 +383,10 @@ export class ClaudeProcess {
       ],
       cwd: launch.cwd,
       // A spare is started before the agent it serves is known.
-      agentCredential: !launch.discovery,
+      agentCredential: !launch.discovery && !launch.inspectMcp,
       env: {
         ...ENV,
+        ...(launch.inspectMcp && { ENABLE_CLAUDEAI_MCP_SERVERS: "false" }),
         ...(launch.discovery
           ? {
               CLAUDE_CODE_DISABLE_FILE_MENTIONS: "1",
@@ -602,133 +630,158 @@ export class ClaudeProcess {
   models() {
     return this.listed;
   }
-  /** Native catalog and the separately permission-filtered model tool list. */
-  async readMcp() {
+  private async readMcpStatus(signal?: AbortSignal): Promise<McpStatus[]> {
+    const status = await this.call({ subtype: "mcp_status" }, signal);
+    const rows = (status.response as Message | undefined)?.mcpServers;
+    if (status.subtype !== "success" || !Array.isArray(rows))
+      throw new Error("Claude could not verify its MCP servers");
+    if (rows.some((row) => typeof row?.name !== "string"))
+      throw new Error("Claude listed an invalid MCP server");
+    return rows;
+  }
+
+  /** Inspection never prompts, and accepts only the one registered server. */
+  async inspectMcpTools(name: string, definition: Record<string, unknown>) {
+    await this.write({ mcpServers: { [name]: definition } });
+    await this.initialize({ systemPrompt: "" });
     for (;;) {
-      const status = await this.call({ subtype: "mcp_status" });
-      const rows = (status.response as Message | undefined)?.mcpServers;
-      if (status.subtype !== "success" || !Array.isArray(rows))
-        throw new Error("Claude could not verify its MCP servers");
-      const native = this.mcp?.inspect
-        ? rows
-        : rows.filter((row) => row?.name !== TOOL_SERVER);
-      if (
-        native.some(
-          (row) =>
-            typeof row?.name !== "string" ||
-            (this.mcp?.inspect && row.name !== this.mcp.inspect),
-        )
-      )
+      const rows = await this.readMcpStatus();
+      if (rows.length > 1 || rows.some((row) => row.name !== name))
         throw new Error("Claude listed an unexpected MCP server");
-      if (native.some((row) => row.status === "pending")) {
+      const selected = rows[0];
+      if (selected?.status === "pending") {
         await new Promise((resolve) => setTimeout(resolve, 50));
         continue;
       }
-      const servers: (HarnessMcpServer & {
-        tools?: readonly HarnessMcpTool[];
-      })[] = native.map((row) => ({
-        name: row.name,
-        default: row.status !== "disabled",
-        ...(["connected", "failed", "needs-auth", "disabled"].includes(
-          row.status,
-        )
-          ? {
-              state: row.status as
-                | "connected"
-                | "failed"
-                | "needs-auth"
-                | "disabled",
-            }
-          : {}),
-        ...(Array.isArray(row.tools)
-          ? {
-              tools: row.tools
-                .filter((tool: Message) => typeof tool?.name === "string")
-                .map((tool: Message) => ({
-                  name: tool.name as string,
-                  ...(typeof tool.description === "string" && {
-                    description: tool.description,
-                  }),
-                })),
-            }
+      if (selected?.status !== "connected")
+        throw new Error("The selected MCP server did not connect");
+      return mcpTools(selected.tools);
+    }
+  }
+
+  private mcpCatalog(rows: readonly McpStatus[]) {
+    const tools = new Map<string, HarnessMcpTool[]>();
+    const names = new Map<string, McpIdentity | null>();
+    for (const { name: server, status, tools: raw } of rows) {
+      if (status === "pending") continue;
+      const list = mcpTools(raw);
+      tools.set(server, list);
+      for (const { name: tool } of list) {
+        const name = `mcp__${mcpName(server)}__${mcpName(tool)}`;
+        this.addMcpName(names, name, { server, tool });
+        if (server === TOOL_SERVER) this.buzzMcpTools.add(name);
+      }
+    }
+    return { tools, names };
+  }
+
+  private addMcpName(
+    names: Map<string, McpIdentity | null>,
+    name: string,
+    identity: McpIdentity,
+  ) {
+    const prior = names.get(name);
+    names.set(
+      name,
+      prior === null ||
+        (prior &&
+          (prior.server !== identity.server || prior.tool !== identity.tool))
+        ? null
+        : identity,
+    );
+  }
+
+  private pendingMcp(rows: readonly McpStatus[]) {
+    return rows
+      .filter(
+        ({ name, status }) => status === "pending" && name !== TOOL_SERVER,
+      )
+      .map(({ name }) => `mcp__${mcpName(name)}__`);
+  }
+
+  /** A startup snapshot. Connecting servers still participate in the policy
+   * check, even when they cannot yet contribute tools. */
+  private async readMcp() {
+    const rows = await this.readMcpStatus();
+    const catalog = this.mcpCatalog(rows);
+    const context = await this.call({ subtype: "get_context_usage" });
+    const tools = (context.response as Message | undefined)?.mcpTools;
+    if (context.subtype !== "success" || !Array.isArray(tools))
+      throw new Error("Claude could not verify its admitted MCP tools");
+
+    const admitted = new Map<string, McpIdentity | null>();
+    const admittedTools: McpIdentity[] = [];
+    const pending = new Set(
+      rows
+        .filter(({ status }) => status === "pending")
+        .map(({ name }) => mcpName(name)),
+    );
+    for (const tool of tools)
+      if (
+        typeof tool?.name === "string" &&
+        typeof tool.serverName === "string"
+      ) {
+        const native = this.catalogCall(
+          tool.name,
+          tool.serverName,
+          catalog.tools,
+        );
+        if (!native) {
+          // The server may have connected since the status response.
+          if (
+            tool.serverName === TOOL_SERVER ||
+            pending.has(mcpName(tool.serverName))
+          )
+            continue;
+          throw new Error("Claude could not verify an admitted MCP tool");
+        }
+        this.addMcpName(admitted, tool.name, native);
+        admittedTools.push(native);
+      }
+    this.mcpPending = this.pendingMcp(rows);
+    this.mcpToolNames = new Map([...catalog.names, ...admitted]);
+
+    const servers: HarnessMcpServer[] = rows
+      .filter(({ name }) => name !== TOOL_SERVER)
+      .map(({ name, status }) => ({
+        name,
+        default: status !== "disabled",
+        ...(status === "connected" ||
+        status === "failed" ||
+        status === "needs-auth" ||
+        status === "disabled"
+          ? { state: status }
           : {}),
       }));
-      const context = await this.call({ subtype: "get_context_usage" });
-      const tools = (context.response as Message | undefined)?.mcpTools;
-      if (context.subtype !== "success" || !Array.isArray(tools))
-        throw new Error("Claude could not verify its admitted MCP tools");
-      const catalog = new Map<
-        string,
-        { server: string; tool: string } | null
-      >();
-      const admitted = new Map<
-        string,
-        { server: string; tool: string } | null
-      >();
-      const add = (
-        map: typeof catalog,
-        name: string,
-        server: string,
-        tool: string,
-      ) => {
-        const prior = map.get(name);
-        map.set(
-          name,
-          prior === null ||
-            (prior && (prior.server !== server || prior.tool !== tool))
-            ? null
-            : { server, tool },
-        );
-      };
-      this.mcpToolCatalog = new Map(
-        rows
-          .filter(
-            (row) => typeof row?.name === "string" && Array.isArray(row.tools),
-          )
-          .map((row) => [
-            row.name,
-            row.tools
-              .filter((tool: Message) => typeof tool?.name === "string")
-              .map((tool: Message) => tool.name),
-          ]),
-      );
-      for (const row of rows)
-        if (typeof row?.name === "string" && Array.isArray(row.tools))
-          for (const tool of row.tools)
-            if (typeof tool?.name === "string") {
-              const name = `mcp__${mcpName(row.name)}__${mcpName(tool.name)}`;
-              add(catalog, name, row.name, tool.name);
-              if (row.name === TOOL_SERVER) this.buzzMcpTools.add(name);
-            }
-      const admittedTools: { server: string; tool: string }[] = [];
-      for (const tool of tools)
-        if (
-          typeof tool?.name === "string" &&
-          typeof tool.serverName === "string"
-        ) {
-          const native = this.catalogCall(tool.name, tool.serverName);
-          if (!native) {
-            if (tool.serverName === TOOL_SERVER) continue;
-            throw new Error("Claude could not verify an admitted MCP tool");
-          }
-          add(admitted, tool.name, native.server, native.tool);
-          admittedTools.push(native);
-        }
-      this.mcpToolNames = new Map([...catalog, ...admitted]);
-      const loaded = servers
-        .filter((row) => row.state !== "disabled")
-        .map(({ name, state, tools: catalog }) => ({
-          name,
-          ...(state && state !== "disabled" && { state }),
-          tools: admittedTools
-            .filter((tool) => tool.server === name)
-            .map(
-              ({ tool }) =>
-                catalog?.find((item) => item.name === tool) ?? { name: tool },
-            ),
-        }));
-      return { servers, loaded };
-    }
+    const loaded = servers
+      .filter((row) => row.state !== "disabled")
+      .map(({ name, state }) => ({
+        name,
+        ...(state && state !== "disabled" && { state }),
+        tools: admittedTools
+          .filter((tool) => tool.server === name)
+          .map(
+            ({ tool }) =>
+              catalog.tools.get(name)?.find((item) => item.name === tool) ?? {
+                name: tool,
+              },
+          ),
+      }));
+    return { servers, loaded };
+  }
+
+  private async refreshMcp() {
+    const rows = await this.readMcpStatus(AbortSignal.timeout(250));
+    const { names } = this.mcpCatalog(rows);
+    const matches = (name: string) =>
+      this.mcpPending.some((prefix) => name.startsWith(prefix));
+    // Pending servers may collide with names from the original snapshot.
+    // Refresh those prefixes from one catalog, preserving any ambiguity.
+    this.mcpToolNames = new Map([
+      ...[...this.mcpToolNames].filter(([name]) => !matches(name)),
+      ...[...names].filter(([name]) => matches(name)),
+    ]);
+    this.mcpPending = this.pendingMcp(rows);
   }
   /** The effort a turn without a pick runs at, when Claude reports it. */
   async readEffort() {
@@ -860,12 +913,27 @@ export class ClaudeProcess {
       request_id: id,
       request,
     });
-    return { written, answer };
+    return { written, answer, id };
   }
   /** Sends a control request and resolves with Claude's response. */
-  private call(request: Message): Promise<Message> {
-    const { written, answer } = this.request(request);
-    return written.then(() => answer);
+  private async call(request: Message, signal?: AbortSignal): Promise<Message> {
+    signal?.throwIfAborted();
+    const { written, answer, id } = this.request(request);
+    const reply = written.then(() => answer);
+    if (!signal) return reply;
+    let abort = () => {};
+    try {
+      return await Promise.race([
+        reply,
+        new Promise<never>((_, reject) => {
+          abort = () => reject(signal.reason);
+          signal.addEventListener("abort", abort, { once: true });
+        }),
+      ]);
+    } finally {
+      signal.removeEventListener("abort", abort);
+      this.calls.delete(id);
+    }
   }
   /** Switches model without restarting, as the SDK's `setModel` does. Back to
    * the session's own is the model it was launched with, or the default. A
@@ -1086,11 +1154,17 @@ export class ClaudeProcess {
     }
   }
   /** Native names are lossy; only a unique catalog name can identify a tool. */
-  private catalogCall(name: string, server: string) {
-    const tools = this.mcpToolCatalog
+  private catalogCall(
+    name: string,
+    server: string,
+    catalog: ReadonlyMap<string, readonly HarnessMcpTool[]>,
+  ) {
+    const tools = catalog
       .get(server)
-      ?.filter((tool) => `mcp__${mcpName(server)}__${mcpName(tool)}` === name);
-    const tool = tools?.length === 1 ? tools[0] : undefined;
+      ?.filter(
+        (tool) => `mcp__${mcpName(server)}__${mcpName(tool.name)}` === name,
+      );
+    const tool = tools?.length === 1 ? tools[0]?.name : undefined;
     return tool === undefined ? undefined : { server, tool };
   }
   private nativeCall(name: unknown) {
@@ -1099,7 +1173,7 @@ export class ClaudeProcess {
     return found?.server !== TOOL_SERVER ? (found ?? undefined) : undefined;
   }
   /** Raw MCP identity is metadata, never inferred from lossy name segments. */
-  private hookInput(event: string, input: unknown) {
+  private async hookInput(event: string, input: unknown) {
     if (!["PreToolUse", "PostToolUse", "PostToolUseFailure"].includes(event))
       return input;
     if (!input || typeof input !== "object" || Array.isArray(input))
@@ -1110,12 +1184,34 @@ export class ClaudeProcess {
       mcp_unresolved: _unresolved,
       ...value
     } = input as Message;
-    const native = this.nativeCall(value.tool_name);
+    const name = value.tool_name;
+    if (
+      typeof name === "string" &&
+      this.mcpPending.some((prefix) => name.startsWith(prefix))
+    ) {
+      // A newly connected server may collide with a name already in the map.
+      // Leave time for the policy hook, and keep an unverifiable call unresolved.
+      this.mcpRefresh ??= this.refreshMcp()
+        .then(
+          () => true,
+          () => false,
+        )
+        .finally(() => {
+          this.mcpRefresh = undefined;
+        });
+      if (
+        !(await this.mcpRefresh) ||
+        this.mcpPending.some((prefix) => name.startsWith(prefix))
+      )
+        return { ...value, mcp_unresolved: true };
+    }
+    const native = this.nativeCall(name);
     return native
       ? { ...value, mcp_server: native.server, mcp_tool: native.tool }
       : typeof value.tool_name === "string" &&
           value.tool_name.startsWith("mcp__") &&
-          !this.buzzMcpTools.has(value.tool_name)
+          (this.mcpToolNames.get(value.tool_name) === null ||
+            !this.buzzMcpTools.has(value.tool_name))
         ? { ...value, mcp_unresolved: true }
         : value;
   }
@@ -1363,7 +1459,7 @@ export class ClaudeProcess {
             ? ((await this.hook?.(
                 this.sessionId ?? "",
                 event,
-                this.hookInput(event, request.input),
+                await this.hookInput(event, request.input),
                 this.hookTurn,
               )) ?? {})
             : request.callback_id === "final" && this.final(request.input)

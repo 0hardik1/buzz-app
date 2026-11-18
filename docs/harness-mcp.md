@@ -72,9 +72,9 @@ A type declares `harnessMcp: { report(agent), inspect?(agent, server) }`, or `ha
 - This adapter exposes no plugin call hooks and omits `calls: true`. A policy
   plugin must leave tools that require per-call approval off.
 - Inspection opens a separate process with only the selected native extension,
-  lists its tools and stops the process on every exit path. It makes no model
-  turn or tool call; Goose's provider may refresh its model catalog during
-  setup.
+  lists its tools, deletes the hidden inspection session by ID and stops the
+  process. It makes no model turn or tool call. Goose's provider may refresh
+  its model catalog during setup.
 
 ### Claude Code
 
@@ -93,6 +93,9 @@ A type declares `harnessMcp: { report(agent), inspect?(agent, server) }`, or `ha
   explicit agent model/effort choices; it does not send a model turn.
 - Read-back uses `mcp_status` for server metadata and `get_context_usage` for
   the admitted tools. The discovered catalog can still contain denied tools.
+  A connecting server has no admitted tools at startup. Its name still
+  participates in the policy check, and its tool identity is checked if it
+  connects and issues a later hook.
   Tool choices and hook inputs keep the catalog names (such as `search.docs`);
   native permission rules use Claude’s normalized names (such as `search_docs`).
   An admitted tool with no unique catalog identity stops the session before a
@@ -108,7 +111,10 @@ A type declares `harnessMcp: { report(agent), inspect?(agent, server) }`, or `ha
   budget.
 - Inspection requires the selected server to be enabled in Claude's native
   configuration, including native project approval, before starting a process.
-  It denies every other known server, checks for unexpected servers before
-  returning tools, and stops its process on success, error or cancellation. It
-  makes no model turn or tool call. Protected and helper launches keep strict
-  MCP configuration; execution targets keep their host's behavior.
+  Approvals found only in unverifiable workspace settings need inspection
+  inside Claude.
+  It launches in strict MCP mode and gives Claude only the selected server
+  through an anonymous pipe. Servers with a source-sensitive header helper
+  must be inspected in Claude. Buzz checks that only the selected server
+  connected and stops the probe on success, error or cancellation. It makes no
+  model turn or tool call.

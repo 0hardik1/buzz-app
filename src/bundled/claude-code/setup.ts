@@ -49,6 +49,7 @@ const PLATFORMS: Readonly<Record<string, string>> = {
 /** The `claude.sh` step behind each process the plugin starts by name. */
 const STEPS: Readonly<Record<string, string>> = {
   claude: "run",
+  "claude-inspect": "inspect",
   install: "install",
   use: "use",
   review: "review",

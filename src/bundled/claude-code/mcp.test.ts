@@ -20,16 +20,24 @@ function native(
   context?: { name: string; serverName: string }[],
   beforeStatus?: () => Promise<void>,
   description?: string,
+  mode?: { pending?: ReadonlySet<string> },
 ) {
   const fake = fakeSpawn();
   const spawn: Spawn = async (id, options) => {
-    const process = await fake.spawn(id, options);
+    const inspecting = id === "claude-inspect";
+    const process = await fake.spawn(inspecting ? "claude" : id, options);
     const running = fake.processes.at(-1);
+    let installed = !inspecting;
     return {
       ...process,
       write: async (data) => {
         const message = JSON.parse(data);
         const subtype = message.request?.subtype;
+        if (inspecting && message.mcpServers) {
+          installed = true;
+          running?.received.push(message);
+          return;
+        }
         if (subtype !== "mcp_status" && subtype !== "get_context_usage")
           return process.write(data);
         if (subtype === "mcp_status") await beforeStatus?.();
@@ -42,12 +50,15 @@ function native(
             response:
               subtype === "mcp_status"
                 ? {
-                    mcpServers: servers.map((name) => ({
+                    mcpServers: (installed ? servers : []).map((name) => ({
                       name,
-                      status: "connected",
+                      status: mode?.pending?.has(name)
+                        ? "pending"
+                        : "connected",
                       config: { env: { SECRET: "never report" } },
-                      tools: (
-                        catalog[name] ?? ["read_echo", "write_marker"]
+                      tools: (mode?.pending?.has(name)
+                        ? []
+                        : (catalog[name] ?? ["read_echo", "write_marker"])
                       ).map((name) => ({
                         name,
                         ...(description && { description }),
@@ -352,6 +363,10 @@ it("requires native approval and isolates each Claude inspection from its siblin
   const names = ["alpha"];
   const context = [{ name: "mcp__alpha__read_echo", serverName: "alpha" }];
   const f = native(names, [], {}, context);
+  const definitions = {
+    alpha: { command: "fixture-mcp", args: ["a"], env: { FIXTURE: "test" } },
+    beta: { command: "fixture-mcp", args: ["b"] },
+  };
   let approved = false;
   let configured = true;
   const runtime = new ClaudeRuntime(
@@ -363,15 +378,17 @@ it("requires native approval and isolates each Claude inspection from its siblin
             !configured
               ? {}
               : path === ".mcp.json"
-                ? { mcpServers: { alpha: {} } }
+                ? { mcpServers: { alpha: definitions.alpha } }
                 : path === "~/.claude.json"
                   ? {
-                      mcpServers: { beta: {}, buzz: {} },
+                      mcpServers: { beta: definitions.beta, buzz: {} },
                       projects: approved
                         ? { "/work": { enabledMcpjsonServers: ["alpha"] } }
                         : {},
                     }
-                  : {},
+                  : path === ".claude/settings.json"
+                    ? { enableAllProjectMcpServers: true }
+                    : {},
           ),
         ),
     },
@@ -381,14 +398,11 @@ it("requires native approval and isolates each Claude inspection from its siblin
   );
   try {
     await expect(runtime.inspectMcp(agent, "alpha")).rejects.toThrow(
-      "Enable this MCP server in Claude before inspecting its tools",
+      "Claude inspection could not verify this server's project approval",
     );
     expect(f.processes).toHaveLength(0);
     approved = true;
-    for (const [selected, other] of [
-      ["alpha", "beta"],
-      ["beta", "alpha"],
-    ] as const) {
+    for (const selected of ["alpha", "beta"] as const) {
       names[0] = selected;
       context[0] = {
         name: `mcp__${selected}__read_echo`,
@@ -398,11 +412,11 @@ it("requires native approval and isolates each Claude inspection from its siblin
         { name: "read_echo" },
         { name: "write_marker" },
       ]);
-      const args = f.processes.at(-1)?.options.args ?? [];
-      expect(
-        JSON.parse(args[args.indexOf("--settings") + 1] ?? "{}"),
-      ).toMatchObject({
-        deniedMcpServers: [{ serverName: other }, { serverName: "buzz" }],
+      const process = f.processes.at(-1);
+      expect(process?.options.args).toContain("--strict-mcp-config");
+      expect(process?.options.args).not.toContain("--mcp-config");
+      expect(process?.received[0]).toEqual({
+        mcpServers: { [selected]: definitions[selected] },
       });
     }
     configured = false;
@@ -634,23 +648,115 @@ it("verifies admitted tools rather than the catalog and retains every configured
 it.each(["unexpected", "buzz"])(
   "stops and awaits an inspection that reports %s before exposing tools",
   async (unexpected) => {
-    const f = native(["alpha", unexpected]);
-    await expect(
-      ClaudeProcess.start(f.spawn, {
-        cwd: "/work",
-        systemPrompt: "",
-        mcp: { ...settings(), inspect: "alpha" },
-      }),
-    ).rejects.toThrow("unexpected MCP server");
-    expect(f.processes[0]?.killed).toBe(true);
-    expect(
-      f.processes[0]?.received.some(
-        (message) =>
-          (message.request as { subtype?: string })?.subtype ===
-          "get_context_usage",
-      ),
-    ).toBe(false);
-    expect(f.processes[0]?.prompts).toEqual([]);
+    const f = native(["alpha", unexpected], [], {}, []);
+    const runtime = new ClaudeRuntime(
+      {
+        spawn: f.spawn,
+        readFile: async (path) =>
+          new TextEncoder().encode(
+            JSON.stringify(
+              path === "~/.claude.json"
+                ? { mcpServers: { alpha: { command: "fixture-mcp" } } }
+                : {},
+            ),
+          ),
+      },
+      () => undefined,
+      async () => undefined,
+      localStore(),
+    );
+    try {
+      await expect(runtime.inspectMcp(agent, "alpha")).rejects.toThrow(
+        "unexpected MCP server",
+      );
+      expect(f.processes[0]?.killed).toBe(true);
+      expect(f.processes[0]?.prompts).toEqual([]);
+    } finally {
+      await runtime.dispose();
+    }
+  },
+);
+
+it.each(["unique", "ambiguous"] as const)(
+  "starts with a connecting server and checks its first late tool hook: %s",
+  async (identity) => {
+    vi.useFakeTimers();
+    const ambiguous = identity === "ambiguous";
+    const delayed = ambiguous ? "alpha__beta" : "alpha";
+    const toolName = `mcp__${delayed}__search_docs`;
+    const pending = new Set([delayed]);
+    let statusRead!: () => void;
+    const firstStatus = new Promise<void>((resolve) => {
+      statusRead = resolve;
+    });
+    const context: { name: string; serverName: string }[] = ambiguous
+      ? [{ name: toolName, serverName: "alpha" }]
+      : [];
+    const f = native(
+      ambiguous ? ["alpha", delayed] : [delayed],
+      [],
+      ambiguous
+        ? { alpha: ["beta__search.docs"], [delayed]: ["search.docs"] }
+        : { [delayed]: ["search.docs"] },
+      context,
+      async () => statusRead(),
+      undefined,
+      { pending },
+    );
+    const launch = settings();
+    let hookInput!: (input: unknown) => void;
+    const hookSeen = new Promise<unknown>((resolve) => {
+      hookInput = resolve;
+    });
+    const opening = ClaudeProcess.start(f.spawn, {
+      cwd: "/work",
+      systemPrompt: "",
+      mcp: launch,
+      hook: async (_session, _event, input) => {
+        hookInput(input);
+        return {};
+      },
+    });
+    let process: ClaudeProcess | undefined;
+    void opening.then(
+      (opened) => {
+        process = opened;
+      },
+      () => undefined,
+    );
+    try {
+      await firstStatus;
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(process?.running).toBe(true);
+      expect(launch.started).toHaveBeenCalledWith(
+        "initial",
+        expect.arrayContaining([{ name: delayed, tools: [] }]),
+        expect.objectContaining({ [delayed]: expect.anything() }),
+      );
+      expect(f.processes[0]?.killed).toBe(false);
+
+      pending.delete(delayed);
+      f.processes[0]?.emit({
+        type: "control_request",
+        request_id: "late-tool",
+        request: {
+          subtype: "hook_callback",
+          callback_id: "buzz:PreToolUse",
+          input: { tool_name: toolName },
+        },
+      });
+      expect(await hookSeen).toEqual({
+        tool_name: toolName,
+        ...(ambiguous
+          ? { mcp_unresolved: true }
+          : { mcp_server: delayed, mcp_tool: "search.docs" }),
+      });
+    } finally {
+      pending.clear();
+      await vi.advanceTimersByTimeAsync(50);
+      await process?.kill();
+      vi.useRealTimers();
+    }
   },
 );
 

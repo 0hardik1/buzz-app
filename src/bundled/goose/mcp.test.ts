@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { HarnessMcpAnswer } from "../../features/agents/harness-mcp";
 import type { Agent } from "../../features/agents/service";
 import type { Host } from "../../features/host/service";
+import { gated } from "./goose-testing";
 import { GooseProcess } from "./goose";
 import { native, transport } from "./mcp-testing";
 import { GooseMcp } from "./mcp";
@@ -429,11 +430,17 @@ function inspector(wire: ReturnType<typeof transport>, spawn = wire.spawn) {
 }
 
 describe("Goose tools-only lifecycle", () => {
-  it.each(["listed", "error", "cancelled"] as const)(
-    "stops an isolated inspection after %s",
+  it.each(["listed", "error", "cancelled", "cancelled while opening"] as const)(
+    "deletes and stops an isolated inspection after %s",
     async (outcome) => {
       const wire = transport();
-      const { runtime, agent } = inspector(wire);
+      const opening = gated("session/new");
+      const { runtime, agent } = inspector(
+        wire,
+        outcome === "cancelled while opening"
+          ? opening.wrap(wire.spawn)
+          : wire.spawn,
+      );
       let listed!: () => void;
       const started = new Promise<void>((resolve) => {
         listed = resolve;
@@ -446,29 +453,43 @@ describe("Goose tools-only lifecycle", () => {
       if (outcome === "cancelled") wire.holdTools(listed);
       const inspect = runtime.inspectMcp(agent, "fixture");
       try {
-        if (outcome === "cancelled") {
-          await started;
-          await runtime.retire(agent.key);
-        }
-        if (outcome === "listed")
+        if (outcome === "listed") {
           expect(await inspect).toEqual([
             { name: "read_echo", description: "read_echo" },
             { name: "write_marker", description: "write_marker" },
           ]);
-        else await expect(inspect).rejects.toThrow();
-        expect(present(wire.fake.geese[0]).killed).toBe(true);
-        expect(present(wire.fake.geese[0]).turns).toHaveLength(0);
-        expect(present(wire.fake.geese[0]).opened[0]).toMatchObject({
+        } else {
+          const rejected = expect(inspect).rejects.toThrow(
+            outcome === "error" ? "Tool listing failed" : "agent was retired",
+          );
+          if (outcome === "cancelled") {
+            await started;
+            await runtime.retire(agent.key);
+          }
+          if (outcome === "cancelled while opening") {
+            await vi.waitFor(() => expect(opening.waiting()).toHaveLength(1));
+            const retiring = runtime.retire(agent.key);
+            opening.release();
+            await retiring;
+          }
+          await rejected;
+        }
+        const goose = present(wire.fake.geese[0]);
+        expect(goose.deleted).toEqual(["session-1"]);
+        expect(goose.killed).toBe(true);
+        expect(goose.turns).toHaveLength(0);
+        expect(goose.opened[0]).toMatchObject({
           cwd: "/project/fixture",
           mcpServers: [],
-          _meta: { enabledExtensions: [native("fixture")] },
+          _meta: { enabledExtensions: [native("fixture")], hidden: true },
         });
       } finally {
+        opening.release();
         runtime.dispose();
       }
     },
   );
-  it.each(["spawn", "tools"] as const)(
+  it.each(["spawn", "opening", "tools"] as const)(
     "waits for a cancelled inspection's actual exit during retirement (%s)",
     async (stage) => {
       vi.useFakeTimers();
@@ -477,6 +498,7 @@ describe("Goose tools-only lifecycle", () => {
       const stopped = new Promise<void>((resolve) => {
         requested = resolve;
       });
+      const requestStop = vi.fn(requested);
       let spawned!: () => void;
       const spawning = new Promise<void>((resolve) => {
         spawned = resolve;
@@ -490,15 +512,15 @@ describe("Goose tools-only lifecycle", () => {
         listed = resolve;
       });
       wire.holdTools(listed);
+      const opening = gated("session/new");
+      const spawn = stage === "opening" ? opening.wrap(wire.spawn) : wire.spawn;
       const { runtime, agent } = inspector(wire, async (id, options) => {
-        const process = await wire.spawn(id, options);
+        const process = await spawn(id, options);
         spawned();
         if (stage === "spawn") await held;
         return {
           ...process,
-          kill: async () => {
-            requested();
-          },
+          kill: async () => requestStop(),
         };
       });
       let retiring: Promise<void> | undefined;
@@ -509,12 +531,19 @@ describe("Goose tools-only lifecycle", () => {
       );
       let retired = false;
       try {
-        await (stage === "spawn" ? spawning : listing);
+        if (stage === "opening")
+          await vi.waitFor(() => expect(opening.waiting()).toHaveLength(1));
+        else await (stage === "spawn" ? spawning : listing);
         retiring = runtime.retire(agent.key).then(() => {
           retired = true;
         });
+        if (stage === "opening") {
+          await vi.advanceTimersByTimeAsync(0);
+          expect(requestStop).not.toHaveBeenCalled();
+        }
         // Passing the old stop timeout is not evidence that the process exited.
         await vi.advanceTimersByTimeAsync(6_000);
+        if (stage === "opening") expect(requestStop).toHaveBeenCalled();
         expect(retired).toBe(false);
         release();
         await stopped;
@@ -527,6 +556,7 @@ describe("Goose tools-only lifecycle", () => {
       } finally {
         release();
         wire.fake.geese[0]?.exit(null);
+        opening.release();
         await inspection.catch(() => undefined);
         await retiring;
         runtime.dispose();

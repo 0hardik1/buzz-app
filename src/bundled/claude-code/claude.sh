@@ -3,6 +3,7 @@
 # with one of these steps:
 #
 #   run [ARGS...]                    runs the copy in use with ARGS
+#   inspect [ARGS...]                reads an MCP config line, then runs Claude
 #   install VERSION PLATFORM SHA256  downloads a release, unless it is already
 #                                    downloaded, and checks it
 #   use VERSION                      makes a downloaded release the one in use
@@ -55,6 +56,15 @@ newer() {
 
 command="$1"
 shift
+if [ "$command" = inspect ]; then
+  # Keep literal headers and environment values off disk and out of argv.
+  # Claude's native JSON config reader expands environment placeholders.
+  IFS= read -r mcp_config
+  exec 3< <(printf '%s\n' "$mcp_config")
+  unset mcp_config
+  set -- --mcp-config /dev/fd/3 "$@"
+  command=run
+fi
 case "$command" in
 run)
   # A failed exec returns (execfail, without errexit), so the launcher can

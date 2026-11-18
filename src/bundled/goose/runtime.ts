@@ -74,6 +74,7 @@ import {
 import {
   AgentProcess,
   AgentSessions,
+  abortable,
   absolute,
   localSessions,
 } from "./sessions";
@@ -229,7 +230,9 @@ export class GooseRuntime {
     const entry = this.entry(agent.key, this.settings(agent.config));
     const mcp = entry.mcp;
     return mcp
-      ? this.nativeMcp(entry, (process) => mcp.report(process))
+      ? this.nativeMcp(entry, (process, signal) =>
+          abortable(mcp.report(process), signal),
+        )
       : Promise.resolve(undefined);
   }
   inspectMcp(agent: Agent, server: string) {
@@ -239,17 +242,17 @@ export class GooseRuntime {
     const mcp = entry.mcp;
     if (!mcp)
       return Promise.reject(new Error("Goose MCP inspection is unavailable"));
-    return this.nativeMcp(entry, async (process) => {
-      const cwd = await absolute(
-        this.desktop.resolveDirectory,
-        entry.config.workspace,
+    return this.nativeMcp(entry, async (process, signal) => {
+      const cwd = await abortable(
+        absolute(this.desktop.resolveDirectory, entry.config.workspace),
+        signal,
       );
-      return mcp.inspect(process, cwd, server, entry.lifetime.signal);
+      return mcp.inspect(process, cwd, server, signal);
     });
   }
   private nativeMcp<T>(
     entry: Entry,
-    run: (process: GooseProcess, cwd: string) => Promise<T>,
+    run: (process: GooseProcess, signal: AbortSignal) => Promise<T>,
   ) {
     const signal = entry.lifetime.signal;
     let process: GooseProcess | undefined;
@@ -277,7 +280,9 @@ export class GooseRuntime {
           },
         });
         signal.throwIfAborted();
-        return await run(process, cwd);
+        // Let an active inspection clean up its native session before stopping.
+        signal.removeEventListener("abort", cancel);
+        return await run(process, signal);
       } finally {
         signal.removeEventListener("abort", cancel);
         await stop();

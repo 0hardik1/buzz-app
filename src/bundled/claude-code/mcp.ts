@@ -9,7 +9,6 @@ import type { Host } from "../../features/host/service";
 export type ClaudeMcp = Readonly<{
   choice: HarnessMcpAnswer;
   servers: readonly HarnessMcpServer[];
-  inspect?: string;
   started(
     session: string,
     loaded: HarnessMcpLoaded,
@@ -26,8 +25,7 @@ const strings = (value: unknown): string[] =>
     : [];
 export const mcpName = (name: string) => name.replace(/[^a-zA-Z0-9_-]/g, "_");
 
-/** Reads metadata only. Native Claude remains the owner of definitions and policy. */
-export async function configuredMcp(read: Host["readFile"], cwd: string) {
+async function readMcpConfig(read: Host["readFile"], cwd: string) {
   const json = async (path: string) => {
     if (!read) return {};
     try {
@@ -52,29 +50,85 @@ export async function configuredMcp(read: Host["readFile"], cwd: string) {
     ...strings(local.disabledMcpServers),
   ]);
   const approved = new Set(strings(local.enabledMcpjsonServers));
-  const rejected = new Set(strings(local.disabledMcpjsonServers));
+  const rejected = new Set(
+    [local, userSettings, projectSettings, localSettings].flatMap((settings) =>
+      strings(settings.disabledMcpjsonServers),
+    ),
+  );
   const all =
     { ...userSettings, ...projectSettings, ...localSettings }
       .enableAllProjectMcpServers === true;
-  const rows = new Map<string, HarnessMcpServer>();
+  const rows = new Map<
+    string,
+    {
+      server: HarnessMcpServer;
+      definition: Record<string, unknown>;
+      inspectable: boolean;
+    }
+  >();
+  const approves = (settings: Record<string, unknown>, name: string) =>
+    settings.enableAllProjectMcpServers === true ||
+    strings(settings.enabledMcpjsonServers).includes(name);
   for (const [servers, needsApproval] of [
     [user.mcpServers, false],
     [local.mcpServers, false],
     [project.mcpServers, true],
   ] as const)
-    for (const name of Object.keys(object(servers))) {
+    for (const [name, definition] of Object.entries(object(servers))) {
       if (name === "buzz") continue;
+      // Claude's local definition wins over the workspace project file.
+      if (needsApproval && Object.hasOwn(object(local.mcpServers), name))
+        continue;
+      const approvedProject =
+        !needsApproval ||
+        (!rejected.has(name) &&
+          (approved.has(name) ||
+            approves(userSettings, name) ||
+            (local.hasTrustDialogAccepted === true &&
+              approves(projectSettings, name))));
       const off =
         disabled.has(name) ||
-        (needsApproval &&
-          (rejected.has(name) || (!all && !approved.has(name))));
+        (needsApproval && (rejected.has(name) || (!all && !approvedProject)));
       rows.set(name, {
-        name,
-        default: !off,
-        ...(off ? { state: "disabled" as const } : {}),
+        server: { name, default: !off, ...(off && { state: "disabled" }) },
+        definition: object(definition),
+        // Dynamic entries do not carry Claude's project approval checks.
+        inspectable: approvedProject,
       });
     }
-  return [...rows.values()];
+  return rows;
+}
+
+/** Reports expose metadata only. */
+export async function configuredMcp(read: Host["readFile"], cwd: string) {
+  return [...(await readMcpConfig(read, cwd)).values()].map(
+    ({ server }) => server,
+  );
+}
+
+export async function inspectMcpConfig(
+  read: Host["readFile"],
+  cwd: string,
+  name: string,
+) {
+  const entry = (await readMcpConfig(read, cwd)).get(name);
+  if (!entry) throw new Error("This agent cannot inspect that MCP server");
+  if (!entry.server.default)
+    throw new Error(
+      "Enable this MCP server in Claude before inspecting its tools",
+    );
+  if (!entry.inspectable)
+    throw new Error(
+      "Claude inspection could not verify this server's project approval",
+    );
+  const { definition } = entry;
+  // Claude varies helper cwd and credential access by source. An inspection
+  // registers its server dynamically, so source-sensitive helpers stay native.
+  if (definition.headersHelper != null)
+    throw new Error(
+      "Claude inspection cannot run this server's headers helper",
+    );
+  return definition;
 }
 
 export function mcpChoice(
@@ -89,10 +143,7 @@ export function mcpChoice(
         names.map((server) => [server.name, server.default]),
       ),
       ...choice,
-    }).map(([name, pick]) => [
-      name,
-      mcp.inspect ? name === mcp.inspect : (pick ?? false),
-    ]),
+    }).map(([name, pick]) => [name, pick ?? false]),
   );
 }
 export function mcpSettings(mcp: ClaudeMcp) {
@@ -104,8 +155,6 @@ export function mcpSettings(mcp: ClaudeMcp) {
         : Object.entries(choice)
             .filter(([, pick]) => pick === false)
             .map(([name]) => ({ serverName: name }))),
-      // Inspection installs no SDK server to shadow a native definition.
-      ...(mcp.inspect ? [{ serverName: "buzz" }] : []),
     ],
     permissions: {
       deny:
