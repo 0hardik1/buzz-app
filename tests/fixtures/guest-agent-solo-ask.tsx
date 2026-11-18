@@ -37,7 +37,7 @@ import {
   type PageNavigation,
 } from "../../src/features/navigation/service";
 import { ChannelsPage } from "../../src/bundled/channels/ChannelsPage";
-import { PrimarySidebar } from "../../src/app/shell/PrimarySidebar";
+import { PrimarySidebar } from "../../src/app/shell/sidebar-section-testing";
 import { ChannelNavigationProvider } from "../../src/features/channel-navigation/ChannelNavigationState";
 import { ToastProvider } from "../../src/shared/design-system/ui/Toast";
 import { Button } from "../../src/shared/design-system/ui/Button";
