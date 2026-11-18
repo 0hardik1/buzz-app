@@ -3500,7 +3500,12 @@ function Composer({
     form.current?.requestSubmit();
     submitRequest.onSubmitted?.();
   });
-  useEffect(() => submitHostRequest());
+  // Keep checking readiness after each render only while a host request exists.
+  // Ordinary composers must not install a passive effect on every render.
+  const submitRequestRender = submitRequest ? {} : undefined;
+  useEffect(() => {
+    if (submitRequestRender) submitHostRequest();
+  }, [submitRequestRender]);
   // The attachments section animates out over 150 ms; the form's gap and
   // padding (data-attachments) collapse when it has, not when the list empties.
   // An edit unmounts the section at once, so no exit completes during one.
