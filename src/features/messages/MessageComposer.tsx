@@ -1838,7 +1838,8 @@ function Composer({
     }
     if (
       recipient &&
-      distinctRecipients([...valueRef.current.recipients, recipient]) > 32
+      distinctRecipients([...valueRef.current.recipients, recipient]).length >
+        32
     ) {
       setError("Choose at most 32 recipients");
       return false;
@@ -1939,7 +1940,8 @@ function Composer({
       ? "unresolved"
       : !admits()(recipient.pubkey)
         ? "unavailable"
-        : distinctRecipients([...valueRef.current.recipients, recipient]) > 32
+        : distinctRecipients([...valueRef.current.recipients, recipient])
+              .length > 32
           ? "limit"
           : undefined;
     const accepted =
@@ -2136,9 +2138,11 @@ function Composer({
     if (focus) input.current?.focus();
     return true;
   }
+  /** With `label`, one chip `@label` stands for all of `recipients`. */
   function insertMentions(
     recipients: readonly MentionRecipient[],
     range?: CompletionQuery,
+    label?: string,
   ) {
     if (
       !Array.isArray(recipients) ||
@@ -2169,31 +2173,46 @@ function Composer({
       input.current.readOnly
     )
       return false;
+    // In code only the text goes in, as in a message edit.
+    if (label !== undefined && range && inMarkdownCode(range))
+      return insert(`@${label} `, undefined, range);
     // Message edits only add references, never new notification intent.
     if (editing.target)
       return insert(
-        unique.map((person) => editMentionText(person)).join(""),
+        label === undefined
+          ? unique.map((person) => editMentionText(person)).join("")
+          : `${groupLabelMarkdown(label)} `,
         undefined,
         range,
       );
     const admitted = admits();
+    const noun = label === undefined ? "team" : "group";
     if (unique.some((person) => !admitted(person.pubkey))) {
       setError(
-        "A team member is no longer available. Refresh choices before trying again.",
+        label === undefined
+          ? "A team member is no longer available. Refresh choices before trying again."
+          : "A recipient is no longer available. Refresh choices before trying again.",
       );
       return false;
     }
-    const text = unique.map((person) => `@${person.name} `).join("");
+    const text =
+      label === undefined
+        ? unique.map((person) => `@${person.name} `).join("")
+        : `@${label} `;
     if (
       !(solo && !range
         ? keepProseCaret(
             (at) =>
               !!input.current?.insertText(text, unique, at, undefined, false),
           )
-        : input.current.insertText(text, unique, range))
+        : input.current.insertText(
+            text,
+            label === undefined ? unique : { label, members: unique },
+            range,
+          ))
     ) {
       setError(
-        "The team would exceed the message length or 32-recipient limit. Nothing was added.",
+        `The ${noun} would exceed the message length or 32-recipient limit. Nothing was added.`,
       );
       return false;
     }
@@ -2214,58 +2233,6 @@ function Composer({
     return [...context.protected, ...markdownRanges(context.text).literal].some(
       (r) => range.start < r.end && range.end > r.start,
     );
-  }
-  /** One chip `@label` over `range` that notifies each of `mentions`, sent
-   * as the text `@label`. In code, and in a message edit, only the text goes
-   * in, since edits never add notification intent; an edit is Markdown, so
-   * there the label goes in escaped, as a chip sends it. */
-  function insertGroup(
-    edit: Readonly<{ mentions: readonly MentionRecipient[]; label: string }>,
-    range: CompletionQuery,
-  ) {
-    if (
-      !permitted.current ||
-      editingDisabled ||
-      !outbox?.supports(9) ||
-      !input.current?.isConnected ||
-      input.current.disabled ||
-      input.current.readOnly
-    )
-      return false;
-    if (inMarkdownCode(range))
-      return insert(`@${edit.label} `, undefined, range);
-    if (editing.target)
-      return insert(`${groupLabelMarkdown(edit.label)} `, undefined, range);
-    const text = `@${edit.label} `;
-    const members = [
-      ...new Map(
-        edit.mentions.map(({ pubkey, name }) => [pubkey, { pubkey, name }]),
-      ).values(),
-    ];
-    if (members.length > 32) {
-      setError("Choose at most 32 recipients");
-      return false;
-    }
-    const admitted = admits();
-    if (members.some((person) => !admitted(person.pubkey))) {
-      setError(
-        "A recipient is no longer available. Refresh choices before trying again.",
-      );
-      return false;
-    }
-    if (
-      !input.current.insertText(text, { label: edit.label, members }, range)
-    ) {
-      setError(
-        "The group would exceed the message length or 32-recipient limit. Nothing was added.",
-      );
-      return false;
-    }
-    completion.invalidate();
-    for (const person of members)
-      rememberMention(session, channelId, person.pubkey);
-    setError(undefined);
-    return true;
   }
   function replaceRecipients(recipients: readonly MentionRecipient[]) {
     if (
@@ -2352,9 +2319,7 @@ function Composer({
       return true;
     }
     if ("mentions" in edit && edit.mentions)
-      return edit.label !== undefined
-        ? insertGroup(edit, query)
-        : insertMentions(edit.mentions, query);
+      return insertMentions(edit.mentions, query, edit.label);
     if ("mention" in edit && edit.mention)
       return insert(`@${edit.mention.name} `, edit.mention, query, typed);
     if ("token" in edit && edit.token) {
@@ -2989,9 +2954,9 @@ function Composer({
         return;
       }
       let references: readonly string[] = [];
-      let recipients = [
-        ...new Set(capturedRecipients.map((item) => item.pubkey)),
-      ];
+      let recipients = distinctRecipients(capturedRecipients).map(
+        (item) => item.pubkey,
+      );
       let declinedImports: readonly string[] = [];
       if (soloConversation || ownSoloConversation) {
         admission.current = true;
@@ -3002,11 +2967,7 @@ function Composer({
         ));
       } else if (recipients.length) {
         // A person in several chips, or also mentioned alone, is offered once.
-        const people = [
-          ...new Map(
-            captured.recipients.map((person) => [person.pubkey, person]),
-          ).values(),
-        ];
+        const people = distinctRecipients(captured.recipients);
         // An agent only an earlier Buzz runs would not answer; offer it here first.
         const lookup = oldAgents.find(people);
         const old = lookup instanceof Promise ? await lookup : lookup;

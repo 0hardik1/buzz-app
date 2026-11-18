@@ -392,16 +392,9 @@ export type CompletionEdit =
     }>
   | Readonly<{
       mentions: readonly Readonly<{ pubkey: string; name: string }>[];
-      label?: never;
-      text?: never;
-      mention?: never;
-      pending?: never;
-    }>
-  /** One chip `@label` that notifies each of `mentions`, sent as the text
-   * `@label`. In code, and in a message edit, only the text goes in. */
-  | Readonly<{
-      mentions: readonly Readonly<{ pubkey: string; name: string }>[];
-      label: string;
+      /** One chip `@label` that notifies each of `mentions`, sent as the text
+       * `@label`. In code, and in a message edit, only the text goes in. */
+      label?: string;
       text?: never;
       mention?: never;
       pending?: never;

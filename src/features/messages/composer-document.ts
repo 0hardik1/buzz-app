@@ -235,22 +235,18 @@ export function composerGroup(
     source !== `@${label}` ||
     !Array.isArray(members) ||
     !members.length ||
-    members.length > 32
+    members.length > 32 ||
+    members.some(
+      (member) =>
+        !member ||
+        typeof member.pubkey !== "string" ||
+        !/^[0-9a-f]{64}$/.test(member.pubkey) ||
+        typeof member.name !== "string" ||
+        !member.name.trim(),
+    ) ||
+    new Set(members.map((member) => member.pubkey)).size < members.length
   )
     return null;
-  const keys = new Set<string>();
-  for (const member of members) {
-    if (
-      !member ||
-      typeof member.pubkey !== "string" ||
-      !/^[0-9a-f]{64}$/.test(member.pubkey) ||
-      typeof member.name !== "string" ||
-      !member.name.trim() ||
-      keys.has(member.pubkey)
-    )
-      return null;
-    keys.add(member.pubkey);
-  }
   return value as ComposerGroup;
 }
 /** The members of a group chip that the draft still mentions on its range. */
@@ -284,23 +280,20 @@ export function tokenRecipients(
     (item) => item.start === range.start && item.end === range.end,
   );
   const label = on.find((item) => item.label !== undefined)?.label;
-  if (label !== undefined) {
-    const members = on
-      .filter((item) => item.label === label)
-      .map(({ pubkey, name }) => ({ pubkey, name }));
-    const group = composerGroup(
-      {
-        label,
-        members: [...new Map(members.map((m) => [m.pubkey, m])).values()],
-      },
-      source,
-    );
-    return { recipient: null, group };
-  }
   const one = on[0];
+  if (label === undefined)
+    return {
+      recipient: one ? { pubkey: one.pubkey, name: one.name } : null,
+      group: null,
+    };
+  const members = new Map(
+    on
+      .filter((item) => item.label === label)
+      .map(({ pubkey, name }) => [pubkey, { pubkey, name }]),
+  );
   return {
-    recipient: one ? { pubkey: one.pubkey, name: one.name } : null,
-    group: null,
+    recipient: null,
+    group: composerGroup({ label, members: [...members.values()] }, source),
   };
 }
 /** Draft text stays the editing/completion coordinate space. Formatting metadata

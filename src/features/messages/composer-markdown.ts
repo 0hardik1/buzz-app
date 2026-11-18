@@ -50,6 +50,19 @@ strike.peek = () => "~";
 export const groupLabelMarkdown = (label: string) =>
   `@${label.replace(/[\\`*_[\]<~]/g, "\\$&")}`;
 
+/** A group's label comes from a plugin, so a chip sends it escaped: it renders
+ * as the label the chip shows. Code shows it as is; a link escapes its text. */
+const groupChip = (node: EditorNode) =>
+  node.attrs.group &&
+  !composerSchema.marks.code.isInSet(node.marks) &&
+  !composerSchema.marks.link.isInSet(node.marks)
+    ? node.type.create(
+        { ...node.attrs, source: groupLabelMarkdown(node.attrs.group.label) },
+        null,
+        node.marks,
+      )
+    : node;
+
 /** Plain portions are authored Markdown, not rich-editor literal text. Keeping
  * their source verbatim avoids normalizing formats this slice does not edit.
  * Marked content uses CommonMark/GFM delimiter escaping and flanking rules.
@@ -59,27 +72,12 @@ export function composerMarkdown(
   draft: MentionDraft,
   { authored = false }: { authored?: boolean } = {},
 ): string {
-  // A group's label comes from a plugin, so its Markdown characters are sent
-  // escaped: it renders as the label the chip shows. Code shows it as is, and
-  // a link's text is escaped by the link.
   const project = (node: EditorNode): EditorNode =>
     node.type.name === "token" && node.attrs.semantic
       ? node.mark(composerSchema.marks.literal.create().addToSet(node.marks))
-      : node.type.name === "token" &&
-          node.attrs.group &&
-          !composerSchema.marks.code.isInSet(node.marks) &&
-          !composerSchema.marks.link.isInSet(node.marks)
-        ? node.type.create(
-            {
-              ...node.attrs,
-              source: groupLabelMarkdown(node.attrs.group.label),
-            },
-            null,
-            node.marks,
-          )
-        : node.isLeaf
-          ? node
-          : node.copy(Fragment.fromArray(node.content.content.map(project)));
+      : node.isLeaf
+        ? groupChip(node)
+        : node.copy(Fragment.fromArray(node.content.content.map(project)));
   const doc = project(readComposerDocument(draft, []));
   const wire = (body: EditorNode) =>
     [...(draft.chatCards ?? []), blocksMarkdown(body), ...(draft.gifs ?? [])]

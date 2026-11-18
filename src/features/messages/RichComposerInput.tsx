@@ -340,21 +340,8 @@ export function RichComposerInput({
           ...(mention ? { mention } : {}),
         });
     };
-    // A group's members share its span; the first claims it for the chip.
-    const groups = new Map<number, { label: string; names: string[] }>();
-    for (const recipient of draft.recipients) {
-      if (recipient.label !== undefined) {
-        const name = labels.get(recipient.pubkey) ?? recipient.name;
-        const group = groups.get(recipient.start);
-        if (group) group.names.push(name);
-        else
-          groups.set(recipient.start, {
-            label: recipient.label,
-            names: [name],
-          });
-      }
+    for (const recipient of draft.recipients)
       add(recipient.start, recipient.end, recipient.pubkey);
-    }
     // Identity links are display references, not new notification recipients.
     // Keep their exact source token so editing surrounding prose preserves it.
     const profileLinks = new Map<number, { pubkey: string; label: string }>();
@@ -418,17 +405,23 @@ export function RichComposerInput({
         const preview = gifPreviews.get(start);
         if (preview && preview.end === end && !mention)
           return { start, end, editAsText: false, content: preview.content };
-        const group = mention ? groups.get(start) : undefined;
-        if (group && draft.text.slice(start, end) === `@${group.label}`)
+        // A group's members share its span: one chip, counting them.
+        const people = draft.recipients.filter(
+          (item) => item.start === start && item.label !== undefined,
+        );
+        const group = people[0]?.label;
+        if (group !== undefined && draft.text.slice(start, end) === `@${group}`)
           return {
             start,
             end,
             editAsText: false,
             content: (
               <GroupChip
-                label={group.label}
-                names={group.names.join(", ")}
-                count={group.names.length}
+                label={group}
+                names={people
+                  .map((item) => labels.get(item.pubkey) ?? item.name)
+                  .join(", ")}
+                count={people.length}
               />
             ),
           };

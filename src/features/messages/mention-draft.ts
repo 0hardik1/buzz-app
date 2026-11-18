@@ -10,21 +10,16 @@ export type MentionRecipient = Readonly<{ pubkey: string; name: string }>;
  * the group's `label`: then the span is `@label`, not `@name`. */
 export type DraftRecipient = MentionRecipient &
   Readonly<{ start: number; end: number; label?: string }>;
-/** A message notifies at most this many distinct people. */
-export const MAX_RECIPIENTS = 32;
-/** The distinct people `recipients` mention; a group shares a span with its
- * members, and two chips can name the same person. */
-export function distinctRecipients(
-  recipients: readonly MentionRecipient[],
-): number {
-  return new Set(recipients.map((item) => item.pubkey)).size;
-}
-/** `recipients` up to the first `MAX_RECIPIENTS` distinct people, keeping
- * every span of each one it keeps. */
+/** One entry per person: a group shares a span with its members, and two
+ * chips can name the same person. */
+export const distinctRecipients = <T extends MentionRecipient>(
+  recipients: readonly T[],
+) => [...new Map(recipients.map((item) => [item.pubkey, item])).values()];
+/** `recipients` up to the first 32 distinct people, keeping all their spans. */
 function capRecipients<T extends MentionRecipient>(recipients: readonly T[]) {
   const kept = new Set<string>();
   return recipients.filter((item) => {
-    if (!kept.has(item.pubkey) && kept.size >= MAX_RECIPIENTS) return false;
+    if (!kept.has(item.pubkey) && kept.size >= 32) return false;
     kept.add(item.pubkey);
     return true;
   });

@@ -98,7 +98,6 @@ import {
 } from "./composer-clipboard";
 import {
   distinctRecipients,
-  MAX_RECIPIENTS,
   mentionBoundary,
   mentionDraft,
   type MentionDraft,
@@ -919,7 +918,6 @@ export function EditableInput({
       text = text.replace(/\r\n?/g, "\n");
       const tr = closeHistory(editor.state.tr);
       if (group) {
-        // One chip for every member; in code, the text alone.
         const source = `@${group.label}`;
         tr.replaceWith(
           from,
@@ -971,8 +969,8 @@ export function EditableInput({
       );
       if (
         (Array.isArray(recipient) || group) &&
-        distinctRecipients(projectComposerDocument(tr.doc).draft.recipients) >
-          MAX_RECIPIENTS
+        distinctRecipients(projectComposerDocument(tr.doc).draft.recipients)
+          .length > 32
       )
         return false;
       if (
@@ -1134,28 +1132,25 @@ export function EditableInput({
       const added = recipients.filter((person) => !existing.has(person.pubkey));
       const tr = closeHistory(editor.state.tr);
       // A group's members share its chip: the chip keeps the members still
-      // requested, and is plain text without them.
-      const spans = new Map<number, typeof source.draft.recipients>();
-      for (const person of source.draft.recipients)
-        spans.set(person.start, [...(spans.get(person.start) ?? []), person]);
-      for (const [start, people] of [...spans].reverse()) {
-        const span = people[0];
-        if (!span || people.every((person) => requested.has(person.pubkey)))
-          continue;
-        const token = source.tokens.find((item) => item.start === start);
-        const group =
-          token &&
-          composerGroup(token.node.attrs.group, token.node.attrs.source);
-        if (token && group) {
-          const members = group.members.filter((m) => requested.has(m.pubkey));
+      // requested, and is plain text without them. Attributes keep positions.
+      for (const token of source.tokens) {
+        const group = composerGroup(
+          token.node.attrs.group,
+          token.node.attrs.source,
+        );
+        const members = group?.members.filter((m) => requested.has(m.pubkey));
+        if (group && members && members.length < group.members.length)
           tr.setNodeMarkup(token.from, undefined, {
             ...token.node.attrs,
             group: members.length ? { label: group.label, members } : null,
           });
+      }
+      for (const person of [...source.draft.recipients].reverse()) {
+        if (requested.has(person.pubkey) || person.label !== undefined)
           continue;
-        }
-        const end = span.end + (source.draft.text[span.end] === " " ? 1 : 0);
-        tr.delete(source.position(start), source.position(end, -1));
+        const end =
+          person.end + (source.draft.text[person.end] === " " ? 1 : 0);
+        tr.delete(source.position(person.start), source.position(end, -1));
       }
       if (added.length) {
         const at = Selection.atStart(tr.doc).from;
@@ -1180,7 +1175,7 @@ export function EditableInput({
       }
       const next = projectComposerDocument(tr.doc).draft;
       if (
-        distinctRecipients(next.recipients) > MAX_RECIPIENTS ||
+        distinctRecipients(next.recipients).length > 32 ||
         composerMarkdown(next).length > current.current.maxLength
       )
         return false;
@@ -1750,7 +1745,7 @@ export function EditableInput({
         const identity = identityLink(token.node.attrs.source);
         if (
           !identity ||
-          (!counted.has(identity.pubkey) && counted.size >= MAX_RECIPIENTS) ||
+          (!counted.has(identity.pubkey) && counted.size >= 32) ||
           !mentionBoundary(
             projectComposerDocument(tr.doc).draft.text,
             token.end,
@@ -2628,10 +2623,7 @@ export function EditableInput({
                 recipient: null,
               });
             // A group drops the member; without members it is plain text.
-            const group =
-              node.type.name === "token"
-                ? composerGroup(node.attrs.group, node.attrs.source)
-                : null;
+            const group = composerGroup(node.attrs.group, node.attrs.source);
             if (group?.members.some((m) => m.pubkey === pubkey)) {
               const members = group.members.filter((m) => m.pubkey !== pubkey);
               tr.setNodeMarkup(pos, undefined, {
