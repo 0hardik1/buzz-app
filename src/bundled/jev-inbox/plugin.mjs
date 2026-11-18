@@ -2763,6 +2763,10 @@ export function apply(ctx) {
   const summarizer = (() => {
     const waiting = new Map(); // item key -> item
     let flight; // { id, keys, timer } while Bestie is writing
+    // Requests that were given up on, by id: Bestie may still answer one
+    // after its turn sat in a queue, and a late line is still worth showing.
+    const late = new Map();
+    const LATE_KEPT = 40;
     let timer;
     let sequence = 0;
 
@@ -2796,6 +2800,10 @@ export function apply(ctx) {
           feed.landHeld(item);
         }
       }
+      if (keys.length && why !== "done")
+        console.warn(
+          `Jev Inbox: no summary for ${keys.length} card(s): ${why}`,
+        );
       store.bump();
     }
 
@@ -2868,7 +2876,9 @@ export function apply(ctx) {
       const keys = batch.map((item) => item.key);
       if (!live || !agentKey || !dm)
         return fail(keys, bestie.pubkey ? "no_bestie_dm" : "no_bestie");
-      const id = `s${++sequence}`;
+      // Unique across reloads, so an answer to an earlier run's request is
+      // never taken for this one's.
+      const id = `s${Date.now().toString(36)}${++sequence}`;
       flight = {
         id,
         keys: new Set(keys),
@@ -2899,7 +2909,11 @@ export function apply(ctx) {
       clearTimeout(flight.timer);
       const left = [...flight.keys];
       flight = undefined;
-      if (left.length) fail(left, why);
+      if (left.length) {
+        late.set(id, new Set(left));
+        if (late.size > LATE_KEPT) late.delete(late.keys().next().value);
+        fail(left, why);
+      }
       schedule();
     }
     function schedule() {
@@ -2930,15 +2944,15 @@ export function apply(ctx) {
       },
       /** Bestie's answer. Returns how many were taken. */
       deliver(request, summaries) {
-        if (!flight || flight.id !== request)
-          throw new Error(
-            `No summary request "${request}" is waiting; it may have timed out.`,
-          );
+        const inFlight = flight?.id === request;
+        const keys = inFlight ? flight.keys : late.get(request);
+        if (!keys)
+          throw new Error(`No summary request "${request}" is known here.`);
         let taken = 0;
         for (const entry of summaries) {
           const text = clip(entry?.summary, SUMMARY_MAX);
-          if (!flight.keys.has(entry?.key) || !text) continue;
-          flight.keys.delete(entry.key);
+          if (!keys.has(entry?.key) || !text) continue;
+          keys.delete(entry.key);
           const item = current(entry.key);
           if (!item) continue;
           item.summary = {
@@ -2951,7 +2965,10 @@ export function apply(ctx) {
           taken++;
         }
         store.bump();
-        if (!flight.keys.size) land(request, "done");
+        if (!keys.size) {
+          if (inFlight) land(request, "done");
+          else late.delete(request);
+        }
         return taken;
       },
       stop() {
@@ -3162,6 +3179,9 @@ export function apply(ctx) {
             { className: "ji-score" },
             item.jevFailed ? "no Jev" : (item.p ?? 0).toFixed(2),
             item.long === undefined ? "" : ` · long ${item.long.toFixed(2)}`,
+            item.summary
+              ? ` · summary ${item.summary.status}${item.summary.why ? ` (${item.summary.why})` : ""}`
+              : "",
           ),
         h("span", { className: "ji-kind-time" }, relativeTime(last.createdAt)),
       ),
