@@ -264,12 +264,13 @@ function notifyRecovered(
     listener(recovered);
 }
 /** A saved draft with nothing in it, like the one a send leaves. */
-function blankDraft(raw: string) {
+export function blankDraft(raw: string) {
   try {
     const draft = mentionDraft(JSON.parse(raw));
     return (
       !draft.text.trim() &&
       !draft.recipients.length &&
+      !draft.forward &&
       !composerMarkdown(draft).trim()
     );
   } catch {
@@ -3023,6 +3024,7 @@ function Composer({
             single &&
             !!agent?.own &&
             !capturedAttachments.length &&
+            !captured.forward &&
             !!relaySession?.channelWrites.available;
           // Your agent from another community joins through §7's bring
           // prompt instead, which also sets it up here.

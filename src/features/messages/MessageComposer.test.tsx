@@ -71,7 +71,11 @@ import { fakeSpawn } from "../../bundled/claude-code/claude-testing";
 import { ConversationPresentation } from "../conversation/ConversationPresentation";
 import { AgentsContext } from "../agents/react";
 import type { Agents, Models } from "../agents/service";
-import { MessageComposer, type MessageComposerProps } from "./MessageComposer";
+import {
+  blankDraft,
+  MessageComposer,
+  type MessageComposerProps,
+} from "./MessageComposer";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { InlineChip } from "../../shared/design-system/ui/InlineChip";
 import { MessageEditScope, useMessageEditScope } from "./MessageEditScope";
@@ -2709,6 +2713,134 @@ it("asks your Viewing-only agent in a Solo chat with the model and effort chosen
   );
   // It went to the Solo chat, not the channel.
   expect(asked?.tags).not.toContainEqual(["h", "channel"]);
+});
+
+it("never offers a Solo ask for a draft that carries a forwarded message", async () => {
+  const honey = keypair();
+  const snapshot = {
+    status: "ready",
+    agents: [
+      {
+        key: honey.pubkey,
+        pubkey: honey.pubkey,
+        name: "Honey",
+        type: "test/agent",
+      },
+    ],
+  };
+  const types: readonly unknown[] = [];
+  const agents = {
+    find: (pubkey: string) =>
+      snapshot.agents.find((agent) => agent.pubkey === pubkey),
+    joinable: () => [],
+    sessionState: () => "unavailable" as const,
+    subscribe: () => () => {},
+    snapshot: () => snapshot,
+    types: () => types,
+  } as unknown as Agents;
+  const tools: readonly Contribution<ComposerTool>[] = [
+    {
+      id: "fixture",
+      key: "test/fixture",
+      pluginId: "test",
+      revision: "1",
+      title: "Fixture tools",
+      component: (props: ComposerToolProps) => (
+        <button
+          type="button"
+          onClick={() =>
+            props.insertMention({ pubkey: honey.pubkey, name: "Honey" })
+          }
+        >
+          Mention Honey
+        </button>
+      ),
+    },
+  ];
+  const h = await mountUploadComposer({
+    agents,
+    members: [honey.pubkey],
+    guests: [honey.pubkey],
+    soloChats: true,
+    sourceMessages: true,
+    profiles: (viewer) => [
+      eventDto(
+        signed(honey, {
+          kind: 0,
+          created_at: 1700000000,
+          content: JSON.stringify({ name: "Honey", bot: true }),
+          tags: [
+            [
+              "auth",
+              viewer.pubkey,
+              "",
+              bytesToHex(
+                schnorr.sign(
+                  new Uint8Array(
+                    createHash("sha256")
+                      .update(`nostr:agent-auth:${honey.pubkey}:`)
+                      .digest(),
+                  ),
+                  viewer.secret,
+                ),
+              ),
+            ],
+          ],
+        }),
+      ),
+    ],
+    extensions: {
+      tools: { snapshot: () => tools, subscribe: () => () => {} },
+      inline: { snapshot: () => [], subscribe: () => () => {} },
+    },
+  });
+  await act(() =>
+    h.owner.session.profiles.ensure([honey.pubkey], "background"),
+  );
+  await waitFor(() =>
+    expect(h.owner.session.profiles.owner?.(honey.pubkey)).toBeDefined(),
+  );
+  const id = h.owner.session.messages.send("channel", "Original message");
+  await waitFor(() => expect(h.publish).toHaveBeenCalledOnce());
+  const { forwardClipboard } = await import("./forward-clipboard");
+  const reference = {
+    version: 1 as const,
+    origin: "https://relay.example.test",
+    channelId: "channel",
+    id,
+  };
+  const payload = forwardClipboard(reference, "Clipboard text");
+  await userEvent.click(screen.getByRole("button", { name: "Mention Honey" }));
+  fireEvent.paste(h.input(), {
+    clipboardData: {
+      getData: (type: string) =>
+        type === "text/html" ? payload.html : payload.text,
+      items: [],
+    },
+  });
+  await screen.findByRole("button", { name: "Remove forwarded message" });
+  await waitFor(() => expect(h.send()).toBeEnabled());
+  let offered = false;
+  const watch = new MutationObserver(() => {
+    if (screen.queryByRole("button", { name: "Ask in a Solo chat" }))
+      offered = true;
+  });
+  watch.observe(document.body, { childList: true, subtree: true });
+  try {
+    fireEvent.click(h.send());
+    // The forward goes to the channel through the ordinary send.
+    await waitFor(() => expect(h.publish).toHaveBeenCalledTimes(2));
+  } finally {
+    watch.disconnect();
+  }
+  expect(offered).toBe(false);
+  expect(h.sign.mock.calls.some(([event]) => event.kind === 9007)).toBe(false);
+  // A forward alone is not a blank draft, so a refused Solo ask never
+  // restores over it.
+  expect(blankDraft(JSON.stringify({ text: "", forward: reference }))).toBe(
+    false,
+  );
+  expect(blankDraft(JSON.stringify({ text: "" }))).toBe(true);
 });
 
 it.each(["cleanup", "restore"] as const)(
