@@ -189,7 +189,7 @@ import type { AnnotationMenuRequest } from "./composer-dom";
 import { formatMediaTime, mediaTimeReply } from "./media-timecode";
 import { RichComposerInput } from "./RichComposerInput";
 import type { MessageLinkOrigin } from "./MessageRow";
-import { composerMarkdown } from "./composer-markdown";
+import { composerMarkdown, groupLabelMarkdown } from "./composer-markdown";
 import type {
   ComposerInputElement,
   ComposerLinkEdit,
@@ -2217,7 +2217,8 @@ function Composer({
   }
   /** One chip `@label` over `range` that notifies each of `mentions`, sent
    * as the text `@label`. In code, and in a message edit, only the text goes
-   * in, since edits never add notification intent. */
+   * in, since edits never add notification intent; an edit is Markdown, so
+   * there the label goes in escaped, as a chip sends it. */
   function insertGroup(
     edit: Readonly<{ mentions: readonly MentionRecipient[]; label: string }>,
     range: CompletionQuery,
@@ -2231,9 +2232,11 @@ function Composer({
       input.current.readOnly
     )
       return false;
+    if (inMarkdownCode(range))
+      return insert(`@${edit.label} `, undefined, range);
+    if (editing.target)
+      return insert(`${groupLabelMarkdown(edit.label)} `, undefined, range);
     const text = `@${edit.label} `;
-    if (editing.target || inMarkdownCode(range))
-      return insert(text, undefined, range);
     const members = [
       ...new Map(
         edit.mentions.map(({ pubkey, name }) => [pubkey, { pubkey, name }]),

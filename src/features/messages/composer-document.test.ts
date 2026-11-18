@@ -769,6 +769,29 @@ describe("inline formatting batch", () => {
       kinds: ["root", "paragraph", "emphasis", "text"],
       text: "@eng_ios hi",
     });
+    // Emphasis beside an escaped label still pairs only its own delimiters.
+    expect(
+      rendered(
+        serialize(
+          chip("eng*"),
+          schema.text("b", [schema.marks.italic.create()]),
+          schema.text("*"),
+        ),
+      ),
+    ).toEqual({
+      kinds: ["root", "paragraph", "text", "emphasis"],
+      text: "@eng*b*",
+    });
+    // A link escapes its own text, once.
+    const linked = schema.nodes.token.create(
+      { source: "@eng_ios", group: { label: "eng_ios", members } },
+      null,
+      [schema.marks.link.create({ href: "https://example.com" })],
+    );
+    expect(rendered(serialize(linked))).toEqual({
+      kinds: ["root", "paragraph", "link", "text"],
+      text: "@eng_ios",
+    });
     // Code shows its text as is.
     expect(serialize(chip("eng_ios", "code"))).toBe("`@eng_ios`");
   });

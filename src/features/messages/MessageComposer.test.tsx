@@ -12671,16 +12671,11 @@ it("batch insertion rejects an unavailable member atomically and does not send o
 function offerCrew(
   h: ReturnType<typeof mount>,
   mentions: readonly MentionRecipient[],
+  label = "Crew",
 ) {
   act(() => {
     h.completionRequests.at(-1)?.({
-      items: [
-        {
-          id: "crew",
-          label: "Crew",
-          edit: { mentions, label: "Crew" },
-        },
-      ],
+      items: [{ id: "crew", label, edit: { mentions, label } }],
     });
   });
 }
@@ -12717,19 +12712,26 @@ it("a labelled mentions edit inside Markdown code is only its name", async () =>
   expect(h.input()).toHaveValue("@Crew ");
   expect(h.commands().recipients).toEqual([]);
 });
-it("a labelled mentions edit while editing a sent message adds only its text", async () => {
-  const h = mount({}, undefined, first.pubkey);
-  h.setRows([editableMessage()]);
-  fireEvent.keyDown(h.input(), { key: "ArrowUp" });
-  h.fill("!Crew");
-  offerCrew(h, [first, second]);
-  await h.user.keyboard("{Enter}");
-  expect(h.input()).toHaveValue("@Crew ");
-  expect(h.commands().recipients).toEqual([]);
-  h.submit();
-  expect(h.messages.edit.mock.calls[0]?.[1]).toBe("@Crew ");
-  expect(h.messages.send).not.toHaveBeenCalled();
-});
+it.each([
+  ["Crew", "@Crew "],
+  // An edit is Markdown, so the label goes in escaped, as a chip sends it.
+  ["*ops*", "@\\*ops\\* "],
+])(
+  "a labelled mentions edit while editing a sent message adds only its text (%s)",
+  async (label, text) => {
+    const h = mount({}, undefined, first.pubkey);
+    h.setRows([editableMessage()]);
+    fireEvent.keyDown(h.input(), { key: "ArrowUp" });
+    h.fill("!Crew");
+    offerCrew(h, [first, second], label);
+    await h.user.keyboard("{Enter}");
+    expect(h.input()).toHaveValue(text);
+    expect(h.commands().recipients).toEqual([]);
+    h.submit();
+    expect(h.messages.edit.mock.calls[0]?.[1]).toBe(text);
+    expect(h.messages.send).not.toHaveBeenCalled();
+  },
+);
 it("a labelled mentions edit with an unavailable member adds nothing", async () => {
   const h = mount({ inviteAgents: true });
   h.fill("!Crew");
