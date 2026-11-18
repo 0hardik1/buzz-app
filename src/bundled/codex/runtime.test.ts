@@ -1315,7 +1315,6 @@ function protectedPreview(
       handle: (key) => (key === pubkey ? handle : undefined),
     },
     resolveDirectory,
-    undefined,
     mcp,
   );
   const original = {
