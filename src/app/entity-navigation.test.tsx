@@ -995,7 +995,7 @@ it("keeps a link read while a code-less link switches communities", async () => 
   );
 });
 
-it("lists active primary pages in the app dock", async () => {
+it("lists active primary pages in the app switcher", async () => {
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -1034,17 +1034,24 @@ it("lists active primary pages in the app dock", async () => {
   services = createServices();
   const current = services;
   render(<App services={current} />);
-  // Activity is a row in the Messages sidebar; the others are dock apps.
-  await within(
-    await screen.findByRole("navigation", { name: "Pages" }),
-  ).findByRole("button", { name: "Activity" });
-  expect(screen.queryByRole("tab", { name: "Activity" })).toBeNull();
-  expect(screen.getByRole("tab", { name: "Bestie" })).toBeInTheDocument();
-
+  // Activity stays in the Messages sidebar; apps are offered in the switcher.
+  await screen.findByRole("button", { name: "Activity" });
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole("button", { name: "Switch app: Messages" }),
+  );
+  const apps = await screen.findByRole("menu", { name: "Apps" });
+  expect(within(apps).queryByRole("menuitem", { name: "Activity" })).toBeNull();
   expect(
-    screen.queryByRole("tab", { name: "Repository" }),
+    within(apps).getByRole("menuitem", { name: "Bestie" }),
+  ).toBeInTheDocument();
+  expect(
+    within(apps).queryByRole("menuitem", { name: "Repository" }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Agents" })).toBeInTheDocument();
+  expect(
+    within(apps).getByRole("menuitem", { name: "Agents" }),
+  ).toBeInTheDocument();
+  await user.keyboard("{Escape}");
 
   // The fixture page is active and searchable but never a sidebar row.
   expect(current.pages.snapshot().map((page) => page.key)).toContain(
@@ -1088,9 +1095,17 @@ it("lists active primary pages in the app dock", async () => {
       { name: "Activity" },
     ),
   ).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Bestie" })).toBeInTheDocument();
-
-  expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: "Switch app: Messages" }),
+  );
+  const remainingApps = await screen.findByRole("menu", { name: "Apps" });
+  expect(
+    within(remainingApps).getByRole("menuitem", { name: "Bestie" }),
+  ).toBeInTheDocument();
+  expect(
+    within(remainingApps).queryByRole("menuitem", { name: "Agents" }),
+  ).not.toBeInTheDocument();
+  await user.keyboard("{Escape}");
   await userEvent.click(screen.getByRole("button", { name: "Search Buzz" }));
   const search = await screen.findByRole("dialog", { name: "Search Buzz" });
   expect(
@@ -1117,8 +1132,17 @@ it("lists active primary pages in the app dock", async () => {
       { name: "Activity" },
     ),
   ).not.toBeInTheDocument();
-  expect(screen.queryByRole("tab", { name: "Bestie" })).not.toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Messages" })).toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: "Switch app: Messages" }),
+  );
+  const finalApps = await screen.findByRole("menu", { name: "Apps" });
+  expect(
+    within(finalApps).queryByRole("menuitem", { name: "Bestie" }),
+  ).not.toBeInTheDocument();
+  expect(
+    within(finalApps).getByRole("menuitem", { name: "Messages" }),
+  ).toHaveAttribute("aria-current", "page");
+  await user.keyboard("{Escape}");
   expect(
     screen.getByRole("complementary", { name: "Sidebar" }),
   ).toBeInTheDocument();

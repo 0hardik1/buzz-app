@@ -549,13 +549,14 @@ it("honors the promoted DM's mute and unread state through reads and Bestie repl
           pageId: "bestie",
         }}
       >
-        <PageNavigation
-          pages={[page]}
-          selected={page.key}
-          placement="dock"
-          onSelect={() => {}}
-        />
+        {null}
       </PrimarySidebar>
+      <PageNavigation
+        pages={[page]}
+        selected={page.key}
+        placement="dock"
+        onSelect={() => {}}
+      />
     </ChannelNavigationProvider>
   );
   const tree = () => (

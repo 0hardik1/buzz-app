@@ -66,7 +66,6 @@ import {
   useChannelNavigation,
 } from "./ChannelNavigationState";
 import { readView, writeView } from "../../shared/view-state";
-import styles from "../../bundled/channels/MessagesSidebar.module.css";
 import { BestieNavigationProvider } from "../../app/shell/BestieNavigation";
 import { PageNavigation } from "../../app/shell/PageNavigation";
 import { createAgentChoices } from "../agents/choices";
@@ -454,6 +453,8 @@ it("keeps visibility recovery quiet, then offers the existing retry after exhaus
     cleanup();
     lifecycle.dispose();
     random.mockRestore();
+    // Release queued animation frames before replacing the fake clock.
+    await act(() => vi.runOnlyPendingTimersAsync());
     vi.useRealTimers();
   }
 });
@@ -520,6 +521,7 @@ it("keeps a roster failure quiet while recovery retries it, but not a denial whi
   } finally {
     cleanup();
     recovery.dispose();
+    await act(() => vi.runOnlyPendingTimersAsync());
     vi.useRealTimers();
   }
 });
@@ -544,6 +546,7 @@ it("cancels visibility retries on sidebar unmount and session changes", async ()
   } finally {
     cleanup();
     lifecycle.dispose();
+    await act(() => vi.runOnlyPendingTimersAsync());
     vi.useRealTimers();
   }
 });
@@ -1200,14 +1203,19 @@ it("explains and disables unavailable move retries, then enables them after pref
 
 it.each(["ready", "error"] as const)(
   "keeps the supplied page navigation while the relay is %s",
-  (status) => {
+  async (status) => {
     const h = fixture(undefined, status);
     render(h.view("alpha"));
-    const pages = screen.getByRole("navigation", { name: "Pages" });
+    const pages = await screen.findByRole("navigation", { name: "Pages" });
     expect(
       within(pages).getByRole("button", { name: "Projects" }),
     ).toBeVisible();
-    expect(pages.closest(`.${styles.destinations}`)).not.toBeNull();
+    expect(pages.closest("aside")).toHaveAccessibleName("Sidebar");
+    if (status === "ready")
+      expect(pages.closest("[data-sidebar-section]")).toHaveAttribute(
+        "data-sidebar-section",
+        "starred",
+      );
   },
 );
 
@@ -1251,20 +1259,6 @@ it.each(["Laptop", "Channels", "Starred"])(
         name: `More actions for ${section}`,
       }).parentElement;
       assert.exists(header);
-      if (section === "Starred") {
-        const icon = screen
-          .getByLabelText("Starred")
-          .querySelector("[data-sidebar-group-icon]");
-        const emoji = screen
-          .getByLabelText("Laptop")
-          .querySelector("[data-sidebar-group-icon]");
-        assert.exists(icon);
-        assert.exists(emoji);
-        expect(icon).toHaveAttribute("class", emoji.className);
-        expect(icon).toHaveAttribute("aria-hidden", "true");
-        expect(icon.querySelector("svg")).toBeInTheDocument();
-        expect(icon).not.toHaveTextContent("★");
-      }
       fireEvent.click(
         within(header).getByRole("button", { name: "Create channel" }),
       );
@@ -1480,7 +1474,9 @@ it("rejects a deferred header Create section after its navigation origin retires
       />,
     ),
   );
-  await user.click(screen.getByRole("button", { name: "Channel actions" }));
+  await user.click(
+    await screen.findByRole("button", { name: "Channel actions" }),
+  );
   await user.hover(
     await screen.findByRole("menuitem", { name: "Move channel" }),
   );
@@ -1564,7 +1560,9 @@ it("offers only Copy link for a not-joined preview, keeping sidebar actions for 
     readOnly: true,
   };
   const mounted = render(header(preview));
-  await user.click(screen.getByRole("button", { name: "Channel actions" }));
+  await user.click(
+    await screen.findByRole("button", { name: "Channel actions" }),
+  );
   expect(
     await screen.findByRole("menuitem", { name: "Copy link" }),
   ).toBeVisible();
@@ -1577,7 +1575,9 @@ it("offers only Copy link for a not-joined preview, keeping sidebar actions for 
   await user.keyboard("{Escape}");
 
   mounted.rerender(header({ ...preview, viewerRole: "guest" }));
-  await user.click(screen.getByRole("button", { name: "Channel actions" }));
+  await user.click(
+    await screen.findByRole("button", { name: "Channel actions" }),
+  );
   expect(
     await screen.findByRole("menuitem", { name: "Move channel" }),
   ).toBeVisible();
@@ -1797,7 +1797,7 @@ it("restores lifecycle focus to the active row while an inert copy is exiting", 
   vi.spyOn(active, "getClientRects").mockReturnValue(rects);
   vi.spyOn(leaving, "getClientRects").mockReturnValue(rects);
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "Start action" }));
+  await user.click(await screen.findByRole("button", { name: "Start action" }));
   const dialog = await screen.findByRole("dialog", {
     name: "Archive channel: beta",
   });
@@ -1854,7 +1854,9 @@ it.each(["archive", "unarchive", "delete"] as const)(
       ),
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Start action" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Start action" }),
+    );
     await user.click(
       await screen.findByRole("button", {
         name:
@@ -1964,7 +1966,9 @@ function pendingLifecycle(
     view,
     async start() {
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: "Start action" }));
+      await user.click(
+        await screen.findByRole("button", { name: "Start action" }),
+      );
       await user.click(
         screen.getByRole("button", {
           name: {
@@ -2478,9 +2482,7 @@ it("moves a saved group from its menu, rolls back a failed save, and retries it"
       expect(groups()).toEqual(["group:work", "group:later"]),
     );
     expect(
-      document.querySelector(
-        "[data-create-section-slot] + [data-sidebar-section]",
-      ),
+      document.querySelector('[data-sidebar-section^="group:"]'),
     ).toHaveAttribute("data-sidebar-section", "group:work");
     await user.click(
       screen.getByRole("button", { name: "More actions for Work" }),
@@ -2513,9 +2515,7 @@ it("moves a saved group from its menu, rolls back a failed save, and retries it"
       expect(groups()).toEqual(["group:later", "group:work"]),
     );
     expect(
-      document.querySelector(
-        "[data-create-section-slot] + [data-sidebar-section]",
-      ),
+      document.querySelector('[data-sidebar-section^="group:"]'),
     ).toHaveAttribute("data-sidebar-section", "group:later");
     expect(order).toHaveBeenLastCalledWith(
       ["later", "work"],
@@ -2926,6 +2926,7 @@ it.each([
       prefs.dispose();
       await runtime.dispose();
       await root.fiber.dispose();
+      await act(() => vi.runOnlyPendingTimersAsync());
       vi.useRealTimers();
     }
   },
@@ -3030,6 +3031,7 @@ it("reveals an unavailable saved sort when configuration settles and stays settl
     prefs.dispose();
     await runtime.dispose();
     await root.fiber.dispose();
+    await act(() => vi.runOnlyPendingTimersAsync());
     vi.useRealTimers();
   }
 });

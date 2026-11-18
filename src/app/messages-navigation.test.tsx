@@ -80,10 +80,9 @@ it("opens the Drafts & sent plugin page from global search inside Messages", asy
     pluginId: "buzz.drafts-and-sent",
     pageId: "drafts-sent",
   });
-  expect(screen.getByRole("tab", { name: "Messages" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  expect(
+    screen.getByRole("button", { name: "Switch app: Messages" }),
+  ).toBeInTheDocument();
 });
 
 it("opens Drafts & sent from a plugin-owned sidebar's shared Pages navigation", async () => {
@@ -141,10 +140,9 @@ it("opens Drafts & sent inside Messages and retains the sidebar through Back/For
   expect(
     await screen.findByRole("region", { name: "Drafts & sent" }),
   ).toBeVisible();
-  expect(screen.getByRole("tab", { name: "Messages" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  expect(
+    screen.getByRole("button", { name: "Switch app: Messages" }),
+  ).toBeInTheDocument();
   expect(document.getElementById("shell-navigation")).toHaveAttribute(
     "aria-hidden",
     "false",
@@ -232,9 +230,8 @@ it.each(Object.keys(legacyLinks) as (keyof typeof legacyLinks)[])(
       pageId: "drafts-sent",
       scope: null,
     });
-    expect(screen.getByRole("tab", { name: "Messages" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(
+      screen.getByRole("button", { name: "Switch app: Messages" }),
+    ).toBeInTheDocument();
   },
 );

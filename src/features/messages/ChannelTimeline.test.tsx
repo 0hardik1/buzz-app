@@ -219,6 +219,10 @@ function setup({
     }
   };
   const element = {
+    children: [],
+    toggleAttribute: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
     clientWidth: 1124,
     clientHeight: 668,
     scrollHeight: 3706,
@@ -288,7 +292,7 @@ function setup({
     } as unknown as RelaySession);
   let rows = initialRows ?? [timelineMessage("first"), timelineMessage("last")];
   type Section = ReactElement<{
-    ref: { current: unknown };
+    ref: (element: unknown) => void;
     "data-jump-visible": true | undefined;
     children: unknown[];
     onScroll: (event: unknown) => void;
@@ -345,9 +349,9 @@ function setup({
     section = (
       scoped.type as (
         props: typeof scoped.props,
-      ) => ReactElement<{ children: Section }>
-    )(scoped.props).props.children;
-    section.props.ref.current = element;
+      ) => ReactElement<{ children: ReactElement<{ children: Section }> }>
+    )(scoped.props).props.children.props.children;
+    section.props.ref(element);
     const edge = section.props.children[0] as ReactElement<{
       ref: { current: unknown };
     }>;

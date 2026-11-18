@@ -52,6 +52,8 @@ afterEach(async () => {
   localStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  // Release queued animation frames before replacing the fake clock.
+  if (vi.isFakeTimers()) await act(() => vi.runOnlyPendingTimersAsync());
   vi.useRealTimers();
 });
 function fixture() {
