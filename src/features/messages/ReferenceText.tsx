@@ -1,6 +1,8 @@
 import { useChannelIdentityNames } from "../identity-names/react";
 import { useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { AtIcon, RobotIcon } from "../../shared/design-system/icons/index";
+import { Avatar } from "../../shared/design-system/ui/Avatar";
+import { avatarMedia } from "../../shared/avatar-source";
 import type { RelaySession } from "../relay/session";
 import type { ComposerSession } from "./composer-session";
 import type { ChannelList, ChannelSummary, Profile } from "../relay/contracts";
@@ -16,13 +18,16 @@ const emptyProfiles: ReadonlyMap<string, Profile> = new Map();
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /** A mention chip's contents. The icon stays with the first character, so a
- * chip at a line end never strands its icon; the rest wraps within the message. */
+ * chip at a line end never strands its icon; the rest wraps within the message.
+ * With a picture, the identity's avatar takes the icon's place. */
 export function MentionLabel({
   agent,
   label,
+  avatar,
 }: {
   agent: boolean;
   label: string;
+  avatar?: string | undefined;
 }) {
   const Icon = agent ? RobotIcon : AtIcon;
   const lead = graphemes.segment(label).containing(0)?.segment ?? "";
@@ -30,7 +35,19 @@ export function MentionLabel({
     <>
       <span className={styles.lead}>
         <span role="img" aria-label={agent ? "agent @" : "@"}>
-          <Icon aria-hidden="true" className={styles.icon} />
+          {avatar ? (
+            <span className="inline-chip-avatar">
+              <Avatar
+                src={avatar}
+                alt=""
+                fallback={label}
+                size="fill"
+                shape={agent ? "squircle" : "circle"}
+              />
+            </span>
+          ) : (
+            <Icon aria-hidden="true" className={styles.icon} />
+          )}
         </span>
         {lead}
       </span>
@@ -50,6 +67,7 @@ export function ProfileMention({
   viewer,
   resolveName,
   onOpen,
+  media,
 }: {
   text: string;
   target: string;
@@ -58,6 +76,8 @@ export function ProfileMention({
   viewer: string | undefined;
   resolveName: (pubkey: string, fallback: string) => string;
   onOpen?: ((target: string) => unknown) | undefined;
+  /** Without it the chip keeps its icon. */
+  media?: ((url: string, size: "small") => string | undefined) | undefined;
 }) {
   const key = profileKey(target);
   const agent =
@@ -87,7 +107,11 @@ export function ProfileMention({
           : undefined
       }
     >
-      <MentionLabel agent={agent} label={label} />
+      <MentionLabel
+        agent={agent}
+        label={label}
+        avatar={key ? avatarMedia(profiles.get(key)?.picture, media) : undefined}
+      />
     </Mention>
   );
 }
@@ -300,7 +324,14 @@ export function ReferenceText({
           data-mention-self={reference.id === session?.viewer ? "" : undefined}
           title={`${reference.kind === "agent" ? "Agent" : "Person"}: ${label}\n${reference.id}`}
         >
-          <MentionLabel agent={reference.kind === "agent"} label={label} />
+          <MentionLabel
+            agent={reference.kind === "agent"}
+            label={label}
+            avatar={avatarMedia(
+              directory.profiles.get(reference.id)?.picture,
+              session?.media,
+            )}
+          />
         </span>
       ),
     );

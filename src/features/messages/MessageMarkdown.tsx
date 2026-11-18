@@ -680,6 +680,7 @@ function PreparedMessageMarkdown({
         viewer={session?.viewer}
         resolveName={resolveName}
         onOpen={clickable ? onOpenLink : undefined}
+        media={media}
       />
     );
   };
