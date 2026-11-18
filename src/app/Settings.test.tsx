@@ -1474,6 +1474,7 @@ it("opens Manage plugins from the Decisions API hint", async () => {
   const providers: never[] = [];
   const decisions = {
     backend: () => undefined,
+    status: () => "unavailable" as const,
     providers: () => providers,
     subscribe: () => () => {},
     setBackend: vi.fn(),
@@ -2311,6 +2312,7 @@ it("links a decision provider's details to Decisions API", async () => {
   ];
   const decisions = {
     backend: () => undefined,
+    status: () => "unavailable" as const,
     providers: () => providers,
     subscribe: () => () => {},
     setBackend: vi.fn(),
