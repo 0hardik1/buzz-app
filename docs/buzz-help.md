@@ -721,8 +721,8 @@ and are asked to sign in again in Buzz.
   lights it only for a mention of you or **Mark as unread**, and a muted DM still lights it.
   Muting does not mark messages or threads as read.
   In a channel's or DM's main message box, typing `/mute` by itself toggles
-  Mute for it, and a toast shows the change. The command is not posted as a
-  message. If the change cannot be saved, a notice offers **Retry**. Thread
+  Mute for it, and a toast confirms it once saved. The command is not posted as
+  a message. If the change cannot be saved, a notice offers **Retry** instead. Thread
   replies send `/mute` as text.
 - **Messaging someone**: **Message** on a profile, a profile preview or an
   agent, **Send message** in a channel's members, and choosing a person in
