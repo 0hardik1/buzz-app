@@ -114,7 +114,7 @@ it("shows only exact verified visible memberships, handles partial lists and ope
   });
   f.update({ status: "ready", channels: [] });
   expect(
-    screen.getByText(/They aren’t in any channel you can see/),
+    screen.getByText(/They aren’t in any channel that can be shown here/),
   ).toBeTruthy();
 });
 
@@ -226,7 +226,7 @@ it("qualifies ready empty results when only matching unclassified memberships ex
     screen.getByText(/No matching channels with a known visible type/),
   ).toBeTruthy();
   expect(
-    screen.queryByText(/They aren’t in any channel you can see/),
+    screen.queryByText(/They aren’t in any channel that can be shown here/),
   ).toBeNull();
   f.update({
     status: "ready",
@@ -237,7 +237,7 @@ it("qualifies ready empty results when only matching unclassified memberships ex
     screen.getByText(/More channels may exist outside the loaded list/),
   ).toBeTruthy();
   expect(
-    screen.queryByText(/They aren’t in any channel you can see/),
+    screen.queryByText(/They aren’t in any channel that can be shown here/),
   ).toBeNull();
 });
 
@@ -262,7 +262,7 @@ it("does not classify hidden, archived or DM memberships in a ready empty list",
   });
   expect(screen.queryByText(/unclassified and omitted/)).toBeNull();
   expect(
-    screen.getByText(/They aren’t in any channel you can see/),
+    screen.getByText(/They aren’t in any channel that can be shown here/),
   ).toBeTruthy();
   expect(
     screen.queryByText(/No matching channels with a known visible type/),
@@ -287,7 +287,7 @@ it("does not show a metadata caveat for another identity's unclassified roster",
   });
   expect(screen.queryByText(/unclassified and omitted/)).toBeNull();
   expect(
-    screen.getByText(/They aren’t in any channel you can see/),
+    screen.getByText(/They aren’t in any channel that can be shown here/),
   ).toBeTruthy();
 });
 

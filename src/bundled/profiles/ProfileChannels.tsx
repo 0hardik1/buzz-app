@@ -81,7 +81,7 @@ export function ProfileChannels({
                 ? "No matching channels in the loaded list; more channels may exist."
                 : viewer === pubkey
                   ? "You aren’t in any channel that can be shown here."
-                  : "They aren’t in any channel you can see."}
+                  : "They aren’t in any channel that can be shown here."}
           </p>
         )}
         {!!channels.length && (
