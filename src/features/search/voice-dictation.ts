@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const DELTA = "conversation.item.input_audio_transcription.delta";
 const COMPLETED = "conversation.item.input_audio_transcription.completed";
 /** Speech that stops producing text this long has ended. */
-const PAUSE_MS = 1_100;
+const PAUSE_MS = 800;
 /** Nothing heard this long after starting ends the attempt. */
 const SILENCE_MS = 8_000;
 

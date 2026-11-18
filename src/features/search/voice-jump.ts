@@ -8,6 +8,10 @@ import { messagePreviewText } from "../conversation/message-preview-text";
 
 /** Goes to the likeliest place at or above this probability. */
 export const VOICE_JUMP_THRESHOLD = 0.5;
+/** While words are still arriving, goes only at or above this. Measured on
+ * Jev: "Take me to buzz" puts 0.49 on the wrong #buzz-* channel, and "Take
+ * me to buzz sec" puts 0.96 on #buzz-security. */
+export const VOICE_JUMP_LIVE_THRESHOLD = 0.8;
 /** The most places Jev chooses among (a choice allows 255 options). */
 const MAX_PLACES = 200;
 /** Places, most recent first, that also carry their messages. */
@@ -151,6 +155,33 @@ export type VoiceJump =
   | Readonly<{ outcome: "none" }>
   | Readonly<{ outcome: "failed"; reason: DecisionFailure }>;
 
+const LABEL_LIMIT = 90;
+const KIND_LABEL: Record<JumpKind, string> = {
+  channel: "#",
+  dm: "DM with ",
+  chat: "Chat with ",
+  thread: "",
+};
+
+/** Each place's answer option: its own readable name, so Jev matches what
+ * was said against names directly. Pointer keys such as `p12` pointing into
+ * `places` spread Jev's probability thin once there are dozens of places. */
+export function placeOptions(places: readonly JumpPlace[]): string[] {
+  const taken = new Set<string>([NONE]);
+  return places.map((place) => {
+    const base =
+      place.kind === "thread"
+        ? `Thread in ${place.in ?? "a conversation"}: ${place.name}`
+        : `${KIND_LABEL[place.kind]}${place.name}`;
+    const clipped =
+      base.length > LABEL_LIMIT ? `${base.slice(0, LABEL_LIMIT - 1)}…` : base;
+    let label = clipped;
+    for (let n = 2; taken.has(label); n++) label = `${clipped} (${n})`;
+    taken.add(label);
+    return label;
+  });
+}
+
 /** The place the spoken request asked for, when one is likely enough. */
 export async function pickPlace(
   decisions: Decisions,
@@ -160,28 +191,29 @@ export async function pickPlace(
   threshold = VOICE_JUMP_THRESHOLD,
 ): Promise<VoiceJump> {
   if (!spoken.trim() || !places.length) return { outcome: "none" };
+  const labels = placeOptions(places);
   const options: Record<string, string> = {};
-  places.forEach((_, index) => {
-    options[`p${index}`] = `Go to \`places[${index}]\`.`;
-  });
-  options[NONE] = "None of the places is the one the person asked for.";
+  for (const label of labels) options[label] = "";
+  options[NONE] = "None of these places is the one the person asked for.";
   const result = await decisions.decide({
     state: JSON.stringify({
       spoken_request: spoken,
-      places: places.map(({ kind, name, in: where, about, first, recent }) => ({
-        kind,
-        name,
-        ...(where ? { in: where } : {}),
-        ...(about ? { about } : {}),
-        ...(first ? { first_message: first } : {}),
-        ...(recent ? { recent_messages: recent } : {}),
-      })),
+      places: places.map(
+        ({ kind, in: where, about, first, recent }, index) => ({
+          option: labels[index],
+          kind,
+          ...(where ? { in: where } : {}),
+          ...(about ? { about } : {}),
+          ...(first ? { first_message: first } : {}),
+          ...(recent ? { recent_messages: recent } : {}),
+        }),
+      ),
     }),
     questions: {
       place: {
         type: "choice",
         instructions:
-          "A person said `spoken_request` aloud to jump to a place in a workplace chat app. It is a speech transcript, so names may be misheard or spelled phonetically. `places` are what they can go to, most recently active first: a `channel`, a `dm` (named by the other people in it), an agent `chat`, or a `thread` (named by its first message, `in` its conversation). Which place did they ask to go to? A place whose name matches what they said beats one whose messages only mention it. Pick a thread only when they asked for a thread or a specific discussion. Pick none when no place plainly fits.",
+          "A person said `spoken_request` aloud to jump to a place in a workplace chat app. It is a speech transcript, so names may be misheard or spelled phonetically. Each option is a place they can go to: a channel (#name), a DM (named by the other people in it), a chat with an agent, or a thread (named by its first message and where it is). `places` gives each option's details, most recently active first. Which place did they ask to go to? A place whose name matches what they said beats one whose messages only mention it. Pick a thread only when they asked for a thread or a specific discussion. Pick none when no place plainly fits.",
         options,
       },
     },
@@ -195,7 +227,7 @@ export async function pickPlace(
     return { outcome: "none" };
   const probability =
     answer.probabilities[answer.choice] ?? answer.confidence ?? 0;
-  const place = places[Number(answer.choice.slice(1))];
+  const place = places[labels.indexOf(answer.choice)];
   if (!place || probability < threshold) return { outcome: "none" };
   return { outcome: "found", place, probability };
 }

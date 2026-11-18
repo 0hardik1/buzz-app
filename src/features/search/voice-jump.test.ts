@@ -7,7 +7,12 @@ import type {
 } from "../relay/contracts";
 import type { InboxItem } from "../relay/inbox";
 import { mergeTranscript } from "./voice-dictation";
-import { type JumpPlace, jumpPlaces, pickPlace } from "./voice-jump";
+import {
+  type JumpPlace,
+  jumpPlaces,
+  pickPlace,
+  placeOptions,
+} from "./voice-jump";
 
 const message = (
   id: string,
@@ -175,7 +180,11 @@ const choice = (pick: string, probabilities: Record<string, number>) =>
 describe("pickPlace", () => {
   it("goes to the place Jev picks at 0.5 or more", async () => {
     const { decisions, decide } = deciding(
-      choice("p1", { p0: 0.3, p1: 0.6, none: 0.1 }),
+      choice("DM with Dana Lee", {
+        "#design": 0.3,
+        "DM with Dana Lee": 0.6,
+        none: 0.1,
+      }),
     );
     await expect(
       pickPlace(decisions, "dana", places, "wss://relay.example.org"),
@@ -192,13 +201,13 @@ describe("pickPlace", () => {
     expect(JSON.parse(request.state)).toEqual({
       spoken_request: "dana",
       places: [
-        { kind: "channel", name: "design" },
-        { kind: "dm", name: "Dana Lee" },
+        { option: "#design", kind: "channel" },
+        { option: "DM with Dana Lee", kind: "dm" },
       ],
     });
     expect(Object.keys(request.questions.place.options)).toEqual([
-      "p0",
-      "p1",
+      "#design",
+      "DM with Dana Lee",
       "none",
     ]);
     expect(request.community).toBe("wss://relay.example.org");
@@ -206,8 +215,12 @@ describe("pickPlace", () => {
 
   it("finds nothing below 0.5 or for none, and reports a failure", async () => {
     for (const result of [
-      choice("p0", { p0: 0.49, p1: 0.3, none: 0.21 }),
-      choice("none", { p0: 0.04, p1: 0.01, none: 0.95 }),
+      choice("#design", {
+        "#design": 0.49,
+        "DM with Dana Lee": 0.3,
+        none: 0.21,
+      }),
+      choice("none", { "#design": 0.04, "DM with Dana Lee": 0.01, none: 0.95 }),
     ]) {
       const { decisions } = deciding(result);
       await expect(
@@ -225,7 +238,7 @@ describe("pickPlace", () => {
   });
 
   it("asks nothing without a request or places", async () => {
-    const { decisions, decide } = deciding(choice("p0", { p0: 1 }));
+    const { decisions, decide } = deciding(choice("#design", { "#design": 1 }));
     await expect(pickPlace(decisions, " ", places, undefined)).resolves.toEqual(
       { outcome: "none" },
     );
@@ -233,6 +246,42 @@ describe("pickPlace", () => {
       pickPlace(decisions, "design", [], undefined),
     ).resolves.toEqual({ outcome: "none" });
     expect(decide).not.toHaveBeenCalled();
+  });
+});
+
+describe("placeOptions", () => {
+  it("names each place readably and keeps the names unique", () => {
+    const thread: JumpPlace = {
+      key: "thread:t",
+      kind: "thread",
+      channelId: "a",
+      rootId: "t",
+      name: "Alice: Logo options",
+      in: "design",
+      at: 0,
+    };
+    expect(
+      placeOptions([
+        ...places,
+        {
+          key: "channel:c",
+          kind: "channel",
+          channelId: "c",
+          name: "design",
+          at: 0,
+        },
+        { key: "chat:d", kind: "chat", channelId: "d", name: "Fizz", at: 0 },
+        thread,
+        { ...thread, key: "thread:u", rootId: "u", name: "x".repeat(200) },
+      ]),
+    ).toEqual([
+      "#design",
+      "DM with Dana Lee",
+      "#design (2)",
+      "Chat with Fizz",
+      "Thread in design: Alice: Logo options",
+      `Thread in design: ${"x".repeat(71)}…`,
+    ]);
   });
 });
 
