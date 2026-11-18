@@ -188,7 +188,7 @@ it("copies and freezes batch recipients without allowing malformed or oversized 
     ).toEqual([]);
   }
 });
-it("keeps a group's label and drops a blank or non-string one", () => {
+it("keeps a group's label and drops one that is blank, not a string or not one plain line", () => {
   const mentions = [{ pubkey: "a".repeat(64), name: "Carl" }];
   const edit = (extra: object) =>
     completionResult({
@@ -201,7 +201,15 @@ it("keeps a group's label and drops a blank or non-string one", () => {
       ],
     }).items[0]?.edit;
   expect(edit({ label: "crew" })).toEqual({ mentions, label: "crew" });
-  for (const label of ["", " ", 7, null])
+  for (const label of [
+    "",
+    " ",
+    7,
+    null,
+    "crew\n\n# Title",
+    "\u202ecrew",
+    "x".repeat(257),
+  ])
     expect(edit({ label })).toBeUndefined();
 });
 it("keeps a host workspace edit and drops a provider's look-alike", () => {

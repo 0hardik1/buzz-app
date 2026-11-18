@@ -54,12 +54,25 @@ export function composerMarkdown(
   draft: MentionDraft,
   { authored = false }: { authored?: boolean } = {},
 ): string {
+  // A group's label comes from a plugin, so its Markdown characters are sent
+  // escaped: it renders as the label the chip shows. In code it stays as is.
   const project = (node: EditorNode): EditorNode =>
     node.type.name === "token" && node.attrs.semantic
       ? node.mark(composerSchema.marks.literal.create().addToSet(node.marks))
-      : node.isLeaf
-        ? node
-        : node.copy(Fragment.fromArray(node.content.content.map(project)));
+      : node.type.name === "token" &&
+          node.attrs.group &&
+          !composerSchema.marks.code.isInSet(node.marks)
+        ? node.type.create(
+            {
+              ...node.attrs,
+              source: `@${node.attrs.group.label.replace(/[\\`*_[\]<~]/g, "\\$&")}`,
+            },
+            null,
+            node.marks,
+          )
+        : node.isLeaf
+          ? node
+          : node.copy(Fragment.fromArray(node.content.content.map(project)));
   const doc = project(readComposerDocument(draft, []));
   const wire = (body: EditorNode) =>
     [...(draft.chatCards ?? []), blocksMarkdown(body), ...(draft.gifs ?? [])]
@@ -320,8 +333,9 @@ function paragraphMarkdown(
         : node.attrs.source;
     if (composerSchema.marks.literal.isInSet(node.marks))
       literals.push({ start, end: text.length });
-    // A group chip's @label is protected like a recipient's exact name, so
-    // its characters are never escaped or paired as emphasis.
+    // A group chip's @label arrives escaped (see composerMarkdown) and is
+    // protected like a recipient's exact name, so it is never escaped again or
+    // paired as emphasis.
     if (
       node.attrs.recipient ||
       node.attrs.group ||

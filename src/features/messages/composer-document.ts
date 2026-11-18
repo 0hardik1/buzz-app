@@ -15,6 +15,7 @@ import type {
 } from "./mention-draft";
 import type { ComposerResource } from "../conversation/contracts";
 import {
+  chipLabel,
   composerToken,
   composerTokenText,
   type ComposerToken,
@@ -230,8 +231,7 @@ export function composerGroup(
   if (!value || typeof value !== "object") return null;
   const { label, members } = value as Record<string, unknown>;
   if (
-    typeof label !== "string" ||
-    !label.trim() ||
+    !chipLabel(label) ||
     source !== `@${label}` ||
     !Array.isArray(members) ||
     !members.length ||

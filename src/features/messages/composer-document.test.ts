@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  composerGroup,
   composerSchema as schema,
   projectComposerDocument,
   readComposerDocument,
@@ -724,7 +725,7 @@ describe("inline formatting batch", () => {
       ),
     ).toBe("_@Honey_");
   });
-  it("sends a group chip like a recipient chip: exact label beside formatting, italic with asterisks", () => {
+  it("escapes a group chip's label like prose, so it never changes the Markdown", () => {
     const members = [
       { pubkey: "a".repeat(64), name: "Honey" },
       { pubkey: "b".repeat(64), name: "Pollen" },
@@ -735,20 +736,49 @@ describe("inline formatting batch", () => {
         null,
         marks.map((name) => schema.marks[name].create()),
       );
-    expect(serialize(chip("eng_ios", "italic"), schema.text(" "))).toBe(
-      "*@eng\\_ios* ",
+    // What a reader's Markdown renders: the node kinds and the text.
+    const rendered = (markdown: string) => {
+      const kinds = new Set<string>();
+      let text = "";
+      const visit = (node: Nodes) => {
+        kinds.add(node.type);
+        if (node.type === "text") text += node.value;
+        if ("children" in node) node.children.forEach(visit);
+      };
+      visit(fromMarkdown(markdown));
+      return { kinds: [...kinds], text };
+    };
+    expect(serialize(chip("Design Team"), schema.text(" hi"))).toBe(
+      "@Design Team hi",
     );
-    // The label is sent as typed, so a reader of the raw text can match it.
+    for (const label of [
+      "eng_ios",
+      "eng*ops",
+      "*ops*",
+      "a`b",
+      "x](https://evil.example)[y",
+      "[x](https://evil.example)",
+    ])
+      expect(rendered(serialize(chip(label), schema.text(" hi")))).toEqual({
+        kinds: ["root", "paragraph", "text"],
+        text: `@${label} hi`,
+      });
     expect(
-      serialize(chip("eng*ops"), schema.text(" hi "), marked("b", "bold")),
-    ).toBe("@eng*ops hi **b**");
-    expect(
-      serialize(
-        chip("eng*"),
-        schema.text("b", [schema.marks.italic.create()]),
-        schema.text("*"),
-      ),
-    ).toBe("@eng**b*\\*");
+      rendered(serialize(chip("eng_ios", "italic"), schema.text(" hi"))),
+    ).toEqual({
+      kinds: ["root", "paragraph", "emphasis", "text"],
+      text: "@eng_ios hi",
+    });
+    // Code shows its text as is.
+    expect(serialize(chip("eng_ios", "code"))).toBe("`@eng_ios`");
+  });
+  it("trusts a group chip only with a one-line label", () => {
+    const members = [{ pubkey: "a".repeat(64), name: "Honey" }];
+    const group = (label: string) =>
+      composerGroup({ label, members }, `@${label}`);
+    expect(group("crew")).not.toBeNull();
+    for (const label of ["crew\n\n# Title", "\u202ecrew", "x".repeat(257)])
+      expect(group(label)).toBeNull();
   });
   it("escapes literal punctuation in each generated format", () => {
     for (const mark of ["bold", "italic", "strike"] as const)
