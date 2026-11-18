@@ -135,7 +135,7 @@ it("keeps startup unsettled until the catalog is read and its plugins start", as
   expect(root.pluginStatus.settled?.()).toBe(true);
 });
 it("reports an enabled agent MCP plugin that is not running, until it runs or is turned off", async () => {
-  const withGrant = (enabled: boolean): StorageResult => {
+  const withGrant = (enabled: boolean) => {
     const catalog = ready(enabled);
     if (catalog.status !== "ready") throw new Error("not ready");
     const [plugin] = catalog.catalog.plugins;

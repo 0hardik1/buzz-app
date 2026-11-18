@@ -248,6 +248,12 @@ import {
 } from "../solo/default-agent";
 import type { AgentPlugins } from "../../plugins/requests";
 import type { DeviceSettings } from "../../shared/device-settings";
+import type { TurnContext } from "./gateway/contract";
+import {
+  type EligibleRoute,
+  type FallbackReason,
+  gatewayRoutes,
+} from "./gateway/route";
 
 /** Where an agent runs: `here`, with its key on this device; `hosted`, by its
  * type's provider; or `elsewhere`, on another of the owner's devices. Only an
@@ -575,6 +581,11 @@ export type AgentHandle = Readonly<{
   /** On a run's handle only: wakes this agent in another of its
    * conversations, as `Agents.wake` would, telling it the wake is its own. */
   handoff?(handoff: AgentHandoff): void;
+  /** On a run's handle only: whether this agent's threads in `channel` have
+   * sessions of their own, apart from its channel-level conversation there,
+   * so a handoff from that conversation into a thread reaches another;
+   * undefined while the channel is not known here yet. */
+  threadsApart?(channel: string): boolean | undefined;
   /** Rechecks an operation lifetime after channel startup, before signing. */
   publish(event: AgentEventTemplate, check?: () => void): Promise<RelayEvent>;
   /** Reads the community as the agent, seeing only what it may see. */
@@ -834,6 +845,26 @@ export type Delivery<Config = unknown> = Readonly<{
   named?(title: string): void;
   /** Rebuilds an addressed subscription prompt after harness readiness or a queue wait. */
   wakeText?(): Promise<string | undefined>;
+  /** This membership routes inference through the agent gateway: its
+   * eligible route, this turn's context and the upstream base this build
+   * configures for the type's harness, all frozen at dispatch. Absent when it
+   * doesn't: an external community, gateway routing off in this build, a
+   * type that names no harness, one this build gives no upstream or one the
+   * gateway doesn't enable, or a blocked route (see `gatewayFallback`). */
+  gateway?: Readonly<{
+    route: EligibleRoute;
+    turn: TurnContext;
+    upstream: Readonly<{ base: string }>;
+  }>;
+  /** A blocked route sent this turn to the type's own configuration, decided
+   * before dispatch, after waiting up to `TURN_READINESS_WAIT_MS` for an
+   * access check in flight; never with `gateway`. Every blocked reason
+   * falls back this way except a 401 or 403 (`auth`) and a route still
+   * pending after the wait, which fail the turn before dispatch instead. The
+   * host owns the decision and `notice`; a type shows `notice` in this turn's
+   * visible activity where the host can't (any turn but a mention, whose
+   * request it already notes). */
+  gatewayFallback?: Readonly<{ reason: FallbackReason; notice: string }>;
   /** Whether the trigger should still run, asked again now. False once the
    * agent is removed or its type replaced; for a watch or timer, also once
    * attention was turned off or its object disabled or removed; and for a
@@ -1134,6 +1165,12 @@ export type AgentType<Config = unknown> = {
    * again marked `resumed` if the owner chooses to resume it, to carry on in
    * the conversation's saved session, or in a new one shown the conversation. */
   resumes?: boolean;
+  /** The type can route inference through the agent gateway with
+   * `Delivery.gateway`, under this stable harness name (e.g. "pi"). It does
+   * only when this build configures an upstream for the harness and the
+   * membership's gateway enables it; otherwise, and for types without it,
+   * turns keep their existing behavior. */
+  gateway?: Readonly<{ harness: string }>;
   /** Makes the type hosted: its provider runs each agent, so it has no `run`,
    * `models` or `timeoutMs`, and its agents have no attention. */
   remote?: RemoteAgentType;
@@ -1992,6 +2029,8 @@ type Binding = {
   origin: string;
   viewer: string;
   session: RelaySession;
+  /** The community UUID the session's transport read from NIP-11, if any. */
+  communityId?: string | undefined;
   /** Aborts when this binding is replaced, so no work outlives its session. */
   controller: AbortController;
   stopLive: () => void;
@@ -2174,14 +2213,12 @@ export class AgentsService extends Service implements Agents {
       throw new Error(
         "Plugins can dispatch hooks only for their own agent types",
       );
-    // Only a turn core delivered to this agent says who started it.
     const trigger =
       turn && this.runners.delivered(agent, turn.trigger)
         ? turn.trigger
         : undefined;
     const conversation = trigger && conversationOf(trigger);
     const running = this.state.running.find((each) => each.key === agent);
-    // Frozen: each hook in turn reads what core attested.
     return dispatchAgentHooks(
       this.hookContributions.handlers(harness, event),
       input,
@@ -2245,6 +2282,8 @@ export class AgentsService extends Service implements Agents {
   private state: AgentsSnapshot;
   /** By origin, so each agent listens in its own community, selected or not. */
   private bound = new Map<string, Bound>();
+  /** The local memberships gateway routing was last told about. */
+  private gatewayKeys = new Set<AgentKey>();
   private readonly runners: AgentRunners;
   private readonly coreMemory: CoreMemoryCache;
   /** Counts list requests, so only the latest one is applied. */
@@ -2461,6 +2500,11 @@ export class AgentsService extends Service implements Agents {
         const channel = event.tags.find((tag) => tag[0] === "h")?.[1];
         const session = this.bindingOf(agent)?.session;
         return !channel || !session || session.unattended(channel, live);
+      },
+      flat: (agent, channelId) => {
+        const { channelType } =
+          this.channelOf(agent, { tags: [["h", channelId]] }) ?? {};
+        return channelType === "dm" || channelType === "solo";
       },
       starting: (agent, channelId) =>
         this.bindingOf(agent)?.session.channelWrites.starting(channelId),
@@ -2774,6 +2818,7 @@ export class AgentsService extends Service implements Agents {
         }),
       handoff: (agent, { from, ...wake }) =>
         this.wakeIn(agent.key, wake, { from }),
+      threadsApart: (agent, channelId) => this.threadsApart(agent, channelId),
       instructions: (agent) => this.turnInstructions(agent),
       conversationInstructions: (agent, channelId, root) =>
         this.turnConversationInstructions(agent, channelId, root),
@@ -3624,15 +3669,13 @@ export class AgentsService extends Service implements Agents {
     };
   }
   tools = () => this.addedTools.snapshot();
-  /** Added tools whose `when` threw, so each registration warns once. */
   private readonly whenFailed = new WeakSet<AddedTool>();
-  toolsFor = (key?: AgentKey): readonly AddedTool[] => {
+  toolsFor = (key?: AgentKey) => {
     const agent = key === undefined ? undefined : this.agent(key);
     return this.addedTools.snapshot().filter((tool) => {
       if (!tool.when) return true;
       if (!agent) return false;
       try {
-        // Only true admits it: an async `when` gives a Promise.
         return tool.when(agent) === true;
       } catch (error) {
         if (!this.whenFailed.has(tool)) {
@@ -3655,11 +3698,11 @@ export class AgentsService extends Service implements Agents {
     repositories: repositoriesContext,
   });
   /** The harness kit, with its MCP part bound to the plugin that asks. */
-  get harness(): HarnessKit {
+  get harness() {
     return Object.freeze({
       ...this.harnessShared,
       mcp: this.mcp.kitFor(this.ctx),
-    });
+    } satisfies HarnessKit);
   }
   readonly supportsGuardedWake = true as const;
   wake(key: AgentKey, wake: AgentWake): void;
@@ -5090,6 +5133,24 @@ export class AgentsService extends Service implements Agents {
       runtime: agent.type,
       prior: this.rowOf(origin, pubkey)?.prior,
     });
+  }
+  /** Whether the agent's threads in the channel have sessions of their own,
+   * apart from its channel-level conversation: only where its type says it
+   * runs one session per thread, outside a DM, Solo chat or huddle room (whose
+   * text turns harnesses run in the room's one session). Any type that
+   * offers session controls gets this; one that does not keeps the channel
+   * one conversation. A channel not known here yet is undefined, which the
+   * tools also treat as one conversation. */
+  private threadsApart(agent: Agent, channelId: string) {
+    const type = this.types().find((kind) => kind.key === agent.type);
+    if (type?.sessionControls?.scope(agent) !== "thread") return false;
+    const summary = this.channelOf(agent, { tags: [["h", channelId]] });
+    if (!summary) return undefined;
+    return (
+      summary.channelType !== "dm" &&
+      summary.channelType !== "solo" &&
+      !isHuddleRoom(summary.description)
+    );
   }
   private sessionPlace(
     agent: Agent,
@@ -7151,6 +7212,33 @@ export class AgentsService extends Service implements Agents {
       ? binding
       : undefined;
   }
+  /** Tells gateway routing each local membership and the community ID its
+   * live relay session's transport read. Hosted agents never route there. */
+  private syncGateway(identities: readonly Member[]) {
+    if (!gatewayRoutes.configured) return;
+    const types = new Map(this.types().map((type) => [type.key, type]));
+    const present = new Set<AgentKey>();
+    for (const identity of identities) {
+      const origin = originOf(identity.relay);
+      if (identity.deleting || !origin || types.get(identity.type)?.remote)
+        continue;
+      const binding = this.bindingOf(identity);
+      present.add(identity.key);
+      gatewayRoutes.setMembership({
+        key: identity.key,
+        origin,
+        owner: identity.owner,
+        pubkey: identity.pubkey,
+        community: binding && {
+          id: binding.communityId,
+          session: binding.session,
+        },
+      });
+    }
+    for (const key of this.gatewayKeys)
+      if (!present.has(key)) gatewayRoutes.removeMembership(key);
+    this.gatewayKeys = present;
+  }
   /** Whether the agent stays running: it is the viewer's, and its community is
    * joined and not disconnected. A reconnect does not stop it. */
   private alive({ relay, owner }: AgentIdentity) {
@@ -7412,6 +7500,7 @@ export class AgentsService extends Service implements Agents {
             origin: snapshot.origin,
             viewer: snapshot.viewer,
             session: snapshot.session,
+            communityId: snapshot.communityId,
             controller: new AbortController(),
           }
         : undefined;
@@ -7604,6 +7693,7 @@ export class AgentsService extends Service implements Agents {
         })),
       new Map(this.types().map((type) => [type.key, type])),
     );
+    this.syncGateway(identities);
     const left = this.runners.interrupted();
     // Only the copy that holds an agent may resume or forget its turns.
     const interrupted = running.filter(

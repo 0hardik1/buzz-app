@@ -31,7 +31,12 @@ import {
   type StandaloneTurn,
   type TurnResult,
 } from "../../features/agents/service";
-import { ownerReads } from "../../features/agents/reads";
+import { workflowOf } from "../../features/agents/owner-attestation";
+import {
+  ownerReads,
+  readyOwnerReads,
+  workflowMarked,
+} from "../../features/agents/reads";
 import {
   followRecommended,
   onRecommended,
@@ -191,7 +196,6 @@ export class GooseRuntime {
     /** The agent's `core` memory as the host keeps it (`Agents.core`). */
     private readonly core: Agents["core"],
     private readonly storage: Storage = globalThis.localStorage,
-    /** The tools plugins add to the agent's sessions now. */
     private readonly added: (
       agent?: AgentKey,
     ) => readonly AddedTool[] = () => [],
@@ -530,16 +534,25 @@ export class GooseRuntime {
     const resumed = trigger.type === "mention" && !!trigger.resumed;
     // goose runs commands as you; mentions need owner or delegated authority.
     if (trigger.type === "mention") {
-      const snapshot = this.relay(agent.key)?.snapshot();
-      const authority = await mentionAuthority(trigger.event, agent.owner, {
-        agent: agent.pubkey,
-        authority:
-          snapshot?.status === "ready"
-            ? snapshot.session.workflowAuthority
-            : undefined,
-        profiles:
-          snapshot?.status === "ready" ? snapshot.session.profiles : undefined,
-      });
+      // A workflow's mention waits out a reconnect; the check below decides.
+      const ready = workflowMarked(trigger.event, agent.owner);
+      const reads = ready
+        ? await readyOwnerReads(
+            this.relay(agent.key),
+            agent,
+            signal,
+            channelId ?? trigger.event.tags.find((tag) => tag[0] === "h")?.[1],
+          )
+        : ownerReads(this.relay(agent.key), agent.pubkey);
+      if (ready) {
+        signal.throwIfAborted();
+        if (current && !current()) return ignored?.();
+      }
+      const authority = await mentionAuthority(
+        trigger.event,
+        agent.owner,
+        workflowOf(reads, agent.pubkey),
+      );
       if (authority !== "owner") return ignored?.(authority);
       signal.throwIfAborted();
     }

@@ -16,7 +16,8 @@ import {
   conversationKey,
 } from "../../features/agents/conversation-folders";
 import { pubkeyOf } from "../../features/agents/membership";
-import { ownerReads } from "../../features/agents/reads";
+import { ownerReads, readyOwnerReads } from "../../features/agents/reads";
+import { ReadError } from "../../features/relay/errors";
 import {
   localStore,
   fileStore,
@@ -43,7 +44,13 @@ import type {
   HostProcessOptions,
 } from "../../features/host/service";
 import { BUZZ_PROMPT, TOP_LEVEL_PROMPT } from "../../buzz-mcp/prompt";
-import { CodexRuntime, codexStep, mcpCallOf, programs } from "./runtime";
+import {
+  CodexRuntime,
+  codexStep,
+  HANDOVER_MS,
+  mcpCallOf,
+  programs,
+} from "./runtime";
 import { codexRun } from "./run";
 import { config } from "./config";
 import type { AddedTool } from "../../buzz-mcp/session-tools";
@@ -102,9 +109,8 @@ function fixture(
     handle: ConstructorParameters<typeof CodexRuntime>[13];
   },
   resolveDirectory?: ConstructorParameters<typeof CodexRuntime>[14],
-  mcp?: ConstructorParameters<typeof CodexRuntime>[15],
+  mcp?: ConstructorParameters<typeof CodexRuntime>[16],
 ) {
-  /** The servers `config/read` lists, and the rows a thread's status answers. */
   const servers: Record<string, unknown> = {
     "company.tools": { command: "secret-tool", enabled: true, url: null },
   };
@@ -114,6 +120,7 @@ function fixture(
   let thread = 0;
   const sent: Wire[] = [];
   const modelIds: [string, string] = ["test-model", "deep-model"];
+  const voiceCatalog = { v3: ["cove", "maple"] as string[] | undefined };
   /** Methods the server answers with a JSON-RPC error instead of a result. */
   const failing = new Set<string>();
   const failures = new Map<string, string>();
@@ -164,6 +171,8 @@ function fixture(
       let result: unknown = {};
       if (request.method === "initialize")
         result = { userAgent: "fixture buzz-protection-v2" };
+      if (request.method === "thread/realtime/listVoices")
+        result = { voices: voiceCatalog };
       if (request.method === "model/list")
         result = {
           data: [
@@ -409,8 +418,6 @@ function fixture(
     ): Promise<string | null | undefined> =>
       memories.find((memory) => memory.slug === "core")?.body ?? null,
   );
-  /** The tools plugins add, as the runtime reads them at each use: each
-   * given to the agent, so none without one. */
   const added: AddedTool[] = [];
   const runtime = new CodexRuntime(
     spawn,
@@ -429,6 +436,7 @@ function fixture(
     security?.host,
     security?.handle,
     resolveDirectory,
+    undefined,
     mcp,
   );
   runtimes.push(runtime);
@@ -698,6 +706,7 @@ function fixture(
     process,
     sent,
     modelIds,
+    voiceCatalog,
     failing,
     failures,
     held,
@@ -780,7 +789,6 @@ it("hands over promptly and runs conversations independently on one server", asy
       },
     },
   });
-  // The agent's own server has no entry, so its Codex configuration applies.
   expect((started.config as Record<string, unknown>).mcp_servers).toEqual({});
   expect(started.config).toMatchObject({
     web_search: "disabled",
@@ -807,7 +815,6 @@ it("leaves Codex's Apps and plugins to its configuration only for an agent that 
   const { config } = started;
   expect(config).not.toHaveProperty("features.apps");
   expect(config).not.toHaveProperty("features.plugins");
-  // Web search stays off.
   expect(config).toMatchObject({ web_search: "disabled" });
   f.complete(0, "DONE");
   await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
@@ -1259,7 +1266,7 @@ it("shares model discovery with active turns and another agent", async () => {
 
 function protectedPreview(
   resolveDirectory?: ConstructorParameters<typeof CodexRuntime>[14],
-  mcp?: ConstructorParameters<typeof CodexRuntime>[15],
+  mcp?: ConstructorParameters<typeof CodexRuntime>[16],
 ) {
   const engine = () => {
     const next = fixture();
@@ -2474,6 +2481,49 @@ it("serializes owner follow-ups and routes tool replies to the latest accepted r
     tags: expect.arrayContaining([["e", "c".repeat(64), "", "reply"]]),
   });
 });
+it("starts a turn without history when the history read times out", async () => {
+  const f = fixture();
+  f.read.mockRejectedValue(
+    new ReadError("unavailable", "Relay read timed out"),
+  );
+  await f.runtime.run(f.delivery("FIRST_REQUEST"));
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  expect(f.read).toHaveBeenCalledTimes(1);
+  expect(JSON.stringify(f.starts()[0]?.params)).toContain("FIRST_REQUEST");
+  f.complete();
+  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+  expect(f.publish.mock.calls[0]?.[0]).toMatchObject({ content: "DONE" });
+});
+it("accepts a steer without history when the history read times out", async () => {
+  const f = fixture();
+  await f.runtime.run(f.delivery("FIRST_REQUEST"));
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  // The native transport rejects with its own message, not a ReadError.
+  f.read.mockRejectedValue("Relay request could not be confirmed");
+  await f.runtime.run(f.delivery("STEER_REQUEST"));
+  await vi.waitFor(() =>
+    expect(f.sent.filter((wire) => wire.method === "turn/steer")).toHaveLength(
+      1,
+    ),
+  );
+  expect(f.read).toHaveBeenCalledTimes(2);
+  expect(
+    JSON.stringify(f.sent.find((wire) => wire.method === "turn/steer")?.params),
+  ).toContain("STEER_REQUEST");
+  f.complete();
+  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+  expect(f.publish.mock.calls[0]?.[0]).toMatchObject({ content: "DONE" });
+});
+it("still fails a turn whose history read is denied", async () => {
+  const f = fixture();
+  f.read.mockRejectedValue(new ReadError("denied", "Relay read failed (403)"));
+  await f.runtime.run(f.delivery("FIRST_REQUEST"));
+  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+  expect(f.publish.mock.calls[0]?.[0]).toMatchObject({
+    content: "Codex could not finish: Relay read failed (403).",
+  });
+  expect(f.starts()).toHaveLength(0);
+});
 it("cuts delayed history messages off before the request while applying current edits", async () => {
   const f = fixture();
   const first = f.delivery("CURRENT_REQUEST");
@@ -3032,6 +3082,195 @@ it("gives the workflow reason for its owner's workflow mention that doesn't name
   expect(ignored).toHaveBeenCalledExactlyOnceWith("workflow");
   expect(f.spawn).not.toHaveBeenCalled();
 });
+
+it("waits for a workflow mention's community, not for its owner's", async () => {
+  const f = fixture();
+  const relay = keypair();
+  const replacement = {
+    snapshot: () => ({
+      ...f.snapshot,
+      session: { ...f.snapshot.session, workflowAuthority: relay.pubkey },
+    }),
+  } as unknown as RelayData;
+  const readyReads = vi.fn(async () => ownerReads(replacement, pubkey));
+  Object.assign(f.runtime, { readyReads });
+  await f.runtime.run(f.delivery("owner"));
+  expect(readyReads).not.toHaveBeenCalled();
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  await f.complete();
+  const ask = f.delivery("@Codex workflow");
+  const event = eventDto(
+    signed(relay, {
+      kind: 9,
+      content: "@Codex workflow",
+      tags: [
+        ["h", "channel"],
+        ["p", pubkey],
+        ["buzz:workflow", "true"],
+        ["buzz:workflow-owner", owner],
+        ["buzz:workflow-mention", pubkey],
+      ],
+    }),
+  );
+  await f.runtime.run({ ...ask, trigger: { type: "mention", event } });
+  expect(readyReads).toHaveBeenCalledExactlyOnceWith(
+    ask.agent,
+    ask.signal,
+    "channel",
+  );
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+  await f.complete();
+});
+
+it("waits after a reconnect until a workflow mention's DM is typed, then answers in the DM's session", async () => {
+  const f = fixture();
+  const relay = keypair();
+  const origin = "https://relay.example";
+  // The community the turn later reads through is the one the wait ended on.
+  f.snapshot.scope = `${origin}:${owner}`;
+  // The replacement session lists the DM, restored or paged, before its kind.
+  let listed: { id: string; name: string; channelType?: string }[] = [];
+  const listeners = new Set<() => void>();
+  const live = {
+    ...f.snapshot.session,
+    workflowAuthority: relay.pubkey,
+    channels: {
+      list: () => ({ status: "ready", channels: listed }),
+      subscribeList: (listener: () => void) => {
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
+      },
+    },
+  };
+  const relisted = (next: typeof listed) => {
+    listed = next;
+    for (const listener of [...listeners]) listener();
+  };
+  let snapshot: object = { status: "connecting", generation: 1 };
+  const services = new Set<() => void>();
+  const community = {
+    snapshot: () => snapshot,
+    subscribe: (listener: () => void) => {
+      services.add(listener);
+      return () => void services.delete(listener);
+    },
+  } as unknown as RelayData;
+  Object.assign(f.runtime, {
+    readyReads: (
+      agent: AgentHandle,
+      signal: AbortSignal,
+      channelId: string | undefined,
+    ) =>
+      readyOwnerReads(
+        community,
+        { ...agent, relay: "wss://relay.example" },
+        signal,
+        channelId,
+      ),
+  });
+  const prepare: NonNullable<Delivery["prepareSession"]> = vi.fn(
+    async () => undefined,
+  );
+  const workflow = (threadRoot: string) => {
+    const ask = f.delivery("@Codex workflow", threadRoot);
+    return f.runtime.run({
+      ...ask,
+      config: { ...(ask.config as object), scope: "thread" },
+      prepareSession: prepare,
+      trigger: {
+        type: "mention",
+        event: eventDto(
+          signed(relay, {
+            kind: 9,
+            content: "@Codex workflow",
+            tags: [
+              ["h", "channel"],
+              ["e", threadRoot, "", "reply"],
+              ["p", pubkey],
+              ["buzz:workflow", "true"],
+              ["buzz:workflow-owner", owner],
+              ["buzz:workflow-mention", pubkey],
+            ],
+          }),
+        ),
+      },
+    });
+  };
+  const first = workflow(root);
+  snapshot = {
+    status: "ready",
+    generation: 2,
+    origin,
+    viewer: owner,
+    scope: `${origin}:${owner}`,
+    session: live,
+  };
+  for (const listener of [...services]) listener();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  relisted([{ id: "channel", name: "DM" }]);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  // Neither a missing nor an untyped DM admits or starts the turn.
+  expect(prepare).not.toHaveBeenCalled();
+  expect(f.spawn).not.toHaveBeenCalled();
+  relisted([{ id: "channel", name: "DM", channelType: "dm" }]);
+  await first;
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  expect(prepare).toHaveBeenCalledWith(
+    {
+      source: { channelId: "channel" },
+      conversation: { channelId: "channel" },
+    },
+    false,
+  );
+  expect(listeners.size).toBe(0);
+  expect(services.size).toBe(0);
+  // A mention in another thread of the DM continues the same session.
+  await workflow("e".repeat(64));
+  await vi.waitFor(() =>
+    expect(f.sent.filter((wire) => wire.method === "turn/steer")).toHaveLength(
+      1,
+    ),
+  );
+  expect(f.sent.filter((wire) => wire.method === "thread/start")).toHaveLength(
+    1,
+  );
+  await f.complete();
+});
+
+it("ignores a workflow mention whose agent was replaced during the wait", async () => {
+  const f = fixture();
+  const relay = keypair();
+  const ask = f.delivery("@Codex workflow");
+  const event = eventDto(
+    signed(relay, {
+      kind: 9,
+      content: "@Codex workflow",
+      tags: [
+        ["h", "channel"],
+        ["p", pubkey],
+        ["buzz:workflow", "true"],
+        ["buzz:workflow-owner", owner],
+      ],
+    }),
+  );
+  let live = true;
+  Object.assign(f.runtime, {
+    readyReads: async () => {
+      live = false;
+      return f.runtime["reads"](pubkey);
+    },
+  });
+  const ignored = vi.fn();
+  await f.runtime.run({
+    ...ask,
+    trigger: { type: "mention", event },
+    current: () => live,
+    ignored,
+  });
+  expect(ignored).toHaveBeenCalledExactlyOnceWith();
+  expect(f.spawn).not.toHaveBeenCalled();
+});
+
 it.each([false, true])(
   "handles sibling workflow authorization with cancellation=%s",
   async (cancelled) => {
@@ -6362,6 +6601,87 @@ it("refuses a handoff from a channel-scoped Codex session to another of its chan
   expect(handoff).not.toHaveBeenCalled();
 });
 
+it.each([true, false])(
+  "hands a channel-level Codex wake into a thread only where the host says threads are apart (%s)",
+  async (apart) => {
+    const f = fixture();
+    const handoff = vi.fn();
+    f.events.push({
+      id: "d".repeat(64),
+      pubkey: owner,
+      kind: 39000,
+      content: "",
+      created_at: 1,
+      tags: [["d", "channel"]],
+    } as EventData);
+    const other = f.delivery("other thread", "e".repeat(64));
+    if (other.trigger.type !== "mention") throw new Error("Expected mention");
+    const delivery = pluginWake(f);
+    if (delivery.trigger.type !== "plugin") throw new Error("fixture");
+    await f.runtime.run({
+      ...delivery,
+      trigger: { ...delivery.trigger, type: "attention", topLevel: true },
+      agent: {
+        ...delivery.agent,
+        handoff,
+        threadsApart: () => apart,
+      } as Delivery["agent"],
+    });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    const result = await f.tool("self_handoff", {
+      channel: "channel",
+      thread: other.trigger.event.id,
+      text: "carry on",
+    });
+    if (apart) {
+      expect(JSON.stringify(result?.result)).toContain("Queued self-handoff");
+      expect(handoff).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: "channel", root: "e".repeat(64) }),
+      );
+    } else {
+      expect(JSON.stringify(result?.result)).toContain(
+        "That is this conversation.",
+      );
+      expect(handoff).not.toHaveBeenCalled();
+    }
+  },
+);
+
+it("refuses a handoff from a thread-scoped Codex huddle turn into the same room", async () => {
+  const f = fixture();
+  f.huddleChannels.add("channel");
+  const handoff = vi.fn();
+  // Agents says a huddle room is one conversation.
+  const threadsApart = vi.fn(() => false);
+  f.events.push({
+    id: "d".repeat(64),
+    pubkey: owner,
+    kind: 39000,
+    content: "",
+    created_at: 1,
+    tags: [["d", "channel"]],
+  } as EventData);
+  const other = f.delivery("another message in the room", "e".repeat(64));
+  if (other.trigger.type !== "mention") throw new Error("Expected mention");
+  const first = f.delivery("@Codex hi", root);
+  await f.runtime.run({
+    ...first,
+    agent: { ...first.agent, handoff, threadsApart } as Delivery["agent"],
+  });
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  const result = await f.tool("self_handoff", {
+    channel: "channel",
+    thread: other.trigger.event.id,
+    text: "carry on",
+  });
+  // The room's one session has no thread, so the host decides, and says no.
+  expect(threadsApart).toHaveBeenCalledWith("channel");
+  expect(JSON.stringify(result?.result)).toContain(
+    "That is this conversation.",
+  );
+  expect(handoff).not.toHaveBeenCalled();
+});
+
 it("keeps callbacks live beside terminals and lets a title finish after its admission closes", async () => {
   let handler!: McpHandler;
   let enabled = true;
@@ -6487,9 +6807,13 @@ it("keeps interrupting an idle existing conversation a no-op", async () => {
 });
 
 describe("voice seats", () => {
-  async function seated(overrides: Partial<AgentVoiceSeat> = {}) {
+  async function seated(
+    overrides: Partial<AgentVoiceSeat> = {},
+    configure: (f: ReturnType<typeof fixture>) => void = () => {},
+  ) {
     vi.stubGlobal("RTCPeerConnection", class {});
     const f = fixture();
+    configure(f);
     f.huddleChannels.add("channel");
     const delivery = f.delivery("hello");
     const abort = new AbortController();
@@ -6530,6 +6854,109 @@ describe("voice seats", () => {
       params: { threadId: "thread-1", turn: { id: "late" } },
     });
     expect(thinking).not.toHaveBeenCalled();
+  });
+  it.each(["cove", "maple"])(
+    "uses the resolved seat voice %s",
+    async (voice) => {
+      const f = await seated({
+        config: { workspace: "/tmp/voices", voice },
+        synced: { voice },
+      });
+      expect(vi.mocked(openVoice).mock.calls.at(-1)?.[7]).toBe(voice);
+      await f.connection.close();
+    },
+  );
+  it.each(
+    ["unsupported", "missing", "failed"].flatMap((state) =>
+      [true, false].map((synced) => ({ state, synced })),
+    ),
+  )(
+    "refuses an unchecked saved voice: $state, synced=$synced",
+    async ({ state, synced }) => {
+      const before = vi.mocked(openVoice).mock.calls.length;
+      const started = seated(
+        {
+          config: { workspace: "/tmp/voices", voice: "maple" },
+          ...(synced ? { synced: { voice: "maple" } } : {}),
+        },
+        (f) => {
+          if (state === "unsupported") f.voiceCatalog.v3 = ["cove"];
+          if (state === "missing") f.voiceCatalog.v3 = undefined;
+          if (state === "failed") f.failing.add("thread/realtime/listVoices");
+        },
+      );
+      try {
+        await expect(started).rejects.toThrow(
+          state === "unsupported"
+            ? /voice "maple".*Settings/
+            : /Couldn't check.*voice "maple".*Try again/,
+        );
+        expect(vi.mocked(openVoice).mock.calls.length).toBe(before);
+      } finally {
+        await started.then(
+          (f) => f.connection.close(),
+          () => {},
+        );
+      }
+    },
+  );
+  it("releases a cancelled seat while voice verification is pending", async () => {
+    const f = fixture();
+    vi.stubGlobal("RTCPeerConnection", class {});
+    f.huddleChannels.add("channel");
+    const gate = deferred<void>();
+    f.held.set("thread/realtime/listVoices", gate.promise);
+    const delivery = f.delivery("hello");
+    const abort = new AbortController();
+    const seat = {
+      config: { workspace: "/tmp/voices", voice: "maple" },
+      agent: { ...delivery.agent, config: delivery.config } as unknown as Agent,
+      conversation: { channelId: "channel" },
+      signal: abort.signal,
+      async output() {},
+      async transcript() {},
+      ended() {},
+    };
+    const opening = f.runtime.voice(seat, delivery.agent);
+    let cancelled = false;
+    const rejected = expect(opening)
+      .rejects.toThrow()
+      .then(() => {
+        cancelled = true;
+      });
+    try {
+      await vi.waitFor(() =>
+        expect(
+          f.sent.some((wire) => wire.method === "thread/realtime/listVoices"),
+        ).toBe(true),
+      );
+      abort.abort();
+      await vi.waitFor(() => expect(cancelled).toBe(true));
+      await rejected;
+      const connection = await f.runtime.voice(
+        {
+          ...seat,
+          config: { workspace: "/tmp/voices" },
+          signal: new AbortController().signal,
+        },
+        delivery.agent,
+      );
+      await connection.close();
+    } finally {
+      gate.resolve();
+      await rejected;
+    }
+  });
+  it("opens media after verifying an offered synced voice", async () => {
+    const f = await seated({
+      config: { workspace: "/tmp/voices", voice: "maple" },
+      synced: { voice: "maple" },
+    });
+    expect(
+      f.sent.some((wire) => wire.method === "thread/realtime/listVoices"),
+    ).toBe(true);
+    expect(vi.mocked(openVoice).mock.calls.at(-1)?.[7]).toBe("maple");
+    await f.connection.close();
   });
   it("uses resolved seat config and team instead of the local agent config", async () => {
     const f = await seated({
@@ -7174,6 +7601,159 @@ it("waits for remote turn and target cleanup when an agent retires", async () =>
   }
   await retirement;
   expect(target.signal.aborted).toBe(true);
+});
+
+/** The hand-over budgets started, which the test expires; other timeouts run
+ * on the real clock. */
+function handoverBudgets() {
+  const budgets: AbortController[] = [];
+  const spy = vi.spyOn(AbortSignal, "timeout");
+  spy.mockImplementation((ms) => {
+    const budget = new AbortController();
+    if (ms === HANDOVER_MS) budgets.push(budget);
+    else
+      setTimeout(
+        () => budget.abort(new DOMException("timed out", "TimeoutError")),
+        ms,
+      );
+    return budget.signal;
+  });
+  return Object.assign(budgets, { restore: () => spy.mockRestore() });
+}
+
+/** A remote conversation whose New the test holds, and a workflow's mention
+ * in it with `readyReads` on both sides. */
+async function heldRemoteNew(readyReads: ReturnType<typeof vi.fn>) {
+  const guests: ReturnType<typeof fixture>[] = [];
+  const f = fixture(
+    [],
+    undefined,
+    false,
+    {},
+    undefined,
+    undefined,
+    async () => {
+      const guest = fixture();
+      guests.push(guest);
+      return guestTarget(guest);
+    },
+  );
+  const relay = keypair();
+  const replacement = {
+    snapshot: () => ({
+      ...f.snapshot,
+      session: { ...f.snapshot.session, workflowAuthority: relay.pubkey },
+    }),
+  } as unknown as RelayData;
+  const reads = ownerReads(replacement, pubkey);
+  Object.assign(f.runtime, { readyReads });
+  const first = f.delivery("first");
+  await f.runtime.run(first);
+  await vi.waitFor(() => expect(guests[0]?.starts()).toHaveLength(1));
+  await guests[0]?.complete();
+  const agent = { ...first.agent, config: first.config } as unknown as Agent;
+  const place = { channelId: "channel", root };
+  await vi.waitFor(() =>
+    expect(f.runtime.sessionState(agent, place)).toBe("idle"),
+  );
+  /** Starts a New that waits for `released`. */
+  const holdNew = async () => {
+    const started = deferred<void>();
+    const released = deferred<void>();
+    const reset = f.runtime.session(agent, place, "new", async (change) => {
+      started.resolve();
+      await released.promise;
+      await change();
+    });
+    await started.promise;
+    return { released, reset };
+  };
+  const handoffs: Promise<unknown>[] = [];
+  const workflow = (signal: AbortSignal) =>
+    f.runtime.run({
+      ...f.delivery("@Codex workflow"),
+      trigger: {
+        type: "mention",
+        event: eventDto(
+          signed(relay, {
+            kind: 9,
+            content: "@Codex workflow",
+            tags: [
+              ["h", "channel"],
+              ["e", root, "", "reply"],
+              ["p", pubkey],
+              ["buzz:workflow", "true"],
+              ["buzz:workflow-owner", owner],
+              ["buzz:workflow-mention", pubkey],
+            ],
+          }),
+        ),
+      },
+      signal,
+      workingUntil: (work: Promise<unknown>) => void handoffs.push(work),
+    });
+  return {
+    f,
+    guests,
+    reads,
+    agent,
+    place,
+    holdNew,
+    handoffs,
+    workflow,
+  };
+}
+
+it("gives a workflow mention held behind a remote New a fresh hand-over deadline that does not bound its turn", async () => {
+  const readyReads = vi.fn();
+  const held = await heldRemoteNew(readyReads);
+  // Here the community is ready; on the target it first keeps retrying.
+  readyReads.mockImplementation(async () => held.reads);
+  readyReads.mockImplementationOnce(async () => held.reads);
+  readyReads.mockImplementationOnce(
+    (_agent: unknown, signal: AbortSignal) =>
+      new Promise((_resolve, reject) =>
+        signal.addEventListener(
+          "abort",
+          () => reject(new Error("did not reconnect")),
+          { once: true },
+        ),
+      ),
+  );
+  const budgets = handoverBudgets();
+  try {
+    let hold = await held.holdNew();
+    const expired = new AbortController();
+    await held.workflow(expired.signal);
+    const handoff = held.handoffs[0] as Promise<unknown>;
+    handoff.catch(() => {});
+    // The original deadline passes while the hand-over waits for New.
+    expired.abort(new Error("delivery deadline"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(budgets).toHaveLength(0);
+    hold.released.resolve();
+    await hold.reset;
+    await vi.waitFor(() => expect(readyReads).toHaveBeenCalledTimes(2));
+    expect(budgets).toHaveLength(1);
+    expect(readyReads.mock.calls[1]?.[1]?.aborted).toBe(false);
+    budgets[0]?.abort(new DOMException("timed out", "TimeoutError"));
+    await expect(handoff).rejects.toThrow("did not reconnect");
+    expect(held.guests.flatMap((guest) => guest.starts())).toHaveLength(1);
+    // New works again; a turn that outlives its hand-over budget finishes.
+    hold = await held.holdNew();
+    await held.workflow(new AbortController().signal);
+    hold.released.resolve();
+    await hold.reset;
+    const guest = () => held.guests.find((g, i) => i > 0 && g.starts().length);
+    await vi.waitFor(() => expect(guest()).toBeDefined());
+    for (const budget of budgets) budget.abort();
+    await guest()?.complete();
+    await held.handoffs[1];
+    await vi.waitFor(() => expect(held.f.publish).toHaveBeenCalledTimes(2));
+  } finally {
+    budgets.restore();
+    await held.f.runtime.retire(pubkey);
+  }
 });
 
 it("gives each conversation a durable target key and rotates only its New session", async () => {
@@ -7976,8 +8556,7 @@ describe("a conversation given its own folder", () => {
   });
 });
 
-/** What the owner's choice and the harness's status look like to an adapter. */
-type McpKit = NonNullable<ConstructorParameters<typeof CodexRuntime>[15]>;
+type McpKit = NonNullable<ConstructorParameters<typeof CodexRuntime>[16]>;
 const mcpKit = (
   answer: Awaited<ReturnType<McpKit["choice"]>>,
   started: McpKit["started"] = vi.fn(),
@@ -7986,7 +8565,6 @@ const mcpKit = (
     choice: vi.fn(async () => answer),
     started,
   }) satisfies McpKit;
-/** A Codex runtime whose agent's MCP servers `kit` chooses. */
 const withMcp = (
   kit?: McpKit,
   hooks?: ConstructorParameters<typeof CodexRuntime>[7],
@@ -8005,7 +8583,6 @@ const withMcp = (
     undefined,
     kit,
   );
-/** Buzz's hook bridge, which no test calls. */
 const idleHooks = () => ({
   serve: vi.fn(async () => ({
     url: "http://127.0.0.1:1/mcp",
@@ -8056,8 +8633,6 @@ describe("harness MCP choice", () => {
     expect(kit.started).not.toHaveBeenCalled();
   });
 
-  // Nothing is forced on: a server the choice leaves out, or turns on, keeps
-  // its `config.toml` entry, and a name the harness does not list is not sent.
   it.each([
     [
       "leaves a server chosen on to its configuration, and trims chosen tools",
@@ -8100,12 +8675,10 @@ describe("harness MCP choice", () => {
     f.statusRows.rows = [
       row("alpha", "connected", { read: { description: "Reads" }, write: {} }),
       row("beta", "disabled"),
-      // Buzz's own hook bridge is no `config/read` name, so it is not asked.
       row("buzz_native_hooks"),
     ];
     await f.runtime.run(f.delivery("@Codex hello"));
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
-    // One call per server name: without a name Codex starts servers again.
     expect(statusCalls(f).map((wire) => wire.params)).toEqual([
       { threadId: "thread-1", serverName: "alpha", detail: "toolsAndAuthOnly" },
       { threadId: "thread-1", serverName: "beta", detail: "toolsAndAuthOnly" },
@@ -8117,8 +8690,6 @@ describe("harness MCP choice", () => {
     expect(order.indexOf("mcpServerStatus/list")).toBeLessThan(
       order.indexOf("turn/start"),
     );
-    // A server that is off is not loaded, so only alpha is listed. Beta,
-    // left out, is read back as the default: on.
     expect(started).toHaveBeenCalledWith(
       expect.objectContaining({ key: pubkey }),
       "thread-1",
@@ -8140,9 +8711,9 @@ describe("harness MCP choice", () => {
       (f: ReturnType<typeof fixture>) => f.failing.add("mcpServerStatus/list"),
     ],
   ])("starts no turn when %s", async (_name, arrange) => {
-    const started = vi.fn(() => {
+    const started = () => {
       throw new Error("MCP servers loaded that were turned off");
-    });
+    };
     const f = withMcp(mcpKit({ alpha: false }, started));
     withServers(f, "alpha");
     f.statusRows.rows = [row("alpha")];
@@ -8168,7 +8739,6 @@ describe("harness MCP choice", () => {
     asSoloChat(f);
     await f.runtime.run({ ...f.delivery("@Codex fix it"), named: vi.fn() });
     await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
-    // The conversation leaves gamma to `config.toml`; the title turns it off.
     expect(threadConfig(f, 0).mcp_servers).toEqual({
       beta: { disabled_tools: ["write"] },
     });
@@ -8201,8 +8771,6 @@ describe("harness MCP choice", () => {
     );
   });
 
-  /** Starts a conversation, ends its turn and asks for a compaction, whose
-   * thread resume is what `resumed` holds. `finish` ends the compaction. */
   async function compacting(f: ReturnType<typeof fixture>, between = () => {}) {
     const delivery = f.delivery("first");
     const agent = {
@@ -8270,7 +8838,6 @@ describe("harness MCP choice", () => {
     const f = fixture();
     withServers(f, "alpha");
     const { resumed, finish } = await compacting(f);
-    // The conversation leaves alpha to `config.toml`; compaction turns it off.
     expect(threadConfig(f).mcp_servers).toEqual({});
     expect(resumed).toEqual({ alpha: off("alpha") });
     expect(statusCalls(f)).toEqual([]);
@@ -8291,13 +8858,11 @@ describe("harness MCP choice", () => {
     });
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
     expect(threadConfig(f).mcp_servers).toEqual({});
-    // Unsubscribing unloads it at once, which stops the servers it started.
     expect(threadConfig(f).thread_unload_delay_secs).toBe(0);
     expect(started).toHaveBeenCalledWith(
       expect.objectContaining({ key: pubkey }),
       "thread-1",
       [{ name: "alpha", state: "connected", tools: [] }],
-      // A name the choice leaves out is checked as the default: on.
       { alpha: true, beta: true },
     );
   });
@@ -8427,7 +8992,6 @@ describe("harness MCP report and inspect", () => {
       ephemeral: true,
       sandbox: "read-only",
       approvalPolicy: "never",
-      // Unloaded once unsubscribed, so the server it started stops.
       config: { thread_unload_delay_secs: 0 },
     });
     expect(threadConfig(f).mcp_servers).toEqual({
@@ -8490,8 +9054,6 @@ describe("harness MCP report and inspect", () => {
 });
 
 describe("harness MCP hooks", () => {
-  /** A thread with servers `names` whose hook bridge the test can call, and
-   * the plugin hooks that run behind it. */
   const bridged = (
     answer: Parameters<typeof mcpKit>[0],
     names = ["my.server"],
@@ -8500,7 +9062,11 @@ describe("harness MCP hooks", () => {
     ],
   ) => {
     let handler!: McpHandler;
-    const plugin = vi.fn(async () => ({ plugin: "ran" }));
+    const calls: unknown[][] = [];
+    const plugin = async (...args: unknown[]) => {
+      calls.push(args);
+      return { plugin: "ran" };
+    };
     const kit = mcpKit(answer);
     const f = withMcp(kit, {
       serve: async (run) => {
@@ -8538,10 +9104,8 @@ describe("harness MCP hooks", () => {
       await f.runtime.run(f.delivery("@Codex hello"));
       await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
     };
-    /** What the plugin hooks were given: session, input and turn. */
     const seen = (call = -1) => {
-      const [, session, , input, turn] = (plugin.mock.calls.at(call) ??
-        []) as unknown as [
+      const [, session, , input, turn] = (calls.at(call) ?? []) as [
         string,
         string,
         string,
@@ -8586,7 +9150,6 @@ describe("harness MCP hooks", () => {
     await vi.waitFor(() =>
       expect(f.sent.some((wire) => wire.method === "turn/steer")).toBe(true),
     );
-    // Codex may take the steer in before Buzz sees its answer.
     await pre("mcp__my_server__write");
     expect(seen().turn).toMatchObject({
       trigger: {
@@ -8630,10 +9193,8 @@ describe("harness MCP hooks", () => {
         }),
       },
     });
-    // The tool's own name is found from Codex's sanitized one.
     await pre("mcp__my_server__get_thing");
     expect(seen().input).toMatchObject({ mcp_tool: "get-thing" });
-    // A name the status did not list leaves the tool out, not the server.
     await pre("mcp__my_server__other");
     expect(seen().input).toMatchObject({ mcp_server: "my.server" });
     expect(seen().input).not.toHaveProperty("mcp_tool");
@@ -8642,12 +9203,10 @@ describe("harness MCP hooks", () => {
       tool_use_id: "call-1",
     });
     expect(seen().input).toMatchObject({ mcp_tool: "write" });
-    // Other tools and Buzz's own bridge server are passed as Codex gave them.
     await pre("Bash");
     expect(seen().input).not.toHaveProperty("mcp_server");
     await pre("mcp__buzz_native_hooks__PreToolUse");
     expect(seen().input).not.toHaveProperty("mcp_server");
-    // So is a name that matches no server of the thread.
     await pre("mcp__nobody__write");
     expect(seen().input).not.toHaveProperty("mcp_server");
     await f.complete();
@@ -8656,7 +9215,6 @@ describe("harness MCP hooks", () => {
   it("gives plugin hooks a subagent's events as its parent turn's, and another thread's with no turn", async () => {
     const { f, hook, pre, begin, seen } = bridged({ "my.server": true });
     await begin();
-    // Before its spawn completes, a thread is not this turn's.
     await expect(
       pre("mcp__my_server__write", { session_id: "child-1" }),
     ).resolves.toEqual({ plugin: "ran" });
@@ -8719,8 +9277,6 @@ describe("harness MCP hooks", () => {
     expect(seen().turn).toMatchObject({
       trigger: { type: "mention", event: { pubkey: owner } },
     });
-    // A plugin's wake steered into the owner's turn: the turn is no longer
-    // only the owner's message.
     await f.runtime.run(pluginWake(f, root));
     await vi.waitFor(() =>
       expect(
@@ -8738,18 +9294,14 @@ describe("mcpCallOf", () => {
     ["mcp__alpha__write", ["alpha"], [], { server: "alpha" }],
     ["mcp__my_server__write", ["my.server"], [], { server: "my.server" }],
     ["mcp__a_b__write", ["a b"], [], { server: "a b" }],
-    // Codex joins a namespace and a name after trimming their edge underscores.
     ["mcp__a__tool", ["a_"], [], { server: "a_" }],
     ["mcp__a__tool", ["a", "b"], [], { server: "a" }],
-    // "a" and "a-" read alike once sanitized, so they cannot be told apart.
     ["mcp__a__write", ["a", "a-", "c"], [], undefined],
     ["mcp__c__write", ["a", "a-", "c"], [], { server: "c" }],
     ["mcp__alpha__x__y", ["alpha", "alpha__x"], [], undefined],
     ["mcp__beta__write", ["alpha"], [], undefined],
     ["mcp__alpha", ["alpha"], [], undefined],
     ["mcp__", ["alpha"], [], undefined],
-    // The tool is found by its sanitized name, with edge underscores trimmed,
-    // and is left out when it matches none or two.
     [
       "mcp__alpha__get_thing",
       ["alpha"],

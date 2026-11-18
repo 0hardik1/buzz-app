@@ -37,7 +37,6 @@ function setup(options: { harnessMcp?: unknown } = {}) {
     },
   };
   const root = new Context();
-  /** What runs here. */
   const live = { agent };
   const created = createHarnessMcp(
     () =>
@@ -60,7 +59,6 @@ function setup(options: { harnessMcp?: unknown } = {}) {
       } as never,
     ],
   );
-  /** A plugin's view of the kit; by default the plugin that registered the type. */
   const kitOf = (id = "third") =>
     created.kitFor(
       root.extend({ pluginOwner: { id, revision: "1" } } as never),
@@ -74,7 +72,6 @@ function setup(options: { harnessMcp?: unknown } = {}) {
         ...(agentMcp && { agentMcp }),
       },
     } as never);
-  /** Registers `control` as an installed plugin does; disposing ends the scope. */
   async function install(control: HarnessMcpControl) {
     const fiber = scope().plugin((ctx) => mcp.control(ctx, control));
     await fiber.await();
@@ -87,35 +84,31 @@ const loaded = (...names: string[]) => names.map((name) => ({ name }));
 
 it("leaves the harness's default alone while no control or declaring plugin exists", async () => {
   const { mcp, status } = setup();
-  // Owner decision: a launch is never delayed when no enabled plugin declares
-  // the key, even while other plugins are still starting.
   status.settled = false;
   await expect(mcp.kit.choice(handle)).resolves.toBeUndefined();
 });
 
-/** Read plugin settings; `paused`: external plugins are paused. */
-const ready = (plugins: PluginInfo[] = [], paused = false): StorageResult => ({
-  status: "ready",
-  externalPluginsPaused: paused,
-  catalog: { profile: "test", location: "test", plugins },
-});
-/** An enabled plugin, `policy`, that declares choosing. */
-const declaring = (source: PluginInfo["source"] = "bundled"): PluginInfo => ({
-  manifest: {
-    id: "policy",
-    name: "Policy",
-    apiVersion: 1,
-    host: { agentMcp: true },
-  },
-  source,
-  enabled: true,
-  revision: "1",
-  previous: null,
-  reloadable: source === "external",
-  error: null,
-});
-/** The kit with the real plugin manager, reading the catalog `getCatalog`
- * gives. The `policy` plugin fails to start. */
+const ready = (plugins: PluginInfo[] = [], paused = false) =>
+  ({
+    status: "ready",
+    externalPluginsPaused: paused,
+    catalog: { profile: "test", location: "test", plugins },
+  }) satisfies StorageResult;
+const declaring = (source: PluginInfo["source"] = "bundled") =>
+  ({
+    manifest: {
+      id: "policy",
+      name: "Policy",
+      apiVersion: 1,
+      host: { agentMcp: true },
+    },
+    source,
+    enabled: true,
+    revision: "1",
+    previous: null,
+    reloadable: source === "external",
+    error: null,
+  }) satisfies PluginInfo;
 function startup(getCatalog: PluginStorage["getCatalog"]) {
   const root = new Context();
   const plugins = createPluginManager(root, {
@@ -123,7 +116,7 @@ function startup(getCatalog: PluginStorage["getCatalog"]) {
       getCatalog,
       changePlugin: vi.fn(),
       recoverSettings: vi.fn(),
-      readModule: vi.fn(async () => ""),
+      readModule: async () => "",
       reloadPlugin: vi.fn(),
     },
     bundled: [
@@ -214,9 +207,9 @@ it("loads nothing when the plugin settings still can't be read after 30 seconds"
 
 it("keeps only booleans and lists of off and known tool names from a control's answer", async () => {
   const { mcp, install } = setup();
-  const choose = vi.fn<HarnessMcpControl["choose"]>();
-  await install({ choose });
-  choose.mockReturnValue({
+  let answer: unknown;
+  await install({ choose: () => answer as never });
+  answer = {
     alpha: true,
     beta: { off: ["write"], known: ["read", "write"] },
     gamma: "yes",
@@ -224,7 +217,7 @@ it("keeps only booleans and lists of off and known tool names from a control's a
     epsilon: { off: ["write"] },
     zeta: ["write"],
     constructor: true,
-  } as never);
+  };
   const choice = await mcp.kit.choice(handle);
   expect({ ...(choice as object) }).toEqual({
     alpha: true,
@@ -237,58 +230,70 @@ it("keeps only booleans and lists of off and known tool names from a control's a
   });
   expect(Object.getPrototypeOf(choice)).toBeNull();
   for (const odd of ["all", ["alpha"], Promise.resolve({}), null]) {
-    choose.mockReturnValue(odd as never);
+    answer = odd;
     await expect(mcp.kit.choice(handle)).resolves.toBe("none");
   }
 });
 
 it("does not ask a control whose plugin is no longer running", async () => {
   const { mcp, install, status } = setup();
-  const choose = vi.fn<HarnessMcpControl["choose"]>(() => ({ alpha: true }));
-  await install({ choose });
+  const asked: Agent[] = [];
+  await install({
+    choose(who) {
+      asked.push(who);
+      return { alpha: true };
+    },
+  });
   status.change({ active: false, unavailable: true });
   await expect(mcp.kit.choice(handle)).resolves.toBe("none");
-  expect(choose).not.toHaveBeenCalled();
+  expect(asked).toEqual([]);
   status.change({ active: true, unavailable: false });
   await expect(mcp.kit.choice(handle)).resolves.toEqual({ alpha: true });
 });
 
 it("asks the registered control, and an error from it loads nothing", async () => {
   const { mcp, install } = setup();
-  const choose = vi.fn<HarnessMcpControl["choose"]>(() => ({ alpha: true }));
-  await install({ choose });
-  await expect(mcp.kit.choice(handle)).resolves.toEqual({ alpha: true });
-  expect(choose).toHaveBeenCalledWith(agent);
-  choose.mockImplementation(() => {
-    throw new Error("control failed");
+  const asked: Agent[] = [];
+  let answer: HarnessMcpControl["choose"] = () => ({ alpha: true });
+  await install({
+    choose(who) {
+      asked.push(who);
+      return answer(who);
+    },
   });
+  await expect(mcp.kit.choice(handle)).resolves.toEqual({ alpha: true });
+  expect(asked).toEqual([agent]);
+  answer = () => {
+    throw new Error("control failed");
+  };
   await expect(mcp.kit.choice(handle)).resolves.toBe("none");
-  // Leaving every name out keeps every default, and is still read back.
-  choose.mockReturnValue(undefined);
+  answer = () => undefined;
   await expect(mcp.kit.choice(handle)).resolves.toEqual({});
 });
 
 it("answers and hears only for the plugin that runs the agent, as the agent runs, and loads nothing for a protected agent", async () => {
   const { mcp, install, live, kitOf } = setup();
-  const choose = vi.fn(() => ({ alpha: true }));
-  await install({ choose });
+  const asked: Agent[] = [];
+  await install({
+    choose(who) {
+      asked.push(who);
+      return { alpha: true };
+    },
+  });
   const refused = "Only the plugin that runs this agent's harness";
   await expect(kitOf("other").choice(handle)).rejects.toThrow(refused);
   expect(() => kitOf("other").started(handle, "s1", [], "none")).toThrow(
     refused,
   );
-  // An agent that doesn't run here has no choice to make or session to report.
   await expect(mcp.kit.choice({ key: "gone" } as never)).rejects.toThrow(
     "not running here",
   );
   expect(() =>
     mcp.kit.started({ key: "gone" } as never, "s2", [], "none"),
   ).toThrow("not running here");
-  // Core reads protection from the agent as it runs, not from the caller:
-  // leaving it out neither asks the control nor lets a session load a server.
   live.agent = { ...agent, protection: { provider: "p", policy: {} } } as Agent;
   await expect(mcp.kit.choice({ key } as never)).resolves.toBe("none");
-  expect(choose).not.toHaveBeenCalled();
+  expect(asked).toEqual([]);
   expect(() =>
     mcp.kit.started({ key } as never, "s3", loaded("alpha"), { alpha: true }),
   ).toThrow(/alpha/);
@@ -320,7 +325,6 @@ it.each([
   },
 );
 
-// `started` judges the answer its session was given, so these need no control.
 it.each([
   [
     "a server chosen on, and a tool the choice did not know of",
@@ -361,10 +365,16 @@ it.each([
 
 it("gives the control what a passing session loaded, and nothing else", async () => {
   const { mcp, install, status, live } = setup();
-  const loadedBy = vi.fn<NonNullable<HarnessMcpControl["loaded"]>>();
+  const heard: unknown[][] = [];
+  let failure: (() => void) | undefined;
   await install({
     choose: () => ({ alpha: { off: ["write"], known: ["read", "write"] } }),
-    loaded: loadedBy,
+    loaded(who, servers) {
+      heard.push([who, servers]);
+      const fail = failure;
+      failure = undefined;
+      return fail?.();
+    },
   });
   const choice = await mcp.kit.choice(handle);
   const listing = [
@@ -375,11 +385,9 @@ it("gives the control what a passing session loaded, and nothing else", async ()
     },
   ];
   mcp.kit.started(handle, "s1", listing, choice);
-  // It hears after the session goes on, not inside `started`.
-  expect(loadedBy).not.toHaveBeenCalled();
+  expect(heard).toEqual([]);
   await Promise.resolve();
-  expect(loadedBy).toHaveBeenCalledExactlyOnceWith(agent, listing);
-  // A session that fails the check tells it nothing.
+  expect(heard).toEqual([[agent, listing]]);
   expect(() =>
     mcp.kit.started(
       handle,
@@ -388,25 +396,23 @@ it("gives the control what a passing session loaded, and nothing else", async ()
       choice,
     ),
   ).toThrow(/alpha/);
-  // Its throw or rejection does not reach the session.
-  loadedBy.mockImplementationOnce(() => {
+  failure = () => {
     throw new Error("plugin bug");
-  });
+  };
   expect(() => mcp.kit.started(handle, "s3", listing, choice)).not.toThrow();
-  loadedBy.mockImplementationOnce((() =>
-    Promise.reject(new Error("later"))) as never);
+  await Promise.resolve();
+  expect(failure).toBeUndefined();
+  failure = () => Promise.reject(new Error("later"));
   expect(() => mcp.kit.started(handle, "s4", listing, choice)).not.toThrow();
   await Promise.resolve();
-  expect(loadedBy).toHaveBeenCalledTimes(3);
-  // A protected agent's session loads nothing and tells nothing.
+  expect(heard).toHaveLength(3);
   live.agent = { ...agent, protection: { provider: "p" } } as never;
   mcp.kit.started(handle, "s5", [], "none");
   live.agent = agent;
-  // A control whose plugin stopped hears nothing.
   status.change({ active: false });
   mcp.kit.started(handle, "s6", listing, choice);
   await Promise.resolve();
-  expect(loadedBy).toHaveBeenCalledTimes(3);
+  expect(heard).toHaveLength(3);
 });
 
 it("takes one control, and drops it with the plugin's scope", async () => {
@@ -423,10 +429,8 @@ it("takes one control, and drops it with the plugin's scope", async () => {
   await expect(mcp.kit.choice(handle)).resolves.toEqual({ a: true });
   await first.dispose();
   await expect(mcp.kit.choice(handle)).resolves.toBeUndefined();
-  // The same slot can be taken again once the scope has ended.
   await install({ choose: () => ({ b: true }) });
   await expect(mcp.kit.choice(handle)).resolves.toEqual({ b: true });
-  // A running control is asked even while its plugin is marked unavailable.
   status.change({ unavailable: true });
   await expect(mcp.kit.choice(handle)).resolves.toEqual({ b: true });
 });
@@ -441,7 +445,11 @@ const report = (overrides: Partial<HarnessMcpReport> = {}) => ({
 });
 
 it("needs the manifest key to control, report or inspect", async () => {
-  const inspect = vi.fn(async () => []);
+  const inspected: unknown[][] = [];
+  const inspect = async (...args: unknown[]) => {
+    inspected.push(args);
+    return [];
+  };
   const { mcp, scope } = setup({
     harnessMcp: { report: async () => report(), inspect },
   });
@@ -454,7 +462,7 @@ it("needs the manifest key to control, report or inspect", async () => {
   await expect(mcp.inspect(scope(false), key, "alpha")).rejects.toThrow(
     "Declare host.agentMcp",
   );
-  expect(inspect).not.toHaveBeenCalled();
+  expect(inspected).toEqual([]);
 });
 
 it("gives a type with no MCP client no report", async () => {
@@ -502,22 +510,30 @@ it("reports a type's servers as it lists them, and nothing for an agent that is 
 });
 
 it("lists a server's tools through the type, which rejects what it can't list", async () => {
-  const inspect = vi.fn(async () => [{ name: "read" }]);
+  const inspected: unknown[][] = [];
+  const inspect = async (who: Agent, server: string) => {
+    inspected.push([who, server]);
+    if (server === "beta") throw new Error("did not connect");
+    return [{ name: "read" }];
+  };
   const { mcp, scope } = setup({
     harnessMcp: { report: async () => report(), inspect },
   });
   await expect(mcp.inspect(scope(), key, "alpha")).resolves.toEqual([
     { name: "read" },
   ]);
-  expect(inspect).toHaveBeenCalledWith(agent, "alpha");
-  inspect.mockRejectedValueOnce(new Error("did not connect"));
+  expect(inspected).toEqual([[agent, "alpha"]]);
   await expect(mcp.inspect(scope(), key, "beta")).rejects.toThrow(
     "did not connect",
   );
 });
 
 it("never lists tools for a protected agent, a type that cannot, or a stopped plugin", async () => {
-  const inspect = vi.fn(async () => []);
+  const inspected: unknown[][] = [];
+  const inspect = async (...args: unknown[]) => {
+    inspected.push(args);
+    return [];
+  };
   const { mcp, scope, live, status } = setup({
     harnessMcp: { report: async () => report(), inspect },
   });
@@ -528,7 +544,7 @@ it("never lists tools for a protected agent, a type that cannot, or a stopped pl
   await expect(mcp.inspect(scope(), key, "alpha")).rejects.toThrow(
     "not running",
   );
-  expect(inspect).not.toHaveBeenCalled();
+  expect(inspected).toEqual([]);
   const plain = setup({ harnessMcp: { report: async () => report() } });
   await expect(plain.mcp.inspect(plain.scope(), key, "alpha")).rejects.toThrow(
     "cannot list",

@@ -38,7 +38,7 @@ import { directTrigger } from "../../features/agents/hooks";
 import { sessionPrompts } from "../../features/agents/session-prompts";
 import { standaloneSessions } from "../../features/agents/standalone-sessions";
 import { localStore, type AgentStore } from "../../features/agents/store";
-import type { AgentReads } from "../../features/agents/reads";
+import { type AgentReads, workflowMarked } from "../../features/agents/reads";
 import type {
   Agent,
   AgentHandle,
@@ -74,6 +74,7 @@ import {
 import { DEFAULT_THINKING, PiSetup, runsAt } from "./setup";
 import { readTranscript } from "./transcript";
 import { readUsage } from "./usage";
+import { answerGateway, gatewayRoute, type GatewaySeam } from "./gateway";
 
 export type Config = Readonly<{
   /** A Pi provider; empty uses the one Pi's settings name. */
@@ -136,8 +137,6 @@ type Waited =
 type Receipt = Pick<Delivery, "step" | "acknowledged" | "superseded"> & {
   /** Its conversation key, which session controls act on. */
   key: string;
-  /** The owner's own message, with every request the conversation's run
-   * took before it: what its tools get as `Context.direct`. */
   direct: boolean;
   /** Where its activity shows: a thread, or a Solo chat's channel. */
   scope: string;
@@ -222,7 +221,6 @@ export class PiRuntime {
     private readonly reads: (key: AgentKey) => AgentReads | undefined,
     /** The agent's `core` memory as the host keeps it (`Agents.core`). */
     private readonly core: Agents["core"],
-    /** The tools plugins add to the agent's conversations now. */
     private readonly added: (
       agent?: AgentKey,
     ) => readonly AddedTool[] = () => [],
@@ -246,6 +244,15 @@ export class PiRuntime {
     ) => () => void = () => () => {},
     /** Agent storage, where what each session started with is kept. */
     private readonly storage: AgentStore = localStore(),
+    /** The model gateway's routes and context; none: all external. */
+    private readonly seam?: GatewaySeam,
+    /** The agent's reads once its community is ready, for a workflow's
+     * mention that arrived while it reconnects; rejects when `signal` aborts. */
+    private readonly readyReads?: (
+      agent: AgentHandle,
+      signal: AbortSignal,
+      channelId: string | undefined,
+    ) => Promise<AgentReads | undefined>,
   ) {
     this.pi = new Pi(
       () => this.spawn,
@@ -264,6 +271,7 @@ export class PiRuntime {
           );
         },
         event: (event) => this.event(event),
+        gateway: async (call) => answerGateway(this.seam, call),
         prompt: ({ agent, request }) =>
           this.agents.get(agent)?.receipts.get(request)?.prompt?.() ??
           Promise.resolve(undefined),
@@ -510,7 +518,19 @@ export class PiRuntime {
         if ([...entry.receipts.values()].some((taken) => taken.key === key))
           throw new Error("Wait for the active turn to finish first.");
       }
-      await this.pi.request("session", { agent: agent.key, key, action });
+      // An owner's compaction is its own request, through the gateway while
+      // the agent's route is there. No signed event caused it, so its
+      // context is the conversation's place with no message.
+      const gateway =
+        action === "compact" &&
+        this.seam &&
+        gatewayRoute(this.seam.routeFor(agent.key));
+      await this.pi.request("session", {
+        agent: agent.key,
+        key,
+        action,
+        ...(gateway ? { gatewayTurn: placeContext(agent, place) } : {}),
+      });
     };
     if (action === "interrupt") {
       this.controls.interrupt(control);
@@ -552,6 +572,8 @@ export class PiRuntime {
     accepted,
     superseded,
     interruptible,
+    gateway,
+    gatewayFallback,
   }: Delivery) {
     // Unaddressed watches and timers come as standalone turns (`runOnce`).
     if (
@@ -569,10 +591,25 @@ export class PiRuntime {
     const attention = wake?.type === "attention";
     // Pi runs commands as you; mentions need owner or delegated authority.
     if (trigger.type === "mention") {
+      // A workflow's mention waits out a reconnect; the check below decides.
+      const ready = workflowMarked(trigger.event, agent.owner)
+        ? this.readyReads
+        : undefined;
+      const reads = ready
+        ? await ready(
+            agent,
+            signal,
+            channelId ?? trigger.event.tags.find((tag) => tag[0] === "h")?.[1],
+          )
+        : this.reads(agent.key);
+      if (ready) {
+        signal.throwIfAborted();
+        if (current && !current()) return ignored?.();
+      }
       const authority = await mentionAuthority(
         trigger.event,
         agent.owner,
-        workflowOf(this.reads(agent.key), agent.pubkey),
+        workflowOf(reads, agent.pubkey),
       );
       if (authority !== "owner") return ignored?.(authority);
     }
@@ -647,8 +684,6 @@ export class PiRuntime {
           channel,
           key === channel ? undefined : root,
         );
-      // A request that joins a run can only take `direct` away: the run is
-      // direct while every request it took is the owner's own message.
       const direct =
         directTrigger(trigger, agent.owner) &&
         [...entry.receipts.values()].every(
@@ -702,6 +737,14 @@ export class PiRuntime {
           request,
           ...(attention ? { reply: where } : {}),
           ...(attention || accepted ? { refresh: true } : {}),
+          // A mention's request row notes how it ran; a wake has none, so
+          // its turn in this conversation's Activity does.
+          ...(wake && gatewayFallback
+            ? { notice: gatewayFallback.notice }
+            : {}),
+          ...(this.seam
+            ? { gatewayTurn: this.seam.turnContext(gateway ? { gateway } : {}) }
+            : {}),
           ...picked,
         },
         () => !interrupted && (!wake || !current || current()),
@@ -774,6 +817,12 @@ export class PiRuntime {
     // Stop on its activity stops the run the request is in.
     interruptible?.(async () => {
       interrupted = true;
+      // A gateway turn Pi doesn't have yet, waiting for a run in the other
+      // mode, is withdrawn rather than submitted once that run ends.
+      if (!submitted)
+        await this.pi
+          .request("cancel", { agent: agent.key, key, request })
+          .catch(() => undefined);
       await handed;
       if (!submitted) return;
       await this.pi.request("abort", {
@@ -820,7 +869,13 @@ export class PiRuntime {
       const { submission, conversation } = await this.pi.request<{
         submission: number;
         conversation: number;
-      }>("once", { agent: agent.key, text, request, ...turn });
+      }>("once", {
+        agent: agent.key,
+        text,
+        request,
+        ...(this.seam ? { gatewayTurn: this.seam.turnContext(delivery) } : {}),
+        ...turn,
+      });
       // Outside any conversation, so no place lists it for its usage.
       void standaloneSessions(this.storage, "pi", agent.key).add(
         String(conversation),
@@ -1096,7 +1151,6 @@ export class PiRuntime {
         key: context.root
           ? `${context.channel}/${context.root}`
           : context.channel,
-        // A run saved before Buzz said so is not known to be direct.
         direct: context.direct === true,
         scope: where.topLevel ? context.channel : root,
         where,
@@ -1439,6 +1493,16 @@ export class PiRuntime {
     if (reads) this.memoryReads.forget(reads.connection, pubkeyOf(agent));
   }
 }
+
+/** The gateway turn context of a conversation itself, for work no signed
+ * event caused: its channel, its thread unless it spans the channel, and no
+ * message. */
+const placeContext = (agent: Agent, place: SessionPlace) => ({
+  channel_id: place.channelId,
+  message_id: null,
+  thread_id:
+    config(agent.config).scope === "channel" || !place.root ? null : place.root,
+});
 
 /** The conversation key session controls in `place` act on, as `key` makes
  * it: a DM or Solo chat has no root here. */

@@ -87,8 +87,6 @@ export function createPluginManager(
     () =>
       configuration.status === "loading" ||
       (configuration.status === "recovery" && !configuration.canReset),
-    // An enabled plugin the runtime isn't asked to run (a catalog error,
-    // paused external plugins) still counts; unread settings may hold one.
     (access) => {
       if (configuration.status !== "ready") return true;
       const desired = new Set(

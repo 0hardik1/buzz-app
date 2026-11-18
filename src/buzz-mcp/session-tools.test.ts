@@ -194,7 +194,6 @@ it("reviews a conversation's calls as one session, whatever its run's direct and
     await callSessionTool(client, context, "plugin_write", {}, [
       tool("plugin_write"),
     ]);
-  // The session it had before runs said either.
   expect(new Set(protect.mock.calls.map(([action]) => action.session))).toEqual(
     new Set([JSON.stringify(destination)]),
   );

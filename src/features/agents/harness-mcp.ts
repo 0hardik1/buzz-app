@@ -1,6 +1,3 @@
-// The MCP servers a harness loads by itself, and the one optional plugin
-// (`host.agentMcp`) that may choose which of them an agent's sessions load.
-// Protected sessions and a failed control load none; calls go to agent hooks.
 import type { Context } from "@deepseek-ai/cordis";
 import type { AgentKey } from "./membership";
 import type { Agent, AgentHandle, RegisteredAgentType } from "./service";
@@ -49,15 +46,12 @@ export type HarnessMcpControl = Readonly<{
 }>;
 
 type Who = Pick<AgentHandle, "key" | "protection">;
-/** A list of tool names, copied, or undefined. */
 function names(value: unknown) {
   return Array.isArray(value) && value.every((tool) => typeof tool === "string")
     ? Object.freeze([...value])
     : undefined;
 }
-/** A control's answer as core uses it: a malformed server value means off,
- * anything but a plain object means none. */
-function normalize(raw: unknown): HarnessMcpChoice | "none" {
+function normalize(raw: unknown) {
   if (raw === undefined) return {};
   if (Object.prototype.toString.call(raw) !== "[object Object]") return "none";
   const choice: Record<string, HarnessMcpServerChoice> = Object.create(null);
@@ -88,7 +82,6 @@ export type HarnessMcpKit = Readonly<{
   ): void;
 }>;
 
-// No plugin declares choosing, or the one that does is starting, down or there.
 type Control = "absent" | "waiting" | "down" | "controlled";
 
 export function createHarnessMcp(
@@ -99,19 +92,17 @@ export function createHarnessMcp(
     "key" | "pluginId" | "harnessMcp"
   >[],
 ) {
-  /** The registered control, with the installation that registered it. */
   let control:
     | Readonly<{ value: HarnessMcpControl; id: string; revision: string }>
     | undefined;
-  // A control answers only while its plugin is running, as contributions do.
-  const state = (): Control =>
-    control && status().isActive(control.id, control.revision)
+  const state = () =>
+    (control && status().isActive(control.id, control.revision)
       ? "controlled"
       : !status().unavailable?.("agentMcp")
         ? "absent"
         : (status().settled?.() ?? true)
           ? "down"
-          : "waiting";
+          : "waiting") satisfies Control;
   const settle = () =>
     new Promise<void>((resolve) => {
       const finish = () => {
@@ -123,11 +114,10 @@ export function createHarnessMcp(
         if (state() !== "waiting") finish();
       };
       const off = status().subscribe(done);
-      // Bounded: a settings read that keeps failing never settles.
       const timer = setTimeout(finish, 30_000);
       done();
     });
-  async function answer(agent: Agent): Promise<HarnessMcpAnswer> {
+  async function answer(agent: Agent) {
     if (agent.protection) return "none";
     if (state() === "waiting") await settle();
     switch (state()) {
@@ -151,14 +141,12 @@ export function createHarnessMcp(
     if (!owner?.agentMcp) throw new Error("Declare host.agentMcp access");
     return owner;
   };
-  /** The agent and its type's hooks, when it runs here and its type reports. */
   function reporter(key: AgentKey) {
     const agent = running(key);
     const mcp = agent && typeOf(agent)?.harnessMcp;
     return agent && mcp && "report" in mcp ? { agent, mcp } : undefined;
   }
 
-  /** The running agent `key` names, when the plugin `ctx` belongs to registered its type. */
   function owned(ctx: Context, key: AgentKey) {
     const agent = running(key);
     const type = agent && typeOf(agent);
@@ -170,9 +158,7 @@ export function createHarnessMcp(
     return agent;
   }
 
-  /** The kit for plugin `ctx`: only the plugin that registered an agent's type
-   * uses it, and the agent is read from what runs here, not from the caller. */
-  const kitFor = (ctx: Context): HarnessMcpKit =>
+  const kitFor = (ctx: Context) =>
     Object.freeze({
       async choice(who) {
         return answer(owned(ctx, who.key));
@@ -180,16 +166,14 @@ export function createHarnessMcp(
       started(who, session, loaded, given) {
         started(owned(ctx, who.key), session, loaded, given);
       },
-    });
+    } satisfies HarnessMcpKit);
 
-  /** A session of `agent`, as it runs here, listed what it loaded. */
   function started(
     agent: Agent,
     session: string,
     loaded: HarnessMcpLoaded,
     given: HarnessMcpAnswer,
   ) {
-    // A protected session loads nothing, whatever the adapter applied.
     const choice = agent.protection ? "none" : given;
     const extra = choice
       ? loaded.filter(({ name, tools }) => {
@@ -212,7 +196,6 @@ export function createHarnessMcp(
       );
     if (!agent.protection) tell(agent, loaded);
   }
-  /** Tells the control what a session loaded, only while its plugin runs. */
   function tell(agent: Agent, loaded: HarnessMcpLoaded) {
     const entry = control;
     if (!entry?.value.loaded) return;
@@ -226,7 +209,6 @@ export function createHarnessMcp(
 
   return {
     kitFor,
-    /** Registers the one control, until the calling plugin's scope ends. */
     control(ctx: Context, next: HarnessMcpControl) {
       const owner = declared(ctx);
       if (control)
@@ -243,10 +225,7 @@ export function createHarnessMcp(
         };
       });
     },
-    async report(
-      ctx: Context,
-      key: AgentKey,
-    ): Promise<HarnessMcpReport | undefined> {
+    async report(ctx: Context, key: AgentKey) {
       declared(ctx);
       const found = reporter(key);
       const report = found && (await found.mcp.report(found.agent));
@@ -256,9 +235,8 @@ export function createHarnessMcp(
         ...rest,
         ...(calls === true && !found.agent.protection && { calls }),
         inspect: !!found.mcp.inspect,
-      };
+      } satisfies HarnessMcpReport;
     },
-    /** Lists one server's tools in a session with no model turn. */
     async inspect(ctx: Context, key: AgentKey, server: string) {
       const owner = declared(ctx);
       const found = reporter(key);
