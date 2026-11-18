@@ -1,0 +1,14 @@
+@reference "../../shared/styles/globals.css";
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+}
+.status {
+  margin: 0;
+  padding-inline: var(--space-3);
+  min-height: var(--text-body-sm--line-height);
+  @apply text-body-sm text-subtle;
+}
