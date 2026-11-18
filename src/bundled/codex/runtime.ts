@@ -833,8 +833,8 @@ export class CodexRuntime {
         throw new Error(
           "The workspace changed. Send a message to start its session first.",
         );
-      // Compaction loads no MCP server; with a choice in play it is read
-      // back as off, which is how a protected agent proves it here too.
+      // Compaction loads no MCP server; with a choice in play, including a
+      // protected agent's, it is read back as off.
       const who = {
         key: agent.key,
         protection: this.handle(agent.key)?.protection,

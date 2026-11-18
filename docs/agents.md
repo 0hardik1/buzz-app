@@ -512,8 +512,8 @@ tool's name, description or schema changes, so edit those deliberately.
 `addedKey` covers only plugins' tools, so a resumed Codex thread keeps the Buzz
 tools, and their `load`, that it started with.
 
-A tool's `context` names where the agent is working. Pi and the harness kit
-(when its harness passes them) also give `direct`, true while the owner's own
+A tool's `context` names where the agent is working. Pi also gives
+`direct`, true while the owner's own
 message started the run and nothing else joined it, and `folder`, where the
 conversation works, as the agent's settings give it. A harness that does not
 tell leaves them out, and a tool treats a missing `direct` as false. Core passes

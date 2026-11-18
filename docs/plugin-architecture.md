@@ -1000,12 +1000,10 @@ it goes. `systemPrompt` and `turnPrompt` give Buzz's prompts, `turnPrompt`
 showing what the session has not seen and taking plugins' notes. Its
 `cursor` is opaque: save it with the session and give it to the next
 `turnPrompt`, which keeps a mark for each thread of a channel conversation.
-`reply` posts as the agent there. `tools(agent, conversation, { read, direct, folder })`
+`reply` posts as the agent there. `tools(agent, conversation, { read })`
 answers the Buzz tools over MCP for `ctx.host.serveMcp`, so the manifest
 declares `host.mcp`; `read` is the plugin's own file access (`host.files`),
-which uploads of local files use. `direct` and `folder` reach plugins' tools
-in their call context: whether the owner's own message started the run, and
-the agent's working folder. Apart from `mcp`, the kit grants nothing
+which uploads of local files use. Apart from `mcp`, the kit grants nothing
 `ctx.agents` and `ctx.host` do not already give the plugin. `mcp` lets the
 plugin that registered an agent's type ask core for that agent's MCP choice
 and report what a session loaded, only for its own agents running here

@@ -8195,6 +8195,10 @@ describe("harness MCP choice", () => {
     expect(started).toHaveBeenCalledWith(f.handle, "thread-1", [], {
       alpha: false,
     });
+    const order = f.worker.sent.map((wire) => wire.method);
+    expect(order.indexOf("mcpServerStatus/list")).toBeLessThan(
+      order.indexOf("turn/start"),
+    );
   });
 
   /** Starts a conversation, ends its turn and asks for a compaction, whose
@@ -8267,6 +8271,7 @@ describe("harness MCP choice", () => {
     withServers(f, "alpha");
     const { resumed, finish } = await compacting(f);
     // The conversation leaves alpha to `config.toml`; compaction turns it off.
+    expect(threadConfig(f).mcp_servers).toEqual({});
     expect(resumed).toEqual({ alpha: off("alpha") });
     expect(statusCalls(f)).toEqual([]);
     await finish();
