@@ -9,6 +9,7 @@ import type { InboxItem } from "../relay/inbox";
 import { mergeTranscript } from "./voice-dictation";
 import {
   type JumpPlace,
+  holdsLead,
   jumpPlaces,
   pickPlace,
   placeOptions,
@@ -201,6 +202,10 @@ describe("pickPlace", () => {
       outcome: "found",
       place: places[1],
       probability: 0.6,
+      candidates: [
+        { place: places[1], label: "DM with Dana Lee", probability: 0.6 },
+        { place: places[0], label: "#design", probability: 0.3 },
+      ],
     });
     const request = decide.mock.calls[0]?.[0] as unknown as {
       state: string;
@@ -234,7 +239,7 @@ describe("pickPlace", () => {
       const { decisions } = deciding(result);
       await expect(
         pickPlace(decisions, "design", places, undefined),
-      ).resolves.toEqual({ outcome: "none" });
+      ).resolves.toMatchObject({ outcome: "none" });
     }
     const { decisions } = deciding({
       outcome: "failed",
@@ -249,11 +254,11 @@ describe("pickPlace", () => {
   it("asks nothing without a request or places", async () => {
     const { decisions, decide } = deciding(choice("#design", { "#design": 1 }));
     await expect(pickPlace(decisions, " ", places, undefined)).resolves.toEqual(
-      { outcome: "none" },
+      { outcome: "none", candidates: [] },
     );
     await expect(
       pickPlace(decisions, "design", [], undefined),
-    ).resolves.toEqual({ outcome: "none" });
+    ).resolves.toEqual({ outcome: "none", candidates: [] });
     expect(decide).not.toHaveBeenCalled();
   });
 });
@@ -308,5 +313,71 @@ describe("mergeTranscript", () => {
       "hi",
     );
     expect(mergeTranscript(text, { type: "session.created" })).toBe(text);
+  });
+});
+
+describe("holdsLead", () => {
+  const jev = {
+    key: "channel:jev",
+    kind: "channel",
+    channelId: "jev",
+    name: "jev",
+    at: 1,
+  } as JumpPlace;
+  const clock = {
+    key: "thread:clock",
+    kind: "thread",
+    channelId: "jev",
+    name: "Jev clock",
+    at: 2,
+  } as JumpPlace;
+  const found = (place: JumpPlace, probability: number) =>
+    ({ outcome: "found", place, probability, candidates: [] }) as const;
+
+  it("waits for the same sure place to hold through another word", () => {
+    const first = holdsLead(
+      undefined,
+      found(jev, 0.9),
+      "the conversation about the jev",
+    );
+    expect(first.jump).toBe(false);
+    // A longer name still being said takes over instead of jumping early.
+    const next = holdsLead(
+      first.lead,
+      found(clock, 0.9),
+      "the conversation about the jev clock",
+    );
+    expect(next.jump).toBe(false);
+    expect(
+      holdsLead(
+        next.lead,
+        found(clock, 0.95),
+        "the conversation about the jev clock",
+      ).jump,
+    ).toBe(false);
+    expect(
+      holdsLead(
+        next.lead,
+        found(clock, 0.95),
+        "the conversation about the jev clock please",
+      ).jump,
+    ).toBe(true);
+  });
+
+  it("drops the lead when no place is sure", () => {
+    const first = holdsLead(undefined, found(jev, 0.9), "take me to jev");
+    const unsure = holdsLead(
+      first.lead,
+      found(jev, 0.6),
+      "take me to jev stuff",
+    );
+    expect(unsure).toEqual({ jump: false, lead: undefined });
+    expect(
+      holdsLead(
+        first.lead,
+        { outcome: "none", candidates: [] },
+        "take me to jev x",
+      ).lead,
+    ).toBeUndefined();
   });
 });
