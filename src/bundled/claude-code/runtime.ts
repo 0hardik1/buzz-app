@@ -234,6 +234,8 @@ export class ClaudeRuntime {
   private readonly titled = new Set<string>();
   /** Counts changes of credentials, which start processes again. */
   private credentials = 0;
+  /** One process started ahead of need, for any agent's next new conversation.
+   * It lists the tools every agent gets. */
   private readonly spare = new Spare(
     // Started ahead of need, it never stops a conversation to make room.
     (id, options) => this.spawn(id, options),

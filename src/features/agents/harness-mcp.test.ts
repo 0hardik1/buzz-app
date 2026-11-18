@@ -400,6 +400,8 @@ it("gives the control what a passing session loaded, and nothing else", async ()
     throw new Error("plugin bug");
   };
   expect(() => mcp.kit.started(handle, "s3", listing, choice)).not.toThrow();
+  await Promise.resolve();
+  expect(failure).toBeUndefined();
   failure = () => Promise.reject(new Error("later"));
   expect(() => mcp.kit.started(handle, "s4", listing, choice)).not.toThrow();
   await Promise.resolve();
