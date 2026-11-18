@@ -12,7 +12,6 @@ import { createPortal } from "react-dom";
 import { RobotIcon } from "../../shared/design-system/icons/index";
 import { useCompletionPosition } from "./useCompletionPosition";
 import {
-  Fragment,
   useId,
   useCallback,
   useEffect,
@@ -37,7 +36,6 @@ import type {
 import { ContributionBoundary, contributionKey } from "./ContributionBoundary";
 import { IdentityMarks } from "./IdentityMarks";
 import {
-  byOrder,
   completionResult,
   matchCompletion,
   type CompletionMatch,
@@ -96,8 +94,8 @@ function EmojiCompletionName({
  * owner whose provider has not published by the end of its mount effects
  * clears it. A query opened elsewhere, by another provider, or after the
  * popup closed starts empty: `ComposerCompletions` evicts the store in its
- * closed render, so a carried result means only a continuing open query.
- * Results are kept per provider: the winner and each supplement beside it. */
+ * closed render, so a carried result means only a continuing open query. */
+// By `contributionKey` of the publishing provider, winner or supplement.
 type Shown = Readonly<Record<number, HostCompletionResult>>;
 function createDisplay() {
   let shown: { key: string; results: Shown | undefined } = {
@@ -271,7 +269,7 @@ export function ComposerCompletions({
         identityMarks={identityMarks}
         display={display}
         provider={match.provider}
-        supplements={match.supplements}
+        sources={match.sources}
         query={match.query}
         observation={observation}
         editor={editor}
@@ -282,20 +280,20 @@ export function ComposerCompletions({
     </ContributionBoundary>
   );
 }
-type Source = CompletionMatch;
 type Row = Readonly<{
-  source: Source;
+  source: CompletionMatch;
   key: string;
   item?: HostCompletionSuggestion;
   heading?: string;
 }>;
+const slot = ({ provider }: CompletionMatch) => contributionKey(provider);
 // A row's identity is its provider and its id: two providers may share ids.
-const rowKey = (source: Source, id?: string) =>
-  JSON.stringify([contributionKey(source.provider), id ?? null]);
+const rowKey = (source: CompletionMatch, id?: string) =>
+  JSON.stringify([slot(source), id ?? null]);
 
 function OwnedCompletion({
   provider,
-  supplements: matched,
+  sources: matched,
   registry,
   identityMarks,
   display,
@@ -308,7 +306,7 @@ function OwnedCompletion({
   ...context
 }: CompletionContext & {
   provider: Contribution<ComposerCompletion>;
-  supplements: readonly Source[];
+  sources: readonly CompletionMatch[];
   registry: ContributionReader<ComposerCompletion>;
   identityMarks?: ContributionReader<IdentityMark> | undefined;
   display: ReturnType<typeof createDisplay>;
@@ -346,28 +344,19 @@ function OwnedCompletion({
   const list = useRef<HTMLDivElement>(null);
   const trigger = `${contributionKey(provider)}:${query.start}`;
   // Fixed for this lifetime: a changed set of supplements remounts it.
-  const [{ winner, supplements, sources }] = useState(() => {
-    const winner: Source = { provider, query };
-    return {
-      winner,
-      supplements: matched,
-      sources: [winner, ...matched].sort((a, b) =>
-        byOrder(a.provider, b.provider),
-      ),
-    };
-  });
+  const [sources] = useState(matched);
   const results = useSyncExternalStore(
     display.subscribe,
     () => display.read(trigger),
     () => display.read(trigger),
   );
   const result = results?.[contributionKey(provider)];
-  // This lifetime's own publications; a carried display is never acted on.
-  const latest = useRef(new Map<Source, HostCompletionResult>());
+  // This lifetime's own publication; a carried display is never acted on.
+  const latest = useRef(new Map<number, HostCompletionResult>());
   // A failed supplement is done for this lifetime: its section goes, it holds
   // nothing back, and it can no longer publish or accept.
-  const failed = useRef(new Set<Source>());
-  // Only user navigation pins a row; automatic selection follows the first result.
+  const failed = useRef(new Set<number>());
+  // Only user navigation pins an ID; automatic selection follows the first result.
   const [selected, setSelected] = useState<string>();
   const [keyboardSelection, setKeyboardSelection] = useState<string>();
   const pointerMoved = useCallback(
@@ -399,49 +388,41 @@ function OwnedCompletion({
     current.current = { editor, replace };
   });
   const active = useCallback(
-    (source: Source) =>
+    (candidate: Contribution<ComposerCompletion>) =>
       live.current &&
-      !failed.current.has(source) &&
-      registry.snapshot().includes(source.provider) &&
+      !failed.current.has(contributionKey(candidate)) &&
+      registry.snapshot().includes(candidate) &&
       current.current.editor.valid(observation),
     [registry, observation],
   );
   const [publishers, setPublishers] =
-    useState<ReadonlyMap<Source, ComposerCompletionProps["publish"]>>();
+    useState<readonly ComposerCompletionProps["publish"][]>();
   useLayoutEffect(() => {
     live.current = true;
     let owned = true;
     const published = latest.current;
     setPublishers(
-      new Map(
-        sources.map((source) => [
-          source,
-          (incoming: CompletionResult) => {
-            if (!owned || !active(source)) return false;
-            const next = completionResult(incoming, source.provider);
-            const slot = contributionKey(source.provider);
-            published.set(source, next);
-            revealSelection.current = true;
-            display.set(trigger, slot, next);
-            // A pinned row of this provider stays only while it still exists.
-            setSelected((previous) => {
-              if (!previous?.startsWith(`[${slot},`)) return previous;
-              const kept =
-                previous === rowKey(source)
-                  ? !!next.retry
-                  : next.items.some(
-                      (item) => previous === rowKey(source, item.id),
-                    );
-              return kept ? previous : undefined;
-            });
-            return () => {
-              if (published.get(source) !== next) return;
-              published.delete(source);
-              if (live.current) display.set(trigger, slot);
-            };
-          },
-        ]),
-      ),
+      sources.map((source) => (incoming: CompletionResult) => {
+        if (!owned || !active(source.provider)) return false;
+        const next = completionResult(incoming, source.provider);
+        published.set(slot(source), next);
+        revealSelection.current = true;
+        display.set(trigger, slot(source), next);
+        // A pinned row of this provider stays only while it still exists.
+        setSelected((previous) => {
+          if (!previous?.startsWith(`[${slot(source)},`)) return previous;
+          const kept =
+            previous === rowKey(source)
+              ? !!next.retry
+              : next.items.some((item) => previous === rowKey(source, item.id));
+          return kept ? previous : undefined;
+        });
+        return () => {
+          if (published.get(slot(source)) !== next) return;
+          published.delete(slot(source));
+          if (live.current) display.set(trigger, slot(source));
+        };
+      }),
     );
     return () => {
       owned = false;
@@ -449,42 +430,39 @@ function OwnedCompletion({
       published.clear();
     };
   }, [active, display, sources, trigger]);
-  // A carried result stands only until this query's providers have run their
+  // A carried result stands only until this query's provider has run its
   // mount effects, which precede this one; a provider that has not published
-  // by then shows nothing, as for a first query, so a stale display is never
-  // painted. A provider no longer beside this query keeps nothing either.
+  // by then leaves the popup closed, as for a first query, so a stale display
+  // is never painted. Each supplement is judged alone.
   useEffect(() => {
     if (!publishers) return;
-    const published = new Set(
-      [...latest.current.keys()].map(({ provider }) =>
-        contributionKey(provider),
-      ),
-    );
-    for (const slot of Object.keys(display.read(trigger) ?? {}))
-      if (!published.has(Number(slot))) display.set(trigger, Number(slot));
+    for (const key of Object.keys(display.read(trigger) ?? {}))
+      if (!latest.current.has(Number(key))) display.set(trigger, Number(key));
   }, [publishers, display, trigger]);
   // The winner's exact match waits while a supplement has, or may have, a
   // name the typed one is, or begins.
   const held = () =>
-    supplements.some((source) => {
-      const published = latest.current.get(source);
+    sources.some((source) => {
+      const published = latest.current.get(slot(source));
       return (
-        !failed.current.has(source) &&
-        (!published || published.holdAutoSelect === true)
+        source.provider !== provider &&
+        !failed.current.has(slot(source)) &&
+        (!published || published.holdAutoSelect)
       );
     });
   // The winner's failure closes the popup; a supplement's drops only its own
   // section, whether its provider or one of its previews throws.
-  const isolate = (source: Source, node: ReactNode) =>
-    source === winner ? (
+  const isolate = (source: CompletionMatch, node: ReactNode) =>
+    source.provider === provider ? (
       node
     ) : (
       <ContributionBoundary
+        key={slot(source)}
         fallback={null}
         onFailedChange={(failure) => {
           if (!failure) return;
-          failed.current.add(source);
-          display.set(trigger, contributionKey(source.provider));
+          failed.current.add(slot(source));
+          display.set(trigger, slot(source));
         }}
       >
         {node}
@@ -492,7 +470,7 @@ function OwnedCompletion({
     );
   const rows: Row[] = [];
   for (const source of sources) {
-    const shown = results?.[contributionKey(source.provider)];
+    const shown = results?.[slot(source)];
     const own: Row[] = [
       ...(shown?.items ?? []).map((item) => ({
         source,
@@ -504,13 +482,31 @@ function OwnedCompletion({
     // A supplement's rows sit under its title; the winner's too when rows
     // precede them and the provider draws no heading of its own.
     const first = own[0];
-    if (first && (source !== winner || (rows.length > 0 && !first.item?.group)))
+    if (
+      first &&
+      (source.provider !== provider || (rows.length > 0 && !first.item?.group))
+    )
       own[0] = { ...first, heading: source.provider.title };
     rows.push(...own);
   }
   const statuses = sources.flatMap((source) => {
-    const status = results?.[contributionKey(source.provider)]?.status;
+    const status = results?.[slot(source)]?.status;
     return status ? [{ source, status }] : [];
+  });
+  const lines = rows.map((row, i) => {
+    const { item, source } = row;
+    const lead = rows.findIndex((other) => other.source === source);
+    const group = item?.group;
+    return {
+      ...row,
+      heading:
+        row.heading ?? (group !== rows[i - 1]?.item?.group ? group : undefined),
+      described: group
+        ? `${id}-group-${rows.findIndex((other) => other.item?.group === group)}`
+        : rows[lead]?.heading
+          ? `${id}-group-${lead}`
+          : undefined,
+    };
   });
   // Matching syntax is not evidence of pending work. Providers publish their
   // own status when needed; an empty/unpublished result must not flash a portal.
@@ -521,9 +517,9 @@ function OwnedCompletion({
   function accept(index: number, key = "click") {
     const terminator = terminates(key);
     const row = terminator ? undefined : rows[index];
-    const source = row?.source ?? winner;
-    const published = latest.current.get(source);
-    if (!active(source) || !published) return false;
+    const source = row?.source ?? { provider, query };
+    const published = latest.current.get(slot(source));
+    if (!active(source.provider) || !published) return false;
     if (row && !row.item) {
       if (!published.retry) return false;
       published.retry();
@@ -546,10 +542,10 @@ function OwnedCompletion({
   }
   useLayoutEffect(() => {
     const element = input.current;
-    // Escape must still dismiss an unpublished provider, or a supplement that
-    // still holds, without advertising a nonexistent listbox. A settled empty
-    // result leaves ordinary keys alone; an undecided one still owns the
-    // terminator, with nothing to show yet.
+    // Escape must still dismiss an unpublished provider without advertising a
+    // nonexistent listbox. A settled empty result leaves ordinary keys alone;
+    // an undecided one still owns the terminator, with nothing to show yet.
+    // A supplement that still holds counts as undecided.
     if (!element || (!visible && result && !result.spacePending && !held()))
       return;
     if (visible) {
@@ -582,7 +578,7 @@ function OwnedCompletion({
         (event.key === " " || !terminates(event.key))
       )
         return false;
-      if (!active(winner)) {
+      if (!active(provider)) {
         // A displayed choice owns plain acceptance even when its final evidence
         // was revoked. Never turn a rejected edit into an unintended send.
         if ((event.key === "Enter" || event.key === "Tab") && count) {
@@ -597,13 +593,13 @@ function OwnedCompletion({
       // yet, so both terminator branches read the publication. Space is not
       // redirected away from an exact match the display showed: a publication
       // that moves it to another id leaves Space literal. The displayed row
-      // is never accepted on its own; only the publication selects. A
-      // supplement holding the terminator leaves it literal too.
-      const published = latest.current.get(winner);
-      const waiting = terminates(event.key) && held();
+      // is never accepted on its own; only the publication selects.
+      // A supplement holding the terminator leaves it literal too.
+      const published = held()
+        ? undefined
+        : latest.current.get(contributionKey(provider));
       if (
         terminates(event.key) &&
-        !waiting &&
         published?.spaceId &&
         (!result?.spaceId || result.spaceId === published.spaceId)
       ) {
@@ -622,7 +618,6 @@ function OwnedCompletion({
       // decision is deferred to the resolver under the full rule.
       if (
         terminates(event.key) &&
-        !waiting &&
         published?.spacePending &&
         !published.spaceId &&
         current.current.replace(
@@ -673,22 +668,19 @@ function OwnedCompletion({
   return (
     <>
       {publishers &&
-        sources.map((source) => {
+        sources.map((source, i) => {
           const Provider = source.provider.component;
-          const publish = publishers.get(source);
+          const publish = publishers[i];
           if (!publish) return null;
-          return (
-            <Fragment key={contributionKey(source.provider)}>
-              {isolate(
-                source,
-                <Provider
-                  {...context}
-                  observation={observation}
-                  query={source.query}
-                  publish={publish}
-                />,
-              )}
-            </Fragment>
+          return isolate(
+            source,
+            <Provider
+              key={slot(source)}
+              {...context}
+              observation={observation}
+              query={source.query}
+              publish={publish}
+            />,
           );
         })}
       {visible &&
@@ -709,140 +701,117 @@ function OwnedCompletion({
               ref={list}
               className={styles.list}
             >
-              {rows.flatMap((row, i) => {
-                const { item, source } = row;
-                const previous = rows[i - 1];
-                const group =
-                  item?.group &&
-                  (previous?.source !== source ||
-                    item.group !== previous.item?.group) &&
-                  item.group;
-                const heading = row.heading ?? group;
-                const lead = rows.findIndex((other) => other.source === source);
-                const describedBy = item?.group
-                  ? `${id}-group-${rows.findIndex((other) => other.source === source && other.item?.group === item.group)}`
-                  : rows[lead]?.heading
-                    ? `${id}-group-${lead}`
-                    : undefined;
-                const option = (
-                  // The textarea owns keyboard focus/selection via aria-activedescendant.
-                  // biome-ignore lint/a11y/useKeyWithClickEvents: Keyboard acceptance belongs to the focused textarea.
+              {lines.flatMap(({ item, source, key, heading, described }, i) => [
+                heading && (
+                  // Read as the description of each row it heads.
                   <div
-                    role="option"
-                    tabIndex={-1}
-                    aria-selected={i === selectedIndex}
-                    aria-disabled={item ? !!item.disabled : undefined}
-                    aria-label={
-                      compact && item?.detail
-                        ? `${item.label} ${item.detail}`
-                        : undefined
-                    }
-                    id={`${id}-${i}`}
-                    // The provider's identity for the row (a mention's key),
-                    // which its label no longer spells out.
-                    data-completion-id={item?.id}
-                    key={row.key}
-                    aria-describedby={describedBy}
-                    onPointerDown={(event) => {
-                      if (event.button === 0) event.preventDefault();
-                    }}
-                    onPointerMove={
-                      compact || named
-                        ? (event) => {
-                            // WebKit can report a pointermove when keyboard
-                            // scrolling moves another row under a resting pointer.
-                            if (compact && !pointerMoved(event)) return;
-                            revealSelection.current = false;
-                            setKeyboardSelection(undefined);
-                            setSelected(row.key);
-                          }
-                        : undefined
-                    }
-                    onClick={() => accept(i)}
-                    className={styles.option}
+                    key={`group:${key}`}
+                    id={`${id}-group-${i}`}
+                    aria-hidden="true"
+                    className={styles.group}
                   >
-                    {!item ? (
-                      source === winner ? (
-                        "Retry suggestions"
-                      ) : (
-                        `Retry ${source.provider.title} suggestions`
-                      )
-                    ) : (
-                      <>
-                        {item.preview && (
-                          <span aria-hidden="true" className={styles.preview}>
-                            {isolate(source, item.preview)}
-                          </span>
-                        )}
-                        <span className={styles.label} data-completion-label>
-                          {compact ? (
-                            <EmojiCompletionName
-                              label={item.label}
-                              selected={i === selectedIndex}
-                              keyboardSelected={keyboardSelection === row.key}
-                            />
-                          ) : named ? (
-                            // Only the name ellipsizes; the agent mark stays visible.
-                            <span className={styles.nameRow}>
-                              <span className={styles.name}>{item.label}</span>
-                              {mention &&
-                                source === winner &&
-                                item.edit.mention && (
-                                  <IdentityMarks
-                                    registry={identityMarks}
-                                    pubkey={item.edit.mention.pubkey}
-                                    profiles={context.session.profiles}
-                                    className={styles.identityMarks}
-                                  />
-                                )}
-                              {item.agent && (
-                                <span
-                                  aria-hidden="true"
-                                  className={styles.agentMark}
-                                >
-                                  <RobotIcon />
-                                </span>
-                              )}
-                              {item.agent && (
-                                <span className="sr-only"> Agent</span>
-                              )}
+                    {heading}
+                  </div>
+                ),
+                // The textarea owns keyboard focus/selection via aria-activedescendant.
+                // biome-ignore lint/a11y/useKeyWithClickEvents: Keyboard acceptance belongs to the focused textarea.
+                <div
+                  role="option"
+                  tabIndex={-1}
+                  aria-selected={i === selectedIndex}
+                  aria-disabled={item && !!item.disabled}
+                  aria-label={
+                    compact && item?.detail
+                      ? `${item.label} ${item.detail}`
+                      : undefined
+                  }
+                  id={`${id}-${i}`}
+                  // The provider's identity for the row (a mention's key),
+                  // which its label no longer spells out.
+                  data-completion-id={item?.id}
+                  key={key}
+                  aria-describedby={described}
+                  onPointerDown={(event) => {
+                    if (event.button === 0) event.preventDefault();
+                  }}
+                  onPointerMove={
+                    compact || named
+                      ? (event) => {
+                          // WebKit can report a pointermove when keyboard
+                          // scrolling moves another row under a resting pointer.
+                          if (compact && !pointerMoved(event)) return;
+                          revealSelection.current = false;
+                          setKeyboardSelection(undefined);
+                          setSelected(key);
+                        }
+                      : undefined
+                  }
+                  onClick={() => accept(i)}
+                  className={styles.option}
+                >
+                  {item?.preview && (
+                    <span aria-hidden="true" className={styles.preview}>
+                      {isolate(source, item.preview)}
+                    </span>
+                  )}
+                  {item && (
+                    <span className={styles.label} data-completion-label>
+                      {compact ? (
+                        <EmojiCompletionName
+                          label={item.label}
+                          selected={i === selectedIndex}
+                          keyboardSelected={keyboardSelection === key}
+                        />
+                      ) : named ? (
+                        // Only the name ellipsizes; the agent mark stays visible.
+                        <span className={styles.nameRow}>
+                          <span className={styles.name}>{item.label}</span>
+                          {mention &&
+                            source.provider === provider &&
+                            item.edit.mention && (
+                              <IdentityMarks
+                                registry={identityMarks}
+                                pubkey={item.edit.mention.pubkey}
+                                profiles={context.session.profiles}
+                                className={styles.identityMarks}
+                              />
+                            )}
+                          {item.agent && (
+                            <span
+                              aria-hidden="true"
+                              className={styles.agentMark}
+                            >
+                              <RobotIcon />
                             </span>
-                          ) : (
-                            item.label
                           )}
-                          {item.detail && (
-                            <small aria-hidden={compact || undefined}>
-                              {item.detail}
-                            </small>
+                          {item.agent && (
+                            <span className="sr-only"> Agent</span>
                           )}
                         </span>
-                        {channel && i === selectedIndex && (
-                          <span aria-hidden="true" className={styles.acceptKey}>
-                            Enter
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </div>
-                );
-                return [
-                  heading && (
-                    // Read as the description of each row it heads.
-                    <div
-                      key={`group:${row.key}`}
-                      id={`${id}-group-${i}`}
-                      aria-hidden="true"
-                      className={styles.group}
-                    >
-                      {heading}
-                    </div>
-                  ),
-                  option,
-                ];
-              })}
+                      ) : (
+                        item.label
+                      )}
+                      {item.detail && (
+                        <small aria-hidden={compact || undefined}>
+                          {item.detail}
+                        </small>
+                      )}
+                    </span>
+                  )}
+                  {channel && item && i === selectedIndex && (
+                    <span aria-hidden="true" className={styles.acceptKey}>
+                      Enter
+                    </span>
+                  )}
+                  {!item &&
+                    (source.provider === provider
+                      ? "Retry suggestions"
+                      : `Retry ${source.provider.title} suggestions`)}
+                </div>,
+              ])}
             </div>
             {statuses.map(({ source, status }) => (
-              <p role="status" key={contributionKey(source.provider)}>
+              <p role="status" key={slot(source)}>
                 {status}
               </p>
             ))}
