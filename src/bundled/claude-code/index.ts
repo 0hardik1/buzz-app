@@ -20,7 +20,8 @@ import {
 import type { AgentHandle } from "../../features/agents/service";
 import { ClaudeDefaults } from "./defaults";
 import { ClaudeRuntime, type Config, config, DEFAULT_CONFIG } from "./runtime";
-import { ClaudeSetup, withScript } from "./setup";
+import type { Spawn } from "./claude";
+import { ClaudeSetup, mcpConfigPaths, withScript } from "./setup";
 import { createTabs } from "./tabs";
 import { targetKey } from "../../features/navigation/targets";
 import type { ClaudeConnection } from "./ClaudeSettings";
@@ -109,7 +110,11 @@ export const apply: PluginModule["apply"] = (ctx) => {
   // No turn starts without credentials.
   const runtime = new ClaudeRuntime(
     {
-      ...(spawn ? { spawn: setup.auth.authorize(spawn, true) } : {}),
+      ...(spawn && {
+        spawn: setup.auth.authorize(spawn, true),
+        mcpConfigPaths: (cwd: string, source?: Spawn, signal?: AbortSignal) =>
+          mcpConfigPaths(source ?? spawn, cwd, signal),
+      }),
       ...(readFile ? { readFile } : {}),
       ...(host.resolveDirectory
         ? { resolveDirectory: host.resolveDirectory.bind(host) }

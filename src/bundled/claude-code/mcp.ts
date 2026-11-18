@@ -23,11 +23,26 @@ const strings = (value: unknown): string[] =>
   Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
-export const mcpName = (name: string) => name.replace(/[^a-zA-Z0-9_-]/g, "_");
+export function mcpName(name: string) {
+  const normalized = name.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return name.startsWith("claude.ai ")
+    ? normalized.replace(/_+/g, "_").replace(/^_|_$/g, "")
+    : normalized;
+}
 
-async function readMcpConfig(read: Host["readFile"], cwd: string) {
-  const json = async (path: string) => {
-    if (!read) return {};
+export type McpConfigPaths = { user: string | null; settings: string };
+const defaultPaths: McpConfigPaths = {
+  user: "~/.claude.json",
+  settings: "~/.claude/settings.json",
+};
+
+async function readMcpConfig(
+  read: Host["readFile"],
+  cwd: string,
+  paths = defaultPaths,
+) {
+  const json = async (path: string | null) => {
+    if (!read || !path) return {};
     try {
       return object(
         JSON.parse(new TextDecoder().decode(await read(path, { cwd }))),
@@ -38,9 +53,9 @@ async function readMcpConfig(read: Host["readFile"], cwd: string) {
   };
   const [user, project, userSettings, projectSettings, localSettings] =
     await Promise.all([
-      json("~/.claude.json"),
+      json(paths.user),
       json(".mcp.json"),
-      json("~/.claude/settings.json"),
+      json(paths.settings),
       json(".claude/settings.json"),
       json(".claude/settings.local.json"),
     ]);
@@ -54,6 +69,9 @@ async function readMcpConfig(read: Host["readFile"], cwd: string) {
     [local, userSettings, projectSettings, localSettings].flatMap((settings) =>
       strings(settings.disabledMcpjsonServers),
     ),
+  );
+  const normalizedRejected = new Set(
+    [...rejected].filter((name) => !name.startsWith("plugin:")).map(mcpName),
   );
   const all =
     { ...userSettings, ...projectSettings, ...localSettings }
@@ -79,16 +97,21 @@ async function readMcpConfig(read: Host["readFile"], cwd: string) {
       // Claude's local definition wins over the workspace project file.
       if (needsApproval && Object.hasOwn(object(local.mcpServers), name))
         continue;
+      const rejectedProject =
+        needsApproval &&
+        (rejected.has(name) ||
+          (!name.startsWith("plugin:") &&
+            normalizedRejected.has(mcpName(name))));
       const approvedProject =
         !needsApproval ||
-        (!rejected.has(name) &&
+        (!rejectedProject &&
           (approved.has(name) ||
             approves(userSettings, name) ||
             (local.hasTrustDialogAccepted === true &&
               approves(projectSettings, name))));
       const off =
         disabled.has(name) ||
-        (needsApproval && (rejected.has(name) || (!all && !approvedProject)));
+        (needsApproval && (rejectedProject || (!all && !approvedProject)));
       rows.set(name, {
         server: { name, default: !off, ...(off && { state: "disabled" }) },
         definition: object(definition),
@@ -100,8 +123,13 @@ async function readMcpConfig(read: Host["readFile"], cwd: string) {
 }
 
 /** Reports expose metadata only. */
-export async function configuredMcp(read: Host["readFile"], cwd: string) {
-  return [...(await readMcpConfig(read, cwd)).values()].map(
+export async function configuredMcp(
+  read: Host["readFile"],
+  cwd: string,
+  paths?: McpConfigPaths,
+) {
+  if (paths?.user === null) return [];
+  return [...(await readMcpConfig(read, cwd, paths)).values()].map(
     ({ server }) => server,
   );
 }
@@ -110,8 +138,13 @@ export async function inspectMcpConfig(
   read: Host["readFile"],
   cwd: string,
   name: string,
+  paths?: McpConfigPaths,
 ) {
-  const entry = (await readMcpConfig(read, cwd)).get(name);
+  if (paths?.user === null)
+    throw new Error(
+      "Claude inspection could not identify its global MCP configuration",
+    );
+  const entry = (await readMcpConfig(read, cwd, paths)).get(name);
   if (!entry) throw new Error("This agent cannot inspect that MCP server");
   if (!entry.server.default)
     throw new Error(

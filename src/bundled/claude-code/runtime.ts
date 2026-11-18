@@ -92,7 +92,7 @@ import {
 import { sessionPrompts } from "../../features/agents/session-prompts";
 import { standaloneSessions } from "../../features/agents/standalone-sessions";
 import { ClaudeProcess } from "./claude";
-import { configuredMcp, inspectMcpConfig } from "./mcp";
+import { configuredMcp, inspectMcpConfig, type McpConfigPaths } from "./mcp";
 import type {
   HarnessMcpAnswer,
   HarnessMcpKit,
@@ -266,7 +266,13 @@ export class ClaudeRuntime {
     private readonly host: Pick<
       Host,
       "spawn" | "readFile" | "resolveDirectory"
-    >,
+    > & {
+      mcpConfigPaths?(
+        cwd: string,
+        spawn?: Spawn,
+        signal?: AbortSignal,
+      ): Promise<McpConfigPaths>;
+    },
     /** What each agent's turns read of its community, while it can be read. */
     private readonly reads: (key: AgentKey) => AgentReads | undefined,
     /** The agent's `core` memory as the host keeps it (`Agents.core`). */
@@ -315,12 +321,19 @@ export class ClaudeRuntime {
         servers: [],
       };
     const cwd = this.resolveConfig(agent.config).workspace;
-    const path = (await this.host.resolveDirectory?.(cwd)) ?? cwd;
     return {
       tools: true,
       ...(this.mcp && this.host.spawn && { calls: true as const }),
-      servers: await configuredMcp(this.host.readFile?.bind(this.host), path),
+      servers: await this.configuredMcp(cwd),
     };
+  }
+  private async configuredMcp(cwd: string, spawn?: Spawn) {
+    const path = (await this.host.resolveDirectory?.(cwd)) ?? cwd;
+    return configuredMcp(
+      this.host.readFile?.bind(this.host),
+      path,
+      await this.host.mcpConfigPaths?.(path, spawn),
+    );
   }
   inspectMcp(
     agent: Agent,
@@ -354,6 +367,7 @@ export class ClaudeRuntime {
       this.host.readFile?.bind(this.host),
       path,
       server,
+      await this.host.mcpConfigPaths?.(path, undefined, signal),
     );
     let process: ClaudeProcess | undefined;
     const abort = () => void process?.kill().catch(() => undefined);
@@ -1871,9 +1885,10 @@ export class ClaudeRuntime {
           this.credentials,
           entry.mcpChoice,
         ]),
-      launch: async (key) => {
+      launch: async (key, spawn) => {
         const { workspace, instructions, scope } = entry.config;
-        const gate = entry.handle?.protection;
+        const { handle, mcpChoice: choice } = entry;
+        const gate = handle?.protection;
         if (entry.protected && !gate)
           throw new Error("The protected agent has no live policy binding");
         gate?.assertAvailable();
@@ -1895,18 +1910,9 @@ export class ClaudeRuntime {
         const shared = key ? entry.directories.get(key) : undefined;
         const directories = home ? [home, ...(shared ?? [])] : shared;
         const cwd = folder || workspace;
-        const handle = entry.handle;
-        const choice =
-          !this.target && this.mcp && handle
-            ? await this.mcp.choice(handle)
-            : undefined;
-        entry.mcpChoice = choice;
         const servers =
-          choice !== undefined && choice !== "none"
-            ? await configuredMcp(
-                this.host.readFile?.bind(this.host),
-                (await this.host.resolveDirectory?.(cwd)) ?? cwd,
-              )
+          spawn && choice !== undefined && choice !== "none"
+            ? await this.configuredMcp(cwd, spawn)
             : [];
         return {
           ...where(entry.config),

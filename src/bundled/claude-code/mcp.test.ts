@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it, vi } from "vitest";
 import { ClaudeProcess, type Spawn } from "./claude";
-import { configuredMcp, type ClaudeMcp } from "./mcp";
+import { configuredMcp, inspectMcpConfig, type ClaudeMcp } from "./mcp";
 import { fakeSpawn, flush } from "./claude-testing";
 import { AgentSessions } from "./sessions";
 import { ClaudeRuntime } from "./runtime";
@@ -101,6 +101,22 @@ it.each([
     context: [{ name: "mcp__alpha__search_docs", serverName: "alpha" }],
     name: "mcp__alpha__search_docs",
     identity: { mcp_server: "alpha", mcp_tool: "search.docs" },
+  },
+  {
+    label: "Claude connector display names",
+    servers: ["claude.ai Weather (Preview)"],
+    catalog: { "claude.ai Weather (Preview)": ["search.docs"] },
+    context: [
+      {
+        name: "mcp__claude_ai_Weather_Preview__search_docs",
+        serverName: "claude.ai Weather (Preview)",
+      },
+    ],
+    name: "mcp__claude_ai_Weather_Preview__search_docs",
+    identity: {
+      mcp_server: "claude.ai Weather (Preview)",
+      mcp_tool: "search.docs",
+    },
   },
   {
     label: "overlapping server prefixes",
@@ -333,12 +349,15 @@ it("delivers live session inventory to the control without retaining it in stati
     config: agent.config,
   } as Delivery;
   try {
-    await runtime.runOnce({
-      delivery,
-      key: "seen",
-      signal: new AbortController().signal,
-      prompt: async () => undefined,
-    });
+    await expect(
+      runtime.runOnce({
+        delivery,
+        key: "seen",
+        signal: new AbortController().signal,
+        prompt: async () => undefined,
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(f.processes).toHaveLength(1);
     expect(runtime.mcp.started).toHaveBeenCalledWith(
       expect.objectContaining({ key: agent.key }),
       expect.any(String),
@@ -580,24 +599,51 @@ it("reports the bounded native config union with native project approvals and me
   ).toBe(true);
 });
 
-it("honors enable-all without overriding an explicit project rejection", async () => {
+it("honors enable-all without overriding a normalized project rejection", async () => {
   const files: Record<string, unknown> = {
-    "~/.claude.json": {
-      projects: { "/work": { disabledMcpjsonServers: ["off"] } },
+    ".mcp.json": { mcpServers: { on: {}, "weather.v2": {} } },
+    ".claude/settings.local.json": {
+      enableAllProjectMcpServers: true,
+      disabledMcpjsonServers: ["weather_v2"],
     },
-    ".mcp.json": { mcpServers: { on: {}, off: {} } },
-    ".claude/settings.local.json": { enableAllProjectMcpServers: true },
   };
-  expect(
-    await configuredMcp(
-      async (path) =>
-        new TextEncoder().encode(JSON.stringify(files[path] ?? {})),
-      "/work",
-    ),
-  ).toEqual([
+  const read = async (path: string) =>
+    new TextEncoder().encode(JSON.stringify(files[path] ?? {}));
+  expect(await configuredMcp(read, "/work")).toEqual([
     { name: "on", default: true },
-    { name: "off", default: false, state: "disabled" },
+    { name: "weather.v2", default: false, state: "disabled" },
   ]);
+  await expect(inspectMcpConfig(read, "/work", "weather.v2")).rejects.toThrow(
+    "Enable this MCP server in Claude before inspecting its tools",
+  );
+});
+
+it("reports and inspects against the effective config home", async () => {
+  const paths = {
+    user: "/alternate/.claude.json",
+    settings: "/alternate/settings.json",
+  };
+  const weather = { command: "fixture-weather" };
+  const files: Record<string, unknown> = {
+    "~/.claude.json": { mcpServers: { old: {} } },
+    [paths.user]: { mcpServers: { weather } },
+    [paths.settings]: { enabledMcpjsonServers: ["maps"] },
+    ".mcp.json": { mcpServers: { maps: {} } },
+  };
+  const read = async (path: string) =>
+    new TextEncoder().encode(JSON.stringify(files[path] ?? {}));
+  expect(await configuredMcp(read, "/work", paths)).toEqual([
+    { name: "weather", default: true },
+    { name: "maps", default: true },
+  ]);
+  expect(await inspectMcpConfig(read, "/work", "weather", paths)).toEqual(
+    weather,
+  );
+  const conflicting = { ...paths, user: null };
+  expect(await configuredMcp(read, "/work", conflicting)).toEqual([]);
+  await expect(
+    inspectMcpConfig(read, "/work", "weather", conflicting),
+  ).rejects.toThrow("could not identify its global MCP configuration");
 });
 
 it("verifies admitted tools rather than the catalog and retains every configured applied choice", async () => {
@@ -887,7 +933,7 @@ it("applies explicit exclusions for native names absent from static discovery", 
     mcp: {
       choice: {
         managed: false,
-        connector: {
+        "claude.ai Weather (Preview)": {
           off: ["write.marker"],
           known: ["read_echo", "write.marker"],
         },
@@ -900,7 +946,7 @@ it("applies explicit exclusions for native names absent from static discovery", 
     const args = f.processes[0]?.options.args ?? [];
     expect(JSON.parse(args[args.indexOf("--settings") + 1] ?? "{}")).toEqual({
       deniedMcpServers: [{ serverName: "managed" }],
-      permissions: { deny: ["mcp__connector__write_marker"] },
+      permissions: { deny: ["mcp__claude_ai_Weather_Preview__write_marker"] },
     });
     expect(f.processes[0]?.prompts).toEqual([]);
   } finally {

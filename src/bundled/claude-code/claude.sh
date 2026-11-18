@@ -4,6 +4,7 @@
 #
 #   run [ARGS...]                    runs the copy in use with ARGS
 #   inspect [ARGS...]                reads an MCP config line, then runs Claude
+#   mcp-config-paths                 prints Claude's global and user settings paths
 #   install VERSION PLATFORM SHA256  downloads a release, unless it is already
 #                                    downloaded, and checks it
 #   use VERSION                      makes a downloaded release the one in use
@@ -66,6 +67,24 @@ if [ "$command" = inspect ]; then
   command=run
 fi
 case "$command" in
+mcp-config-paths)
+  mcp_user_dir=${CLAUDE_CONFIG_DIR:-$HOME}
+  mcp_settings_dir=${CLAUDE_CONFIG_DIR-$HOME/.claude}
+  case "$mcp_user_dir" in /*) ;; *) mcp_user_dir="./$mcp_user_dir" ;; esac
+  case "$mcp_settings_dir" in /*) ;; *) mcp_settings_dir="./$mcp_settings_dir" ;; esac
+  mcp_user="${mcp_user_dir%/}/.claude.json"
+  mcp_settings="${1-${mcp_settings_dir%/}/settings.json}"
+  mcp_legacy="${mcp_settings%/*}/.config.json"
+  # Both global files can exist, and Claude's precedence depends on its release.
+  if [ -f "$mcp_legacy" ]; then
+    if [ -f "$mcp_user" ]; then
+      mcp_user=""
+    else
+      mcp_user="$mcp_legacy"
+    fi
+  fi
+  printf '%s\0%s\0' "$mcp_user" "$mcp_settings"
+  ;;
 run)
   # A failed exec returns (execfail, without errexit), so the launcher can
   # look again when a release it read was pruned before it started.

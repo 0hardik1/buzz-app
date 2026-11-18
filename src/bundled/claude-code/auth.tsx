@@ -290,8 +290,11 @@ export class ClaudeAuth {
    * run with the key, and protected launches whenever one is saved. */
   authorize(spawn: Spawn, required = false): Spawn {
     return async (id, options) => {
-      // Buzz's copy, and the protected release (`claude-protected-*`).
-      if (id !== "claude" && !id.startsWith("claude-protected-"))
+      if (
+        id !== "claude" &&
+        id !== "claude-inspect" &&
+        !id.startsWith("claude-protected-")
+      )
         return spawn(id, options);
       const args = options?.args ?? [];
       // The person's own setup is in `~/.claude`, so a Claude given a folder

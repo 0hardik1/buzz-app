@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { HostProcessOptions } from "../../features/host/service";
 import { ClaudeAuth } from "./auth";
-import { ENV, type Spawn } from "./claude";
+import { ClaudeProcess, ENV, type Spawn } from "./claude";
 import { PROCESS_LIMIT } from "./sessions";
 
 const KEY = "sk-ant-api03-saved";
@@ -88,10 +88,16 @@ it("asks native code to start every claude, the protected release included, with
   const authorized = auth.authorize(spawn, true);
   for (const id of ["claude", "claude-protected-arm64"])
     await authorized(id, { args: ["--verbose"], env: { ...ENV, A: "1" } });
+  const inspection = await ClaudeProcess.spawn(authorized, {
+    cwd: "/work",
+    inspectMcp: true,
+  });
+  await inspection.exited;
   await authorized("platform", { env: { ...ENV } });
   expect(started.map(({ id }) => id)).toEqual([
     "claude",
     "claude-protected-arm64",
+    "claude-inspect",
     "platform",
   ]);
   for (const { options } of started.slice(0, 2)) {
@@ -103,7 +109,12 @@ it("asks native code to start every claude, the protected release included, with
     // Process launches never read or forward the key through JavaScript.
     expect(JSON.stringify(options)).not.toContain("sk-ant-");
   }
-  expect(started[2]?.options).toEqual({ env: { ...ENV } });
+  expect(started[2]?.options).toMatchObject({
+    agentCredential: false,
+    secrets: ["anthropic-api-key"],
+  });
+  expect(JSON.stringify(started[2]?.options)).not.toContain("sk-ant-");
+  expect(started[3]?.options).toEqual({ env: { ...ENV } });
 });
 
 it("refuses a turn's claude without a key, but lets setup run its checks", async () => {

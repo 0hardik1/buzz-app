@@ -78,7 +78,10 @@ export type SessionsOptions = Readonly<{
   store: SessionStore;
   /** How to start a process with the agent's current settings, for the
    * conversation `key` when given. */
-  launch(key?: string): Promise<Omit<ClaudeLaunch, "resume" | "sessionId">>;
+  launch(
+    key?: string,
+    spawn?: Spawn,
+  ): Promise<Omit<ClaudeLaunch, "resume" | "sessionId">>;
   /** Changes when a setting that a running process fixed has changed, for the
    * conversation `key` when given. */
   fingerprint(key?: string): string;
@@ -346,7 +349,8 @@ export class AgentSessions {
     }: DeliveryOptions,
     handed: () => void,
   ): Promise<Settled> {
-    if (this.options.prepare) await this.options.prepare(key);
+    if (this.options.prepare && (this.live.has(key) || this.opening.has(key)))
+      await this.options.prepare(key);
     for (;;) {
       if (this.disposed)
         return { ok: false, error: "Claude was stopped", undelivered: true };
@@ -670,10 +674,11 @@ export class AgentSessions {
     once?: string,
     wanted: () => boolean = () => true,
   ): Promise<Live> {
+    if (this.options.prepare) await this.options.prepare(key);
     // Read before `launch` reads the settings, so it never describes newer ones.
     const fingerprint = this.options.fingerprint(key);
-    const launch = await this.options.launch(key);
     const spawn = this.roomy(wanted);
+    const launch = await this.options.launch(key, spawn);
     const process = resume
       ? await ClaudeProcess.start(spawn, { ...launch, resume })
       : await this.fresh(launch, spawn, spawned);

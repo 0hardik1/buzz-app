@@ -99,6 +99,56 @@ async function disk(releases: readonly string[], current?: string) {
   };
 }
 
+it.each([
+  { override: undefined, settings: ".claude/settings.json" },
+  { override: "", settings: "settings.json" },
+  { override: "alternate config", settings: "alternate config/settings.json" },
+])(
+  "reports the config paths for CLAUDE_CONFIG_DIR=$override",
+  async ({ override, settings }) => {
+    const { home } = await disk([]);
+    const { stdout } = await run(
+      "bash",
+      ["-c", script, "claude.sh", "mcp-config-paths"],
+      {
+        cwd: home,
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: home,
+          ...(override !== undefined && { CLAUDE_CONFIG_DIR: override }),
+        },
+      },
+    );
+    const user = override
+      ? `./${override}/.claude.json`
+      : join(home, ".claude.json");
+    expect(stdout.split("\0")).toEqual([
+      user,
+      override === undefined ? join(home, settings) : `./${settings}`,
+      "",
+    ]);
+  },
+);
+
+it("finds the legacy config and leaves overlapping global files unresolved", async () => {
+  const { home, step } = await disk([]);
+  await mkdir(join(home, ".claude"));
+  const legacy = join(home, ".claude/.config.json");
+  const settings = join(home, ".claude/settings.json");
+  await writeFile(legacy, "{}");
+  expect((await step("mcp-config-paths")).stdout.split("\0")).toEqual([
+    legacy,
+    settings,
+    "",
+  ]);
+  await writeFile(join(home, ".claude.json"), "{}");
+  expect((await step("mcp-config-paths")).stdout.split("\0")).toEqual([
+    "",
+    settings,
+    "",
+  ]);
+});
+
 // Builds that fetched 0.2.0 and 0.3.0 switch in either order, or at once;
 // none prunes what another made current.
 it("keeps the newer release when it switches first", async () => {

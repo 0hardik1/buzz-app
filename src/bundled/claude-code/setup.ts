@@ -51,6 +51,7 @@ const PLATFORMS: Readonly<Record<string, string>> = {
 const STEPS: Readonly<Record<string, string>> = {
   claude: "run",
   "claude-inspect": "inspect",
+  "mcp-config-paths": "mcp-config-paths",
   install: "install",
   use: "use",
   review: "review",
@@ -118,11 +119,19 @@ async function queryModels(spawn: Spawn, signal: AbortSignal) {
 }
 
 /** Runs a short process and returns its exit code and output. */
-async function collect(spawn: Spawn, id: string, args: readonly string[]) {
+async function collect(
+  spawn: Spawn,
+  id: string,
+  args: readonly string[],
+  cwd?: string,
+  signal?: AbortSignal,
+) {
+  signal?.throwIfAborted();
   let stdout = "";
   let stderr = "";
   const process = await spawn(id, {
     args,
+    ...(cwd !== undefined && { cwd }),
     env: ENV,
     onStdout: (data) => {
       stdout += data;
@@ -131,10 +140,43 @@ async function collect(spawn: Spawn, id: string, args: readonly string[]) {
       stderr += data;
     },
   });
-  const timer = setTimeout(() => void process.kill(), CHECK_TIMEOUT_MS);
-  const code = await process.exited;
-  clearTimeout(timer);
-  return { code, stdout, stderr };
+  const stop = () => void process.kill().catch(() => undefined);
+  const timer = setTimeout(stop, CHECK_TIMEOUT_MS);
+  signal?.addEventListener("abort", stop, { once: true });
+  if (signal?.aborted) stop();
+  try {
+    const code = await process.exited;
+    signal?.throwIfAborted();
+    return { code, stdout, stderr };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
+  }
+}
+
+/** Resolves the launcher paths, including Claude's NFC-normalized settings directory. */
+export async function mcpConfigPaths(
+  spawn: Spawn,
+  cwd: string,
+  signal?: AbortSignal,
+) {
+  const probe = async (args: readonly string[]) => {
+    const { code, stdout } = await collect(
+      spawn,
+      "mcp-config-paths",
+      args,
+      cwd,
+      signal,
+    );
+    const parts = stdout.split("\0");
+    const [user, settings, end] = parts;
+    if (code !== 0 || !settings || end !== "" || parts.length !== 3)
+      throw new Error("Claude could not identify its MCP configuration files");
+    return { user: user || null, settings };
+  };
+  const paths = await probe([]);
+  const normalized = paths.settings.normalize("NFC");
+  return normalized === paths.settings ? paths : probe([normalized]);
 }
 
 /** Waits for `work` until `signal` aborts; the work itself carries on. */
