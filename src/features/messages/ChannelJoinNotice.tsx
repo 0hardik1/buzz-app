@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { ChannelLifecycleCapability } from "../relay/channel-lifecycle";
 import { ChannelLifecycleUnconfirmed } from "../relay/channel-lifecycle";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -21,6 +27,7 @@ export function joinFailure(reason: unknown, place: "chat" | "channel") {
 export function ChannelJoinNotice({
   channelId,
   ready = true,
+  showArchivedWhileLoading = false,
   lifecycle,
   joinable,
   guest = false,
@@ -29,9 +36,12 @@ export function ChannelJoinNotice({
   joinRole,
   onJoin,
   onHeightChange,
+  archivedMessage,
+  children,
 }: {
   channelId: string;
   ready?: boolean;
+  showArchivedWhileLoading?: boolean;
   lifecycle?: ChannelLifecycleCapability | undefined;
   joinable: boolean;
   guest?: boolean;
@@ -40,12 +50,18 @@ export function ChannelJoinNotice({
   joinRole?: "member" | "guest" | undefined;
   onJoin(): void;
   onHeightChange?(height: number): void;
+  archivedMessage?: string | undefined;
+  /** The host owns archive recovery and its confirmation. */
+  children?: ReactNode;
 }) {
   const notice = useRef<HTMLElement>(null);
   // Notices float above Join, not over it.
   useToastClearance(notice);
   const [revealedChannel, setRevealedChannel] = useState<string>();
-  const visible = ready || revealedChannel === channelId;
+  const visible =
+    (archived && showArchivedWhileLoading) ||
+    ready ||
+    revealedChannel === channelId;
   useEffect(() => {
     if (ready) setRevealedChannel(channelId);
   }, [ready, channelId]);
@@ -104,9 +120,11 @@ export function ChannelJoinNotice({
         data-ready={visible}
         className={`${styles.channelJoinSurface} pointer-events-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-2 p-1.5`}
       >
-        <p className="max-w-md px-2 text-center text-body-sm text-subtle">
+        <p
+          className={`max-w-md px-2 text-center text-body-sm text-subtle${archived && archivedMessage ? " my-2" : ""}`}
+        >
           {archived
-            ? `This ${place} is archived`
+            ? (archivedMessage ?? `This ${place} is archived`)
             : readOnly
               ? joinRole === "guest"
                 ? `This ${place} is read-only${canJoin ? ". Join to keep it in your sidebar and appear as a viewer." : ""}`
@@ -125,6 +143,7 @@ export function ChannelJoinNotice({
             Join
           </Button>
         )}
+        {archived && children}
         {canJoin && error && (
           <p
             className="max-w-sm basis-full px-2 pb-1 text-body-sm text-danger"
