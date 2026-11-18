@@ -232,6 +232,8 @@ const capabilityFlags = (capabilities) => ({
   can_use_remote_agents: capabilities?.can_use_remote_agents === true,
   can_use_builderlab_decisions:
     capabilities?.can_use_builderlab_decisions === true,
+  can_customize_compaction_window:
+    capabilities?.can_customize_compaction_window === true,
   can_delete_buzz_communities:
     capabilities?.can_delete_buzz_communities === true,
 });

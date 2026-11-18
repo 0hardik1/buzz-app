@@ -137,6 +137,7 @@ it("completes browser sign-in through a loopback callback without exposing the c
       can_delete_buzz_communities: false,
       can_use_remote_agents: false,
       can_use_builderlab_decisions: false,
+      can_customize_compaction_window: false,
     },
   });
   expect(JSON.stringify(auth)).not.toContain("secret");
@@ -251,6 +252,7 @@ it.each([
     can_delete_buzz_communities: expected,
     can_use_remote_agents: false,
     can_use_builderlab_decisions: false,
+    can_customize_compaction_window: false,
   });
 });
 
@@ -971,6 +973,7 @@ it("keeps the broker sign-in and account projection when a capability-only check
     capabilities: {
       can_use_remote_agents: true,
       can_use_builderlab_decisions: false,
+      can_customize_compaction_window: false,
       can_delete_buzz_communities: false,
     },
   });
@@ -1000,7 +1003,10 @@ it("retains refreshed flags and their age for reloaded pages without changing th
         email: granted ? "changed@example.org" : "original@example.org",
         name: granted ? "Changed" : "Original",
         expires_at: "2030",
-        capabilities: { can_use_remote_agents: granted },
+        capabilities: {
+          can_use_remote_agents: granted,
+          can_customize_compaction_window: granted,
+        },
       });
     },
   });
@@ -1029,7 +1035,10 @@ it("retains refreshed flags and their age for reloaded pages without changing th
         email: "original@example.org",
         name: "Original",
         expiresAt: "2030",
-        capabilities: { can_use_remote_agents: true },
+        capabilities: {
+          can_use_remote_agents: true,
+          can_customize_compaction_window: true,
+        },
       },
     });
   } finally {

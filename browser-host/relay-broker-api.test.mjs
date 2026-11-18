@@ -4315,6 +4315,7 @@ test("Builderlab HTTP accepts full agent instructions and isolates the fixed nat
       capabilities: {
         can_use_remote_agents: true,
         can_use_builderlab_decisions: false,
+        can_customize_compaction_window: false,
         can_delete_buzz_communities: false,
       },
     });
