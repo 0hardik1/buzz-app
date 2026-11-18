@@ -63,6 +63,7 @@ function fixture() {
       sign: vi.fn(async (event) => ({
         ...event,
         pubkey: viewer,
+        sig: "c".repeat(128),
         id: (++sequence).toString(16).padStart(64, "0"),
       })),
       publish: vi.fn(async (event) => {
@@ -913,5 +914,178 @@ it("does not restore an old assignment from a failed channel read", async () => 
   await f.model.refresh();
   expect(f.model.snapshot().tasks).toHaveLength(0);
   expect(f.model.snapshot().error).toContain("offline");
+  f.model.dispose();
+});
+
+it("preserves a corrupt journal until an explicit backed-up reset", async () => {
+  const f = fixture();
+  f.model.dispose();
+  const key = `buzz-task-list-pending:${f.session.scope}`;
+  f.saved.set(key, "{broken");
+  const next = createModel(f.session, f.storage, () => {}, f.locks);
+  await next.refresh();
+  expect(next.snapshot().canResetJournal).toBe(true);
+  expect(next.snapshot().readOnly).toBe(true);
+  expect(() => next.save(f.input)).toThrow(/left untouched/);
+  expect(next.resetDamagedJournal()).toBe(true);
+  await next.refresh();
+  expect(f.saved.has(key)).toBe(false);
+  expect([...f.saved.values()]).toContain("{broken");
+  await next.save(f.input);
+  expect(f.records.size).toBe(1);
+  expect([...f.saved.values()]).toContain("{broken");
+  next.dispose();
+});
+
+it("does not reset damaged data when its backup cannot be written", async () => {
+  const f = fixture();
+  f.model.dispose();
+  const key = `buzz-task-list-pending:${f.session.scope}`;
+  f.saved.set(key, "{broken");
+  const next = createModel(f.session, f.storage, () => {}, f.locks);
+  await next.refresh();
+  f.storage.setItem = () => {
+    throw new Error("storage full");
+  };
+  expect(next.resetDamagedJournal()).toBe(false);
+  expect(f.saved.get(key)).toBe("{broken");
+  expect(next.snapshot().readOnly).toBe(true);
+  next.dispose();
+});
+
+it("rejects malformed pending events and unknown journal versions without replay", async () => {
+  for (const saved of [
+    { version: 2, queue: [] },
+    { version: 1, queue: [], pending: { tags: [] } },
+  ]) {
+    const f = fixture();
+    f.model.dispose();
+    f.saved.set(
+      `buzz-task-list-pending:${f.session.scope}`,
+      JSON.stringify(saved),
+    );
+    const next = createModel(f.session, f.storage, () => {}, f.locks);
+    await next.refresh();
+    expect(next.snapshot().canResetJournal).toBe(true);
+    expect(f.session.configArtifactWriter.publish).not.toHaveBeenCalled();
+    next.dispose();
+  }
+});
+
+it("does not offer a destructive reset after storage access fails", async () => {
+  const f = fixture();
+  f.model.dispose();
+  f.storage.getItem = () => {
+    throw new Error("storage unavailable");
+  };
+  const next = createModel(f.session, f.storage, () => {}, f.locks);
+  await next.refresh();
+  expect(next.snapshot().canResetJournal).toBe(false);
+  expect(next.resetDamagedJournal()).toBe(false);
+  next.dispose();
+});
+
+it("reports missing host controls and Web Locks before mounting task editors", async () => {
+  const { compatibilityError } = await import(
+    "../examples/plugins/tasks/plugin.js"
+  );
+  const ui = {
+    Calendar: {},
+    PopoverRoot: {},
+    PopoverTrigger: {},
+    PopoverPopup: {},
+  };
+  expect(compatibilityError(ui, { request() {} })).toBe("");
+  for (const key of Object.keys(ui)) {
+    expect(
+      compatibilityError({ ...ui, [key]: undefined }, { request() {} }),
+    ).toMatch(/date and time/);
+  }
+  expect(compatibilityError(ui, {})).toMatch(/coordinate/);
+});
+
+it("treats existing empty or scalar journal values as damaged, and retries transient access failures", async () => {
+  for (const raw of ["", "false", "null", "0"]) {
+    const f = fixture();
+    f.model.dispose();
+    f.saved.set(`buzz-task-list-pending:${f.session.scope}`, raw);
+    const next = createModel(f.session, f.storage, () => {}, f.locks);
+    await next.refresh();
+    expect(next.snapshot().canResetJournal).toBe(true);
+    expect(next.damagedJournalText()).toBe(raw);
+    next.dispose();
+  }
+  const f = fixture();
+  f.model.dispose();
+  const get = f.storage.getItem;
+  f.storage.getItem = () => {
+    throw new Error("temporarily unavailable");
+  };
+  const next = createModel(f.session, f.storage, () => {}, f.locks);
+  await next.refresh();
+  expect(next.snapshot().readOnly).toBe(true);
+  f.storage.getItem = get;
+  next.retryRecovery();
+  await next.refresh();
+  expect(next.snapshot().readOnly).toBe(false);
+  await next.save(f.input);
+  next.dispose();
+});
+
+it("retains a confirmed personal write when the post-save current-head refresh fails", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  const read = f.session.snapshotRead.getMockImplementation();
+  f.session.snapshotRead.mockImplementation((filters, options) => {
+    if (filters[0].artifact === "current" && f.records.size)
+      throw new Error("list timeout");
+    return read(filters, options);
+  });
+  await f.model.save({ ...f.input, channel: home });
+  expect(f.model.snapshot().pending).toBeNull();
+  expect(
+    f.model.snapshot().tasks.find((task) => task.id === taskId)?.title,
+  ).toBe(f.input.title);
+  await f.model.refresh();
+  expect(
+    f.model.snapshot().tasks.find((task) => task.id === taskId)?.title,
+  ).toBe(f.input.title);
+  f.session.snapshotRead.mockImplementation(read);
+  await f.model.refresh();
+  expect(f.model.snapshot().tasks).toHaveLength(1);
+  f.model.dispose();
+});
+
+it("retires accepted assigned overlays after a complete fresh absence", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  const read = f.session.snapshotRead.getMockImplementation();
+  f.session.snapshotRead.mockImplementation((filters, options) => {
+    if (filters[0].artifact === "current" && f.records.size)
+      throw new Error("list timeout");
+    return read(filters, options);
+  });
+  await f.model.save(f.input);
+  expect(f.model.snapshot().tasks).toHaveLength(1);
+  f.records.clear();
+  f.session.snapshotRead.mockImplementation(read);
+  await f.model.refresh();
+  expect(f.model.snapshot().tasks).toHaveLength(0);
+  f.model.dispose();
+});
+
+it("an accepted unassignment overrides an old assigned fallback during a read failure", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  await f.model.save(f.input);
+  const original = f.model.snapshot().tasks[0];
+  const read = f.session.snapshotRead.getMockImplementation();
+  f.session.snapshotRead.mockImplementation((filters, options) => {
+    if (filters[0].artifact === "current" && !filters[0]["#d"])
+      throw new Error("list timeout");
+    return read(filters, options);
+  });
+  await f.model.save({ ...original, assignees: [] });
+  expect(f.model.snapshot().tasks).toHaveLength(0);
   f.model.dispose();
 });

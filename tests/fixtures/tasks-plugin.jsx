@@ -64,6 +64,7 @@ for (const [index, [channel, title, assignees, done]] of [
             : {}),
     }),
     pubkey: viewer,
+    sig: "c".repeat(128),
     id: String(index).padStart(64, "0"),
   });
 }
@@ -120,6 +121,7 @@ const session = {
     sign: async (event) => ({
       ...event,
       pubkey: viewer,
+      sig: "c".repeat(128),
       id: (++sequence).toString(16).padStart(64, "0"),
     }),
     publish: async (event) => {

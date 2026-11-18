@@ -2040,3 +2040,5 @@ Enter to select. The time picker currently uses 24-hour columns independently
 of the app's Clock preference. Completed tasks leave the list.
 
 Unconfirmed To-do saves can be kept with **Set aside and continue** so other tasks can save. This does not cancel delivery; avoid creating a replacement. **Check set-aside saves** checks for delivery before allowing another edit to that task.
+
+If saved task recovery cannot be read, **Show saved task backup** lets you copy it before **Recover saved tasks** backs it up locally and resets the journal. Unsent drafts leave the list; previously sent tasks may still arrive. A failed backup leaves the original intact. Update Buzz if To-do reports missing date controls or safe window coordination. Only one window edits tasks at a time.

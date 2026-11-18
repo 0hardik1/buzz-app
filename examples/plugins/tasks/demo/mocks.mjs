@@ -16,6 +16,11 @@ export function wrapRelay(service) {
           /^(page|channel)-/,
           "",
         );
+        if (scenario.startsWith("corrupt"))
+          localStorage.setItem(
+            `buzz-task-list-pending:${state.session.scope}`,
+            "{fictional damaged journal",
+          );
         const records = new Map(),
           listeners = new Set();
         let sequence = 0;
@@ -116,6 +121,7 @@ export function wrapRelay(service) {
                   sign: async (event) => ({
                     ...event,
                     pubkey: state.viewer,
+                    sig: "c".repeat(128),
                     id: (++sequence).toString(16).padStart(64, "0"),
                   }),
                   publish: async (event) => {

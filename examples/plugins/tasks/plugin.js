@@ -1,12 +1,51 @@
-export const inject = ["react", "ui", "pages", "panels", "relay"];
+// Generated from squareup/agents buzz-plugins/plugins/to-do via pnpm build.
+// ../../shared/channel-artifacts/src/relay.ts
+function refusalOf(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const own = error?.reason;
+  const reason = typeof own === "string" ? own : message;
+  const prefix = /^([a-z-]+):/.exec(reason)?.[1];
+  if (
+    prefix === "conflict" ||
+    prefix === "duplicate" ||
+    prefix === "rate-limited"
+  )
+    return { definite: true, refusal: prefix, message: reason };
+  if (/archived/i.test(reason))
+    return { definite: true, refusal: "archived", message: reason };
+  if (
+    prefix === "restricted" ||
+    prefix === "auth-required" ||
+    prefix === "blocked"
+  )
+    return { definite: true, refusal: "permission", message: reason };
+  if (prefix === "invalid")
+    return {
+      definite: true,
+      refusal: /too large|too big|size/i.test(reason) ? "too-large" : "invalid",
+      message: reason,
+    };
+  return { definite: false, refusal: "unknown", message: reason };
+}
+function isReadDenied(error) {
+  const e = error;
+  return (
+    e?.kind === "denied" ||
+    e?.status === 401 ||
+    e?.status === 403 ||
+    (typeof e?.message === "string" &&
+      /^Relay read failed \((401|403)\)$/.test(e.message))
+  );
+}
 
-const TYPE = "com.squareup.task-list.task";
-const LABEL = "com.squareup.task-list.personal";
-const tag = (event, name) => event.tags.find(([key]) => key === name)?.[1];
-const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
-const pubkey = /^[0-9a-f]{64}$/;
-
-export function matchesAssignee(profile, search) {
+// plugin.js
+var inject = ["react", "pages", "panels", "relay"];
+var TYPE = "com.squareup.task-list.task";
+var LABEL = "com.squareup.task-list.personal";
+var tag = (event, name) => event.tags.find(([key]) => key === name)?.[1];
+var uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
+var pubkey = /^[0-9a-f]{64}$/;
+function matchesAssignee(profile, search) {
   const query = search.trim().replace(/^@/, "").toLocaleLowerCase();
   if (!query) return true;
   return [
@@ -17,15 +56,15 @@ export function matchesAssignee(profile, search) {
     profile?.verified?.username,
   ].some((value) => value?.toLocaleLowerCase().includes(query));
 }
-
-const validDate = (value) =>
+var validDate = (value) =>
   typeof value === "string" &&
   /^\d{4}-\d{2}-\d{2}$/.test(value) &&
   Number.isFinite(Date.parse(`${value}T12:00:00Z`)) &&
-  new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value;
-const validTime = (value) =>
+  /* @__PURE__ */ new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) ===
+    value;
+var validTime = (value) =>
   typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
-const validDue = ({ dueDate, dueAt, dueTime }) =>
+var validDue = ({ dueDate, dueAt, dueTime }) =>
   (!dueTime || (validTime(dueTime) && !dueDate && !dueAt)) &&
   (!dueDate || validDate(dueDate)) &&
   (!dueAt ||
@@ -33,15 +72,16 @@ const validDue = ({ dueDate, dueAt, dueTime }) =>
       Number.isFinite(Date.parse(dueAt)) &&
       new Date(dueAt).toISOString() === dueAt)) &&
   !(dueDate && dueAt);
-export function dueValue(date, time) {
+function dueValue(date, time) {
   if (time && !validTime(time)) throw new Error("Choose a valid time.");
-  if (!date && time) date = dueInputs({ dueAt: new Date().toISOString() }).date;
+  if (!date && time)
+    date = dueInputs({ dueAt: /* @__PURE__ */ new Date().toISOString() }).date;
   if (!date) return { dueDate: null, dueAt: null, dueTime: null };
   if (!validDate(date)) throw new Error("Choose a valid due date.");
   if (!time) return { dueDate: date, dueAt: null, dueTime: null };
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time))
     throw new Error("Choose a valid time.");
-  const value = new Date(`${date}T${time}:00`);
+  const value = /* @__PURE__ */ new Date(`${date}T${time}:00`);
   const parts = dueInputs({ dueAt: value.toISOString() });
   if (parts.date !== date || parts.time !== time)
     throw new Error(
@@ -49,7 +89,7 @@ export function dueValue(date, time) {
     );
   return { dueDate: null, dueAt: value.toISOString(), dueTime: null };
 }
-export function dueInputs(task) {
+function dueInputs(task) {
   if (!task.dueAt)
     return { date: task.dueDate || "", time: task.dueTime || "" };
   const value = new Date(task.dueAt),
@@ -59,8 +99,7 @@ export function dueInputs(task) {
     time: `${pad(value.getHours())}:${pad(value.getMinutes())}`,
   };
 }
-
-export function parseTask(event) {
+function parseTask(event) {
   if (
     event.kind !== 45010 ||
     tag(event, "type") !== TYPE ||
@@ -98,15 +137,14 @@ export function parseTask(event) {
       createdAt:
         Number.isSafeInteger(body.createdAt) && body.createdAt >= 0
           ? body.createdAt
-          : event.created_at * 1000,
+          : event.created_at * 1e3,
       event,
     };
   } catch {
     return null;
   }
 }
-
-export function taskTemplate({
+function taskTemplate({
   id,
   channel,
   title,
@@ -140,7 +178,7 @@ export function taskTemplate({
   assignees = [...new Set(assignees)];
   return {
     kind: 45010,
-    created_at: Math.floor(Date.now() / 1000),
+    created_at: Math.floor(Date.now() / 1e3),
     content: JSON.stringify({
       version: 1,
       createdAt,
@@ -163,8 +201,18 @@ export function taskTemplate({
     ],
   };
 }
-
-export function createModel(
+function compatibilityError(ui, locks = globalThis.navigator?.locks) {
+  if (
+    !["Calendar", "PopoverRoot", "PopoverTrigger", "PopoverPopup"].every(
+      (name) => ui?.[name],
+    )
+  )
+    return "Update Buzz to use To-do. This version is missing the date and time controls.";
+  if (typeof locks?.request !== "function")
+    return "Update Buzz to use To-do. This version cannot safely coordinate task saves across windows.";
+  return "";
+}
+function createModel(
   session,
   storage,
   changed,
@@ -185,17 +233,18 @@ export function createModel(
     asideCount: 0,
   };
   let confirmedTasks = [];
+  const acceptedWrites = /* @__PURE__ */ new Map();
   let optimisticTask = null;
   let saveQueue = [];
   let aside = [];
   let recoveryError = "";
-  const unverified = new Set();
+  let damagedJournal = null;
+  const unverified = /* @__PURE__ */ new Set();
   let ownsJournal = false;
   let releaseJournal;
   const journalReleased = new Promise((resolve) => {
     releaseJournal = resolve;
   });
-  // One atomic journal owns both unsigned drafts and the exact signed attempt.
   const persist = (pending, queue, retained = aside) => {
     if (pending || queue.length || retained.length)
       storage.setItem(
@@ -211,7 +260,7 @@ export function createModel(
   };
   let draining = false;
   let lastCreatedAt = 0;
-  const openChannels = new Map();
+  const openChannels = /* @__PURE__ */ new Map();
   let running,
     again = false,
     disposed = false;
@@ -225,10 +274,20 @@ export function createModel(
       state = { ...state, ...patch };
       const pendingTask =
         optimisticTask ?? (state.pending && parseTask(state.pending));
+      let baseTasks = confirmedTasks;
+      for (const task of acceptedWrites.values()) {
+        if (
+          !openChannels.has(task.channel) &&
+          !state.personal.includes(task.channel) &&
+          !task.assignees.includes(session.viewer)
+        ) {
+          baseTasks = baseTasks.filter((item) => item.id !== task.id);
+        } else baseTasks = withTask(baseTasks, task);
+      }
       state.tasks =
         pendingTask && !unverified.has(pendingTask.channel)
-          ? withTask(confirmedTasks, pendingTask)
-          : confirmedTasks;
+          ? withTask(baseTasks, pendingTask)
+          : baseTasks;
       for (const entry of saveQueue)
         if (!unverified.has(entry.input.channel))
           state.tasks = withTask(state.tasks, entry.input);
@@ -238,7 +297,10 @@ export function createModel(
       );
       state.asideCount = aside.length;
       state.asideIds = aside.map((event) => tag(event, "d"));
-      state.readOnly = !ownsJournal;
+      state.readOnly = !ownsJournal || !!recoveryError;
+      state.canResetJournal = ownsJournal && damagedJournal !== null;
+      state.recoveryBlocked = !!recoveryError;
+      state.canRetryRecovery = ownsJournal && !!recoveryError;
       state.queuedTitle =
         revoked.has(saveQueue[0]?.input.channel) ||
         unverified.has(saveQueue[0]?.input.channel)
@@ -262,10 +324,38 @@ export function createModel(
     home.members?.length === 1 &&
     home.members[0] === session.viewer;
   function restoreJournal() {
+    damagedJournal = null;
     try {
-      const saved = JSON.parse(storage.getItem(key) || "null");
+      const raw = storage.getItem(key);
+      damagedJournal = raw ?? null;
+      const saved = raw == null ? null : JSON.parse(raw);
+      const validAttempt = (event) =>
+        event &&
+        typeof event.id === "string" &&
+        pubkey.test(event.id) &&
+        typeof event.sig === "string" &&
+        /^[0-9a-f]{128}$/.test(event.sig) &&
+        Number.isSafeInteger(event.created_at) &&
+        event.created_at >= 0 &&
+        typeof event.content === "string" &&
+        Array.isArray(event.tags) &&
+        event.tags.every(
+          (item) =>
+            Array.isArray(item) &&
+            item.every((value) => typeof value === "string"),
+        ) &&
+        event.pubkey === session.viewer &&
+        parseTask(event);
+      if (
+        raw != null &&
+        (!saved || (saved.version !== 1 && !validAttempt(saved)))
+      )
+        throw new Error("Invalid task journal");
       if (saved?.version === 1) {
-        if (!Array.isArray(saved.queue))
+        if (
+          !Array.isArray(saved.queue) ||
+          (saved.pending != null && !validAttempt(saved.pending))
+        )
           throw new Error("Invalid task journal");
         const restored = saved.queue.map((input) => {
           if (!input || !Number.isFinite(input.createdAt))
@@ -276,9 +366,7 @@ export function createModel(
         if (
           saved.aside != null &&
           (!Array.isArray(saved.aside) ||
-            saved.aside.some(
-              (event) => !parseTask(event) || event.pubkey !== session.viewer,
-            ))
+            saved.aside.some((event) => !validAttempt(event)))
         )
           throw new Error("Invalid retained attempts");
         aside = saved.aside ?? [];
@@ -289,31 +377,41 @@ export function createModel(
           0,
           ...restored.map(({ input }) => input.createdAt),
         );
-      } else state.pending = saved; // Migrate the original signed-event-only journal.
+      } else state.pending = saved;
       for (const entry of saveQueue)
         if (entry.input.channel) unverified.add(entry.input.channel);
       if (state.pending) unverified.add(tag(state.pending, "h"));
+      damagedJournal = null;
     } catch {
+      state.pending = null;
+      saveQueue = [];
+      aside = [];
       recoveryError = state.error =
-        "Saved task recovery could not be read. Reload before adding tasks.";
+        "Saved task recovery could not be read. Your local data has been left untouched.";
     }
   }
-  const lockRequest = locks?.request(key, { signal }, async () => {
-    if (disposed) return;
-    ownsJournal = true;
-    restoreJournal();
-    emit({});
-    void refresh();
-    await journalReleased;
-    ownsJournal = false;
-  });
+  const lockRequest =
+    typeof locks?.request === "function"
+      ? Promise.resolve().then(() =>
+          locks.request(key, { signal }, async () => {
+            if (disposed) return;
+            ownsJournal = true;
+            restoreJournal();
+            emit({});
+            void refresh();
+            await journalReleased;
+            ownsJournal = false;
+          }),
+        )
+      : null;
   if (!lockRequest)
     recoveryError =
       "This Buzz version cannot safely coordinate task saves. Update Buzz to continue.";
   else
-    void lockRequest.catch((error) => {
+    void lockRequest.catch(() => {
       if (!disposed) {
-        recoveryError = String(error.message || error);
+        recoveryError =
+          "Task save coordination failed. Reload Buzz to try again.";
         emit({ error: recoveryError });
       }
     });
@@ -332,6 +430,7 @@ export function createModel(
     const result = await read([
       {
         artifact: "current",
+        consistency: "strong",
         kinds: [45010],
         "#type": [TYPE],
         ...extra,
@@ -365,26 +464,32 @@ export function createModel(
       saveQueue = remaining;
       if (!draining && head && !remaining.includes(head)) head.resolve();
       const task = parseTask(event);
+      const known = task && confirmedTasks.find((item) => item.id === task.id);
+      const advancesKnown =
+        task &&
+        (!known ||
+          known.event?.id === event.id ||
+          known.event?.id === tag(event, "prev"));
+      if (advancesKnown && !revoked.has(task.channel))
+        acceptedWrites.set(task.id, task);
       emit({
         pending: null,
-        tasks: task ? withTask(confirmedTasks, task) : confirmedTasks,
+        tasks: advancesKnown ? withTask(confirmedTasks, task) : confirmedTasks,
       });
     }
   }
-  const readSets = new Map();
-  const readEpochs = new Map();
-  const verifying = new Set();
-  const revoked = new Map();
+  const readSets = /* @__PURE__ */ new Map();
+  const readEpochs = /* @__PURE__ */ new Map();
+  const verifying = /* @__PURE__ */ new Set();
+  const revoked = /* @__PURE__ */ new Map();
   let unfollow = () => {};
   let followed = "";
-  const denied = (error) =>
-    error?.kind === "denied" ||
-    [401, 403].includes(error?.status) ||
-    /^Relay read failed \((401|403)\)$/.test(error?.message ?? "");
   function revoke(ids) {
     for (const id of ids) revoked.set(id, (revoked.get(id) ?? 0) + 1);
-    for (const [key, result] of readSets)
-      readSets.set(key, {
+    for (const [id, task] of acceptedWrites)
+      if (ids.includes(task.channel)) acceptedWrites.delete(id);
+    for (const [key2, result] of readSets)
+      readSets.set(key2, {
         ...result,
         tasks: result.tasks.filter((task) => !revoked.has(task.channel)),
       });
@@ -427,7 +532,7 @@ export function createModel(
             saveQueue.find(({ input }) => input.channel === id)?.input ??
             (state.pending && tag(state.pending, "h") === id
               ? parseTask(state.pending)
-              : undefined);
+              : void 0);
           if (!task) {
             unverified.delete(id);
             continue;
@@ -468,9 +573,11 @@ export function createModel(
             },
           },
         ];
-        const freshSources = new Set();
+        const freshSources = /* @__PURE__ */ new Set();
+        const retireWrites = /* @__PURE__ */ new Map();
         await Promise.all(
           sources.map(async (source) => {
+            const writesAtStart = new Map(acceptedWrites);
             const accessEpochs = new Map(revoked);
             const epoch = source.channel
               ? (revoked.get(source.channel) ?? 0)
@@ -497,11 +604,23 @@ export function createModel(
                 )
                   revoked.delete(task.channel);
               }
+              for (const [id, task] of writesAtStart) {
+                const covers =
+                  result.tasks.some((item) => item.id === id) ||
+                  (!result.partial &&
+                    (source.channel === task.channel ||
+                      (source.key === "personal" &&
+                        state.personal.includes(task.channel)) ||
+                      (source.key === "assigned" &&
+                        task.assignees.includes(session.viewer))));
+                if (covers && acceptedWrites.get(id) === task)
+                  retireWrites.set(id, { task });
+              }
               readSets.set(source.key, result);
               freshSources.add(source.key);
             } catch (error) {
               errors.push(String(error.message || error));
-              if (denied(error)) {
+              if (isReadDenied(error)) {
                 readSets.delete(source.key);
                 if (source.channel) revoke([source.channel]);
               }
@@ -516,15 +635,15 @@ export function createModel(
           assigned && !assigned.partial
             ? new Set(assigned.tasks.map((task) => task.id))
             : null;
-        // Retained reads are fallback data; successful reads in this pass win.
         const results = [...sources]
           .sort(
             (a, b) =>
               Number(freshSources.has(a.key)) - Number(freshSources.has(b.key)),
           )
-          .map(({ key }) => {
-            const result = readSets.get(key);
-            if (!result || freshSources.has(key) || !assignedIds) return result;
+          .map(({ key: key2 }) => {
+            const result = readSets.get(key2);
+            if (!result || freshSources.has(key2) || !assignedIds)
+              return result;
             return {
               ...result,
               tasks: result.tasks.filter(
@@ -535,14 +654,19 @@ export function createModel(
             };
           })
           .filter(Boolean);
-        const tasks = [
+        let tasks = [
           ...new Map(
             results
               .flatMap((result) => result.tasks)
               .filter((task) => !revoked.has(task.channel))
               .map((task) => [task.id, task]),
           ).values(),
-        ];
+        ].filter(
+          (task) =>
+            openChannels.has(task.channel) ||
+            state.personal.includes(task.channel) ||
+            task.assignees.includes(session.viewer),
+        );
         try {
           await session.channels.resolve?.(
             [...new Set(tasks.map((task) => task.channel))],
@@ -551,8 +675,36 @@ export function createModel(
         } catch (error) {
           errors.push(String(error.message || error));
         }
+        for (const [id, { task }] of retireWrites) {
+          if (acceptedWrites.get(id) !== task) continue;
+          const head = [...freshSources]
+            .flatMap((key2) => readSets.get(key2)?.tasks ?? [])
+            .find((item) => item.id === id);
+          const replace = (items, assignedOnly = false) =>
+            items.flatMap((item) =>
+              item.id !== id
+                ? [item]
+                : head &&
+                    (!assignedOnly || head.assignees.includes(session.viewer))
+                  ? [head]
+                  : [],
+            );
+          for (const [key2, result] of readSets)
+            readSets.set(key2, {
+              ...result,
+              tasks: replace(result.tasks, key2 === "assigned"),
+            });
+          tasks = replace(tasks);
+          acceptedWrites.delete(id);
+        }
         emit({
-          tasks: tasks.filter((task) => !revoked.has(task.channel)),
+          tasks: tasks.filter(
+            (task) =>
+              !revoked.has(task.channel) &&
+              (openChannels.has(task.channel) ||
+                state.personal.includes(task.channel) ||
+                task.assignees.includes(session.viewer)),
+          ),
           partial: results.some((result) => result.partial),
           loading: false,
           error: recoveryError || errors.join(" "),
@@ -560,7 +712,7 @@ export function createModel(
         followAccess();
       } while (again && !disposed);
     })().finally(() => {
-      running = undefined;
+      running = void 0;
       void drainSaves();
     });
     return running;
@@ -600,7 +752,6 @@ export function createModel(
       throw new Error(
         "An assignee is no longer in this channel. Choose a current member.",
       );
-
     if (
       home.channelType === "system" &&
       !(await discover()).includes(task.channel)
@@ -657,19 +808,16 @@ export function createModel(
       const writer = session.configArtifactWriter;
       const signed = await writer.sign(taskTemplate(task), signal);
       signal.throwIfAborted();
-      // Persist the exact event before sending. Recovery never signs a replacement.
       persist(signed, saveQueue);
       emit({ pending: signed });
       try {
         await writer.publish(signed, signal);
       } catch (error) {
-        // The host preserves these machine-readable relay refusals (including HTTP 409 as conflict).
-        // Only the initial attempt may be retired; retrySaved never clears a refusal.
+        const refusal = refusalOf(error);
         if (
           writer.isNotSent?.(error) ||
-          /^(conflict|restricted|auth-required|blocked|invalid|rate-limited):/.test(
-            error?.reason ?? error?.message ?? "",
-          )
+          (refusal.definite &&
+            !["duplicate", "archived"].includes(refusal.refusal))
         ) {
           signal.throwIfAborted();
           persist(null, saveQueue);
@@ -707,7 +855,8 @@ export function createModel(
     try {
       while (saveQueue.length && !state.pending && !disposed) {
         const nextIndex = saveQueue.findIndex(
-          (entry) => !aside.some((event) => tag(event, "d") === entry.input.id),
+          (entry2) =>
+            !aside.some((event) => tag(event, "d") === entry2.input.id),
         );
         if (nextIndex < 0) break;
         const entry = saveQueue[nextIndex];
@@ -720,7 +869,7 @@ export function createModel(
             persist(null, reordered);
           } catch (error) {
             emit({ error: String(error.message || error) });
-            return; // No write was attempted; never offer to discard another draft.
+            return;
           }
           saveQueue = reordered;
         }
@@ -729,8 +878,6 @@ export function createModel(
           entry.resolve();
         } catch (error) {
           entry.reject(error);
-          // Retain the entire draft, including its destination and metadata.
-          // An uncertain signed attempt is recovered before anything is re-signed.
           emit({ queuePaused: !state.pending });
           break;
         }
@@ -770,7 +917,6 @@ export function createModel(
         reject,
       };
     });
-    // Throw synchronously on storage failure so the composer keeps its draft.
     const next = [...saveQueue, entry];
     persist(state.pending, next);
     saveQueue = next;
@@ -812,7 +958,7 @@ export function createModel(
         (event) =>
           (event.kind === 45010 && tag(event, "type") === TYPE) ||
           event.kind === 45011 ||
-          ([39000, 39002].includes(event.kind) &&
+          ([39e3, 39002].includes(event.kind) &&
             state.tasks.some((task) => task.channel === tag(event, "d"))),
       )
     )
@@ -841,7 +987,6 @@ export function createModel(
           : saveQueue;
       const retained = [...aside, event];
       try {
-        // Keep the signed event atomically with the remaining queue. It may still arrive.
         persist(null, remaining, retained);
         aside = retained;
         saveQueue = remaining;
@@ -862,7 +1007,6 @@ export function createModel(
         return;
       emit({ saving: true, error: "" });
       const errors = [];
-      // Explicit checks only: retain absent/inaccessible attempts, never infer non-delivery.
       for (const event of [...aside]) {
         try {
           const found = await read([
@@ -888,6 +1032,42 @@ export function createModel(
       await refresh();
       if (errors.length) emit({ error: errors.join("; ") });
       void drainSaves();
+    },
+    retryRecovery() {
+      if (disposed || !ownsJournal || !recoveryError) return;
+      recoveryError = "";
+      restoreJournal();
+      emit({ error: recoveryError });
+      void refresh();
+    },
+    damagedJournalText() {
+      return ownsJournal ? damagedJournal : null;
+    },
+    resetDamagedJournal() {
+      if (disposed || !ownsJournal || damagedJournal === null || state.saving)
+        return false;
+      try {
+        if (storage.getItem(key) !== damagedJournal)
+          throw new Error(
+            "Saved tasks changed. Reload before recovering them.",
+          );
+        const backupKey = `${key}:recovery:${crypto.randomUUID()}`;
+        storage.setItem(backupKey, damagedJournal);
+        if (storage.getItem(backupKey) !== damagedJournal)
+          throw new Error("Could not preserve the saved task backup.");
+        storage.removeItem(key);
+        damagedJournal = null;
+        recoveryError = "";
+        saveQueue = [];
+        aside = [];
+        optimisticTask = null;
+        emit({ pending: null, queuePaused: false, error: "" });
+        void refresh();
+        return true;
+      } catch (error) {
+        emit({ error: String(error.message || error) });
+        return false;
+      }
     },
     discardUnsent() {
       if (disposed || !ownsJournal) return;
@@ -926,8 +1106,7 @@ export function createModel(
     },
   };
 }
-
-export function apply(ctx) {
+function apply(ctx) {
   const R = ctx.react,
     h = R.createElement;
   const iconPath =
@@ -960,13 +1139,15 @@ export function apply(ctx) {
         "data-buzz-ui": "",
         "data-variant": "ghost",
         "data-size": "sm",
-        "data-disabled": props.disabled ? "" : undefined,
+        "data-disabled": props.disabled ? "" : void 0,
         onClick,
         ...props,
       },
       h("span", { className: "buzz-button-label" }, label),
     );
-  const listeners = new Set();
+  const ui = typeof ctx.get === "function" ? ctx.get("ui", false) : ctx.ui;
+  const hostError = compatibilityError(ui);
+  const listeners = /* @__PURE__ */ new Set();
   let model, relayState, stopChannels;
   const notify = () => {
     for (const listener of listeners) listener();
@@ -981,9 +1162,10 @@ export function apply(ctx) {
       return;
     model?.dispose();
     stopChannels?.();
-    model = undefined;
+    model = void 0;
     relayState = next;
     if (
+      !hostError &&
       next.status === "ready" &&
       !next.cached &&
       next.viewer &&
@@ -1025,7 +1207,7 @@ export function apply(ctx) {
     return (
       profile?.verified?.fullName?.trim() ||
       profile?.name ||
-      `${key.slice(0, 8)}…`
+      `${key.slice(0, 8)}\u2026`
     );
   };
   const chipStyle = {
@@ -1050,7 +1232,7 @@ export function apply(ctx) {
     const source =
       typeof picture === "string" && picture.startsWith("https://")
         ? relayState.session.media?.(picture, "small")
-        : undefined;
+        : void 0;
     return h(
       "span",
       {
@@ -1095,7 +1277,7 @@ export function apply(ctx) {
     onChange,
     disabled,
     label,
-    placeholder = "Assign…",
+    placeholder = "Assign\u2026",
   }) {
     const [search, setSearch] = R.useState("");
     const [active, setActive] = R.useState(null);
@@ -1114,7 +1296,6 @@ export function apply(ctx) {
         ?.catch(() => {});
       return stop;
     }, [memberKey]);
-
     const id = R.useId(),
       menu = R.useRef(null),
       trigger = R.useRef(null);
@@ -1203,7 +1384,7 @@ export function apply(ctx) {
           "data-buzz-ui": "",
           "data-size": "sm",
           "aria-label": "Search people",
-          placeholder: "Search people…",
+          placeholder: "Search people\u2026",
           value: search,
           autoFocus: true,
           role: "combobox",
@@ -1212,7 +1393,7 @@ export function apply(ctx) {
           "aria-controls": `${id}-results`,
           "aria-activedescendant": matches.includes(active)
             ? `${id}-${active}`
-            : undefined,
+            : void 0,
           onChange: (event) => {
             setSearch(event.target.value);
             setActive(null);
@@ -1242,7 +1423,9 @@ export function apply(ctx) {
   function DatePicker({ label, value, onChange, triggerProps }) {
     const [open, setOpen] = R.useState(false);
     const popup = R.useRef(null);
-    const selected = value ? new Date(`${value}T12:00:00`) : undefined;
+    const selected = value
+      ? /* @__PURE__ */ new Date(`${value}T12:00:00`)
+      : void 0;
     return h(
       "span",
       {
@@ -1253,13 +1436,13 @@ export function apply(ctx) {
         },
       },
       h(
-        ctx.ui.PopoverRoot,
+        ui.PopoverRoot,
         { open, onOpenChange: setOpen },
-        h(ctx.ui.PopoverTrigger, {
-          render: button(label, undefined, triggerProps),
+        h(ui.PopoverTrigger, {
+          render: button(label, void 0, triggerProps),
         }),
         h(
-          ctx.ui.PopoverPopup,
+          ui.PopoverPopup,
           {
             ref: popup,
             "aria-label": "Choose due date",
@@ -1268,7 +1451,7 @@ export function apply(ctx) {
             onPointerDown: (event) => event.stopPropagation(),
             onKeyDown: (event) => event.stopPropagation(),
           },
-          h(ctx.ui.Calendar, {
+          h(ui.Calendar, {
             mode: "single",
             required: true,
             autoFocus: true,
@@ -1302,7 +1485,7 @@ export function apply(ctx) {
       triggerProps: props,
     });
   }
-  function TimeColumn({ name, value, count, onChange }) {
+  function TimeColumn({ name: name2, value, count, onChange }) {
     const list = R.useRef(null);
     R.useLayoutEffect(() => {
       const selected = list.current?.querySelector('[aria-selected="true"]');
@@ -1316,7 +1499,7 @@ export function apply(ctx) {
       {
         ref: list,
         role: "listbox",
-        "aria-label": name,
+        "aria-label": name2,
         style: {
           height: "10rem",
           width: "5rem",
@@ -1388,7 +1571,7 @@ export function apply(ctx) {
         },
       },
       h(
-        ctx.ui.PopoverRoot,
+        ui.PopoverRoot,
         {
           open,
           onOpenChange: (next) => {
@@ -1400,11 +1583,11 @@ export function apply(ctx) {
             setOpen(next);
           },
         },
-        h(ctx.ui.PopoverTrigger, {
-          render: button(label, undefined, triggerProps),
+        h(ui.PopoverTrigger, {
+          render: button(label, void 0, triggerProps),
         }),
         h(
-          ctx.ui.PopoverPopup,
+          ui.PopoverPopup,
           {
             ref: popup,
             "aria-label": "Choose time",
@@ -1485,13 +1668,13 @@ export function apply(ctx) {
         }
         if (titleElement.current && !draftRef.current)
           titleElement.current.textContent = title;
-      } catch (error) {
+      } catch (error2) {
         if (!admitted) {
           if (!draftRef.current) {
             draftRef.current = { ...original, title };
             setDraft(draftRef.current);
           }
-          setError(error.message);
+          setError(error2.message);
         }
       }
     };
@@ -1508,7 +1691,7 @@ export function apply(ctx) {
       h(
         "span",
         {
-          className: draft && removable ? "task-edit-chip" : undefined,
+          className: draft && removable ? "task-edit-chip" : void 0,
           style: { display: "inline-flex", alignItems: "center" },
         },
         control,
@@ -1620,7 +1803,7 @@ export function apply(ctx) {
           },
         );
         animation.finished.then(() => removeCompleted(task.id)).catch(() => {});
-      }, 3000);
+      }, 3e3);
       return () => {
         clearTimeout(timer);
         animation?.cancel();
@@ -1640,25 +1823,27 @@ export function apply(ctx) {
       try {
         await owner.save({ ...task, ...patch });
         titleElement.current.textContent = patch.title ?? task.title;
-      } catch (error) {
-        setError(error.message);
+      } catch (error2) {
+        setError(error2.message);
       }
     };
     const saveDue = (date, time) => {
       try {
         setError("");
         void save(dueValue(date, time));
-      } catch (error) {
-        setError(error.message);
+      } catch (error2) {
+        setError(error2.message);
       }
     };
     const members = owner.channel(task.channel)?.members ?? [relayState.viewer];
     const due = task.dueAt
       ? new Date(task.dueAt)
       : task.dueDate
-        ? new Date(`${task.dueDate}T12:00:00`)
+        ? /* @__PURE__ */ new Date(`${task.dueDate}T12:00:00`)
         : null;
-    const today = dueInputs({ dueAt: new Date().toISOString() }).date;
+    const today = dueInputs({
+      dueAt: /* @__PURE__ */ new Date().toISOString(),
+    }).date;
     const overdue =
       !task.done &&
       (task.dueAt
@@ -1709,8 +1894,8 @@ export function apply(ctx) {
           type: "checkbox",
           className: "buzz-checkbox",
           "data-buzz-ui": "",
-          "data-checked": task.done ? "" : undefined,
-          "data-disabled": disabled ? "" : undefined,
+          "data-checked": task.done ? "" : void 0,
+          "data-disabled": disabled ? "" : void 0,
           checked: task.done,
           disabled,
           "aria-label": `${task.done ? "Reopen" : "Complete"} ${task.title}`,
@@ -1796,7 +1981,7 @@ export function apply(ctx) {
             outline: "none",
             cursor: "text",
             overflowWrap: "anywhere",
-            textDecoration: task.done ? "line-through" : undefined,
+            textDecoration: task.done ? "line-through" : void 0,
             color: task.done ? "var(--text-muted)" : "var(--text-standard)",
           },
         }),
@@ -1861,7 +2046,7 @@ export function apply(ctx) {
                               h(
                                 "time",
                                 { dateTime: task.dueAt || task.dueDate },
-                                `${due.getDate()} ${due.toLocaleDateString("en-GB", { month: "short" })}${due.getFullYear() !== new Date().getFullYear() ? ` ${due.getFullYear()}` : ""}, ${due.toLocaleDateString("en-GB", { weekday: "short" })}`,
+                                `${due.getDate()} ${due.toLocaleDateString("en-GB", { month: "short" })}${due.getFullYear() !== /* @__PURE__ */ new Date().getFullYear() ? ` ${due.getFullYear()}` : ""}, ${due.toLocaleDateString("en-GB", { weekday: "short" })}`,
                               ),
                             ),
                             "date",
@@ -1915,8 +2100,11 @@ export function apply(ctx) {
                               ),
                               !draft && "at ",
                               (
-                                due || new Date(`2000-01-01T${task.dueTime}:00`)
-                              ).toLocaleTimeString(undefined, {
+                                due ||
+                                /* @__PURE__ */ new Date(
+                                  `2000-01-01T${task.dueTime}:00`,
+                                )
+                              ).toLocaleTimeString(void 0, {
                                 hour: "numeric",
                                 minute: "2-digit",
                               }),
@@ -2042,14 +2230,14 @@ export function apply(ctx) {
     const destinationMenu = R.useRef(null);
     const disabled =
       state.loading || state.readOnly || (!!state.pending && !state.saving);
-    const channel = destination ? owner.channel(destination) : undefined;
+    const channel = destination ? owner.channel(destination) : void 0;
     const saving = R.useRef(false);
     const removableChip = (kind, selected, clear, control) =>
       h(
         "span",
         {
           key: kind,
-          className: selected ? "task-edit-chip" : undefined,
+          className: selected ? "task-edit-chip" : void 0,
           style: { display: "inline-flex", alignItems: "center" },
         },
         control,
@@ -2093,7 +2281,7 @@ export function apply(ctx) {
         try {
           const savingTask = owner.save({
             id: crypto.randomUUID(),
-            channel: destination || undefined,
+            channel: destination || void 0,
             title,
             done: false,
             ...dueValue(date, time),
@@ -2107,9 +2295,8 @@ export function apply(ctx) {
           setFocused(false);
           saving.current = false;
           await savingTask;
-        } catch (error) {
-          // Background failures belong to the durable queue, not the next draft.
-          if (!admitted) setError(error.message);
+        } catch (error2) {
+          if (!admitted) setError(error2.message);
         }
       } finally {
         saving.current = false;
@@ -2308,10 +2495,12 @@ export function apply(ctx) {
                   (kind === "date"
                     ? date
                     : time &&
-                      new Date(`2000-01-01T${time}:00`).toLocaleTimeString(
-                        undefined,
-                        { hour: "numeric", minute: "2-digit" },
-                      )) || `Add ${kind}`,
+                      /* @__PURE__ */ new Date(
+                        `2000-01-01T${time}:00`,
+                      ).toLocaleTimeString(void 0, {
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })) || `Add ${kind}`,
                 ),
                 kind,
                 kind === "date" ? date : time,
@@ -2323,7 +2512,9 @@ export function apply(ctx) {
                     setTime(value);
                     if (value && !date)
                       setDate(
-                        dueInputs({ dueAt: new Date().toISOString() }).date,
+                        dueInputs({
+                          dueAt: /* @__PURE__ */ new Date().toISOString(),
+                        }).date,
                       );
                   }
                 },
@@ -2373,12 +2564,15 @@ export function apply(ctx) {
       () =>
         channelId && owner && (!scope || scope === relayState.scope)
           ? owner.followChannel(channelId)
-          : undefined,
+          : void 0,
       [owner, channelId, scope],
     );
-    const [completed, setCompleted] = R.useState(() => new Set());
+    const [completed, setCompleted] = R.useState(
+      () => /* @__PURE__ */ new Set(),
+    );
     const retainCompleted = R.useCallback(
-      (id) => setCompleted((previous) => new Set([...previous, id])),
+      (id) =>
+        setCompleted((previous) => /* @__PURE__ */ new Set([...previous, id])),
       [],
     );
     const removeCompleted = R.useCallback(
@@ -2392,6 +2586,17 @@ export function apply(ctx) {
     );
     const [creating, setCreating] = R.useState(false);
     const [hasDraft, setHasDraft] = R.useState(false);
+    const [confirmReset, setConfirmReset] = R.useState(false);
+    const [showBackup, setShowBackup] = R.useState(false);
+    if (hostError)
+      return h(
+        "section",
+        {
+          "aria-label": "To-do",
+          style: { padding: "var(--space-panel-inset)" },
+        },
+        h("p", { role: "alert" }, hostError),
+      );
     if (!owner || (scope && scope !== relayState.scope))
       return h(
         "p",
@@ -2410,7 +2615,7 @@ export function apply(ctx) {
     const visible = selected.filter(
       (task) => !task.done || completed.has(task.id),
     );
-    const groups = new Map();
+    const groups = /* @__PURE__ */ new Map();
     if (!channelId) groups.set("personal", []);
     for (const task of visible) {
       const group =
@@ -2479,7 +2684,6 @@ export function apply(ctx) {
         ),
       );
     }
-
     return h(
       "section",
       {
@@ -2535,7 +2739,6 @@ export function apply(ctx) {
                   disabled: state.saving,
                 }),
             ),
-
           state.readOnly &&
             !state.error &&
             !state.loading &&
@@ -2549,16 +2752,57 @@ export function apply(ctx) {
               "div",
               null,
               h("p", { role: "alert" }, state.error),
-              button(
-                "Retry",
-                () =>
-                  void (state.queuePaused
-                    ? owner.retrySaved()
-                    : owner.refresh()),
-                {
-                  disabled: state.saving,
-                },
+              (!state.recoveryBlocked || state.canRetryRecovery) &&
+                button(
+                  "Retry",
+                  () =>
+                    void (state.recoveryBlocked
+                      ? owner.retryRecovery()
+                      : state.queuePaused
+                        ? owner.retrySaved()
+                        : owner.refresh()),
+                  {
+                    disabled: state.saving,
+                  },
+                ),
+            ),
+          state.canResetJournal &&
+            h(
+              "div",
+              null,
+              h(
+                "p",
+                null,
+                "Back up the unreadable local journal and start a new one. Unsent drafts will leave this list but remain in the backup on this device. Previously sent tasks may still arrive; check the list before recreating them.",
               ),
+              button("Show saved task backup", () => setShowBackup(true)),
+              showBackup &&
+                h(
+                  "label",
+                  null,
+                  "Copy this plaintext backup to a safe location. It may include tasks from channels you can no longer access.",
+                  h("textarea", {
+                    "aria-label": "Saved task backup",
+                    readOnly: true,
+                    value: owner.damagedJournalText() ?? "",
+                    onFocus: (event) => event.currentTarget.select(),
+                    style: {
+                      display: "block",
+                      width: "100%",
+                      boxSizing: "border-box",
+                    },
+                  }),
+                ),
+              confirmReset
+                ? h(
+                    "div",
+                    null,
+                    button("Back up and reset saved tasks", () => {
+                      if (owner.resetDamagedJournal()) setConfirmReset(false);
+                    }),
+                    button("Cancel", () => setConfirmReset(false)),
+                  )
+                : button("Recover saved tasks", () => setConfirmReset(true)),
             ),
           state.pending &&
             !state.saving &&
@@ -2608,7 +2852,7 @@ export function apply(ctx) {
               h(
                 "p",
                 { role: "status" },
-                `“${state.queuedTitle}” is saved on this device but has not been sent.`,
+                `\u201C${state.queuedTitle}\u201D is saved on this device but has not been sent.`,
               ),
               button("Discard unsent task", () => owner.discardUnsent()),
             ),
@@ -2618,7 +2862,6 @@ export function apply(ctx) {
               { role: "status" },
               "Showing up to 500 tasks per list. Some tasks may be missing from this first version.",
             ),
-
           h(AddTask, {
             key: channelId || "personal",
             autoFocus: creating,
@@ -2632,7 +2875,7 @@ export function apply(ctx) {
               h(
                 channelId ? "div" : "details",
                 {
-                  open: channelId ? undefined : true,
+                  open: channelId ? void 0 : true,
                   className: "tasks-group",
                   key: id,
                   style: {
@@ -2821,3 +3064,14 @@ export function apply(ctx) {
           : h("p", null, "Open To-do from a channel toolbar."),
   });
 }
+export {
+  apply,
+  compatibilityError,
+  createModel,
+  dueInputs,
+  dueValue,
+  inject,
+  matchesAssignee,
+  parseTask,
+  taskTemplate,
+};
