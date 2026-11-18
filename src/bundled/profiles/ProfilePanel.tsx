@@ -661,7 +661,7 @@ function ProfileDetails({
             {presence !== "unknown" && (
               <p className="text-body-sm text-primary">
                 {
-                  { online: "Active", away: "Away", offline: "Offline" }[
+                  { online: "Online", away: "Away", offline: "Offline" }[
                     presence
                   ]
                 }
