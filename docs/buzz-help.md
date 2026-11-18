@@ -1163,8 +1163,8 @@ available rather than silently discarding it.
   summarized. The input uses thousands of tokens, shown by the **K** suffix:
   enter `40` for 40,000 tokens or `250` for 250,000. The minimum is `1` (1,000
   tokens). Leave blank for the default.
-  The window is capped at the service's safety threshold for the model, normally
-  80% of its usable input budget. Changes apply from the next turn after Save.
+  The window is capped at the service's safe limit for the model. Changes apply
+  from the next turn after Save.
   If the service disables custom windows, new tasks use default compaction
   and your saved window is kept for when the feature returns.
 - Some builds offer **AI setup → Automatic** when creating an

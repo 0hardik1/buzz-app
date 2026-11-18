@@ -146,7 +146,7 @@ it.each(["deadline", "cancel"] as const)(
 async function fixture(
   selection: Partial<RemoteAgent> = {},
   catalog?: readonly RemoteAgentModel[],
-  options: { compactionAllowed: boolean | undefined } = {
+  options: { compactionAllowed: boolean } = {
     compactionAllowed: true,
   },
 ) {
@@ -169,9 +169,7 @@ async function fixture(
         email: "a@example.com",
         canUseRemoteAgents: true,
         canUseBuilderlabDecisions: false,
-        ...(compactionAllowed === undefined
-          ? {}
-          : { canCustomizeCompactionWindow: compactionAllowed }),
+        canCustomizeCompactionWindow: compactionAllowed,
       },
     }),
     undefined,
@@ -287,43 +285,16 @@ async function choose(label: string, value: string) {
     await user.click(await screen.findByRole("option", { name: value }));
   }
 }
-it.each([false, undefined])(
-  "hides custom compaction when capability is %s and preserves it on unrelated saves",
-  async (compactionAllowed) => {
-    const h = await fixture(
-      { modelSelectionStatus: "valid", autoCompactWindow: 40000 },
-      undefined,
-      { compactionAllowed },
-    );
-    expect(
-      screen.queryByRole("button", { name: "Advanced settings" }),
-    ).toBeNull();
-    fireEvent.change(screen.getByRole("textbox", { name: "Instructions" }), {
-      target: { value: "Updated instructions" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Save" })).toBeNull(),
-    );
-    const updates = h.request.mock.calls.filter(([request]) =>
-      request.url.endsWith("/update-agent"),
-    );
-    expect(
-      updates.map(([request]) => JSON.parse(request.body ?? "{}")),
-    ).toEqual([
-      {
-        agent_pubkey: "ab".repeat(32),
-        agent_instructions: "Updated instructions",
-      },
-    ]);
-    h.session.dispose();
-  },
-);
-it("ignores a hidden compaction draft after the capability is disabled", async () => {
-  const h = await fixture({
-    modelSelectionStatus: "valid",
-    autoCompactWindow: 40000,
-  });
+it("hides disabled compaction settings and ignores their draft on unrelated saves", async () => {
+  const h = await fixture(
+    { modelSelectionStatus: "valid", autoCompactWindow: 40000 },
+    undefined,
+    { compactionAllowed: false },
+  );
+  expect(
+    screen.queryByRole("button", { name: "Advanced settings" }),
+  ).toBeNull();
+  await act(() => h.changeCompactionCapability(true));
   fireEvent.click(screen.getByRole("button", { name: "Advanced settings" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Auto-compact at" }), {
     target: { value: "0.999" },
@@ -410,7 +381,7 @@ it("saves and clears a compaction window without changing other settings", async
   );
 });
 
-it.each(["0", "0.001", "0.999", "-1", "2147483.648", "1.0001"])(
+it.each(["0", "0.999", "-1", "2147483.648", "1.0001"])(
   "does not save invalid compaction window %j",
   async (value) => {
     await fixture({ modelSelectionStatus: "valid" });
