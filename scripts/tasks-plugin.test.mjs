@@ -42,8 +42,12 @@ function fixture() {
       resolve: vi.fn(async () => {}),
       refreshRoster: vi.fn(async () => true),
     },
-    snapshotRead: vi.fn(async ([filter]) =>
-      [...records.values()].filter(
+    snapshotRead: vi.fn(async ([filter]) => {
+      if (filter.artifact === "current" && filter.consistency)
+        throw new Error(
+          "invalid: consistency is not accepted on artifact reads",
+        );
+      return [...records.values()].filter(
         (event) =>
           (!filter.ids || filter.ids.includes(event.id)) &&
           (!filter["#p"] ||
@@ -57,8 +61,8 @@ function fixture() {
               )) &&
           (!filter["#d"] ||
             filter["#d"].includes(event.tags.find(([key]) => key === "d")[1])),
-      ),
-    ),
+      );
+    }),
     configArtifactWriter: {
       sign: vi.fn(async (event) => ({
         ...event,
@@ -130,6 +134,16 @@ describe("Tasks plugin", () => {
     expect(f.model.snapshot().tasks).toHaveLength(1);
     await f.model.save({ ...f.model.snapshot().tasks[0], done: true });
     expect(f.model.snapshot().tasks[0].done).toBe(true);
+    expect(
+      f.session.snapshotRead.mock.calls.some(([filters]) =>
+        filters.some(
+          (filter) =>
+            filter.consistency === "strong" &&
+            filter["#d"]?.includes(taskId) &&
+            !filter.artifact,
+        ),
+      ),
+    ).toBe(true);
     await f.model.save({ ...f.model.snapshot().tasks[0], done: false });
     expect(f.model.snapshot().tasks[0].done).toBe(false);
     expect(f.saved.size).toBe(0);
@@ -986,9 +1000,7 @@ it("does not offer a destructive reset after storage access fails", async () => 
 });
 
 it("reports missing host controls and Web Locks before mounting task editors", async () => {
-  const { compatibilityError } = await import(
-    "../examples/plugins/tasks/plugin.js"
-  );
+  const { compatibilityError } = await import("./plugin.js");
   const ui = {
     Calendar: {},
     PopoverRoot: {},

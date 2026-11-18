@@ -430,7 +430,6 @@ function createModel(
     const result = await read([
       {
         artifact: "current",
-        consistency: "strong",
         kinds: [45010],
         "#type": [TYPE],
         ...extra,
@@ -796,11 +795,16 @@ function createModel(
       }
       await authorize(task);
       if (task.event) {
-        const heads = await current({ "#h": [task.channel], "#d": [task.id] });
-        if (
-          heads.tasks.length !== 1 ||
-          heads.tasks[0].event.id !== task.event.id
-        )
+        const heads = await read([
+          {
+            kinds: [45010],
+            "#h": [task.channel],
+            "#d": [task.id],
+            limit: 1,
+            consistency: "strong",
+          },
+        ]);
+        if (heads.length !== 1 || heads[0].id !== task.event.id)
           throw new Error(
             "This task changed elsewhere. Refresh and try your edit again.",
           );

@@ -36,6 +36,8 @@ function fixture({ locks = lock, onChange = () => {} } = {}) {
       list: () => ({ channels: [{ id: channel }] }),
     },
     snapshotRead: async ([filter]) => {
+      if (filter.artifact === "current" && filter.consistency)
+        throw Error("invalid: consistency is not accepted on artifact reads");
       if (filter["#p"] && holdAssigned) await holdAssigned();
       if (filter.ids && readExact) return readExact(filter.ids);
       if (filter["#p"] && assignedFailure) throw Error("assigned read failed");

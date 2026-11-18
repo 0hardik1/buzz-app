@@ -138,6 +138,15 @@ export function wrapRelay(service) {
                 };
               if (key === "snapshotRead")
                 return async (filters, options) => {
+                  if (
+                    filters.some(
+                      (filter) =>
+                        filter.artifact === "current" && filter.consistency,
+                    )
+                  )
+                    throw new Error(
+                      "invalid: consistency is not accepted on artifact reads",
+                    );
                   if (scenario === "loading") return new Promise(() => {});
                   if (
                     ["offline", "forbidden", "server-error"].includes(scenario)
