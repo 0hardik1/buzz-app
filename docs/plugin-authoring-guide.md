@@ -259,3 +259,12 @@ Add `"host"` to `inject`, then:
 - Editing `manifest.host` and expecting `plugin_reload` to apply it; it refuses until the owner approves the update in Settings.
 - Invalid ids (uppercase, underscores in the plugin id, a page id starting with `-`), or an unknown manifest key, which rejects the whole folder.
 - Expecting React state to survive a reload, or a plugin added by drag and drop to be reloadable.
+
+### Shared calendar and popover
+
+Inject `ui` to use `ctx.ui.Calendar` (Buzz-styled React DayPicker) and
+`ctx.ui.PopoverRoot`, `PopoverTrigger`, and `PopoverPopup` (Buzz-styled Base UI).
+Render them with `ctx.react.createElement`; no runtime imports are needed.
+`PopoverPopup` includes its portal and positioning. Keep focus moving into the
+portal from triggering an enclosing form submit or row save. These components
+require a host that provides the `ui` service.

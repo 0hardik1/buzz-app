@@ -1,5 +1,6 @@
 import { createPluginStorage, type PluginStorage } from "./storage";
 import * as React from "react";
+import { pluginUi } from "./ui";
 import { PluginRuntime } from "./runtime";
 import type { Context } from "@deepseek-ai/cordis";
 import type { PluginManifest, PluginModule } from "./api";
@@ -59,6 +60,7 @@ export function createPluginManager(
   },
 ) {
   ctx.provide("react", React);
+  ctx.provide("ui", pluginUi);
   const builtInPlugins: PluginInfo[] = builtIn.map(({ manifest }) => ({
     manifest,
     source: "bundled",

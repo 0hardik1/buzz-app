@@ -2027,3 +2027,14 @@ occurs. It contains operation metadata, with no draft text or secrets. See
 ## Plugin account actions
 
 Plugins can add actions to your avatar menu. Profile-related actions may appear just above Settings; other plugin actions appear below it.
+
+## Optional To-do plugin
+
+With To-do installed, open **To-do** in navigation for personal tasks and channel
+tasks assigned to you. The checkmark in a channel header opens its shared list.
+Type a new task and press Enter, or click outside an edited row, to save. Date,
+time, and assignee controls appear while editing; their × buttons clear them.
+Adding a time selects today when no date is set. Removing the date also removes
+its time. Assignment search accepts full names and usernames, with Up/Down and
+Enter to select. The time picker currently uses 24-hour columns independently
+of the app's Clock preference. Completed tasks leave the list.

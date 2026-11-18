@@ -684,6 +684,14 @@ async fn plugin_reload(
     result
 }
 #[tauri::command]
+async fn plugin_content(
+    manager: tauri::State<'_, PluginManager>,
+    id: String,
+    revision: String,
+) -> Result<buzzodz_plugins::PluginContent, String> {
+    with_manager(manager, move |m| m.content(&id, &revision)).await
+}
+#[tauri::command]
 async fn plugin_module(
     manager: tauri::State<'_, PluginManager>,
     id: String,
@@ -818,6 +826,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         plugin_change,
         plugin_reload,
         plugin_module,
+        plugin_content,
         plugin_recover,
         plugin_host_run_command,
         plugin_host_call_context,

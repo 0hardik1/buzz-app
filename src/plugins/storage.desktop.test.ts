@@ -38,3 +38,27 @@ it("passes the pinned commit to the native Git import and the policy through the
   invoke.mockResolvedValueOnce(ready as never);
   await expect(storage.getCatalog()).resolves.toEqual(ready);
 });
+
+it("reads revision-pinned packaged artwork, preferring PNG and falling back to JPEG", async () => {
+  const { readPluginIcon } = await import("./storage");
+  invoke.mockResolvedValueOnce({ iconPng: "png", iconJpg: "jpg" } as never);
+  await expect(readPluginIcon("example.tasks", "revision")).resolves.toBe(
+    "data:image/png;base64,png",
+  );
+  expect(invoke).toHaveBeenLastCalledWith("plugin_content", {
+    id: "example.tasks",
+    revision: "revision",
+  });
+  invoke.mockResolvedValueOnce({ iconJpg: "jpg" } as never);
+  await expect(readPluginIcon("example.tasks", "revision")).resolves.toBe(
+    "data:image/jpeg;base64,jpg",
+  );
+  invoke.mockResolvedValueOnce({} as never);
+  await expect(
+    readPluginIcon("example.tasks", "revision"),
+  ).resolves.toBeUndefined();
+  invoke.mockRejectedValueOnce(new Error("Plugin was updated"));
+  await expect(readPluginIcon("example.tasks", "old")).rejects.toThrow(
+    "Plugin was updated",
+  );
+});

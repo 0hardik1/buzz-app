@@ -53,6 +53,7 @@ import {
   SidebarRightIcon,
 } from "../shared/design-system/icons/index";
 import { canRetryPlugin, type PluginManager } from "../plugins/manager";
+import { readPluginIcon } from "../plugins/storage";
 import type { Catalog, PluginInfo } from "../plugins/types";
 import type { Communities, Membership } from "../features/communities/service";
 import { PluginImport } from "./PluginImport";
@@ -200,10 +201,34 @@ function PluginIcon({
   plugin: PluginInfo;
   size?: number;
 }) {
+  const { revision, source } = plugin;
+  const id = plugin.manifest.id;
+  const hasIcon = Boolean(plugin.iconPngRevision || plugin.iconJpgRevision);
+  const [loaded, setLoaded] = useState<{
+    id: string;
+    revision: string;
+    url: string;
+  }>();
+  useEffect(() => {
+    if (source === "bundled" || !hasIcon) return;
+    let active = true;
+    void readPluginIcon(id, revision)
+      .then((url) => {
+        if (active) setLoaded(url ? { id, revision, url } : undefined);
+      })
+      .catch(() => {
+        if (active) setLoaded(undefined);
+      });
+    return () => {
+      active = false;
+    };
+  }, [id, revision, source, hasIcon]);
   const url =
-    plugin.source === "bundled"
-      ? bundledIcons.get(plugin.manifest.id)
-      : undefined;
+    source === "bundled"
+      ? bundledIcons.get(id)
+      : hasIcon && loaded?.id === id && loaded.revision === revision
+        ? loaded.url
+        : undefined;
   const [failedUrl, setFailedUrl] = useState<string>();
   return (
     <span

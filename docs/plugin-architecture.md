@@ -2449,8 +2449,9 @@ content in typed optional release-envelope fields, so the artifact hash and
 publisher signature cover them without changing plugin `apiVersion: 1`. Hosts
 continue to accept older `{ manifest, code }` artifacts. The catalog exposes only
 small content revisions for import/update comparison. `Manager::content` reads the
-integrity-checked content on demand; its native command and capability land with
-the first details surface that consumes them.
+integrity-checked content on demand through the main-window `plugin_content` command.
+Settings uses packaged artwork for installed plugins, preferring PNG to JPEG, with
+the same category color treatment as bundled plugins and a generic fallback.
 Both icon formats may be packaged together and are returned independently; the
 client decides which format to prefer.
 Header parsing and image decoding use a 16 MiB allocation budget; the underlying

@@ -1,0 +1,14 @@
+{
+  "id": "com.squareup.task-list",
+  "name": "To-do",
+  "apiVersion": 1,
+  "description": "Personal tasks and shared channel checklists, with assigned tasks grouped by channel.",
+  "discovery": {
+    "category": "productivity",
+    "tags": [
+      "tasks",
+      "to-do",
+      "checklist"
+    ]
+  }
+}

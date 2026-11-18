@@ -45,6 +45,10 @@ const noRequests = createPluginRequests({
   change: vi.fn(),
   error: () => null,
 });
+vi.mock("../plugins/storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../plugins/storage")>()),
+  readPluginIcon: vi.fn(async () => "data:image/png;base64,packaged"),
+}));
 vi.mock("../bundled/icons", () => ({
   bundledIcons: new Map([
     ["buzz.channels", "/channels-icon.png"],
@@ -512,7 +516,7 @@ it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
   expect(search).toHaveValue("Invoices");
 });
 
-it("opens each plugin's existing metadata and controls in a detail aside", () => {
+it("opens each plugin's existing metadata and controls in a detail aside", async () => {
   const { cards } = registry([]);
   const snapshot = {
     configuration: {
@@ -546,6 +550,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
             source: "external" as const,
             enabled: true,
             revision: "abc123",
+            iconPngRevision: "icon123",
             previous: null,
             hasSignature: true,
             publisher: "publisher-public-key",
@@ -648,7 +653,16 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
     name: "View External helper details",
   });
   const externalAuthor = within(externalCard).getByText("publisher-public-key");
-  expect(externalCard.querySelector("img")).toBeNull();
+  await waitFor(() =>
+    expect(externalCard.querySelector("img")).toHaveAttribute(
+      "src",
+      "data:image/png;base64,packaged",
+    ),
+  );
+  expect(externalCard.querySelector("img")?.parentElement).toHaveAttribute(
+    "data-branded",
+    "true",
+  );
   expect(externalAuthor.parentElement?.querySelector("svg")).toBeNull();
   const rowAction = screen.getByRole("button", {
     name: "Disable External helper",

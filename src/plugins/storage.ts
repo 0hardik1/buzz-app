@@ -168,3 +168,18 @@ export type PluginStorage = Omit<
   imports?: PluginImports | undefined;
   refreshManaged?: (() => Promise<StorageResult>) | undefined;
 };
+
+/** Read integrity-checked artwork from the installed revision, without running it. */
+export async function readPluginIcon(
+  id: string,
+  revision: string,
+): Promise<string | undefined> {
+  if (!desktop) return undefined;
+  const content = await invoke<{
+    iconPng?: string | null;
+    iconJpg?: string | null;
+  }>("plugin_content", { id, revision });
+  if (content.iconPng) return `data:image/png;base64,${content.iconPng}`;
+  if (content.iconJpg) return `data:image/jpeg;base64,${content.iconJpg}`;
+  return undefined;
+}

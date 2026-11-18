@@ -1,3 +1,4 @@
+import { pluginUi } from "./ui";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Context } from "@deepseek-ai/cordis";
 import * as React from "react";
@@ -386,17 +387,20 @@ it("disposing plugins leaves app-owned Cordis services alive", async () => {
   expect(sharedCleanup).toHaveBeenCalledTimes(1);
 });
 
-it("provides the host React instance through Cordis", async () => {
+it("provides host React and shared UI through Cordis", async () => {
   const { root } = harness();
   let received: unknown;
+  let receivedUi: unknown;
   const consumer = root.plugin({
-    inject: ["react"],
+    inject: ["react", "ui"],
     apply(ctx) {
       received = ctx.react;
+      receivedUi = ctx.ui;
     },
   });
   await consumer.await();
   expect(received).toBe(React);
+  expect(receivedUi).toBe(pluginUi);
 });
 
 it("defaults to platform storage using the bundled manifests", async () => {
