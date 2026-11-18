@@ -552,6 +552,8 @@ pub fn bundled_manifests() -> Vec<Manifest> {
         .expect("plugin development manifest"),
         serde_json::from_str(include_str!("../../../src/bundled/focus/manifest.json"))
             .expect("focus manifest"),
+        serde_json::from_str(include_str!("../../../src/bundled/jev-inbox/manifest.json"))
+            .expect("jev inbox manifest"),
         serde_json::from_str(include_str!(
             "../../../src/bundled/changesets/manifest.json"
         ))
