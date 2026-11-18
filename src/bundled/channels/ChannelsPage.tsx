@@ -953,8 +953,10 @@ function ChannelWorkspace({
     const muted = intent?.pending
       ? intent.muted
       : preferences.data.muted.includes(channel.id);
-    mute.change(channel.id, channel.name, !muted);
-    notify(`${muted ? "Unmuted" : "Muted"} ${channel.name}`, "success");
+    // Confirmed only once saved; a failed save shows the failure notice alone.
+    mute.change(channel.id, channel.name, !muted, () =>
+      notify(`${muted ? "Unmuted" : "Muted"} ${channel.name}`, "success"),
+    );
     return true;
   };
   // `/invite @name…` adds the mentioned people through the same session-owned

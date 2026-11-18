@@ -766,6 +766,7 @@ it("offers Retry when a mute from /mute cannot be saved", async () => {
   expect(
     within(failure).getByRole("button", { name: "Retry" }),
   ).toBeInTheDocument();
+  expect(screen.queryByText("Muted Planning")).not.toBeInTheDocument();
   expect(f.send).not.toHaveBeenCalled();
 });
 
