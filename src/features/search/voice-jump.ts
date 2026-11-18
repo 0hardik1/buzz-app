@@ -5,6 +5,7 @@ import type { DecisionFailure, Decisions } from "../decisions/service";
 import type { ChannelSummary, ChannelWindow } from "../relay/contracts";
 import type { InboxItem } from "../relay/inbox";
 import { messagePreviewText } from "../conversation/message-preview-text";
+import { soundsLike } from "./sounds-like";
 
 /** Goes to the likeliest place at or above this probability. */
 export const VOICE_JUMP_THRESHOLD = 0.5;
@@ -227,21 +228,26 @@ export async function pickPlace(
     state: JSON.stringify({
       spoken_request: spoken,
       places: places.map(
-        ({ kind, in: where, about, first, recent }, index) => ({
-          option: labels[index],
-          kind,
-          ...(where ? { in: where } : {}),
-          ...(about ? { about } : {}),
-          ...(first ? { first_message: first } : {}),
-          ...(recent ? { recent_messages: recent } : {}),
-        }),
+        ({ kind, name, in: where, about, first, recent }, index) => {
+          // A thread's name is its message; only real names are heard.
+          const heard = kind === "thread" ? [] : soundsLike(spoken, name);
+          return {
+            option: labels[index],
+            kind,
+            ...(heard.length ? { sounds_like: heard } : {}),
+            ...(where ? { in: where } : {}),
+            ...(about ? { about } : {}),
+            ...(first ? { first_message: first } : {}),
+            ...(recent ? { recent_messages: recent } : {}),
+          };
+        },
       ),
     }),
     questions: {
       place: {
         type: "choice",
         instructions:
-          "A person said `spoken_request` aloud to jump to a place in a workplace chat app. It is a speech transcript, so names may be misheard or spelled phonetically. Each option is a place they can go to: a channel (#name), a DM (named by the other people in it), a chat with an agent, or a thread (named by its first message and where it is). `places` gives each option's details, most recently active first. Which place did they ask to go to? A place whose name matches what they said beats one whose messages only mention it. Pick a thread only when they asked for a thread or a specific discussion. Pick none when no place plainly fits.",
+          "A person said `spoken_request` aloud to jump to a place in a workplace chat app. It is an automatic speech transcript, not typed text. Place names are often product names, jargon or people's names that speech recognition doesn't know, so it often writes a name as a common word or name that sounds like it, splits or joins its words, or spells it another way. Compare how the words sound when said aloud, not how they are spelled: a word or phrase that sounds like a place's name counts as saying that name. A place's `sounds_like` lists words in the transcript that sound like its name. Each option is a place they can go to: a channel (#name), a DM (named by the other people in it), a chat with an agent, or a thread (named by its first message and where it is). `places` gives each option's details, most recently active first. Which place did they ask to go to? A place whose name matches what they said, by sound, beats one whose messages only mention it. Pick a thread only when they asked for a thread or a specific discussion. Pick none when nothing they said sounds like or describes any place.",
         options,
       },
     },
