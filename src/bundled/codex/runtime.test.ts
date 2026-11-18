@@ -812,7 +812,7 @@ it("leaves Codex's Apps and plugins to its configuration only for an agent that 
   f.complete(0, "DONE");
   await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
 });
-it("keeps Codex's Apps and plugins off for a protected agent that allows them", async () => {
+it("keeps Codex's Apps, plugins and MCP servers off for a protected agent that allows them", async () => {
   const f = protectedPreview();
   try {
     await f.runtime.run({
@@ -827,7 +827,6 @@ it("keeps Codex's Apps and plugins off for a protected agent that allows them", 
       config: {
         "features.apps": false,
         "features.plugins": false,
-        // With no control, a protected agent's own servers stay off too.
         mcp_servers: {
           "company.tools": { enabled: false, command: "secret-tool" },
         },
