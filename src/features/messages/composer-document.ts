@@ -249,26 +249,6 @@ export function composerGroup(
     return null;
   return value as ComposerGroup;
 }
-/** The members of a group chip that the draft still mentions on its range. */
-export function groupMembers(
-  group: ComposerGroup,
-  recipients: readonly DraftRecipient[],
-  start: number,
-  end: number,
-): MentionRecipient[] {
-  return group.members.flatMap((member) =>
-    recipients.some(
-      (item) =>
-        item.pubkey === member.pubkey &&
-        item.name === member.name &&
-        item.label === group.label &&
-        item.start === start &&
-        item.end === end,
-    )
-      ? [{ pubkey: member.pubkey, name: member.name }]
-      : [],
-  );
-}
 /** A source token's recipient attributes from the draft's recipients on its
  * range: every labelled one as a group, else the one recipient. */
 export function tokenRecipients(
@@ -331,9 +311,6 @@ export function readComposerDocument(
         const resource = composerResource(node.attrs.resource);
         const semantic = composerToken(node.attrs.semantic);
         const group = composerGroup(node.attrs.group, node.attrs.source);
-        const members = group
-          ? groupMembers(group, draft.recipients, start, end)
-          : [];
         return node.type.create(
           {
             ...node.attrs,
@@ -346,7 +323,11 @@ export function readComposerDocument(
                 ? node.attrs.recipient
                 : null,
             group:
-              group && members.length ? { label: group.label, members } : null,
+              group &&
+              tokenRecipients(draft.recipients, node.attrs.source, {
+                start,
+                end,
+              }).group,
             resource:
               resource &&
               resource.source === node.attrs.source &&
