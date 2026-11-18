@@ -46,9 +46,13 @@ jobs:
       - name: Frontend build
         run: ./bin/pnpm exec vite build
       # The intake mapping must also restrict issuance to this workflow on main pushes.
+      # Reporting is best effort: a failed or stalled exchange leaves the key empty,
+      # and Vitest then runs without the tracer.
       - name: Get Datadog intake key via OIDC
         id: datadog
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DD_ORG_UUID != ''
+        continue-on-error: true
+        timeout-minutes: 1
         uses: DataDog/datadog-workload-identity-federation-github-action/intake@08e47f7c6f805efc5eef19953e33c523915acd85
         with:
           org_uuid: ${{ vars.DD_ORG_UUID }}
@@ -69,6 +73,8 @@ jobs:
           DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED: "false"
           DD_TEST_MANAGEMENT_ENABLED: "false"
           DD_TEST_FAILED_TEST_REPLAY_ENABLED: "false"
+          # Skip the Git history upload; it fetches a month of history in the coordinator.
+          DD_CIVISIBILITY_GIT_UPLOAD_ENABLED: "false"
           # Report from the Vitest coordinator so fixture subprocesses can run outside the checkout.
           DD_EXPERIMENTAL_TEST_OPT_VITEST_NO_WORKER_INIT: "true"
           NODE_OPTIONS: ${{ steps.datadog.outputs.api_key != '' && '--import dd-trace/register.js -r dd-trace/ci/init' || '' }}
