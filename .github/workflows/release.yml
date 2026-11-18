@@ -112,6 +112,9 @@ jobs:
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
+      # CI's Vitest shards declare this for Datadog reporting, which only runs on
+      # main pushes. A caller must grant every permission its called jobs request.
+      id-token: write
 
   promote_preview:
     name: Promote verified preview
