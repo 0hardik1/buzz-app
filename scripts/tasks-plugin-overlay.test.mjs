@@ -227,3 +227,25 @@ it("prefers a channel head over delayed assigned absence", async () => {
   );
   model.dispose();
 });
+
+it("keeps consecutive confirmed edits visible while list reads fail", async () => {
+  const f = fixture(),
+    { model } = f;
+  try {
+    await model.refresh();
+    await model.save(input);
+    f.failAfterPublish(true);
+    for (const title of ["first edit", "second edit", "third edit"]) {
+      await model.save({ ...model.snapshot().tasks[0], title });
+      assert.equal(model.snapshot().tasks[0].title, title);
+      assert.equal(model.snapshot().pending, null);
+      await model.refresh();
+      assert.equal(model.snapshot().tasks[0].title, title);
+    }
+    f.failAssigned(false);
+    await model.refresh();
+    assert.equal(model.snapshot().tasks[0].title, "third edit");
+  } finally {
+    model.dispose();
+  }
+});

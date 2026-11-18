@@ -463,7 +463,10 @@ function createModel(
       saveQueue = remaining;
       if (!draining && head && !remaining.includes(head)) head.resolve();
       const task = parseTask(event);
-      const known = task && confirmedTasks.find((item) => item.id === task.id);
+      const known =
+        task &&
+        (acceptedWrites.get(task.id) ??
+          confirmedTasks.find((item) => item.id === task.id));
       const advancesKnown =
         task &&
         (!known ||
