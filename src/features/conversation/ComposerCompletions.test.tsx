@@ -330,9 +330,7 @@ type Source = Readonly<{
   order?: number;
   supplement?: true;
   title?: string;
-  /** Undefined publishes nothing; a function throws while rendering. */
   result?: CompletionResult | (() => never) | undefined;
-  /** Publishes `result` without keeping its withdrawal, then throws. */
   crashAfterPublish?: true;
 }>;
 function mountSources(
@@ -467,18 +465,15 @@ const groupRow = {
   edit: { mentions: [BOB] },
 } as const;
 
-// Headings and rows as the listbox lays them out.
 const listed = () =>
   [...screen.getByRole("listbox").children].map((node) => node.textContent);
 it("shows a supplement's rows under its title beside the winner, in provider order", async () => {
   mountSources([people(), groups({ items: [groupRow] })]);
   await screen.findByRole("option", { name: /^eng$/ });
-  // The winner's rows never read as part of the section above them.
   expect(listed()).toEqual(["Groups", "eng", "Mention", "Eng Bot"]);
   cleanup();
   mountSources([people(), groups({ items: [groupRow] }, 10)]);
   await screen.findByRole("option", { name: /^eng$/ });
-  // First, the winner looks as it does alone.
   expect(listed()).toEqual(["Eng Bot", "Groups", "eng"]);
 });
 it("opens with a supplement's rows when the winner has none", async () => {
@@ -577,7 +572,6 @@ it("drops a failed supplement's rows and refuses its later publications", async 
   });
   expect(late).toBe(false);
   expect(listed()).toEqual(["Eng Bot"]);
-  // Its hold went with it.
   expect(press(" ")).toBe(true);
   expect(replace).toHaveBeenCalledWith(
     { mention: ENG_BOT },
@@ -652,7 +646,6 @@ it("lets Escape dismiss a supplement that has not answered beside an empty winne
   const empty = people({ items: [], spaceId: undefined });
   expect(mountSources([empty, groups(undefined)]).press("Escape")).toBe(true);
   cleanup();
-  // A settled, empty popup leaves Escape to the composer.
   expect(mountSources([empty, groups({ items: [] })]).press("Escape")).toBe(
     false,
   );
