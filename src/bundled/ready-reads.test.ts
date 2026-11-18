@@ -115,6 +115,7 @@ it.each([
         executionBinding: () => undefined,
         snapshot: () => ({ status: "ready", agents: [], running: [] }),
         subscribe: () => () => {},
+        harness: { mcp: undefined },
       },
       effect: vi.fn(),
     } as never);
