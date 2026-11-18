@@ -742,3 +742,176 @@ it("hides restored private drafts until fresh access has been verified", async (
   expect(f.saved.size).toBe(1);
   next.dispose();
 });
+
+it("prefers a fresh assigned revision over a failed channel's cached revision", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  await f.model.save(f.input);
+  f.model.followChannel(channelId);
+  await f.model.refresh();
+  const old = f.records.get(taskId);
+  const updated = {
+    ...old,
+    id: "f".repeat(64),
+    content: JSON.stringify({
+      ...JSON.parse(old.content),
+      title: "Fresh title",
+      done: true,
+    }),
+  };
+  f.records.set(taskId, updated);
+  const read = f.session.snapshotRead.getMockImplementation();
+  f.session.snapshotRead.mockImplementation((filters) => {
+    if (filters[0]["#h"]?.includes(channelId)) throw new Error("offline");
+    return read(filters);
+  });
+  await f.model.refresh();
+  expect(
+    f.model.snapshot().tasks.find((task) => task.id === taskId),
+  ).toMatchObject({
+    title: "Fresh title",
+    done: true,
+    event: { id: updated.id },
+  });
+  f.model.dispose();
+});
+
+it("retains a set-aside uncertain event across restart while unrelated saves continue", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  f.session.configArtifactWriter.publish.mockRejectedValueOnce(
+    new Error("timeout"),
+  );
+  await expect(f.model.save(f.input)).rejects.toThrow("timeout");
+  const pending = f.model.snapshot().pending;
+  f.model.setAside();
+  expect(f.model.snapshot().pending).toBeNull();
+  expect(f.model.snapshot().asideCount).toBe(1);
+  expect(() => f.model.save(f.input)).toThrow("set aside");
+  await f.model.save({
+    ...f.input,
+    id: "20000000-0000-4000-8000-000000000002",
+  });
+  f.model.dispose();
+  const restored = createModel(f.session, f.storage, () => {}, f.locks);
+  await restored.refresh();
+  expect(restored.snapshot().asideCount).toBe(1);
+  await restored.checkAside();
+  expect(restored.snapshot().asideCount).toBe(1);
+  expect(() => restored.save(f.input)).toThrow("set aside");
+  f.records.set(taskId, pending); // The original attempt arrives late.
+  await restored.checkAside();
+  expect(restored.snapshot().asideCount).toBe(0);
+  await restored.save({
+    ...f.input,
+    title: "Edit after confirmation",
+    event: pending,
+  });
+  expect(f.session.configArtifactWriter.sign).toHaveBeenCalledTimes(3);
+  restored.dispose();
+});
+
+it("does not release uncertain saves when persisting set-aside state fails", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  f.session.configArtifactWriter.publish.mockRejectedValueOnce(
+    new Error("timeout"),
+  );
+  await expect(f.model.save(f.input)).rejects.toThrow("timeout");
+  const pending = f.model.snapshot().pending;
+  f.storage.setItem = () => {
+    throw new Error("disk full");
+  };
+  f.model.setAside();
+  expect(f.model.snapshot().pending).toEqual(pending);
+  expect(f.model.snapshot().asideCount).toBe(0);
+  expect(f.model.snapshot().error).toBe("disk full");
+  f.model.dispose();
+});
+
+it("checks other set-aside saves even when one channel is inaccessible", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  const events = [];
+  for (const input of [
+    f.input,
+    {
+      ...f.input,
+      channel: home,
+      assignees: [],
+      id: "20000000-0000-4000-8000-000000000002",
+    },
+  ]) {
+    f.session.configArtifactWriter.publish.mockRejectedValueOnce(
+      new Error("timeout"),
+    );
+    await expect(f.model.save(input)).rejects.toThrow("timeout");
+    events.push(f.model.snapshot().pending);
+    f.model.setAside();
+  }
+  f.records.set("personal", events[1]);
+  const read = f.session.snapshotRead.getMockImplementation();
+  f.session.snapshotRead.mockImplementation((filters) => {
+    if (filters[0].ids?.includes(events[0].id)) throw new Error("access lost");
+    return read(filters);
+  });
+  await f.model.checkAside();
+  expect(f.model.snapshot().asideCount).toBe(1);
+  expect(f.model.snapshot().error).toContain("access lost");
+  expect(f.model.snapshot().asideIds).toEqual([taskId]);
+  f.model.dispose();
+});
+
+it("continues unrelated queued drafts past a set-aside task's queued edit", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  let reject;
+  f.session.configArtifactWriter.publish.mockImplementationOnce(
+    () =>
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+  );
+  const first = f.model.save(f.input);
+  const failed = expect(first).rejects.toThrow("timeout");
+  await vi.waitFor(() => expect(reject).toBeTypeOf("function"));
+  const laterEdit = f.model.save({ ...f.input, title: "Queued edit retained" });
+  // A queued promise may remain pending until the uncertain attempt is confirmed.
+  void laterEdit.catch(() => {});
+  const unrelated = f.model.save({
+    ...f.input,
+    id: "20000000-0000-4000-8000-000000000002",
+    title: "Independent",
+  });
+  reject(new Error("timeout"));
+  await failed;
+  f.model.setAside();
+  await unrelated;
+  expect(f.model.snapshot().asideCount).toBe(1);
+  expect(f.model.snapshot().queuePaused).toBe(false);
+  expect(
+    f.model
+      .snapshot()
+      .tasks.some((task) => task.title === "Queued edit retained"),
+  ).toBe(true);
+  expect(JSON.parse([...f.saved.values()][0]).queue).toHaveLength(1);
+  f.model.dispose();
+});
+
+it("does not restore an old assignment from a failed channel read", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  await f.model.save(f.input);
+  f.model.followChannel(channelId);
+  await f.model.refresh();
+  const read = f.session.snapshotRead.getMockImplementation();
+  f.session.snapshotRead.mockImplementation((filters) => {
+    if (filters[0]["#h"]?.includes(channelId)) throw new Error("offline");
+    if (filters[0]["#p"]) return Promise.resolve([]);
+    return read(filters);
+  });
+  await f.model.refresh();
+  expect(f.model.snapshot().tasks).toHaveLength(0);
+  expect(f.model.snapshot().error).toContain("offline");
+  f.model.dispose();
+});

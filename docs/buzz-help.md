@@ -2038,3 +2038,5 @@ Adding a time selects today when no date is set. Removing the date also removes
 its time. Assignment search accepts full names and usernames, with Up/Down and
 Enter to select. The time picker currently uses 24-hour columns independently
 of the app's Clock preference. Completed tasks leave the list.
+
+Unconfirmed To-do saves can be kept with **Set aside and continue** so other tasks can save. This does not cancel delivery; avoid creating a replacement. **Check set-aside saves** checks for delivery before allowing another edit to that task.

@@ -182,10 +182,12 @@ export function createModel(
     partial: false,
     pending: null,
     queuePaused: false,
+    asideCount: 0,
   };
   let confirmedTasks = [];
   let optimisticTask = null;
   let saveQueue = [];
+  let aside = [];
   let recoveryError = "";
   const unverified = new Set();
   let ownsJournal = false;
@@ -194,13 +196,14 @@ export function createModel(
     releaseJournal = resolve;
   });
   // One atomic journal owns both unsigned drafts and the exact signed attempt.
-  const persist = (pending, queue) => {
-    if (pending || queue.length)
+  const persist = (pending, queue, retained = aside) => {
+    if (pending || queue.length || retained.length)
       storage.setItem(
         key,
         JSON.stringify({
           version: 1,
           pending,
+          aside: retained,
           queue: queue.map(({ input }) => input),
         }),
       );
@@ -233,6 +236,8 @@ export function createModel(
       state.tasks = [...state.tasks].sort(
         (a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id),
       );
+      state.asideCount = aside.length;
+      state.asideIds = aside.map((event) => tag(event, "d"));
       state.readOnly = !ownsJournal;
       state.queuedTitle =
         revoked.has(saveQueue[0]?.input.channel) ||
@@ -268,6 +273,15 @@ export function createModel(
           taskTemplate({ ...input, channel: input.channel || input.id });
           return { input, resolve() {}, reject() {} };
         });
+        if (
+          saved.aside != null &&
+          (!Array.isArray(saved.aside) ||
+            saved.aside.some(
+              (event) => !parseTask(event) || event.pubkey !== session.viewer,
+            ))
+        )
+          throw new Error("Invalid retained attempts");
+        aside = saved.aside ?? [];
         state.pending = saved.pending;
         saveQueue = restored;
         state.queuePaused = saveQueue.length > 0 && !state.pending;
@@ -454,6 +468,7 @@ export function createModel(
             },
           },
         ];
+        const freshSources = new Set();
         await Promise.all(
           sources.map(async (source) => {
             const accessEpochs = new Map(revoked);
@@ -483,6 +498,7 @@ export function createModel(
                   revoked.delete(task.channel);
               }
               readSets.set(source.key, result);
+              freshSources.add(source.key);
             } catch (error) {
               errors.push(String(error.message || error));
               if (denied(error)) {
@@ -493,8 +509,31 @@ export function createModel(
           }),
         );
         if (disposed) return;
-        const results = sources
-          .map(({ key }) => readSets.get(key))
+        const assigned = freshSources.has("assigned")
+          ? readSets.get("assigned")
+          : null;
+        const assignedIds =
+          assigned && !assigned.partial
+            ? new Set(assigned.tasks.map((task) => task.id))
+            : null;
+        // Retained reads are fallback data; successful reads in this pass win.
+        const results = [...sources]
+          .sort(
+            (a, b) =>
+              Number(freshSources.has(a.key)) - Number(freshSources.has(b.key)),
+          )
+          .map(({ key }) => {
+            const result = readSets.get(key);
+            if (!result || freshSources.has(key) || !assignedIds) return result;
+            return {
+              ...result,
+              tasks: result.tasks.filter(
+                (task) =>
+                  !task.assignees.includes(session.viewer) ||
+                  assignedIds.has(task.id),
+              ),
+            };
+          })
           .filter(Boolean);
         const tasks = [
           ...new Map(
@@ -574,6 +613,10 @@ export function createModel(
     if (state.pending || state.loading)
       throw new Error(
         "Wait for the current task save or check its outcome first.",
+      );
+    if (aside.some((event) => tag(event, "d") === input.id))
+      throw new Error(
+        "This task has an unconfirmed save set aside. Check set-aside saves before editing it.",
       );
     if (!session.configArtifactWriter)
       throw new Error("Task writes are unavailable in this Buzz session.");
@@ -663,7 +706,24 @@ export function createModel(
     draining = true;
     try {
       while (saveQueue.length && !state.pending && !disposed) {
-        const entry = saveQueue[0];
+        const nextIndex = saveQueue.findIndex(
+          (entry) => !aside.some((event) => tag(event, "d") === entry.input.id),
+        );
+        if (nextIndex < 0) break;
+        const entry = saveQueue[nextIndex];
+        if (nextIndex > 0) {
+          const reordered = [
+            entry,
+            ...saveQueue.filter((item) => item !== entry),
+          ];
+          try {
+            persist(null, reordered);
+          } catch (error) {
+            emit({ error: String(error.message || error) });
+            return; // No write was attempted; never offer to discard another draft.
+          }
+          saveQueue = reordered;
+        }
         try {
           await writeTask(entry.input);
           entry.resolve();
@@ -687,6 +747,10 @@ export function createModel(
         "To-do is being edited in another Buzz window. Close that window to edit here.",
       );
     if (recoveryError) throw new Error(recoveryError);
+    if (aside.some((event) => tag(event, "d") === input.id))
+      throw new Error(
+        "This task has an unconfirmed save set aside. Check set-aside saves before editing it.",
+      );
     if (state.queuePaused)
       throw new Error("Retry the saved tasks before adding another task.");
     if (state.loading || (state.pending && !state.saving))
@@ -760,6 +824,71 @@ export function createModel(
     refresh,
     save,
     retrySaved,
+    setAside() {
+      if (
+        disposed ||
+        !ownsJournal ||
+        state.saving ||
+        state.loading ||
+        !state.pending ||
+        recoveryError
+      )
+        return;
+      const event = state.pending;
+      const remaining =
+        saveQueue[0]?.input.id === tag(event, "d")
+          ? saveQueue.slice(1)
+          : saveQueue;
+      const retained = [...aside, event];
+      try {
+        // Keep the signed event atomically with the remaining queue. It may still arrive.
+        persist(null, remaining, retained);
+        aside = retained;
+        saveQueue = remaining;
+        emit({ pending: null, queuePaused: false, error: "" });
+        void drainSaves();
+      } catch (error) {
+        emit({ error: String(error.message || error) });
+      }
+    },
+    async checkAside() {
+      if (
+        disposed ||
+        !ownsJournal ||
+        state.saving ||
+        state.loading ||
+        recoveryError
+      )
+        return;
+      emit({ saving: true, error: "" });
+      const errors = [];
+      // Explicit checks only: retain absent/inaccessible attempts, never infer non-delivery.
+      for (const event of [...aside]) {
+        try {
+          const found = await read([
+            {
+              ids: [event.id],
+              kinds: [45010],
+              "#h": [tag(event, "h")],
+              limit: 1,
+              consistency: "strong",
+            },
+          ]);
+          signal.throwIfAborted();
+          if (!found.some((item) => item.id === event.id)) continue;
+          const retained = aside.filter((item) => item.id !== event.id);
+          persist(state.pending, saveQueue, retained);
+          aside = retained;
+        } catch (error) {
+          if (signal.aborted) return;
+          errors.push(String(error.message || error));
+        }
+      }
+      emit({ saving: false });
+      await refresh();
+      if (errors.length) emit({ error: errors.join("; ") });
+      void drainSaves();
+    },
     discardUnsent() {
       if (disposed || !ownsJournal) return;
       if (!state.queuePaused || state.pending || state.saving || recoveryError)
@@ -2297,6 +2426,7 @@ export function apply(ctx) {
       !state.loading &&
       !state.error &&
       !state.pending &&
+      !state.asideCount &&
       !state.queuePaused &&
       !state.readOnly &&
       !state.partial
@@ -2438,6 +2568,32 @@ export function apply(ctx) {
               { role: "status" },
               "A task save is still unconfirmed. Check its outcome or retry the same saved task.",
             ),
+          state.pending &&
+            !state.saving &&
+            !state.loading &&
+            h(
+              "div",
+              null,
+              h(
+                "p",
+                null,
+                "Set this save aside to continue with other tasks. It may still arrive. Its saved attempt is kept on this device; this task cannot be edited until delivery is confirmed.",
+              ),
+              button("Set aside and continue", () => owner.setAside()),
+            ),
+          state.asideCount > 0 &&
+            h(
+              "div",
+              null,
+              h(
+                "p",
+                { role: "status" },
+                `${state.asideCount} unconfirmed save(s) set aside. They may still arrive; avoid creating replacement tasks.`,
+              ),
+              button("Check set-aside saves", () => void owner.checkAside(), {
+                disabled: state.saving || state.loading || state.readOnly,
+              }),
+            ),
           (state.pending || state.queuePaused) &&
             !state.saving &&
             !state.loading &&
@@ -2550,6 +2706,7 @@ export function apply(ctx) {
                       disabled:
                         disabled ||
                         state.savingIds?.includes(task.id) ||
+                        state.asideIds?.includes(task.id) ||
                         (!!state.pending &&
                           parseTask(state.pending)?.id === task.id) ||
                         !!owner.channel(task.channel)?.readOnly,

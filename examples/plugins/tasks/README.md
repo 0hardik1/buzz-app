@@ -25,24 +25,24 @@ Enter to select a person. Tasks stay newest-first within each group.
 
 ## Data and access
 
-Channel tasks are shared with their channel. A single assignee can be selected
+Channel tasks are shared with their channel; any channel member with write access can edit any task. A single assignee can be selected
 in this first UI. Personal tasks use a private, self-only system channel in the
 selected community, created on the first addition. It stays out of the ordinary
 channel list. Personal lists are discovered by signed creator/label metadata
-and checked for private visibility and a self-only roster before use.
+and checked for private visibility and a self-only roster before use. “Private” describes channel access, not encryption: task contents are plaintext on the relay and can be read by relay operators.
 
 Tasks are NIP-AR kind 45010 artifacts with type `com.squareup.task-list.task`.
 The version-1 body contains `title`, `done`, and `assignees`, with optional
 `createdAt` (creation milliseconds), `dueDate` (calendar date) or `dueAt` (UTC timestamp); revisions carry `prev`
-and assignment `p` tags. A stale edit is rejected instead of overwriting changes.
+and assignment `p` tags. Every edit re-sends these tags, which may notify assignees again. A stale edit is rejected instead of overwriting changes.
 The plugin does not migrate records from earlier Tasks plugins.
 
 Shared writes use the host's signing/publication capability. Each complete task
 is saved in a local queue before the composer clears, including its destination,
 deadline and assignee. The queue and exact signed attempt share one durable
-record, so queued tasks survive reload. A failure never overwrites the next draft.
+record in localStorage, so queued tasks survive reload. This journal contains plaintext task contents, including queued drafts; it is not encrypted. A failure never overwrites the next draft.
 Proven-unsent tasks remain available to retry or explicitly discard; discarding
-one lets the remaining queue continue. Unconfirmed delivery blocks further writes. **Check save** reads its outcome. **Retry saved task** validates current access and retries the queued task. For
+one lets the remaining queue continue. Unconfirmed delivery initially pauses further writes. **Set aside and continue** keeps the exact signed event in the durable journal and lets unrelated tasks continue. This does not cancel delivery: the task may still arrive, so avoid creating a replacement. Edits to the same task remain blocked until **Check set-aside saves** finds the event on the relay. Empty or denied reads retain the attempt; it is never automatically re-signed or replayed after being set aside. **Check save** reads its outcome. **Retry saved task** validates current access and retries the queued task. For
 an unconfirmed signed attempt it resends only that exact event, never a new task
 ID; a proven-unsent draft is signed when retried. This recovery record is isolated by the host's account/community
 scope and survives reload. No external service or host command grants are needed.

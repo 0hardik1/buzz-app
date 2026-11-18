@@ -12,6 +12,10 @@ export function wrapRelay(service) {
       const state = snapshot();
       if (!state.session || state.status !== "ready") return state;
       if (!sessions.has(state.session)) {
+        const scenario = (globalThis.__BUZZ_VISUAL_STATE__ || "").replace(
+          /^(page|channel)-/,
+          "",
+        );
         const records = new Map(),
           listeners = new Set();
         let sequence = 0;
@@ -23,6 +27,63 @@ export function wrapRelay(service) {
           creator: state.viewer,
           members: [state.viewer],
         };
+        const channel = state.session.channels
+          .list()
+          .channels.find((item) => item.name === "launch-room");
+        const count =
+          scenario === "long-list"
+            ? 40
+            : scenario === "partial"
+              ? 500
+              : [
+                    "one",
+                    "long-title",
+                    "keyboard",
+                    "editing",
+                    "saving",
+                    "host-unavailable",
+                    "offline",
+                    "forbidden",
+                    "server-error",
+                  ].includes(scenario)
+                ? 1
+                : 0;
+        for (let i = 0; i < count; i++) {
+          const id = `20000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`;
+          const title =
+            scenario === "long-title"
+              ? "A".repeat(80) +
+                " https://example.invalid/" +
+                "release-notes/".repeat(12)
+              : `Review launch checklist ${i + 1}`;
+          records.set(id, {
+            kind: 45010,
+            id: String(i + 100).padStart(64, "0"),
+            pubkey: state.viewer,
+            created_at: 1795000000,
+            tags: [
+              ["ar", "1"],
+              ["op", "create"],
+              ["d", id],
+              [
+                "h",
+                globalThis.__BUZZ_VISUAL_STATE__?.startsWith("channel-")
+                  ? channel.id
+                  : home.id,
+              ],
+              ["type", "com.squareup.task-list.task"],
+              ["p", state.viewer],
+            ],
+            content: JSON.stringify({
+              version: 1,
+              title,
+              done: false,
+              assignees: [state.viewer],
+              createdAt: 1795000000000 + i,
+              dueDate: "2026-11-19",
+            }),
+          });
+        }
         const channels = new Proxy(
           { ...state.session.channels },
           {
@@ -43,6 +104,13 @@ export function wrapRelay(service) {
           {
             get(target, key) {
               if (key === "channels") return channels;
+              // Fake artifacts use the in-memory live listeners below, never host relay follows.
+              if (key === "artifacts") return { follow: () => () => {} };
+              if (
+                key === "configArtifactWriter" &&
+                scenario === "host-unavailable"
+              )
+                return undefined;
               if (key === "configArtifactWriter")
                 return {
                   sign: async (event) => ({
@@ -51,6 +119,9 @@ export function wrapRelay(service) {
                     id: (++sequence).toString(16).padStart(64, "0"),
                   }),
                   publish: async (event) => {
+                    if (scenario === "saving") return new Promise(() => {});
+                    if (["uncertain", "set-aside"].includes(scenario))
+                      throw new Error("Save delivery is unconfirmed");
                     records.set(
                       event.tags.find(([key]) => key === "d")[1],
                       event,
@@ -61,6 +132,17 @@ export function wrapRelay(service) {
                 };
               if (key === "snapshotRead")
                 return async (filters, options) => {
+                  if (scenario === "loading") return new Promise(() => {});
+                  if (
+                    ["offline", "forbidden", "server-error"].includes(scenario)
+                  )
+                    throw new Error(
+                      {
+                        offline: "Offline: could not load tasks",
+                        forbidden: "Forbidden: cannot read this list",
+                        "server-error": "Server error: could not load tasks",
+                      }[scenario],
+                    );
                   if (!filters.every((filter) => filter.kinds?.includes(45010)))
                     return target.snapshotRead(filters, options);
                   return [...records.values()].filter((event) =>
