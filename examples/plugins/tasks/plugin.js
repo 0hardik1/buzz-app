@@ -164,7 +164,12 @@ export function taskTemplate({
   };
 }
 
-export function createModel(session, storage, changed) {
+export function createModel(
+  session,
+  storage,
+  changed,
+  locks = globalThis.navigator?.locks,
+) {
   const controller = new AbortController();
   const signal = controller.signal;
   const key = `buzz-task-list-pending:${session.scope}`;
@@ -182,6 +187,12 @@ export function createModel(session, storage, changed) {
   let optimisticTask = null;
   let saveQueue = [];
   let recoveryError = "";
+  const unverified = new Set();
+  let ownsJournal = false;
+  let releaseJournal;
+  const journalReleased = new Promise((resolve) => {
+    releaseJournal = resolve;
+  });
   // One atomic journal owns both unsigned drafts and the exact signed attempt.
   const persist = (pending, queue) => {
     if (pending || queue.length)
@@ -211,15 +222,23 @@ export function createModel(session, storage, changed) {
       state = { ...state, ...patch };
       const pendingTask =
         optimisticTask ?? (state.pending && parseTask(state.pending));
-      state.tasks = pendingTask
-        ? withTask(confirmedTasks, pendingTask)
-        : confirmedTasks;
+      state.tasks =
+        pendingTask && !unverified.has(pendingTask.channel)
+          ? withTask(confirmedTasks, pendingTask)
+          : confirmedTasks;
       for (const entry of saveQueue)
-        state.tasks = withTask(state.tasks, entry.input);
+        if (!unverified.has(entry.input.channel))
+          state.tasks = withTask(state.tasks, entry.input);
+      state.tasks = state.tasks.filter((task) => !revoked.has(task.channel));
       state.tasks = [...state.tasks].sort(
         (a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id),
       );
-      state.queuedTitle = saveQueue[0]?.input.title || "Task";
+      state.readOnly = !ownsJournal;
+      state.queuedTitle =
+        revoked.has(saveQueue[0]?.input.channel) ||
+        unverified.has(saveQueue[0]?.input.channel)
+          ? "Task from an unavailable channel"
+          : saveQueue[0]?.input.title || "Task";
       state.savingIds = saveQueue.map((entry) => entry.input.id);
       changed();
     }
@@ -237,28 +256,53 @@ export function createModel(session, storage, changed) {
     home.creator === session.viewer &&
     home.members?.length === 1 &&
     home.members[0] === session.viewer;
-  try {
-    const saved = JSON.parse(storage.getItem(key) || "null");
-    if (saved?.version === 1) {
-      if (!Array.isArray(saved.queue)) throw new Error("Invalid task journal");
-      const restored = saved.queue.map((input) => {
-        if (!input || !Number.isFinite(input.createdAt))
-          throw new Error("Invalid saved task");
-        taskTemplate({ ...input, channel: input.channel || input.id });
-        return { input, resolve() {}, reject() {} };
-      });
-      state.pending = saved.pending;
-      saveQueue = restored;
-      state.queuePaused = saveQueue.length > 0 && !state.pending;
-      lastCreatedAt = Math.max(
-        0,
-        ...restored.map(({ input }) => input.createdAt),
-      );
-    } else state.pending = saved; // Migrate the original signed-event-only journal.
-  } catch {
-    recoveryError = state.error =
-      "Saved task recovery could not be read. Reload before adding tasks.";
+  function restoreJournal() {
+    try {
+      const saved = JSON.parse(storage.getItem(key) || "null");
+      if (saved?.version === 1) {
+        if (!Array.isArray(saved.queue))
+          throw new Error("Invalid task journal");
+        const restored = saved.queue.map((input) => {
+          if (!input || !Number.isFinite(input.createdAt))
+            throw new Error("Invalid saved task");
+          taskTemplate({ ...input, channel: input.channel || input.id });
+          return { input, resolve() {}, reject() {} };
+        });
+        state.pending = saved.pending;
+        saveQueue = restored;
+        state.queuePaused = saveQueue.length > 0 && !state.pending;
+        lastCreatedAt = Math.max(
+          0,
+          ...restored.map(({ input }) => input.createdAt),
+        );
+      } else state.pending = saved; // Migrate the original signed-event-only journal.
+      for (const entry of saveQueue)
+        if (entry.input.channel) unverified.add(entry.input.channel);
+      if (state.pending) unverified.add(tag(state.pending, "h"));
+    } catch {
+      recoveryError = state.error =
+        "Saved task recovery could not be read. Reload before adding tasks.";
+    }
   }
+  const lockRequest = locks?.request(key, { signal }, async () => {
+    if (disposed) return;
+    ownsJournal = true;
+    restoreJournal();
+    emit({});
+    void refresh();
+    await journalReleased;
+    ownsJournal = false;
+  });
+  if (!lockRequest)
+    recoveryError =
+      "This Buzz version cannot safely coordinate task saves. Update Buzz to continue.";
+  else
+    void lockRequest.catch((error) => {
+      if (!disposed) {
+        recoveryError = String(error.message || error);
+        emit({ error: recoveryError });
+      }
+    });
   async function discover() {
     if (!session.channels.findLabeled)
       throw new Error(
@@ -286,7 +330,7 @@ export function createModel(session, storage, changed) {
     };
   }
   async function recover() {
-    if (!state.pending) return;
+    if (!ownsJournal || !state.pending) return;
     const event = state.pending;
     const found = await read([
       {
@@ -313,6 +357,46 @@ export function createModel(session, storage, changed) {
       });
     }
   }
+  const readSets = new Map();
+  const readEpochs = new Map();
+  const verifying = new Set();
+  const revoked = new Map();
+  let unfollow = () => {};
+  let followed = "";
+  const denied = (error) =>
+    error?.kind === "denied" ||
+    [401, 403].includes(error?.status) ||
+    /^Relay read failed \((401|403)\)$/.test(error?.message ?? "");
+  function revoke(ids) {
+    for (const id of ids) revoked.set(id, (revoked.get(id) ?? 0) + 1);
+    for (const [key, result] of readSets)
+      readSets.set(key, {
+        ...result,
+        tasks: result.tasks.filter((task) => !revoked.has(task.channel)),
+      });
+    emit({
+      tasks: confirmedTasks.filter((task) => !revoked.has(task.channel)),
+    });
+  }
+  function followAccess() {
+    if (disposed || !session.artifacts?.follow) return;
+    const ids = [
+      ...new Set(
+        [
+          ...openChannels.keys(),
+          ...unverified,
+          ...(state.pending ? [tag(state.pending, "h")] : []),
+          ...confirmedTasks.map((task) => task.channel),
+          ...saveQueue.map(({ input }) => input.channel),
+        ].filter(Boolean),
+      ),
+    ].sort();
+    const next = ids.join(",");
+    if (next === followed) return;
+    followed = next;
+    unfollow();
+    unfollow = session.artifacts.follow(ids, () => {}, revoke);
+  }
   async function refresh() {
     if (disposed) return;
     if (running) {
@@ -322,39 +406,119 @@ export function createModel(session, storage, changed) {
     running = (async () => {
       do {
         again = false;
+        const errors = [];
+        followAccess();
+        for (const id of unverified) {
+          const task =
+            saveQueue.find(({ input }) => input.channel === id)?.input ??
+            (state.pending && tag(state.pending, "h") === id
+              ? parseTask(state.pending)
+              : undefined);
+          if (!task) {
+            unverified.delete(id);
+            continue;
+          }
+          if (verifying.has(id)) continue;
+          verifying.add(id);
+          const epoch = revoked.get(id) ?? 0;
+          void authorize(task)
+            .then(() => {
+              if (!disposed && (revoked.get(id) ?? 0) === epoch) {
+                unverified.delete(id);
+                emit({});
+              }
+            })
+            .catch(() => {})
+            .finally(() => verifying.delete(id));
+        }
         try {
           if (!state.saving) await recover();
-          const personal = await discover();
-          const results = await Promise.all([
-            current({ "#p": [session.viewer] }),
-            ...[...openChannels.keys()].map((id) => current({ "#h": [id] })),
-            ...(personal.length ? [current({ "#h": personal })] : []),
-          ]);
-          const tasks = [
-            ...new Map(
-              results
-                .flatMap((result) => result.tasks)
-                .map((task) => [task.id, task]),
-            ).values(),
-          ];
+        } catch (error) {
+          errors.push(String(error.message || error));
+        }
+        const sources = [
+          { key: "assigned", read: () => current({ "#p": [session.viewer] }) },
+          ...[...openChannels.keys()].map((id) => ({
+            key: `channel:${id}`,
+            channel: id,
+            read: () => current({ "#h": [id] }),
+          })),
+          {
+            key: "personal",
+            read: async () => {
+              const personal = await discover();
+              if (!disposed) emit({ personal });
+              return personal.length
+                ? current({ "#h": personal })
+                : { tasks: [], partial: false };
+            },
+          },
+        ];
+        await Promise.all(
+          sources.map(async (source) => {
+            const accessEpochs = new Map(revoked);
+            const epoch = source.channel
+              ? (revoked.get(source.channel) ?? 0)
+              : 0;
+            const readEpoch = source.channel
+              ? (readEpochs.get(source.channel) ?? 0)
+              : 0;
+            try {
+              const result = await source.read();
+              if (disposed) return;
+              if (source.channel) {
+                if ((revoked.get(source.channel) ?? 0) !== epoch) return;
+                if (
+                  !openChannels.has(source.channel) ||
+                  (readEpochs.get(source.channel) ?? 0) !== readEpoch
+                )
+                  return;
+                if (result.tasks.length) revoked.delete(source.channel);
+              }
+              for (const task of result.tasks) {
+                if (
+                  (revoked.get(task.channel) ?? 0) ===
+                  (accessEpochs.get(task.channel) ?? 0)
+                )
+                  revoked.delete(task.channel);
+              }
+              readSets.set(source.key, result);
+            } catch (error) {
+              errors.push(String(error.message || error));
+              if (denied(error)) {
+                readSets.delete(source.key);
+                if (source.channel) revoke([source.channel]);
+              }
+            }
+          }),
+        );
+        if (disposed) return;
+        const results = sources
+          .map(({ key }) => readSets.get(key))
+          .filter(Boolean);
+        const tasks = [
+          ...new Map(
+            results
+              .flatMap((result) => result.tasks)
+              .filter((task) => !revoked.has(task.channel))
+              .map((task) => [task.id, task]),
+          ).values(),
+        ];
+        try {
           await session.channels.resolve?.(
             [...new Set(tasks.map((task) => task.channel))],
             { signal },
           );
-          emit({
-            tasks,
-            personal,
-            partial: results.some((result) => result.partial),
-            loading: false,
-            error: recoveryError,
-          });
         } catch (error) {
-          if (!signal.aborted)
-            emit({
-              loading: false,
-              error: String(error.message || error),
-            });
+          errors.push(String(error.message || error));
         }
+        emit({
+          tasks: tasks.filter((task) => !revoked.has(task.channel)),
+          partial: results.some((result) => result.partial),
+          loading: false,
+          error: recoveryError || errors.join(" "),
+        });
+        followAccess();
       } while (again && !disposed);
     })().finally(() => {
       running = undefined;
@@ -456,10 +620,18 @@ export function createModel(session, storage, changed) {
       try {
         await writer.publish(signed, signal);
       } catch (error) {
-        if (writer.isNotSent?.(error)) {
+        // The host preserves these machine-readable relay refusals (including HTTP 409 as conflict).
+        // Only the initial attempt may be retired; retrySaved never clears a refusal.
+        if (
+          writer.isNotSent?.(error) ||
+          /^(conflict|restricted|auth-required|blocked|invalid|rate-limited):/.test(
+            error?.reason ?? error?.message ?? "",
+          )
+        ) {
           signal.throwIfAborted();
           persist(null, saveQueue);
           emit({ pending: null });
+          await refresh();
         }
         throw error;
       }
@@ -479,6 +651,7 @@ export function createModel(session, storage, changed) {
   }
   async function drainSaves() {
     if (
+      !ownsJournal ||
       draining ||
       state.saving ||
       state.pending ||
@@ -509,6 +682,10 @@ export function createModel(session, storage, changed) {
   }
   function save(input) {
     signal.throwIfAborted();
+    if (!ownsJournal)
+      throw new Error(
+        "To-do is being edited in another Buzz window. Close that window to edit here.",
+      );
     if (recoveryError) throw new Error(recoveryError);
     if (state.queuePaused)
       throw new Error("Retry the saved tasks before adding another task.");
@@ -538,7 +715,7 @@ export function createModel(session, storage, changed) {
     return result;
   }
   async function retrySaved() {
-    if (state.saving || recoveryError) return;
+    if (!ownsJournal || state.saving || recoveryError) return;
     if (!state.pending) {
       emit({ queuePaused: false, error: "" });
       await drainSaves();
@@ -584,7 +761,7 @@ export function createModel(session, storage, changed) {
     save,
     retrySaved,
     discardUnsent() {
-      if (disposed) return;
+      if (disposed || !ownsJournal) return;
       if (!state.queuePaused || state.pending || state.saving || recoveryError)
         return;
       const remaining = saveQueue.slice(1);
@@ -592,6 +769,7 @@ export function createModel(session, storage, changed) {
         persist(null, remaining);
         saveQueue = remaining;
         emit({ queuePaused: false, error: "" });
+        void refresh();
         void drainSaves();
       } catch (error) {
         emit({ error: String(error.message || error) });
@@ -603,12 +781,18 @@ export function createModel(session, storage, changed) {
       return () => {
         const remaining = openChannels.get(id) - 1;
         if (remaining) openChannels.set(id, remaining);
-        else openChannels.delete(id);
+        else {
+          openChannels.delete(id);
+          readSets.delete(`channel:${id}`);
+          readEpochs.set(id, (readEpochs.get(id) ?? 0) + 1);
+        }
       };
     },
     dispose() {
       disposed = true;
       controller.abort();
+      releaseJournal();
+      unfollow();
       unsubscribe();
     },
   };
@@ -1163,17 +1347,23 @@ export function apply(ctx) {
       draftRef.current = null;
       const title = titleElement.current.textContent.trim() || savedTask.title;
       setDraft(null);
+      let admitted = false;
       try {
-        if (JSON.stringify({ ...next, title }) !== JSON.stringify(savedTask))
-          await owner.save({ ...next, title });
+        if (JSON.stringify({ ...next, title }) !== JSON.stringify(savedTask)) {
+          const saving = owner.save({ ...next, title });
+          admitted = true;
+          await saving;
+        }
         if (titleElement.current && !draftRef.current)
           titleElement.current.textContent = title;
       } catch (error) {
-        if (!draftRef.current) {
-          draftRef.current = { ...original, title };
-          setDraft(draftRef.current);
+        if (!admitted) {
+          if (!draftRef.current) {
+            draftRef.current = { ...original, title };
+            setDraft(draftRef.current);
+          }
+          setError(error.message);
         }
-        setError(error.message);
       }
     };
     const [error, setError] = R.useState("");
@@ -1699,7 +1889,7 @@ export function apply(ctx) {
       ),
     );
   }
-  function AddTask({ owner, channelId, autoFocus = false }) {
+  function AddTask({ owner, channelId, autoFocus = false, onDraftChange }) {
     const [focused, setFocused] = R.useState(false);
     const [destination, setDestination] = R.useState(channelId ?? "");
     const [date, setDate] = R.useState(""),
@@ -1709,8 +1899,20 @@ export function apply(ctx) {
       [error, setError] = R.useState("");
     const id = R.useId(),
       state = owner.snapshot();
+    R.useEffect(() => {
+      onDraftChange?.(
+        !!(
+          title ||
+          date ||
+          time ||
+          assignee ||
+          destination !== (channelId ?? "")
+        ),
+      );
+    }, [title, date, time, assignee, destination, channelId, onDraftChange]);
     const destinationMenu = R.useRef(null);
-    const disabled = state.loading || (!!state.pending && !state.saving);
+    const disabled =
+      state.loading || state.readOnly || (!!state.pending && !state.saving);
     const channel = destination ? owner.channel(destination) : undefined;
     const saving = R.useRef(false);
     const removableChip = (kind, selected, clear, control) =>
@@ -2060,6 +2262,7 @@ export function apply(ctx) {
       [],
     );
     const [creating, setCreating] = R.useState(false);
+    const [hasDraft, setHasDraft] = R.useState(false);
     if (!owner || (scope && scope !== relayState.scope))
       return h(
         "p",
@@ -2086,14 +2289,16 @@ export function apply(ctx) {
       if (!groups.has(group)) groups.set(group, []);
       groups.get(group).push(task);
     }
-    const disabled = state.loading;
+    const disabled = state.loading || state.readOnly;
     if (
       !visible.length &&
       !creating &&
+      !hasDraft &&
       !state.loading &&
       !state.error &&
       !state.pending &&
       !state.queuePaused &&
+      !state.readOnly &&
       !state.partial
     ) {
       return h(
@@ -2201,6 +2406,14 @@ export function apply(ctx) {
                 }),
             ),
 
+          state.readOnly &&
+            !state.error &&
+            !state.loading &&
+            h(
+              "p",
+              { role: "status" },
+              "To-do is open in another Buzz window. Close that window to edit here.",
+            ),
           state.error &&
             h(
               "div",
@@ -2253,6 +2466,7 @@ export function apply(ctx) {
           h(AddTask, {
             key: channelId || "personal",
             autoFocus: creating,
+            onDraftChange: setHasDraft,
             owner,
             channelId,
           }),

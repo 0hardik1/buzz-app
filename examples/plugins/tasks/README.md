@@ -50,22 +50,28 @@ scope and survives reload. No external service or host command grants are needed
 ## First-version limits
 
 This is a desktop plugin, not a mobile screen. Lists cover the selected community.
-Use Today and the previous/next arrows to browse dated tasks, or select All dates
-or No date. Personal and channel section headings expand and collapse their lists.
+Tasks from all dates appear together, newest first. Personal and channel section
+headings expand and collapse their lists.
 Each current-head query is bounded to 500 records and displays a partial-results
 notice at that limit. Return to the app to discover tasks
 outside the current live channel coverage. Incoming task events on the host's
-live routes refresh the list; the plugin does not poll or create per-channel
-subscriptions. An initial refresh uses a personal-home lookup plus one general
-assigned-task query, one query per open channel checklist and, when a personal home exists, one query for those homes. Channel
-metadata is resolved in a single batch.
+live routes refresh the list. Channel follows track access revocation; revoked
+channel data is hidden. The plugin does not poll. Personal-home lookup, the
+assigned-task query, and open channel queries fail independently, so a personal
+lookup failure does not prevent a channel checklist from loading. Each query is
+bounded; channel metadata is resolved in a batch.
 
 No reminders, deletion, task threads or agent tools are included.
 
-Known publication blocker: a definitive relay rejection can leave a saved attempt
-pending because the current host does not expose that outcome separately from
-uncertain delivery. Retry cannot repair a rejected stale revision. This draft
-package should not be published to the marketplace until recovery is resolved.
+Recognized refusals on the first publication keep the unsigned task recoverable
+without retaining a rejected signed attempt. A conflict refreshes current task
+state; discard the unsent edit to work from that state. Unknown delivery retains
+the exact signed event, including when a later replay is refused.
+
+Only one Buzz window may edit To-do for an account/community at a time. Other
+windows remain readable; close the owning Buzz window to hand over the save
+journal. Web Locks are required so windows cannot overwrite one another's queued
+work. Restored private drafts stay hidden until fresh access is verified.
 
 ## Host requirements and packaging
 

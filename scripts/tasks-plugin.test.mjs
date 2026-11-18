@@ -83,7 +83,10 @@ function fixture() {
     setItem: (key, value) => saved.set(key, value),
     removeItem: (key) => saved.delete(key),
   };
-  const model = createModel(session, storage, () => {});
+  const locks = {
+    request: (_name, _options, run) => Promise.resolve().then(run),
+  };
+  const model = createModel(session, storage, () => {}, locks);
   const input = {
     id: taskId,
     channel: channelId,
@@ -93,6 +96,7 @@ function fixture() {
   };
   return {
     model,
+    locks,
     session,
     storage,
     records,
@@ -198,7 +202,7 @@ describe("Tasks plugin", () => {
     await expect(f.model.save(f.input)).rejects.toThrow("connection lost");
     expect(f.model.snapshot().pending).not.toBeNull();
     f.model.dispose();
-    const next = createModel(f.session, f.storage, () => {});
+    const next = createModel(f.session, f.storage, () => {}, f.locks);
     await next.refresh();
     expect(next.snapshot().pending).toBeNull();
     expect(next.snapshot().tasks).toHaveLength(1);
@@ -515,7 +519,7 @@ it("restores every queued task after reload and retries the original signed even
   await expect(first).rejects.toThrow("offline");
   const signed = f.model.snapshot().pending;
   f.model.dispose();
-  const next = createModel(f.session, f.storage, () => {});
+  const next = createModel(f.session, f.storage, () => {}, f.locks);
   await next.refresh();
   expect(next.snapshot().tasks).toHaveLength(2);
   expect(
@@ -545,7 +549,7 @@ it("keeps a full unsigned draft across reload after signing fails", async () => 
   };
   await expect(f.model.save(draft)).rejects.toThrow("signing unavailable");
   f.model.dispose();
-  const next = createModel(f.session, f.storage, () => {});
+  const next = createModel(f.session, f.storage, () => {}, f.locks);
   await next.refresh();
   expect(next.snapshot().tasks[0]).toMatchObject(draft);
   expect(next.snapshot().queuePaused).toBe(true);
@@ -618,4 +622,123 @@ it("does not retire an active save during a refresh before its failed acknowledg
   expect(f.records.size).toBe(2);
   expect(f.saved.size).toBe(0);
   f.model.dispose();
+});
+
+it("retires an initial conflict but retains an uncertain attempt when replay conflicts", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  f.session.configArtifactWriter.publish.mockRejectedValueOnce(
+    new Error("conflict: head changed"),
+  );
+  await expect(f.model.save(f.input)).rejects.toThrow("conflict:");
+  expect(f.model.snapshot().pending).toBeNull();
+  expect(f.model.snapshot().queuePaused).toBe(true);
+  f.model.discardUnsent();
+  f.session.configArtifactWriter.publish.mockRejectedValueOnce(
+    new Error("timeout"),
+  );
+  await expect(f.model.save(f.input)).rejects.toThrow("timeout");
+  const pending = f.model.snapshot().pending;
+  f.session.configArtifactWriter.publish.mockRejectedValueOnce(
+    new Error("conflict: head changed"),
+  );
+  await f.model.retrySaved();
+  expect(f.model.snapshot().pending).toEqual(pending);
+  expect(f.saved.size).toBe(1);
+  f.model.dispose();
+});
+
+it("loads a channel even when personal-home discovery fails", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  await f.model.save({ ...f.input, assignees: [] });
+  f.session.channels.findLabeled.mockRejectedValue(
+    new Error("home lookup unavailable"),
+  );
+  const stop = f.model.followChannel(channelId);
+  await f.model.refresh();
+  expect(f.model.snapshot().tasks).toHaveLength(1);
+  expect(f.model.snapshot().error).toContain("home lookup unavailable");
+  stop();
+  f.model.dispose();
+});
+
+it("purges a revoked channel and keeps independent personal reads working", async () => {
+  const f = fixture();
+  let revoked;
+  f.session.artifacts = {
+    follow: (_ids, _changed, lost) => {
+      revoked = lost;
+      return () => {};
+    },
+  };
+  await f.model.refresh();
+  await f.model.save(f.input);
+  const stop = f.model.followChannel(channelId);
+  await f.model.refresh();
+  const read = f.session.snapshotRead.getMockImplementation();
+  f.session.snapshotRead.mockImplementation((filters) => {
+    if (filters[0]["#h"]?.includes(channelId))
+      throw Object.assign(new Error("denied"), { kind: "denied" });
+    return read(filters);
+  });
+  revoked([channelId]);
+  expect(f.model.snapshot().tasks).toHaveLength(0);
+  await f.model.refresh();
+  expect(f.model.snapshot().tasks).toHaveLength(0);
+  expect(f.session.channels.findLabeled).toHaveBeenCalled();
+  stop();
+  f.model.dispose();
+});
+
+it("hands the journal to another window only after the first owner releases it", async () => {
+  const f = fixture();
+  f.model.dispose();
+  let tail = Promise.resolve();
+  const locks = {
+    request: (_key, { signal }, run) => {
+      const next = tail.then(() => {
+        if (!signal.aborted) return run();
+      });
+      tail = next.catch(() => {});
+      return next;
+    },
+  };
+  const first = createModel(f.session, f.storage, () => {}, locks);
+  await first.refresh();
+  f.session.configArtifactWriter.publish.mockRejectedValueOnce(
+    new Error("offline"),
+  );
+  await expect(first.save(f.input)).rejects.toThrow("offline");
+  const pending = first.snapshot().pending;
+  const second = createModel(f.session, f.storage, () => {}, locks);
+  await second.refresh();
+  expect(() => second.save({ ...f.input, title: "Other window" })).toThrow(
+    /another.*window/,
+  );
+  expect(first.snapshot().pending).toEqual(pending);
+  first.dispose();
+  await vi.waitFor(() => expect(second.snapshot().readOnly).toBe(false));
+  expect(second.snapshot().pending).toEqual(pending);
+  await second.retrySaved();
+  expect(f.saved.size).toBe(0);
+  second.dispose();
+});
+
+it("hides restored private drafts until fresh access has been verified", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  f.session.configArtifactWriter.sign.mockRejectedValueOnce(
+    new Error("signing failed"),
+  );
+  await expect(f.model.save(f.input)).rejects.toThrow("signing failed");
+  f.model.dispose();
+  f.channel.members = [other];
+  f.session.snapshotRead.mockResolvedValue([]);
+  const next = createModel(f.session, f.storage, () => {}, f.locks);
+  await next.refresh();
+  expect(next.snapshot().tasks).toHaveLength(0);
+  expect(next.snapshot().queuedTitle).not.toContain(f.input.title);
+  expect(f.saved.size).toBe(1);
+  next.dispose();
 });
