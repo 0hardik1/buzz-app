@@ -45,6 +45,9 @@ export const MODEL_TAG = "model";
 export type RunPick = Readonly<{ model?: string; effort?: string }>;
 /** The model and effort picked for each addressed agent, by pubkey. */
 export type MentionPicks = Readonly<Record<string, RunPick>>;
+/** The relay's channel window lists only broadcast replies to the thread's opening message. */
+const BROADCAST_REFUSAL =
+  "Only a reply to the thread's opening message can also be sent to the channel.";
 
 /** Domain convenience only. Delivery and read reconciliation remain session-owned. */
 export function createMessages(
@@ -474,6 +477,7 @@ export function createMessages(
         references?: readonly string[];
         attachments?: readonly UploadedAttachment[];
         picks?: MentionPicks;
+        broadcast?: boolean;
       },
     ) {
       const event = prepareForward(channelId, row, authorName, note);
@@ -485,6 +489,8 @@ export function createMessages(
           (parent && !/^[0-9a-f]{64}$/.test(parent))
         )
           throw new Error("A valid thread is required");
+        if (options.broadcast && (!root || parent !== root))
+          throw new Error(BROADCAST_REFUSAL);
         const mediaTarget = options.mediaTargetUrl
           ? safeMessageUrl(options.mediaTargetUrl)
           : undefined;
@@ -509,6 +515,7 @@ export function createMessages(
                 ["e", parent, "", "reply"],
               ]
             : []),
+          ...(options.broadcast ? [["broadcast", "1"]] : []),
           ...mentionTags(
             channelId,
             withDmAgents(channelId, options.mentions ?? []),
@@ -619,12 +626,14 @@ export function createMessages(
       references: readonly string[] = [],
       picks: MentionPicks = {},
       mediaTargetUrl?: string,
+      broadcast = false,
     ) {
       if (!channelId) throw new Error("A channel is required");
       if (!/^[0-9a-f]{64}$/.test(rootId))
         throw new Error("A valid thread root is required");
       if (!/^[0-9a-f]{64}$/.test(parentId))
         throw new Error("A valid reply parent is required");
+      if (broadcast && parentId !== rootId) throw new Error(BROADCAST_REFUSAL);
       const mediaTarget = mediaTargetUrl
         ? safeMessageUrl(mediaTargetUrl)
         : undefined;
@@ -638,6 +647,7 @@ export function createMessages(
           ["h", channelId],
           ...(parentId === rootId ? [] : [["e", rootId, "", "root"]]),
           ["e", parentId, "", "reply"],
+          ...(broadcast ? [["broadcast", "1"]] : []),
           ...mentionTags(channelId, withDmAgents(channelId, mentions)),
           ...referenceTags(references),
           ...pickTags(channelId, mentions, picks),
