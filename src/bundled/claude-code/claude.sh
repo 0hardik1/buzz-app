@@ -68,6 +68,8 @@ if [ "$command" = inspect ]; then
 fi
 case "$command" in
 mcp-config-paths)
+  # With an empty override Claude reads .claude.json from home but settings
+  # and the legacy .config.json from its working directory.
   mcp_user_dir=${CLAUDE_CONFIG_DIR:-$HOME}
   mcp_settings_dir=${CLAUDE_CONFIG_DIR-$HOME/.claude}
   case "$mcp_user_dir" in /*) ;; *) mcp_user_dir="./$mcp_user_dir" ;; esac

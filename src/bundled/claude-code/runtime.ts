@@ -329,11 +329,9 @@ export class ClaudeRuntime {
   }
   private async configuredMcp(cwd: string, spawn?: Spawn) {
     const path = (await this.host.resolveDirectory?.(cwd)) ?? cwd;
-    return configuredMcp(
-      this.host.readFile?.bind(this.host),
-      path,
-      await this.host.mcpConfigPaths?.(path, spawn),
-    );
+    const probe = this.host.mcpConfigPaths?.(path, spawn);
+    const paths = spawn ? await probe : await probe?.catch(() => null);
+    return configuredMcp(this.host.readFile?.bind(this.host), path, paths);
   }
   inspectMcp(
     agent: Agent,

@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { expect, it, vi } from "vitest";
 import { ClaudeProcess, type Spawn } from "./claude";
-import { configuredMcp, inspectMcpConfig, type ClaudeMcp } from "./mcp";
+import {
+  configuredMcp,
+  inspectMcpConfig,
+  mcpSettings,
+  type ClaudeMcp,
+} from "./mcp";
 import { fakeSpawn, flush } from "./claude-testing";
 import { AgentSessions } from "./sessions";
 import { ClaudeRuntime } from "./runtime";
@@ -618,6 +623,34 @@ it("honors enable-all without overriding a normalized project rejection", async 
   );
 });
 
+it("reports project servers when the config path probe fails", async () => {
+  const files: Record<string, unknown> = {
+    ".mcp.json": { mcpServers: { maps: {} } },
+    ".claude/settings.json": { enableAllProjectMcpServers: true },
+    "~/.claude.json": { mcpServers: { elsewhere: {} } },
+  };
+  const runtime = new ClaudeRuntime(
+    {
+      mcpConfigPaths: async () => {
+        throw new Error("Config path probe failed");
+      },
+      readFile: async (path) =>
+        new TextEncoder().encode(JSON.stringify(files[path] ?? {})),
+    },
+    () => undefined,
+    async () => undefined,
+    localStore(),
+  );
+  try {
+    expect(await runtime.harnessMcp(agent)).toEqual({
+      tools: true,
+      servers: [{ name: "maps", default: false, state: "disabled" }],
+    });
+  } finally {
+    await runtime.dispose();
+  }
+});
+
 it("reports and inspects against the effective config home", async () => {
   const paths = {
     user: "/alternate/.claude.json",
@@ -640,7 +673,13 @@ it("reports and inspects against the effective config home", async () => {
     weather,
   );
   const conflicting = { ...paths, user: null };
-  expect(await configuredMcp(read, "/work", conflicting)).toEqual([]);
+  const servers = await configuredMcp(read, "/work", conflicting);
+  expect(servers).toEqual([
+    { name: "maps", default: false, state: "disabled" },
+  ]);
+  expect(
+    mcpSettings({ ...settings(), servers, choice: {} }).deniedMcpServers,
+  ).toEqual([{ serverName: "maps" }]);
   await expect(
     inspectMcpConfig(read, "/work", "weather", conflicting),
   ).rejects.toThrow("could not identify its global MCP configuration");

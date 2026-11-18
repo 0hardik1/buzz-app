@@ -39,9 +39,9 @@ const defaultPaths: McpConfigPaths = {
 async function readMcpConfig(
   read: Host["readFile"],
   cwd: string,
-  paths = defaultPaths,
+  paths: McpConfigPaths | null = defaultPaths,
 ) {
-  const json = async (path: string | null) => {
+  const json = async (path: string | null | undefined) => {
     if (!read || !path) return {};
     try {
       return object(
@@ -53,9 +53,9 @@ async function readMcpConfig(
   };
   const [user, project, userSettings, projectSettings, localSettings] =
     await Promise.all([
-      json(paths.user),
+      json(paths?.user),
       json(".mcp.json"),
-      json(paths.settings),
+      json(paths?.settings),
       json(".claude/settings.json"),
       json(".claude/settings.local.json"),
     ]);
@@ -110,6 +110,7 @@ async function readMcpConfig(
             (local.hasTrustDialogAccepted === true &&
               approves(projectSettings, name))));
       const off =
+        !paths?.user ||
         disabled.has(name) ||
         (needsApproval && (rejectedProject || (!all && !approvedProject)));
       rows.set(name, {
@@ -126,9 +127,8 @@ async function readMcpConfig(
 export async function configuredMcp(
   read: Host["readFile"],
   cwd: string,
-  paths?: McpConfigPaths,
+  paths?: McpConfigPaths | null,
 ) {
-  if (paths?.user === null) return [];
   return [...(await readMcpConfig(read, cwd, paths)).values()].map(
     ({ server }) => server,
   );

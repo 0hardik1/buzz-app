@@ -80,8 +80,11 @@ A type declares `harnessMcp: { report(agent), inspect?(agent, server) }`, or `ha
 
 - Reports read names from the user's `.claude.json`, its entry for the agent's
   workspace and the workspace's `.mcp.json`. Project servers that Claude has not
-  approved are off by default. Live tools and state go to the control after a
-  session's readback; reporting starts no server.
+  approved are off by default. If the global config path cannot be determined,
+  reports list only workspace project servers, all off by default. When both
+  current and legacy global files exist, controlled launches use those project
+  defaults and detached inspection is unavailable. Live tools and state go to
+  the control after a session's readback. Reporting starts no server.
 - Controlled launches apply server denies and per-tool permission denies without
   changing native configuration. A changed choice replaces the conversation's
   process before its next turn; controlled sessions do not take an uncontrolled
