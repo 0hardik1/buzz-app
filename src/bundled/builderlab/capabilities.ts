@@ -1,11 +1,13 @@
 export type Capabilities = Readonly<{
   canUseRemoteAgents: boolean;
   canUseBuilderlabDecisions: boolean;
+  canCustomizeCompactionWindow?: boolean;
 }>;
 
 const capabilityFields = {
   canUseRemoteAgents: "can_use_remote_agents",
   canUseBuilderlabDecisions: "can_use_builderlab_decisions",
+  canCustomizeCompactionWindow: "can_customize_compaction_window",
 } as const satisfies Record<keyof Capabilities, string>;
 const capabilityKeys = Object.keys(capabilityFields) as (keyof Capabilities)[];
 

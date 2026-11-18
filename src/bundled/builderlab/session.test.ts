@@ -38,6 +38,7 @@ it("reads each native session's account once and fences requests and viewers to 
     email: "first@example.com",
     canUseRemoteAgents: true,
     canUseBuilderlabDecisions: false,
+    canCustomizeCompactionWindow: false,
   });
   expect(h.request).toHaveBeenLastCalledWith({
     path: "/api/goose/v1/auth/me",
@@ -184,6 +185,7 @@ it("keeps permissions at most a minute old as the session is read, without retir
         capabilities: {
           can_use_remote_agents: false,
           can_use_builderlab_decisions: true,
+          can_customize_compaction_window: true,
           can_delete_buzz_communities: true,
         },
       }),
@@ -198,6 +200,7 @@ it("keeps permissions at most a minute old as the session is read, without retir
         email: "user@example.com",
         canUseRemoteAgents: false,
         canUseBuilderlabDecisions: true,
+        canCustomizeCompactionWindow: true,
       },
     });
     expect(h.request).toHaveBeenCalledTimes(2);

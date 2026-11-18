@@ -1157,13 +1157,16 @@ available rather than silently discarding it.
   when that account holds this Buzz identity's backup, Buzz restores it instead
   of asking for QR pairing. The remote agent can answer while the desktop is off,
   but it cannot open files on that desktop.
-- In a Builderlab agent's settings, expand **Advanced settings** to edit
+- When your service enables custom compaction windows, expand
+  **Advanced settings** in a Builderlab agent's settings to edit
   **Auto-compact at**, which sets when older context is automatically
   summarized. The input uses thousands of tokens, shown by the **K** suffix:
   enter `40` for 40,000 tokens or `250` for 250,000. The minimum is `1` (1,000
   tokens). Leave blank for the default.
   The window is capped at the service's safety threshold for the model, normally
   80% of its usable input budget. Changes apply from the next turn after Save.
+  If the service disables custom windows, new tasks use default compaction
+  and your saved window is kept for when the feature returns.
 - Some builds offer **AI setup → Automatic** when creating an
   agent. AI setup covers the harness, model, and thinking level. Buzz picks
   the first recommended harness that is set up on this

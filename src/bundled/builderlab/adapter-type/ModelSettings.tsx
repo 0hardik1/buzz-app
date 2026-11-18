@@ -126,6 +126,8 @@ export function ModelSettings({
     signedIn &&
     (mismatch || login.account?.canUseRemoteAgents === false || !!accessError);
   const hasAccess = signedIn && !accountProblem;
+  const canCustomizeCompaction =
+    login.account?.canCustomizeCompactionWindow === true;
   const busy = !saved || loading || saving || !hasAccess;
   useEffect(() => {
     if (!signedIn) {
@@ -184,6 +186,7 @@ export function ModelSettings({
     ? Number(`${compaction.trim()}e3`)
     : 0;
   const validCompaction =
+    !canCustomizeCompaction ||
     compaction.trim() === "" ||
     (/^\d+(?:\.\d{1,3})?$/.test(compaction.trim()) &&
       validAutoCompactWindow(autoCompactWindow) &&
@@ -191,9 +194,10 @@ export function ModelSettings({
         (!compactionUnconfirmed &&
           autoCompactWindow === saved?.autoCompactWindow)));
   const compactionChanged =
-    compactionUnconfirmed ||
-    !validCompaction ||
-    autoCompactWindow !== (saved?.autoCompactWindow ?? 0);
+    canCustomizeCompaction &&
+    (compactionUnconfirmed ||
+      !validCompaction ||
+      autoCompactWindow !== (saved?.autoCompactWindow ?? 0));
   const saveModel =
     modelChanged ||
     (!instructionsChanged &&
@@ -425,77 +429,79 @@ export function ModelSettings({
             ]}
             onValueChange={setEffort}
           />
-          <Accordion
-            variant="settings"
-            keepMounted
-            items={[
-              {
-                value: "Advanced settings",
-                title: "Advanced settings",
-                content: (
-                  <Field
-                    label="Auto-compact at"
-                    labelVisibility="hidden"
-                    error={
-                      hasAccess && !validCompaction
-                        ? "Enter at least 1 K or leave blank for default."
-                        : undefined
-                    }
-                  >
-                    <PreferenceRow
-                      title={
-                        <span className="flex items-center gap-1">
-                          Auto-compact at
-                          <IconButton
-                            aria-label="About auto-compaction"
-                            title="Capped at the service’s safe limit for this model. Leave blank for default."
-                            size="xs"
-                            icon={<InfoIcon size={16} />}
-                          />
-                        </span>
+          {canCustomizeCompaction && (
+            <Accordion
+              variant="settings"
+              keepMounted
+              items={[
+                {
+                  value: "Advanced settings",
+                  title: "Advanced settings",
+                  content: (
+                    <Field
+                      label="Auto-compact at"
+                      labelVisibility="hidden"
+                      error={
+                        hasAccess && !validCompaction
+                          ? "Enter at least 1 K or leave blank for default."
+                          : undefined
                       }
-                      trailing={
-                        <div className="w-32">
-                          <InputGroup
-                            appearance="outlined"
-                            trailing={
-                              <span id={compactionUnitId}>
-                                {compaction.trim() && (
-                                  <span aria-hidden="true">K</span>
-                                )}
-                                <span className="sr-only">
-                                  Thousands of tokens
-                                </span>
-                              </span>
-                            }
-                          >
-                            <Input
-                              inputMode="decimal"
-                              aria-describedby={compactionUnitId}
-                              placeholder="Default"
-                              value={compaction}
-                              onChange={(event) =>
-                                setCompaction(event.target.value)
-                              }
-                              onBlur={() => {
-                                if (validCompaction)
-                                  setCompaction(
-                                    autoCompactWindow
-                                      ? formatCompaction(autoCompactWindow)
-                                      : "",
-                                  );
-                              }}
-                              disabled={!saved || saving || !hasAccess}
+                    >
+                      <PreferenceRow
+                        title={
+                          <span className="flex items-center gap-1">
+                            Auto-compact at
+                            <IconButton
+                              aria-label="About auto-compaction"
+                              title="Capped at the service’s safe limit for this model. Leave blank for default."
+                              size="xs"
+                              icon={<InfoIcon size={16} />}
                             />
-                          </InputGroup>
-                        </div>
-                      }
-                    />
-                  </Field>
-                ),
-              },
-            ]}
-          />
+                          </span>
+                        }
+                        trailing={
+                          <div className="w-32">
+                            <InputGroup
+                              appearance="outlined"
+                              trailing={
+                                <span id={compactionUnitId}>
+                                  {compaction.trim() && (
+                                    <span aria-hidden="true">K</span>
+                                  )}
+                                  <span className="sr-only">
+                                    Thousands of tokens
+                                  </span>
+                                </span>
+                              }
+                            >
+                              <Input
+                                inputMode="decimal"
+                                aria-describedby={compactionUnitId}
+                                placeholder="Default"
+                                value={compaction}
+                                onChange={(event) =>
+                                  setCompaction(event.target.value)
+                                }
+                                onBlur={() => {
+                                  if (validCompaction)
+                                    setCompaction(
+                                      autoCompactWindow
+                                        ? formatCompaction(autoCompactWindow)
+                                        : "",
+                                    );
+                                }}
+                                disabled={!saved || saving || !hasAccess}
+                              />
+                            </InputGroup>
+                          </div>
+                        }
+                      />
+                    </Field>
+                  ),
+                },
+              ]}
+            />
+          )}
         </SettingsGroup>
         {hasAccess && models?.length === 0 && (
           <p className="m-0 text-body-sm text-secondary">
