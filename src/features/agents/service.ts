@@ -2209,6 +2209,8 @@ export class AgentsService extends Service implements Agents {
     string,
     (outcome: AgentCreationOutcome) => void
   >();
+  /** When the owner last dismissed each requester's request. */
+  private readonly creationDismissed = new Map<string, number>();
   private updates: readonly AgentUpdateRequest[] = [];
   private teamUpdates: readonly TeamUpdateRequest[] = [];
   private readonly approving = new Set<string>();
@@ -4120,9 +4122,13 @@ export class AgentsService extends Service implements Agents {
     );
     if (own.length >= 4)
       throw new Error("Wait for the owner to review this plugin's requests");
+    const dismissed = this.creationDismissed.get(next.requester);
+    if (dismissed !== undefined && Date.now() - dismissed < 60_000)
+      throw new Error("The owner just dismissed a request; ask again later");
     const outcome = new Promise<AgentCreationOutcome>((resolve) =>
       this.creationOutcomes.set(next.id, resolve),
     );
+    this.ctx.effect(() => () => this.dropCreation(next.id));
     this.requests = [...this.requests, next];
     this.notify();
     return { requestId: next.id, outcome };
@@ -4157,7 +4163,15 @@ export class AgentsService extends Service implements Agents {
   // approves or discards a request in the owner's place.
   dismissCreation(id: string) {
     this.ownerReview();
+    const request = this.requests.find((item) => item.id === id);
+    if (request && !this.approving.has(id))
+      this.creationDismissed.set(request.requester, Date.now());
+    this.dropCreation(id);
+  }
+  /** Removes a request that is not being approved, as dismissed. */
+  private dropCreation(id: string) {
     if (this.approving.has(id)) return;
+    if (!this.requests.some((request) => request.id === id)) return;
     this.requests = this.requests.filter((request) => request.id !== id);
     this.settleCreation(id, { status: "dismissed" });
     this.notify();

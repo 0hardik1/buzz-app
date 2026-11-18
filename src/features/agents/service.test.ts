@@ -15848,6 +15848,37 @@ it("refuses a plugin approving or dismissing an agent request itself", async () 
   expect(service.creationRequests()).toHaveLength(1);
 });
 
+it("makes a plugin wait a minute after the owner dismisses its request", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const { service, plugin } = await setup();
+    const ask = () =>
+      plugin.agents.requestCreation({ type: "example/echo", name: "Helper" });
+    service.dismissCreation(ask().requestId);
+    expect(ask).toThrow("ask again later");
+    vi.setSystemTime(Date.now() + 60_000);
+    expect(ask().requestId).toEqual(expect.any(String));
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("dismisses a plugin's pending agent requests when the plugin unloads", async () => {
+  const { service, plugin } = await setup();
+  let caller!: Context;
+  const scope = plugin.plugin((ctx) => {
+    caller = ctx;
+  });
+  await scope.await();
+  const { outcome } = caller.agents.requestCreation({
+    type: "example/echo",
+    name: "Helper",
+  });
+  await scope.dispose();
+  await expect(outcome).resolves.toEqual({ status: "dismissed" });
+  expect(service.creationRequests()).toEqual([]);
+});
+
 it("refuses agent creation through a stale handle or an unavailable type", async () => {
   const { service, native, plugin, connect, ctx } = await setup();
   ctx

@@ -1207,7 +1207,9 @@ until the owner submits it. The call returns `{ requestId, outcome }`, where
 `outcome` resolves `{ status: "created", agent }` or `{ status: "dismissed" }`
 and never rejects. It throws for an unknown or hosted `type`, a blank `name`,
 `instructions` for a type that takes none, when this plugin already has 4
-requests pending, or when 16 are pending in all. Each request opens the form,
+requests pending, when 16 are pending in all, or for a minute after the owner
+dismisses one of this plugin's requests. Unloading the plugin dismisses its
+pending requests. Each request opens the form,
 so call it from a user action. Only the owner's review creates or dismisses a
 request; `approveCreation` and `dismissCreation` throw for a plugin.
 See [Creating and changing agents from a conversation](agents.md#creating-and-changing-agents-from-a-conversation).
