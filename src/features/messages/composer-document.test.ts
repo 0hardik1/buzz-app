@@ -724,6 +724,32 @@ describe("inline formatting batch", () => {
       ),
     ).toBe("_@Honey_");
   });
+  it("sends a group chip like a recipient chip: exact label beside formatting, italic with asterisks", () => {
+    const members = [
+      { pubkey: "a".repeat(64), name: "Honey" },
+      { pubkey: "b".repeat(64), name: "Pollen" },
+    ];
+    const chip = (label: string, ...marks: InlineFormat[]) =>
+      schema.nodes.token.create(
+        { source: `@${label}`, group: { label, members } },
+        null,
+        marks.map((name) => schema.marks[name].create()),
+      );
+    expect(serialize(chip("eng_ios", "italic"), schema.text(" "))).toBe(
+      "*@eng\\_ios* ",
+    );
+    // The label is sent as typed, so a reader of the raw text can match it.
+    expect(
+      serialize(chip("eng*ops"), schema.text(" hi "), marked("b", "bold")),
+    ).toBe("@eng*ops hi **b**");
+    expect(
+      serialize(
+        chip("eng*"),
+        schema.text("b", [schema.marks.italic.create()]),
+        schema.text("*"),
+      ),
+    ).toBe("@eng**b*\\*");
+  });
   it("escapes literal punctuation in each generated format", () => {
     for (const mark of ["bold", "italic", "strike"] as const)
       for (const character of ["*", "_", "~", "!"]) {

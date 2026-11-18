@@ -721,6 +721,7 @@ function read(value: unknown): EditorNode | undefined {
           !token ||
           composerTokenText(token) !== node.attrs.source ||
           ("recipient" in node.attrs && node.attrs.recipient) ||
+          ("group" in node.attrs && node.attrs.group) ||
           ("resource" in node.attrs && node.attrs.resource) ||
           ("pending" in node.attrs && node.attrs.pending)
         )

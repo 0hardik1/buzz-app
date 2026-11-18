@@ -254,7 +254,7 @@ function authoredLiteralRanges(doc: EditorNode) {
           ? "\n"
           : node.attrs.source;
       context.source +=
-        node.marks.length || node.attrs.recipient
+        node.marks.length || node.attrs.recipient || node.attrs.group
           ? value.replace(/\S/g, "a")
           : value;
     });
@@ -320,8 +320,11 @@ function paragraphMarkdown(
         : node.attrs.source;
     if (composerSchema.marks.literal.isInSet(node.marks))
       literals.push({ start, end: text.length });
+    // A group chip's @label is protected like a recipient's exact name, so
+    // its characters are never escaped or paired as emphasis.
     if (
       node.attrs.recipient ||
+      node.attrs.group ||
       composerSchema.marks.recipient.isInSet(node.marks)
     )
       recipients.push({ start, end: text.length });
