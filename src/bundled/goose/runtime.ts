@@ -180,7 +180,6 @@ export class GooseRuntime {
     /** The agent's `core` memory as the host keeps it (`Agents.core`). */
     private readonly core: Agents["core"],
     private readonly storage: Storage = globalThis.localStorage,
-    /** The tools plugins add to the agent's sessions now. */
     private readonly added: (
       agent?: AgentKey,
     ) => readonly AddedTool[] = () => [],

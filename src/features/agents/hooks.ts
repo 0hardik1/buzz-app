@@ -30,19 +30,21 @@ export type AgentHookRouting = Readonly<{
 export const directTrigger = (trigger: Trigger, owner: string | undefined) =>
   trigger.type === "mention" && !!owner && trigger.event.pubkey === owner;
 /** The conversation a trigger came from, when it names one. */
-export function conversationOf(
-  trigger: Trigger,
-): AgentHookContext["conversation"] {
+export function conversationOf(trigger: Trigger) {
   if ("channel" in trigger)
     return {
       channel: trigger.channel,
       ...(trigger.root && { root: trigger.root }),
-    };
+    } satisfies NonNullable<AgentHookContext["conversation"]>;
   if (!("event" in trigger)) return undefined;
   const channel = trigger.event.tags.find((tag) => tag[0] === "h")?.[1];
   const root = threadReference(trigger.event)?.rootId;
   return channel
-    ? { channel, ...(root && { root }), message: trigger.event.id }
+    ? ({
+        channel,
+        ...(root && { root }),
+        message: trigger.event.id,
+      } satisfies NonNullable<AgentHookContext["conversation"]>)
     : undefined;
 }
 /** Event names, input and output formats belong to the selected agent type. */

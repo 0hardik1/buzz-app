@@ -97,7 +97,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
     supportsGuardedWake: true,
     id: TYPE_ID,
     hooks: { events: ["beforeTool", "afterTool"] },
-    // Pi has no MCP client: it loads no server of its own.
     harnessMcp: { client: false },
     retire: (pubkey) => runtime.retire(pubkey),
     protection: true,

@@ -410,7 +410,6 @@ try {
   assert.match(published.at(-1).content, /SETTINGS_CLEARED/);
   assert.doesNotMatch(published.at(-1).content, /INSTRUCTIONS_UPDATED/);
   assert.equal(binding().threadId, saved.threadId);
-  // The configuration's own server loads, as Claude Code's do.
   assert.equal(await exists("mcp-started"), true);
   assert(!notices.some((wire) => wire.params?.item?.type === "mcpToolCall"));
   assert(!notices.some((wire) => wire.method === "item/agentMessage/delta"));

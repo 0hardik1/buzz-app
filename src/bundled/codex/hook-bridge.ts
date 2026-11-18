@@ -54,8 +54,6 @@ export async function openHookBridge(
     event: string,
     input: unknown,
   ) => Promise<Record<string, unknown>>,
-  /** A hook from another thread than the bound one, such as a subagent's.
-   * Its output answers the hook; undefined refuses it as before. */
   other?: (
     bound: string | undefined,
     session: string,

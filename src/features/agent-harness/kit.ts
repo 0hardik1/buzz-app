@@ -192,7 +192,7 @@ const CONVERSATION_READ_TIMEOUT_MS = 4_000;
 
 /** The kit without its MCP part, which `agents.harness` binds to the plugin
  * that asks. */
-export function harnessKit(sources: Sources): Omit<HarnessKit, "mcp"> {
+export function harnessKit(sources: Sources) {
   const admitted = new WeakMap<HarnessConversation, Admitted>();
   const memoryReads = new MemoryReads();
   const session = (key: AgentKey) => {
@@ -471,5 +471,5 @@ export function harnessKit(sources: Sources): Omit<HarnessKit, "mcp"> {
         ],
       });
     },
-  });
+  } satisfies Omit<HarnessKit, "mcp">);
 }

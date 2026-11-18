@@ -48,8 +48,6 @@ export class PluginRuntime {
     timeoutMs = 10_000,
     /** Whether the manager is still reading which plugins to run. */
     configuring = () => false,
-    /** Whether an enabled plugin declaring this access never reaches the
-     * runtime, or may, while the plugin settings are not read. */
     blocked: (access: HostAccess) => boolean = () => false,
   ) {
     this.root = root;

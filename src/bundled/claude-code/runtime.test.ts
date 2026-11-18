@@ -108,7 +108,6 @@ function setup(
     /** Raw text after the history, as a line Claude is still writing. */
     nativeTail?: string;
     resolveDirectory?: Host["resolveDirectory"];
-    /** Each agent's added tools, instead of `added` for every agent. */
     given?: (agent?: AgentKey) => readonly AddedTool[];
     /** Claude processes the host runs at once before it refuses one, as it
      * refuses past its limit on all plugins' processes. */
@@ -2886,7 +2885,6 @@ it("hands the spare only to an agent given the tools every agent gets", async ()
   const { runtime, claudes, deliver } = setup([], {
     given: (agent) => (agent === self && given.tasks ? [tasks] : []),
   });
-  // Each a new thread, so each starts a new session.
   const mention = (id: string) =>
     deliver({
       type: "mention",

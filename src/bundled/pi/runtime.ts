@@ -137,8 +137,6 @@ type Waited =
 type Receipt = Pick<Delivery, "step" | "acknowledged" | "superseded"> & {
   /** Its conversation key, which session controls act on. */
   key: string;
-  /** The owner's own message, with every request the conversation's run
-   * took before it: what its tools get as `Context.direct`. */
   direct: boolean;
   /** Where its activity shows: a thread, or a Solo chat's channel. */
   scope: string;
@@ -223,7 +221,6 @@ export class PiRuntime {
     private readonly reads: (key: AgentKey) => AgentReads | undefined,
     /** The agent's `core` memory as the host keeps it (`Agents.core`). */
     private readonly core: Agents["core"],
-    /** The tools plugins add to the agent's conversations now. */
     private readonly added: (
       agent?: AgentKey,
     ) => readonly AddedTool[] = () => [],
@@ -665,8 +662,6 @@ export class PiRuntime {
           channel,
           key === channel ? undefined : root,
         );
-      // A request that joins a run can only take `direct` away: the run is
-      // direct while every request it took is the owner's own message.
       const direct =
         directTrigger(trigger, agent.owner) &&
         [...entry.receipts.values()].every(
@@ -1134,7 +1129,6 @@ export class PiRuntime {
         key: context.root
           ? `${context.channel}/${context.root}`
           : context.channel,
-        // A run saved before Buzz said so is not known to be direct.
         direct: context.direct === true,
         scope: where.topLevel ? context.channel : root,
         where,

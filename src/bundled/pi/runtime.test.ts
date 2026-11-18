@@ -61,7 +61,6 @@ const reply = (id: string, content: string, created_at = 110) =>
 
 function setup(
   handlers: Readonly<Record<string, Handler>> = {},
-  /** The tools plugins add, or each agent's. */
   added:
     | readonly AddedTool[]
     | ((agent?: AgentKey) => readonly AddedTool[]) = [],
@@ -772,9 +771,7 @@ it("lists and runs a plugin's tool only for the agents it is given to now, with 
   await expect(call()).resolves.toEqual({
     content: [{ type: "text", text: "found" }],
   });
-  // The call's cancel, so the plugin can stop work the owner canceled.
   expect(seen).toBeInstanceOf(AbortSignal);
-  // Handed over after the first, once Pi has that one.
   await deliver({ type: "mention", event: reply("3", "@Pi again") }).run;
   await vi.waitFor(() => expect(host.requests("open")).toHaveLength(2));
   expect(listed(1)).toContain("lookup");
@@ -782,16 +779,17 @@ it("lists and runs a plugin's tool only for the agents it is given to now, with 
 
 it("tells plugins' tools a run is direct only while each request it took is the owner's own", async () => {
   const waits: ReturnType<typeof deferred<unknown>>[] = [];
+  const allWaiting = deferred();
   const { host, deliver, settled } = setup({
     wait: () => {
       const wait = deferred<unknown>();
       waits.push(wait);
+      if (waits.length === 3) allWaiting.resolve();
       return wait.promise;
     },
   });
   const contexts = () =>
     host.requests("deliver").map((sent) => sent.params.context);
-  // Each later one is handed over once Pi has the one before.
   const handed = (count: number) =>
     vi.waitFor(() => expect(contexts()).toHaveLength(count));
   const first = deliver({ type: "mention", event: reply("2", "@Pi look") });
@@ -814,7 +812,8 @@ it("tells plugins' tools a run is direct only while each request it took is the 
     { channel, root: root.id, direct: false, folder: "~/.buzz" },
     { channel, root: root.id, direct: false, folder: "~/.buzz" },
   ]);
-  await vi.waitFor(() => expect(waits).toHaveLength(3));
+  await allWaiting.promise;
+  expect(waits).toHaveLength(3);
   for (const wait of waits)
     wait.resolve({ status: "done", answer: 5, text: "" });
   await Promise.all([first, wake, steer].map(settled));

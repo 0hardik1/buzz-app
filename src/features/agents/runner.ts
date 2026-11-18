@@ -641,8 +641,6 @@ export class AgentRunners {
   /** Whether each event catch-up read may address its agent, as `unattended`
    * said when it was read: one waiting for room keeps what it arrived as. */
   private readonly readAddressable = new WeakMap<RelayEvent, boolean>();
-  /** The agent each trigger was delivered to, so a harness's later report of
-   * the turn it runs can be checked against what core sent. */
   private readonly deliveredTriggers = new WeakMap<object, AgentKey>();
   private readonly sourceJobs = new Map<Job, string>();
   private readonly failedSources = new WeakSet<AttentionObject>();

@@ -234,8 +234,6 @@ export class ClaudeRuntime {
   private readonly titled = new Set<string>();
   /** Counts changes of credentials, which start processes again. */
   private credentials = 0;
-  /** One process started ahead of need, for any agent's next new conversation.
-   * It lists the tools every agent gets. */
   private readonly spare = new Spare(
     // Started ahead of need, it never stops a conversation to make room.
     (id, options) => this.spawn(id, options),
@@ -257,8 +255,6 @@ export class ClaudeRuntime {
       raw: unknown,
       remote?: boolean,
     ) => Config = config,
-    /** The tools plugins add to the agent's sessions now; without an agent,
-     * those every agent gets. */
     private readonly added: (
       agent?: AgentKey,
     ) => readonly AddedTool[] = () => [],
@@ -1661,8 +1657,6 @@ export class ClaudeRuntime {
       ...(!this.target
         ? {
             spare: {
-              // An agent whose plugins' `when` gives it other tools than the
-              // spare lists starts its own process, and leaves the spare.
               take: (where) =>
                 addedKey(this.added(agent)) === addedKey(this.added())
                   ? this.spare.take(where)

@@ -105,7 +105,6 @@ function fixture(
   resolveDirectory?: ConstructorParameters<typeof CodexRuntime>[14],
   mcp?: ConstructorParameters<typeof CodexRuntime>[15],
 ) {
-  /** The servers `config/read` lists, and the rows a thread's status answers. */
   const servers: Record<string, unknown> = {
     "company.tools": { command: "secret-tool", enabled: true, url: null },
   };
@@ -413,8 +412,6 @@ function fixture(
     ): Promise<string | null | undefined> =>
       memories.find((memory) => memory.slug === "core")?.body ?? null,
   );
-  /** The tools plugins add, as the runtime reads them at each use: each
-   * given to the agent, so none without one. */
   const added: AddedTool[] = [];
   const runtime = new CodexRuntime(
     spawn,
@@ -785,7 +782,6 @@ it("hands over promptly and runs conversations independently on one server", asy
       },
     },
   });
-  // The agent's own server has no entry, so its Codex configuration applies.
   expect((started.config as Record<string, unknown>).mcp_servers).toEqual({});
   expect(started.config).toMatchObject({
     web_search: "disabled",
@@ -812,7 +808,6 @@ it("leaves Codex's Apps and plugins to its configuration only for an agent that 
   const { config } = started;
   expect(config).not.toHaveProperty("features.apps");
   expect(config).not.toHaveProperty("features.plugins");
-  // Web search stays off.
   expect(config).toMatchObject({ web_search: "disabled" });
   f.complete(0, "DONE");
   await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
@@ -8131,7 +8126,6 @@ describe("a conversation given its own folder", () => {
   });
 });
 
-/** What the owner's choice and the harness's status look like to an adapter. */
 type McpKit = NonNullable<ConstructorParameters<typeof CodexRuntime>[15]>;
 const mcpKit = (
   answer: Awaited<ReturnType<McpKit["choice"]>>,
@@ -8141,7 +8135,6 @@ const mcpKit = (
     choice: vi.fn(async () => answer),
     started,
   }) satisfies McpKit;
-/** A Codex runtime whose agent's MCP servers `kit` chooses. */
 const withMcp = (
   kit?: McpKit,
   hooks?: ConstructorParameters<typeof CodexRuntime>[7],
@@ -8160,7 +8153,6 @@ const withMcp = (
     undefined,
     kit,
   );
-/** Buzz's hook bridge, which no test calls. */
 const idleHooks = () => ({
   serve: vi.fn(async () => ({
     url: "http://127.0.0.1:1/mcp",
@@ -8211,8 +8203,6 @@ describe("harness MCP choice", () => {
     expect(kit.started).not.toHaveBeenCalled();
   });
 
-  // Nothing is forced on: a server the choice leaves out, or turns on, keeps
-  // its `config.toml` entry, and a name the harness does not list is not sent.
   it.each([
     [
       "leaves a server chosen on to its configuration, and trims chosen tools",
@@ -8255,12 +8245,10 @@ describe("harness MCP choice", () => {
     f.statusRows.rows = [
       row("alpha", "connected", { read: { description: "Reads" }, write: {} }),
       row("beta", "disabled"),
-      // Buzz's own hook bridge is no `config/read` name, so it is not asked.
       row("buzz_native_hooks"),
     ];
     await f.runtime.run(f.delivery("@Codex hello"));
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
-    // One call per server name: without a name Codex starts servers again.
     expect(statusCalls(f).map((wire) => wire.params)).toEqual([
       { threadId: "thread-1", serverName: "alpha", detail: "toolsAndAuthOnly" },
       { threadId: "thread-1", serverName: "beta", detail: "toolsAndAuthOnly" },
@@ -8272,8 +8260,6 @@ describe("harness MCP choice", () => {
     expect(order.indexOf("mcpServerStatus/list")).toBeLessThan(
       order.indexOf("turn/start"),
     );
-    // A server that is off is not loaded, so only alpha is listed. Beta,
-    // left out, is read back as the default: on.
     expect(started).toHaveBeenCalledWith(
       expect.objectContaining({ key: pubkey }),
       "thread-1",
@@ -8295,9 +8281,9 @@ describe("harness MCP choice", () => {
       (f: ReturnType<typeof fixture>) => f.failing.add("mcpServerStatus/list"),
     ],
   ])("starts no turn when %s", async (_name, arrange) => {
-    const started = vi.fn(() => {
+    const started = () => {
       throw new Error("MCP servers loaded that were turned off");
-    });
+    };
     const f = withMcp(mcpKit({ alpha: false }, started));
     withServers(f, "alpha");
     f.statusRows.rows = [row("alpha")];
@@ -8323,7 +8309,6 @@ describe("harness MCP choice", () => {
     asSoloChat(f);
     await f.runtime.run({ ...f.delivery("@Codex fix it"), named: vi.fn() });
     await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
-    // The conversation leaves gamma to `config.toml`; the title turns it off.
     expect(threadConfig(f, 0).mcp_servers).toEqual({
       beta: { disabled_tools: ["write"] },
     });
@@ -8356,8 +8341,6 @@ describe("harness MCP choice", () => {
     );
   });
 
-  /** Starts a conversation, ends its turn and asks for a compaction, whose
-   * thread resume is what `resumed` holds. `finish` ends the compaction. */
   async function compacting(f: ReturnType<typeof fixture>, between = () => {}) {
     const delivery = f.delivery("first");
     const agent = {
@@ -8425,7 +8408,6 @@ describe("harness MCP choice", () => {
     const f = fixture();
     withServers(f, "alpha");
     const { resumed, finish } = await compacting(f);
-    // The conversation leaves alpha to `config.toml`; compaction turns it off.
     expect(threadConfig(f).mcp_servers).toEqual({});
     expect(resumed).toEqual({ alpha: off("alpha") });
     expect(statusCalls(f)).toEqual([]);
@@ -8446,13 +8428,11 @@ describe("harness MCP choice", () => {
     });
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
     expect(threadConfig(f).mcp_servers).toEqual({});
-    // Unsubscribing unloads it at once, which stops the servers it started.
     expect(threadConfig(f).thread_unload_delay_secs).toBe(0);
     expect(started).toHaveBeenCalledWith(
       expect.objectContaining({ key: pubkey }),
       "thread-1",
       [{ name: "alpha", state: "connected", tools: [] }],
-      // A name the choice leaves out is checked as the default: on.
       { alpha: true, beta: true },
     );
   });
@@ -8582,7 +8562,6 @@ describe("harness MCP report and inspect", () => {
       ephemeral: true,
       sandbox: "read-only",
       approvalPolicy: "never",
-      // Unloaded once unsubscribed, so the server it started stops.
       config: { thread_unload_delay_secs: 0 },
     });
     expect(threadConfig(f).mcp_servers).toEqual({
@@ -8645,8 +8624,6 @@ describe("harness MCP report and inspect", () => {
 });
 
 describe("harness MCP hooks", () => {
-  /** A thread with servers `names` whose hook bridge the test can call, and
-   * the plugin hooks that run behind it. */
   const bridged = (
     answer: Parameters<typeof mcpKit>[0],
     names = ["my.server"],
@@ -8655,7 +8632,11 @@ describe("harness MCP hooks", () => {
     ],
   ) => {
     let handler!: McpHandler;
-    const plugin = vi.fn(async () => ({ plugin: "ran" }));
+    const calls: unknown[][] = [];
+    const plugin = async (...args: unknown[]) => {
+      calls.push(args);
+      return { plugin: "ran" };
+    };
     const kit = mcpKit(answer);
     const f = withMcp(kit, {
       serve: async (run) => {
@@ -8693,10 +8674,8 @@ describe("harness MCP hooks", () => {
       await f.runtime.run(f.delivery("@Codex hello"));
       await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
     };
-    /** What the plugin hooks were given: session, input and turn. */
     const seen = (call = -1) => {
-      const [, session, , input, turn] = (plugin.mock.calls.at(call) ??
-        []) as unknown as [
+      const [, session, , input, turn] = (calls.at(call) ?? []) as [
         string,
         string,
         string,
@@ -8741,7 +8720,6 @@ describe("harness MCP hooks", () => {
     await vi.waitFor(() =>
       expect(f.sent.some((wire) => wire.method === "turn/steer")).toBe(true),
     );
-    // Codex may take the steer in before Buzz sees its answer.
     await pre("mcp__my_server__write");
     expect(seen().turn).toMatchObject({
       trigger: {
@@ -8785,10 +8763,8 @@ describe("harness MCP hooks", () => {
         }),
       },
     });
-    // The tool's own name is found from Codex's sanitized one.
     await pre("mcp__my_server__get_thing");
     expect(seen().input).toMatchObject({ mcp_tool: "get-thing" });
-    // A name the status did not list leaves the tool out, not the server.
     await pre("mcp__my_server__other");
     expect(seen().input).toMatchObject({ mcp_server: "my.server" });
     expect(seen().input).not.toHaveProperty("mcp_tool");
@@ -8797,12 +8773,10 @@ describe("harness MCP hooks", () => {
       tool_use_id: "call-1",
     });
     expect(seen().input).toMatchObject({ mcp_tool: "write" });
-    // Other tools and Buzz's own bridge server are passed as Codex gave them.
     await pre("Bash");
     expect(seen().input).not.toHaveProperty("mcp_server");
     await pre("mcp__buzz_native_hooks__PreToolUse");
     expect(seen().input).not.toHaveProperty("mcp_server");
-    // So is a name that matches no server of the thread.
     await pre("mcp__nobody__write");
     expect(seen().input).not.toHaveProperty("mcp_server");
     await f.complete();
@@ -8811,7 +8785,6 @@ describe("harness MCP hooks", () => {
   it("gives plugin hooks a subagent's events as its parent turn's, and another thread's with no turn", async () => {
     const { f, hook, pre, begin, seen } = bridged({ "my.server": true });
     await begin();
-    // Before its spawn completes, a thread is not this turn's.
     await expect(
       pre("mcp__my_server__write", { session_id: "child-1" }),
     ).resolves.toEqual({ plugin: "ran" });
@@ -8874,8 +8847,6 @@ describe("harness MCP hooks", () => {
     expect(seen().turn).toMatchObject({
       trigger: { type: "mention", event: { pubkey: owner } },
     });
-    // A plugin's wake steered into the owner's turn: the turn is no longer
-    // only the owner's message.
     await f.runtime.run(pluginWake(f, root));
     await vi.waitFor(() =>
       expect(
@@ -8893,18 +8864,14 @@ describe("mcpCallOf", () => {
     ["mcp__alpha__write", ["alpha"], [], { server: "alpha" }],
     ["mcp__my_server__write", ["my.server"], [], { server: "my.server" }],
     ["mcp__a_b__write", ["a b"], [], { server: "a b" }],
-    // Codex joins a namespace and a name after trimming their edge underscores.
     ["mcp__a__tool", ["a_"], [], { server: "a_" }],
     ["mcp__a__tool", ["a", "b"], [], { server: "a" }],
-    // "a" and "a-" read alike once sanitized, so they cannot be told apart.
     ["mcp__a__write", ["a", "a-", "c"], [], undefined],
     ["mcp__c__write", ["a", "a-", "c"], [], { server: "c" }],
     ["mcp__alpha__x__y", ["alpha", "alpha__x"], [], undefined],
     ["mcp__beta__write", ["alpha"], [], undefined],
     ["mcp__alpha", ["alpha"], [], undefined],
     ["mcp__", ["alpha"], [], undefined],
-    // The tool is found by its sanitized name, with edge underscores trimmed,
-    // and is left out when it matches none or two.
     [
       "mcp__alpha__get_thing",
       ["alpha"],

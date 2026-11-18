@@ -269,7 +269,6 @@ type Server = {
    * that turn's model input, if it said. */
   explainer?(threadId: string): () => string | undefined;
 };
-/** A server of `config/read`, and a row of a thread's `mcpServerStatus/list`. */
 type McpConfig = Record<string, unknown> & { disabled_tools?: string[] };
 type McpRow = {
   name: string;
@@ -277,27 +276,26 @@ type McpRow = {
   tools?: Record<string, { description?: string }>;
   toolsError?: string | null;
 };
-/** CLI overrides replace this table; a disabled server still needs a transport. */
 const turnedOff = (server: McpConfig) => ({
   ...(typeof server.command === "string"
     ? { command: server.command }
     : { url: server.url }),
   enabled: false,
 });
-// "disabled" is not here: in a thread's status it is also a server Buzz
-// turned off, which the user's configuration may have on.
 const MCP_STATES = {
   connected: "connected",
   authenticationRequired: "needs-auth",
   failed: "failed",
   cancelled: "failed",
 } as const;
-const mcpTools = (row: McpRow): HarnessMcpTool[] =>
-  Object.entries(row.tools ?? {}).map(([name, { description }]) => ({
-    name,
-    ...(description ? { description } : {}),
-  }));
-/** Codex's model-visible name for a name: other characters become `_`. */
+const mcpTools = (row: McpRow) =>
+  Object.entries(row.tools ?? {}).map(
+    ([name, { description }]) =>
+      ({
+        name,
+        ...(description ? { description } : {}),
+      }) satisfies HarnessMcpTool,
+  );
 const modelName = (text: string) => text.replace(/[^A-Za-z0-9_]/g, "_");
 /** The server, and the tool where known, behind a hook's `mcp__<server>__<tool>`
  * name, among the thread's server names. Undefined when the name matches no
@@ -307,7 +305,7 @@ export function mcpCallOf(
   name: string,
   servers: readonly string[],
   row: (server: string) => Pick<McpRow, "tools"> | undefined,
-): { server: string; tool?: string } | undefined {
+) {
   const rest = name.slice("mcp__".length);
   const prefix = (server: string) =>
     `${modelName(server).replace(/_+$/, "")}__`;
@@ -315,12 +313,14 @@ export function mcpCallOf(
   const [server] = hits;
   if (!server || hits.length !== 1) return undefined;
   const given = rest.slice(prefix(server).length);
-  // Two tools that read alike name neither, so the call's tool is unnamed.
   const tools = Object.keys(row(server)?.tools ?? {}).filter(
     (own) => modelName(own).replace(/^_+/, "") === given,
   );
   const tool = tools.length === 1 ? tools[0] : undefined;
-  return { server, ...(tool && { tool }) };
+  return { server, ...(tool && { tool }) } satisfies {
+    server: string;
+    tool?: string;
+  };
 }
 export type SessionView = { key: string; status: string; detail: string };
 /** A saved binding, newest first, for the owner's transcript list, with the
@@ -434,7 +434,6 @@ export class CodexRuntime {
     { key: string; ready: Promise<Models> }
   >();
   private memoryReads = new MemoryReads();
-  /** Each chosen thread's own status, for naming the tools its hooks show. */
   private threadRows = new Map<string, readonly McpRow[]>();
   /** A failed turn's notice as the thread reads it, such as where to sign
    * Codex in again. */
@@ -450,7 +449,6 @@ export class CodexRuntime {
       raw: unknown,
       remote?: boolean,
     ) => Config = config,
-    /** The tools plugins add to the agent's threads now. */
     private readonly added: (
       agent?: AgentKey,
     ) => readonly AddedTool[] = () => [],
@@ -459,8 +457,6 @@ export class CodexRuntime {
       "",
     private readonly hooks?: {
       serve: NonNullable<Host["serveMcp"]>;
-      /** `milliseconds`: what is left of the hook's budget, when less than
-       * the usual. */
       run(
         agent: string,
         session: string,
@@ -477,7 +473,6 @@ export class CodexRuntime {
     private readonly handle: (pubkey: string) => AgentHandle | undefined = () =>
       undefined,
     private readonly resolveDirectory?: Host["resolveDirectory"],
-    /** The MCP servers a thread loads: the owner's choice, if one is made. */
     private readonly mcp?: HarnessMcpKit,
   ) {}
   /** The folder a plugin gave the conversation, if any. Only the local
@@ -689,12 +684,9 @@ export class CodexRuntime {
       this.changeSession(agent, place, action, signal, reset),
     );
   }
-  /** Runs `work` as one of `agent`'s actions, which retiring the agent aborts
-   * and waits for. */
   private track<T>(agent: AgentKey, work: (signal: AbortSignal) => Promise<T>) {
     const abort = new AbortController();
     const done = work(abort.signal);
-    // Settles either way: the caller sees the rejection, retiring only waits.
     const pending = {
       abort,
       done: done.then(
@@ -842,8 +834,6 @@ export class CodexRuntime {
         throw new Error(
           "The workspace changed. Send a message to start its session first.",
         );
-      // Compaction loads no MCP server; with a choice in play, including a
-      // protected agent's, it is read back as off.
       const who = {
         key: agent.key,
         protection: this.handle(agent.key)?.protection,
@@ -953,7 +943,6 @@ export class CodexRuntime {
     return ready;
   }
 
-  /** The servers `config/read` lists for the agent, which starts none. */
   private async mcpServers(agent: Agent) {
     if (this.disposed) throw new Error("Codex runtime is disposed");
     const rpc = await this.open(this.handle(agent.key)).opening;
@@ -968,17 +957,18 @@ export class CodexRuntime {
     }>("config/read", { cwd });
     const hooks =
       (config.features?.hooks ?? config.features?.codex_hooks) !== false;
-    // The hook bridge serves only threads on the main app-server.
     const calls = hooks && !!this.hooks && this.server?.rpc === rpc;
     return { rpc, cwd, servers: config.mcp_servers ?? {}, calls };
   }
   /** The agent's MCP servers by name, from its configuration. An execution
    * target reports and applies nothing. */
-  async harnessMcp(
-    agent: Agent,
-  ): Promise<Omit<HarnessMcpReport, "inspect"> | undefined> {
+  async harnessMcp(agent: Agent) {
     if (await this.inspect?.(agent.key)) return undefined;
-    if (agent.protection) return { tools: true, servers: [] };
+    if (agent.protection)
+      return { tools: true, servers: [] } satisfies Omit<
+        HarnessMcpReport,
+        "inspect"
+      >;
     const { servers, calls } = await this.mcpServers(agent);
     return {
       tools: true,
@@ -988,7 +978,7 @@ export class CodexRuntime {
         default: server.enabled !== false,
         ...(server.enabled === false && { state: "disabled" as const }),
       })),
-    };
+    } satisfies Omit<HarnessMcpReport, "inspect">;
   }
   /** Lists one server's tools on an ephemeral thread where every other server
    * is off. No turn runs and nothing is saved. */
@@ -1018,7 +1008,6 @@ export class CodexRuntime {
         sandbox: "read-only",
         ephemeral: true,
         config: {
-          // Unloads once unsubscribed, which stops the server it started.
           thread_unload_delay_secs: 0,
           web_search: "disabled",
           "features.plugins": false,
@@ -2359,7 +2348,6 @@ export class CodexRuntime {
         "thread/start",
         {
           ...params,
-          // Unloads once unsubscribed, which stops the servers it started.
           config: { ...params.config, thread_unload_delay_secs: 0 },
           ephemeral: true,
           dynamicTools: dynamicTools(this.added(agent.key)),
@@ -2967,22 +2955,17 @@ export class CodexRuntime {
       };
     }>("config/read", { cwd: workspace });
     const { model, effort } = await this.turnModel(rpc, settings, pick, synced);
-    // Only names `config/read` lists are sent: Codex rejects one it lacks.
     const named = Object.entries(normalized.config.mcp_servers ?? {});
     const silenced = Object.fromEntries(
       named.map(([name, server]) => [name, turnedOff(server)]),
     );
-    // A server chosen on has no entry, so `config.toml` applies; with `off`
-    // tools it keeps its own disabled tools too. Nothing is ever forced on.
-    // A name the choice leaves out follows `config.toml`, as Claude Code's
-    // servers do, except for a protected agent.
     const picks = named.map(([name, server]) => {
       const picked =
         choice === "none" ? false : (choice?.[name] ?? !agent.protection);
       return [name, server, picked] as const;
     });
     const mcp = Object.fromEntries(
-      picks.flatMap(([name, server, picked]): [string, object][] => {
+      picks.flatMap<[string, object]>(([name, server, picked]) => {
         if (picked === true) return [];
         if (picked)
           return [
@@ -2999,7 +2982,6 @@ export class CodexRuntime {
       }),
     );
     const servers = named.map(([name]) => name);
-    // What each server was given, for the read-back; none without a choice.
     const applied: HarnessMcpChoice | undefined =
       choice === undefined
         ? undefined
@@ -3023,8 +3005,6 @@ export class CodexRuntime {
               this.named(session, input, servers),
               this.turnOf(session),
             ),
-          // A subagent's hooks reach plugins as its parent turn's; any other
-          // thread's carry no turn, so nothing says who started it.
           (bound, session, event, input) => {
             const parent =
               bound && this.runningOf(bound)?.children?.has(session)
@@ -3073,13 +3053,9 @@ export class CodexRuntime {
       summary,
       bridge,
       applied,
-      // What the thread's `mcp_servers` is with every server off: the title
-      // thread's.
       silenced: { ...silenced, ...bridge?.config },
     };
   }
-  /** Shows the choice is in effect: what the thread's status lists as loaded
-   * is checked by the kit; a throw stops the session before any turn. */
   private async verifyMcp(
     rpc: AppServer,
     agent: Pick<AgentHandle, "key" | "protection">,
@@ -3087,9 +3063,6 @@ export class CodexRuntime {
     applied: HarnessMcpChoice | undefined,
   ) {
     if (!this.mcp || applied === undefined) return;
-    // By name, the status reads the thread's own connection; without one,
-    // Codex starts every server again to list it. Buzz's own hook-bridge
-    // server is not a `config/read` name, so it is not asked about.
     const rows = (
       await Promise.all(
         Object.keys(applied).map((serverName) =>
@@ -3122,10 +3095,6 @@ export class CodexRuntime {
       applied,
     );
   }
-  /** A native MCP tool event's input, with the raw `mcp_server` and, when
-   * known, `mcp_tool` behind Codex's model-visible `tool_name`, matched among
-   * `servers` and the tools thread `threadId` listed. Buzz's own hook server
-   * and a name that matches no single server are left as they are. */
   private named(threadId: string, input: unknown, servers: readonly string[]) {
     const fields = (input ?? {}) as Record<string, unknown>;
     const name = fields.tool_name;
@@ -3146,10 +3115,7 @@ export class CodexRuntime {
         }
       : input;
   }
-  /** What started the running turn of thread `threadId`. A steered turn
-   * answers for its first request that is not the owner's own message, so
-   * `direct` holds only when every request, and every steer sent, is. */
-  private turnOf(threadId: string): Pick<Delivery, "trigger"> | undefined {
+  private turnOf(threadId: string) {
     const turn = this.runningOf(threadId);
     if (turn && "requests" in turn) {
       const active = turn;
@@ -3162,8 +3128,7 @@ export class CodexRuntime {
     }
     return turn && { trigger: turn.trigger };
   }
-  /** The running turn, regular or once, on thread `threadId`. */
-  private runningOf(threadId: string): Active | Once | undefined {
+  private runningOf(threadId: string) {
     const entries = [...this.entries.values()];
     return (
       entries
@@ -3175,8 +3140,6 @@ export class CodexRuntime {
         .find((turn) => turn.threadId === threadId)
     );
   }
-  /** A turn's native item, from its thread or a subagent's: a spawn adds the
-   * subagent's thread to the turn. */
   private native(turn: Active | Once, item: Item) {
     if (item.type !== "collabAgentToolCall") return;
     turn.children ??= new Set();
@@ -3521,7 +3484,6 @@ export class CodexRuntime {
             request.named,
             text,
             entry.abort.signal,
-            // The title thread loads no server, whatever the turn's choice.
             {
               ...params,
               config: { ...params.config, mcp_servers: silenced },
@@ -3628,10 +3590,8 @@ export class CodexRuntime {
 type Item = {
   type: string;
   id?: string;
-  /** An `mcpToolCall`'s raw server and tool names. */
   server?: string;
   tool?: string;
-  /** A `collabAgentToolCall`'s spawned subagent threads, once it completes. */
   receiverThreadIds?: readonly unknown[];
   text?: string;
   phase?: string;
@@ -3651,7 +3611,6 @@ function follow(
     children?: ReadonlySet<string>;
   },
   onItem?: (method: string, item: Item) => void,
-  /** Items of the turn's subagent threads, when Codex sends them. */
   onChild?: (method: string, item: Item) => void,
 ) {
   let finish!: (status: string) => void;

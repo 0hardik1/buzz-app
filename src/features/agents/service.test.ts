@@ -2180,9 +2180,8 @@ describe("a plugin's wake", () => {
     ).not.toThrow();
   });
 
-  /** A hook on `example/hooked` that records the context it is given. */
   async function watchHooks(ctx: Context) {
-    const seen = vi.fn((_input: unknown, _context: AgentHookContext) => ({}));
+    const seen: AgentHookContext[] = [];
     const policy = ctx
       .extend({
         pluginOwner: {
@@ -2196,26 +2195,38 @@ describe("a plugin's wake", () => {
           id: "watch",
           harness: "example/hooked",
           event: "BeforeTool",
-          run: seen,
+          run: (_input, context) => {
+            seen.push(context);
+            return {};
+          },
         });
       });
     await policy.await();
-    return { policy, contexts: () => seen.mock.calls.map(([, c]) => c) };
+    return { policy, contexts: () => seen };
   }
 
   it("tells hook callbacks who started a turn only from the turn core delivered", async () => {
-    const { service, run, plugin, ctx, native } = await setup();
-    await service.create({ type: "example/echo", name: "Echo" });
-    await held(native);
-    const { policy, contexts } = await watchHooks(ctx);
     let finish = () => {};
     const turn = new Promise<void>((resolve) => {
       finish = resolve;
     });
-    run.mockImplementationOnce(async ({ workingUntil }) => workingUntil(turn));
+    let started = () => {};
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const { service, run, plugin, ctx, native } = await setup({
+      answer: async ({ workingUntil }) => {
+        started();
+        return workingUntil(turn);
+      },
+    });
+    await service.create({ type: "example/echo", name: "Echo" });
+    await held(native);
+    const { policy, contexts } = await watchHooks(ctx);
     plugin.agents.wake(bot, { channel, root, text: "CI failed" });
     try {
-      await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+      await running;
+      expect(run).toHaveBeenCalledTimes(1);
       const trigger = run.mock.calls[0]?.[0].trigger as Trigger;
       const dispatch = (turned?: Trigger) =>
         plugin.agents.dispatchHook(
@@ -2254,7 +2265,13 @@ describe("a plugin's wake", () => {
   });
 
   it("tells hook callbacks a turn the owner's own delivered mention started is direct", async () => {
-    const { service, run, plugin, ctx, emit } = await setup();
+    let started = () => {};
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const { service, run, plugin, ctx, emit } = await setup({
+      answer: () => started(),
+    });
     await service.create({ type: "example/echo", name: "Echo" });
     await service.save(bot, { attentionEnabled: true });
     const { policy, contexts } = await watchHooks(ctx);
@@ -2267,7 +2284,8 @@ describe("a plugin's wake", () => {
     });
     emit({ events: [mention], channelId: channel });
     try {
-      await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+      await running;
+      expect(run).toHaveBeenCalledTimes(1);
       const trigger = run.mock.calls[0]?.[0].trigger as Trigger;
       await plugin.agents.dispatchHook(
         "example/hooked",
@@ -2284,7 +2302,6 @@ describe("a plugin's wake", () => {
           conversation: { channel, message: mention.id },
         },
       ]);
-      // A hook earlier in turn cannot change what a later one reads.
       const [given] = contexts();
       expect(Object.isFrozen(given)).toBe(true);
       expect(Object.isFrozen(given?.conversation)).toBe(true);
@@ -13034,8 +13051,6 @@ it("gives a plugin's tool to the agents its when accepts, asked each time", asyn
     "notes_broken",
     expect.any(Error),
   );
-  // Without an agent, only what every agent gets; an agent not running here
-  // gets nothing a `when` chooses.
   expect(names(service.toolsFor())).toEqual(["notes_every"]);
   expect(names(service.toolsFor(`${bot}@elsewhere.example`))).toEqual([
     "notes_every",
@@ -13043,8 +13058,6 @@ it("gives a plugin's tool to the agents its when accepts, asked each time", asyn
   echo = "Other";
   expect(names(service.toolsFor(bot))).toEqual(["notes_every"]);
   expect(service.tools()).toHaveLength(4);
-  // Every listing asks `when` again, but a registration whose `when` throws
-  // warns once; added again, it warns again.
   const failed = () =>
     warn.mock.calls.filter(([text]) => text === "Agent tool failed to match")
       .length;
@@ -13113,7 +13126,6 @@ it("removes a plugin's tool and frees its name before the plugin stops", async (
   ]);
   remove();
   expect(service.tools()).toEqual([]);
-  // The name is free again: for a changed tool, or for another plugin.
   owner("buzz.other").agents.addTool(tool("New."));
   await vi.waitFor(() =>
     expect(service.tools().map(({ description }) => description)).toEqual([

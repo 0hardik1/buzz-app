@@ -2208,14 +2208,12 @@ export class AgentsService extends Service implements Agents {
       throw new Error(
         "Plugins can dispatch hooks only for their own agent types",
       );
-    // Only a turn core delivered to this agent says who started it.
     const trigger =
       turn && this.runners.delivered(agent, turn.trigger)
         ? turn.trigger
         : undefined;
     const conversation = trigger && conversationOf(trigger);
     const running = this.state.running.find((each) => each.key === agent);
-    // Frozen: each hook in turn reads what core attested.
     return dispatchAgentHooks(
       this.hookContributions.handlers(harness, event),
       input,
@@ -3665,15 +3663,13 @@ export class AgentsService extends Service implements Agents {
     };
   }
   tools = () => this.addedTools.snapshot();
-  /** Added tools whose `when` threw, so each registration warns once. */
   private readonly whenFailed = new WeakSet<AddedTool>();
-  toolsFor = (key?: AgentKey): readonly AddedTool[] => {
+  toolsFor = (key?: AgentKey) => {
     const agent = key === undefined ? undefined : this.agent(key);
     return this.addedTools.snapshot().filter((tool) => {
       if (!tool.when) return true;
       if (!agent) return false;
       try {
-        // Only true admits it: an async `when` gives a Promise.
         return tool.when(agent) === true;
       } catch (error) {
         if (!this.whenFailed.has(tool)) {
@@ -3696,11 +3692,11 @@ export class AgentsService extends Service implements Agents {
     repositories: repositoriesContext,
   });
   /** The harness kit, with its MCP part bound to the plugin that asks. */
-  get harness(): HarnessKit {
+  get harness() {
     return Object.freeze({
       ...this.harnessShared,
       mcp: this.mcp.kitFor(this.ctx),
-    });
+    } satisfies HarnessKit);
   }
   readonly supportsGuardedWake = true as const;
   wake(key: AgentKey, wake: AgentWake): void;
