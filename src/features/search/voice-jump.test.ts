@@ -251,6 +251,16 @@ describe("pickPlace", () => {
     ).resolves.toEqual({ outcome: "failed", reason: "timeout" });
   });
 
+  it("tells Jev which places sound like what was said", async () => {
+    const { decisions, decide } = deciding(choice("none", { none: 1 }));
+    await pickPlace(decisions, "open donna leigh", places, undefined);
+    const request = decide.mock.calls[0]?.[0] as unknown as { state: string };
+    expect(JSON.parse(request.state).places).toEqual([
+      { option: "#design", kind: "channel" },
+      { option: "DM with Dana Lee", kind: "dm", sounds_like: ["donna leigh"] },
+    ]);
+  });
+
   it("asks nothing without a request or places", async () => {
     const { decisions, decide } = deciding(choice("#design", { "#design": 1 }));
     await expect(pickPlace(decisions, " ", places, undefined)).resolves.toEqual(
