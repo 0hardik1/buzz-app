@@ -2273,6 +2273,10 @@ describe("a plugin's wake", () => {
           conversation: { channel, message: mention.id },
         },
       ]);
+      // A hook earlier in turn cannot change what a later one reads.
+      const [given] = contexts();
+      expect(Object.isFrozen(given)).toBe(true);
+      expect(Object.isFrozen(given?.conversation)).toBe(true);
     } finally {
       await policy.dispose();
     }

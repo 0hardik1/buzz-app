@@ -19,7 +19,8 @@ every request it took since was one too) and `conversation`
 (`{ channel, root?, message? }`, where the trigger came from), the same facts
 added tools get as `Context.direct`. Core sets them only when it delivered that
 trigger to the agent; otherwise, and for events with no turn, both are absent.
-Codex and Claude tool events pass their admitted turns; Pi passes none.
+The hook context and its conversation are frozen. Codex and Claude tool
+events pass their admitted turns; Pi passes none.
 Absent `direct` means unknown, so a hook that requires owner-started work must
 check `direct === true`. Core verifies delivery of the trigger; the type plugin
 is trusted to associate it with the correct running turn.

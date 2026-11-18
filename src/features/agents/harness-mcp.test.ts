@@ -6,6 +6,9 @@ import {
   type HarnessMcpReport,
 } from "./harness-mcp";
 import type { Agent } from "./service";
+import { createPluginManager } from "../../plugins/manager";
+import type { PluginStorage } from "../../plugins/storage";
+import type { PluginInfo, StorageResult } from "../../plugins/types";
 
 const key = "agent-key" as Agent["key"];
 const agent = {
@@ -88,6 +91,125 @@ it("leaves the harness's default alone while no control or declaring plugin exis
   // the key, even while other plugins are still starting.
   status.settled = false;
   await expect(mcp.kit.choice(handle)).resolves.toBeUndefined();
+});
+
+/** Read plugin settings; `paused`: external plugins are paused. */
+const ready = (plugins: PluginInfo[] = [], paused = false): StorageResult => ({
+  status: "ready",
+  externalPluginsPaused: paused,
+  catalog: { profile: "test", location: "test", plugins },
+});
+/** An enabled plugin, `policy`, that declares choosing. */
+const declaring = (source: PluginInfo["source"] = "bundled"): PluginInfo => ({
+  manifest: {
+    id: "policy",
+    name: "Policy",
+    apiVersion: 1,
+    host: { agentMcp: true },
+  },
+  source,
+  enabled: true,
+  revision: "1",
+  previous: null,
+  reloadable: source === "external",
+  error: null,
+});
+/** The kit with the real plugin manager, reading the catalog `getCatalog`
+ * gives. The `policy` plugin fails to start. */
+function startup(getCatalog: PluginStorage["getCatalog"]) {
+  const root = new Context();
+  const plugins = createPluginManager(root, {
+    storage: {
+      getCatalog,
+      changePlugin: vi.fn(),
+      recoverSettings: vi.fn(),
+      readModule: vi.fn(async () => ""),
+      reloadPlugin: vi.fn(),
+    },
+    bundled: [
+      {
+        manifest: { id: "policy", name: "Policy", apiVersion: 1 },
+        module: {
+          apply() {
+            throw new Error("Policy failed");
+          },
+        },
+      },
+    ],
+  });
+  const { kitFor } = createHarnessMcp(
+    () => root.pluginStatus,
+    (found) => (found === key ? agent : undefined),
+    () => [{ key: "third/type", pluginId: "third" } as never],
+  );
+  const kit = kitFor(
+    root.extend({ pluginOwner: { id: "third", revision: "1" } } as never),
+  );
+  let answer: unknown = "pending";
+  void kit.choice(handle).then((value) => {
+    answer = value;
+  });
+  return {
+    answer: () => answer,
+    async dispose() {
+      await plugins.dispose();
+      await root.fiber.dispose();
+    },
+  };
+}
+
+it.each([
+  ["no plugin declares choosing: the harness's default", ready(), undefined],
+  [
+    "the plugin that declares it fails to start: none",
+    ready([declaring()]),
+    "none",
+  ],
+  [
+    "it is external and external plugins are paused: none",
+    ready([declaring("external")], true),
+    "none",
+  ],
+  [
+    "the settings need the user to reset them: none",
+    { status: "recovery", reason: "Unreadable", canReset: true },
+    "none",
+  ],
+] as [string, StorageResult, unknown][])(
+  "waits for the plugin settings at startup, then answers as they say; when %s",
+  async (_, result, expected) => {
+    vi.useFakeTimers();
+    let read!: (result: StorageResult) => void;
+    const app = startup(
+      () => new Promise<StorageResult>((resolve) => (read = resolve)),
+    );
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(app.answer()).toBe("pending");
+      read(result);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(app.answer()).toBe(expected);
+    } finally {
+      await app.dispose();
+      vi.useRealTimers();
+    }
+  },
+);
+
+it("loads nothing when the plugin settings still can't be read after 30 seconds", async () => {
+  vi.useFakeTimers();
+  const app = startup(async () => {
+    throw new Error("Storage offline");
+  });
+  try {
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(app.answer()).toBe("pending");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(app.answer()).toBe("none");
+  } finally {
+    await app.dispose();
+    vi.useRealTimers();
+  }
 });
 
 it("keeps only booleans and lists of off and known tool names from a control's answer", async () => {

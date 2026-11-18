@@ -87,16 +87,20 @@ export function createPluginManager(
     () =>
       configuration.status === "loading" ||
       (configuration.status === "recovery" && !configuration.canReset),
-    // A catalog error keeps it from starting, but its access still counts.
-    (access) =>
-      configuration.status === "ready" &&
-      configuration.catalog.plugins.some(
+    // An enabled plugin the runtime isn't asked to run (a catalog error,
+    // paused external plugins) still counts; unread settings may hold one.
+    (access) => {
+      if (configuration.status !== "ready") return true;
+      const desired = new Set(
+        desiredPlugins().map(({ manifest }) => manifest.id),
+      );
+      return configuration.catalog.plugins.some(
         (plugin) =>
           plugin.enabled &&
-          !!plugin.error &&
           declares(plugin.manifest, access) &&
-          !builtInIds.has(plugin.manifest.id),
-      ),
+          !desired.has(plugin.manifest.id),
+      );
+    },
   );
   let busy = false;
   let catalogPending = false;

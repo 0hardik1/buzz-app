@@ -114,13 +114,17 @@ export function createHarnessMcp(
           : "waiting";
   const settle = () =>
     new Promise<void>((resolve) => {
+      const finish = () => {
+        off();
+        clearTimeout(timer);
+        resolve();
+      };
       const done = () => {
-        if (state() !== "waiting") {
-          off();
-          resolve();
-        }
+        if (state() !== "waiting") finish();
       };
       const off = status().subscribe(done);
+      // Bounded: a settings read that keeps failing never settles.
+      const timer = setTimeout(finish, 30_000);
       done();
     });
   async function answer(agent: Agent): Promise<HarnessMcpAnswer> {

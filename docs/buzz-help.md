@@ -1495,8 +1495,10 @@ available rather than silently discarding it.
   plugin with agent hook access can also check each MCP tool call before it
   runs where the harness's hooks see those calls (Codex and Claude Code).
   Protected agents load none. If that plugin is enabled but not running, new
-  sessions load none until it runs. Without such a plugin nothing changes:
-  each harness keeps its own default. Codex agents load the MCP servers your
+  sessions load none until it runs. New sessions also wait while Buzz reads its
+  plugin settings, and load none if that takes over 30 seconds or the settings
+  need a reset. Without such a plugin,
+  each harness keeps its own default: Codex agents load the MCP servers your
   Codex configuration turns on, Claude agents load the ones in your Claude Code
   configuration, and Goose agents load none of your Goose MCP servers.
 - **Settings → Agent details → Previous versions** expands saved revisions for
