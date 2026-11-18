@@ -2621,6 +2621,10 @@ export const test = base.extend({
                   upstreamFetch: relay.fetch,
                   socketFactory: relay.socket,
                   liveSetupTimeoutMs,
+                  // A dropped socket's reconnect waits a random spread of up
+                  // to 10 s; this draw makes it 500 ms, the base backoff the
+                  // journeys' real-time waits were written against.
+                  liveRandom: () => 0.05,
                 });
                 await broker.configureServer(server);
               } else server.middlewares.use(middleware);

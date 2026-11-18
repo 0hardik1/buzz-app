@@ -1250,7 +1250,9 @@ not return at once. A proxy that stops ends every socket through it with no clos
 frame (1006), so the close code alone cannot tell a fleet drop from one client's
 network change. A connect that fails before authentication, a socket a probe
 finds dead, and the one fresh-evidence reconnect after a policy close (1008) keep
-the ordinary backoff. Authentication rejection
+the ordinary backoff. The session's automatic recovery tick leaves a scheduled
+reconnect to its wait; an explicit Retry and a wake, network or focus check start
+it at once. Authentication rejection
 or signing failure keeps its error visible and reconnects on a slow timer, 60 s
 doubling to 10 minutes, because access or a locked signer can change later; a
 signer that does not match the viewer stays terminal. A route the relay CLOSED

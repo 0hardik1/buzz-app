@@ -1556,6 +1556,13 @@ export function createRelaySession(
     });
     for (const listener of liveListeners) notify(listener);
   };
+  /** `keepWait`: the automatic recovery tick (see LiveSubscription.retry). */
+  function retryLive(keepWait = false) {
+    channels.retryList();
+    revalidatePreviews(channels.suspendedPreviews());
+    for (const id of channels.demandedChannels()) demandChannel(id);
+    traffic?.retry(keepWait);
+  }
   const live = Object.freeze({
     snapshot: () => liveView,
     subscribe(listener: () => void) {
@@ -1565,10 +1572,7 @@ export function createRelaySession(
       };
     },
     retry() {
-      channels.retryList();
-      revalidatePreviews(channels.suspendedPreviews());
-      for (const id of channels.demandedChannels()) demandChannel(id);
-      traffic?.retry();
+      retryLive();
     },
   });
   /** Hands the owner's signed message in a chat still starting to live
@@ -2441,7 +2445,7 @@ export function createRelaySession(
   const liveRecovery = recoverable(
     live.subscribe,
     () => liveRecoveryStatus(live.snapshot()),
-    live.retry,
+    () => retryLive(true),
   );
   const recovery = transport
     ? createRecovery([

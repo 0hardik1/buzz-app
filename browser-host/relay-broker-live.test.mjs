@@ -1121,6 +1121,9 @@ test.each([
 test("lost publication receipt stays unknown; reconnect never automatically republishes", async () => {
   const h = await harness();
   let traffic;
+  // The broker's live layer spreads a dropped socket's reconnect up to 10 s;
+  // this draw makes it 500 ms, inside until()'s wait.
+  const random = vi.spyOn(Math, "random").mockReturnValue(0.05);
   try {
     browserFetch(h.base);
     const transport = await connectBrokerTransport(h.base);
@@ -1143,6 +1146,50 @@ test("lost publication receipt stays unknown; reconnect never automatically repu
     expect(h.publications).toHaveLength(1);
     expect(h.upstream.some((url) => url.endsWith("/events"))).toBe(false);
   } finally {
+    random.mockRestore();
+    traffic?.dispose();
+    vi.unstubAllGlobals();
+    await h.close();
+  }
+});
+
+test("the recovery tick's retry control keeps the broker's reconnect wait; an explicit retry skips it", async () => {
+  const h = await harness();
+  let traffic;
+  // A 9 s spread: far past this test's waits.
+  const random = vi.spyOn(Math, "random").mockReturnValue(0.9);
+  try {
+    const fetcher = browserFetch(h.base);
+    const transport = await connectBrokerTransport(h.base);
+    let snapshot;
+    traffic = transport.subscribe({
+      ...callbacks,
+      state: (next) => {
+        snapshot = next;
+      },
+    });
+    await until(() => snapshot?.status === "connected");
+    h.sockets[0].close();
+    await until(() => snapshot?.status === "retrying");
+    // Wait for each control's response: the broker has applied it by then.
+    const control = async () => {
+      const index = fetcher.mock.calls.findLastIndex(([url]) =>
+        String(url).endsWith("/stream-retry"),
+      );
+      expect(index).toBeGreaterThanOrEqual(0);
+      const response = await fetcher.mock.results[index].value;
+      expect(response.status).toBe(200);
+      await delay(0); // Let the client clear its pending control.
+    };
+    traffic.retry(true);
+    await control();
+    await delay(300);
+    expect(h.sockets).toHaveLength(1);
+    traffic.retry();
+    await control();
+    await until(() => h.sockets.length === 2);
+  } finally {
+    random.mockRestore();
     traffic?.dispose();
     vi.unstubAllGlobals();
     await h.close();
@@ -1153,6 +1200,8 @@ test("a reconnect's continuous channel replays cross the real HTTP boundary", as
   const h = await harness(0, undefined, { holdAuth: true });
   let traffic;
   const clock = vi.spyOn(Date, "now");
+  // A 500 ms reconnect spread (see the lost-receipt test).
+  const random = vi.spyOn(Math, "random").mockReturnValue(0.05);
   try {
     const now = Date.now();
     clock.mockReturnValue(now - 20 * 60_000);
@@ -1188,6 +1237,7 @@ test("a reconnect's continuous channel replays cross the real HTTP boundary", as
       ]),
     );
   } finally {
+    random.mockRestore();
     clock.mockRestore();
     traffic?.dispose();
     vi.unstubAllGlobals();

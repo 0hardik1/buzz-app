@@ -3283,6 +3283,40 @@ it.each([
   },
 );
 
+it.each([
+  [
+    "the recovery tick keeps",
+    (h: ReturnType<typeof setup>) => h.owner.retry(true),
+    9000,
+  ],
+  [
+    "an explicit retry skips",
+    (h: ReturnType<typeof setup>) => h.owner.retry(),
+    1000,
+  ],
+  [
+    "a hint check skips",
+    (h: ReturnType<typeof setup>) => h.owner.check?.(),
+    1000,
+  ],
+] as const)("%s the drawn reconnect wait", async (_name, act, reconnectAt) => {
+  vi.useFakeTimers();
+  const h = setup(["a"], undefined, undefined, () => 0.9);
+  try {
+    await h.first.auth();
+    h.first.close(1006);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(h.sockets).toHaveLength(1);
+    act(h);
+    await vi.advanceTimersByTimeAsync(reconnectAt - 1000);
+    expect(h.sockets).toHaveLength(reconnectAt === 1000 ? 2 : 1);
+    await vi.advanceTimersByTimeAsync(reconnectAt === 1000 ? 0 : 1);
+    expect(h.sockets).toHaveLength(2);
+  } finally {
+    h.owner.dispose();
+  }
+});
+
 it("reconnects at once when the spread draws zero, then backs off normally after a plain failure", async () => {
   vi.useFakeTimers();
   const draws = [0, 0.5];

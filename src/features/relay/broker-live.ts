@@ -710,7 +710,7 @@ export function subscribeBrokerTraffic(
       joined = nextJoined;
       sendInterests();
     },
-    retry() {
+    retry(keepWait = false) {
       if (closed || controlPending) return;
       if (!streamId) {
         // Reconnect only when there is no open broker owner to preserve.
@@ -725,7 +725,8 @@ export function subscribeBrokerTraffic(
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ streamId }),
+        // The broker's live layer keeps its own reconnect wait for the tick.
+        body: JSON.stringify(keepWait ? { streamId, keepWait } : { streamId }),
         signal: AbortSignal.any([
           controller?.signal ?? new AbortController().signal,
           AbortSignal.timeout(5000),

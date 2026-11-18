@@ -868,6 +868,8 @@ export function relayBrokerPlugin({
   archiveFile,
   // Tests that hold EOSE on purpose lengthen this real-time deadline.
   liveSetupTimeoutMs,
+  // Tests fix the live layer's reconnect draw (default Math.random).
+  liveRandom,
 } = {}) {
   const publicOrigin =
     browserOrigin === undefined
@@ -1832,10 +1834,13 @@ export function relayBrokerPlugin({
               interests,
               joined,
               removed,
-              interestRevision;
+              interestRevision,
+              keepWait = false;
             try {
               const body = JSON.parse(raw);
               streamId = body.streamId;
+              if (route === "/api/relay/stream-retry")
+                keepWait = body.keepWait === true;
               if (publishingPresence) {
                 status = body.status;
                 if (
@@ -1925,7 +1930,7 @@ export function relayBrokerPlugin({
             else if (observing) stream.traffic.observe(observer);
             else if (watchingPresence)
               stream.traffic.watchPresence(presenceAuthors);
-            else stream.traffic.retry();
+            else stream.traffic.retry(keepWait);
             return json(res, 200, { accepted: true });
           }
           if (route === "/api/relay/stream" && req.method === "POST") {
@@ -2241,6 +2246,8 @@ export function relayBrokerPlugin({
               principal.live,
               undefined,
               liveSetupTimeoutMs,
+              undefined,
+              liveRandom,
             );
             principal.streams++;
             traffic.observe(observer);

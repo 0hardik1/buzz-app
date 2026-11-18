@@ -48,8 +48,9 @@ export function liveRecoveryStatus(view: LiveRecoveryView): RecoveryStatus {
   // A terminal connection error closed the socket: its routes stay pending
   // but nothing is in flight. Finite roster and head reads still count.
   const routes = view.status === "error" ? [] : view.routes;
-  // "retrying" counts as failed so wake, network and focus signals skip the
-  // live layer's own backoff wait too.
+  // "retrying" counts as failed so a long outage shows the recovery notice.
+  // The automatic tick leaves the live layer's own wait alone (retry keepWait);
+  // wake, network and focus hints skip it through checkLive.
   if (
     view.status === "retrying" ||
     view.previews === "suspended" ||

@@ -148,6 +148,7 @@ function setup(restored?: {
       assert.exists(socket);
       return socket;
     },
+    sockets: () => sockets.length,
     query,
     preflights,
     holdPreflight() {
@@ -542,4 +543,34 @@ it("a deadline in the preparation continuation cannot publish or leave sending s
   await vi.advanceTimersByTimeAsync(10002);
   expect(h.publish).not.toHaveBeenCalled();
   expect(h.session.outbox?.snapshot()[0]?.delivery).toBe("failed");
+});
+
+it.each([
+  ["waits out its drawn spread through the recovery ticks", undefined, 9000],
+  [
+    "skips the spread for a wake, network or focus hint",
+    (h: ReturnType<typeof setup>) => h.session.checkLive(),
+    1000,
+  ],
+  [
+    "skips the spread for an explicit retry",
+    (h: ReturnType<typeof setup>) => h.session.live.retry(),
+    1000,
+  ],
+] as const)("a dropped live connection %s", async (_name, act, reconnectAt) => {
+  // A 0.9 draw: the drop waits 9 s, past the recovery ticks at 1 s, 3 s and 7 s.
+  random.mockReturnValue(0.9);
+  const h = setup();
+  await established(h);
+  h.socket().close();
+  expect(h.session.live.snapshot().status).toBe("retrying");
+  await vi.advanceTimersByTimeAsync(999);
+  expect(h.sockets()).toBe(1);
+  act?.(h);
+  await vi.advanceTimersByTimeAsync(reconnectAt - 1000);
+  expect(h.sockets()).toBe(act ? 2 : 1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(h.sockets()).toBe(2);
+  // The coordinator saw the drop and is still recovering it.
+  expect(h.session.recovery?.snapshot().recovering).toBe(true);
 });
