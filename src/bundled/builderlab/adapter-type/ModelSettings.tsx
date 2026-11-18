@@ -187,7 +187,9 @@ export function ModelSettings({
     compaction.trim() === "" ||
     (/^\d+(?:\.\d{1,3})?$/.test(compaction.trim()) &&
       validAutoCompactWindow(autoCompactWindow) &&
-      autoCompactWindow >= MIN_AUTO_COMPACT_WINDOW);
+      (autoCompactWindow >= MIN_AUTO_COMPACT_WINDOW ||
+        (!compactionUnconfirmed &&
+          autoCompactWindow === saved?.autoCompactWindow)));
   const compactionChanged =
     compactionUnconfirmed ||
     !validCompaction ||

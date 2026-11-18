@@ -351,6 +351,30 @@ it.each(["0", "0.001", "0.999", "-1", "2147483.648", "1.0001"])(
   },
 );
 
+it("allows unrelated edits with an unchanged legacy compaction window", async () => {
+  const h = await fixture({
+    modelSelectionStatus: "valid",
+    autoCompactWindow: 999,
+  });
+  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  fireEvent.change(screen.getByRole("textbox", { name: "Instructions" }), {
+    target: { value: "Updated instructions" },
+  });
+  await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull(),
+  );
+  const updates = h.request.mock.calls.filter(([request]) =>
+    request.url.endsWith("/update-agent"),
+  );
+  expect(updates.map(([request]) => JSON.parse(request.body ?? "{}"))).toEqual([
+    {
+      agent_pubkey: "ab".repeat(32),
+      agent_instructions: "Updated instructions",
+    },
+  ]);
+});
+
 it("keeps an unpersisted window draft and blocks invalid retries", async () => {
   const h = await fixture({
     autoCompactWindow: 1001,
