@@ -290,3 +290,28 @@ it("does not show a metadata caveat for another identity's unclassified roster",
     screen.getByText(/They aren’t in any channel you can see/),
   ).toBeTruthy();
 });
+
+it("addresses the viewer on their own profile without claiming they are in no channels at all", () => {
+  const f = fixture();
+  render(
+    <ProfileChannels
+      session={f.session}
+      pubkey={viewer}
+      viewer={viewer}
+      communityOrigin="https://relay.example.test"
+      navigation={f.navigation}
+    />,
+  );
+  f.update({
+    status: "ready",
+    channels: [
+      { id: "dm", name: "Direct", channelType: "dm", members: [viewer] },
+      { id: "hidden", name: "Hidden", hidden: true, members: [viewer] },
+      { id: "other", name: "Other", channelType: "stream", members: [person] },
+    ],
+  });
+  expect(
+    screen.getByText("You aren’t in any channel that can be shown here."),
+  ).toBeTruthy();
+  expect(screen.queryByText(/They aren’t/)).toBeNull();
+});
