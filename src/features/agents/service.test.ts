@@ -2169,10 +2169,8 @@ describe("a plugin's wake", () => {
     ).not.toThrow();
   });
 
-  it("tells hook callbacks who started a turn only from the turn core delivered", async () => {
-    const { service, run, plugin, ctx, native } = await setup();
-    await service.create({ type: "example/echo", name: "Echo" });
-    await held(native);
+  /** A hook on `example/hooked` that records the context it is given. */
+  async function watchHooks(ctx: Context) {
     const seen = vi.fn((_input: unknown, _context: AgentHookContext) => ({}));
     const policy = ctx
       .extend({
@@ -2191,6 +2189,14 @@ describe("a plugin's wake", () => {
         });
       });
     await policy.await();
+    return { policy, contexts: () => seen.mock.calls.map(([, c]) => c) };
+  }
+
+  it("tells hook callbacks who started a turn only from the turn core delivered", async () => {
+    const { service, run, plugin, ctx, native } = await setup();
+    await service.create({ type: "example/echo", name: "Echo" });
+    await held(native);
+    const { policy, contexts } = await watchHooks(ctx);
     let finish = () => {};
     const turn = new Promise<void>((resolve) => {
       finish = resolve;
@@ -2219,7 +2225,7 @@ describe("a plugin's wake", () => {
         event: { pubkey: viewer, tags: [["h", channel]] },
       } as never);
       await dispatch();
-      expect(seen.mock.calls.map(([, context]) => context)).toEqual([
+      expect(contexts()).toEqual([
         {
           agent: bot,
           session: "s1",
@@ -2240,24 +2246,7 @@ describe("a plugin's wake", () => {
     const { service, run, plugin, ctx, emit } = await setup();
     await service.create({ type: "example/echo", name: "Echo" });
     await service.save(bot, { attentionEnabled: true });
-    const seen = vi.fn((_input: unknown, _context: AgentHookContext) => ({}));
-    const policy = ctx
-      .extend({
-        pluginOwner: {
-          id: "policy",
-          revision: "one",
-          agentHooks: ["example/hooked"],
-        },
-      })
-      .plugin((hooks) => {
-        hooks.agents.registerHook({
-          id: "watch",
-          harness: "example/hooked",
-          event: "BeforeTool",
-          run: seen,
-        });
-      });
-    await policy.await();
+    const { policy, contexts } = await watchHooks(ctx);
     const mention = event("m", {
       pubkey: viewer,
       tags: [
@@ -2276,7 +2265,7 @@ describe("a plugin's wake", () => {
         { agent: bot, session: "s1", turn: { trigger } },
         { accepts: () => false, milliseconds: 1000 },
       );
-      expect(seen.mock.calls.map(([, context]) => context)).toEqual([
+      expect(contexts()).toEqual([
         {
           agent: bot,
           session: "s1",
@@ -18559,7 +18548,7 @@ it("reports unsupported hooks when their harness registers later", async () => {
   }
 });
 
-it("lets only a plugin with agent MCP access choose harness MCP servers, one at a time", async () => {
+it("lets only a plugin with agent MCP access choose harness MCP servers", async () => {
   const { plugin, ctx } = await setup();
   const control = { choose: () => undefined };
   expect(() => plugin.agents.controlHarnessMcp(control)).toThrow(
@@ -18576,20 +18565,12 @@ it("lets only a plugin with agent MCP access choose harness MCP servers, one at 
   });
   const fiber = scope.plugin((chooser) => {
     chooser.agents.controlHarnessMcp(control);
-    expect(() => chooser.agents.controlHarnessMcp(control)).toThrow(
-      /already registered/,
-    );
   });
   await fiber.await();
   await expect(
     scope.agents.harnessMcp("agent" as never),
   ).resolves.toBeUndefined();
   await fiber.dispose();
-  const again = scope.plugin((chooser) => {
-    chooser.agents.controlHarnessMcp(control);
-  });
-  await again.await();
-  await again.dispose();
   await ctx.fiber.dispose();
 });
 
