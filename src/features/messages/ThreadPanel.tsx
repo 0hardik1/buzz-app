@@ -16,7 +16,6 @@ import { moveMessageSelection } from "./message-selection";
 import { MessageSelection } from "./use-message-selection";
 import { MessageEditScope } from "./MessageEditScope";
 import { useMessageSelectionCopy } from "./selection-copy";
-import { SelectionQuote } from "./SelectionQuote";
 import { ReplySummary } from "./ReplySummary";
 import { ReplyBranch } from "./ReplyBranch";
 import { replyTree } from "./reply-tree";
@@ -1081,16 +1080,21 @@ function ThreadMessages({
       (row) => row && session.unread.attention(channelId, row.id).unread,
     ).length;
     const unreadOlder = (threadUnread?.observedCount ?? 0) > loadedUnread;
+    const readThrough =
+      since ?? session.unread.threadReadThrough(channelId, messageId);
     if (
       known &&
       snapshot.direction === "older" &&
       (snapshot.canLoadMore || snapshot.limited) &&
       oldest &&
-      (unreadOlder ||
-        oldest.createdAt >
-          (since ?? session.unread.threadReadThrough(channelId, messageId)))
+      (unreadOlder || oldest.createdAt > readThrough)
     ) {
-      if (snapshot.canLoadMore) void view.loadMore();
+      // Page to the frontier in one read, not one page per decision. Read
+      // per page: a read synced mid-load can move it.
+      if (snapshot.canLoadMore)
+        void view.loadMore(
+          () => since ?? session.unread.threadReadThrough(channelId, messageId),
+        );
       // Past the page limit the first unread reply stays unknown.
       else setBoundary({ ...boundary, id: null });
       return;
@@ -1915,7 +1919,9 @@ function ThreadMessages({
               <ReplySummary
                 count={descendants.length}
                 participants={[
-                  ...new Set(descendants.map((reply) => reply.authorId)),
+                  ...new Set(
+                    descendants.map((reply) => reply.authorId).reverse(),
+                  ),
                 ]}
                 profiles={profiles}
                 agentPubkeys={agentPubkeys}
@@ -2272,8 +2278,12 @@ function ThreadMessages({
         />
       </section>
       {/* After the scroller, so its ref is attached when this registers. */}
-      <MessageSelection list={scroller} rows={rows} session={session} />
-      <SelectionQuote list={scroller} />
+      <MessageSelection
+        list={scroller}
+        rows={rows}
+        session={session}
+        conversationId={rootId}
+      />
       {preview && (
         <ChannelJoinNotice
           ready={
