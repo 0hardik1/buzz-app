@@ -155,6 +155,7 @@ pub(crate) fn service_over(
     *service.0.pairings.communities.lock().unwrap() = Some(vec![RELAY.into()]);
     // The page's prompt is listening, as it is once the app shell shows.
     service.0.pairings.prompt(true);
+    service.0.pairings.sign_prompt(true);
     service
 }
 
@@ -1006,10 +1007,7 @@ fn every_class_gets_its_verdict() {
         assert_eq!(verdict(kind), Verdict::Sign, "{kind}");
     }
     for &kind in SENSITIVE {
-        assert!(
-            matches!(verdict(kind), Verdict::Deny(reason) if reason.contains("use Buzz")),
-            "{kind}"
-        );
+        assert_eq!(verdict(kind), Verdict::Ask, "{kind}");
     }
     for kind in REFUSED.iter().copied().chain([30350, 65000]) {
         assert!(
@@ -1245,3 +1243,4 @@ fn a_launch_token_reaches_no_child_the_app_spawns() {
 }
 
 mod pairing;
+mod signing;
