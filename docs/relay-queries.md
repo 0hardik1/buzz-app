@@ -1243,9 +1243,14 @@ timeouts while its session is active. Its exponential delay starts at 250–500m
 and caps at 15–30s, with jitter on each attempt. A full minute authenticated
 resets that backoff; a brief successful authentication does not. After a close with
 code 1012 (Service Restart) or 1001 (Going Away), as a rolling deploy sends to every
-client at once, the first attempt instead waits a uniform random time up to 10 s
-(more once repeated bounces have grown the backoff past that), so a fleet the relay
-closed at once does not return at once. Authentication rejection
+client at once, or after any other close or error of an authenticated connection,
+the first attempt instead waits a uniform random time up to 10 s (more once
+repeated bounces have grown the backoff past that), so a fleet dropped at once does
+not return at once. A proxy that stops ends every socket through it with no close
+frame (1006), so the close code alone cannot tell a fleet drop from one client's
+network change. A connect that fails before authentication, a socket a probe
+finds dead, and the one fresh-evidence reconnect after a policy close (1008) keep
+the ordinary backoff. Authentication rejection
 or signing failure keeps its error visible and reconnects on a slow timer, 60 s
 doubling to 10 minutes, because access or a locked signer can change later; a
 signer that does not match the viewer stays terminal. A route the relay CLOSED

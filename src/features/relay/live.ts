@@ -98,8 +98,10 @@ export const LIVE_PROOF_ENTRIES = 16_384;
 /** Close codes for a relay that is going away on purpose (a rolling deploy
  * sends 1012 to every client at once): 1001 Going Away, 1012 Service Restart. */
 const RESTART_CLOSE_CODES = [1001, 1012];
-/** The first reconnect after such a close waits a uniform random time up to
- * this, so a fleet the relay closed at once does not return at once. */
+/** The first reconnect after such a close, or after the transport drops an
+ * admitted connection, waits a uniform random time up to this, so a fleet
+ * dropped at once does not return at once. A proxy that stops ends every socket
+ * through it with no close frame (1006), so the close code alone cannot tell. */
 export const LIVE_RESTART_SPREAD_MS = 10_000;
 /** What a route knew when its authenticated connection ended (unix seconds). */
 export type LiveCursor = Readonly<{ liveUntil: number }>;
@@ -110,16 +112,19 @@ export type LiveCursor = Readonly<{ liveUntil: number }>;
 export function liveResumeSince(original: number, cursor: LiveCursor): number {
   return Math.max(original, cursor.liveUntil - LIVE_RESUME_LAG);
 }
-/** Delay before the next connection attempt. A restarting relay (1001/1012)
- * gets full jitter over the spread window, widening once repeated bounces have
- * grown the backoff past it. Anything else waits half to all of the backoff.
- * `random` is in [0, 1). */
+/** Delay before the next connection attempt. A restarting relay (1001/1012),
+ * or the transport dropping an admitted connection (`dropped`), gets full jitter
+ * over the spread window, widening once repeated bounces have grown the backoff
+ * past it. Anything else waits half to all of the backoff, so a failing connect
+ * or a dead socket found by a probe stays prompt. `random` is in [0, 1). */
 export function liveReconnectDelay(
   closeCode: number | undefined,
+  dropped: boolean,
   backoff: number,
   random: () => number,
 ): number {
-  return closeCode !== undefined && RESTART_CLOSE_CODES.includes(closeCode)
+  return dropped ||
+    (closeCode !== undefined && RESTART_CLOSE_CODES.includes(closeCode))
     ? random() * Math.max(LIVE_RESTART_SPREAD_MS, backoff)
     : backoff * (0.5 + random() / 2);
 }
@@ -1506,9 +1511,16 @@ export function subscribeRelayTraffic(
     const valid = () => !closed && current === generation;
     heard = false;
     probe = undefined;
-    const reconnect = (reason: string, closeCode?: number) => {
+    // `transport` marks a close or error event, the only signal a stopped
+    // proxy gives every socket through it at once.
+    const reconnect = (
+      reason: string,
+      closeCode?: number,
+      transport = false,
+    ) => {
       if (!valid()) return;
       log.warn(`${peer} ${reason}`);
+      const dropped = transport && authenticated;
       clearSocket();
       renewing = false;
       broken = false;
@@ -1520,7 +1532,12 @@ export function subscribeRelayTraffic(
       notify();
       // Transient outages must recover without manual retry. Jitter spreads
       // reconnects while retaining a minimum delay under sustained failure.
-      const delay = liveReconnectDelay(closeCode, reconnectDelay, random);
+      const delay = liveReconnectDelay(
+        closeCode,
+        dropped,
+        reconnectDelay,
+        random,
+      );
       reconnectDelay = Math.min(MAX_RECONNECT_DELAY, reconnectDelay * 2);
       retryTimer = setTimeout(() => connect(), delay);
     };
@@ -2096,7 +2113,7 @@ export function subscribeRelayTraffic(
           // while signed out; signing in retries at once (onSignedIn).
           FEDERATED_SIGN_IN_REFUSALS.has(failure.message ?? ""),
         );
-      else reconnect("Live connection interrupted");
+      else reconnect("Live connection interrupted", undefined, true);
     };
     // Keep the relay's close detail. A 1008 also ends a normally expired
     // assertion, so the first reconnects with fresh evidence. The relay denies
@@ -2114,7 +2131,7 @@ export function subscribeRelayTraffic(
       const reason = event?.code
         ? `Live connection closed (${event.code}${event.reason ? `: ${event.reason}` : ""})`
         : "Live connection closed";
-      if (event?.code !== 1008) return reconnect(reason, event?.code);
+      if (event?.code !== 1008) return reconnect(reason, event?.code, true);
       if (!policyRecovery) return terminal(reason, false);
       policyRecovery = false;
       reconnect(reason);

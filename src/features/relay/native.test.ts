@@ -7,7 +7,15 @@ import {
   READ_STATE_TIMESTAMP_REFUSAL,
 } from "./read-state-host";
 import memberContract from "../channel-members/administration-contract.json";
-import { afterEach, assert, beforeEach, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import {
   type EventTemplate,
@@ -332,11 +340,19 @@ it("publishes config artifacts straight to the relay, re-sending identical bytes
     transport.configArtifacts.publish({ ...event, kind: 9 }, signal),
   ).rejects.toThrow("Not this viewer's artifact");
 });
+// A transport drop of an authenticated socket waits a random share of the
+// 10 s reconnect spread. This draw makes that 500 ms, the base backoff these
+// tests time against; a test that checks the spread picks its own draw.
+let random: MockInstance<() => number>;
+beforeEach(() => {
+  random = vi.spyOn(Math, "random").mockReturnValue(0.05);
+});
 afterEach(() => {
   for (const owner of owners.splice(0)) owner.dispose();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  random.mockRestore();
 });
 
 it("discovers the relay, verifies reads and publishes through the same native identity and destination", async () => {

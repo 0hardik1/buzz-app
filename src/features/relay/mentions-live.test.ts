@@ -1,4 +1,12 @@
-import { assert, afterEach, expect, it, vi } from "vitest";
+import {
+  assert,
+  afterEach,
+  beforeEach,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from "vitest";
 import { createRelaySession } from "./session";
 import { subscribeRelayTraffic } from "./live";
 import { keypair, metadata, roster, signed } from "./testing";
@@ -35,9 +43,17 @@ class Socket {
   }
 }
 const owners: ReturnType<typeof createRelaySession>[] = [];
+// A transport drop of an authenticated socket waits a random share of the
+// 10 s reconnect spread. This draw makes that 500 ms, the base backoff these
+// tests time against; a test that checks the spread picks its own draw.
+let random: MockInstance<() => number>;
+beforeEach(() => {
+  random = vi.spyOn(Math, "random").mockReturnValue(0.05);
+});
 afterEach(() => {
   for (const owner of owners.splice(0)) owner.dispose();
   vi.useRealTimers();
+  random.mockRestore();
 });
 function setup(restored?: {
   viewer: ReturnType<typeof keypair>;
