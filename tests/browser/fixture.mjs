@@ -994,6 +994,7 @@ export const test = base.extend({
         compiledBuild: {
           worker: testInfo.workerIndex,
           durationMs: compiledApp.durationMs,
+          built: compiledApp.built,
         },
         signedHistory: { counts: historyCounts, durationMs: historyDurationMs },
         largeSidebar,
