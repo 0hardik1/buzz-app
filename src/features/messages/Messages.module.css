@@ -446,7 +446,8 @@ html[data-keyboard-navigation] .authorLink:focus-visible {
   width: var(--size-emoji-reaction, 0.75rem);
   height: var(--size-emoji-reaction, 0.75rem);
 }
-/* Paint 12px artwork at 14px (10.5pt), keeping the capsule's layout box. */
+/* Paint artwork at 7/6 of its box (12px at 14px, or 16px at about 19px with
+   Large emoji), keeping the capsule's layout box. */
 .reactionGlyph [data-reaction-artwork],
 .reactionGlyph .reactionCustomEmoji,
 .reactionGlyph .reactionPlaceholder {
