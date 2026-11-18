@@ -6,6 +6,7 @@ import type {
   HarnessMcpChoice,
   HarnessMcpLoaded,
   HarnessMcpServer,
+  HarnessMcpTool,
 } from "../../features/agents/harness-mcp";
 import type { AgentHandle } from "../../features/agents/service";
 import {
@@ -162,25 +163,25 @@ export class GooseMcp {
       )) as { sessionId: string };
       if (typeof sessionId !== "string" || !sessionId)
         throw new Error("Goose did not return an inspection session ID");
+      let tools: HarnessMcpTool[];
       try {
         signal.throwIfAborted();
-        const { tools } = await this.tools(
+        ({ tools } = await this.tools(
           p,
           sessionId,
           configured,
           AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
-        );
-        return tools;
+        ));
       } finally {
         await abortable(
           p.request("session/delete", { sessionId }, INSPECTION_CLEANUP_MS),
           cleanup.signal,
-        ).catch((error: unknown) => {
-          signal.throwIfAborted();
-          throw error;
+        ).catch(() => {
+          console.warn("Goose did not delete its temporary MCP session");
         });
-        signal.throwIfAborted();
       }
+      signal.throwIfAborted();
+      return tools;
     } finally {
       signal.removeEventListener("abort", cancelling);
       clearTimeout(deadline);

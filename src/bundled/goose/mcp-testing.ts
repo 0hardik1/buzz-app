@@ -32,7 +32,7 @@ type Selected = {
 };
 
 /** Native protocol fixture layered over the existing ACP spawn boundary. */
-export function transport() {
+export function transport({ failDelete = false } = {}) {
   const fake = fakeSpawn({ hold: true });
   const saved: Record<string, Record<string, unknown>> = Object.fromEntries(
     configured.flatMap((entry) =>
@@ -110,6 +110,10 @@ export function transport() {
             return reply({});
           }
           if (method === "session/set_mode") return reply({});
+          if (method === "session/delete" && failDelete)
+            return options.onStdout?.(
+              `${JSON.stringify({ jsonrpc: "2.0", id: wire.id, error: { code: -32603, message: "Session deletion failed" } })}\n`,
+            );
           if (method === "_goose/unstable/tools/list") {
             if (toolBarrier) {
               toolBarrier();

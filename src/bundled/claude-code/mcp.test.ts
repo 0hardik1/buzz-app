@@ -20,7 +20,7 @@ function native(
   context?: { name: string; serverName: string }[],
   beforeStatus?: () => Promise<void>,
   description?: string,
-  mode?: { pending?: ReadonlySet<string> },
+  mode?: { pending?: ReadonlySet<string>; beforeContext?: () => void },
 ) {
   const fake = fakeSpawn();
   const spawn: Spawn = async (id, options) => {
@@ -41,6 +41,7 @@ function native(
         if (subtype !== "mcp_status" && subtype !== "get_context_usage")
           return process.write(data);
         if (subtype === "mcp_status") await beforeStatus?.();
+        else mode?.beforeContext?.();
         running?.received.push(message);
         running?.emit({
           type: "control_response",
@@ -759,6 +760,40 @@ it.each(["unique", "ambiguous"] as const)(
     }
   },
 );
+
+it("verifies tools already admitted as a server connects during startup", async () => {
+  const pending = new Set(["alpha"]);
+  const f = native(
+    ["alpha"],
+    ["write_marker"],
+    {},
+    undefined,
+    undefined,
+    undefined,
+    { pending, beforeContext: () => pending.clear() },
+  );
+  const mcp = settings();
+  const process = await ClaudeProcess.start(f.spawn, {
+    cwd: "/work",
+    systemPrompt: "",
+    mcp,
+  });
+  try {
+    expect(mcp.started).toHaveBeenCalledWith(
+      "initial",
+      [
+        {
+          name: "alpha",
+          state: "connected",
+          tools: [{ name: "write_marker" }],
+        },
+      ],
+      mcp.choice,
+    );
+  } finally {
+    await process.kill();
+  }
+});
 
 it("never prompts after core rejects readback, and strict-none keeps the SDK server out of the listing", async () => {
   const f = native();

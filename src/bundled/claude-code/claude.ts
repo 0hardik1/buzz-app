@@ -702,20 +702,25 @@ export class ClaudeProcess {
   /** A startup snapshot. Connecting servers still participate in the policy
    * check, even when they cannot yet contribute tools. */
   private async readMcp() {
-    const rows = await this.readMcpStatus();
-    const catalog = this.mcpCatalog(rows);
+    let rows = await this.readMcpStatus();
     const context = await this.call({ subtype: "get_context_usage" });
     const tools = (context.response as Message | undefined)?.mcpTools;
     if (context.subtype !== "success" || !Array.isArray(tools))
       throw new Error("Claude could not verify its admitted MCP tools");
 
-    const admitted = new Map<string, McpIdentity | null>();
-    const admittedTools: McpIdentity[] = [];
     const pending = new Set(
       rows
-        .filter(({ status }) => status === "pending")
-        .map(({ name }) => mcpName(name)),
+        .filter(
+          ({ name, status }) => name !== TOOL_SERVER && status === "pending",
+        )
+        .map(({ name }) => name),
     );
+    // Refresh once if an already admitted tool outpaced the status snapshot.
+    if (tools.some((tool) => pending.has(tool?.serverName)))
+      rows = await this.readMcpStatus();
+    const catalog = this.mcpCatalog(rows);
+    const admitted = new Map<string, McpIdentity | null>();
+    const admittedTools: McpIdentity[] = [];
     for (const tool of tools)
       if (
         typeof tool?.name === "string" &&
@@ -727,12 +732,7 @@ export class ClaudeProcess {
           catalog.tools,
         );
         if (!native) {
-          // The server may have connected since the status response.
-          if (
-            tool.serverName === TOOL_SERVER ||
-            pending.has(mcpName(tool.serverName))
-          )
-            continue;
+          if (tool.serverName === TOOL_SERVER) continue;
           throw new Error("Claude could not verify an admitted MCP tool");
         }
         this.addMcpName(admitted, tool.name, native);

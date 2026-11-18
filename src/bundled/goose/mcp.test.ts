@@ -489,6 +489,31 @@ describe("Goose tools-only lifecycle", () => {
       }
     },
   );
+  it.each([false, true])(
+    "preserves the inspection outcome when session deletion fails (listing fails: %s)",
+    async (failTools) => {
+      const wire = transport({ failDelete: true });
+      if (failTools) wire.failTools();
+      const { runtime, agent } = inspector(wire);
+      try {
+        const inspect = runtime.inspectMcp(agent, "fixture");
+        if (failTools)
+          await expect(inspect).rejects.toThrow("Tool listing failed");
+        else
+          await expect(inspect).resolves.toEqual([
+            { name: "read_echo", description: "read_echo" },
+            { name: "write_marker", description: "write_marker" },
+          ]);
+        expect(wire.requests).toContainEqual({
+          method: "session/delete",
+          params: { sessionId: "session-1" },
+        });
+        expect(present(wire.fake.geese[0]).killed).toBe(true);
+      } finally {
+        runtime.dispose();
+      }
+    },
+  );
   it.each(["spawn", "opening", "tools"] as const)(
     "waits for a cancelled inspection's actual exit during retirement (%s)",
     async (stage) => {
