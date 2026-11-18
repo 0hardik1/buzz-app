@@ -8243,7 +8243,6 @@ it("rejects overlong and over-limit tool edits without changing accepted intent"
   act(() => {
     for (const person of people)
       expect(h.commands().insertMention(person)).toBe(true);
-    // Someone already mentioned adds no recipient.
     expect(h.commands().insertMention(people[7] ?? first)).toBe(true);
   });
   const before = h.input().value;
@@ -8789,7 +8788,6 @@ it.each([undefined, "root"])(
     h.submit();
     expect(h.input()).toHaveValue("@Honey @Honey @Honey hello");
     h.submit();
-    // Two chips for one person notify once.
     expect(send.mock.calls.at(-1)?.[threadRootId ? 3 : 2]).toEqual([
       first.pubkey,
       second.pubkey,
@@ -12667,7 +12665,6 @@ it("batch insertion rejects an unavailable member atomically and does not send o
   expect(h.messages.send).not.toHaveBeenCalled();
   expect(screen.getByRole("alert")).toHaveTextContent("no longer available");
 });
-/** The provider publishes one row whose edit is a labelled group. */
 function offerCrew(
   h: ReturnType<typeof mount>,
   mentions: readonly MentionRecipient[],
@@ -12686,16 +12683,13 @@ it("a labelled mentions edit is one chip, sent as `@label` with each member once
   await h.user.keyboard("{Enter}");
   expect(h.input()).toHaveValue("@Crew ");
   expect(
-    // The namesakes' names say which key each one is.
     screen.getByRole("img", {
       name: "Group Crew, 2 recipients: Honey · rcaj, Honey · 04hu",
     }),
   ).toHaveTextContent("@Crew · 2");
-  // A member also mentioned alone is still one recipient.
   act(() => void h.commands().insertMention(first));
   h.submit();
   await waitFor(() => expect(h.messages.send).toHaveBeenCalled());
-  // The label, then the member named alone, qualified: a namesake is tagged.
   expect(h.messages.send.mock.calls[0]?.[1]).toBe(
     `@Crew @Honey (${first.pubkey}) `,
   );
@@ -12714,7 +12708,6 @@ it("a labelled mentions edit inside Markdown code is only its name", async () =>
 });
 it.each([
   ["Crew", "@Crew "],
-  // An edit is Markdown, so the label goes in escaped, as a chip sends it.
   ["*ops*", "@\\*ops\\* "],
 ])(
   "a labelled mentions edit while editing a sent message adds only its text (%s)",
@@ -12766,7 +12759,6 @@ it("a person in a chip and also mentioned alone is one reference outside a DM", 
   await act(async () => {});
   expect(h.messages.send).toHaveBeenCalledOnce();
   expect(h.messages.send.mock.calls[0]?.[2]).toEqual([second.pubkey]);
-  // Once, though two spans name her: the relay takes at most 32 references.
   expect(h.messages.send.mock.calls[0]?.at(-1)).toEqual([first.pubkey]);
 });
 it.each(["disabled", "retarget", "unmount"])(

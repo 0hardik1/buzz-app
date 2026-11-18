@@ -93,13 +93,11 @@ it("keeps a leading group tag, so Solo naming matches the sent text", () => {
       ),
     );
   expect(title("@crew do X", "crew")).toBe("@crew do X");
-  // The sent text tags no one named `@crew`, so its reading keeps the label too.
   expect(
     isStartingChatTitle(title("@crew do X", "crew"), {
       text: "@crew do X",
       recipients: [],
     }),
   ).toBe(true);
-  // A label that starts with a member's name is never cut at that name.
   expect(title("@Ann's team do X", "Ann's team")).toBe("@Ann's team do X");
 });

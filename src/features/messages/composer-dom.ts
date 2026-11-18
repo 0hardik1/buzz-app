@@ -105,7 +105,6 @@ export type ComposerInputElement = HTMLDivElement & {
   setSelectionRange(start: number, end: number, direction?: string): void;
   insertText(
     text: string,
-    /** People to mention; a group is one chip `@label` for all its members. */
     recipient?: MentionRecipient | readonly MentionRecipient[] | ComposerGroup,
     range?: { start: number; end: number },
     /** The key typed to end the query. A closing colon is recorded before

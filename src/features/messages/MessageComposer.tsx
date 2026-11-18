@@ -2116,7 +2116,6 @@ function Composer({
   function keepProseCaret(add: (at: CompletionQuery) => boolean, focus = true) {
     const before = valueRef.current;
     let start = 0;
-    // A group's members share one span: each chip counts once.
     for (const tag of [
       ...new Map(
         before.recipients.map((tag) => [`${tag.start}:${tag.end}`, tag]),
@@ -2138,7 +2137,6 @@ function Composer({
     if (focus) input.current?.focus();
     return true;
   }
-  /** With `label`, one chip `@label` stands for all of `recipients`. */
   function insertMentions(
     recipients: readonly MentionRecipient[],
     range?: CompletionQuery,
@@ -2173,7 +2171,6 @@ function Composer({
       input.current.readOnly
     )
       return false;
-    // In code only the text goes in, as in a message edit.
     if (label !== undefined && range && inMarkdownCode(range))
       return insert(`@${label} `, undefined, range);
     // Message edits only add references, never new notification intent.
@@ -2222,9 +2219,6 @@ function Composer({
     setError(undefined);
     return true;
   }
-  /** Whether `range` overlaps Markdown code the draft spells with backticks,
-   * or a rich span Markdown can't reach: code, a link or literal text such as
-   * a removed link's label. */
   function inMarkdownCode(range: Readonly<{ start: number; end: number }>) {
     const doc = readComposerSnapshot(valueRef.current.document);
     const context = doc
@@ -2966,7 +2960,6 @@ function Composer({
           fromPill,
         ));
       } else if (recipients.length) {
-        // A person in several chips, or also mentioned alone, is offered once.
         const people = distinctRecipients(captured.recipients);
         // An agent only an earlier Buzz runs would not answer; offer it here first.
         const lookup = oldAgents.find(people);

@@ -5031,7 +5031,6 @@ describe("group chip", () => {
     await h.user.keyboard("hi");
     expect(h.markdown()).toBe("@crew hi");
     expect(h.draft().recipients).toEqual(on(0, ann, bo));
-    // From the saved document, and from text and recipients alone.
     const { text, recipients } = h.draft();
     for (const saved of [h.draft(), mentionDraft({ text, recipients })]) {
       const restored = mount(saved);
@@ -5093,7 +5092,6 @@ describe("group chip", () => {
     }));
     const h = mount();
     expect(add(h, { label: "crew", members: people })).toBe(true);
-    // The same people again add no one, so the cap still holds.
     act(() => expect(h.input.insertText("", people[0])).toBe(true));
     expect(add(h, { label: "crew", members: [people[1] ?? ann] })).toBe(true);
     act(() => expect(h.input.insertText("", [ann])).toBe(false));

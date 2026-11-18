@@ -265,10 +265,8 @@ it("keeps a group's members only on the exact text `@label`", () => {
     { ...first, label: "crew", start: 0, end: 5 },
     { ...second, label: "crew", start: 0, end: 5 },
   ]);
-  // Another label, or a word that only starts with it, is prose.
   expect(crew("team").recipients).toEqual([]);
   expect(crew("crew", "@crews hi").recipients).toEqual([]);
-  // The group's span is removed once, so prose after it still counts.
   expect(addressingOnly(crew("crew", "@crew "))).toBe(true);
   expect(addressingOnly(crew("crew"))).toBe(false);
 });

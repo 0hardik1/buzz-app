@@ -736,7 +736,6 @@ describe("inline formatting batch", () => {
         null,
         marks.map((name) => schema.marks[name].create()),
       );
-    // What a reader's Markdown renders: the node kinds and the text.
     const rendered = (markdown: string) => {
       const kinds = new Set<string>();
       let text = "";
@@ -769,7 +768,6 @@ describe("inline formatting batch", () => {
       kinds: ["root", "paragraph", "emphasis", "text"],
       text: "@eng_ios hi",
     });
-    // Emphasis beside an escaped label still pairs only its own delimiters.
     expect(
       rendered(
         serialize(
@@ -782,7 +780,6 @@ describe("inline formatting batch", () => {
       kinds: ["root", "paragraph", "text", "emphasis"],
       text: "@eng*b*",
     });
-    // A link escapes its own text, once.
     const linked = schema.nodes.token.create(
       { source: "@eng_ios", group: { label: "eng_ios", members } },
       null,
@@ -792,7 +789,6 @@ describe("inline formatting batch", () => {
       kinds: ["root", "paragraph", "link", "text"],
       text: "@eng_ios",
     });
-    // Code shows its text as is.
     expect(serialize(chip("eng_ios", "code"))).toBe("`@eng_ios`");
   });
   it("trusts a group chip only with a one-line label", () => {

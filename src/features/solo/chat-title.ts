@@ -35,8 +35,6 @@ function chatTitle(
   for (const recipient of [...draft.recipients].sort(
     (a, b) => a.start - b.start,
   )) {
-    // A group's `@label` stays: Solo naming rereads the sent text, where it
-    // names no tagged person.
     if (recipient.label !== undefined) break;
     if (
       recipient.start < draftStart ||

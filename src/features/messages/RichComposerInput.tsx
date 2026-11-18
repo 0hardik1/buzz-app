@@ -106,8 +106,6 @@ const TokenChip = memo(function TokenChip({
   );
 });
 
-/** One chip `@label` for several people, with the people it notifies
- * counted beside it and named in its accessible name. */
 const GroupChip = memo(function GroupChip({
   label,
   names,
@@ -405,7 +403,6 @@ export function RichComposerInput({
         const preview = gifPreviews.get(start);
         if (preview && preview.end === end && !mention)
           return { start, end, editAsText: false, content: preview.content };
-        // A group's members share its span: one chip, counting them.
         const people = draft.recipients.filter(
           (item) => item.start === start && item.label !== undefined,
         );

@@ -15,7 +15,6 @@ export type DraftRecipient = MentionRecipient &
 export const distinctRecipients = <T extends MentionRecipient>(
   recipients: readonly T[],
 ) => [...new Map(recipients.map((item) => [item.pubkey, item])).values()];
-/** `recipients` up to the first 32 distinct people, keeping all their spans. */
 function capRecipients<T extends MentionRecipient>(recipients: readonly T[]) {
   const kept = new Set<string>();
   return recipients.filter((item) => {

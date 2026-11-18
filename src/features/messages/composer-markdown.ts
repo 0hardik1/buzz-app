@@ -50,8 +50,6 @@ strike.peek = () => "~";
 export const groupLabelMarkdown = (label: string) =>
   `@${label.replace(/[\\`*_[\]<~]/g, "\\$&")}`;
 
-/** A group's label comes from a plugin, so a chip sends it escaped: it renders
- * as the label the chip shows. Code shows it as is; a link escapes its text. */
 const groupChip = (node: EditorNode) =>
   node.attrs.group &&
   !composerSchema.marks.code.isInSet(node.marks) &&
@@ -103,7 +101,6 @@ function qualifyNamesakes(doc: EditorNode): EditorNode {
     composerSchema.marks.recipient.isInSet(node?.marks ?? [])?.attrs;
   const keys = new Map<string, Set<string>>();
   doc.descendants((node) => {
-    // A chip for several people tags each of them, so they are namesakes too.
     const members: readonly { pubkey: string; name: string }[] =
       node.attrs.group?.members ?? [];
     // Mobile readers match names case-insensitively, so case-only namesakes
@@ -338,9 +335,6 @@ function paragraphMarkdown(
         : node.attrs.source;
     if (composerSchema.marks.literal.isInSet(node.marks))
       literals.push({ start, end: text.length });
-    // A group chip's @label arrives escaped (see composerMarkdown) and is
-    // protected like a recipient's exact name, so it is never escaped again or
-    // paired as emphasis.
     if (
       node.attrs.recipient ||
       node.attrs.group ||

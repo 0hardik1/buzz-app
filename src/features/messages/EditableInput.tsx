@@ -1131,8 +1131,6 @@ export function EditableInput({
         return true;
       const added = recipients.filter((person) => !existing.has(person.pubkey));
       const tr = closeHistory(editor.state.tr);
-      // A group's members share its chip: the chip keeps the members still
-      // requested, and is plain text without them. Attributes keep positions.
       for (const token of source.tokens) {
         const group = composerGroup(
           token.node.attrs.group,
@@ -2622,7 +2620,6 @@ export function EditableInput({
                 ...node.attrs,
                 recipient: null,
               });
-            // A group drops the member; without members it is plain text.
             const group = composerGroup(node.attrs.group, node.attrs.source);
             if (group?.members.some((m) => m.pubkey === pubkey)) {
               const members = group.members.filter((m) => m.pubkey !== pubkey);
