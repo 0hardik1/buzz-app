@@ -4,12 +4,14 @@ import { loadEnv } from "vite";
 import {
   desktopOverlay,
   launchEnvironment,
+  ME_SETTINGS,
   options,
 } from "./desktop-config.mjs";
 import { prepareCredentialHelper } from "./dev-credential-helper.mjs";
 import { worktreePort } from "./worktree-port.mjs";
 
-// `me` (from `just desktop me`) signs in with the release build's key, read-only.
+// `me` (from `just desktop me`) runs as the installed build: its key, read-only,
+// its saved sign-ins, and its settings from ME_SETTINGS.
 // Only this argument sets the variable: .env.local is copied into every
 // worktree, agents' included, so it must never turn this on.
 const me = process.argv[2] === "me";
@@ -39,7 +41,7 @@ const port = values.port === undefined ? undefined : Number(values.port);
 
 const help = forwarded.some((arg) => arg === "--help" || arg === "-h");
 const root = fileURLToPath(new URL("../", import.meta.url));
-const env = launchEnvironment(root);
+const env = launchEnvironment(root, me ? ME_SETTINGS : undefined);
 delete env.BUZZ_DEV_RELEASE_KEY;
 if (me) env.BUZZ_DEV_RELEASE_KEY = "1";
 // On macOS `me` also routes Keychain items through a helper it installs once,
@@ -70,8 +72,11 @@ if (me && !help && process.platform === "darwin") {
 // Give Rust the development frontend's effective public pin (including an
 // explicit empty override), so native agent starts select the signer the
 // frontend actually uses.
-env.BUZZ_DEV_VIEWER =
-  loadEnv("development", root, "BUZZ_DEV_VIEWER").BUZZ_DEV_VIEWER ?? "";
+// `me` signs in natively, as the installed build does: a pinned viewer would
+// swap that for the development broker and turn its sign-in servers off.
+env.BUZZ_DEV_VIEWER = me
+  ? ""
+  : (loadEnv("development", root, "BUZZ_DEV_VIEWER").BUZZ_DEV_VIEWER ?? "");
 // Stage the bundled helpers before Tauri compiles, outside its dev-server timeout.
 if (!help) {
   // Stage for the target Tauri is given, as Tauri tells beforeBuildCommand.

@@ -108,7 +108,10 @@ need their own validation.
   override it; keep their development URL and frontend command consistent. Use `--`
   before runner/application arguments if they contain their own `--port` flag.
   `just desktop me` signs in with your installed Buzz's key, read-only, instead
-  of the debug build's own. On macOS it also sets up, on first use, a Keychain
+  of the debug build's own, and shares its saved sign-ins, so signing out of a
+  server there asks first: it signs the installed app out too. It reads the installed build's
+  settings from `~/.buzz-foundation/desktop-me.env`
+  ([launch environment](configuration.md#launch-environment)). On macOS it also sets up, on first use, a Keychain
   helper and a local signing certificate: click **Always Allow** on each Keychain
   dialog that first launch, and later launches, rebuilds and new worktrees show
   none. Agents and tests use plain `just desktop`. See

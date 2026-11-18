@@ -966,7 +966,7 @@ pub fn run() {
             },
             || {
                 host_mcp::pairing::revoke(&paths.app_data)?;
-                federated_identity::store::remove_all(federated_identity::store::root()?)?;
+                federated_identity::store::remove_all(federated_identity::store::own_root()?)?;
                 identity::remove_saved_key()
             },
         )

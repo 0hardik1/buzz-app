@@ -4,7 +4,7 @@
 /// Bumped when the request format or the set of served items changes.
 /// `just desktop me` installs one helper per protocol, so checkouts on
 /// different protocols each keep a helper that understands them.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 
 /// Largest value read or written, in either direction.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -106,8 +106,9 @@ fn plain(account: &str, prefix: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b".-_:".contains(&byte))
 }
 
-/// The exact debug-build items `just desktop me` reads and writes, and the
-/// release human key, which it may only read.
+/// The exact debug-build items `just desktop me` reads and writes, the
+/// release human key, which it may only read, and the release build's
+/// sign-in sessions, which `me` shares.
 pub fn allowed(operation: Operation, service: &str, account: &str) -> bool {
     use Operation::*;
     match service {
@@ -126,7 +127,8 @@ pub fn allowed(operation: Operation, service: &str, account: &str) -> bool {
         "xyz.block.buzz.desktop.agents" | "dev.local.buzz.foundation.agents" => {
             account == "agent-bundle-v1" || plain(account, "agent:")
         }
-        "xyz.block.buzz.desktop.federated-session.debug" => hex64(account),
+        "xyz.block.buzz.desktop.federated-session"
+        | "xyz.block.buzz.desktop.federated-session.debug" => hex64(account),
         "xyz.block.buzz.desktop.jev-key.debug" | "dev.local.buzz.foundation.jev-key.debug" => {
             account == "typesafe"
         }
@@ -215,6 +217,17 @@ mod tests {
                 "xyz.block.buzz.desktop.federated-session.debug",
                 hex.as_str(),
             ),
+            // `me` shares the release build's sessions.
+            (
+                Replace,
+                "xyz.block.buzz.desktop.federated-session",
+                hex.as_str(),
+            ),
+            (
+                Delete,
+                "xyz.block.buzz.desktop.federated-session",
+                hex.as_str(),
+            ),
             (Replace, "xyz.block.buzz.desktop.jev-key.debug", "typesafe"),
             (Read, "dev.local.buzz.foundation.jev-key.debug", "typesafe"),
             (
@@ -260,11 +273,11 @@ mod tests {
             ),
             (Read, "xyz.block.buzz.desktop.agents", "secrets"),
             (Read, "xyz.block.buzz.desktop.agents", "agent:"),
-            // Release-build sessions and keys belong to the release app.
+            // Other release-build keys belong to the release app.
             (
                 Read,
                 "xyz.block.buzz.desktop.federated-session",
-                hex.as_str(),
+                upper.as_str(),
             ),
             (
                 Read,
