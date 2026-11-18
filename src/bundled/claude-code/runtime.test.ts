@@ -342,14 +342,16 @@ function setup(
       interruptible,
       ...(options.named ? { named: options.named } : {}),
       ...picks,
-      // The host's answer, as it is when asked.
-      current: () =>
-        trigger.type === "mention" ||
-        trigger.type === "plugin" ||
-        trigger.type === "attention" ||
-        (attention.on &&
-          objects.get(trigger.slug)?.enabled === true &&
-          !stale.has(trigger.slug)),
+      // The host's answer, as it is when asked, unless the test gives one.
+      current:
+        picks.current ??
+        (() =>
+          trigger.type === "mention" ||
+          trigger.type === "plugin" ||
+          trigger.type === "attention" ||
+          (attention.on &&
+            objects.get(trigger.slug)?.enabled === true &&
+            !stale.has(trigger.slug))),
     } as unknown as Delivery;
     if (
       trigger.type === "mention" ||
@@ -2501,6 +2503,75 @@ it("gives the workflow reason for its owner's workflow mention that doesn't name
   }
 });
 
+it("ignores a workflow mention whose agent was replaced during the wait", async () => {
+  const relay = keypair();
+  const event = eventDto(
+    signed(relay, {
+      kind: 9,
+      content: "@Claude workflow",
+      tags: [
+        ["h", channel],
+        ["p", self],
+        ["buzz:workflow", "true"],
+        ["buzz:workflow-owner", alice],
+      ],
+    }),
+  );
+  const f = setup([event]);
+  try {
+    let live = true;
+    Object.assign(f.runtime, {
+      readyReads: async () => {
+        live = false;
+        return f.runtime["reads"](self);
+      },
+    });
+    const ignored = vi.fn();
+    await f.deliver(
+      { type: "mention", event },
+      { ignored, current: () => live },
+    );
+    expect(ignored).toHaveBeenCalledExactlyOnceWith();
+    expect(f.claudes()).toHaveLength(0);
+  } finally {
+    f.runtime.dispose();
+  }
+});
+
+it("waits for a workflow mention's community, not for its owner's", async () => {
+  const relay = keypair();
+  const event = eventDto(
+    signed(relay, {
+      kind: 9,
+      content: "@Agent workflow",
+      tags: [
+        ["h", channel],
+        ["p", self],
+        ["buzz:workflow", "true"],
+        ["buzz:workflow-owner", alice],
+      ],
+    }),
+  );
+  const f = setup([event]);
+  try {
+    const readyReads = vi.fn(async () => f.runtime["reads"](self));
+    Object.assign(f.runtime, { readyReads });
+    await f.deliver({ type: "mention", event }, { ignored: vi.fn() });
+    expect(readyReads).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ owner: alice }),
+      expect.any(AbortSignal),
+      "chan-1",
+    );
+    await f.deliver(
+      { type: "mention", event: { ...event, pubkey: alice } },
+      { ignored: vi.fn() },
+    );
+    expect(readyReads).toHaveBeenCalledOnce();
+  } finally {
+    f.runtime.dispose();
+  }
+});
+
 it.each([false, true])(
   "handles sibling workflow authorization with cancellation=%s",
   async (cancelled) => {
@@ -3739,6 +3810,54 @@ it("delivers a rootless subscription to its channel without publishing its ancho
   for (const event of f.published.filter(({ kind }) => kind === 9))
     expect(event.tags.some((tag) => tag[0] === "e")).toBe(false);
   expect(JSON.stringify(f.published)).not.toContain(WAKE_ID);
+});
+
+it("hands a channel-level wake into a thread only where the host says threads have their own sessions", async () => {
+  const root = message("7", "a thread in the channel");
+  const metadata = message("8", "", { kind: 39000, tags: [["d", channel]] });
+  for (const scope of ["thread", "channel"] as const) {
+    const f = setup([], { hold: true });
+    f.agent.query.mockImplementation(async (...args: unknown[]) => {
+      const [[filter] = []] = args as { ids?: string[]; kinds?: number[] }[][];
+      if (filter?.ids?.includes(root.id)) return [root];
+      if (filter?.kinds?.includes(39000)) return [metadata];
+      return [];
+    });
+    const handoff = vi.fn();
+    // The host answers from the agent's session scope, as Agents does.
+    const threadsApart = () => scope === "thread";
+    await f.deliver(
+      { ...pluginWake(), type: "attention", topLevel: true },
+      {
+        agent: {
+          ...f.agent,
+          handoff,
+          threadsApart,
+        } as unknown as Delivery["agent"],
+        config: { ...DEFAULT_CONFIG, scope },
+      },
+    );
+    await flush(10);
+    const claude = f.claudes().find((process) => process.prompts.length);
+    const result = (await mcp(claude, 1, "tools/call", {
+      name: "self_handoff",
+      arguments: { channel, thread: root.id, text: "answer there" },
+    })) as { isError?: boolean; content: { text: string }[] } | undefined;
+    if (scope === "thread") {
+      expect(result?.isError).toBeFalsy();
+      expect(handoff).toHaveBeenCalledWith(
+        expect.objectContaining({ channel, root: root.id }),
+      );
+    } else {
+      // One session per channel: the threads share this conversation.
+      expect(result).toMatchObject({
+        isError: true,
+        content: [{ text: "That is this conversation." }],
+      });
+      expect(handoff).not.toHaveBeenCalled();
+    }
+    f.runtime.dispose();
+  }
 });
 
 it("refreshes Attention instructions after Claude starts", async () => {
