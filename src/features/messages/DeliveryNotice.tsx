@@ -50,8 +50,15 @@ export function DeliveryNotice({
     unfinished,
   );
   // Kept once seen, so the row can say that setup ended, however it ended.
-  const [held, setHeld] = useState(false);
-  if (setup && !held) setHeld(true);
+  // Having said so, the row drops it when it is next tried: a failure after
+  // that has its own cause. A try begun under setup keeps it, because setup
+  // can end during that try.
+  const [held, setHeld] = useState<"setup" | "ended">();
+  if (setup) {
+    if (held !== "setup") setHeld("setup");
+  } else if (failed) {
+    if (held === "setup") setHeld("ended");
+  } else if (held === "ended") setHeld(undefined);
   const recovery = setup && abandonableSetup(setup);
   const [abandon, setAbandon] = useState<{
     id: string;

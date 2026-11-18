@@ -101,7 +101,7 @@ behavior on the label, so a rename touches copy only.
   published finishes first and another window’s unfinished signature cannot
   publish after either. A failed row that was held says that setup ended,
   whether it was abandoned or expired; the note is not saved, and lasts while
-  the row stays mounted.
+  the row stays mounted, until the message is next retried.
   Afterwards, retry the opening message with current roles or send a new
   message if its signed timestamp has expired. This needs no relay update
   and does not migrate existing members' roles or change tool-created grants.

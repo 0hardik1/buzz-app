@@ -1,11 +1,12 @@
-import { test, expect } from "./fixture.mjs";
+import { test as releaseTest, expect } from "./fixture.mjs";
 import { openPage } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 
 const channel = "11111111-1111-4111-8111-111111111111";
 const chat = "33333333-3333-4333-8333-333333333333";
+// Release builds do not render the Outbox list that all but the last journey drive.
+const test = releaseTest.extend({ channelDiagnostics: true });
 test.use({
-  channelDiagnostics: true, // Release builds do not render it.
   productionBroker: true,
   openingAdminSetup: true,
   channelLifecycle: true,
@@ -312,3 +313,116 @@ for (const mode of ["cross-window", "same-window", "failed-storage"])
       }
     }
   });
+
+// Browser-only: the release bundle, which has no Outbox list, on the production
+// session, broker and IndexedDB journal, with the browser's own focus return.
+releaseTest(
+  "a release build abandons a stuck admin setup from its failed message",
+  async ({ page, app }) => {
+    const createdAt = Math.floor(Date.now() / 1000);
+    const [owned, shared] = app.soloAgents;
+    const creation = app.sign({
+      kind: 9007,
+      created_at: createdAt,
+      content: "",
+      tags: [
+        ["h", chat],
+        ["p", owned.pubkey],
+        ["p", shared.pubkey],
+      ],
+    });
+    const message = app.sign({
+      kind: 9,
+      created_at: createdAt,
+      content: "Opening work",
+      tags: [
+        ["h", chat],
+        ["p", owned.pubkey],
+      ],
+    });
+    app.report.setupCreation = creation;
+    app.report.setupReceiverTime = createdAt;
+    await page.addInitScript(
+      ({ scope, creation, message, shared }) => {
+        localStorage.setItem(
+          `buzz-outbox-v1:${scope}`,
+          JSON.stringify([
+            {
+              event: creation,
+              signed: creation,
+              delivery: "accepted",
+              // The creator does not own this agent, so its grant is refused.
+              recovery: {
+                key: `solo-initial-admins:${creation.tags[0][1]}`,
+                value: JSON.stringify([shared]),
+              },
+            },
+            { event: message, signed: message, delivery: "failed" },
+          ]),
+        );
+      },
+      {
+        scope: `https://primary.example:${app.viewer}`,
+        creation,
+        message,
+        shared: shared.pubkey,
+      },
+    );
+    await page.goto(app.origin);
+    await openPage(page, "Messages");
+    await page
+      .getByRole("button", { name: "Recovery chat", exact: true })
+      .click();
+    const row = page
+      .locator("[data-message-id]")
+      .filter({ hasText: message.content });
+    const status = row.getByRole("status");
+    const retry = row.getByRole("button", { name: "Retry", exact: true });
+    const abandon = row.getByRole("button", {
+      name: "Abandon admin setup",
+      exact: true,
+    });
+    const sent = (kind) =>
+      app.report.publications.filter(({ event }) => event.kind === kind);
+
+    // The offer appears once startup has confirmed the restored create.
+    await expect(abandon).toBeVisible();
+    await retry.click();
+    await expect(status).toHaveText(
+      "Couldn’t send this message. An opening agent is not verified as owned by the chat creator. Retry this message. The chat continues with current roles once setup is 15 minutes old.",
+    );
+    await expect(status).not.toHaveClass(/sr-only/);
+    await expect(retry).toBeVisible();
+    await abandon.click();
+    const confirmation = page.getByRole("alertdialog", {
+      name: "Abandon admin setup?",
+    });
+    const cancel = confirmation.getByRole("button", {
+      name: "Cancel",
+      exact: true,
+    });
+    await expect(cancel).toBeFocused();
+    await cancel.click();
+    await expect(abandon).toBeFocused();
+
+    await abandon.click();
+    await confirmation
+      .getByRole("button", { name: "Abandon admin setup", exact: true })
+      .click();
+    await expect(confirmation).toHaveCount(0);
+    await expect(abandon).toHaveCount(0);
+    await expect(status).toHaveText(
+      "Couldn’t send this message. Chat admin setup has ended, and the chat keeps its current roles. Retry this message, or send it again if it has expired.",
+    );
+    await expect(status).not.toHaveClass(/sr-only/);
+    await expect(retry).toBeFocused();
+    expect([...sent(9000), ...sent(9)]).toEqual([]);
+
+    // A grant would precede the message, so its arrival shows none was sent.
+    await retry.click();
+    await expect.poll(() => sent(9).length).toBe(1);
+    expect(sent(9)[0].event).toEqual(message);
+    expect(sent(9000)).toEqual([]);
+    await expect(retry).toHaveCount(0);
+  },
+);

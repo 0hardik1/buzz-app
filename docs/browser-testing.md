@@ -86,6 +86,9 @@ otherwise unchanged release bundle. If the panel has moved or its gate has chang
 build fails rather than quietly producing a release bundle. Every other file stays on the
 release bundle, where the Canvas confirmation journey confirms Diagnostics is
 absent; `developmentReact` files get it through the app's own developer signal.
+A file with journeys on both bundles sets it on a derived test instead, as
+`solo-admin-abandonment.spec.mjs` does for its Outbox journeys; its release
+journey then runs in a worker of its own, with its own build.
 
 Every fixture build except a `developmentReact` one is also checked for the
 text only Diagnostics tools render, listed as `DIAGNOSTICS_LABELS` in

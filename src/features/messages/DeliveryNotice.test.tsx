@@ -405,6 +405,29 @@ it("says that setup ended when it expires under a failed message", async () => {
   }
 });
 
+it("stops saying that setup ended once the message is retried and fails for another reason", async () => {
+  const chat = await soloChat();
+  const message = await chat.failed("Work on this");
+  render(<Sent outbox={chat.outbox} id={message} channelId={chat.channel} />);
+  const offer = abandon();
+  assert.exists(offer);
+  fireEvent.click(offer);
+  fireEvent.click(confirm());
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent(SETUP_ENDED),
+  );
+  // The relay refuses the retry for a reason that has nothing to do with setup.
+  chat.publish.mockRejectedValueOnce(new PublishRejected("Rate limited"));
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(chat.item(message)?.error).toBe("Rate limited"));
+  expect(chat.item(message)?.delivery).toBe("failed");
+  expect(screen.getByRole("status")).toHaveTextContent(
+    /^Couldn’t send this message\.$/,
+  );
+  expect(screen.getByRole("status")).toHaveClass("sr-only");
+  expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+});
+
 /** A saved setup as the outbox holds it, for a chat named `channel`. */
 function setupReceipt(
   delivery: OutgoingEvent["delivery"],
