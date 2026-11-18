@@ -518,18 +518,18 @@ export async function fileCatchUpChat(
   session: RelaySession,
   channelId: string,
 ) {
-  await session.soloPreferences.ensure();
-  const snapshot = session.soloPreferences.snapshot();
+  await session.sidebarPreferences.ensure();
+  const snapshot = session.sidebarPreferences.snapshot();
   if (snapshot.status !== "ready" || !snapshot.data)
     throw new Error(snapshot.error ?? "Solo workspaces are unavailable.");
   const workspace = snapshot.data.sections.find(isCatchUpWorkspace);
   if (workspace && snapshot.data.assignments[channelId] === workspace.id)
     return;
   if (workspace) {
-    await session.soloPreferences.assign(channelId, workspace.id);
+    await session.sidebarPreferences.assign(channelId, workspace.id);
     return;
   }
-  await session.soloPreferences.createAndAssign(channelId, {
+  await session.sidebarPreferences.createAndAssign(channelId, {
     id: CATCH_UP_WORKSPACE_ID,
     name: CATCH_UP_WORKSPACE_NAME,
   });

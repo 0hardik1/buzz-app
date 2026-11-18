@@ -712,8 +712,8 @@ it.each([
   };
   const catchUpSession = {
     ...session,
-    soloPreferences: {
-      ...session.soloPreferences,
+    sidebarPreferences: {
+      ...session.sidebarPreferences,
       ensure,
       snapshot: () => preferencesSnapshot,
       createAndAssign,
@@ -767,8 +767,8 @@ it("does not move an existing catch-up back after the owner re-files it", async 
       list: () => loadingChannels,
       subscribeList: () => () => {},
     },
-    soloPreferences: {
-      ...session.soloPreferences,
+    sidebarPreferences: {
+      ...session.sidebarPreferences,
       ensure,
       snapshot: () => preferencesSnapshot,
       assign,

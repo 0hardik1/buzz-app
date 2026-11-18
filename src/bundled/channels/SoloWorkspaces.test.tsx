@@ -9,7 +9,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { useState } from "react";
+import { useState, type ComponentProps } from "react";
 import {
   WorkspaceCompositionContext,
   RegionWorkspace,
@@ -34,6 +34,7 @@ import {
 } from "./SoloWorkspaces";
 import { createSoloRegionFixture } from "../../features/channel-navigation/solo-navigation-testing";
 import { readView } from "../../shared/view-state";
+import { ChannelSidebarDnd } from "../../features/channel-navigation/ChannelSidebarDnd";
 
 const owners: ReturnType<typeof createRelaySession>[] = [];
 afterEach(() => {
@@ -110,13 +111,15 @@ function fixture(
       writeOrder: order,
     });
   const order = vi.fn(async (ids: readonly string[]) => {
-    saved = {
-      ...saved,
-      sections: ids.flatMap((id, order) => {
-        const section = saved.sections.find((section) => section.id === id);
-        return section ? [{ ...section, order }] : [];
-      }),
-    };
+    saved = ids.some((id) => id.startsWith("group:"))
+      ? { ...saved, sectionOrder: [...ids] }
+      : {
+          ...saved,
+          sections: ids.flatMap((id, order) => {
+            const section = saved.sections.find((section) => section.id === id);
+            return section ? [{ ...section, order }] : [];
+          }),
+        };
     return saved;
   });
   const onNew = vi.fn();
@@ -136,9 +139,13 @@ function fixture(
       { id: "other", title: "Existing chat" },
     ],
     compose?: ComposeWorkspaces,
+    workspaceComposition?: ComponentProps<
+      typeof SoloWorkspaces
+    >["workspaceComposition"],
   ) => (
     <SoloWorkspaces
       compose={compose}
+      workspaceComposition={workspaceComposition}
       onNew={onNew}
       session={
         {
@@ -291,6 +298,107 @@ it("labels and places the generated catch-up workspace after Chats", async () =>
     expect(
       personal.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Catch me up" }),
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: "Move up" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "Move down" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  } finally {
+    store.dispose();
+  }
+});
+
+it("keeps Catch me up pinned while unified workspaces reorder", async () => {
+  const catchUp = "bestie-catch-ups";
+  const h = fixture("Work", [
+    { id: "work", name: "Work", order: 0 },
+    { id: catchUp, name: "Catch-ups", order: 1 },
+    { id: "personal", name: "Personal", order: 2 },
+  ]);
+  h.setSaved({
+    ...h.saved(),
+    sectionOrder: [
+      "pages",
+      "starred",
+      `group:${catchUp}`,
+      "group:work",
+      "solo",
+      "group:personal",
+      "channels",
+      "forums",
+      "dms",
+    ],
+  });
+  const workspaceComposition = {
+    sections: new Set([
+      "group:work",
+      `group:${catchUp}`,
+      "group:personal",
+      "solo",
+    ]),
+    pendingChatClick: { current: undefined },
+    collapsed: [],
+    toggle: vi.fn(),
+    registerFrame: vi.fn(() => () => {}),
+    newAction: vi.fn(() => null),
+  } satisfies NonNullable<
+    ComponentProps<typeof SoloWorkspaces>["workspaceComposition"]
+  >;
+  const store = h.store();
+  render(
+    <ChannelSidebarDnd
+      writable
+      onMove={vi.fn()}
+      onReorder={vi.fn()}
+      overlay={() => null}
+    >
+      {h.view(
+        store.queries,
+        "unified-workspaces",
+        undefined,
+        undefined,
+        undefined,
+        workspaceComposition,
+      )}
+    </ChannelSidebarDnd>,
+  );
+  try {
+    const user = userEvent.setup();
+    const chats = await screen.findByRole("button", { name: "Chats" });
+    const catchUpHeading = screen.getByRole("button", {
+      name: "Catch me up",
+    });
+    expect(
+      chats.compareDocumentPosition(catchUpHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Actions for Work" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Move down" }),
+    );
+    await waitFor(() =>
+      expect(h.order).toHaveBeenLastCalledWith(
+        [
+          "pages",
+          "starred",
+          "solo",
+          `group:${catchUp}`,
+          "group:work",
+          "group:personal",
+          "channels",
+          "forums",
+          "dms",
+        ],
+        expect.any(AbortSignal),
+      ),
+    );
+
     await user.click(
       screen.getByRole("button", { name: "Actions for Catch me up" }),
     );
