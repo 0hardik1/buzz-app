@@ -1,5 +1,4 @@
 import { Button } from "../../shared/design-system/ui/Button";
-import { useUserStatus } from "../user-status/useUserStatus";
 import { ChatCircleIcon, RobotIcon } from "../../shared/design-system/icons";
 import { useProfileMessage } from "./useProfileMessage";
 import {
@@ -17,10 +16,9 @@ import { AgentAvatar } from "../agents/AgentAvatar";
 import { usePresenceStatus } from "../presence/react";
 import { useMessageDensity } from "../../shared/theme/message-density";
 import type { RelaySession } from "../relay/session";
-import { UserStatusDisplay } from "../user-status/StatusDisplay";
+import { ProfileStatusBubble } from "./ProfileStatusBubble";
 import { ProfileBackdrop } from "./ProfileBackdrop";
-import { ProfileLocalTime } from "./ProfileLocalTime";
-import { useProfileCity } from "./profile-source";
+import { ProfileHeaderTime } from "./ProfileHeaderTime";
 import styles from "./ProfilePeek.module.css";
 type ProfilePeekProps = {
   trigger: ReactElement;
@@ -51,32 +49,6 @@ function ActualName({
   );
   return (
     profile?.verified?.fullName ?? profile?.verified?.displayName ?? fallback
-  );
-}
-
-/** Their shared local time, read only while the preview is open. */
-function LocalTime({
-  session,
-  pubkey,
-}: {
-  session: RelaySession;
-  pubkey: string;
-}) {
-  const timeZone = useSyncExternalStore(
-    session.profiles.subscribe,
-    () => session.profiles.snapshot().get(pubkey)?.tz,
-  );
-  const status = useUserStatus(session.statuses, pubkey);
-  const hasStatus = !!(status?.text || status?.emoji);
-  const city = useProfileCity(session, pubkey);
-  return (
-    <ProfileLocalTime
-      clockOnly={!!city || hasStatus}
-      inlineDetails={!city && !hasStatus}
-      city={city}
-      timeZone={timeZone}
-      className="text-caption text-secondary"
-    />
   );
 }
 
@@ -247,6 +219,13 @@ export function ProfilePeek({
               <ProfileBackdrop src={picture} />
             </div>
             <div className={styles.artwork}>
+              {session && (
+                <ProfileStatusBubble
+                  session={session}
+                  pubkey={pubkey}
+                  compact
+                />
+              )}
               <div className={styles.portrait}>
                 <AgentAvatar
                   session={session}
@@ -276,13 +255,8 @@ export function ProfilePeek({
                 )}
               </div>
               {session && (
-                <UserStatusDisplay
-                  session={session}
-                  userId={pubkey}
-                  size="caption"
-                />
+                <ProfileHeaderTime session={session} pubkey={pubkey} />
               )}
-              {session && <LocalTime session={session} pubkey={pubkey} />}
             </div>
           </button>
         </div>

@@ -15,6 +15,7 @@ import {
   AtIcon,
   EnvelopeIcon,
   UsersIcon,
+  UserCircleIcon,
   ClockIcon,
   HashIcon,
 } from "../../shared/design-system/icons";
@@ -209,7 +210,7 @@ export function ProfileInfoBento({
       <section aria-label="Personal info">
         <InlineHeader title="Personal info" />
         <div className={styles.group}>
-          {about && row("About", about, <InfoIcon size={24} />)}
+          {about && row("About", about, <UserCircleIcon size={24} />)}
           {row("LDAP", `@${username}`, <AtIcon size={24} />)}
           {extraFields("personal")}
           {email?.value && (

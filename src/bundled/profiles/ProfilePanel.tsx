@@ -1,3 +1,4 @@
+import { ProfileHeaderTime } from "../../features/profiles/ProfileHeaderTime";
 import { createPortal } from "react-dom";
 import { ProfileInfoBento } from "./ProfileInfoBento";
 import { ProfileLocationPreview } from "./ProfileLocationPreview";
@@ -26,7 +27,7 @@ import {
   usePanelTabTitle,
 } from "../../features/panels/PanelWorkspace";
 import { useAgentOwnerEvidence } from "../../features/profiles/useAgentOwnerEvidence";
-import { StatusDisplay } from "../../features/user-status/StatusDisplay";
+import { ProfileStatusBubble } from "../../features/profiles/ProfileStatusBubble";
 import { StatusEditor } from "../../features/user-status/StatusEditor";
 import { useStatusEditor } from "../../features/user-status/useStatusEditor";
 import { useUserStatus } from "../../features/user-status/useUserStatus";
@@ -798,6 +799,7 @@ function ProfileDetails({
       >
         <div data-profile-hero="" className={`${hero.hero} ${hero.panelHero}`}>
           <ProfileBackdrop src={picture} />
+          <ProfileStatusBubble session={session} pubkey={pubkey} />
           <motion.button
             layoutId={photoId}
             transition={photoTransition}
@@ -835,7 +837,7 @@ function ProfileDetails({
               {displayAgent && <RobotIcon className={styles.agentIcon} />}
               {headingName}
             </h2>
-            <StatusDisplay session={session} status={userStatus} />
+            <ProfileHeaderTime session={session} pubkey={pubkey} />
           </div>
           {(canSetStatus || canMessage || canEdit) && (
             <div className={hero.actions}>

@@ -31,7 +31,9 @@
 }
 .artwork {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
+  gap: var(--space-4);
   padding: var(--space-4) var(--space-4) var(--space-1);
 }
 .portrait {
