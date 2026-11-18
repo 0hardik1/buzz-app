@@ -365,3 +365,118 @@ test("Team and Solo row counts persist independently within their account/commun
     screen.getByRole("slider", { name: "solo visible rows" }),
   ).toHaveAttribute("aria-valuenow", "1");
 });
+
+const droppedUrl = "https://github.com/block/buzz-app/pull/3823";
+function linkRail(scope = "link-drops", section = "custom:links") {
+  writeView(scope, "navigation-layout:v2", {
+    order: [],
+    sections: section.startsWith("custom:")
+      ? [{ id: section, title: "Links" }]
+      : [],
+    placements: [],
+  });
+  const props = {
+    partition: scope,
+    current: noEntries,
+    sections: section.startsWith("custom:")
+      ? []
+      : [
+          {
+            id: section,
+            title: "Links",
+            content: <RailGroup id={section} title="Links" />,
+          },
+        ],
+    isPinned: () => false,
+    onTogglePin: () => {},
+    openSection: () => {},
+    renderEntry: (entry: RailEntry) => <NavigationItem label={entry.label} />,
+  };
+  return () => <RailArrangement {...props} />;
+}
+function dropLink(data: Record<string, string>) {
+  const card = screen
+    .getByRole("button", { name: "Links" })
+    .closest("[data-rail-section]");
+  if (!card) throw new Error("Links card missing");
+  fireEvent.dragOver(card, {
+    dataTransfer: {
+      types: Object.keys(data),
+      getData: (type: string) => data[type] ?? "",
+    },
+  });
+  fireEvent.drop(card, {
+    dataTransfer: {
+      types: Object.keys(data),
+      getData: (type: string) => data[type] ?? "",
+    },
+  });
+}
+
+test.each(["text/uri-list", "text/plain", "text/html"])(
+  "dropped %s links become saved section rows",
+  (type) => {
+    const Rail = linkRail();
+    const view = render(<Rail />);
+    dropLink({
+      [type]:
+        type === "text/html"
+          ? `<a href="${droppedUrl}">Voice search PR</a>`
+          : droppedUrl,
+    });
+    const link = screen.getByRole("link");
+    expect(link).toHaveAttribute("href", droppedUrl);
+    expect(link).toHaveAccessibleName(
+      type === "text/html"
+        ? "Voice search PR"
+        : "github.com/block/buzz-app/pull/3823",
+    );
+    dropLink({ "text/uri-list": droppedUrl });
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    view.unmount();
+    render(<Rail />);
+    expect(screen.getByRole("link")).toHaveAttribute("href", droppedUrl);
+  },
+);
+
+test("multiple URI-list bookmarks ignore comments and unsafe URLs, and can be removed", () => {
+  const Rail = linkRail();
+  render(<Rail />);
+  dropLink({
+    "text/uri-list": `# Links\r\n${droppedUrl}\r\njavascript:alert(1)\r\nhttps://example.com/guide`,
+  });
+  expect(screen.getAllByRole("link")).toHaveLength(2);
+  const link = screen.getByRole("link", { name: "example.com/guide" });
+  fireEvent.contextMenu(link);
+  fireEvent.click(screen.getByRole("menuitem", { name: "Remove link" }));
+  expect(screen.getAllByRole("link")).toHaveLength(1);
+});
+
+test.each(["pins", "team", "solo", "navigation"])(
+  "regular %s cards accept bookmark rows",
+  (section) => {
+    const Rail = linkRail("builtin-link-drops", section);
+    render(<Rail />);
+    dropLink({ "text/plain": droppedUrl });
+    expect(screen.getByRole("link")).toHaveAttribute("href", droppedUrl);
+  },
+);
+
+test("a failed bookmark write stays absent and can be retried", () => {
+  const Rail = linkRail();
+  render(<Rail />);
+  const write = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new Error("Storage full");
+    });
+  dropLink({ "text/uri-list": droppedUrl });
+  expect(screen.queryByRole("link")).toBeNull();
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Couldn’t save this link",
+  );
+  write.mockRestore();
+  dropLink({ "text/uri-list": droppedUrl });
+  expect(screen.getByRole("link")).toHaveAttribute("href", droppedUrl);
+  expect(screen.queryByRole("alert")).toBeNull();
+});

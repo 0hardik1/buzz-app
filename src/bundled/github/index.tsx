@@ -63,6 +63,7 @@ import { createPanelMemory, type PanelMemory } from "./panel-memory";
 import { PullFiles } from "./PullFiles";
 import { GitHubSettings } from "./GitHubSettings";
 import { openGitHubLinksInBuzz } from "./link-preference";
+import { registerLivePullSections } from "./live-search";
 
 /** How often an open pull request panel reads GitHub again. */
 export const REFRESH_MS = PANEL_REFRESH_MS;
@@ -70,6 +71,7 @@ export const REFRESH_MS = PANEL_REFRESH_MS;
 export const inject = ["panels", "host", "conversation", "relay", "agents"];
 export const apply: PluginModule["apply"] = (ctx) => {
   const gh = gitHubCli(ctx.host);
+  registerLivePullSections(ctx, gh);
   const diff = gitHubDiff(ctx.host);
   // A pull request's state is nobody's community's: one store serves every
   // session's sidebar, every link in messages, the panel and agents, so one

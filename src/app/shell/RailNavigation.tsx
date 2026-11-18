@@ -1,4 +1,10 @@
+import { demoWidgetKind } from "./demo-widget-sections";
+import { DemoWidgetBody } from "../../features/sidebar-widget-demos";
 import { TeamCardTransition } from "./TeamCardTransition";
+import { NewRailSection } from "./NewRailSection";
+import { LiveGitHubRows } from "./LiveGitHubRows";
+import { liveSectionMatches } from "../../features/sidebar-sections/live-section";
+import type { Decisions } from "../../features/decisions/service";
 import { TeamDraftRows } from "./TeamDraftRows";
 import { Tabs } from "../../shared/design-system/ui/Tabs";
 import { TeamViewMenu } from "./TeamViewMenu";
@@ -104,6 +110,8 @@ export function RailNavigation({
   compact = false,
   onOpenSection,
   sectionAction,
+  decisions,
+  visible = true,
 }: {
   session: RelaySession;
   scope: NavigationScope;
@@ -125,6 +133,8 @@ export function RailNavigation({
   /** The shell can expand a card over the rail without navigating the reader. */
   onOpenSection?: (id: string) => void;
   sectionAction?: ReactNode;
+  decisions?: Decisions | undefined;
+  visible?: boolean;
 }) {
   const partition = `${scope.communityOrigin}:${scope.viewer}`;
   const contributed = useSyncExternalStore(
@@ -714,6 +724,7 @@ export function RailNavigation({
       (page) =>
         (page.primary || page.key === "buzz.agents/agents") &&
         ![
+          "buzz.home/home",
           "buzz.channels/channels",
           "buzz.inbox/inbox",
           "buzz.drafts-and-sent/drafts-sent",
@@ -945,6 +956,81 @@ export function RailNavigation({
         key={partition}
         partition={partition}
         current={byId}
+        renderNewSection={(props) => (
+          <NewRailSection
+            {...props}
+            session={session}
+            community={scope.communityOrigin}
+            decisions={decisions}
+            sidebarSections={sidebarSections}
+          />
+        )}
+        renderCustomSection={(section) => {
+          if (section.id.startsWith("custom:widget:")) {
+            const kind = demoWidgetKind(partition, section.id);
+            return (
+              <RailGroup
+                id={section.id}
+                title={section.title}
+                customContent
+                widget={kind ?? "unavailable"}
+              >
+                {kind ? (
+                  <DemoWidgetBody kind={kind} />
+                ) : (
+                  <p className="text-caption text-secondary">
+                    This widget preview is saved on the device where you added
+                    it.
+                  </p>
+                )}
+              </RailGroup>
+            );
+          }
+          const rule = section.live;
+          if (!rule)
+            return section.id.startsWith("custom:live:") ? (
+              <RailGroup id={section.id} title={section.title} customContent>
+                <p className="text-caption text-secondary">
+                  This live filter is saved on the device where you created it.
+                </p>
+              </RailGroup>
+            ) : undefined;
+          const matches = liveSectionMatches(
+            rule,
+            channels.filter((channel) => !hidden.has(channel.id)),
+            (channel) =>
+              byId.get(`channel:${channel.id}`)?.label ?? channel.name,
+            session.profiles.snapshot(),
+          );
+          return (
+            <RailGroup
+              id={section.id}
+              title={section.title}
+              customContent={!!rule.github}
+              rows={matches.flatMap((channel) => {
+                const entry = byId.get(`channel:${channel.id}`);
+                return entry ? [sourceRow(entry, section.id)] : [];
+              })}
+            >
+              {(rule.dms || rule.search) && !matches.length && (
+                <p className="text-caption text-secondary">
+                  {rule.search
+                    ? "No matching conversations yet."
+                    : "No matching DMs yet."}
+                </p>
+              )}
+              {rule.github && (
+                <LiveGitHubRows
+                  registry={sidebarSections}
+                  scope={scope}
+                  query={rule.github}
+                  expanded={pageSection === section.id}
+                  enabled={visible && (!compact || !!pageSection)}
+                />
+              )}
+            </RailGroup>
+          );
+        }}
         renderSectionList={(id, title, entries, action) => (
           <RailConversationList
             section={id}

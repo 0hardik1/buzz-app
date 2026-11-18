@@ -10,6 +10,7 @@ Build defaults are readable binary data, **never secret storage**.
 | --- | --- |
 | `BUZZ_EXTERNAL_MCP_COMMUNITIES` | Frontend build: space-separated secure community origins allowed to authorize external MCP access. Empty disables access. See below. |
 | `BUZZ_BUILDERLAB_URL` | Shared frontend/native build: the live development broker's Builderlab, and whether a build without an added sign-in server keeps the built-in one; no runtime override. See below. |
+| `BUZZ_VOICE_TRANSCRIPTION_URL` | Native build or process environment (environment wins): `https://` endpoint that answers a JSON POST with `{"client_secret": …, "expires_at": …}`, a short-lived OpenAI Realtime transcription key. Native code keeps the key until shortly before it expires and answers voice jump's WebRTC offer with it, so the key never reaches the webview. Unset means no voice jump. Unset in OSS builds. |
 | `BUZZ_BUILDERLAB_APPS_DOMAIN` | Shared frontend/native build: exact Apps cookie domain paired with the login origin for native viewer SSO; no runtime override. |
 | `BUZZ_BUILDERLAB_APPS_CONTROL_PLANE` | Shared frontend/native build: HTTPS origin of the Apps control plane for the configured login origin, for deployments the built-in public table does not list; no runtime override. |
 | `BUZZ_BUILD_REPOSITORY_ACCESS` | Native build: default [repository access rules](repository-access.md#default-rules), in `repository-access.json`'s schema. Unset means none. |

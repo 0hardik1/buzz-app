@@ -85,7 +85,9 @@ mod packaged_plugins;
 mod plugin_url;
 mod repositories_folder;
 mod subject_lift;
+mod voice_search;
 mod window_controls;
+mod window_snapshot;
 mod window_state;
 mod workspace_folder;
 use legacy_communities::legacy_communities;
@@ -731,6 +733,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         pairing::pairing_cancel,
         qr::qr_code,
         sharing::share_image,
+        window_snapshot::window_snapshot,
         identity_restore,
         identity_import,
         identity_legacy_available,
@@ -887,6 +890,9 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         agent_state::app_agent_state_load,
         agent_state::app_agent_state_set,
         decisions::decide,
+        voice_search::voice_search_available,
+        voice_search::voice_search_prepare,
+        voice_search::voice_search_connect,
         title_bar_double_click,
         notification_show,
         #[cfg(target_os = "macos")]

@@ -591,7 +591,15 @@ export function useChannelTabState(
       unreadSince?: number,
     ) =>
       update((state) =>
-        withThread(state, channelId, messageId, rootId, intent, true, unreadSince),
+        withThread(
+          state,
+          channelId,
+          messageId,
+          rootId,
+          intent,
+          true,
+          unreadSince,
+        ),
       ),
     [update],
   );
@@ -889,6 +897,11 @@ export function useChannelTabState(
     () => snapshot()[key]?.selected ?? empty.selected,
     [key, snapshot],
   );
+  const hasThreadTab = useCallback(
+    (channelId: string, rootId: string) =>
+      !!threadTab(snapshot()[key]?.tabs ?? [], channelId, rootId),
+    [key, snapshot],
+  );
   // Workspace callbacks list this object as a dependency; a fresh object per
   // render would recreate them and re-render every memoized message row.
   return useMemo(
@@ -896,6 +909,7 @@ export function useChannelTabState(
       ...state,
       // Synchronous actions need the selection before React rerenders.
       getSelected,
+      hasThreadTab,
       threadVisits,
       detailVisits,
       setEntries,
@@ -918,6 +932,7 @@ export function useChannelTabState(
     [
       state,
       getSelected,
+      hasThreadTab,
       threadVisits,
       detailVisits,
       setEntries,

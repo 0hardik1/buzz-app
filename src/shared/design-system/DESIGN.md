@@ -799,6 +799,10 @@ use opaque `surface-popover` so inset fields stay distinct above the dimmed
 page, retaining their 28px `radius-panel` corners and modal backdrop. Stepped
 dialogs apply the fill to each step; their shared wrapper stays transparent.
 
+Independent `Panel shape="card"` surfaces retain their fill, corners, and card
+elevation within joined workspaces. Home canvas widgets use this surface with
+a feature-owned `space-3` content inset.
+
 ### Corner scale and nesting
 
 Standalone containers use the 12 / 16 / 20 / 24 / 28px scale: `radius-chip` for

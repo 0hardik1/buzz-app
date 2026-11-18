@@ -1,0 +1,25 @@
+.messages {
+  --skullet-base: var(--surface-inset);
+  --skullet-highlight: var(--surface-panel);
+  --skullet-radius: var(--radius-chip);
+  --skullet-animation: pulse;
+  --skullet-speed: slow;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  width: min(100%, var(--timeline-measure));
+  margin-inline: auto;
+  overflow: hidden;
+}
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+}

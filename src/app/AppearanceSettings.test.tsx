@@ -1,3 +1,7 @@
+import {
+  setThreadPlacementPreference,
+  threadPlacementPreference,
+} from "../features/messages/thread-preferences";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import {
@@ -48,6 +52,7 @@ afterEach(() => {
   for (const appearance of preferenceAppearances.splice(0))
     appearance.dispose();
   setFollowUpBehaviorPreference("immediate");
+  setThreadPlacementPreference("inline");
   setMessageAutocorrectPreference(false);
   setUnreadFirstPreference(true);
   setClockPreference({
@@ -717,4 +722,26 @@ it("offers a choice between usernames and full names only where the community ve
   await user.click(await screen.findByRole("option", { name: "Full name" }));
   expect(namePreference()).toBe("full-name");
   setNamePreference("username");
+});
+
+it("keeps the selected card placement active when saving fails and retries it", async () => {
+  const user = userEvent.setup();
+  const saved = vi.spyOn(Storage.prototype, "setItem");
+  render(<ToastProvider>{preferencesPage()}</ToastProvider>);
+  expect(threadPlacementPreference()).toBe("inline");
+  saved.mockImplementationOnce(() => {
+    throw new Error("denied");
+  });
+  await user.click(
+    screen.getByRole("combobox", { name: "Open threads and links in" }),
+  );
+  await user.click(await screen.findByRole("option", { name: "Split panel" }));
+  expect(threadPlacementPreference()).toBe("side");
+  await user.click(
+    await screen.findByRole("button", { name: "Retry saving card placement" }),
+  );
+  expect(localStorage.getItem("buzz-thread-placement.v1")).toBe("side");
+  expect(
+    screen.queryByRole("button", { name: "Retry saving card placement" }),
+  ).toBeNull();
 });

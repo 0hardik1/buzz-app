@@ -15,6 +15,8 @@ export function AppDock({
   onDismiss,
   sheet,
   sheetOpen = false,
+  navigationMode,
+  placement = "inline",
   ...pages
 }: Omit<ComponentProps<typeof PageNavigation>, "placement"> & {
   children?: ReactNode;
@@ -25,6 +27,8 @@ export function AppDock({
   onDismiss?: () => void;
   sheet?: ReactNode;
   sheetOpen?: boolean;
+  navigationMode?: "home" | "workspace" | undefined;
+  placement?: "inline" | "overlay";
 }) {
   const scrollEdges = useScrollEdges("block");
   return (
@@ -36,6 +40,8 @@ export function AppDock({
       inert={!open}
       aria-hidden={!open}
       data-compact={compact || undefined}
+      data-navigation-mode={navigationMode}
+      data-placement={placement}
       onKeyDown={(event) => {
         if (
           event.key === "Escape" &&
@@ -64,13 +70,16 @@ export function AppDock({
       >
         {header && (
           <div
-            className={`${sectionStyles.group} ${styles.heading} ${compact ? "buzz-dock-controls" : ""}`}
+            className={`${sectionStyles.group} ${styles.heading} ${compact && !navigationMode ? "buzz-dock-controls" : ""}`}
           >
             {header}
           </div>
         )}
         <div
           className={styles.apps}
+          id="shell-workspace-navigation"
+          inert={navigationMode === "home"}
+          aria-hidden={navigationMode === "home" || undefined}
           ref={scrollEdges}
           data-scroll-fade="scrolled"
         >

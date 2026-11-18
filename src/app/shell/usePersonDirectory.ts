@@ -18,9 +18,10 @@ const none: readonly Person[] = [];
  */
 export function usePersonDirectory(
   session: RelaySession,
-  query: string,
+  text: string | readonly string[],
   enabled: boolean,
 ) {
+  const query = typeof text === "string" ? text : [...new Set(text)].join("\n");
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<{
     query: string;
@@ -29,13 +30,30 @@ export function usePersonDirectory(
     error?: true;
   }>();
   const active =
-    enabled && searchable(query) && query.length <= PEOPLE_SEARCH_MAX_LENGTH;
+    enabled &&
+    query.split("\n").some(searchable) &&
+    query.split("\n").length <= 16 &&
+    query.split("\n").every((part) => part.length <= PEOPLE_SEARCH_MAX_LENGTH);
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
     const cancel = searchDebounce(() => {
-      session.directMessages.people(query, 1, controller.signal).then(
-        ({ people }) => {
+      Promise.all(
+        query
+          .split("\n")
+          .filter(searchable)
+          .map((part) =>
+            session.directMessages.people(part, 1, controller.signal),
+          ),
+      ).then(
+        (pages) => {
+          const people = [
+            ...new Map(
+              pages
+                .flatMap((page) => page.people)
+                .map((person) => [person.pubkey, person]),
+            ).values(),
+          ];
           if (!controller.signal.aborted) setState({ query, attempt, people });
         },
         () => {

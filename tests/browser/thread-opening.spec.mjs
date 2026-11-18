@@ -11,7 +11,7 @@ test.use({
 test("ordinary thread reveals its first content already positioned at the bottom", async ({
   page,
   app,
-}) => {
+}, testInfo) => {
   await open(page, app);
   await channelRow(page, "beta").click();
   let release, intercepted;
@@ -62,7 +62,28 @@ test("ordinary thread reveals its first content already positioned at the bottom
     ).toBeFocused();
     await expect(history).toHaveAttribute("data-positioning");
     await expect(history.getByRole("status")).toHaveText("Loading thread…");
-    await expect(history.getByRole("status")).toBeInViewport();
+    const placeholders = history.locator("[skullet-bar]");
+    await expect(placeholders.first()).toBeVisible();
+    await expect(placeholders.first()).toBeInViewport();
+    await expect(
+      history.locator('img[src="/buzz-loading-mark.svg"]'),
+    ).toHaveCount(0);
+    const bounds = await history.boundingBox();
+    const inset = await history.evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).paddingTop),
+    );
+    expect((await placeholders.first().boundingBox()).y).toBeGreaterThanOrEqual(
+      bounds.y + inset,
+    );
+    for (const placeholder of await placeholders.all()) {
+      const rect = await placeholder.boundingBox();
+      expect(rect.width).toBeGreaterThan(0);
+      expect(rect.x).toBeGreaterThanOrEqual(bounds.x);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+    }
+    await history.screenshot({
+      path: testInfo.outputPath("skullet-thread-loading.png"),
+    });
     await expect(history.locator("[data-thread-rows]")).toHaveAttribute(
       "inert",
     );

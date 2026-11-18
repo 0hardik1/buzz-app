@@ -1,3 +1,4 @@
+import { threadPlacementSetting } from "../features/messages/thread-preferences";
 import { autocorrectSetting } from "../features/messages/autocorrect-preference";
 import { followUpBehaviorSetting } from "../features/messages/follow-up-preference";
 import { rememberAgentsSetting } from "../features/messages/mention-preferences";
@@ -14,6 +15,7 @@ import { appearanceSettings } from "../shared/theme/settings";
 export const deviceSettings = (appearance: Appearance) =>
   createDeviceSettings([
     ...appearanceSettings(appearance),
+    threadPlacementSetting,
     followUpBehaviorSetting,
     autocorrectSetting,
     rememberAgentsSetting,

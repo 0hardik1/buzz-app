@@ -1,0 +1,61 @@
+:where(.widget-frame) {
+  position: relative;
+}
+
+:where(.widget-frame).widget-preview {
+  display: grid;
+  box-sizing: border-box;
+  width: 13.75rem;
+  max-width: 100%;
+  min-width: 0;
+  gap: var(--widget-gap);
+  padding: var(--widget-inset);
+  border-radius: var(--widget-radius);
+  background: var(--surface-rail-card);
+  color: var(--text-standard);
+  overflow-wrap: anywhere;
+  font-family: var(--font-sans);
+}
+
+.widget-frame .widget-heading {
+  display: flex;
+  gap: var(--space-2);
+  align-items: start;
+  justify-content: space-between;
+}
+
+.widget-frame:has([data-widget-secondary])
+  :is(.widget-heading, .navigation-section-heading) {
+  padding-inline-end: var(--space-8);
+}
+
+.widget-frame .widget-muted {
+  color: var(--text-subtle);
+}
+
+.widget-frame .widget-body {
+  min-width: 0;
+}
+
+.widget-frame [data-widget-secondary] {
+  position: absolute;
+  z-index: 3;
+  inset-block-start: var(--space-2);
+  inset-inline-end: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .widget-frame [data-widget-secondary] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .widget-frame:hover [data-widget-secondary],
+  .widget-frame:focus-within [data-widget-secondary],
+  .widget-frame [data-widget-secondary][data-secondary-pinned] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

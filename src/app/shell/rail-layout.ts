@@ -6,30 +6,59 @@ import {
   writeView,
 } from "../../shared/view-state";
 import { parseRailEntries, type RailEntry } from "./rail-pins";
+import {
+  createDemoWidgetSection,
+  forgetDemoWidgetSection,
+} from "./demo-widget-sections";
+import type { DemoWidgetKind } from "../../features/sidebar-widget-demos/kinds";
+import {
+  parseLiveSection,
+  type LiveSectionRule,
+} from "../../features/sidebar-sections/live-section";
 
 type Placement = { section: string; entry: RailEntry };
 export type RailLayout = {
   order: string[];
-  sections: { id: string; title: string }[];
+  sections: { id: string; title: string; live?: LiveSectionRule }[];
   placements: Placement[];
 };
 export const LAYOUT_KEY = "navigation-layout:v2";
 const KEY = LAYOUT_KEY;
+export const LIVE_KEY = "navigation-live-sections:v1";
 
-const readLayout = (scope: string) =>
-  parseRailLayout(readView<unknown>(scope, KEY, null));
+const readLayout = (
+  scope: string,
+  liveRevision = viewRevision(scope, LIVE_KEY),
+): RailLayout => {
+  const layout = parseRailLayout(readView<unknown>(scope, KEY, null));
+  let rules: Record<string, unknown> | undefined;
+  try {
+    rules = JSON.parse(liveRevision ?? "null");
+  } catch {
+    /* A damaged local rule must not hide the rail. */
+  }
+  return {
+    ...layout,
+    sections: layout.sections.map((section) => {
+      const live = parseLiveSection(rules?.[section.id]);
+      return live ? { ...section, live } : section;
+    }),
+  };
+};
 /** Team's section was once named for its page; saved arrangements still say so. */
 const sectionId = (id: string) => (id === "messages" ? "team" : id);
 export function parseRailLayout(value: unknown): RailLayout {
   const raw = value as Partial<RailLayout> | null;
   const sections = Array.isArray(raw?.sections)
-    ? raw.sections.filter(
-        (section) =>
-          typeof section?.id === "string" &&
-          section.id.startsWith("custom:") &&
-          typeof section.title === "string" &&
-          !!section.title.trim(),
-      )
+    ? raw.sections
+        .filter(
+          (section) =>
+            typeof section?.id === "string" &&
+            section.id.startsWith("custom:") &&
+            typeof section.title === "string" &&
+            !!section.title.trim(),
+        )
+        .map((section) => ({ id: section.id, title: section.title }))
     : [];
   const placements: Placement[] = [];
   if (Array.isArray(raw?.placements))
@@ -69,15 +98,20 @@ export function useRailLayout(scope: string) {
     () => viewRevision(scope, KEY),
     () => undefined,
   );
+  const liveRevision = useSyncExternalStore(
+    subscribe,
+    () => viewRevision(scope, LIVE_KEY),
+    () => undefined,
+  );
   const layout = useMemo(
     () =>
       revision !== undefined
-        ? readLayout(scope)
+        ? readLayout(scope, liveRevision)
         : { order: [], sections: [], placements: [] },
-    [scope, revision],
+    [scope, revision, liveRevision],
   );
   const save = (update: (current: RailLayout) => RailLayout) =>
-    writeView(scope, KEY, update(readLayout(scope)));
+    writeView(scope, KEY, parseRailLayout(update(readLayout(scope))));
   /** Other placements of an entry that survive placing it in a section. */
   const others = (
     current: RailLayout,
@@ -123,10 +157,37 @@ export function useRailLayout(scope: string) {
     title: string,
     entry?: RailEntry,
     from?: string,
-  ) =>
-    save((current) => ({
+    live?: LiveSectionRule,
+    widget?: DemoWidgetKind,
+  ): boolean => {
+    if (widget)
+      return (
+        !live &&
+        createDemoWidgetSection(scope, `custom:${id}`, widget, () =>
+          create(id, title, entry, from),
+        )
+      );
+    // Rules stay device-local until the signed layout schema supports them.
+    const previous = readView<Record<string, unknown>>(scope, LIVE_KEY, {});
+    const ids = new Set(
+      readLayout(scope).sections.map((section) => section.id),
+    );
+    if (
+      live &&
+      !writeView(scope, LIVE_KEY, {
+        ...Object.fromEntries(
+          Object.entries(previous).filter(([key]) => ids.has(key)),
+        ),
+        [`custom:${id}`]: live,
+      })
+    )
+      return false;
+    const ok = save((current) => ({
       ...current,
-      sections: [...current.sections, { id: `custom:${id}`, title }],
+      sections: [
+        ...current.sections,
+        { id: `custom:${id}`, title, ...(live && { live }) },
+      ],
       placements: entry
         ? [
             ...others(current, entry, `custom:${id}`, from),
@@ -134,6 +195,9 @@ export function useRailLayout(scope: string) {
           ]
         : current.placements,
     }));
+    if (!ok && live) writeView(scope, LIVE_KEY, previous);
+    return ok;
+  };
   const rename = (id: string, title: string) =>
     save((current) => ({
       ...current,
@@ -151,13 +215,30 @@ export function useRailLayout(scope: string) {
           (section !== undefined && item.section !== section),
       ),
     }));
-  const remove = (id: string) =>
-    save((current) => ({
+  const remove = (id: string) => {
+    const previous = readView<Record<string, unknown>>(scope, LIVE_KEY, {});
+    if (
+      Object.hasOwn(previous, id) &&
+      !writeView(
+        scope,
+        LIVE_KEY,
+        Object.fromEntries(
+          Object.entries(previous).filter(([key]) => key !== id),
+        ),
+      )
+    )
+      return false;
+    const ok = save((current) => ({
       ...current,
       order: current.order.filter((key) => key !== id),
       sections: current.sections.filter((section) => section.id !== id),
       placements: current.placements.filter((item) => item.section !== id),
     }));
+    if (!ok && Object.hasOwn(previous, id))
+      writeView(scope, LIVE_KEY, previous);
+    if (ok) forgetDemoWidgetSection(scope, id);
+    return ok;
+  };
   return {
     layout,
     move,

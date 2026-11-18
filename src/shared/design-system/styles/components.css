@@ -1061,7 +1061,7 @@
 
   /* A joined surface keeps one outer edge; nested panels retain opaque
      fills for responsive overlays while their layout owns the separators. */
-  .panel[data-joined] .panel {
+  .panel[data-joined] .panel:not([data-shape="card"]) {
     border: 0;
     border-radius: 0;
     box-shadow: none;
@@ -2546,11 +2546,10 @@
     overflow: visible;
   }
   .panel-header .buzz-tabs[data-variant="navigation"] .buzz-tabs-list {
-    /* A fixed height with the lower inset left as free space: WebKit's
-       scrollbar takes its track from that space, not from the header. */
-    height: calc(var(--size-control-sm) + 2 * var(--space-1));
-    /* Keep capsule edges and elevation inside the scrollport's clip. */
-    padding: var(--space-1) var(--space-1) 0;
+    /* Let the scrollbar add its own height, keeping capsule elevation and
+       focus rings inside equal vertical insets in every engine. */
+    height: auto;
+    padding: var(--space-1);
   }
   .buzz-tabs[data-variant="navigation"] .buzz-tabs-item {
     @apply glass-secondary;

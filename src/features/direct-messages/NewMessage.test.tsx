@@ -260,8 +260,22 @@ function setup({ archived = [] as string[] } = {}) {
       signal: new AbortController().signal,
     }),
   });
-  type Options = Pick<ComponentProps<typeof NewMessage>, "solo" | "allowChannels" | "extensions">;
-  const page = (visit: PageNavigation | undefined, options: Options, to?: string, at = Date.now()) => (
+  type Options = Pick<
+    ComponentProps<typeof NewMessage>,
+    | "solo"
+    | "allowChannels"
+    | "extensions"
+    | "presentation"
+    | "recipientPresentation"
+    | "autoFocus"
+    | "onOpenChat"
+  >;
+  const page = (
+    visit: PageNavigation | undefined,
+    options: Options,
+    to?: string,
+    at = Date.now(),
+  ) => (
     <NewMessage
       {...options}
       intent={to ? { to, at } : undefined}
@@ -286,7 +300,11 @@ function setup({ archived = [] as string[] } = {}) {
       onStarted={onStarted}
     />
   );
-  const mount = (visit?: PageNavigation, choice?: Options | string, at?: number) => {
+  const mount = (
+    visit?: PageNavigation,
+    choice?: Options | string,
+    at?: number,
+  ) => {
     const options = typeof choice === "object" ? choice : {};
     const to = typeof choice === "string" ? choice : undefined;
     const view = render(page(visit, options, to, at));
@@ -328,6 +346,192 @@ function setup({ archived = [] as string[] } = {}) {
 const recipient = () =>
   screen.getByRole("combobox", { name: "Message recipients" });
 const send = () => screen.getByRole("button", { name: "Send message" });
+
+it("keeps Home recipient discovery hidden until requested, then focuses the existing picker", async () => {
+  const t = setup();
+  t.mount(undefined, {
+    presentation: "discovery",
+    recipientPresentation: "on-demand",
+    autoFocus: false,
+    allowChannels: true,
+    solo: { onStarted: vi.fn() },
+  });
+  expect(screen.queryByRole("combobox", { name: "Search Team" })).toBeNull();
+  expect(screen.queryByRole("tab", { name: "Solo" })).toBeNull();
+  const choose = screen.getByRole("button", { name: "Choose recipient" });
+  await t.user.click(choose);
+  expect(screen.getByRole("combobox", { name: "Search Team" })).toHaveFocus();
+  expect(screen.getByRole("tab", { name: "Solo" })).toBeEnabled();
+  expect(t.messages.send).not.toHaveBeenCalled();
+});
+
+it("discovers existing conversations from the same field without sending or clearing a draft", async () => {
+  const t = setup();
+  t.channels.channels = [
+    {
+      id: channel,
+      name: "Design review",
+      channelType: "stream",
+      members: [t.session.viewer ?? ""],
+    },
+  ];
+  const onOpenChat = vi.fn();
+  const draftStorageKey = `buzz-view.v1:${JSON.stringify([scope, "direct-message:new-draft"])}`;
+  localStorage.setItem(draftStorageKey, JSON.stringify("Keep this draft"));
+  t.mount(undefined, {
+    presentation: "discovery",
+    allowChannels: true,
+    solo: { onStarted: vi.fn() },
+    onOpenChat,
+  });
+  expect(screen.getByRole("textbox")).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByRole("tab", { name: "Solo" })).toBeEnabled();
+  const search = screen.getByRole("combobox", { name: "Search Team" });
+  await t.user.type(search, "Design");
+  await screen.findByRole("option", { name: "Design review, Channel" });
+  await t.user.keyboard("{ArrowDown}{Enter}");
+  expect(onOpenChat).toHaveBeenCalledWith(channel);
+  expect(t.directMessages.open).not.toHaveBeenCalled();
+  expect(t.messages.send).not.toHaveBeenCalled();
+  expect(localStorage.getItem(draftStorageKey)).toBe(
+    JSON.stringify("Keep this draft"),
+  );
+});
+
+it("switches search modes before selection and preserves authored text through Solo and Team", async () => {
+  const t = setup();
+  // Agent-choice evidence remains authoritative when the directory omits its agent flag.
+  t.directMessages.people.mockResolvedValue({
+    people: people.map(({ isAgent: _isAgent, ...person }) => person),
+    hasMore: false,
+  });
+  t.mount(undefined, {
+    presentation: "discovery",
+    allowChannels: true,
+    solo: { onStarted: vi.fn() },
+  });
+  await t.user.click(await screen.findByRole("option", { name: "Person 1" }));
+  await t.user.type(screen.getByRole("textbox"), "Keep my message");
+  await t.user.click(screen.getByRole("tab", { name: "Solo" }));
+  expect(screen.getByRole("textbox")).toHaveAttribute("aria-disabled", "true");
+  const search = screen.getByRole("combobox", { name: "Search Solo" });
+  await t.user.click(search);
+  const agent = await screen.findByRole("option", { name: /Person 2/ });
+  expect(
+    screen.queryByRole("option", { name: "Person 1" }),
+  ).not.toBeInTheDocument();
+  await t.user.click(agent);
+  expect(
+    await screen.findByRole("textbox", { name: "Message your agents" }),
+  ).toHaveTextContent("Keep my message");
+  await t.user.click(screen.getByRole("tab", { name: "Team" }));
+  await t.user.click(screen.getByRole("combobox", { name: "Search Team" }));
+  await t.user.click(await screen.findByRole("option", { name: "Person 1" }));
+  expect(screen.getByRole("textbox")).toHaveTextContent("Keep my message");
+  expect(t.messages.send).not.toHaveBeenCalled();
+});
+
+it("selects existing contacts into a new group without opening their individual DMs", async () => {
+  const t = setup();
+  const person = people[0];
+  assert(person);
+  t.channels.channels = [
+    {
+      id: channel,
+      name: "Earlier DM",
+      channelType: "dm",
+      members: [t.session.viewer ?? "", person.pubkey],
+    },
+  ];
+  const onOpenChat = vi.fn();
+  t.mount(undefined, {
+    presentation: "discovery",
+    allowChannels: true,
+    onOpenChat,
+  });
+  await t.user.click(await screen.findByRole("option", { name: "Person 1" }));
+  expect(screen.getByRole("button", { name: "Remove Person 1" })).toBeVisible();
+  await t.user.click(screen.getByRole("combobox", { name: "Search Team" }));
+  await t.user.click(await screen.findByRole("option", { name: "Person 3" }));
+  expect(screen.getByRole("button", { name: "Remove Person 3" })).toBeVisible();
+  expect(onOpenChat).not.toHaveBeenCalled();
+});
+
+it.each(["Team", "Solo"])(
+  "keeps a %s draft mounted until failed local saving recovers",
+  async (kind) => {
+    const t = setup();
+    t.mount(undefined, {
+      presentation: "discovery",
+      solo: { onStarted: vi.fn() },
+    });
+    if (kind === "Solo") {
+      await t.user.click(screen.getByRole("tab", { name: "Solo" }));
+      await t.user.click(screen.getByRole("combobox", { name: "Search Solo" }));
+    }
+    await t.user.click(
+      await screen.findByRole("option", {
+        name: kind === "Solo" ? /Person 2/ : "Person 1",
+      }),
+    );
+    const storage = Storage.prototype.setItem;
+    const failed = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key, value) {
+        if (
+          key ===
+          `buzz-view.v1:${JSON.stringify([scope, "direct-message:new-draft"])}`
+        )
+          throw new DOMException("Storage is full", "QuotaExceededError");
+        storage.call(this, key, value);
+      });
+    await t.user.type(screen.getByRole("textbox"), "Keep this work");
+    expect(
+      screen.getByRole("combobox", { name: `Search ${kind}` }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("tab", { name: kind === "Solo" ? "Team" : "Solo" }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("textbox")).toHaveTextContent("Keep this work");
+    failed.mockRestore();
+    await t.user.type(screen.getByRole("textbox"), " safely");
+    expect(
+      screen.getByRole("tab", { name: kind === "Solo" ? "Team" : "Solo" }),
+    ).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("textbox")).toHaveTextContent(
+      "Keep this work safely",
+    );
+  },
+);
+
+it("keeps unavailable agents out of Solo discovery while allowing existing Solo chats", async () => {
+  const agent = people[1];
+  assert(agent);
+  const t = setup({ archived: [agent.pubkey] });
+  t.channels.channels = [
+    {
+      id: channel,
+      name: "Planning",
+      channelType: "solo",
+      creator: t.session.viewer ?? "",
+      members: [t.session.viewer ?? "", agent.pubkey],
+    },
+  ];
+  const onOpenChat = vi.fn();
+  t.mount(undefined, {
+    presentation: "discovery",
+    solo: { onStarted: vi.fn() },
+    onOpenChat,
+  });
+  await t.user.click(screen.getByRole("tab", { name: "Solo" }));
+  await t.user.click(screen.getByRole("combobox", { name: "Search Solo" }));
+  await screen.findByRole("option", { name: "Planning, Solo chat" });
+  expect(
+    screen.queryByRole("option", { name: /Person 2/ }),
+  ).not.toBeInTheDocument();
+  await t.user.keyboard("{ArrowDown}{Enter}");
+  expect(onOpenChat).toHaveBeenCalledWith(channel);
+});
 
 it("channel-addressed composition offers its existing members as mentions", async () => {
   const t = setup();

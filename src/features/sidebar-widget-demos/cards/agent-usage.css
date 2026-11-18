@@ -1,0 +1,80 @@
+.agent-widget {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "signal action" "chart chart";
+  gap: var(--space-2);
+  align-items: center;
+  color: var(--text-standard);
+  min-width: 0;
+  min-height: 5rem;
+}
+.agent-widget p {
+  margin: 0;
+}
+.agent-widget .agent-widget-signal {
+  grid-area: signal;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+.agent-widget .agent-widget-action {
+  grid-area: action;
+  justify-self: end;
+}
+.agent-widget .agent-widget-detail {
+  color: var(--text-subtle);
+}
+.agent-widget .agent-widget-chart {
+  grid-area: chart;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+  height: 2rem;
+}
+.agent-widget .agent-widget-chart > span {
+  flex: 1;
+  background: var(--text-subtle);
+  border-radius: var(--radius-chip) var(--radius-chip) 0 0;
+}
+.agent-widget .agent-widget-chart > span[data-peak="true"] {
+  background: var(--text-success);
+}
+.agent-widget[data-treatment="visual"] {
+  display: flex;
+  flex-wrap: wrap;
+}
+.agent-widget[data-treatment="visual"] .agent-widget-action {
+  order: 2;
+  flex-basis: 100%;
+}
+.agent-widget[data-treatment="visual"] .agent-widget-chart {
+  flex: 1 0 5rem;
+}
+.agent-widget .agent-widget-signal > .text-heading {
+  white-space: nowrap;
+}
+.agent-widget .agent-widget-chart svg {
+  width: 100%;
+  height: 100%;
+}
+.agent-widget .agent-widget-chart polyline {
+  fill: none;
+  stroke: var(--text-subtle);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.agent-widget .agent-widget-chart circle {
+  fill: var(--text-success);
+}
+.agent-widget[data-treatment="editorial"] {
+  grid-template-areas: "signal signal" "chart action";
+}
+.agent-widget[data-treatment="editorial"] .agent-widget-signal {
+  flex-direction: row;
+  align-items: baseline;
+}
+.agent-widget[data-treatment="editorial"] .agent-widget-chart {
+  gap: var(--space-half);
+}

@@ -664,3 +664,6 @@ export const FoldIcon = defineIcon("tabler", TablerFoldIcon);
 
 import TablerCircleDottedIcon from "@tabler/icons-react/dist/esm/icons/IconCircleDotted.mjs";
 export const CircleDottedIcon = defineIcon("tabler", TablerCircleDottedIcon);
+
+import TablerBumbleIcon from "@tabler/icons-react/dist/esm/icons/IconBrandBumble.mjs";
+export const BumbleIcon = defineIcon("tabler", TablerBumbleIcon);

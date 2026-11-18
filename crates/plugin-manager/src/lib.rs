@@ -445,6 +445,8 @@ pub fn bundled_manifests() -> Vec<Manifest> {
         }
     });
     vec![
+        serde_json::from_str(include_str!("../../../src/bundled/home/manifest.json"))
+            .expect("home manifest"),
         serde_json::from_str(include_str!(
             "../../../src/bundled/mesh-compute/manifest.json"
         ))
@@ -549,6 +551,7 @@ fn enabled_by_default(id: &str) -> bool {
     matches!(
         id,
         "buzz.channels"
+            | "buzz.home"
             | "buzz.feedback"
             | "buzz.diffs"
             | "buzz.mermaid"

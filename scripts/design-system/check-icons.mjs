@@ -88,6 +88,7 @@ const nonIconDependencies = new Set([
   "remark-parse", // Markdown parsing; not an icon library.
   "remark-rehype", // Test-only Markdown to HTML trees; not an icon library.
   "rolldown",
+  "skullet", // Message-read skeleton placeholders, not an icon catalog.
   "sonner", // Headless toast behavior; Buzz supplies controls and Tabler icons.
   "tailwindcss",
   "typescript",

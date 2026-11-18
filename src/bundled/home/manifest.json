@@ -1,0 +1,7 @@
+{
+  "id": "buzz.home",
+  "name": "Home",
+  "apiVersion": 1,
+  "description": "Your messages, files, and personal workspace in one place.",
+  "discovery": { "category": "productivity", "tags": ["canvas", "home"] }
+}

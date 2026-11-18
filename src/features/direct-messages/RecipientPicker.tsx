@@ -1,6 +1,7 @@
 import { Virtualizer } from "virtua";
 import { Popover } from "@base-ui/react/popover";
 import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -28,6 +29,10 @@ import {
 } from "../../shared/identity/public-key";
 import { SEARCH_MIN_CHARS } from "../../shared/search-debounce";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
+import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
+import { ChannelAvatar } from "../channels/ChannelAvatar";
+import { dmLabel } from "../conversation/dm-label";
+import { useIdentityNames } from "../identity-names/react";
 import { Button } from "../../shared/design-system/ui/Button";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { HashIcon, XIcon } from "../../shared/design-system/icons/index";
@@ -93,14 +98,19 @@ export function RecipientPicker({
   onChange,
   onComplete,
   onTyped,
+  discovery,
 }: {
+  /** Search existing chats and close into the editor after picking a recipient. */
+  discovery?: "solo" | "team" | undefined;
   /** Channels To may address instead of people; empty offers only people. */
   channelOptions?: readonly ChannelSummary[];
   /** A chosen channel, shown as To's only chip. */
   selectedChannel?: ChannelSummary | undefined;
   /** Choosing a channel replaces the people; undefined removes it. */
   onChooseChannel?: ((channel: ChannelSummary | undefined) => void) | undefined;
-  onChannelChange?: ((channel: RecipientChannel | undefined) => void) | undefined;
+  onChannelChange?:
+    | ((channel: RecipientChannel | undefined) => void)
+    | undefined;
   /** Beside the To field in the header row. */
   trailing?: ReactNode | undefined;
   session: RelaySession;
@@ -133,7 +143,7 @@ export function RecipientPicker({
   selection.current = selected;
   const id = useId();
   const errorId = useId();
-  const directory = usePeople(session, query);
+  const directory = usePeople(session, query, discovery !== "solo");
   // Searched people the community verified carry their verified names, as in
   // Command-K; the read waits for the directory to settle.
   const verified = useVerifiedNames(session, directory.people, {
@@ -142,7 +152,9 @@ export function RecipientPicker({
   });
   const agents = useAgentChoices(session, false, true);
   const removal = useChipRemoval();
-  const atLimit = (appearance === "field" && !!selectedChannel) || selected.length >= maxRecipients;
+  const atLimit =
+    (appearance === "field" && !!selectedChannel) ||
+    selected.length >= maxRecipients;
   const needle = query.trim().toLowerCase();
   const typed = pickerText("dm", needle);
   const invalid = !open && !!needle && selected.length > 0;
@@ -155,6 +167,25 @@ export function RecipientPicker({
   });
   const channels = session.channels.list().channels;
   const profiles = session.profiles.snapshot();
+  const name = useIdentityNames(session.names);
+  const channelLabel = useCallback(
+    (channel: ChannelSummary) =>
+      channel.channelType === "dm"
+        ? dmLabel(
+            channel.participants,
+            profiles,
+            name,
+            channel.name || "Direct message",
+          )
+        : channel.name || "Conversation",
+    [profiles, name],
+  );
+  const channelKind = (channel: ChannelSummary) =>
+    channel.channelType === "solo"
+      ? "Solo chat"
+      : channel.channelType === "dm"
+        ? "Direct message"
+        : "Channel";
   const people = useMemo(
     () => withVerifiedNames(directory.people, verified, profiles),
     [directory.people, verified, profiles],
@@ -229,40 +260,49 @@ export function RecipientPicker({
       }
     const byVerifiedName = withVerifiedNames(pool, pageNames, profiles);
     const typedKey = typedPublicKey(query);
-    const localAgents = query.trim()
-      ? agents.selectable.flatMap((agent): Recipient[] => {
-          if (
-            !canMessageAgent(agent) ||
-            !agent.name ||
-            inDirectory.has(agent.pubkey) ||
-            (agent.pubkey !== typedKey &&
-              matchPerson(agent.name, query) === undefined)
-          )
-            return [];
-          // Show the profile already seen for this key, as browsing did.
-          const profile =
-            known.current.get(agent.pubkey) ?? profiles.get(agent.pubkey);
-          return [
-            {
-              ...(profile ?? { name: agent.name }),
-              pubkey: agent.pubkey,
-              isAgent: true,
-            },
-          ];
-        })
-      : [];
+    const localAgents =
+      query.trim() || discovery === "solo"
+        ? agents.selectable.flatMap((agent): Recipient[] => {
+            if (
+              !canMessageAgent(agent) ||
+              !agent.name ||
+              inDirectory.has(agent.pubkey) ||
+              (query.trim() &&
+                agent.pubkey !== typedKey &&
+                matchPerson(agent.name, query) === undefined)
+            )
+              return [];
+            // Show the profile already seen for this key, as browsing did.
+            const profile =
+              known.current.get(agent.pubkey) ?? profiles.get(agent.pubkey);
+            return [
+              {
+                ...(profile ?? { name: agent.name }),
+                pubkey: agent.pubkey,
+                isAgent: true,
+              },
+            ];
+          })
+        : [];
     const eligible: VerifiedPerson<Recipient>[] = [
       ...people,
       ...byVerifiedName,
       ...localAgents,
-    ].filter(
-      (person) =>
-        person.pubkey !== viewer &&
-        !excludedPubkeys.includes(person.pubkey) &&
-        !agentUnavailable(session, person.pubkey) &&
-        (!person.isAgent || controlled.has(person.pubkey)) &&
-        !selected.some((item) => item.pubkey === person.pubkey),
-    );
+    ]
+      .map((person) =>
+        controlled.has(person.pubkey)
+          ? { ...person, isAgent: true as const }
+          : person,
+      )
+      .filter(
+        (person) =>
+          person.pubkey !== viewer &&
+          (discovery !== "solo" || controlled.has(person.pubkey)) &&
+          !excludedPubkeys.includes(person.pubkey) &&
+          !agentUnavailable(session, person.pubkey) &&
+          (!person.isAgent || controlled.has(person.pubkey)) &&
+          !selected.some((item) => item.pubkey === person.pubkey),
+      );
     const picked = usage.pick(
       typed,
       new Set(eligible.map((person) => personKey(person.pubkey))),
@@ -301,7 +341,9 @@ export function RecipientPicker({
     const raw = new Map(
       [...directory.people, ...pool, ...localAgents].map((person) => [
         person.pubkey,
-        person,
+        controlled.has(person.pubkey)
+          ? { ...person, isAgent: true as const }
+          : person,
       ]),
     );
     const candidates = ordered.current.pubkeys.flatMap((pubkey) => {
@@ -359,13 +401,19 @@ export function RecipientPicker({
     labels,
     excludedPubkeys,
     session,
+    discovery,
   ]);
   const channelsOnly = !!channelOptions.length && needle.startsWith("#");
   const channelNeedle = needle.replace(/^#/, "");
   // Channels, above people: the closest names while typing, else the most
   // recently active few.
   const channelRows = useMemo(() => {
-    if (!onChooseChannel || !channelOptions.length || (appearance === "field" && (selected.length || selectedChannel))) return [];
+    if (
+      !onChooseChannel ||
+      !channelOptions.length ||
+      (appearance === "field" && (selected.length || selectedChannel))
+    )
+      return [];
     const open = channelOptions.filter(
       (channel) => channel.id !== selectedChannel?.id,
     );
@@ -378,7 +426,7 @@ export function RecipientPicker({
         .slice(0, 3);
     return open
       .flatMap((channel) => {
-        const match = matchPerson(channel.name, channelNeedle);
+        const match = matchPerson(channelLabel(channel), channelNeedle);
         return match ? [{ channel, tier: match.tier }] : [];
       })
       .sort(
@@ -389,7 +437,15 @@ export function RecipientPicker({
       )
       .slice(0, 4)
       .map((row) => row.channel);
-  }, [onChooseChannel, channelOptions, selectedChannel, channelNeedle, appearance, selected.length]);
+  }, [
+    onChooseChannel,
+    channelOptions,
+    selectedChannel,
+    channelNeedle,
+    appearance,
+    selected.length,
+    channelLabel,
+  ]);
   const channelById = new Map(
     channelRows.map((channel) => [channelKey(channel.id), channel]),
   );
@@ -397,7 +453,8 @@ export function RecipientPicker({
     ...channelRows.map((channel) => channelKey(channel.id)),
     ...(channelsOnly ? [] : keys),
   ];
-  const optionCount = channelRows.length + (channelsOnly ? 0 : candidates.length);
+  const optionCount =
+    channelRows.length + (channelsOnly ? 0 : candidates.length);
   function chooseKey(key: string) {
     const channel = channelById.get(key);
     if (channel) {
@@ -442,7 +499,11 @@ export function RecipientPicker({
   // name or a namesake, so Space waits for the full list. A verified person
   // found by an editable profile name is that name's namesake too.
   const exactRecipient = () =>
-    listed && !channelsOnly && !directory.loading && !directory.error && !directory.tooShort
+    listed &&
+    !channelsOnly &&
+    !directory.loading &&
+    !directory.error &&
+    !directory.tooShort
       ? exactName(
           eligible,
           (person) => [...namesOf(person), ...(person.profileNames ?? [])],
@@ -486,6 +547,11 @@ export function RecipientPicker({
     onChange(selection.current);
     setQuery("");
     onTyped(false);
+    if (discovery) {
+      setOpen(false);
+      onComplete();
+      return;
+    }
     focus();
     // The pick that fills a one-person To closes the list rather than show
     // the limit it just reached: the dialog's purpose and "1 person selected"
@@ -501,6 +567,10 @@ export function RecipientPicker({
     onChooseChannel(channel);
     setQuery("");
     onTyped(false);
+    if (discovery) {
+      setOpen(false);
+      return;
+    }
     focus();
   }
   const channelChip = useRef<HTMLButtonElement>(null);
@@ -596,7 +666,7 @@ export function RecipientPicker({
               }
             }}
           >
-            <label htmlFor={id}>To:</label>
+            <label htmlFor={id}>{discovery ? "Find:" : "To:"}</label>
             {selectedChannel && (
               <span className={styles.chip}>
                 <button
@@ -671,7 +741,11 @@ export function RecipientPicker({
               id={id}
               ref={input}
               className={styles.toInput}
-              aria-label="Message recipients"
+              aria-label={
+                discovery
+                  ? `Search ${discovery === "solo" ? "Solo" : "Team"}`
+                  : "Message recipients"
+              }
               role="combobox"
               aria-expanded={visible}
               aria-controls={listed ? highlight.listId : undefined}
@@ -685,9 +759,11 @@ export function RecipientPicker({
                     ? atLimit
                       ? `${maxRecipients} ${maxRecipients === 1 ? "person" : "people"} selected`
                       : "Add another person…"
-                    : onChooseChannel
-                      ? "Find a person, agent or channel…"
-                      : "Find a person…"
+                    : discovery === "solo"
+                      ? "Find a chat or start with an agent…"
+                      : onChooseChannel
+                        ? "Find a person, agent or channel…"
+                        : "Find a person…"
               }
               value={query}
               disabled={disabled}
@@ -835,7 +911,8 @@ export function RecipientPicker({
                     if (
                       list.scrollHeight - list.scrollTop - list.clientHeight <
                         80 &&
-                      !channelsOnly && !directory.loading &&
+                      !channelsOnly &&
+                      !directory.loading &&
                       !directory.error
                     )
                       directory.loadMore();
@@ -850,7 +927,7 @@ export function RecipientPicker({
                       role="option"
                       aria-posinset={index + 1}
                       aria-setsize={optionCount}
-                      aria-label={`${channel.name}, Channel`}
+                      aria-label={`${channelLabel(channel)}, ${channelKind(channel)}`}
                       tabIndex={-1}
                       selected={channelKey(channel.id) === highlight.active}
                       aria-selected={
@@ -858,21 +935,66 @@ export function RecipientPicker({
                       }
                       aria-current={false}
                       icon={
-                        <span className={styles.channelOptionMark}>
-                          <HashIcon size={16} aria-hidden="true" />
-                        </span>
+                        discovery ? (
+                          channel.channelType === "dm" ||
+                          channel.channelType === "solo" ? (
+                            <AvatarStack
+                              size="compact"
+                              items={(
+                                channel.participants ??
+                                channel.members ??
+                                []
+                              )
+                                .filter((key) => key !== viewer)
+                                .map((key) => {
+                                  const profile = profiles.get(key);
+                                  const agent = agents.identities.find(
+                                    (agent) => agent.pubkey === key,
+                                  );
+                                  return {
+                                    id: key,
+                                    name: name(
+                                      key,
+                                      profile?.name ??
+                                        agent?.name ??
+                                        "Participant",
+                                    ),
+                                    src: avatarMedia(
+                                      profile?.picture ?? agent?.avatar,
+                                      session.media,
+                                    ),
+                                    shape:
+                                      profile?.isAgent || agent
+                                        ? "squircle"
+                                        : "circle",
+                                  };
+                                })}
+                            />
+                          ) : (
+                            <ChannelAvatar name={channelLabel(channel)} />
+                          )
+                        ) : (
+                          <span className={styles.channelOptionMark}>
+                            <HashIcon size={16} aria-hidden="true" />
+                          </span>
+                        )
                       }
                       label={
                         <MatchedLabel
-                          label={channel.name}
+                          label={channelLabel(channel)}
                           positions={
                             needle
-                              ? matchPerson(channel.name, needle)?.positions
+                              ? matchPerson(channelLabel(channel), needle)
+                                  ?.positions
                               : undefined
                           }
                         />
                       }
-                      trailing={<span className={styles.agent}>Channel</span>}
+                      trailing={
+                        <span className={styles.agent}>
+                          {channelKind(channel)}
+                        </span>
+                      }
                       onMouseDown={(event) => event.preventDefault()}
                     />
                   ))}
@@ -886,16 +1008,24 @@ export function RecipientPicker({
                   >
                     {renderOption}
                   </Virtualizer>
-                  {(channelsOnly || (!directory.loading && !directory.error)) &&
+                  {(discovery === "solo" ||
+                    channelsOnly ||
+                    (!directory.loading && !directory.error)) &&
                     (channelsOnly || !candidates.length) &&
                     !channelRows.length && (
                       <p>
-                        {channelsOnly ? "No matching channels." : directory.tooShort
-                          ? `Type at least ${SEARCH_MIN_CHARS} characters to search people.`
-                          : "No matching people."}
+                        {discovery === "solo"
+                          ? "No matching chats or available agents."
+                          : channelsOnly
+                            ? "No matching channels."
+                            : directory.tooShort
+                              ? `Type at least ${SEARCH_MIN_CHARS} characters to search people.`
+                              : "No matching people."}
                       </p>
                     )}
-                  {!channelsOnly && directory.loading &&
+                  {discovery !== "solo" &&
+                    !channelsOnly &&
+                    directory.loading &&
                     (!query.trim() || !candidates.length) && (
                       <div role="status" aria-label="Loading people">
                         <div aria-hidden="true">
@@ -915,20 +1045,23 @@ export function RecipientPicker({
                         </div>
                       </div>
                     )}
-                  {!channelsOnly && directory.error && (
+                  {discovery !== "solo" && !channelsOnly && directory.error && (
                     <p role="alert">Could not load people.</p>
                   )}
-                  {!channelsOnly && !directory.loading && directory.hasMore && (
-                    <Button
-                      type="button"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={directory.loadMore}
-                    >
-                      {directory.error
-                        ? "Retry loading people"
-                        : "Load more people"}
-                    </Button>
-                  )}
+                  {discovery !== "solo" &&
+                    !channelsOnly &&
+                    !directory.loading &&
+                    directory.hasMore && (
+                      <Button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={directory.loadMore}
+                      >
+                        {directory.error
+                          ? "Retry loading people"
+                          : "Load more people"}
+                      </Button>
+                    )}
                 </div>
               )}
             </Popover.Popup>

@@ -1,6 +1,30 @@
-import { memo, type ReactNode, useEffect, useId, useLayoutEffect } from "react";
+import {
+  DetailTabContext,
+  RetainedThreadContext,
+} from "../../features/messages/DetailTabContext";
+import { ArrowSquareOutIcon } from "../../shared/design-system/icons";
+import { IconButton } from "../../shared/design-system/ui/IconButton";
+import { MessageLoading } from "../../features/messages/MessageLoading";
+import { DetailsSheet } from "../../features/messages/DetailsSheet";
+import {
+  overlayHostFor,
+  type ComposerOverlayHost,
+} from "../../features/messages/composer-overlay";
+import { useConversationPresentation } from "../../features/conversation/ConversationPresentation";
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   ConversationTimeline,
+  ConversationThread,
   useConversation,
 } from "../../features/conversation/Conversation";
 import type { ChannelTimelineProps } from "../../features/messages/ChannelTimeline";
@@ -23,6 +47,10 @@ export const ChannelBody = memo(function ChannelBody({
   holding,
   onOpenThread,
   onReply,
+  hasThreadTab,
+  threadRequest,
+  onVisitInlineThread,
+  onCloseInlineThread,
   navigation,
   onContentReady,
 }: {
@@ -41,8 +69,16 @@ export const ChannelBody = memo(function ChannelBody({
   /** Show the loading notice instead of the list, as while a message is sought. */
   holding?: boolean | undefined;
   onOpenThread?:
-    | ((messageId: string, threadRootId: string, intent?: "reply") => void)
+    | ((messageId: string, threadRootId: string, intent?: "reply") => unknown)
     | undefined;
+  /** Whether a thread already has a tab, which it selects instead of reading
+   * inline. */
+  hasThreadTab?: ((channelId: string, rootId: string) => boolean) | undefined;
+  /** A visit to a thread read inline: once the timeline reveals its root, the
+   * thread opens over the conversation. */
+  onVisitInlineThread?: ((rootId: string) => void) | undefined;
+  onCloseInlineThread?: ((rootId: string) => void) | undefined;
+  threadRequest?: Readonly<{ rootId: string; signal: AbortSignal }> | undefined;
 }) {
   // The owner's Solo chat is a chat-style timeline that loads history on scroll.
   const {
@@ -50,6 +86,114 @@ export const ChannelBody = memo(function ChannelBody({
     channelId,
     ownSoloConversation: solo,
   } = useConversation();
+  const presented = useConversationPresentation();
+  const tabHost = useContext(DetailTabContext);
+  const retainedThreads = useContext(RetainedThreadContext);
+  const trigger = useRef<HTMLElement | null>(null);
+  type Thread = {
+    messageId: string;
+    rootId: string;
+    channelId: string;
+    host: ComposerOverlayHost;
+    revealSelected: boolean;
+    replyRequest?: number;
+    promoted?: boolean;
+    signal?: AbortSignal;
+    open: boolean;
+    id: number;
+    trigger: { current: HTMLElement | null };
+  };
+  const sequence = useRef(0);
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const addThread = useCallback(
+    (thread: Omit<Thread, "id" | "trigger" | "open">) => {
+      const next = {
+        ...thread,
+        open: true,
+        id: ++sequence.current,
+        trigger: { current: trigger.current },
+      };
+      setThreads((items) => [...items.filter((item) => item.promoted), next]);
+    },
+    [],
+  );
+  useEffect(() => {
+    setThreads((items) =>
+      items.filter((item) => presented && item.channelId === channelId),
+    );
+  }, [presented, channelId]);
+  // Stable, so memoized message rows keep their props across window updates.
+  const openThread = useCallback(
+    (messageId: string, rootId: string, intent?: "reply") => {
+      const opener = document.activeElement;
+      const host = overlayHostFor(opener);
+      if (!host || hasThreadTab?.(channelId, rootId)) {
+        onOpenThread?.(messageId, rootId, intent);
+        return;
+      }
+      if (onVisitInlineThread) {
+        onVisitInlineThread(rootId);
+        return;
+      }
+      trigger.current = opener instanceof HTMLElement ? opener : null;
+      addThread({
+        messageId,
+        rootId,
+        channelId,
+        host,
+        revealSelected: messageId !== rootId,
+        ...(intent === "reply" ? { replyRequest: 1 } : {}),
+      });
+    },
+    [channelId, onOpenThread, hasThreadTab, addThread, onVisitInlineThread],
+  );
+  const opened = useRef<AbortSignal | undefined>(undefined);
+  // The revealed root holds focus, so it anchors the sheet and takes focus back
+  // when the thread closes. Without a reader to attach to, it opens a tab.
+  const revealed = useCallback(
+    (messageId: string, signal: AbortSignal, origin?: HTMLElement) => {
+      const pending = threadRequest;
+      if (
+        !pending ||
+        pending.signal !== signal ||
+        pending.rootId !== messageId ||
+        signal.aborted ||
+        opened.current === signal
+      )
+        return;
+      opened.current = signal;
+      const row = origin ?? document.activeElement;
+      const host = overlayHostFor(row);
+      if (!host) {
+        onOpenThread?.(messageId, messageId);
+        return;
+      }
+      trigger.current = row instanceof HTMLElement ? row : null;
+      addThread({
+        messageId,
+        rootId: messageId,
+        channelId,
+        host,
+        revealSelected: false,
+        replyRequest: 1,
+        signal,
+      });
+    },
+    [channelId, onOpenThread, addThread, threadRequest],
+  );
+  useEffect(() => {
+    const signal = threadRequest?.signal;
+    if (!signal) return;
+    const leave = () =>
+      setThreads((items) =>
+        items.filter(
+          (item) => item.promoted || !item.open || item.signal !== signal,
+        ),
+      );
+    signal.addEventListener("abort", leave);
+    if (signal.aborted) leave();
+    return () => signal.removeEventListener("abort", leave);
+  }, [threadRequest?.signal]);
   // ChannelWorkspace already keys this lifetime by viewer/scope/generation.
   const continuityKey = useId();
   const window = useChannelWindow(queries.channels, channelId);
@@ -62,7 +206,6 @@ export const ChannelBody = memo(function ChannelBody({
   );
   const newest = window.rows.at(-1)?.id;
   const settled = window.status === "ready" || window.status === "error";
-  // Rows the session holds before the first page lands are not shown yet.
   const shown = settled && !holding;
   useEffect(() => {
     if (shown) onContentReady?.(channelId);
@@ -100,8 +243,8 @@ export const ChannelBody = memo(function ChannelBody({
   }, [cached, navigation, window.status]);
   // While recovery retries this timeline's head read, its notice is the one
   // report, after the quiet delay; the empty timeline waits.
-  if (window.status === "error" && !window.rows.length && !headRecovers)
-    return (
+  const timeline =
+    window.status === "error" && !window.rows.length && !headRecovers ? (
       <div
         className={`${styles.empty} ${styles.timelinePlaceholder}`}
         role="alert"
@@ -114,46 +257,113 @@ export const ChannelBody = memo(function ChannelBody({
           Retry messages
         </Button>
       </div>
-    );
-  // Until the first history page lands, rows the session already holds (a list
-  // preview, a live message) are not the conversation: showing them first
-  // makes the reader lay out twice.
-  if (
-    holding ||
-    window.status === "idle" ||
-    window.status === "loading" ||
-    (window.status !== "ready" && !window.rows.length)
-  )
-    return (
+    ) : holding ||
+      window.status === "idle" ||
+      window.status === "loading" ||
+      (window.status !== "ready" && !window.rows.length) ? (
       <div
         className={`${styles.empty} ${styles.timelinePlaceholder}`}
-        role="status"
         data-buzz-launch-pending={!cached ? "required" : undefined}
       >
-        Loading messages…
+        <MessageLoading />
       </div>
+    ) : (
+      <ConversationTimeline
+        continuityKey={continuityKey}
+        intro={intro}
+        viewer={viewer}
+        window={window}
+        launchPending={
+          !cached &&
+          !window.error &&
+          window.status === "ready" &&
+          window.freshness === "cached"
+        }
+        onReply={onReply}
+        {...(onOpenThread ? { onOpenThread: openThread } : {})}
+        onRevealed={revealed}
+        revealMessageId={revealMessageId}
+        openThreadRootId={openThreadRootId}
+        inlineTarget={inlineTarget}
+        marksRead={marksRead}
+        navigation={navigation}
+        chatPresentation={solo}
+        historyControl={solo ? "scroll" : "button"}
+      />
     );
   return (
-    <ConversationTimeline
-      continuityKey={continuityKey}
-      intro={intro}
-      viewer={viewer}
-      window={window}
-      launchPending={
-        !cached &&
-        !window.error &&
-        window.status === "ready" &&
-        window.freshness === "cached"
-      }
-      onReply={onReply}
-      {...(onOpenThread ? { onOpenThread } : {})}
-      revealMessageId={revealMessageId}
-      openThreadRootId={openThreadRootId}
-      inlineTarget={inlineTarget}
-      marksRead={marksRead}
-      navigation={navigation}
-      chatPresentation={solo}
-      historyControl={solo ? "scroll" : "button"}
-    />
+    <>
+      {timeline}
+      {presented &&
+        threads
+          .filter((thread) => thread.channelId === channelId)
+          .map((thread) => (
+            <DetailsSheet
+              key={thread.id}
+              onPromoted={() =>
+                setThreads((items) =>
+                  items.map((item) =>
+                    item.id === thread.id ? { ...item, promoted: true } : item,
+                  ),
+                )
+              }
+              openInSplit={() =>
+                onOpenThread?.(thread.messageId, thread.rootId)
+              }
+              open={thread.open}
+              onOpenChange={(open) => {
+                setThreads((items) =>
+                  items.map((item) =>
+                    item.id === thread.id ? { ...item, open } : item,
+                  ),
+                );
+                if (
+                  !open &&
+                  thread.signal &&
+                  !thread.signal.aborted &&
+                  !thread.promoted
+                )
+                  onCloseInlineThread?.(thread.rootId);
+              }}
+              onClosed={() =>
+                setThreads((items) =>
+                  items.filter((item) => item.id !== thread.id),
+                )
+              }
+              host={thread.host}
+              containsComposer
+              title="Thread"
+              headerActions={
+                !tabHost && (
+                  <IconButton
+                    aria-label="Open thread in split panel"
+                    variant="glass"
+                    shape="round"
+                    size="compact"
+                    icon={<ArrowSquareOutIcon size={16} aria-hidden="true" />}
+                    onClick={() => {
+                      onOpenThread?.(thread.messageId, thread.rootId);
+                      setThreads((items) =>
+                        items.filter((item) => item.id !== thread.id),
+                      );
+                    }}
+                  />
+                )
+              }
+              closeLabel="Close thread"
+              finalFocus={thread.trigger}
+            >
+              <ConversationThread
+                messageId={thread.messageId}
+                replyRequest={thread.replyRequest}
+                revealSelected={thread.revealSelected}
+                retainThread
+                {...(thread.promoted
+                  ? retainedThreads.get(`${channelId}:${thread.rootId}`)
+                  : {})}
+              />
+            </DetailsSheet>
+          ))}
+    </>
   );
 });

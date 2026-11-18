@@ -65,6 +65,9 @@ test("another device's arrangement replaces this one's, and a change here is sav
   expect(sections()).toEqual([section]);
   expect(readView(scope, "navigation-team-expanded:v1", false)).toBe(true);
   expect(saved.railLayout.write).not.toHaveBeenCalled();
+  writeView(scope, "navigation-live-sections:v1", {
+    [section.id]: { version: 1, dms: true, people: [] },
+  });
 
   writeView(scope, "navigation-team-expanded:v1", false);
   await settled();
@@ -72,6 +75,7 @@ test("another device's arrangement replaces this one's, and a change here is sav
 
   saved.replace(record([]));
   await vi.waitFor(() => expect(sections()).toEqual([]));
+  expect(readView(scope, "navigation-live-sections:v1", null)).toEqual({});
   stop();
 });
 

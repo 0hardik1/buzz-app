@@ -42,7 +42,7 @@ type ConversationTabProps = {
   extensions?: ConversationExtensions | undefined;
   openLink(target: string, origin?: MessageLinkOrigin): boolean;
   canOpenLink(target: string): boolean;
-  openThread(messageId: string, rootId: string, intent?: "reply"): void;
+  openThread(messageId: string, rootId: string, intent?: "reply"): unknown;
   /** Omit when an embedding surface owns dismissal and framing. */
   close?: (() => void) | undefined;
   /** The current route's request, only for the thread it addresses. */
@@ -166,6 +166,7 @@ export function ConversationTab({
     >
       <section
         ref={inlineReply.surface}
+        data-composer-host=""
         data-attachment-drop-zone=""
         className={styles.conversation}
         aria-label={`Conversation in ${channel.name}`}

@@ -1,3 +1,5 @@
+import { DetailLifetimeContext } from "./DetailTabContext";
+import { overlayHostFor, type MediaReviewOrigin } from "./composer-overlay";
 import { useMessageReplyHold, type ReplyHold } from "./use-message-reply-hold";
 import { snapshotAttachments } from "../relay/forwarded-message";
 import { ForwardedMessage } from "./ForwardedMessage";
@@ -189,6 +191,7 @@ export type MessageRowProps = {
     seconds: number,
     hasComments?: boolean,
     attachments?: ChannelMessage["attachments"],
+    opening?: MediaReviewOrigin,
   ) => void;
 };
 
@@ -917,6 +920,11 @@ function MessageRowContent({
                                 (!!row.threadRootId &&
                                   row.threadRootId !== row.id),
                               row.attachments,
+
+                              {
+                                host: overlayHostFor(document.activeElement),
+                                rootId: row.threadRootId ?? row.id,
+                              },
                             ),
                         }
                       : {})}
@@ -971,6 +979,11 @@ function MessageRowContent({
                               (!!row.threadRootId &&
                                 row.threadRootId !== row.id),
                             row.attachments,
+
+                            {
+                              host: overlayHostFor(document.activeElement),
+                              rootId: row.threadRootId ?? row.id,
+                            },
                           ),
                       }
                     : {})}
@@ -1325,7 +1338,8 @@ function MessageRowContent({
       )}
     </>
   );
-  const summaryThread = startsThreads || row.replyCount > 0 ? onOpenThread : undefined;
+  const summaryThread =
+    startsThreads || row.replyCount > 0 ? onOpenThread : undefined;
   const renderMessageSummary = (activity?: MessageSummaryActivity) => {
     const remainingThreadAgents = threadAgents.filter(
       (agent) => !activity?.participants.includes(agent.pubkey),
@@ -1335,7 +1349,9 @@ function MessageRowContent({
       : undefined;
     return (
       ((row.replyCount > 0 ||
-        (startsThreads && !row.threadRootId && (threadAgents.length > 0 || threadDraft)) ||
+        (startsThreads &&
+          !row.threadRootId &&
+          (threadAgents.length > 0 || threadDraft)) ||
         activity) &&
         summaryThread && (
           <Button
@@ -1744,22 +1760,24 @@ function MessageRowContent({
                     </div>
                   )}
                   {extensions?.messages ? (
-                    <MessageCard
-                      registry={extensions.messages}
-                      renderer={messageRenderer}
-                      message={row}
-                      onFailedChange={(renderer, failed) =>
-                        setFailedRenderer((current) =>
-                          failed
-                            ? renderer
-                            : current === renderer
-                              ? undefined
-                              : current,
-                        )
-                      }
-                    >
-                      {body}
-                    </MessageCard>
+                    <DetailLifetimeContext value={keepRowMounted}>
+                      <MessageCard
+                        registry={extensions.messages}
+                        renderer={messageRenderer}
+                        message={row}
+                        onFailedChange={(renderer, failed) =>
+                          setFailedRenderer((current) =>
+                            failed
+                              ? renderer
+                              : current === renderer
+                                ? undefined
+                                : current,
+                          )
+                        }
+                      >
+                        {body}
+                      </MessageCard>
+                    </DetailLifetimeContext>
                   ) : (
                     body
                   )}

@@ -27,7 +27,14 @@ import {
 } from "../features/navigation/targets";
 import { bindDeepLinks } from "../features/navigation/deep-links";
 import { matchesEvent } from "../features/relay/projection";
-import { bounds, message, metadata, roster } from "../features/relay/testing";
+import {
+  bounds,
+  message,
+  metadata,
+  roster,
+  signed,
+} from "../features/relay/testing";
+import { threadBinding } from "../features/relay/thread-window";
 import type { ReadFilter } from "../features/relay/events";
 import type { StorageResult } from "../plugins/types";
 
@@ -856,6 +863,9 @@ it("keeps the rail conversation selected through thread navigation and updates i
     },
   );
   vi.stubEnv("VITE_BUZZ_LIVE", "1");
+  // This shell-selection contract uses the split reader. Inline root reveals
+  // require measured layout, which this jsdom fixture does not provide.
+  localStorage.setItem("buzz-thread-placement.v1", "side");
   localStorage.setItem(
     `buzz-client.v1:${viewer}`,
     JSON.stringify({
@@ -864,17 +874,19 @@ it("keeps the rail conversation selected through thread navigation and updates i
       selected: origin,
     }),
   );
+  const alphaId = "11111111-1111-4111-8111-111111111111";
+  const betaId = "22222222-2222-4222-8222-222222222222";
   const author = { secret: key, pubkey: viewer };
-  const root = message(author, "alpha", "Thread root", 1_700_000_100);
+  const root = message(author, alphaId, "Thread root", 1_700_000_100);
   const channels = [
-    roster(author, "alpha", [viewer]),
-    metadata(author, "alpha", "Alpha"),
-    roster(author, "beta", [viewer]),
-    metadata(author, "beta", "Beta"),
+    roster(author, alphaId, [viewer]),
+    metadata(author, alphaId, "Alpha"),
+    roster(author, betaId, [viewer]),
+    metadata(author, betaId, "Beta"),
   ];
   const history = [
     root,
-    bounds(author, "alpha", "head", { has_more: false, next_cursor: null }),
+    bounds(author, alphaId, "head", { has_more: false, next_cursor: null }),
   ];
   vi.stubGlobal(
     "fetch",
@@ -884,8 +896,37 @@ it("keeps the rail conversation selected through thread navigation and updates i
         return Response.json({ viewer, relayAuthor: viewer, relayUrl: origin });
       if (url.endsWith("/query")) {
         const filters = JSON.parse(String(options?.body)) as ReadFilter[];
+        const thread = filters.find((filter) => filter.thread_window);
+        if (thread)
+          return Response.json([
+            signed(author, {
+              kind: 39007,
+              tags: [
+                ["d", await threadBinding(thread, origin, viewer)],
+                ["h", alphaId],
+                ["e", root.id],
+              ],
+              content: JSON.stringify({
+                version: 1,
+                direction: "older",
+                has_more: false,
+                next_cursor: null,
+              }),
+            }),
+          ]);
+        if (filters.some((filter) => filter.ids?.includes(root.id)))
+          return Response.json([root]);
         if (filters.some((filter) => filter.kinds?.includes(9)))
-          return Response.json(history);
+          return Response.json(
+            filters.some((filter) => filter["#h"]?.includes(betaId))
+              ? [
+                  bounds(author, betaId, "head", {
+                    has_more: false,
+                    next_cursor: null,
+                  }),
+                ]
+              : history,
+          );
         return Response.json(
           channels.filter((event) =>
             filters.some((filter) => matchesEvent(event, filter)),
@@ -899,7 +940,7 @@ it("keeps the rail conversation selected through thread navigation and updates i
     version: 1,
     kind: "conversation",
     scope: { viewer, communityOrigin: origin },
-    channelId: "alpha",
+    channelId: alphaId,
   } as const;
   window.history.replaceState(
     null,
@@ -912,10 +953,15 @@ it("keeps the rail conversation selected through thread navigation and updates i
   await waitFor(() =>
     expect(current.navigation.snapshot().status).toBe("opened"),
   );
-  await waitFor(() => expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute("aria-current", "page"));
-  const opened = (entry: string) =>
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    ),
+  );
+  const opened = (entry: string, stage: string) =>
     waitFor(() =>
-      expect(current.navigation.snapshot()).toMatchObject({
+      expect(current.navigation.snapshot(), stage).toMatchObject({
         status: "opened",
         entry: { id: entry },
       }),
@@ -931,17 +977,34 @@ it("keeps the rail conversation selected through thread navigation and updates i
   const thread = current.navigation.snapshot().entry.id;
   expect(thread).not.toBe(start);
   // The page, not the shell, completes the thread's visit.
-  await opened(thread);
-  expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute("aria-current", "page");
+  await opened(thread, "open Alpha thread");
+  expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
   act(() => current.navigation.back());
-  await opened(start);
-  expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute("aria-current", "page");
+  await opened(start, "return to Alpha conversation");
+  expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
   // Another conversation is a destination, which the sidebar shows.
   act(() => {
-    void current.navigation.open({ ...alpha, channelId: "beta" });
+    void current.navigation.open({ ...alpha, channelId: betaId });
   });
-  await waitFor(() => expect(screen.getByRole("button", { name: "Beta" })).toHaveAttribute("aria-current", "page"));
-  expect(screen.getByRole("button", { name: "Alpha" })).not.toHaveAttribute("aria-current");
+  await opened(
+    current.navigation.snapshot().entry.id,
+    "open Beta conversation",
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Beta" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    ),
+  );
+  expect(screen.getByRole("button", { name: "Alpha" })).not.toHaveAttribute(
+    "aria-current",
+  );
 });
 it("offers to join a code-less link's community, or opens it once joined", async () => {
   const queue = [

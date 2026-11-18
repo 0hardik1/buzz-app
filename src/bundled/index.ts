@@ -1,3 +1,5 @@
+import homeManifest from "./home/manifest.json";
+import * as home from "./home";
 import meshManifest from "./mesh-compute/manifest.json";
 import * as mesh from "./mesh-compute";
 import voiceNotesManifest from "./voice-notes/manifest.json";
@@ -89,6 +91,11 @@ const claudeHarness: BundledPlugin = {
 };
 
 export const bundledPlugins: readonly BundledPlugin[] = [
+  {
+    manifest: { ...homeManifest, apiVersion: 1 },
+    module: home,
+    enabledByDefault: true,
+  },
   {
     manifest: { ...meshManifest, apiVersion: 1 },
     module: mesh,

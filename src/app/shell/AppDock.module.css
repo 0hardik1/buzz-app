@@ -86,6 +86,47 @@ html:is([data-keyboard-input], [data-sidebar-resizing]) .frame {
 .primary {
   margin-block-end: var(--space-1);
 }
+
+.frame[data-placement="overlay"] {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.frame[data-placement="overlay"] .heading,
+.frame[data-placement="overlay"] [data-rail-card-sheet] {
+  pointer-events: auto;
+}
+
+.frame[data-navigation-mode] .apps {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+  transition:
+    opacity var(--duration-fast) var(--easing-enter),
+    transform var(--duration-fast) var(--easing-enter),
+    visibility 0s;
+}
+.frame[data-navigation-mode="home"] .apps {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(calc(-1 * var(--space-3)));
+  transition-delay: 0s, 0s, var(--duration-fast);
+}
+.frame[data-placement="overlay"][data-navigation-mode="workspace"] .apps,
+.frame[data-placement="overlay"][data-compact] .apps {
+  pointer-events: auto;
+}
+html[data-keyboard-input] .frame[data-navigation-mode] .apps {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .frame[data-navigation-mode] .apps {
+    transition: none;
+    transform: none;
+  }
+}
 .frame[data-compact] .primary {
   padding: var(--space-1);
 }

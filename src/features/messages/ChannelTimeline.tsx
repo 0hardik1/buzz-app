@@ -1,4 +1,5 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: The history region must support keyboard scrolling.
+import type { MediaReviewOrigin } from "./composer-overlay";
 import type { ReplyHold } from "./use-message-reply-hold";
 import { AgentConnectionSetup } from "../agents/AgentConnectionSetup";
 import { TypingIndicator, useLiveConversationAgents } from "./TypingIndicator";
@@ -234,6 +235,11 @@ export type ChannelTimelineProps = {
   /** False: viewing rows marks nothing read; the owner decides what was read. */
   marksRead?: boolean | undefined;
   navigation?: PageNavigation | undefined;
+  onRevealed?(
+    messageId: string,
+    signal: AbortSignal,
+    origin?: HTMLElement,
+  ): void;
   onReply?:
     | ((row: ChannelMessage, deferFocus?: boolean) => ReplyHold | undefined)
     | undefined;
@@ -248,6 +254,7 @@ export type ChannelTimelineProps = {
     seconds: number,
     hasComments?: boolean,
     initialAttachments?: readonly Attachment[],
+    opening?: MediaReviewOrigin,
   ): void;
 };
 
@@ -285,6 +292,7 @@ function Timeline({
   onOpenThread,
   onReply,
   onOpenMediaReview,
+  onRevealed,
   chatPresentation = false,
 }: ChannelTimelineProps) {
   useMessageSelectionCopy();
@@ -1201,7 +1209,17 @@ function Timeline({
     if (navigation && targetSignal === navigation.signal) present(navigation);
     navigation?.complete({ status: "opened" });
     setRevealedSignal(targetSignal);
-  }, [navigation, targetId, targetSignal, present, glides]);
+    if (targetId && targetSignal)
+      onRevealed?.(
+        targetId,
+        targetSignal,
+        element?.querySelector<HTMLElement>(
+          `[data-message-id="${CSS.escape(targetId)}"]`,
+        ) ??
+          element ??
+          undefined,
+      );
+  }, [navigation, targetId, targetSignal, present, glides, onRevealed]);
   // A covering Members dialog owns focus, and hides the target's mark.
   const focusesTarget = !(
     navigation?.target.kind === "conversation" &&
@@ -1233,6 +1251,15 @@ function Timeline({
     if (prior) {
       present(navigation);
       navigation.complete({ status: "opened" });
+      if (
+        navigation.target.kind === "conversation" &&
+        navigation.target.messageId
+      )
+        onRevealed?.(
+          navigation.target.messageId,
+          navigation.signal,
+          scroller.current ?? undefined,
+        );
       return;
     }
     const place = navigation.position(TIMELINE_PLACE) as ReadingPosition;
@@ -1262,6 +1289,15 @@ function Timeline({
     upwardGesture.current = false;
     settled.current = false;
     navigation.complete({ status: "opened" });
+    if (
+      navigation.target.kind === "conversation" &&
+      navigation.target.messageId
+    )
+      onRevealed?.(
+        navigation.target.messageId,
+        navigation.signal,
+        scroller.current ?? undefined,
+      );
     // Focus left on the page, or on the row the last reveal focused, moves to
     // the restored reading. Focus placed anywhere else stays.
     const element = scroller.current;
@@ -1287,6 +1323,7 @@ function Timeline({
     activity,
     focusesTarget,
     present,
+    onRevealed,
   ]);
   // Leaving a link's visit once it was presented, revealed or returned to, by
   // navigating on or unmounting, records where the reader was for Back/Forward.

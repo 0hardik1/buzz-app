@@ -47,6 +47,7 @@ export const test = base.extend({
   // browser's zone into it; null leaves the key out so launch shares one.
   profileTimeZone: ["", { option: true }],
   readState: [false, { option: true }],
+  threadPlacement: ["side", { option: true }],
   threadUnread: [false, { option: true }],
   presenceThreadAuthors: [0, { option: true }],
   threadUnreadMentions: [false, { option: true }],
@@ -140,6 +141,7 @@ export const test = base.extend({
       profilePicture,
       profileTimeZone,
       readState,
+      threadPlacement,
       threadUnread,
       presenceThreadAuthors,
       threadUnreadMentions,
@@ -2666,6 +2668,10 @@ export const test = base.extend({
           });
           observer.observe(document, { childList: true, subtree: true });
         });
+      await page.addInitScript((placement) => {
+        if (localStorage.getItem("buzz-thread-placement.v1") === null)
+          localStorage.setItem("buzz-thread-placement.v1", placement);
+      }, threadPlacement);
       await page.addInitScript(
         ({
           viewer,

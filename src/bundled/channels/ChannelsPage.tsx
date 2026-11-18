@@ -1,8 +1,15 @@
+import { useThreadPlacementPreference } from "../../features/messages/thread-preferences";
 import { isSidebarSectionRoute } from "../../features/channel-navigation/sidebar-section-route";
 import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
 import { useInlineReply } from "../../features/messages/use-inline-reply";
 import { useChannelHistoryFocus } from "./useChannelHistoryFocus";
 import type { Conversation } from "../../features/conversation/service";
+import { MediaReviewViewer } from "../../features/messages/MediaReviewViewer";
+import {
+  DetailTabContext,
+  RetainedThreadContext,
+} from "../../features/messages/DetailTabContext";
+import type { MediaReviewOrigin } from "../../features/messages/composer-overlay";
 import { StartLinkedChat, canStartLinkedChat } from "./StartLinkedChat";
 import {
   readLinkedChat,
@@ -1092,7 +1099,28 @@ function ChannelWorkspace({
     request: PageNavigation;
     inTimeline: boolean;
     rootId?: string;
+    /** Inline: the visit reveals its thread's root, which then opens over the
+     * conversation instead of in a tab. */
+    inlineThread?: boolean;
   }>();
+  // A visit to a whole thread, such as a thread preview, reads it inline from
+  // its root. One with a tab still selects that tab.
+  const { placement } = useThreadPlacementPreference();
+  const inlineThreadVisit =
+    placement === "inline" &&
+    !!currentId &&
+    !!requestedMessage &&
+    requestedThread === requestedMessage &&
+    !tabState.hasThreadTab(currentId, requestedMessage);
+  // The root can sit above the loaded history, as an older thread with new
+  // replies does: wait for verified rows and read older pages to find it.
+  const inlineRoot = useMessageOpening(
+    queries.channels,
+    currentId ?? "",
+    inlineThreadVisit && !cached && !current?.cached
+      ? requestedMessage
+      : undefined,
+  );
   useEffect(() => {
     if (
       cached ||
@@ -1131,6 +1159,20 @@ function ChannelWorkspace({
     currentId,
     queries,
   ]);
+  // Likewise frozen once found or not: a root that never loads opens in a tab.
+  useEffect(() => {
+    if (!navigation || navigation.signal.aborted || inlineRoot === undefined)
+      return;
+    setExactOpening((opening) =>
+      opening?.request === navigation
+        ? opening
+        : {
+            request: navigation,
+            inTimeline: inlineRoot,
+            inlineThread: inlineRoot,
+          },
+    );
+  }, [navigation, inlineRoot]);
   // A live connection can still be confirming its restored membership. Keep
   // the pending intent; an exact reader cannot use display-only authority.
   const exact = useMemo(
@@ -1139,12 +1181,13 @@ function ChannelWorkspace({
         ? undefined
         : navigation && requestedMessage && timelineOnly
           ? { request: navigation, inTimeline: true }
-          : navigation &&
-              requestedMessage &&
-              requestedThread === requestedMessage
-            ? { request: navigation, inTimeline: false }
-            : exactOpening?.request === navigation
-              ? exactOpening
+          : exactOpening?.request === navigation
+            ? exactOpening
+            : navigation &&
+                requestedMessage &&
+                requestedThread === requestedMessage &&
+                !inlineThreadVisit
+              ? { request: navigation, inTimeline: false }
               : undefined,
     [
       cached,
@@ -1154,7 +1197,19 @@ function ChannelWorkspace({
       requestedThread,
       timelineOnly,
       exactOpening,
+      inlineThreadVisit,
     ],
+  );
+  const inlineThreadSignal = exact?.inlineThread
+    ? navigation?.signal
+    : undefined;
+  // Stable per visit, so the memoized body keeps its props.
+  const inlineThreadRequest = useMemo(
+    () =>
+      inlineThreadSignal && requestedMessage
+        ? { rootId: requestedMessage, signal: inlineThreadSignal }
+        : undefined,
+    [inlineThreadSignal, requestedMessage],
   );
   // The route addresses a thread; its tab owns presentation, the route only
   // selects it and supplies the reveal request.
@@ -1375,7 +1430,11 @@ function ChannelWorkspace({
     const current = navigator.snapshot().entry;
     if (
       keep !== undefined &&
-      (keptTab || keptEntry || keep === "settings" || tabState.sidePanel) &&
+      (keptTab ||
+        keptEntry ||
+        keep === "settings" ||
+        tabState.sidePanel ||
+        secondary.items.some((item) => item.id === keep)) &&
       visits.includes(current.id) &&
       keptTab?.kind !== "thread" &&
       !(keptEntry && historyPanel(keptEntry))
@@ -1407,7 +1466,10 @@ function ChannelWorkspace({
         target: targetKey(fallback),
       };
   };
-  const [mediaReview, setMediaReview] = useState<{
+  type OpenMedia = {
+    id: number;
+    promoted?: boolean;
+    trigger: { current: HTMLElement | null };
     channelId: string;
     channelName: string;
     messageId: string;
@@ -1415,16 +1477,27 @@ function ChannelWorkspace({
     initialAttachments?: readonly Attachment[] | undefined;
     initialTime: number;
     hasComments: boolean;
+    opening?: MediaReviewOrigin | undefined;
     entryId?: string | undefined;
-  }>();
+  };
+  const mediaSequence = useRef(0);
+  const [mediaReviews, setMediaReviews] = useState<OpenMedia[]>([]);
   // The current destination may be an authorized public preview, which is
   // intentionally absent from the joined-channel list.
-  const showingMediaReview = current?.archived
-    ? undefined
-    : mediaReviewForDestination(mediaReview, current?.id, navigation?.entryId);
+  const showingMediaReviews = mediaReviews.filter(
+    (review) =>
+      !current?.archived &&
+      (review.promoted
+        ? review.channelId === current?.id
+        : mediaReviewForDestination(review, current?.id, navigation?.entryId)),
+  );
+  const showingMediaReview = showingMediaReviews.find(
+    (review) => !review.promoted,
+  );
   useEffect(() => {
-    if (mediaReview && !showingMediaReview) setMediaReview(undefined);
-  }, [mediaReview, showingMediaReview]);
+    if (mediaReviews.length !== showingMediaReviews.length)
+      setMediaReviews(showingMediaReviews);
+  }, [mediaReviews.length, showingMediaReviews]);
   const secondary = useConversationTabs({
     state: tabState,
     relay,
@@ -1624,6 +1697,7 @@ function ChannelWorkspace({
   const {
     open,
     drawer,
+    openDetail,
     drawerContext,
     selectedTab,
     selectPanelTab,
@@ -1674,7 +1748,15 @@ function ChannelWorkspace({
           detail.target,
           detail.rootId,
         );
-        if (entry && historyPanel(entry)) open(entry);
+        if (entry && historyPanel(entry))
+          openDetail(
+            entry,
+            channelConversation.current?.querySelector(
+              "[data-message-composer]",
+            ),
+            true,
+            true,
+          );
         else navigation.complete({ status: "failed", reason: "unavailable" });
       }
       // Reselect it over the restored selection and give it its own visit.
@@ -1733,6 +1815,7 @@ function ChannelWorkspace({
     navigation,
     requestedChannel,
     open,
+    openDetail,
     handoff?.activityThread,
     exact?.request,
     exact?.inTimeline,
@@ -1766,6 +1849,8 @@ function ChannelWorkspace({
       intent?: "reply",
     ) => {
       setSettings(undefined);
+      // A promoted root hands this same visit from timeline presentation to its tab.
+      setExactOpening(undefined);
       threadTrigger.current =
         document.activeElement instanceof HTMLElement
           ? document.activeElement
@@ -1799,6 +1884,7 @@ function ChannelWorkspace({
             communityOrigin: scope.slice(0, -(viewer.length + 1)),
           },
         });
+      return tabState.getSelected();
     },
     [
       navigator,
@@ -1806,14 +1892,54 @@ function ChannelWorkspace({
       scope,
       open,
       setSettings,
+      tabState.getSelected,
       tabState.openThreadTab,
       tabState.leaveVisit,
     ],
   );
+  const visitInlineThread = useCallback(
+    (rootId: string) => {
+      if (!navigator || !viewer || !currentId) return;
+      tabState.leaveVisit();
+      void navigator.open({
+        version: 1,
+        kind: "conversation",
+        channelId: currentId,
+        messageId: rootId,
+        threadRootId: rootId,
+        scope: {
+          viewer,
+          communityOrigin: scope.slice(0, -(viewer.length + 1)),
+        },
+      });
+    },
+    [navigator, viewer, currentId, scope, tabState.leaveVisit],
+  );
+  const closeInlineThread = useCallback(
+    (rootId: string) => {
+      const target = navigator?.snapshot().entry.target;
+      if (!navigator || target?.kind !== "conversation" || !currentId) return;
+      navigator.dismiss(
+        (item) =>
+          item.kind === "conversation" &&
+          item.scope.viewer === target.scope.viewer &&
+          item.scope.communityOrigin === target.scope.communityOrigin &&
+          item.channelId === currentId &&
+          item.threadRootId === rootId,
+        {
+          version: 1,
+          kind: "conversation",
+          channelId: currentId,
+          scope: target.scope,
+        },
+      );
+    },
+    [navigator, currentId],
+  );
   const openThread = useCallback(
     (messageId: string, threadRootId: string, intent?: "reply") => {
       if (currentId)
-        openChannelThread(currentId, messageId, threadRootId, intent);
+        return openChannelThread(currentId, messageId, threadRootId, intent);
     },
     [currentId, openChannelThread],
   );
@@ -1831,7 +1957,6 @@ function ChannelWorkspace({
     },
     [secondary.openLinkedThread],
   );
-  const mediaReviewTrigger = useRef<HTMLElement | null>(null);
   // Timeline rows are memoized; their callbacks read the shown destination at
   // call time so a new navigation request does not rerender every row.
   const destination = useRef({ current, navigation });
@@ -1845,14 +1970,17 @@ function ChannelWorkspace({
       initialTime: number,
       hasComments = false,
       initialAttachments?: readonly Attachment[],
+      opening?: MediaReviewOrigin,
     ) => {
       const { current, navigation } = destination.current;
       if (!current) return;
-      mediaReviewTrigger.current =
+      const trigger =
         document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null;
-      setMediaReview({
+      const next: OpenMedia = {
+        id: ++mediaSequence.current,
+        trigger: { current: trigger },
         channelId: current.id,
         channelName: current.name,
         messageId,
@@ -1860,8 +1988,13 @@ function ChannelWorkspace({
         initialTime,
         hasComments,
         initialAttachments,
+        opening,
         ...(navigation ? { entryId: navigation.entryId } : {}),
-      });
+      };
+      setMediaReviews((items) => [
+        ...items.filter((item) => item.promoted),
+        next,
+      ]);
     },
     [],
   );
@@ -1969,7 +2102,7 @@ function ChannelWorkspace({
         // Thread-origin details cover the live thread instead of retiring it.
         if (!fromThread && routedThread && !historyPanel(next))
           select(channelId);
-        open(next, fromThread);
+        openDetail(next, panelTrigger.current, fromThread);
         return true;
       }
       return false;
@@ -1977,6 +2110,7 @@ function ChannelWorkspace({
     [
       panels,
       open,
+      openDetail,
       relay,
       queries,
       select,
@@ -2373,6 +2507,10 @@ function ChannelWorkspace({
                 ? inlineReply.select
                 : undefined
             }
+            hasThreadTab={tabState.hasThreadTab}
+            threadRequest={inlineThreadRequest}
+            onVisitInlineThread={navigator ? visitInlineThread : undefined}
+            onCloseInlineThread={closeInlineThread}
             revealMessageId={
               sent?.channelId === current.id ? sent.id : undefined
             }
@@ -2560,6 +2698,7 @@ function ChannelWorkspace({
                 : "0px",
             } as React.CSSProperties
           }
+          data-composer-host=""
           data-attachment-drop-zone=""
         >
           {composingTeam && (
@@ -2861,6 +3000,7 @@ function ChannelWorkspace({
                         icon: <CurrentChannelIcon size="1rem" />,
                         content: (
                           <div
+                            data-composer-host=""
                             ref={channelConversation}
                             className={styles.conversation}
                           >
@@ -2898,6 +3038,7 @@ function ChannelWorkspace({
         )}
       {secondary.drag.feedback}
       {secondary.hosts}
+      {secondary.detailSheet}
       <p role="status" className="sr-only">
         {secondary.announcement}
       </p>
@@ -3018,36 +3159,58 @@ function ChannelWorkspace({
   );
   return (
     // The review reads thread-tab links like the workspace.
-    <LinkThreadTabContext value={openLinkedThread}>
-      <ConversationChannel
-        session={queries}
-        scope={scope}
-        extensions={extensions}
-        channel={current}
-        interactions={{
-          onOpenLink: openLink,
-          canOpenLink,
-          onOpenMediaReview: openMediaReview,
-        }}
-        mediaReview={
-          showingMediaReview && {
-            ...showingMediaReview,
-            restoreFocus: mediaReviewTrigger,
-            close: () => setMediaReview(undefined),
-          }
-        }
-      >
-        <ForwardMessageProvider
-          session={queries}
-          scope={scope}
-          navigation={navigator}
-          renderDialog
-        >
-          {workspace}
-        </ForwardMessageProvider>
-      </ConversationChannel>
-      {soloMoveNotices}
-    </LinkThreadTabContext>
+    <RetainedThreadContext value={secondary.retainedThreads}>
+      <DetailTabContext value={secondary.promoteDetail}>
+        <LinkThreadTabContext value={openLinkedThread}>
+          <ConversationChannel
+            session={queries}
+            scope={scope}
+            extensions={extensions}
+            channel={current}
+            interactions={{
+              onOpenLink: openLink,
+              canOpenLink,
+              onOpenMediaReview: openMediaReview,
+            }}
+          >
+            <ForwardMessageProvider
+              session={queries}
+              scope={scope}
+              navigation={navigator}
+              renderDialog
+            >
+              {workspace}
+            </ForwardMessageProvider>
+            {showingMediaReviews.map((review) => (
+              <MediaReviewViewer
+                key={review.id}
+                {...review}
+                session={queries}
+                scope={scope}
+                extensions={extensions}
+                onOpenLink={openLink}
+                restoreFocus={review.trigger}
+                onPromoted={() =>
+                  setMediaReviews((items) =>
+                    items.map((item) =>
+                      item.id === review.id
+                        ? { ...item, promoted: true }
+                        : item,
+                    ),
+                  )
+                }
+                close={() =>
+                  setMediaReviews((items) =>
+                    items.filter((item) => item.id !== review.id),
+                  )
+                }
+              />
+            ))}
+          </ConversationChannel>
+          {soloMoveNotices}
+        </LinkThreadTabContext>
+      </DetailTabContext>
+    </RetainedThreadContext>
   );
 }
 

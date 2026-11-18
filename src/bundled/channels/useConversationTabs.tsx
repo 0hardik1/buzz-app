@@ -1,4 +1,15 @@
 import {
+  DetailTabSlot,
+  type DetailTab,
+} from "../../features/messages/DetailTabContext";
+import { DetailsSheet } from "../../features/messages/DetailsSheet";
+import {
+  overlayHostFor,
+  type ComposerOverlayHost,
+} from "../../features/messages/composer-overlay";
+import { PanelSubviewHost } from "../../features/panels/PanelSubview";
+import panelStyles from "../../features/panels/Panels.module.css";
+import {
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -142,6 +153,24 @@ export function useConversationTabs({
   ): void;
 }) {
   const currentId = current?.id;
+  const [detailTabs, setDetailTabs] = useState<
+    (DetailTab & { channelId: string | undefined })[]
+  >([]);
+  const promoteDetail = useCallback(
+    (tab: DetailTab) => {
+      setDetailTabs((tabs) => [
+        ...tabs.filter((item) => item.id !== tab.id),
+        { ...tab, channelId: currentId },
+      ]);
+      tabState.select(tab.id);
+      return () =>
+        setDetailTabs((tabs) => tabs.filter((item) => item.id !== tab.id));
+    },
+    [currentId, tabState.select],
+  );
+  useEffect(() => {
+    for (const tab of detailTabs) if (tab.channelId !== currentId) tab.close();
+  }, [currentId, detailTabs]);
   const viewer = queries.viewer;
   const { entries, setEntries } = tabState;
   const panelHistory = useRef({ onVisitPanel, onClosePanel });
@@ -231,8 +260,7 @@ export function useConversationTabs({
     (next: Opening | undefined, append = false) => {
       const found = next
         ? entryList.current.find(
-            (entry) =>
-              entry.panel === next.panel && entry.target === next.target,
+            (entry) => panelTabId(entry) === panelTabId(next),
           )
         : undefined;
       // A tab retained for its channel stays retained when a link reopens it,
@@ -254,7 +282,8 @@ export function useConversationTabs({
       const retarget =
         existing &&
         wanted &&
-        (existing.channelId !== wanted.channelId ||
+        (existing.target !== wanted.target ||
+          existing.channelId !== wanted.channelId ||
           existing.rootId !== wanted.rootId ||
           existing.channelContext !== wanted.channelContext)
           ? wanted
@@ -282,6 +311,124 @@ export function useConversationTabs({
     },
     [selectOpening, setEntries],
   );
+  type Detail = {
+    id: number;
+    entry: Opening;
+    host: ComposerOverlayHost;
+    trigger: { current: HTMLElement | null };
+    open: boolean;
+    promoted?: boolean;
+    signal?: AbortSignal | undefined;
+  };
+  const detailId = useRef(0);
+  const [details, setDetails] = useState<Detail[]>([]);
+  const detailsRef = useRef(details);
+  detailsRef.current = details;
+  useEffect(() => {
+    for (const tab of detailTabs)
+      if (
+        tab.canonical &&
+        !tabState.tabs.some((item) => item.id === tab.id) &&
+        !entries.some((entry) => panelTabId(entry) === tab.id)
+      )
+        tab.close();
+  }, [detailTabs, tabState.tabs, entries]);
+  const openDetail = useCallback(
+    (
+      entry: Opening,
+      origin?: HTMLElement | null,
+      append = true,
+      fromNavigation = false,
+    ) => {
+      const trigger =
+        origin ??
+        (document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null);
+      const host = overlayHostFor(trigger);
+      if (
+        !host ||
+        !currentId ||
+        entry.channelId !== currentId ||
+        entryList.current.some((item) => panelTabId(item) === panelTabId(entry))
+      ) {
+        open(entry, append);
+        return;
+      }
+      if (
+        !fromNavigation &&
+        historyPanel(entry) &&
+        panelHistory.current.onVisitPanel
+      ) {
+        panelHistory.current.onVisitPanel(entry);
+        return;
+      }
+      if (
+        detailsRef.current.some(
+          (item) =>
+            item.open &&
+            item.entry.panel === entry.panel &&
+            item.entry.target === entry.target &&
+            item.signal === navigationSignal,
+        )
+      )
+        return;
+      const next = {
+        id: ++detailId.current,
+        signal: navigationSignal,
+        entry,
+        host,
+        trigger: { current: trigger },
+        open: true,
+      };
+      setDetails((items) => [...items.filter((item) => item.promoted), next]);
+    },
+    [open, currentId, navigationSignal],
+  );
+  const visibleDetails = details.filter(
+    (detail) =>
+      detail.entry.channelId === currentId &&
+      available.includes(detail.entry.panel) &&
+      (detail.promoted || detail.host.composer.isConnected) &&
+      (detail.promoted || !detail.open || !detail.signal?.aborted),
+  );
+  useEffect(() => {
+    if (details.length !== visibleDetails.length) setDetails(visibleDetails);
+  }, [details.length, visibleDetails]);
+  const updateDetail = (id: number, patch: Partial<Detail>) =>
+    setDetails((items) =>
+      items.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    );
+  const removeDetail = (id: number) =>
+    setDetails((items) => items.filter((item) => item.id !== id));
+  const closeDetail = (detail: Detail) => {
+    if (detail.promoted) {
+      closeTab(detail.entry);
+      return;
+    }
+    updateDetail(detail.id, { open: false });
+    if (!detail.signal?.aborted && historyPanel(detail.entry))
+      panelHistory.current.onClosePanel?.(detail.entry, entryList.current);
+  };
+  const detailContext = (detail: Detail) => ({
+    channelId: detail.entry.channelId,
+    ...(detail.entry.rootId && { rootId: detail.entry.rootId }),
+    canOpen: canOpenLink,
+    open: (target: string) => {
+      if (detail.promoted) return panelContext(detail.entry).open(target);
+      if (!active() || !detailsRef.current.includes(detail) || !detail.open)
+        return false;
+      const next = panelOpening(
+        panels,
+        detail.entry.channelId,
+        target,
+        detail.entry.rootId,
+      );
+      if (!next) return false;
+      updateDetail(detail.id, { entry: next });
+      return true;
+    },
+  });
   const panelTabs = entries.filter(
     (entry) =>
       available.includes(entry.panel) &&
@@ -345,6 +492,7 @@ export function useConversationTabs({
     const remaining = entryList.current.filter((item) => item !== entry);
     entryList.current = remaining;
     setEntries(remaining);
+    detailTabs.find((tab) => tab.id === tabId(entry))?.close();
     afterClose(tabId(entry), panelTrigger.current);
     panelHistory.current.onClosePanel?.(entry, remaining);
   };
@@ -372,6 +520,7 @@ export function useConversationTabs({
     ...leadingIds,
     ...tabState.tabs.map((tab) => tab.id),
     ...panelTabs.map(tabId),
+    ...detailTabs.filter((tab) => !tab.canonical).map((tab) => tab.id),
   ];
   const selectedTab = selectedTabId(tabState.selected, rootTabIds);
   // A tab-placed channel launcher keeps one retained tab per channel.
@@ -475,6 +624,7 @@ export function useConversationTabs({
     const closing = tabState.tabs.find((tab) => tab.id === id);
     const wasActive = tabState.paneOpen && selectedTab === id;
     tabState.setTabs((tabs) => tabs.filter((tab) => tab.id !== id));
+    detailTabs.find((tab) => tab.id === id)?.close();
     afterClose(id);
     const last = rootTabIds.length === 1;
     if (last) focusSplit.current = true;
@@ -532,6 +682,7 @@ export function useConversationTabs({
       panelTabId(opening.current) !== tabState.getSelected()
     )
       opening.current = undefined;
+    return tabState.getSelected();
   };
   const openConversationLink = (
     channelId: string,
@@ -562,7 +713,7 @@ export function useConversationTabs({
         document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null;
-      open(next, true);
+      openDetail(next, panelTrigger.current);
       return true;
     }
     return openLink(url);
@@ -685,6 +836,7 @@ export function useConversationTabs({
     const target = tabChannel(tab);
     const usable = !!target;
     const openChannel = openInChannel(tab, target);
+    const retained = detailTabs.find((item) => item.id === tab.id);
     return {
       id: tab.id,
       composer: true,
@@ -729,6 +881,11 @@ export function useConversationTabs({
           <p role="status" className={styles.empty}>
             This conversation is no longer available.
           </p>
+        ) : retained ? (
+          <DetailTabSlot
+            node={retained.node}
+            close={() => closeConversationTab(tab.id)}
+          />
         ) : tab.kind === "thread" && nodes.get(tab.id) ? (
           <TabSlot node={nodes.get(tab.id) as HTMLDivElement} />
         ) : (
@@ -757,6 +914,7 @@ export function useConversationTabs({
 
   function panelItem(entry: Opening) {
     const id = tabId(entry);
+    const retained = detailTabs.find((item) => item.id === id);
     if (tabState.paneOpen && selectedTab === id) visitTab.shown.add(id);
     return {
       id,
@@ -770,27 +928,24 @@ export function useConversationTabs({
         ),
       }),
       close: () => closeTab(entry),
-      content:
-        !entry.panel.deferUntilShown || visitTab.shown.has(id) ? (
-          <PanelMediaCard
-            session={queries}
-            scope={scope}
-            channelId={entry.channelId}
-            channelName={
-              entry.channelContext?.channelName ?? current?.name ?? ""
-            }
-            extensions={extensions}
-            isActive={() =>
-              panelActive(entry) && tabState.paneOpen
-            }
-            panel={entry.panel}
-            contentKey={panelContentTarget(entry)}
-            target={entry.target}
-            context={panelContext(entry)}
-            channelContext={entry.channelContext}
-            close={() => closeTab(entry)}
-          />
-        ) : null,
+      content: retained ? (
+        <DetailTabSlot node={retained.node} close={() => closeTab(entry)} />
+      ) : !entry.panel.deferUntilShown || visitTab.shown.has(id) ? (
+        <PanelMediaCard
+          session={queries}
+          scope={scope}
+          channelId={entry.channelId}
+          channelName={entry.channelContext?.channelName ?? current?.name ?? ""}
+          extensions={extensions}
+          isActive={() => panelActive(entry) && tabState.paneOpen}
+          panel={entry.panel}
+          contentKey={panelContentTarget(entry)}
+          target={entry.target}
+          context={panelContext(entry)}
+          channelContext={entry.channelContext}
+          close={() => closeTab(entry)}
+        />
+      ) : null,
     };
   }
 
@@ -812,6 +967,7 @@ export function useConversationTabs({
       navigationSignal?.aborted ||
       !(
         closing.length ||
+        detailTabs.some((tab) => tab.id !== keep) ||
         tabState.entries.some((entry) => panelTabId(entry) !== keep) ||
         (tabState.settings && keep !== "settings") ||
         tabState.thread ||
@@ -829,15 +985,127 @@ export function useConversationTabs({
       (entry) => panelTabId(entry) === keep,
     );
     opening.current = entryList.current[0];
+    for (const tab of detailTabs) if (tab.id !== keep) tab.close();
     tabState.closeTabs(keep);
+    if (keep && detailTabs.some((tab) => tab.id === keep))
+      tabState.select(keep);
     if (onCloseTabs) onCloseTabs(closing, closingEntries, keep);
     else if (addressed?.kind === "thread")
       onCloseThread?.(addressed, false, true);
     return true;
   };
 
+  const retainedThreads = useMemo(
+    () =>
+      new Map(
+        tabState.tabs.flatMap((tab) => {
+          if (tab.kind !== "thread") return [];
+          const route =
+            routed?.channelId === tab.channelId &&
+            routed.messageId === tab.messageId
+              ? routed.navigation
+              : undefined;
+          return [
+            [
+              `${tab.channelId}:${rootOfTab(tab)}`,
+              {
+                messageId: tab.messageId,
+                active: tabState.paneOpen && selectedTab === tab.id,
+                navigation: route,
+                onRetryNavigation,
+                onResolvedRoot: (rootId: string) =>
+                  tabState.resolveThreadRoot(tab.id, rootId),
+                onDifferentThread: (requested: string, kept: string) =>
+                  tabState.divertThread(tab.id, requested, kept),
+                replyRequest: tab.replyRequest,
+                focusRequest: tab.focusRequest,
+                revealSelected: tab.revealRequest !== undefined,
+                revealRequest: tab.revealRequest,
+                unreadRequest: tab.unreadRequest,
+              },
+            ] as const,
+          ];
+        }),
+      ),
+    [
+      tabState.tabs,
+      tabState.paneOpen,
+      tabState.resolveThreadRoot,
+      tabState.divertThread,
+      selectedTab,
+      routed,
+      onRetryNavigation,
+    ],
+  );
+
   return {
     open,
+    openDetail,
+    promoteDetail,
+    retainedThreads,
+    detailSheet: visibleDetails.map((original) => {
+      const detail = original.promoted
+        ? {
+            ...original,
+            entry:
+              entries.find(
+                (entry) => panelTabId(entry) === panelTabId(original.entry),
+              ) ?? original.entry,
+          }
+        : original;
+      return (
+        <DetailsSheet
+          key={detail.id}
+          open={detail.open}
+          onOpenChange={(open) =>
+            open ? updateDetail(detail.id, { open }) : closeDetail(detail)
+          }
+          onClosed={() => removeDetail(detail.id)}
+          onPromoted={() => updateDetail(detail.id, { promoted: true })}
+          openInSplit={() => {
+            open(detail.entry, true);
+            return panelTabId(detail.entry);
+          }}
+          host={detail.host}
+          title={detail.entry.panel.title}
+          readerOnly
+          finalFocus={detail.trigger}
+        >
+          <PanelSubviewHost close={() => closeDetail(detail)}>
+            {/* The card bounds the content so it scrolls, as in a panel tab. */}
+            <div className={panelStyles.card}>
+              <div className={panelStyles.content}>
+                <PanelMediaCard
+                  presentation="content"
+                  session={queries}
+                  scope={scope}
+                  channelId={detail.entry.channelId}
+                  channelName={
+                    detail.entry.channelContext?.channelName ??
+                    current?.name ??
+                    ""
+                  }
+                  extensions={extensions}
+                  isActive={() =>
+                    detail.promoted
+                      ? panelActive(detail.entry) && tabState.paneOpen
+                      : active() &&
+                        detailsRef.current.some(
+                          (item) => item.id === detail.id && item.open,
+                        )
+                  }
+                  panel={detail.entry.panel}
+                  contentKey={panelContentTarget(detail.entry)}
+                  target={detail.entry.target}
+                  context={detailContext(detail)}
+                  close={() => closeDetail(detail)}
+                />
+              </div>
+            </div>
+          </PanelSubviewHost>
+        </DetailsSheet>
+      );
+    }),
     opened,
     panel,
     panelTabs,
@@ -868,7 +1136,12 @@ export function useConversationTabs({
     drag,
     // Thread content renders here once and is attached to its tab's slot.
     hosts: tabState.tabs.flatMap((tab) => {
-      if (tab.kind !== "thread" || withholdThreads) return [];
+      if (
+        tab.kind !== "thread" ||
+        withholdThreads ||
+        detailTabs.some((item) => item.id === tab.id)
+      )
+        return [];
       const node = nodes.get(tab.id);
       const target = tabChannel(tab);
       if (!node || !target) return [];
@@ -934,6 +1207,29 @@ export function useConversationTabs({
         ),
       ];
     }),
-    items: [...tabState.tabs.map(tabItem), ...panelTabs.map(panelItem)],
+    items: [
+      ...tabState.tabs.map(tabItem),
+      ...panelTabs.map(panelItem),
+      ...detailTabs
+        .filter((tab) => !tab.canonical)
+        .map((tab) => ({
+          id: tab.id,
+          label: tab.title,
+          move: undefined,
+          close: () => {
+            tab.close();
+            afterClose(tab.id);
+          },
+          content: (
+            <DetailTabSlot
+              node={tab.node}
+              close={() => {
+                tab.close();
+                afterClose(tab.id);
+              }}
+            />
+          ),
+        })),
+    ],
   };
 }

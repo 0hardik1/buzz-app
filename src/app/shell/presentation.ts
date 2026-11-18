@@ -1,5 +1,6 @@
 import {
   AlarmIcon,
+  HouseIcon,
   BellIcon,
   BestieIcon,
   BrowserIcon,
@@ -29,6 +30,7 @@ const bundledOrder = [
   "buzz.bestie/bestie",
 ];
 const dockOrder = [
+  "buzz.home/home",
   "buzz.bestie/bestie",
   "buzz.channels/channels",
   "buzz.reminders/reminders",
@@ -54,6 +56,7 @@ export function orderPages(
 }
 
 const bundledIcons = new Map<string, typeof BrowserIcon>([
+  ["buzz.home/home", HouseIcon],
   ["buzz.bestie/bestie", BestieIcon],
   ["buzz.inbox/inbox", BellIcon],
   ["buzz.drafts-and-sent/drafts-sent", SendIcon],

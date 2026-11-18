@@ -8,6 +8,7 @@ import { ConnectionNotices } from "./ConnectionNotices";
 import styles from "./AppShell.module.css";
 import { ResizeHandle } from "../../features/panels/ResizeHandle";
 import { RailNavigation } from "./RailNavigation";
+import { RailSectionServices } from "./NewRailSection";
 import { RailDrag } from "./RailArrangement";
 import { ChatIcons } from "../../features/conversation/ChatIconSlot";
 import { SidePanelPresence } from "../../features/panels/side-panel-presence";
@@ -31,6 +32,8 @@ import { isApplePlatform } from "../../features/shortcuts/format";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
   SidebarIcon,
+  HouseIcon,
+  BumbleIcon,
   MagnifyingGlassIcon,
 } from "../../shared/design-system/icons";
 import { createPortal } from "react-dom";
@@ -54,6 +57,7 @@ import { CommunityShortcuts } from "./CommunityShortcuts";
 import { MarkAllReadShortcut } from "./MarkAllReadShortcut";
 import type { Appearance } from "../../shared/theme/service";
 import { PageSearch, type SearchServices } from "./PageSearch";
+import { VoiceJump } from "./VoiceJump";
 import { FindInPage } from "./FindInPage";
 import { BestieNavigationProvider } from "./BestieNavigation";
 import type {
@@ -177,8 +181,6 @@ function AppShellContent({
   );
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const openSwitcher = useCallback(() => {
-    setSidebarOpen(true);
-    setNavigationOpen(true);
     setSwitcherOpen(true);
   }, []);
   const connection = useRelayConnection(communities.relay);
@@ -194,6 +196,13 @@ function AppShellContent({
     return () => query.removeEventListener("change", update);
   }, []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const homePage = pages.find((page) => page.key === "buzz.home/home");
+  const onHome = !!homePage && selected === homePage.key;
+  const [browseHome, setBrowseHome] = useState(false);
+  const homeMode = onHome && !browseHome;
+  useLayoutEffect(() => {
+    if (!onHome) setBrowseHome(false);
+  }, [onHome]);
   const [railSheet, setRailSheet] = useState<{
     section: string;
     scope: string | undefined;
@@ -201,6 +210,7 @@ function AppShellContent({
   }>();
   const openRailSheet = useCallback(
     (section: string) => {
+      setBrowseHome(true);
       setSidebarOpen(true);
       setNavigationOpen(true);
       setRailSheet({
@@ -215,11 +225,6 @@ function AppShellContent({
     [connection.scope],
   );
   const closeRailSheet = useCallback(() => setRailSheet(undefined), []);
-  useEffect(() => {
-    setRailSheet((current) =>
-      current?.scope === connection.scope ? current : undefined,
-    );
-  }, [connection.scope]);
   const railScope = connection.viewer ? connection.scope : undefined;
   useEffect(
     () =>
@@ -269,6 +274,12 @@ function AppShellContent({
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const visibleRail = narrow ? navigationOpen : sidebarOpen;
   const compactRail = !narrow && !sidebarOpen;
+  const cardsVisible = !homeMode && (narrow ? navigationOpen : sidebarOpen);
+  useEffect(() => {
+    setRailSheet((current) =>
+      !compactRail && current?.scope === connection.scope ? current : undefined,
+    );
+  }, [compactRail, connection.scope]);
   const creationInNavigation = !!creationAction;
   useEffect(
     () =>
@@ -284,6 +295,7 @@ function AppShellContent({
           (isApplePlatform(navigator.platform) ||
             !document.activeElement?.closest(".xterm")),
         run: () => {
+          setBrowseHome(true);
           setSidebarOpen(true);
           setNavigationOpen(true);
           setCreationOpen(true);
@@ -311,10 +323,19 @@ function AppShellContent({
   const dockPages = useMemo(
     () =>
       orderPages(
-        pages.filter((page) => page.primary && page.key === "buzz.inbox/inbox"),
+        pages.filter(
+          (page) =>
+            page.primary &&
+            (page.key === "buzz.home/home" || page.key === "buzz.inbox/inbox"),
+        ),
         "dock",
       ),
     [pages],
+  );
+  const primaryPages = dockPages.filter(
+    (page) =>
+      page.key !== "buzz.home/home" &&
+      !(connection.viewer && connection.scope && searchServices?.navigation),
   );
   const search = (
     <PageSearch
@@ -358,7 +379,7 @@ function AppShellContent({
       side="bottom"
     />
   );
-  const railActions = (
+  const accountControls = (
     <>
       {railCommunity}
       <ProfileButton
@@ -372,45 +393,93 @@ function AppShellContent({
         }
         side="bottom"
       />
-      <div ref={setSearchContainer} />
-      {creationAction && <div ref={setCreationMenuContainer} />}
+    </>
+  );
+  const navigationModes = (
+    <>
+      {homePage && (
+        <>
+          <IconButton
+            aria-label="Home"
+            title="Home"
+            aria-pressed={homeMode}
+            data-selected={homeMode || undefined}
+            icon={<HouseIcon size={16} aria-hidden="true" />}
+            onClick={() => {
+              setBrowseHome(false);
+              setNavigationOpen(false);
+              setRailSheet(undefined);
+              onSelect(homePage.key);
+            }}
+          />
+          <IconButton
+            aria-label="All cards"
+            title="All cards"
+            aria-pressed={cardsVisible}
+            data-selected={cardsVisible || undefined}
+            aria-controls="shell-workspace-navigation"
+            icon={<BumbleIcon size={16} aria-hidden="true" />}
+            onClick={() => {
+              setBrowseHome(true);
+              setRailSheet(undefined);
+              setSidebarOpen(true);
+              setNavigationOpen(true);
+            }}
+          />
+        </>
+      )}
     </>
   );
   const dock = (
     <AppDock
-      sheetOpen={!!railSheet && railSheet.scope === connection.scope}
+      placement={onHome ? "overlay" : "inline"}
+      navigationMode={
+        homePage && !compactRail
+          ? cardsVisible
+            ? "workspace"
+            : "home"
+          : undefined
+      }
+      sheetOpen={
+        (!homePage || cardsVisible) &&
+        !compactRail &&
+        !!railSheet &&
+        railSheet.scope === connection.scope
+      }
       sheet={
-        <AnimatePresence>
-          {railSheet &&
-            railSheet.scope === connection.scope &&
-            shellScope &&
-            searchServices &&
-            railNavigator && (
-              <RailCardSheet
-                key={connection.scope}
-                opener={railSheet.opener}
-                close={closeRailSheet}
-              >
-                {(closeAction) => (
-                  <RailNavigation
-                    section={railSheet.section}
-                    sectionAction={closeAction}
-                    session={connection.session}
-                    scope={shellScope}
-                    sidebarSections={searchServices.sidebarSections}
-                    navigator={railNavigator}
-                    pages={pages}
-                    selected={selected}
-                    onSelect={onSelect}
-                  />
-                )}
-              </RailCardSheet>
-            )}
-        </AnimatePresence>
+        (!homePage || cardsVisible) &&
+        !compactRail && (
+          <AnimatePresence>
+            {railSheet &&
+              railSheet.scope === connection.scope &&
+              shellScope &&
+              searchServices &&
+              railNavigator && (
+                <RailCardSheet
+                  key={connection.scope}
+                  opener={railSheet.opener}
+                  close={closeRailSheet}
+                >
+                  {(closeAction) => (
+                    <RailNavigation
+                      section={railSheet.section}
+                      sectionAction={closeAction}
+                      session={connection.session}
+                      scope={shellScope}
+                      sidebarSections={searchServices.sidebarSections}
+                      decisions={searchServices.decisions}
+                      navigator={railNavigator}
+                      pages={pages}
+                      selected={selected}
+                      onSelect={onSelect}
+                    />
+                  )}
+                </RailCardSheet>
+              )}
+          </AnimatePresence>
+        )
       }
-      showPrimaryNavigation={
-        !(connection.viewer && connection.scope && searchServices?.navigation)
-      }
+      showPrimaryNavigation={primaryPages.length > 0}
       open={visibleRail || compactRail}
       compact={compactRail}
       onDismiss={() => {
@@ -418,12 +487,22 @@ function AppShellContent({
         else setSidebarOpen(false);
         navigationToggle.current?.focus();
       }}
-      pages={dockPages}
+      pages={primaryPages}
       selected={owner}
       currentPage={selected}
       onSelect={onSelect}
       previews
-      header={railActions}
+      header={
+        <fieldset
+          className={styles.railToolbar}
+          data-compact={compactRail || undefined}
+          aria-label="Sidebar toolbar"
+        >
+          {navigationModes}
+          <div ref={setSearchContainer} />
+          {creationAction && <div ref={setCreationMenuContainer} />}
+        </fieldset>
+      }
     >
       <ConnectionNotices
         communities={communities}
@@ -433,10 +512,12 @@ function AppShellContent({
         <RailNavigation
           key={connection.scope}
           compact={compactRail}
+          visible={compactRail || (homePage ? cardsVisible : visibleRail)}
           onOpenSection={openRailSheet}
           session={connection.session}
           scope={shellScope}
           sidebarSections={searchServices.sidebarSections}
+          decisions={searchServices.decisions}
           sidebarScope={searchServices.sidebarScope}
           navigator={railNavigator}
           pages={pages}
@@ -450,7 +531,10 @@ function AppShellContent({
         <PageNavigation
           placement={compactRail ? "dock" : "sidebar"}
           pages={pages.filter(
-            (page) => page.primary && page.key !== "buzz.inbox/inbox",
+            (page) =>
+              page.primary &&
+              page.key !== "buzz.inbox/inbox" &&
+              page.key !== "buzz.home/home",
           )}
           selected={selected}
           onSelect={onSelect}
@@ -505,8 +589,10 @@ function AppShellContent({
               aria-controls="shell-rail"
               title={toggleLabel}
               onClick={() => {
-                if (narrow) setNavigationOpen((open) => !open);
-                else setSidebarOpen((open) => !open);
+                if (narrow) {
+                  setBrowseHome(true);
+                  setNavigationOpen((open) => !open);
+                } else setSidebarOpen((open) => !open);
               }}
               icon={<SidebarIcon aria-hidden="true" size={16} />}
             />
@@ -515,6 +601,7 @@ function AppShellContent({
         </div>
         <div className="shell-search">
           {search}
+          <VoiceJump services={searchServices} />
           <FindInPage shortcuts={searchServices?.shortcuts} />
         </div>
         <div
@@ -524,6 +611,7 @@ function AppShellContent({
         >
           <div className="shell-actions-fixed">
             {launchers}
+            {accountControls}
 
             <WindowControls />
           </div>
@@ -532,7 +620,7 @@ function AppShellContent({
 
       <div
         ref={railWorkspace}
-        className="shell-workspace"
+        className={`shell-workspace ${onHome ? styles.homeWorkspace : ""}`}
         style={
           {
             "--shell-rail-width": compactRail
@@ -542,6 +630,7 @@ function AppShellContent({
         }
         data-detail-container=""
         data-full-width-workspace={
+          selected === "buzz.home/home" ||
           selected === "buzz.channels/channels" ||
           selected === "buzz.inbox/inbox" ||
           selected === "buzz.drafts-and-sent/drafts-sent" ||
@@ -554,22 +643,25 @@ function AppShellContent({
         <ChatIcons value={searchServices?.conversation?.chatIcons}>
           <RailDrag>
             {dock}
-            {!narrow && !compactRail && (
-              <ResizeHandle
-                label="Resize app sidebar"
-                width={railWidth}
-                min={RAIL_MIN_WIDTH}
-                max={440}
-                target={railWorkspace}
-                property="--shell-rail-width"
-                className={styles.railResize}
-                setWidth={resizeRail}
-                reset={() => {
-                  setRailWidth(304);
-                  setSidebarOpen(true);
-                }}
-              />
-            )}
+            {!narrow &&
+              !compactRail &&
+              !onHome &&
+              (!homePage || cardsVisible) && (
+                <ResizeHandle
+                  label="Resize app sidebar"
+                  width={railWidth}
+                  min={RAIL_MIN_WIDTH}
+                  max={440}
+                  target={railWorkspace}
+                  property="--shell-rail-width"
+                  className={styles.railResize}
+                  setWidth={resizeRail}
+                  reset={() => {
+                    setRailWidth(304);
+                    setSidebarOpen(true);
+                  }}
+                />
+              )}
             <div
               ref={workspaceRef}
               className="shell-dialog-frame"
@@ -630,13 +722,28 @@ function AppShellContent({
           </RailDrag>
         </ChatIcons>
       </div>
-      {creationAction?.(
-        creationOpen,
-        setCreationOpen,
-        creationContainer,
-        creationMenuContainer,
-        railNavigator,
-      )}
+      <RailSectionServices
+        value={{
+          decisions: searchServices?.decisions,
+          sidebarSections: searchServices?.sidebarSections,
+          created: (id, widget) => {
+            if (widget) {
+              setBrowseHome(true);
+              setSidebarOpen(true);
+              setNavigationOpen(true);
+              setRailSheet(undefined);
+            } else openRailSheet(id);
+          },
+        }}
+      >
+        {creationAction?.(
+          creationOpen,
+          setCreationOpen,
+          creationContainer,
+          creationMenuContainer,
+          railNavigator,
+        )}
+      </RailSectionServices>
       {searchServices && (
         <>
           <MarkAllReadShortcut

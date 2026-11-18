@@ -394,6 +394,19 @@ and are asked to sign in again in Buzz.
   and attach a voice note. Sending requires ffmpeg on the host computer. Sent
   notes support playback and seeking; a note's duration appears once it
   starts playing.
+- **Voice and point (Mac)**: with Bestie enabled and a saved Bestie, hold
+  Command and Option together for a quarter second to record in the focused
+  Buzz window. Your animated Bestie follows the pointer with a soft audio-reactive
+  aura while the pointed-at message or control stays clear of the subtle scrim.
+  Rest on a target for 350ms to capture a cropped image, up to four images and
+  five minutes of audio. Images come only from the Buzz window; editor/input
+  areas are redacted. Release either key to review playback and timestamped
+  images, remove unwanted images, then choose **Send to Bestie**. Nothing
+  uploads before Send, and the existing DM opens if needed. Escape, another
+  Command shortcut, switching windows, or changing communities cancels recording.
+  First use may request microphone access; if that interrupts the hold, allow
+  access and hold Command and Option again. Screenshots require Mac desktop;
+  a capture error appears in review and does not prevent sending the audio.
 - Long message bubbles use the available conversation width, stopping 32px
   before the opposite speaker’s avatar column. Short messages hug their text.
 - Hover over a message to reveal the capsule above it: add a reaction, reply,
@@ -724,6 +737,13 @@ and are asked to sign in again in Buzz.
   **Join**. Private
   channels appear only once someone adds you. Search reopens where you left it
   for a few minutes; Escape starts fresh next time.
+- **Jumping by voice**: in builds with a configured voice transcription service,
+  ⇧⌘K (Shift+Ctrl+K elsewhere) or the microphone beside Search opens a box
+  with the microphone on. Buzz ranks the channels, DMs, agent chats, and threads
+  it has loaded as you speak, then opens a confident match or waits for a pause.
+  If no destination is likely, choose one of the closest results or type and
+  press Enter. This requires the build's `BUZZ_VOICE_TRANSCRIPTION_URL` and
+  a configured Decisions API. An unset or blank transcription URL leaves it unavailable.
 - **Jumping to unread**: opening search (⌘T or ⌘K; Ctrl elsewhere) with
   nothing typed lists up to five of your other unread channels and DMs first,
   most recently active first, and selects the first, so Enter opens it, instead

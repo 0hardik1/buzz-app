@@ -1,4 +1,5 @@
 import { RailCardResize } from "./RailCardResize";
+import { forgetRailLinks, RailLinkRow, useRailLinks } from "./rail-links";
 import { readView, writeView, subscribeView } from "../../shared/view-state";
 import { accepts, holdsCopy, ownSection, railSections } from "./rail-sections";
 import { motion, useReducedMotion } from "motion/react";
@@ -27,6 +28,7 @@ import {
   type ReactNode,
   type CSSProperties,
   type ReactElement,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { NavigationSection } from "../../shared/design-system/ui/NavigationSection";
@@ -61,7 +63,9 @@ import {
 import { CreateSidebarSection } from "../../bundled/channels/CreateSidebarSection";
 import { Input } from "../../shared/design-system/ui/Input";
 import type { RailEntry } from "./rail-pins";
-import { useRailLayout } from "./rail-layout";
+import { useRailLayout, type RailLayout } from "./rail-layout";
+import type { LiveSectionRule } from "../../features/sidebar-sections/live-section";
+import type { DemoWidgetKind } from "../../features/sidebar-widget-demos/kinds";
 import styles from "./RailArrangement.module.css";
 import { Header } from "../../shared/design-system/ui/Header";
 import { EmptyState } from "../../shared/design-system/ui/EmptyState";
@@ -80,6 +84,7 @@ type Arrangement = {
   selectedSection?: string | undefined;
   openSection(id: string): void;
   groups: { id: string; title: string }[];
+  isLiveSection(id: string): boolean;
   membership: ReturnType<typeof railSections>;
   /** Every entry by id as it is now, for rows saved in a section. */
   current: ReadonlyMap<string, RailEntry>;
@@ -207,6 +212,8 @@ function Arrangement({
   openSection,
   compact = false,
   only,
+  renderCustomSection,
+  renderNewSection,
 }: {
   partition: string;
   sections: Group[];
@@ -234,6 +241,16 @@ function Arrangement({
   selectedSection?: string | undefined;
   openSection(id: string): void;
   compact?: boolean;
+  renderCustomSection?: (section: RailLayout["sections"][number]) => ReactNode;
+  renderNewSection?: (props: {
+    create(
+      title: string,
+      rule?: LiveSectionRule,
+      widget?: DemoWidgetKind,
+    ): boolean;
+    close(): void;
+    finalFocus: RefObject<HTMLButtonElement | null>;
+  }) => ReactNode;
 }) {
   const host = useContext(DragHostContext);
   const { active } = useDndContext();
@@ -252,7 +269,9 @@ function Arrangement({
     ...sections,
     ...layout.sections.map((section) => ({
       ...section,
-      content: <RailGroup id={section.id} title={section.title} />,
+      content: renderCustomSection?.(section) ?? (
+        <RailGroup id={section.id} title={section.title} />
+      ),
     })),
   ];
   const order = [...layout.order, ...groups.map((group) => group.id)];
@@ -275,12 +294,16 @@ function Arrangement({
       id: group.id,
       title: group.title,
     })),
+    isLiveSection: (id) =>
+      id.startsWith("custom:live:") ||
+      !!layout.sections.find((section) => section.id === id)?.live,
     membership: railSections(
       layout,
       groups.map(({ id, title }) => ({ id, title })),
     ),
     current,
     move: (entry, section, from) => {
+      if (value.isLiveSection(section)) return;
       // Pins are their own list: a drop there pins, as the row's menu does.
       if (section === "pins") onTogglePin(entry, true);
       // A conversation lives in Team or Solo: nothing moves or copies it there.
@@ -304,7 +327,7 @@ function Arrangement({
       saved(rename(id, title));
     },
     remove: (id) => {
-      saved(remove(id));
+      if (saved(remove(id))) forgetRailLinks(partition, id);
     },
     renderEntry,
     renderRowActions,
@@ -446,26 +469,39 @@ function Arrangement({
             {error}
           </p>
         )}
-        {creating && (
-          <CreateSidebarSection
-            channelName={creating.entry?.label}
-            finalFocus={
-              creating.entry
-                ? () => creating.opener?.() ?? false
-                : newSectionButton
-            }
-            writable
-            refreshing={false}
-            retry={async () => {}}
-            close={() => setCreating(undefined)}
-            create={({ id, name }) => {
-              if (!saved(create(id, name, creating.entry, creating.from)))
-                throw new Error("Couldn’t save this section. Try again.");
-              setCreating(undefined);
-              return true;
-            }}
-          />
-        )}
+        {creating && !creating.entry && renderNewSection
+          ? renderNewSection({
+              close: () => setCreating(undefined),
+              finalFocus: newSectionButton,
+              create: (title, rule, widget) => {
+                const id = `${widget ? "widget:" : rule ? "live:" : ""}${crypto.randomUUID()}`;
+                const ok = saved(
+                  create(id, title, undefined, undefined, rule, widget),
+                );
+                if (ok && !widget) openSection(`custom:${id}`);
+                return ok;
+              },
+            })
+          : creating && (
+              <CreateSidebarSection
+                channelName={creating.entry?.label}
+                finalFocus={
+                  creating.entry
+                    ? () => creating.opener?.() ?? false
+                    : newSectionButton
+                }
+                writable
+                refreshing={false}
+                retry={async () => {}}
+                close={() => setCreating(undefined)}
+                create={({ id, name }) => {
+                  if (!saved(create(id, name, creating.entry, creating.from)))
+                    throw new Error("Couldn’t save this section. Try again.");
+                  setCreating(undefined);
+                  return true;
+                }}
+              />
+            )}
       </ListedContext>
     </ArrangementContext>
   );
@@ -486,6 +522,8 @@ export function RailGroup({
   wrapContent,
   trailingEntryId,
   sortEntries,
+  customContent = false,
+  widget,
 }: {
   id: string;
   title: string;
@@ -503,15 +541,34 @@ export function RailGroup({
   wrapContent?: (content: ReactNode) => ReactNode;
   trailingEntryId?: string;
   sortEntries?: (a: RailEntry, b: RailEntry) => number;
+  /** Feature-owned rows such as GitHub must remain present in the full list. */
+  customContent?: boolean;
+  /** Simulated card body; the rail retains framing and section management. */
+  widget?: string;
 }) {
   const arrangement = useContext(ArrangementContext);
   // A section's page shares the cards' drag context: only the card is a
   // target or moves.
   const listed = useContext(ListedContext);
+  const links = useRailLinks(
+    arrangement?.partition ?? "",
+    id,
+    !!arrangement && !widget && !arrangement.isLiveSection(id),
+  );
+  const linkRows = links.links.map((link) => (
+    <RailLinkRow
+      key={link.url}
+      link={link}
+      remove={() => links.remove(link.url)}
+    />
+  ));
   const { active } = useDndContext();
   const drop = useDroppable({
     id: listed ? `listed:${id}` : id,
-    disabled: listed,
+    disabled:
+      listed ||
+      (!active?.data.current?.section &&
+        (!!widget || !!arrangement?.isLiveSection(id))),
     resizeObserverConfig: { updateMeasurementsFor: [] },
   });
   const drag = useDraggable({
@@ -544,7 +601,7 @@ export function RailGroup({
   useLayoutEffect(() => {
     if (naming || !refocus.current) return;
     refocus.current = false;
-    titleButton.current?.focus();
+    (titleButton.current ?? grabber.current?.querySelector("button"))?.focus();
   }, [naming]);
   const named = (name?: string) => {
     if (!naming) return;
@@ -584,7 +641,16 @@ export function RailGroup({
       {sourceById.get(entry.id)?.content ?? arrangement?.renderEntry(entry, id)}
     </RailSourceRow>
   ));
-  const notes = children;
+  const notes = (
+    <>
+      {children}
+      {links.error && (
+        <p role="alert" className="text-body-sm text-secondary">
+          {links.error}
+        </p>
+      )}
+    </>
+  );
   if (sortEntries)
     rows.sort((a, b) => sortEntries(a.props.entry, b.props.entry));
   if (trailingEntryId)
@@ -601,10 +667,15 @@ export function RailGroup({
     (row) => !leadingEntryIds.includes(row.props.entry.id),
   );
   const shown = limited ? preview.slice(0, rowLimit) : preview;
-  const more = limited && preview.length > rowLimit;
+  const more = limited && preview.length + linkRows.length > rowLimit;
+  const shownLinks = limited
+    ? linkRows.slice(0, Math.max(0, rowLimit - shown.length))
+    : linkRows;
   if (
     arrangement?.pageSection === id &&
     arrangement.renderSectionList &&
+    !linkRows.length &&
+    !customContent &&
     (id === "pins" || id.startsWith("custom:"))
   )
     return arrangement.renderSectionList(
@@ -615,7 +686,11 @@ export function RailGroup({
     );
   if (arrangement?.pageSection === id)
     return (
-      <section className={feedStyles.page} aria-label={title}>
+      <section
+        className={feedStyles.page}
+        aria-label={title}
+        {...links.handlers}
+      >
         <Header
           title={title}
           actions={
@@ -632,6 +707,7 @@ export function RailGroup({
             </div>
           ))}
           {notes}
+          {linkRows}
         </div>
       </section>
     );
@@ -640,6 +716,9 @@ export function RailGroup({
       {rowsLabel ? (
         <ul aria-label={rowsLabel} className={styles.rows}>
           {shown.map((row) => (
+            <li key={row.key}>{row}</li>
+          ))}
+          {shownLinks.map((row) => (
             <li key={row.key}>{row}</li>
           ))}
         </ul>
@@ -653,6 +732,7 @@ export function RailGroup({
       ) : (
         shown
       )}
+      {!rowsLabel && shownLinks}
       {notes}
     </>
   );
@@ -685,7 +765,9 @@ export function RailGroup({
         drop.setNodeRef(node);
         drag.setNodeRef(node);
       }}
-      className={styles.group}
+      className={`${styles.group}${widget ? " widget-frame" : ""}`}
+      {...links.handlers}
+      data-widget={widget}
       onPointerMove={(event) => {
         if (event.pointerType !== "mouse" || !grabber.current) return;
         const card = event.currentTarget.getBoundingClientRect();
@@ -722,7 +804,7 @@ export function RailGroup({
         event.currentTarget.style.removeProperty("--rail-resize-proximity");
       }}
       data-rail-section={id}
-      data-drop-target={target || undefined}
+      data-drop-target={target || links.over || undefined}
       data-section-drag={sectionDrag || undefined}
       data-insertion-edge={insertionEdge}
       data-dragging={drag.isDragging || undefined}
@@ -780,6 +862,8 @@ export function RailGroup({
                 event.preventDefault();
               }}
             />
+          ) : widget ? (
+            <span>{title}</span>
           ) : (
             <Button
               ref={titleButton}
@@ -897,6 +981,7 @@ export function RailDestinationRow({
   // The arrangement changes with every sidebar update. A row reads only what
   // it shows; its menu reads the rest while open.
   const listed = useContext(ListedContext);
+  const arrangement = useContext(ArrangementContext);
   const instance = useId();
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement>();
@@ -907,7 +992,8 @@ export function RailDestinationRow({
       entry,
       source: section,
       label: entry.label,
-      movable: !listed && ownSection(section),
+      movable:
+        !listed && ownSection(section) && !arrangement?.isLiveSection(section),
     },
   });
   return (
@@ -970,7 +1056,8 @@ function RowMenu({
   const page = entry.kind === "page";
   // A conversation stays in Team or Solo: sections a person made hold copies.
   // Only its row in such a section, in the sidebar, moves on to another.
-  const own = !page && ownSection(section);
+  const own =
+    !page && ownSection(section) && !arrangement?.isLiveSection(section);
   const from = own && !listed ? section : undefined;
   const label = page
     ? "Move page"
@@ -990,7 +1077,9 @@ function RowMenu({
           {arrangement?.groups
             .filter(
               (group) =>
-                (page || ownSection(group.id)) && accepts(entry, group.id),
+                !arrangement.isLiveSection(group.id) &&
+                (page || ownSection(group.id)) &&
+                accepts(entry, group.id),
             )
             .map((group) => (
               <MenuItem

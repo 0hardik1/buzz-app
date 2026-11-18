@@ -7,7 +7,7 @@ import {
   viewRevision,
   writeView,
 } from "../../shared/view-state";
-import { parseRailLayout } from "./rail-layout";
+import { parseRailLayout, LIVE_KEY } from "./rail-layout";
 import { parseRailEntries } from "./rail-pins";
 
 const LAYOUT = "navigation-layout:v2";
@@ -86,11 +86,27 @@ export function syncRail(session: RelaySession, scope: string, viewer: string) {
         } else if (saved && !state().dirty) {
           applying = true;
           try {
-            writeView(scope, LAYOUT, {
+            const applied = writeView(scope, LAYOUT, {
               order: saved.order,
               sections: saved.sections,
               placements: saved.placements,
             });
+            if (applied) {
+              const rules = readView<Record<string, unknown>>(
+                scope,
+                LIVE_KEY,
+                {},
+              );
+              const ids = new Set(saved.sections.map((section) => section.id));
+              if (Object.keys(rules).some((id) => !ids.has(id)))
+                writeView(
+                  scope,
+                  LIVE_KEY,
+                  Object.fromEntries(
+                    Object.entries(rules).filter(([id]) => ids.has(id)),
+                  ),
+                );
+            }
             writeView(scope, PINS, saved.pins);
             writeView(scope, TEAM, saved.teamExpanded);
             writeView(scope, SYNC, { base: head.createdAt, dirty: false });

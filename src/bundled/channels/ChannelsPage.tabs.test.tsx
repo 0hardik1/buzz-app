@@ -1,3 +1,4 @@
+import { setThreadPlacementPreference } from "../../features/messages/thread-preferences";
 import { createNavigationController } from "../../features/navigation/controller";
 import { createMemoryHistory } from "../../features/navigation/history";
 // @vitest-environment jsdom
@@ -67,6 +68,7 @@ const owners: ReturnType<typeof createRelaySession>[] = [];
 const visitSnapshot = { entry: { id: "visit" }, attempt: {} };
 const threadVisitSnapshot = { entry: { id: "thread-visit" }, attempt: {} };
 beforeEach(() => {
+  setThreadPlacementPreference("side");
   // jsdom has no layout/ResizeObserver. Only geometry is substituted; the page,
   // composer, session, tab store and menu interaction are production owners.
   vi.stubGlobal(

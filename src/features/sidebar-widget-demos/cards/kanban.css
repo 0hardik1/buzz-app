@@ -1,0 +1,64 @@
+.kanban-widget {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-standard);
+
+  .kanban-columns {
+    display: grid;
+    grid-template-columns: repeat(
+        auto-fit,
+        minmax(calc(var(--type-rem) * 2.5), 1fr)
+      );
+    gap: var(--space-1);
+    align-items: stretch;
+  }
+  .kanban-well {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+    min-height: 4.5rem;
+    padding-block: var(--space-1);
+    border-radius: var(--corner-row);
+    background: var(--surface-panel);
+  }
+  .kanban-dots {
+    display: grid;
+    grid-template-columns: repeat(3, 0.3125rem);
+    gap: var(--space-1);
+    align-content: start;
+    justify-content: center;
+    padding-bottom: var(--space-1);
+  }
+  .kanban-dots > span {
+    width: 0.3125rem;
+    height: 0.3125rem;
+    border-radius: var(--radius-pill);
+    background: var(--text-metadata);
+  }
+  .kanban-well:where([data-lane="review"]) .kanban-dots > span {
+    background: var(--text-categorical-purple);
+  }
+  .kanban-well:where([data-lane="progress"]) .kanban-dots > span {
+    background: var(--text-link);
+  }
+  .kanban-well:where([data-lane="done"]) .kanban-dots > span {
+    background: var(--status-online);
+  }
+  .kanban-task {
+    min-width: 0;
+  }
+  &[data-variant="visual"] .kanban-well {
+    min-height: 5rem;
+  }
+  &[data-variant="editorial"] .kanban-dots {
+    grid-template-columns: repeat(2, var(--space-1));
+  }
+  &[data-variant="editorial"] .kanban-dots > span {
+    width: var(--space-1);
+    height: var(--space-1);
+  }
+}

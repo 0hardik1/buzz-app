@@ -228,10 +228,15 @@
     background: var(--surface-window-underlay);
   }
   .shell-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
     min-width: 0;
     -webkit-app-region: no-drag;
   }
-  .shell-search > .buzz-button {
+  .shell-search > .buzz-button:not([data-shell-voice-jump]) {
+    flex: 1;
+    min-width: 0;
     width: 100%;
     justify-content: flex-start;
     background: var(--surface-panel);

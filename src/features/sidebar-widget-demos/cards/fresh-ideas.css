@@ -1,0 +1,246 @@
+.fresh-widget {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  gap: var(--space-2);
+  min-height: 5rem;
+  min-width: 0;
+  color: var(--text-standard);
+
+  &.fresh-wins {
+    min-height: 0;
+  }
+
+  p {
+    margin: 0;
+  }
+  svg {
+    flex: none;
+  }
+  .fresh-muted {
+    color: var(--text-metadata);
+  }
+  .fresh-main-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+  .fresh-inline {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+  .fresh-number {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .fresh-three {
+    display: grid;
+    grid-template-columns: repeat(
+        auto-fit,
+        minmax(calc(var(--type-rem) * 3), 1fr)
+      );
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .fresh-time,
+  .fresh-build-status,
+  .fresh-channel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+  }
+  .fresh-dial {
+    width: 2.5rem;
+    height: 2.5rem;
+    fill: none;
+    stroke: var(--text-metadata);
+    stroke-width: 1;
+  }
+  .fresh-dial-track {
+    stroke: var(--border-primary);
+    stroke-width: 2;
+  }
+  .fresh-dial-value {
+    stroke: var(--text-standard);
+    stroke-width: 2;
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: center;
+  }
+  .fresh-dial-value[data-running] {
+    stroke: var(--status-online);
+  }
+  .fresh-overlap-band {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: var(--space-half);
+  }
+  .fresh-overlap-band > span {
+    height: var(--space-1);
+    background: var(--affordance-selected);
+    border-radius: var(--space-half);
+  }
+  .fresh-overlap-band > span[data-overlap] {
+    background: var(--status-online);
+  }
+  .fresh-overlap-band > span[data-current] {
+    background: var(--text-standard);
+  }
+  .fresh-build-result {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    color: var(--text-danger);
+  }
+  .fresh-build-result[data-okay] {
+    color: var(--text-metadata);
+  }
+  .fresh-build-status[data-issue] > :first-child {
+    color: var(--text-standard);
+  }
+  .fresh-quote {
+    padding-inline-start: var(--space-2);
+    border-inline-start: 1px solid var(--border-primary);
+  }
+  .fresh-decision-options {
+    display: grid;
+    grid-template-columns: repeat(
+        auto-fit,
+        minmax(calc(var(--type-rem) * 5.5), 1fr)
+      );
+    gap: var(--space-2);
+  }
+  .fresh-decision-option {
+    display: flex;
+    flex-direction: column;
+    align-items: start;
+    gap: var(--space-1);
+  }
+  .fresh-context-lines {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+  .fresh-context-lines > :last-child {
+    padding-inline-start: var(--space-2);
+    border-inline-start: 1px solid var(--border-primary);
+  }
+  .fresh-readiness {
+    height: var(--space-1);
+    background: var(--affordance-selected);
+    border-radius: var(--radius-pill);
+  }
+  .fresh-readiness > span {
+    display: block;
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--status-online);
+  }
+  .fresh-readiness > span[data-ready] {
+    width: 100%;
+  }
+  .fresh-book {
+    width: 1.75rem;
+    height: 3rem;
+    flex: none;
+    white-space: nowrap;
+    display: grid;
+    place-items: center;
+    background: var(--affordance-selected);
+    border-inline-start: 2px solid var(--text-metadata);
+    border-radius: var(--space-1) var(--corner-row) var(--corner-row)
+      var(--space-1);
+  }
+  .fresh-reading-copy {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+    flex: 1;
+  }
+  .fresh-signal-meter {
+    display: flex;
+    flex-direction: column-reverse;
+    gap: var(--space-half);
+    width: var(--space-4);
+  }
+  .fresh-signal-meter > span {
+    height: var(--space-half);
+    border-radius: var(--space-half);
+    background: var(--affordance-selected);
+  }
+  .fresh-signal-meter > span[data-on] {
+    background: var(--text-standard);
+  }
+  .fresh-win-count {
+    display: flex;
+    gap: var(--space-2);
+    align-items: baseline;
+  }
+  .fresh-win-dots {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .fresh-win-dots > span {
+    width: var(--space-2);
+    height: var(--space-2);
+    border-radius: var(--radius-pill);
+    background: var(--status-online);
+  }
+
+  &[data-variant="visual"] .fresh-dial {
+    width: 3rem;
+    height: 3rem;
+  }
+  &[data-variant="visual"] .fresh-overlap-band > span {
+    height: var(--space-2);
+  }
+  &[data-variant="visual"] .fresh-build-status[data-issue] {
+    border-bottom: 2px solid var(--text-danger);
+    padding-bottom: var(--space-1);
+  }
+  &[data-variant="visual"] .fresh-quote {
+    border-inline-start: 2px solid var(--text-metadata);
+  }
+  &[data-variant="visual"] .fresh-decision-option > .fresh-muted {
+    padding-inline-start: var(--space-1);
+    border-inline-start: 2px solid var(--border-primary);
+  }
+  &[data-variant="visual"] .fresh-book {
+    border-inline-start-width: var(--space-1);
+  }
+  &[data-variant="visual"] .fresh-signal-meter > span {
+    height: var(--space-1);
+  }
+  &[data-variant="visual"] .fresh-win-dots > span {
+    width: var(--space-3);
+    height: var(--space-2);
+    border-radius: var(--space-half);
+  }
+  &[data-variant="editorial"] .fresh-dial {
+    width: 2rem;
+    height: 2rem;
+  }
+  &[data-variant="editorial"] .fresh-overlap-band > span {
+    height: 1px;
+  }
+  &[data-variant="editorial"] .fresh-quote {
+    border-inline-start: 0;
+    padding-inline-start: 0;
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border-primary);
+  }
+  &[data-variant="editorial"] .fresh-book {
+    background: transparent;
+    border: 1px solid var(--border-primary);
+    border-inline-start: 2px solid var(--text-metadata);
+  }
+}

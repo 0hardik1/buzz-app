@@ -27,41 +27,55 @@ vi.mock("../../features/messages/MediaReviewViewer", () => ({
     </button>
   ),
 }));
-it("opens the shared viewer and retires captured actions when hidden or unmounted", () => {
-  let active = true;
-  const props = {
-    session: {},
-    scope: "scope",
-    channelId: "channel",
-    channelName: "Channel",
-    panel: {},
-    target: "channel",
-    close: vi.fn(),
-    context: { channelId: "channel", canOpen: () => false, open: () => false },
-    isActive: () => true,
-  } as unknown as ComponentProps<typeof PanelMediaCard>;
-  const view = render(<PanelMediaCard {...props} />);
-  const attachment = {
-    url: "https://example.com/photo.png",
-    kind: "image" as const,
-    name: "photo.png",
-  };
-  const old = captured;
-  if (!old) throw new Error("Panel context missing");
-  act(() => {
-    expect(old.openMedia?.("message", attachment)).toBe(true);
-  });
-  expect(screen.getByRole("button").textContent).toBe("message: photo.png");
-  active = false;
-  view.rerender(<PanelMediaCard {...props} isActive={() => active} />);
-  expect(screen.queryByRole("button")).toBeNull();
-  expect(old.openMedia?.("message", attachment)).toBe(false);
-  active = true;
-  view.rerender(<PanelMediaCard {...props} isActive={() => active} />);
-  expect(screen.queryByRole("button")).toBeNull();
-  expect(
-    captured?.openMedia?.("message", { ...attachment, kind: "file" }),
-  ).toBe(false);
-  view.unmount();
-  expect(old.openMedia?.("message", attachment)).toBe(false);
-});
+it.each(["card", "content"] as const)(
+  "opens %s media and retires captured actions when hidden or unmounted",
+  (presentation) => {
+    let active = true;
+    const props = {
+      session: {},
+      scope: "scope",
+      channelId: "channel",
+      channelName: "Channel",
+      presentation,
+      panel: {
+        key: "files",
+        component: ({ context }: { context: PanelContext }) => {
+          captured = context;
+          return <div>Files</div>;
+        },
+      },
+      target: "channel",
+      close: vi.fn(),
+      context: {
+        channelId: "channel",
+        canOpen: () => false,
+        open: () => false,
+      },
+      isActive: () => true,
+    } as unknown as ComponentProps<typeof PanelMediaCard>;
+    const view = render(<PanelMediaCard {...props} />);
+    const attachment = {
+      url: "https://example.com/photo.png",
+      kind: "image" as const,
+      name: "photo.png",
+    };
+    const old = captured;
+    if (!old) throw new Error("Panel context missing");
+    act(() => {
+      expect(old.openMedia?.("message", attachment)).toBe(true);
+    });
+    expect(screen.getByRole("button").textContent).toBe("message: photo.png");
+    active = false;
+    view.rerender(<PanelMediaCard {...props} isActive={() => active} />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(old.openMedia?.("message", attachment)).toBe(false);
+    active = true;
+    view.rerender(<PanelMediaCard {...props} isActive={() => active} />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(
+      captured?.openMedia?.("message", { ...attachment, kind: "file" }),
+    ).toBe(false);
+    view.unmount();
+    expect(old.openMedia?.("message", attachment)).toBe(false);
+  },
+);

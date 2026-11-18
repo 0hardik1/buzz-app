@@ -1,0 +1,46 @@
+.mini-calendar-widget {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-standard);
+
+  & .mini-calendar-week {
+    display: grid;
+    grid-template-columns: repeat(
+        auto-fit,
+        minmax(calc(var(--type-rem) * 1.5), 1fr)
+      );
+  }
+
+  & .mini-calendar-day {
+    display: grid;
+    justify-items: center;
+    min-width: 0;
+  }
+
+  & .mini-calendar-next {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  & .mini-calendar-appointment {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+
+  &[data-treatment="visual"] .mini-calendar-next {
+    padding-block-start: var(--space-2);
+    border-block-start: 1px solid var(--border-standard);
+  }
+
+  &[data-treatment="editorial"] .mini-calendar-appointment {
+    display: grid;
+    gap: 0;
+  }
+}

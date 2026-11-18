@@ -1,3 +1,4 @@
+import { purgeCanvasFiles } from "../home/canvas-files";
 import { forgetTabVisits } from "../messages/tab-visit-lifetime";
 import { forgetCoreMemory } from "../agents/core-memory-cache";
 import { forgetChannelSetups } from "../channel-templates/setup";
@@ -54,6 +55,7 @@ export async function purgeCommunityDeviceState(
   await attempt("repositories folder", () => {
     saveRepositoriesFolder(origin, viewer, "");
   });
+  await attempt("Home files", () => purgeCanvasFiles(scope));
   await attempt("view state", () => clearViewScope(scope));
   await attempt("channel setups", () => forgetChannelSetups(scope));
   await attempt("quick reactions", () => forgetQuickReactions(scope));

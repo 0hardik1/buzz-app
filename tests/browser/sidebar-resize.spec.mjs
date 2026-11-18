@@ -1,5 +1,6 @@
 import { test, expect } from "./fixture.mjs";
 import { showRailCards } from "./navigation.mjs";
+import { animationsSettled } from "./animations.mjs";
 
 // Browser-only: CSS cascade and grid placement cannot be verified in jsdom.
 test("resizing the app rail keeps the conversation in the first grid row", async ({
@@ -39,7 +40,7 @@ test("resizing the app rail keeps the conversation in the first grid row", async
   await expect.poll(aligned).toBe(true);
 });
 
-test("compact Pins opens its collection over the expanded rail", async ({
+test("compact cards reopen usable sheets after the sidebar collapses", async ({
   page,
   app,
 }) => {
@@ -47,11 +48,12 @@ test("compact Pins opens its collection over the expanded rail", async ({
   await showRailCards(page);
   const rail = page.getByRole("navigation", { name: "Apps", exact: true });
   await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
-  for (const title of ["Pins"]) {
+  for (const title of ["Pins", "Team", "Solo"]) {
     const tile = rail.getByRole("button", { name: title, exact: true });
     const railContent = rail.locator(".buzz-sidebar-navigation").locator("..");
     await expect(railContent).toBeVisible();
     await expect(tile).toBeVisible();
+    await animationsSettled(rail, { subtree: true });
     const railBounds = await railContent.boundingBox();
     const tileBounds = await tile.boundingBox();
     expect(tileBounds.x).toBeGreaterThanOrEqual(railBounds.x);
@@ -60,13 +62,21 @@ test("compact Pins opens its collection over the expanded rail", async ({
     );
     await tile.click();
     const workspace = page.getByRole("region", {
-      name: title,
+      name: title === "Pins" ? title : `${title} list`,
       exact: true,
     });
     await expect(workspace).toBeVisible();
     await expect(rail.locator("[data-rail-card-sheet]")).toBeVisible();
     await expect(
       workspace.getByRole("heading", { name: title, exact: true }),
+    ).toBeVisible();
+    // Collapsing a focused card returns to the icon rail, with no squeezed sheet.
+    await page
+      .getByRole("button", { name: "Hide sidebar", exact: true })
+      .click();
+    await expect(rail.locator("[data-rail-card-sheet]")).toHaveCount(0);
+    await expect(
+      rail.getByRole("button", { name: title, exact: true }),
     ).toBeVisible();
   }
 });

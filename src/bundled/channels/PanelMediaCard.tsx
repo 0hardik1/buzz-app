@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, type ComponentProps } from "react";
+import { PanelView } from "../../features/panels/PanelView";
 import { PanelCard } from "../../features/panels/PanelCard";
 import { useMediaReview } from "../../features/conversation/Conversation";
 import { MediaReviewViewer } from "../../features/messages/MediaReviewViewer";
@@ -9,6 +10,7 @@ type Props = ComponentProps<typeof PanelCard> &
     "session" | "scope" | "channelId" | "channelName" | "extensions"
   > & {
     isActive(): boolean;
+    presentation?: "card" | "content";
   };
 
 /** A channel panel shares the inline media viewer and its session-backed source. */
@@ -19,6 +21,7 @@ export function PanelMediaCard({
   channelName,
   extensions,
   isActive,
+  presentation = "card",
   context,
   ...card
 }: Props) {
@@ -36,9 +39,10 @@ export function PanelMediaCard({
     visible.current = active;
     if (!active) media.review?.close();
   }, [active, media.review]);
+  const Content = presentation === "content" ? PanelView : PanelCard;
   return (
     <>
-      <PanelCard
+      <Content
         {...card}
         context={
           context && {

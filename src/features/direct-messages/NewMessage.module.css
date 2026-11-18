@@ -10,6 +10,9 @@
   max-width: var(--size-conversation-frame);
   margin-inline: auto;
 }
+.page[data-presentation="discovery"] {
+  height: auto;
+}
 .recipientHeader {
   margin: 0;
   min-width: 0;

@@ -1,3 +1,7 @@
+import {
+  useThreadPlacementPreference,
+  setThreadPlacementPreference,
+} from "../features/messages/thread-preferences";
 import { Select } from "../shared/design-system/ui/Select";
 import { ACCENTS, accentButtonStyle } from "../shared/theme/accent";
 
@@ -71,6 +75,7 @@ export function AppearanceSettings({
   autocorrectAvailable?: boolean;
   communities?: Pick<Communities, "relay"> | undefined;
 }) {
+  const threadPlacement = useThreadPlacementPreference();
   const followUp = useFollowUpBehaviorPreference();
   const autocorrect = useMessageAutocorrectPreference();
   const unreadFirst = useUnreadFirstPreference();
@@ -308,6 +313,30 @@ export function AppearanceSettings({
         <InlineHeader title="Conversations" />
         <SettingsGroup>
           <PreferenceRow
+            title="Open threads and links in"
+            subtitle="Inline expands cards from the composer. Split panel opens them beside the conversation."
+            trailing={
+              <Select
+                variant="compact"
+                label="Open threads and links in"
+                value={threadPlacement.placement}
+                groups={[
+                  {
+                    label: "Open in",
+                    options: [
+                      { value: "inline", label: "Inline" },
+                      { value: "side", label: "Split panel" },
+                    ],
+                  },
+                ]}
+                onValueChange={(value) => {
+                  if (value === "inline" || value === "side")
+                    setThreadPlacementPreference(value);
+                }}
+              />
+            }
+          />
+          <PreferenceRow
             title="Message density"
             subtitle="Compact shows conversations as a flat list that fits more messages on screen."
             trailing={
@@ -513,6 +542,21 @@ export function AppearanceSettings({
               }
             >
               Retry saving spelling correction
+            </Button>
+          </ToastNotice>
+        )}
+        {active && threadPlacement.unsaved && (
+          <ToastNotice
+            title="Card placement wasn’t saved"
+            description="This choice is active, but could not be saved on this device. Try again."
+          >
+            <Button
+              size="sm"
+              onClick={() =>
+                setThreadPlacementPreference(threadPlacement.placement)
+              }
+            >
+              Retry saving card placement
             </Button>
           </ToastNotice>
         )}

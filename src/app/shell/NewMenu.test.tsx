@@ -51,14 +51,14 @@ test("New section adds a section to the rail's own layout", async () => {
     await screen.findByRole("menuitem", { name: /New section/ }),
   );
   await user.type(
-    await screen.findByRole("textbox", { name: "Section name" }),
+    await screen.findByRole("textbox", { name: /^Section name/ }),
     "Projects",
   );
-  await act(() => user.click(screen.getByRole("button", { name: "Create" })));
+  await act(() =>
+    user.click(screen.getByRole("button", { name: "Create section" })),
+  );
   expect(rail.result.current.layout.sections).toEqual([
     { id: expect.stringMatching(/^custom:/), title: "Projects" },
   ]);
-  expect(
-    screen.queryByRole("dialog", { name: "Create new section" }),
-  ).toBeNull();
+  expect(screen.queryByRole("dialog", { name: "Create section" })).toBeNull();
 });

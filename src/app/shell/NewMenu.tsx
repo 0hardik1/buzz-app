@@ -1,7 +1,13 @@
 import { createPortal } from "react-dom";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { Agents } from "../../features/agents/service";
-import { CreateSidebarSection } from "../../bundled/channels/CreateSidebarSection";
+import { NewRailSection, RailSectionServices } from "./NewRailSection";
 import { CreateChannelDialog } from "../../bundled/channels/CreateChannelDialog";
 import { revealCreatedChannel } from "../../features/channel-navigation/created-channel";
 import type { Navigation } from "../../features/navigation/controller";
@@ -75,6 +81,7 @@ function ReadyNewMenu({
   );
   // Sections are the rail's own, saved on this device.
   const { create: createSection } = useRailLayout(session.scope);
+  const sectionServices = useContext(RailSectionServices);
   // Solo navigation publishes on every channel-list change; the menu only
   // needs to know whether a region source composes workspaces.
   const navigation = soloNavigationFor(session);
@@ -284,19 +291,28 @@ function ReadyNewMenu({
           revealCreatedChannel(relay, session, navigator, input, channelId);
         }}
       />
-      {creatingSection && (
-        <CreateSidebarSection
-          writable
-          refreshing={false}
-          retry={async () => {}}
+      {creatingSection && scope && (
+        <NewRailSection
+          session={session}
+          community={scope.communityOrigin}
           finalFocus={menuAnchor}
           close={() => setCreatingSection(false)}
-          create={({ id, name }) => {
+          create={(name, rule, widget) => {
             if (!current()) return false;
-            if (!createSection(id, name))
-              throw new Error("Couldn’t save this section. Try again.");
-            setCreatingSection(false);
-            return true;
+            const id = `${widget ? "widget:" : rule ? "live:" : ""}${crypto.randomUUID()}`;
+            const saved = createSection(
+              id,
+              name,
+              undefined,
+              undefined,
+              rule,
+              widget,
+            );
+            if (saved) {
+              if (widget) sectionServices.created?.(`custom:${id}`, widget);
+              else sectionServices.created?.(`custom:${id}`);
+            }
+            return saved;
           }}
         />
       )}

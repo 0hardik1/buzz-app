@@ -42,7 +42,8 @@ import {
 import { addressableChannels, RecipientPicker } from "./RecipientPicker";
 import { Tabs } from "../../shared/design-system/ui/Tabs";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
-import { PlusIcon } from "../../shared/design-system/icons";
+import { PlusIcon, UsersIcon } from "../../shared/design-system/icons";
+import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { relativeTimestamp } from "../../shared/relative-timestamp";
 import type { Recipient } from "./usePeople";
 import { usePassThroughUntilDrafted } from "../messages/draft-visit";
@@ -51,6 +52,7 @@ import styles from "./NewMessage.module.css";
 import { ExistingDiscussion } from "./ExistingDiscussion";
 import type { MessageIntent } from "../channel-navigation/routes";
 import { abbreviatedPublicKey } from "../../shared/identity/public-key";
+import { ownSolo } from "../solo/labels";
 
 const draftKey = "direct-message:new-draft";
 const channelViewKey = "direct-message:channel";
@@ -73,12 +75,21 @@ export function NewMessage({
   visit,
   intent,
   allowChannels = false,
+  autoFocus = true,
   expanded = false,
   contentContainer,
   solo,
   onOpenChat,
+  presentation = "page",
+  recipientPresentation = "expanded",
 }: {
+  /** Home combines conversation discovery and first-message composition. */
+  presentation?: "page" | "discovery";
+  /** Embedded Home can reveal the recipient picker from its composer toolbar. */
+  recipientPresentation?: "expanded" | "on-demand";
   expanded?: boolean;
+  /** Open and focus To on entry; embedded composers can wait for interaction. */
+  autoFocus?: boolean;
   /** Move the presentation into the host's expanded surface; this owner stays mounted. */
   contentContainer?: HTMLElement | null;
   /** To may also name a channel: Send posts a new message there. */
@@ -87,7 +98,7 @@ export function NewMessage({
   solo?:
     | Pick<ComponentProps<typeof SoloDraft>, "onStarted" | "onFailed">
     | undefined;
-  /** Continue an earlier Solo chat listed beside a chosen agent. */
+  /** Continue an existing conversation. */
   onOpenChat?: ((channelId: string) => void) | undefined;
   session: RelaySession;
   scope: string;
@@ -123,6 +134,19 @@ export function NewMessage({
   const [teamFor, setTeamFor] = useState(() => {
     const saved = readView<unknown>(scope, teamViewKey, null);
     return typeof saved === "string" ? saved : undefined;
+  });
+  const discovery = presentation === "discovery";
+  const [choosingRecipient, setChoosingRecipient] = useState(false);
+  const showRecipients =
+    recipientPresentation === "expanded" ||
+    choosingRecipient ||
+    recipients.length > 0 ||
+    !!channelId;
+  const [searchKind, setSearchKind] = useState<Kind>(() => {
+    const person = recipients.length === 1 ? recipients[0] : undefined;
+    return solo && person?.isAgent && teamFor !== person.pubkey
+      ? "solo"
+      : "team";
   });
   // Recipients keep the facts they were chosen with; their labels follow the
   // current verification and otherwise the current profile name, falling back
@@ -176,7 +200,9 @@ export function NewMessage({
   const [draftChannel] = useState(() => crypto.randomUUID());
   const attempt = useRef<AbortController | null>(null);
   const [soloBusy, setSoloBusy] = useState(false);
+  const [unsaved, setUnsaved] = useState(false);
   const locked = soloBusy || !!busy;
+  const destinationLocked = locked || (discovery && unsaved);
   useEffect(() => () => attempt.current?.abort(), []);
   useEffect(() => {
     // Release a message an earlier version still holds to its conversation.
@@ -210,15 +236,27 @@ export function NewMessage({
       );
   }
   function change(people: Recipient[]) {
-    if (locked || attempt.current) return;
+    if (destinationLocked || attempt.current) return;
     const next: CreationDestination = { kind: "people", people };
     setDestination(next);
     saveCreationDestination(scope, next);
+    if (discovery) {
+      const choice =
+        searchKind === "team" && people.length === 1 && people[0]?.isAgent
+          ? people[0].pubkey
+          : undefined;
+      setTeamFor(choice);
+      writeView(scope, teamViewKey, choice ?? null);
+    }
     setError("");
     setUploadFailed(false);
   }
   function chooseChannel(channel: ChannelSummary | undefined) {
-    if (locked || attempt.current) return;
+    if (destinationLocked || attempt.current) return;
+    if (discovery && channel && onOpenChat) {
+      onOpenChat(channel.id);
+      return;
+    }
     const next: CreationDestination = channel
       ? { kind: "channel", channelId: channel.id }
       : { kind: "people", people: [] };
@@ -231,15 +269,21 @@ export function NewMessage({
   // An in-flight send keeps its recipients until it settles.
   // biome-ignore lint/correctness/useExhaustiveDependencies: consume each explicit intent once, after the send unlocks.
   useEffect(() => {
-    if (!intent || locked || attempt.current) return;
+    if (!intent || destinationLocked || attempt.current) return;
     const taken = readView<unknown>(scope, "direct-message:addressed-at", 0);
     if (typeof taken === "number" && intent.at <= taken) return;
     writeView(scope, "direct-message:addressed-at", intent.at);
     if (intent.to === session.viewer) return;
     const profile = session.profiles.snapshot().get(intent.to);
     void session.profiles.ensure([intent.to]).catch(() => {});
-    change([{ pubkey: intent.to, name: profile?.name ?? abbreviatedPublicKey(intent.to) ?? "", ...(profile?.isAgent ? { isAgent: true } : {}) }]);
-  }, [locked, intent?.to, intent?.at]);
+    change([
+      {
+        pubkey: intent.to,
+        name: profile?.name ?? abbreviatedPublicKey(intent.to) ?? "",
+        ...(profile?.isAgent ? { isAgent: true } : {}),
+      },
+    ]);
+  }, [destinationLocked, intent?.to, intent?.at]);
   async function send(
     draft: MentionDraft,
     files?: AttachmentDraft,
@@ -305,6 +349,7 @@ export function NewMessage({
       setDestination({ kind: "people", people: [] });
       setTeamFor(undefined);
       setDraftRevision((revision) => revision + 1);
+      setUnsaved(false);
       onStarted(channelId, messageId);
     } catch (reason) {
       if (controller.signal.aborted) return;
@@ -326,14 +371,35 @@ export function NewMessage({
         channels,
         session.viewer,
         recipients.map((person) => person.pubkey),
-        (key) => recipients.some((person) => person.pubkey === key && person.isAgent) || !!profiles.get(key)?.isAgent,
+        (key) =>
+          recipients.some(
+            (person) => person.pubkey === key && person.isAgent,
+          ) || !!profiles.get(key)?.isAgent,
       ),
     [channels, recipients, session.viewer, profiles],
   );
-  const joining = existing ? named.filter((person) => !existing.members?.includes(person.pubkey)) : [];
+  const joining = existing
+    ? named.filter((person) => !existing.members?.includes(person.pubkey))
+    : [];
   const channelChoices = useMemo(
     () => (allowChannels ? addressableChannels(channels) : []),
     [allowChannels, channels],
+  );
+  const discoveryChannels = useMemo(
+    () =>
+      channels.filter(
+        (channel) =>
+          !channel.cached &&
+          !channel.archived &&
+          !channel.pending &&
+          !!session.viewer &&
+          channel.members?.includes(session.viewer) &&
+          (searchKind === "solo"
+            ? ownSolo(channel, session.viewer)
+            : !ownSolo(channel, session.viewer)) &&
+          !channel.huddle,
+      ),
+    [channels, session.viewer, searchKind],
   );
   const target = channelId
     ? channelChoices.find((channel) => channel.id === channelId)
@@ -346,8 +412,9 @@ export function NewMessage({
     (lone.isAgent || profiles.get(lone.pubkey)?.isAgent)
       ? lone.pubkey
       : undefined;
-  const kind: Kind | null =
-    solo && loneAgent && teamFor !== loneAgent
+  const kind: Kind | null = discovery
+    ? searchKind
+    : solo && loneAgent && teamFor !== loneAgent
       ? "solo"
       : target || recipients.length || !solo
         ? "team"
@@ -386,11 +453,22 @@ export function NewMessage({
             {
               value: "solo",
               label: "Solo",
-              disabled: locked || !solo || !loneAgent,
+              disabled:
+                destinationLocked || !solo || (!discovery && !loneAgent),
             },
-            { value: "team", label: "Team", disabled: locked || kind === null },
+            {
+              value: "team",
+              label: "Team",
+              disabled: destinationLocked || (!discovery && kind === null),
+            },
           ]}
           onValueChange={(next) => {
+            if (discovery) {
+              if (destinationLocked || next === searchKind) return;
+              change([]);
+              setSearchKind(next);
+              return;
+            }
             if (locked || !loneAgent) return;
             const choice = next === "team" ? loneAgent : undefined;
             setTeamFor(choice);
@@ -419,58 +497,73 @@ export function NewMessage({
       className={styles.page}
       data-layout="page"
       data-expanded={expanded || undefined}
+      data-presentation={presentation}
       aria-label="New message"
       data-attachment-drop-zone
     >
-      <RecipientPicker
-        session={session}
-        scope={scope}
-        initiallyOpen
-        selected={recipients}
-        labels={named}
-        disabled={locked}
-        onChange={change}
-        onComplete={focusComposer}
-        onTyped={setTyped}
-        channelOptions={channelChoices}
-        selectedChannel={target}
-        onChooseChannel={allowChannels ? chooseChannel : undefined}
-        trailing={kindControl}
-      />
+      {showRecipients && (
+        <RecipientPicker
+          discovery={discovery ? searchKind : undefined}
+          session={session}
+          scope={scope}
+          initiallyOpen={autoFocus || choosingRecipient}
+          selected={recipients}
+          labels={named}
+          disabled={destinationLocked}
+          maxRecipients={discovery && searchKind === "solo" ? 1 : 8}
+          onChange={change}
+          onComplete={focusComposer}
+          onTyped={setTyped}
+          channelOptions={discovery ? discoveryChannels : channelChoices}
+          selectedChannel={target}
+          onChooseChannel={
+            allowChannels || discovery ? chooseChannel : undefined
+          }
+          trailing={kindControl}
+        />
+      )}
+      {discovery && unsaved && (
+        <p className={styles.feedback} role="status">
+          Your draft couldn’t save on this device. Keep editing here or send it
+          before switching conversations.
+        </p>
+      )}
       {soloAgent && solo ? (
         <>
-          <div className={styles.solo} data-new-message-body="">
-            {recipientArtwork(true)}
-            {recent.length > 0 && (
-              <nav
-                className={styles.recent}
-                aria-label={`Recent chats with ${agentLabel}`}
-              >
-                <h3>Recent with {agentLabel}</h3>
-                <NavigationItem
-                  selected
-                  aria-current="true"
-                  icon={<PlusIcon size={16} aria-hidden="true" />}
-                  label="New chat"
-                  onClick={focusComposer}
-                />
-                {recent.map((chat) => (
+          {!discovery && (
+            <div className={styles.solo} data-new-message-body="">
+              {recipientArtwork(true)}
+              {recent.length > 0 && (
+                <nav
+                  className={styles.recent}
+                  aria-label={`Recent chats with ${agentLabel}`}
+                >
+                  <h3>Recent with {agentLabel}</h3>
                   <NavigationItem
-                    key={chat.id}
-                    label={chat.name}
-                    trailing={
-                      chat.lastActivityAt ? (
-                        <span className={styles.agent}>
-                          {relativeTimestamp(chat.lastActivityAt)}
-                        </span>
-                      ) : undefined
-                    }
-                    onClick={() => onOpenChat?.(chat.id)}
+                    selected
+                    aria-current="true"
+                    icon={<PlusIcon size={16} aria-hidden="true" />}
+                    label="New chat"
+                    onClick={focusComposer}
                   />
-                ))}
-              </nav>
-            )}
-          </div>
+                  {recent.map((chat) => (
+                    <NavigationItem
+                      key={chat.id}
+                      label={chat.name}
+                      trailing={
+                        chat.lastActivityAt ? (
+                          <span className={styles.agent}>
+                            {relativeTimestamp(chat.lastActivityAt)}
+                          </span>
+                        ) : undefined
+                      }
+                      onClick={() => onOpenChat?.(chat.id)}
+                    />
+                  ))}
+                </nav>
+              )}
+            </div>
+          )}
           <div className={styles.soloComposer}>
             <SoloDraft
               key={soloAgent}
@@ -482,34 +575,50 @@ export function NewMessage({
               agent={soloAgent}
               focusRequest={composerFocus}
               onBusyChange={setSoloBusy}
+              onUnsavedChange={setUnsaved}
               {...solo}
+              onStarted={(channelId) => {
+                setUnsaved(false);
+                solo.onStarted(channelId);
+              }}
             />
           </div>
         </>
       ) : (
         <>
-          <div className={styles.blank} data-new-message-body="">
-            {displayed ? (
-              <ExistingDiscussion
-                key={displayed.id}
-                session={session}
-                scope={scope}
-                channel={displayed}
-                extensions={extensions}
-                host={host}
-                onRecovered={focusComposer}
-                onOpen={(messageId, threadRootId, intent) =>
-                  onOpenThread(displayed.id, messageId, threadRootId, intent)
-                }
-              />
-            ) : recipients.length > 0 ? (
-              <div className={styles.introduction}>
-                {recipientArtwork(false)}
-              </div>
-            ) : null}
-          </div>
+          {!discovery && (
+            <div className={styles.blank} data-new-message-body="">
+              {displayed ? (
+                <ExistingDiscussion
+                  key={displayed.id}
+                  session={session}
+                  scope={scope}
+                  channel={displayed}
+                  extensions={extensions}
+                  host={host}
+                  onRecovered={focusComposer}
+                  onOpen={(messageId, threadRootId, intent) =>
+                    onOpenThread(displayed.id, messageId, threadRootId, intent)
+                  }
+                />
+              ) : recipients.length > 0 ? (
+                <div className={styles.introduction}>
+                  {recipientArtwork(false)}
+                </div>
+              ) : null}
+            </div>
+          )}
           <div className={styles.feedback}>
-            {joining.length > 0 && <p role="status">Sending adds {new Intl.ListFormat(undefined, { type: "conjunction" }).format(joining.map((person) => person.name))} to this DM. {joining.length === 1 ? "It" : "They"} can read its earlier messages.</p>}
+            {joining.length > 0 && (
+              <p role="status">
+                Sending adds{" "}
+                {new Intl.ListFormat(undefined, { type: "conjunction" }).format(
+                  joining.map((person) => person.name),
+                )}{" "}
+                to this DM. {joining.length === 1 ? "It" : "They"} can read its
+                earlier messages.
+              </p>
+            )}
             {busy && (
               <p role="status">
                 {busy === "uploading" ? "Uploading files…" : "Sending message…"}
@@ -543,12 +652,22 @@ export function NewMessage({
               label={composerName ? `Message ${composerName}` : "New message"}
               placeholder={composerName ? undefined : ""}
               disabled={!recipients.length && !target}
+              trailingTool={
+                !showRecipients ? (
+                  <IconButton
+                    aria-label="Choose recipient"
+                    icon={<UsersIcon />}
+                    onClick={() => setChoosingRecipient(true)}
+                  />
+                ) : undefined
+              }
               submission={{
                 channel: target ? true : undefined,
                 draftKey,
                 attachments: true,
                 allowAttachmentOnly: true,
                 onDraftChange: draftEdited,
+                unsaved: setUnsaved,
                 locked,
                 disabled:
                   !!busy ||

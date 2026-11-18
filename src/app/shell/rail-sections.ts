@@ -29,7 +29,8 @@ const teamPages = new Set([
 ]);
 /** Whether a row can be put there: Team keeps to its views and own pages. */
 export const accepts = (entry: RailEntry, section: string) =>
-  section !== "team" || teamPages.has(entry.id);
+  !section.startsWith("custom:widget:") &&
+  (section !== "team" || teamPages.has(entry.id));
 
 /** Cards, expanded lists and conversation routing share the same membership. */
 export function railSections(
@@ -45,6 +46,7 @@ export function railSections(
   // A conversation saved into Team, Solo or Plugins stays where it lives.
   const placements = layout.placements.filter(
     (item) =>
+      !item.section.startsWith("custom:live:") &&
       sections.has(item.section) &&
       accepts(item.entry, item.section) &&
       (item.entry.kind === "page" || holdsCopy(item.entry, item.section)),

@@ -501,9 +501,9 @@ it("shows global routes in the rail and keeps the conversation mounted across se
   const header = document.querySelector<HTMLElement>(".shell-header");
   if (!header) throw new Error("Missing application toolbar");
   expect(
-    within(rail).getByRole("button", { name: /^Community switcher:/ }),
+    within(header).getByRole("button", { name: /^Community switcher:/ }),
   ).toBeVisible();
-  const profile = within(rail).getByRole("button", { name: "Your profile" });
+  const profile = within(header).getByRole("button", { name: "Your profile" });
   expect(profile).toBeVisible();
   expect(
     within(header).getByRole("button", { name: "Search Buzz" }),
@@ -856,5 +856,139 @@ it.each(["sidebar", "topbar"] as const)(
     } finally {
       error.mockRestore();
     }
+  },
+);
+
+it.each(["buzz.home/home", "buzz.channels/channels"])(
+  "keeps Home toolbar controls and restores sidebar collapse on %s",
+  async (selected) => {
+    const current = createServices();
+    services = current;
+    const onSelect = vi.fn();
+    const pages = [
+      { id: "home", pluginId: "buzz.home", title: "Home" },
+      { id: "channels", pluginId: "buzz.channels", title: "Team" },
+      { id: "inbox", pluginId: "buzz.inbox", title: "Activity" },
+    ].map((page) => ({
+      ...page,
+      key: `${page.pluginId}/${page.id}`,
+      revision: "one",
+      primary: true,
+      component: () => null,
+    }));
+    render(
+      <ToastProvider>
+        <AppShell
+          pages={pages}
+          selected={selected}
+          navigationAttempt="team"
+          onSelect={onSelect}
+          tone="default"
+          communities={connectedCommunities(current)}
+          accountActions={current.accountActions}
+          appearance={testAppearance}
+          searchServices={current}
+        >
+          Conversation remains open
+        </AppShell>
+      </ToastProvider>,
+    );
+    const rail = screen.getByRole("navigation", { name: "Apps" });
+    const toolbar = screen.getByRole("group", { name: "Sidebar toolbar" });
+    const home = within(toolbar).getByRole("button", { name: "Home" });
+    expect(home).toBeVisible();
+    expect(
+      within(toolbar).getByRole("button", { name: "All cards" }),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole("banner")).queryByRole("button", {
+        name: "Home",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(rail).getByRole("button", { name: "All cards" }),
+    ).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Hide sidebar" }));
+    expect(rail).toHaveAttribute("data-compact");
+    expect(
+      screen.getByRole("button", { name: "Show sidebar" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(within(rail).getByRole("button", { name: "Team" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Show sidebar" }));
+    expect(rail).not.toHaveAttribute("data-compact");
+    await userEvent.click(
+      within(toolbar).getByRole("button", { name: "All cards" }),
+    );
+    within(rail).getByRole("button", { name: "Team" }).focus();
+    await userEvent.keyboard("{Escape}");
+    expect(rail).toHaveAttribute("data-compact");
+    expect(screen.getByRole("button", { name: "Show sidebar" })).toHaveFocus();
+    await userEvent.click(screen.getByRole("button", { name: "Show sidebar" }));
+    expect(rail).not.toHaveAttribute("data-compact");
+    await userEvent.click(home);
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith("buzz.home/home");
+    expect(screen.getByRole("main")).toHaveTextContent(
+      "Conversation remains open",
+    );
+  },
+);
+
+it.each(["pointer", "keyboard"])(
+  "exposes all cards from minimal Home navigation with %s and preserves the mounted view",
+  async (input) => {
+    const current = createServices();
+    services = current;
+    const onSelect = vi.fn();
+    const pages = [
+      { id: "home", pluginId: "buzz.home", title: "Home" },
+      { id: "channels", pluginId: "buzz.channels", title: "Team" },
+      { id: "bestie", pluginId: "buzz.bestie", title: "Bestie" },
+    ].map((page) => ({
+      ...page,
+      key: `${page.pluginId}/${page.id}`,
+      revision: "one",
+      primary: true,
+      component: () => null,
+    }));
+    render(
+      <ToastProvider>
+        <AppShell
+          pages={pages}
+          selected="buzz.home/home"
+          navigationAttempt="home"
+          onSelect={onSelect}
+          tone="default"
+          communities={connectedCommunities(current)}
+          accountActions={current.accountActions}
+          appearance={testAppearance}
+          searchServices={current}
+        >
+          Home stays mounted
+        </AppShell>
+      </ToastProvider>,
+    );
+    const user = userEvent.setup();
+    expect(
+      screen.queryByRole("button", { name: "Team" }),
+    ).not.toBeInTheDocument();
+    const allCards = screen.getByRole("button", { name: "All cards" });
+    if (input === "keyboard") {
+      allCards.focus();
+      await user.keyboard("{Enter}");
+    } else await user.click(allCards);
+    expect(allCards).toHaveAttribute("aria-pressed", "true");
+    const team = screen.getByRole("button", { name: "Team" });
+    await user.click(screen.getByRole("button", { name: "Home" }));
+    expect(
+      screen.queryByRole("button", { name: "Team" }),
+    ).not.toBeInTheDocument();
+    expect(team).toBeInTheDocument();
+    expect(onSelect).toHaveBeenLastCalledWith("buzz.home/home");
+    await user.click(allCards);
+    await user.click(team);
+    expect(
+      screen.getByRole("button", { name: "Close expanded card" }),
+    ).toBeVisible();
+    expect(screen.getByRole("main")).toHaveTextContent("Home stays mounted");
   },
 );

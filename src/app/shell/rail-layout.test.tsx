@@ -1,9 +1,11 @@
+import { demoWidgetKind } from "./demo-widget-sections";
 import { accepts, railSections } from "./rail-sections";
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { parseRailLayout, useRailLayout } from "./rail-layout";
 import type { RailEntry } from "./rail-pins";
+import { readView } from "../../shared/view-state";
 
 const entry: RailEntry = {
   id: "channel:planning",
@@ -20,6 +22,71 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
   vi.restoreAllMocks();
+});
+
+test("live filters survive remounts and renames locally without changing the signed layout schema, and are erased on removal", () => {
+  const rule = { version: 1 as const, dms: true, people: ["c".repeat(64)] };
+  const first = renderHook(() => useRailLayout("live-account:community"));
+  act(() => {
+    expect(
+      first.result.current.create("live", "Avery", undefined, undefined, rule),
+    ).toBe(true);
+  });
+  expect(
+    readView("live-account:community", "navigation-layout:v2", null),
+  ).toMatchObject({ sections: [{ id: "custom:live", title: "Avery" }] });
+  expect(
+    JSON.stringify(
+      readView("live-account:community", "navigation-layout:v2", null),
+    ),
+  ).not.toContain(rule.people[0]);
+  act(() => {
+    first.result.current.rename("custom:live", "People");
+  });
+  first.unmount();
+  const restored = renderHook(({ scope }) => useRailLayout(scope), {
+    initialProps: { scope: "live-account:community" },
+  });
+  expect(restored.result.current.layout.sections).toEqual([
+    { id: "custom:live", title: "People", live: rule },
+  ]);
+  restored.rerender({ scope: "other-account:community" });
+  expect(restored.result.current.layout.sections).toEqual([]);
+  restored.rerender({ scope: "live-account:community" });
+  act(() => {
+    expect(restored.result.current.remove("custom:live")).toBe(true);
+  });
+  expect(
+    readView("live-account:community", "navigation-live-sections:v1", null),
+  ).toEqual({});
+});
+
+test("a failed layout write rolls back its local live filter so retry does not accumulate orphaned rules", () => {
+  const scope = "failed-live";
+  const { result } = renderHook(() => useRailLayout(scope));
+  const write = Storage.prototype.setItem;
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+    this: Storage,
+    key,
+    value,
+  ) {
+    if (
+      key === `buzz-view.v1:${JSON.stringify([scope, "navigation-layout:v2"])}`
+    )
+      throw new Error("Storage full");
+    return write.call(this, key, value);
+  });
+  act(() => {
+    expect(
+      result.current.create("live", "People", undefined, undefined, {
+        version: 1,
+        dms: true,
+        people: [],
+      }),
+    ).toBe(false);
+  });
+  expect(result.current.layout.sections).toEqual([]);
+  expect(readView(scope, "navigation-live-sections:v1", null)).toEqual({});
 });
 
 test("a saved section that isn't shown keeps its place through reorders and new sections", () => {
@@ -132,6 +199,17 @@ test("cards, expanded lists, and routing share contributed section membership", 
   expect(disabled.entries("team", [entry])).toEqual([entry]);
 });
 
+test("manual rows synchronized from another device cannot enter a live collection", () => {
+  const section = "custom:live:query";
+  const model = railSections({
+    order: [],
+    sections: [{ id: section, title: "Live DMs" }],
+    placements: [{ section, entry }],
+  });
+  expect(model.entries(section, [])).toEqual([]);
+  expect(model.entries("team", [entry])).toEqual([entry]);
+});
+
 test("a conversation keeps its own list while sections a person made hold copies", () => {
   const saved = (placements: { section: string; entry: typeof entry }[]) =>
     railSections({
@@ -184,3 +262,68 @@ test("an arrangement saved under Team's earlier section id still places it", () 
     parseRailLayout({ order: ["solo", "messages"], sections: [] }).order,
   ).toEqual(["solo", "team"]);
 });
+
+test("widget sections persist locally through reload and rename, reject conversation drops, and forget on removal", () => {
+  const scope = "widget-account:community";
+  const first = renderHook(() => useRailLayout(scope));
+  act(() => {
+    expect(
+      first.result.current.create(
+        "widget:notes",
+        "Notes",
+        undefined,
+        undefined,
+        undefined,
+        "sticky-note",
+      ),
+    ).toBe(true);
+    first.result.current.rename("custom:widget:notes", "Scratchpad");
+  });
+  first.unmount();
+  const restored = renderHook(() => useRailLayout(scope));
+  expect(restored.result.current.layout.sections).toEqual([
+    { id: "custom:widget:notes", title: "Scratchpad" },
+  ]);
+  expect(demoWidgetKind(scope, "custom:widget:notes")).toBe("sticky-note");
+  expect(
+    demoWidgetKind("another-account", "custom:widget:notes"),
+  ).toBeUndefined();
+  expect(accepts(entry, "custom:widget:notes")).toBe(false);
+  act(() => {
+    expect(restored.result.current.remove("custom:widget:notes")).toBe(true);
+  });
+  expect(demoWidgetKind(scope, "custom:widget:notes")).toBeUndefined();
+  expect(restored.result.current.layout.sections).toEqual([]);
+});
+
+test.each(["navigation-demo-widgets:v1", "navigation-layout:v2"])(
+  "failed %s writes cannot create a partial widget section",
+  (failedKey) => {
+    const scope = "failed-widget";
+    const { result } = renderHook(() => useRailLayout(scope));
+    const write = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key,
+      value,
+    ) {
+      if (key === `buzz-view.v1:${JSON.stringify([scope, failedKey])}`)
+        throw new Error("Storage full");
+      return write.call(this, key, value);
+    });
+    act(() => {
+      expect(
+        result.current.create(
+          "widget:notes",
+          "Notes",
+          undefined,
+          undefined,
+          undefined,
+          "sticky-note",
+        ),
+      ).toBe(false);
+    });
+    expect(result.current.layout.sections).toEqual([]);
+    expect(demoWidgetKind(scope, "custom:widget:notes")).toBeUndefined();
+  },
+);

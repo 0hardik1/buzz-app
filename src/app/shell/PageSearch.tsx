@@ -65,6 +65,7 @@ export type SearchServices = Pick<
       | "settingsCards"
       | "conversation"
       | "sidebarScope"
+      | "decisions"
     >
   >;
 const SEARCH_ID = "global-search";

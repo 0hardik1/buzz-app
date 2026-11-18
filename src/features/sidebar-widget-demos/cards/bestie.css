@@ -1,0 +1,31 @@
+.bestie-widget {
+  position: relative;
+  display: flex;
+  align-items: end;
+  min-height: 6rem;
+  min-width: 0;
+  isolation: isolate;
+
+  & .bestie-art {
+    position: absolute;
+    inset-block-start: calc(-1 * var(--space-4));
+    inset-inline-end: var(--space-2);
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  & .bestie-composer {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    min-width: 0;
+  }
+
+  &[data-treatment="visual"] .bestie-art {
+    inset-inline-end: calc(50% - 3.5rem);
+  }
+  &[data-treatment="editorial"] .bestie-art {
+    inset-inline-end: auto;
+    inset-inline-start: var(--space-2);
+  }
+}

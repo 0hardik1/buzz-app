@@ -215,6 +215,7 @@ export function SoloDraft({
   navigation,
   draftPrefix,
   onBusyChange,
+  onUnsavedChange,
 }: {
   draft?: SoloDraftStart["draft"];
   region?: string | undefined;
@@ -225,6 +226,8 @@ export function SoloDraft({
   draftPrefix?: string;
   /** The creation host locks destination changes throughout a Solo submission. */
   onBusyChange?: ((busy: boolean) => void) | undefined;
+  /** Keep an embedded draft mounted when device storage cannot save it. */
+  onUnsavedChange?: ((held: boolean) => void) | undefined;
   /** The visit presenting this draft, a Back stop only once drafted. */
   visit?: PageNavigation | undefined;
   linkedId?: string | undefined;
@@ -944,6 +947,7 @@ export function SoloDraft({
           attachments: true,
           unsaved: (held) => {
             unsaved.current = held;
+            onUnsavedChange?.(held);
           },
           onDraftChange: draftEdited,
           submit: (draft, files, addressed, picks, draftPicks, revision) => {

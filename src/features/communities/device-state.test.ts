@@ -41,6 +41,13 @@ vi.mock("../messages/solo-model-picks-storage", () => ({
       : record("model choices", scope),
 }));
 
+vi.mock("../home/canvas-files", () => ({
+  purgeCanvasFiles: (scope: string) =>
+    typeof indexedDB === "undefined"
+      ? Promise.resolve()
+      : record("Home files", scope),
+}));
+
 vi.mock("../artifact-storage/store", () => ({
   purgeArtifactStorage: (viewer: string, origin: string) =>
     typeof indexedDB === "undefined"
@@ -143,6 +150,7 @@ it("purges the relay's heads, read state and outbox for the exact partition, in 
   expect(await purgeCommunityDeviceState(origin, viewer)).toEqual([]);
   // Heads keep their reversed `viewer:origin` encoding inside persistence.
   expect(relay.calls).toEqual([
+    ["Home files", `${origin}:${viewer}`],
     ["heads", viewer, origin],
     ["heads.clear"],
     ["heads.close"],
@@ -168,18 +176,22 @@ it("reports each failed relay store by name, closes heads and still clears the o
   const reads = new Error("read state blocked");
   const artifacts = new Error("artifacts blocked");
   const choices = new Error("choices blocked");
+  const files = new Error("Home files blocked");
   relay.fail
+    .set("Home files", files)
     .set("heads.clear", heads)
     .set("read state", reads)
     .set("artifacts", artifacts)
     .set("model choices", choices);
   expect(await purgeCommunityDeviceState(origin, viewer)).toEqual([
+    { store: "Home files", error: files },
     { store: "channel heads", error: heads },
     { store: "read state", error: reads },
     { store: "artifacts", error: artifacts },
     { store: "model and effort choices", error: choices },
   ]);
   expect(relay.calls.map(([name]) => name)).toEqual([
+    "Home files",
     "heads",
     "heads.clear",
     "heads.close",
@@ -189,6 +201,7 @@ it("reports each failed relay store by name, closes heads and still clears the o
     "model choices",
   ]);
   expect(warn.mock.calls).toEqual([
+    [`Couldn't clear Home files for ${origin} on this device`, files],
     [`Couldn't clear channel heads for ${origin} on this device`, heads],
     [`Couldn't clear read state for ${origin} on this device`, reads],
     [`Couldn't clear artifacts for ${origin} on this device`, artifacts],
