@@ -171,6 +171,7 @@ export type { VoiceRecording } from "../features/relay/voice-media";
 export type {
   Agents,
   AgentAddedTab,
+  AgentAvatarSource,
   AgentHandle,
   AgentInstructions,
   AgentType,

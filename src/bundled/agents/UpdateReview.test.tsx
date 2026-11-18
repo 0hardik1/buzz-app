@@ -11,6 +11,7 @@ import type {
   RegisteredAgentType,
 } from "../../features/agents/service";
 import { UpdateReview } from "./UpdateReview";
+import { noAvatarSources } from "../../features/agents/avatar-testing";
 
 afterEach(cleanup);
 
@@ -79,6 +80,7 @@ function fixture(change: Partial<AgentUpdateRequest>, waiting = false) {
       return () => listeners.delete(listener);
     },
     types: () => types,
+    avatarSources: noAvatarSources.avatarSources,
     snapshot: () => snapshot,
     updateRequests: () => requests,
     approveUpdate: vi.fn(async () => clear()),

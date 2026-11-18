@@ -9,7 +9,12 @@ import {
   useAgentScopeCommunity,
 } from "../../features/agents/AgentCommunityScope";
 import { uncropped } from "../../features/profiles/avatar-upload";
-import { AgentAvatarPicker, type AvatarSelection } from "./AgentAvatarPicker";
+import {
+  AgentAvatarPicker,
+  effectiveAvatar,
+  useAvatarSources,
+  type AvatarSelection,
+} from "./AgentAvatarPicker";
 import styles from "./AgentCreate.module.css";
 
 /** Avatar edits use creation's picker and only publish on Save. */
@@ -31,7 +36,8 @@ export function AgentIdentityDialog({
   useEffect(() => {
     if (!community) setScopeOpen(false);
   }, [community]);
-  const [avatar, setAvatar] = useState<AvatarSelection>(() => ({
+  const avatarSources = useAvatarSources(agents);
+  const [draft, setAvatar] = useState<AvatarSelection>(() => ({
     kind: agentAvatars.some((item) => item.url === agent.picture)
       ? "gloopie"
       : "image",
@@ -41,6 +47,7 @@ export function AgentIdentityDialog({
   const [error, setError] = useState("");
   const [avatarBusy, setAvatarBusy] = useState(false);
   const avatarRef = useRef<{ prepare(): Promise<string> }>(null);
+  const avatar = effectiveAvatar(draft, avatarSources);
   const { zoom, x, y } = (avatar.kind === "image" && avatar.crop) || uncropped;
   const changed =
     avatar.kind === "emoji" ||
@@ -130,9 +137,11 @@ export function AgentIdentityDialog({
       >
         <AgentAvatarPicker
           name={agent.name}
-          selection={avatar}
+          selection={draft}
           disabled={pending}
           community={agent.relay}
+          sources={avatarSources}
+          liveSources={agents.avatarSources}
           onBusyChange={setAvatarBusy}
           onChange={(selection) => {
             setAvatar(selection);

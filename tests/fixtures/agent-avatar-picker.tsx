@@ -5,6 +5,8 @@ import {
   type AvatarSelection,
 } from "../../src/bundled/agents/AgentAvatarPicker";
 import { randomAgentAvatar } from "../../src/features/agents/avatar-packs";
+import type { RegisteredAgentAvatarSource } from "../../src/features/agents/service";
+import { bitties } from "../../src/bundled/bitties";
 import { communityDestination } from "../../src/features/communities/destination";
 import { Button } from "../../src/shared/design-system/ui/Button";
 import { useKeyboardFocusVisibility } from "../../src/shared/design-system/useKeyboardFocusVisibility";
@@ -31,6 +33,20 @@ window.fetch = async (input, init) => {
   throw new Error(`Unexpected fixture request: ${url}`);
 };
 
+// `?bitties` adds the bundled Bitties source, as the app does by default.
+const sources: readonly RegisteredAgentAvatarSource[] = new URLSearchParams(
+  location.search,
+).has("bitties")
+  ? [
+      Object.freeze({
+        ...bitties,
+        key: "buzz.bitties/bitties",
+        pluginId: "buzz.bitties",
+        revision: "bundled",
+      }),
+    ]
+  : [];
+
 function Fixture() {
   useKeyboardFocusVisibility();
   const [selection, setSelection] = useState<AvatarSelection>(() => ({
@@ -46,6 +62,7 @@ function Fixture() {
         selection={selection}
         disabled={false}
         community={community}
+        sources={sources}
         onChange={setSelection}
         onBusyChange={() => {}}
         avatarRef={avatarRef}

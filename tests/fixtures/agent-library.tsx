@@ -431,8 +431,10 @@ Object.assign(window, {
   creationReviewResult: () => reviewed,
   updateReviewResult: () => changed,
 });
+const noAvatarSources: readonly never[] = [];
 const agents = {
   snapshot: () => snapshot,
+  avatarSources: () => noAvatarSources,
   subscribe: (listener: () => void) => {
     listeners.add(listener);
     return () => listeners.delete(listener);
