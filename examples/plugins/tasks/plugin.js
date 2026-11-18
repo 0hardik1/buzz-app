@@ -1246,6 +1246,14 @@ export function apply(ctx) {
         setError(error.message);
       }
     };
+    const saveDue = (date, time) => {
+      try {
+        setError("");
+        void save(dueValue(date, time));
+      } catch (error) {
+        setError(error.message);
+      }
+    };
     const members = owner.channel(task.channel)?.members ?? [relayState.viewer];
     const due = task.dueAt
       ? new Date(task.dueAt)
@@ -1460,8 +1468,7 @@ export function apply(ctx) {
                             ),
                             "date",
                             dueInputs(task).date,
-                            (value) =>
-                              void save(dueValue(value, dueInputs(task).time)),
+                            (value) => saveDue(value, dueInputs(task).time),
                             {
                               style: draft
                                 ? chipStyle
@@ -1518,8 +1525,7 @@ export function apply(ctx) {
                             ),
                             "time",
                             dueInputs(task).time,
-                            (value) =>
-                              void save(dueValue(dueInputs(task).date, value)),
+                            (value) => saveDue(dueInputs(task).date, value),
                             {
                               style: draft
                                 ? chipStyle
@@ -1574,10 +1580,9 @@ export function apply(ctx) {
                     kind,
                     "",
                     (value) => {
-                      void save(
-                        kind === "date"
-                          ? dueValue(value, dueInputs(task).time)
-                          : dueValue(dueInputs(task).date, value),
+                      saveDue(
+                        kind === "date" ? value : dueInputs(task).date,
+                        kind === "time" ? value : dueInputs(task).time,
                       );
                     },
                     {
