@@ -30,6 +30,9 @@ import {
   type JumpPlace,
   jumpPlaces,
   pickPlace,
+  VOICE_JUMP_LIVE_THRESHOLD,
+  VOICE_JUMP_THRESHOLD,
+  type VoiceJump as JumpResult,
 } from "../../features/search/voice-jump";
 import type { AppServices } from "../services";
 import { HOST_SHORTCUT_ORDER } from "../shortcuts";
@@ -141,72 +144,136 @@ function VoiceJumpBody({
   const resolveName = useIdentityNames(session.names);
   const [text, setText] = useState("");
   const [phase, setPhase] = useState<Phase>({ kind: "listening" });
-  // A newer utterance or edit retires the match still in flight.
-  const attempt = useRef(0);
+  // Each listen or edit starts a new epoch; answers from an older one are
+  // dropped. Within one, answers are kept by text, so the final check reuses
+  // the live check of the same words.
+  const run = useRef<{
+    epoch: number;
+    places?: JumpPlace[];
+    answers: Map<string, Promise<JumpResult>>;
+    live: boolean;
+    pending?: string | undefined;
+    done: boolean;
+  }>({ epoch: 0, answers: new Map(), live: false, done: false });
+  const restart = useCallback(() => {
+    run.current = {
+      epoch: run.current.epoch + 1,
+      answers: new Map(),
+      live: false,
+      done: false,
+    };
+  }, []);
+  const scopeNow = () => {
+    const client = services.communities.snapshot();
+    if (!client.selected || !client.viewer) return undefined;
+    return {
+      viewer: client.viewer,
+      communityOrigin: communityDestination(client.selected).url,
+    };
+  };
+  const ask = (said: string, community: string) => {
+    const current = run.current;
+    current.places ??= jumpPlaces(sources(session, resolveName));
+    let answer = current.answers.get(said);
+    if (!answer) {
+      // Threshold 0: the caller decides how sure is sure enough.
+      answer = pickPlace(decisions, said, current.places, community, 0);
+      current.answers.set(said, answer);
+    }
+    return answer;
+  };
+  const goTo = (place: JumpPlace) => {
+    const scope = scopeNow();
+    if (!scope) return;
+    run.current.done = true;
+    go(place);
+    void services.navigation.open({
+      version: 1,
+      kind: "conversation",
+      scope,
+      channelId: place.channelId,
+      ...(place.rootId
+        ? { messageId: place.rootId, threadRootId: place.rootId }
+        : {}),
+    });
+  };
+  /** While words are still landing: one check at a time, always on the
+   * newest words, and a jump only when Jev is already sure. */
+  const live = (said: string) => {
+    const current = run.current;
+    const scope = scopeNow();
+    if (current.done || !scope || !said.trim()) return;
+    if (current.live) {
+      current.pending = said;
+      return;
+    }
+    current.live = true;
+    void ask(said, scope.communityOrigin).then((result) => {
+      if (run.current !== current || current.done) return;
+      current.live = false;
+      if (
+        result.outcome === "found" &&
+        result.probability >= VOICE_JUMP_LIVE_THRESHOLD
+      )
+        return goTo(result.place);
+      const next = current.pending;
+      current.pending = undefined;
+      if (next !== undefined && next !== said) live(next);
+    });
+  };
+  /** Once speech ends or Enter is pressed: the best match at 0.5 or more. */
   const submit = (spoken: string) => {
     const said = spoken.trim();
     if (!said) return setPhase({ kind: "none", text: "" });
-    const client = services.communities.snapshot();
-    if (!client.selected || !client.viewer)
+    const scope = scopeNow();
+    if (!scope)
       return setPhase({
         kind: "failed",
         message: "Choose a community to jump to its conversations.",
       });
-    const scope = {
-      viewer: client.viewer,
-      communityOrigin: communityDestination(client.selected).url,
-    };
-    const places = jumpPlaces(sources(session, resolveName));
-    const current = ++attempt.current;
+    const current = run.current;
+    if (current.done) return;
     setPhase({ kind: "matching" });
-    void pickPlace(decisions, said, places, scope.communityOrigin).then(
-      (result) => {
-        if (current !== attempt.current) return;
-        if (result.outcome === "found") {
-          const { place } = result;
-          go(place);
-          void services.navigation.open({
-            version: 1,
-            kind: "conversation",
-            scope,
-            channelId: place.channelId,
-            ...(place.rootId
-              ? { messageId: place.rootId, threadRootId: place.rootId }
-              : {}),
-          });
-        } else if (result.outcome === "none")
-          setPhase({ kind: "none", text: said });
-        else
-          setPhase({
-            kind: "failed",
-            message:
-              result.reason === "missing_credentials" ||
-              result.reason === "unauthorized" ||
-              result.reason === "unavailable"
-                ? "Set up the Decisions API in Settings to jump by voice."
-                : "Couldn't match that just now. Try again.",
-          });
-      },
-    );
+    void ask(said, scope.communityOrigin).then((result) => {
+      if (run.current !== current || current.done) return;
+      if (
+        result.outcome === "found" &&
+        result.probability >= VOICE_JUMP_THRESHOLD
+      )
+        goTo(result.place);
+      else if (result.outcome !== "failed")
+        setPhase({ kind: "none", text: said });
+      else
+        setPhase({
+          kind: "failed",
+          message:
+            result.reason === "missing_credentials" ||
+            result.reason === "unauthorized" ||
+            result.reason === "unavailable"
+              ? "Set up the Decisions API in Settings to jump by voice."
+              : "Couldn't match that just now. Try again.",
+        });
+    });
   };
   const submitRef = useRef(submit);
   submitRef.current = submit;
   const dictation = useVoiceDictation({
     onText: (next) => {
-      attempt.current++;
       setPhase({ kind: "listening" });
       setText(next);
+      // The dictation hook keeps the newest callbacks, so this is current.
+      live(next);
     },
     onEnd: (spoken) => submitRef.current(spoken),
     onError: (message) => setPhase({ kind: "failed", message }),
   });
   const { start, stop, cancel } = dictation;
   const listen = useCallback(() => {
-    attempt.current++;
+    restart();
     setText("");
     setPhase({ kind: "listening" });
     void start();
-  }, [start]);
+  }, [restart, start]);
   // Listening starts as the box opens.
   // biome-ignore lint/correctness/useExhaustiveDependencies: Once per opening.
   useEffect(() => {
@@ -242,7 +309,7 @@ function VoiceJumpBody({
         onValueChange={(next) => {
           // Typing takes over from the microphone.
           cancel();
-          attempt.current++;
+          restart();
           setPhase({ kind: "listening" });
           setText(next);
         }}
