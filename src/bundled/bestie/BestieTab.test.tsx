@@ -1448,7 +1448,7 @@ it("offers Nightly review's new version, and saves it only when asked, with a wa
   const user = userEvent.setup();
   const { relay } = community(ada.pubkey);
   const { agents, save } = host();
-  const Tab = bestieTab(relay, agents).component;
+  const Tab = bestieTab(relay, agents, navigation, settingsCards).component;
   const old = dreaming(dreamV2);
   const { rerender } = render(<Tab agent={old} />);
   // Showing the update saves nothing.
@@ -1492,7 +1492,7 @@ it("hides Nightly review's update for now with Later, and keeps a way to review 
   const user = userEvent.setup();
   const { relay } = community(ada.pubkey);
   const { agents, save } = host();
-  const Tab = bestieTab(relay, agents).component;
+  const Tab = bestieTab(relay, agents, navigation, settingsCards).component;
   render(<Tab agent={dreaming(dreamV2)} />);
   await user.click(screen.getByRole("button", { name: "Later" }));
   expect(
@@ -1509,7 +1509,7 @@ it("adopts a Nightly review set up by hand as version 3 with the lines it chose 
   const user = userEvent.setup();
   const { relay } = community(ada.pubkey);
   const { agents, save } = host();
-  const Tab = bestieTab(relay, agents).component;
+  const Tab = bestieTab(relay, agents, navigation, settingsCards).component;
   render(<Tab agent={dreaming(`${dreamV2}\n\n${ownLines}`)} />);
   expect(
     screen.getByText(
@@ -1541,7 +1541,7 @@ it("offers Nightly review whose closing line was deleted the way it offers one s
   const user = userEvent.setup();
   const { relay } = community(ada.pubkey);
   const { agents, save } = host();
-  const Tab = bestieTab(relay, agents).component;
+  const Tab = bestieTab(relay, agents, navigation, settingsCards).component;
   render(
     <Tab
       agent={dreaming(
@@ -1582,7 +1582,7 @@ it("saves nothing from a dialog whose Interest changed after it opened, and clos
   const user = userEvent.setup();
   const { relay } = community(ada.pubkey);
   const { agents, save } = host();
-  const Tab = bestieTab(relay, agents).component;
+  const Tab = bestieTab(relay, agents, navigation, settingsCards).component;
   const { rerender } = render(<Tab agent={dreaming(dreamV2)} />);
   for (const [latest, row] of [
     // The agent adds the owner's notes: Review, not Update, keeps them.
@@ -1626,7 +1626,7 @@ it("says inside the dialog why a save was refused, keeping it open", async () =>
   save.mockRejectedValueOnce(
     new Error("Attention changed. Review it and try again."),
   );
-  const Tab = bestieTab(relay, agents).component;
+  const Tab = bestieTab(relay, agents, navigation, settingsCards).component;
   render(<Tab agent={dreaming(dreamV2)} />);
   await user.click(screen.getByRole("button", { name: "See changes" }));
   const dialog = await screen.findByRole("dialog");
@@ -1648,7 +1648,7 @@ it("opens a dialog without the alert of a save that failed before it", async () 
   save.mockRejectedValueOnce(
     new Error("Attention changed. Review it and try again."),
   );
-  const Tab = bestieTab(relay, agents).component;
+  const Tab = bestieTab(relay, agents, navigation, settingsCards).component;
   render(<Tab agent={dreaming(dreamV2)} />);
   // Update from the row fails, and says so beside it.
   await user.click(screen.getByRole("button", { name: "Update" }));
@@ -1667,7 +1667,7 @@ it("offers nothing to do to a Nightly review a newer Buzz set, not even Undo", a
   const user = userEvent.setup();
   const { relay } = community(ada.pubkey);
   const { agents, save } = host();
-  const Tab = bestieTab(relay, agents).component;
+  const Tab = bestieTab(relay, agents, navigation, settingsCards).component;
   const { rerender } = render(<Tab agent={dreaming(dreamV2)} />);
   await user.click(screen.getByRole("button", { name: "Update" }));
   rerender(<Tab agent={dreaming(interestText(dream))} />);
