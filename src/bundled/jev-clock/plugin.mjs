@@ -2012,7 +2012,11 @@ export function apply(ctx) {
     );
     const win = useSyncExternalStore(subscribe, read);
     useEffect(() => session.channels.ensure(channelId), [session, channelId]);
-    const rows = win.rows;
+    // Membership changes and huddle rows are not messages: the host draws them elsewhere.
+    const rows = React.useMemo(
+      () => win.rows.filter((row) => !row.membership && !row.huddle),
+      [win.rows],
+    );
 
     // Stay at the newest message while content loads or arrives, unless the
     // reader scrolled up; keep their place when older messages are added above.
