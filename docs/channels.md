@@ -1623,6 +1623,19 @@ the target is out of reach. Browser engines show a different subset: Chromium's
 frame rate cannot see compositing stalls, so its runs report main-thread cost, and
 macOS WebKit reproduces the frame intervals but not momentum or painted pixels.
 
+### Mouse-wheel easing
+
+WebKit moves a notched mouse wheel's whole tick in one frame, where Chromium eases
+it. In the macOS app, channel history eases each mouse-wheel tick instead: a 190 ms
+cubic-bezier (0.53, 0.21, 0.38, 0.65) that is shorter for long moves, retargets as
+ticks arrive and keeps the current speed. Like Chromium, it moves the full tick and
+stops about 190 ms after the last tick. DOM wheel events look the same for wheels
+and trackpads, so `wheel_input.rs` reads AppKit's `hasPreciseScrollingDeltas` and
+sends `buzz:wheel-input` when the kind changes. Trackpads, Magic Mice, browsers,
+reduced motion, zoom, horizontal wheels and inner scrollers keep native scrolling.
+The tween writes deltas, so the timeline's own corrections still apply. A press or
+key stops it. Wheel ticks over a message's floating actions are eased the same way.
+
 ## Validation and limits
 
 `just scan` runs frontend checks/build, runtime/CLI tests, relay behavior tests,

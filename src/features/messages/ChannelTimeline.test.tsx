@@ -34,6 +34,11 @@ vi.mock("./use-reading", () => ({
   readingPositioned: vi.fn(),
   readingDocumentActive: () => true,
 }));
+// The fake scroller has no DOM events; wheel-easing.test.ts covers easing.
+vi.mock("./wheel-easing", () => ({
+  useWheelEasing: () => {},
+  wheelEasing: () => false,
+}));
 const hooks = vi.hoisted(() => ({
   refs: [] as { current: unknown }[],
   states: [] as unknown[],

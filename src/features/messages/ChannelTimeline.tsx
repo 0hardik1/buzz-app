@@ -67,6 +67,7 @@ import { useKnownAgentPubkeys } from "../agents/use-known";
 import { JumpToLatestButton } from "./JumpToLatestButton";
 import { moveMessageSelection } from "./message-selection";
 import { useMessageSelection } from "./use-message-selection";
+import { useWheelEasing, wheelEasing } from "./wheel-easing";
 import { useMessageVisit } from "./MessageManagement";
 
 // Native upward scrolling can start on a focused message link or button.
@@ -908,6 +909,7 @@ function Timeline({
     return () => observer.disconnect();
   }, []);
   useMessageSelection(scroller, rows, queries);
+  useWheelEasing(scroller);
   // While the connection recovers, its notice is the one report, so the
   // history edge does not repeat the reason. Recovery does not retry older
   // history, and paging stops on a failed read, so Retry stays either way.
@@ -1967,7 +1969,11 @@ function Timeline({
         // even when the browser has not delivered its scroll event yet.
         if (upwardGesture.current && scroller.current)
           recordPosition(scroller.current);
-        if (upwardGesture.current === "candidate")
+        // An eased wheel tick starts slowly; keep its candidate until it moves.
+        if (
+          upwardGesture.current === "candidate" &&
+          !wheelEasing(scroller.current)
+        )
           upwardGesture.current = false;
       });
     // At a restored top edge, input cannot move the DOM and emits no scroll.

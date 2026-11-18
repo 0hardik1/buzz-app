@@ -78,6 +78,8 @@ mod microphone;
 mod mouse_nav;
 #[cfg(target_os = "macos")]
 mod reshow;
+#[cfg(target_os = "macos")]
+mod wheel_input;
 
 mod notifications;
 mod os_idle;
@@ -1049,6 +1051,8 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             mouse_nav::install(app.handle());
             #[cfg(target_os = "macos")]
+            wheel_input::install(app.handle());
+            #[cfg(target_os = "macos")]
             reshow::install(app.handle());
             #[cfg(target_os = "macos")]
             gpu_reaper::install(app.handle());
@@ -1296,6 +1300,12 @@ pub fn run() {
                 .document_load(webview.label(), payload.event())
             {
                 eprintln!("OAuth callback cleanup failed: {error}");
+            }
+            // A wheel event after Started can still reach the old document, so
+            // the kind is sent again after Finished too.
+            #[cfg(target_os = "macos")]
+            if webview.label() == "main" {
+                wheel_input::page_load();
             }
             if webview.label() == "main" && matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
                 webview.state::<HostCalls>().page_load();

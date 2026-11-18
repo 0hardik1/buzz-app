@@ -12,6 +12,7 @@ import {
   behindActiveOverlay,
   observeOverlays,
 } from "../../shared/design-system/overlayLayer";
+import { easeWheel } from "./wheel-easing";
 
 const contentSelector =
   "[data-message-action-anchor], [data-message-attachments] > *";
@@ -568,6 +569,7 @@ export function useFloatingActionBar(
     // the pointer; leave browser zoom gestures alone.
     const wheel = (event: WheelEvent) => {
       if (!scroller || event.ctrlKey || !bar.matches(":popover-open")) return;
+      if (easeWheel(scroller, event, null)) return;
       const unit =
         event.deltaMode === WheelEvent.DOM_DELTA_PAGE
           ? scroller.clientHeight
