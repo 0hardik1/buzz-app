@@ -79,7 +79,6 @@ export function matchCompletion(
   const owners = matches.filter(({ provider }) => provider.supplement !== true);
   const start = Math.max(...owners.map(({ query }) => query.start));
   const winner = owners.find(({ query }) => query.start === start);
-  // The winner and its supplements, in provider precedence.
   const sources = matches.filter(
     (match) =>
       match === winner ||
@@ -116,8 +115,6 @@ export function completionResult(
 ): HostCompletionResult {
   const ids = new Set<string>();
   const items: HostCompletionSuggestion[] = [];
-  // A supplement's rows sit under the host's heading for it and carry no
-  // agent mark; only its hold bears on the winner's exact match.
   const supplement = provider?.supplement === true;
   for (const item of (Array.isArray(result?.items) ? result.items : []).slice(
     0,

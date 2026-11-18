@@ -95,7 +95,6 @@ function EmojiCompletionName({
  * clears it. A query opened elsewhere, by another provider, or after the
  * popup closed starts empty: `ComposerCompletions` evicts the store in its
  * closed render, so a carried result means only a continuing open query. */
-// By `contributionKey` of the publishing provider, winner or supplement.
 type Shown = Readonly<Record<number, HostCompletionResult>>;
 function createDisplay() {
   let shown: { key: string; results: Shown | undefined } = {
@@ -287,7 +286,6 @@ type Row = Readonly<{
   heading?: string;
 }>;
 const slot = ({ provider }: CompletionMatch) => contributionKey(provider);
-// A row's identity is its provider and its id: two providers may share ids.
 const rowKey = (source: CompletionMatch, id?: string) =>
   JSON.stringify([slot(source), id ?? null]);
 
@@ -343,7 +341,6 @@ function OwnedCompletion({
   );
   const list = useRef<HTMLDivElement>(null);
   const trigger = `${contributionKey(provider)}:${query.start}`;
-  // Fixed for this lifetime: a changed set of supplements remounts it.
   const [sources] = useState(matched);
   const results = useSyncExternalStore(
     display.subscribe,
@@ -353,8 +350,6 @@ function OwnedCompletion({
   const result = results?.[contributionKey(provider)];
   // This lifetime's own publication; a carried display is never acted on.
   const latest = useRef(new Map<number, HostCompletionResult>());
-  // A failed supplement is done for this lifetime: its section goes, it holds
-  // nothing back, and it can no longer publish or accept.
   const failed = useRef(new Set<number>());
   // Only user navigation pins an ID; automatic selection follows the first result.
   const [selected, setSelected] = useState<string>();
@@ -408,7 +403,6 @@ function OwnedCompletion({
         published.set(slot(source), next);
         revealSelection.current = true;
         display.set(trigger, slot(source), next);
-        // A pinned row of this provider stays only while it still exists.
         setSelected((previous) => {
           if (!previous?.startsWith(`[${slot(source)},`)) return previous;
           const kept =
@@ -433,14 +427,12 @@ function OwnedCompletion({
   // A carried result stands only until this query's provider has run its
   // mount effects, which precede this one; a provider that has not published
   // by then leaves the popup closed, as for a first query, so a stale display
-  // is never painted. Each supplement is judged alone.
+  // is never painted.
   useEffect(() => {
     if (!publishers) return;
     for (const key of Object.keys(display.read(trigger) ?? {}))
       if (!latest.current.has(Number(key))) display.set(trigger, Number(key));
   }, [publishers, display, trigger]);
-  // The winner's exact match waits while a supplement has, or may have, a
-  // name the typed one is, or begins.
   const held = () =>
     sources.some((source) => {
       const published = latest.current.get(slot(source));
@@ -450,8 +442,6 @@ function OwnedCompletion({
         (!published || published.holdAutoSelect)
       );
     });
-  // The winner's failure closes the popup; a supplement's drops only its own
-  // section, whether its provider or one of its previews throws.
   const isolate = (source: CompletionMatch, node: ReactNode) =>
     source.provider === provider ? (
       node
@@ -479,8 +469,6 @@ function OwnedCompletion({
       })),
       ...(shown?.retry ? [{ source, key: rowKey(source) }] : []),
     ];
-    // A supplement's rows sit under its title; the winner's too when rows
-    // precede them and the provider draws no heading of its own.
     const first = own[0];
     if (
       first &&
@@ -545,7 +533,6 @@ function OwnedCompletion({
     // Escape must still dismiss an unpublished provider without advertising a
     // nonexistent listbox. A settled empty result leaves ordinary keys alone;
     // an undecided one still owns the terminator, with nothing to show yet.
-    // A supplement that still holds counts as undecided.
     if (!element || (!visible && result && !result.spacePending && !held()))
       return;
     if (visible) {
@@ -594,7 +581,6 @@ function OwnedCompletion({
       // redirected away from an exact match the display showed: a publication
       // that moves it to another id leaves Space literal. The displayed row
       // is never accepted on its own; only the publication selects.
-      // A supplement holding the terminator leaves it literal too.
       const published = held()
         ? undefined
         : latest.current.get(contributionKey(provider));
