@@ -71,7 +71,15 @@ export function jumpPlaces(sources: JumpSources): JumpPlace[] {
   const byId = new Map<string, ChannelSummary>();
   for (const channel of sources.channels) {
     const kind = kindOf(channel);
-    if (!kind || channel.archived || channel.hidden) continue;
+    // Every DM is `hidden` (kept out of channel directories), so only a
+    // hidden non-DM is skipped.
+    if (
+      !kind ||
+      channel.archived ||
+      channel.huddle ||
+      (channel.hidden && kind !== "dm")
+    )
+      continue;
     byId.set(channel.id, channel);
     const name = sources.name(channel);
     const history = sources.window(channel.id);
