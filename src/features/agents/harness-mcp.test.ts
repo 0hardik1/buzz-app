@@ -366,14 +366,14 @@ it.each([
 it("gives the control what a passing session loaded, and nothing else", async () => {
   const { mcp, install, status, live } = setup();
   const heard: unknown[][] = [];
-  let failure: (() => unknown) | undefined;
+  let failure: (() => void) | undefined;
   await install({
     choose: () => ({ alpha: { off: ["write"], known: ["read", "write"] } }),
     loaded(who, servers) {
       heard.push([who, servers]);
       const fail = failure;
       failure = undefined;
-      return fail?.() as void;
+      return fail?.();
     },
   });
   const choice = await mcp.kit.choice(handle);

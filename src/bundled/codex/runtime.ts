@@ -3479,16 +3479,10 @@ export class CodexRuntime {
         this.acknowledgeActivity(active, request);
         // A conversation new to this agent: name its Solo chat meanwhile.
         if (request.named && !saved && !server.protection)
-          void this.offerTitle(
-            rpc,
-            request.named,
-            text,
-            entry.abort.signal,
-            {
-              ...params,
-              config: { ...params.config, mcp_servers: silenced },
-            },
-          ).catch((error) => {
+          void this.offerTitle(rpc, request.named, text, entry.abort.signal, {
+            ...params,
+            config: { ...params.config, mcp_servers: silenced },
+          }).catch((error) => {
             if (!entry.abort.signal.aborted)
               console.warn("Codex could not title the chat", error);
           });
