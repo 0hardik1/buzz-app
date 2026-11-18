@@ -11,10 +11,18 @@ import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Button } from "../../shared/design-system/ui/Button";
 import { EmptyState } from "../../shared/design-system/ui/EmptyState";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
+import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { SearchField } from "../../shared/design-system/ui/SearchField";
 import { ShimmerText } from "../../shared/design-system/ui/ShimmerText";
-import { ChoiceRow } from "../../shared/design-system/ui/ChoiceRow";
-import { MicrophoneIcon } from "../../shared/design-system/icons/index";
+import {
+  ChatCircleIcon,
+  MicrophoneIcon,
+  ThreadIcon,
+} from "../../shared/design-system/icons/index";
+import {
+  channelIcon,
+  channelIconLabel,
+} from "../../features/channels/channel-icon";
 import type { KeyBinding } from "../../features/shortcuts/bindings";
 import { communityDestination } from "../../features/communities/destination";
 import { useIdentityNames } from "../../features/identity-names/react";
@@ -40,6 +48,7 @@ import {
 import type { AppServices } from "../services";
 import { HOST_SHORTCUT_ORDER } from "../shortcuts";
 import { conversationFocusTarget } from "../focus-navigation";
+import "./SearchChoices.css";
 import styles from "./VoiceJump.module.css";
 
 export type VoiceJumpServices = Pick<
@@ -385,21 +394,17 @@ function VoiceJumpBody({
         <>
           {phase.kind !== "failed" && candidates.length > 0 && (
             <ul className={styles.candidates} aria-label="Likeliest places">
-              {candidates.map(({ place, label, probability }) => (
+              {candidates.map(({ place, probability }) => (
                 <li key={place.key}>
-                  <Button
-                    variant="ghost"
-                    size="row"
-                    onClick={() => {
+                  <VoiceJumpRow
+                    place={place}
+                    channel={session.channels.get?.(place.channelId)}
+                    probability={probability}
+                    onChoose={() => {
                       cancel();
                       goTo(place);
                     }}
-                  >
-                    <ChoiceRow
-                      label={label}
-                      trailing={`${Math.round(probability * 100)}%`}
-                    />
-                  </Button>
+                  />
                 </li>
               ))}
             </ul>
@@ -410,6 +415,67 @@ function VoiceJumpBody({
         </>
       )}
     </div>
+  );
+}
+
+function VoiceJumpRow({
+  place,
+  channel,
+  probability,
+  onChoose,
+}: {
+  place: JumpPlace;
+  channel: ChannelSummary | undefined;
+  probability: number;
+  onChoose: () => void;
+}) {
+  const { kind } = place;
+  const Icon =
+    kind === "thread"
+      ? ThreadIcon
+      : kind === "channel"
+        ? channelIcon(channel)
+        : ChatCircleIcon;
+  const excerpt = place.recent?.at(-1) ?? place.first;
+  const detail =
+    kind === "thread"
+      ? place.in && `Thread in ${place.in}`
+      : kind === "channel"
+        ? (place.about ?? excerpt ?? channelIconLabel(channel))
+        : (excerpt ??
+          place.about ??
+          (kind === "dm" ? "Direct message" : "Chat"));
+
+  return (
+    <NavigationItem
+      variant="search"
+      icon={
+        <span
+          className="search-peek-tile"
+          data-tone={kind === "dm" ? "person" : kind}
+          aria-hidden="true"
+        >
+          <Icon size={15} />
+        </span>
+      }
+      label={
+        <>
+          <span className="block truncate text-body-sm">{place.name}</span>
+          {detail && (
+            <span className="block truncate text-body-sm text-subtle">
+              {detail}
+            </span>
+          )}
+        </>
+      }
+      trailing={
+        <span className="text-body-sm tabular-nums">
+          {Math.round(probability * 100)}%
+          <span className="sr-only"> match score</span>
+        </span>
+      }
+      onClick={onChoose}
+    />
   );
 }
 
