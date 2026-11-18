@@ -14,7 +14,7 @@ import type { RelaySession } from "../relay/session";
 import type { ComposerSession } from "./composer-session";
 import { MessageLink } from "../conversation/MessageLink";
 import { parseBuzzLink } from "../navigation/buzz-links";
-import { messageLinkParts } from "./message-link-parts";
+import { bareHostParts, messageLinkParts } from "./message-link-parts";
 import { labelText } from "./label-text";
 import {
   ReferenceText,
@@ -33,16 +33,24 @@ import type { ConversationExtensions } from "../conversation/contracts";
 import { CodeFence, observeTableOverflow } from "../markdown/code-blocks";
 import { InlineText } from "../conversation/InlineText";
 import type { ChannelMessage, Profile } from "../relay/contracts";
-import { emojiMatches, linkPart, messageParts } from "../relay/emoji";
+import {
+  emojiMatches,
+  isNumericTimeShortcode,
+  linkPart,
+  messageParts,
+} from "../relay/emoji";
 import { safeLinkUrl, visibleHtmlSource } from "../relay/message-content";
 import styles from "./Messages.module.css";
-import { profileMentionNames, profileMentionParts } from "./profile-mentions";
+import {
+  profileMentionNames,
+  renderedProfileMentionParts,
+} from "./profile-mentions";
 import {
   isLiteralMarkdownContext,
   isPlainProse,
   plainProseTree,
-  prepareMarkdown,
-  type LiteralRange,
+  preparedMarkdown,
+  recentResults,
   type PreparedMarkdown,
 } from "./markdown-preparation";
 
@@ -82,13 +90,15 @@ function protectInlineContent(
     | "attachmentSeams"
     | "mentions"
     | "mentionReferences"
+    | "mentionLabels"
     | "emoji"
   >,
   profiles: ReadonlyMap<string, Profile> | undefined,
-  literalRanges: readonly LiteralRange[],
+  prepared: Extract<ReturnType<typeof preparedMarkdown>, { kind: "markdown" }>,
   agents: typeof emptyReferenceDirectory.agents,
   spoilerDelimiters: readonly number[],
 ): ProtectedContent {
+  const { literalRanges } = prepared;
   let rangeIndex = 0;
   const isLiteral = (start: number, end: number) => {
     while (
@@ -101,7 +111,7 @@ function protectInlineContent(
 
   // Numeric entities can manufacture private-use characters during parsing too.
   // Choose an unused prefix in that decoded source; never trust a fixed marker.
-  const decoded = row.content.replace(
+  const decoded = prepared.content.replace(
     /&#(x[a-f\d]{1,6}|\d{1,7});/gi,
     (entity, number: string) => {
       const code =
@@ -136,11 +146,11 @@ function protectInlineContent(
     return `${start}${parts.length - 1}${end}`;
   };
   let offset = 0;
-  const content = profileMentionParts(row, profiles, agents)
+  const content = renderedProfileMentionParts(row, profiles, agents, prepared)
     .map((segment) => {
       const start = offset;
       offset += segment.text.length;
-      if (segment.target && !isLiteral(start, offset)) return token(segment);
+      if (segment.target) return token(segment);
       let partOffset = start;
       return messageParts(segment.text)
         .map((part) => {
@@ -167,7 +177,15 @@ function protectInlineContent(
               ? []
               : Array.from(emojiMatches(part, row.emoji ?? []), (match) => ({
                   ...match,
-                  literal: undefined,
+                  // Preserve the full-source boundary after mention segmentation,
+                  // including during the inline plugin's later text scan.
+                  literal: isNumericTimeShortcode(
+                    prepared.content,
+                    partStart + match.start,
+                    match.emoji.shortcode,
+                  )
+                    ? part.slice(match.start, match.end)
+                    : undefined,
                 }))),
             ...(urlPart ? [] : encoded),
             ...spoilerDelimiters
@@ -233,6 +251,7 @@ function inlineProtectionKey(
   const emoji = row.emoji?.map(({ shortcode, url }) => [shortcode, url]);
   return JSON.stringify([
     row.edited === true,
+    row.mentionLabels,
     row.attachmentSeams,
     mentions,
     agentNames,
@@ -508,10 +527,7 @@ export function MessageMarkdown({
   edited?: boolean | undefined;
 }) {
   const resolveName = useChannelIdentityNames(session, row.channelId);
-  const prepared = useMemo(
-    () => preparedBodies(row.content, () => prepareMarkdown(row.content)),
-    [row.content],
-  );
+  const prepared = useMemo(() => preparedMarkdown(row.content), [row.content]);
   if (prepared.kind === "plain")
     return (
       <div className={styles.plainText}>
@@ -560,7 +576,7 @@ function PreparedMessageMarkdown({
   interactive = true,
   edited = false,
 }: Parameters<typeof MessageMarkdown>[0] & {
-  prepared: Extract<ReturnType<typeof prepareMarkdown>, { kind: "markdown" }>;
+  prepared: Extract<PreparedMarkdown, { kind: "markdown" }>;
   resolveName: (pubkey: string, fallback: string) => string;
 }) {
   const row =
@@ -598,29 +614,31 @@ function PreparedMessageMarkdown({
     );
   const renderText = (text: string) => {
     let offset = 0;
-    return messageLinkParts(text).map((part) => {
-      // A trailing bare link yields two empty text parts at the same offset.
-      if (!part.url && !part.text) return null;
-      const key = `${offset}:${part.text}`;
-      offset += part.text.length;
-      return part.url ? (
-        <span key={key}>{renderLink(part.url, part.label)}</span>
-      ) : (
-        <ReferenceText
-          channelId={row.channelId}
-          key={key}
-          text={part.text}
-          mentions={[]}
-          directory={directory}
-          renderText={renderInline}
-          onOpenLink={onOpenLink}
-          extensions={extensions}
-          session={session}
-          scope={scope}
-          interactive={interactive}
-        />
-      );
-    });
+    return messageLinkParts(text)
+      .flatMap((part) => (part.url ? [part] : bareHostParts(part.text)))
+      .map((part) => {
+        // A trailing bare link yields two empty text parts at the same offset.
+        if (!part.url && !part.text) return null;
+        const key = `${offset}:${part.text}`;
+        offset += part.text.length;
+        return part.url ? (
+          <span key={key}>{renderLink(part.url, part.label)}</span>
+        ) : (
+          <ReferenceText
+            channelId={row.channelId}
+            key={key}
+            text={part.text}
+            mentions={[]}
+            directory={directory}
+            renderText={renderInline}
+            onOpenLink={onOpenLink}
+            extensions={extensions}
+            session={session}
+            scope={scope}
+            interactive={interactive}
+          />
+        );
+      });
   };
 
   const profiles = participantProfiles ?? directory.profiles;
@@ -635,22 +653,9 @@ function PreparedMessageMarkdown({
   const protectedContent = useMemo(
     () =>
       protectInlineContent(
-        {
-          content: prepared.content,
-          // Seams index the folded body. Leave link-repaired prose unbound, as edits are.
-          ...(sourceRow.edited ||
-          (sourceRow.attachmentSeams && prepared.content !== sourceRow.content)
-            ? { edited: true as const }
-            : {}),
-          ...(sourceRow.attachmentSeams
-            ? { attachmentSeams: sourceRow.attachmentSeams }
-            : {}),
-          mentions: sourceRow.mentions,
-          mentionReferences: sourceRow.mentionReferences ?? [],
-          ...(sourceRow.emoji ? { emoji: sourceRow.emoji } : {}),
-        },
+        sourceRow,
         profiles,
-        prepared.literalRanges,
+        prepared,
         directory.agents,
         prepared.spoilerDelimiters,
       ),
@@ -769,6 +774,7 @@ function PreparedMessageMarkdown({
       <CodeFence
         {...props}
         copy={interactive}
+        focusable={interactive}
         registry={interactive ? extensions?.codeBlocks : undefined}
         classes={MESSAGE_CODE_CLASSES}
       />
@@ -783,33 +789,6 @@ function PreparedMessageMarkdown({
   return largeEmoji ? markdown : <div className={styles.text}>{markdown}</div>;
 }
 
-/** Switching channels remounts every row. Keep recent results so a revisit
- * does not prepare and parse unchanged bodies again. */
-function recentResults<T>(
-  budget: number,
-  weigh: (key: string, value: T) => number,
-) {
-  const results = new Map<string, Readonly<{ value: T; weight: number }>>();
-  let total = 0;
-  return (key: string, make: () => T) => {
-    let entry = results.get(key);
-    if (entry) results.delete(key);
-    else {
-      const value = make();
-      entry = { value, weight: weigh(key, value) };
-      // Keeping a result heavier than the budget would evict all the others.
-      if (entry.weight > budget) return value;
-      total += entry.weight;
-    }
-    results.set(key, entry);
-    for (const [oldest, { weight }] of results) {
-      if (total <= budget) break;
-      results.delete(oldest);
-      total -= weight;
-    }
-    return entry.value;
-  };
-}
 function elementCount(node: ReactNode): number {
   if (Array.isArray(node))
     return node.reduce<number>((sum, child) => sum + elementCount(child), 0);
@@ -817,11 +796,6 @@ function elementCount(node: ReactNode): number {
     ? 1 + elementCount(node.props.children)
     : 0;
 }
-// A prepared body keeps its content and literal ranges: ~200k characters.
-const preparedBodies = recentResults<PreparedMarkdown>(
-  200_000,
-  (content) => 100 + content.length,
-);
 // A parsed body keeps ~2 KB, ~1 KB per element and ~2 bytes per character of
 // its key and text. Dense markup has an element every few characters, so weigh
 // both: ~4 MB in all. The elements depend only on the protected content; their
