@@ -13,6 +13,7 @@ import {
   OPEN_IN_BROWSER_FAILED,
   openInBrowser,
 } from "../conversation/open-in-browser";
+import { useTargetOpener } from "../conversation/opener";
 import { Button } from "../../shared/design-system/ui/Button";
 import { ToastNotice } from "../../shared/design-system/ui/Toast";
 import styles from "./LinkPreviews.module.css";
@@ -23,6 +24,27 @@ export const FOLD_AFTER = 3;
 const none: readonly Contribution<LinkPreviewRenderer>[] = [];
 const noSubscribe = () => () => {};
 const noSnapshot = () => none;
+
+/** One card, with the host's opener for targets other than its link. */
+function LinkPreviewCard({
+  url,
+  messageId,
+  registry,
+  renderer,
+  open,
+}: {
+  url: string;
+  messageId: string;
+  registry: ContributionReader<LinkPreviewRenderer>;
+  renderer: Contribution<LinkPreviewRenderer>;
+  open(): boolean;
+}) {
+  const opener = useTargetOpener(registry, renderer);
+  const Preview = renderer.component;
+  return (
+    <Preview url={url} messageId={messageId} open={open} opener={opener} />
+  );
+}
 
 export function LinkPreviews({
   urls,
@@ -56,13 +78,12 @@ export function LinkPreviews({
     const renderer = resolveMatch(renderers, url);
     return renderer ? [{ url, renderer }] : [];
   });
-  if (!cards.length) return null;
+  if (!registry || !cards.length) return null;
   const shown = open ? cards : cards.slice(0, FOLD_AFTER);
   const hidden = cards.length - shown.length;
   return (
     <div className={styles.previews} data-link-previews>
       {shown.map(({ url, renderer }) => {
-        const Preview = renderer.component;
         const key = contributionKey(renderer);
         return (
           <ContributionBoundary
@@ -70,14 +91,16 @@ export function LinkPreviews({
             fallback={null}
             resetIdentity={key}
           >
-            <Preview
+            <LinkPreviewCard
               url={url}
               messageId={messageId}
+              registry={registry}
+              renderer={renderer}
               open={() => {
                 if (
                   !active ||
                   !live.current ||
-                  !registry?.snapshot().includes(renderer)
+                  !registry.snapshot().includes(renderer)
                 )
                   return false;
                 // A link no panel takes opens in the browser, as its anchor does.
