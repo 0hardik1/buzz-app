@@ -37,11 +37,14 @@ The version-1 body contains `title`, `done`, and `assignees`, with optional
 and assignment `p` tags. A stale edit is rejected instead of overwriting changes.
 The plugin does not migrate records from earlier Tasks plugins.
 
-Shared writes use the host's signing/publication capability. One exact outgoing
-event is saved locally before publication; unconfirmed delivery blocks further
-writes. **Check save** reads its outcome. **Retry saved task** checks again and
-resends only that same signed event after validating current access, never a
-new task ID. This recovery record is isolated by the host's account/community
+Shared writes use the host's signing/publication capability. Each complete task
+is saved in a local queue before the composer clears, including its destination,
+deadline and assignee. The queue and exact signed attempt share one durable
+record, so queued tasks survive reload. A failure never overwrites the next draft.
+Proven-unsent tasks remain available to retry or explicitly discard; discarding
+one lets the remaining queue continue. Unconfirmed delivery blocks further writes. **Check save** reads its outcome. **Retry saved task** validates current access and retries the queued task. For
+an unconfirmed signed attempt it resends only that exact event, never a new task
+ID; a proven-unsent draft is signed when retried. This recovery record is isolated by the host's account/community
 scope and survives reload. No external service or host command grants are needed.
 
 ## First-version limits

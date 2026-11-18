@@ -176,10 +176,25 @@ export function createModel(session, storage, changed) {
     error: "",
     partial: false,
     pending: null,
+    queuePaused: false,
   };
   let confirmedTasks = [];
   let optimisticTask = null;
-  const saveQueue = [];
+  let saveQueue = [];
+  let recoveryError = "";
+  // One atomic journal owns both unsigned drafts and the exact signed attempt.
+  const persist = (pending, queue) => {
+    if (pending || queue.length)
+      storage.setItem(
+        key,
+        JSON.stringify({
+          version: 1,
+          pending,
+          queue: queue.map(({ input }) => input),
+        }),
+      );
+    else storage.removeItem(key);
+  };
   let draining = false;
   let lastCreatedAt = 0;
   const openChannels = new Map();
@@ -204,6 +219,7 @@ export function createModel(session, storage, changed) {
       state.tasks = [...state.tasks].sort(
         (a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id),
       );
+      state.queuedTitle = saveQueue[0]?.input.title || "Task";
       state.savingIds = saveQueue.map((entry) => entry.input.id);
       changed();
     }
@@ -222,9 +238,25 @@ export function createModel(session, storage, changed) {
     home.members?.length === 1 &&
     home.members[0] === session.viewer;
   try {
-    state.pending = JSON.parse(storage.getItem(key) || "null");
+    const saved = JSON.parse(storage.getItem(key) || "null");
+    if (saved?.version === 1) {
+      if (!Array.isArray(saved.queue)) throw new Error("Invalid task journal");
+      const restored = saved.queue.map((input) => {
+        if (!input || !Number.isFinite(input.createdAt))
+          throw new Error("Invalid saved task");
+        taskTemplate({ ...input, channel: input.channel || input.id });
+        return { input, resolve() {}, reject() {} };
+      });
+      state.pending = saved.pending;
+      saveQueue = restored;
+      state.queuePaused = saveQueue.length > 0 && !state.pending;
+      lastCreatedAt = Math.max(
+        0,
+        ...restored.map(({ input }) => input.createdAt),
+      );
+    } else state.pending = saved; // Migrate the original signed-event-only journal.
   } catch {
-    state.error =
+    recoveryError = state.error =
       "Saved task recovery could not be read. Reload before adding tasks.";
   }
   async function discover() {
@@ -266,7 +298,14 @@ export function createModel(session, storage, changed) {
       },
     ]);
     if (found.some((item) => item.id === event.id)) {
-      storage.removeItem(key);
+      signal.throwIfAborted();
+      if (state.pending?.id !== event.id) return;
+      const head = saveQueue[0];
+      const remaining =
+        head?.input.id === tag(event, "d") ? saveQueue.slice(1) : saveQueue;
+      persist(null, remaining);
+      saveQueue = remaining;
+      if (!draining && head && !remaining.includes(head)) head.resolve();
       const task = parseTask(event);
       emit({
         pending: null,
@@ -284,7 +323,7 @@ export function createModel(session, storage, changed) {
       do {
         again = false;
         try {
-          await recover();
+          if (!state.saving) await recover();
           const personal = await discover();
           const results = await Promise.all([
             current({ "#p": [session.viewer] }),
@@ -307,7 +346,7 @@ export function createModel(session, storage, changed) {
             personal,
             partial: results.some((result) => result.partial),
             loading: false,
-            error: "",
+            error: recoveryError,
           });
         } catch (error) {
           if (!signal.aborted)
@@ -412,13 +451,14 @@ export function createModel(session, storage, changed) {
       const signed = await writer.sign(taskTemplate(task), signal);
       signal.throwIfAborted();
       // Persist the exact event before sending. Recovery never signs a replacement.
-      storage.setItem(key, JSON.stringify(signed));
+      persist(signed, saveQueue);
       emit({ pending: signed });
       try {
         await writer.publish(signed, signal);
       } catch (error) {
         if (writer.isNotSent?.(error)) {
-          storage.removeItem(key);
+          signal.throwIfAborted();
+          persist(null, saveQueue);
           emit({ pending: null });
         }
         throw error;
@@ -438,7 +478,15 @@ export function createModel(session, storage, changed) {
     }
   }
   async function drainSaves() {
-    if (draining || state.saving || state.pending || disposed) return;
+    if (
+      draining ||
+      state.saving ||
+      state.pending ||
+      state.queuePaused ||
+      recoveryError ||
+      disposed
+    )
+      return;
     draining = true;
     try {
       while (saveQueue.length && !state.pending && !disposed) {
@@ -448,8 +496,11 @@ export function createModel(session, storage, changed) {
           entry.resolve();
         } catch (error) {
           entry.reject(error);
+          // Retain the entire draft, including its destination and metadata.
+          // An uncertain signed attempt is recovered before anything is re-signed.
+          emit({ queuePaused: !state.pending });
+          break;
         }
-        saveQueue.shift();
         emit({});
       }
     } finally {
@@ -457,29 +508,42 @@ export function createModel(session, storage, changed) {
     }
   }
   function save(input) {
+    signal.throwIfAborted();
+    if (recoveryError) throw new Error(recoveryError);
+    if (state.queuePaused)
+      throw new Error("Retry the saved tasks before adding another task.");
     if (state.loading || (state.pending && !state.saving))
-      return Promise.reject(
-        new Error(
-          "Check the previous save outcome before adding another task.",
-        ),
+      throw new Error(
+        "Check the previous save outcome before adding another task.",
       );
+    taskTemplate({ ...input, channel: input.channel || input.id });
     const createdAt = input.event
       ? parseTask(input.event).createdAt
       : Math.max(Date.now(), lastCreatedAt + 1);
     if (!input.event) lastCreatedAt = createdAt;
+    let entry;
     const result = new Promise((resolve, reject) => {
-      saveQueue.push({
+      entry = {
         input: { ...input, createdAt, title: input.title.trim() },
         resolve,
         reject,
-      });
+      };
     });
+    // Throw synchronously on storage failure so the composer keeps its draft.
+    const next = [...saveQueue, entry];
+    persist(state.pending, next);
+    saveQueue = next;
     emit({});
     void drainSaves();
     return result;
   }
   async function retrySaved() {
-    if (state.saving || !state.pending) return;
+    if (state.saving || recoveryError) return;
+    if (!state.pending) {
+      emit({ queuePaused: false, error: "" });
+      await drainSaves();
+      return;
+    }
     emit({ saving: true, error: "" });
     try {
       await recover();
@@ -519,6 +583,20 @@ export function createModel(session, storage, changed) {
     refresh,
     save,
     retrySaved,
+    discardUnsent() {
+      if (disposed) return;
+      if (!state.queuePaused || state.pending || state.saving || recoveryError)
+        return;
+      const remaining = saveQueue.slice(1);
+      try {
+        persist(null, remaining);
+        saveQueue = remaining;
+        emit({ queuePaused: false, error: "" });
+        void drainSaves();
+      } catch (error) {
+        emit({ error: String(error.message || error) });
+      }
+    },
     followChannel(id) {
       openChannels.set(id, (openChannels.get(id) ?? 0) + 1);
       void refresh();
@@ -1680,6 +1758,7 @@ export function apply(ctx) {
       try {
         if (!title.trim() || disabled) return;
         setError("");
+        let admitted = false;
         try {
           const savingTask = owner.save({
             id: crypto.randomUUID(),
@@ -1689,6 +1768,7 @@ export function apply(ctx) {
             ...dueValue(date, time),
             assignees: assignee ? [assignee] : [],
           });
+          admitted = true;
           setTitle("");
           setDate("");
           setTime("");
@@ -1697,12 +1777,8 @@ export function apply(ctx) {
           saving.current = false;
           await savingTask;
         } catch (error) {
-          if (!owner.snapshot().pending) {
-            setTitle((current) => current || title);
-            setDate(date);
-            setTime(time);
-          }
-          setError(error.message);
+          // Background failures belong to the durable queue, not the next draft.
+          if (!admitted) setError(error.message);
         }
       } finally {
         saving.current = false;
@@ -2017,6 +2093,7 @@ export function apply(ctx) {
       !state.loading &&
       !state.error &&
       !state.pending &&
+      !state.queuePaused &&
       !state.partial
     ) {
       return h(
@@ -2129,9 +2206,16 @@ export function apply(ctx) {
               "div",
               null,
               h("p", { role: "alert" }, state.error),
-              button("Retry", () => void owner.refresh(), {
-                disabled: state.saving,
-              }),
+              button(
+                "Retry",
+                () =>
+                  void (state.queuePaused
+                    ? owner.retrySaved()
+                    : owner.refresh()),
+                {
+                  disabled: state.saving,
+                },
+              ),
             ),
           state.pending &&
             !state.saving &&
@@ -2141,12 +2225,24 @@ export function apply(ctx) {
               { role: "status" },
               "A task save is still unconfirmed. Check its outcome or retry the same saved task.",
             ),
-          state.pending &&
+          (state.pending || state.queuePaused) &&
             !state.saving &&
             !state.loading &&
             button("Retry saved task", () => void owner.retrySaved(), {
               disabled: state.saving,
             }),
+          state.queuePaused &&
+            !state.saving &&
+            h(
+              "div",
+              null,
+              h(
+                "p",
+                { role: "status" },
+                `“${state.queuedTitle}” is saved on this device but has not been sent.`,
+              ),
+              button("Discard unsent task", () => owner.discardUnsent()),
+            ),
           state.partial &&
             h(
               "p",

@@ -176,10 +176,13 @@ describe("Tasks plugin", () => {
     await expect(f.model.save({ ...old, title: "stale" })).rejects.toThrow(
       "changed elsewhere",
     );
-    f.channel.members = [viewer];
+    const removed = fixture();
+    await removed.model.refresh();
+    removed.channel.members = [viewer];
     await expect(
-      f.model.save({ ...f.input, assignees: [other] }),
+      removed.model.save({ ...removed.input, assignees: [other] }),
     ).rejects.toThrow("no longer");
+    removed.model.dispose();
     expect(f.session.configArtifactWriter.publish).toHaveBeenCalledTimes(2);
     f.model.dispose();
   });
@@ -211,7 +214,7 @@ describe("Tasks plugin", () => {
     await expect(f.model.save(f.input)).rejects.toThrow("network");
     await f.model.refresh();
     expect(f.saved.size).toBe(1);
-    await expect(f.model.save(f.input)).rejects.toThrow("outcome");
+    expect(() => f.model.save(f.input)).toThrow("outcome");
     f.model.dispose();
   });
   it("clears a proven unsent attempt and reports read errors instead of an empty list", async () => {
@@ -221,7 +224,9 @@ describe("Tasks plugin", () => {
       Object.assign(new Error("not sent"), { notSent: true }),
     );
     await expect(f.model.save(f.input)).rejects.toThrow("not sent");
-    expect(f.saved.size).toBe(0);
+    expect(f.saved.size).toBe(1);
+    expect(f.model.snapshot().pending).toBeNull();
+    expect(f.model.snapshot().queuePaused).toBe(true);
     f.session.snapshotRead.mockRejectedValueOnce(new Error("offline"));
     await f.model.refresh();
     expect(f.model.snapshot().error).toBe("offline");
@@ -322,7 +327,7 @@ describe("Tasks plugin", () => {
   });
 });
 
-it("shows a new task immediately, survives refresh, and rolls back a definitely unsent save", async () => {
+it("shows a new task immediately and retains a definitely unsent draft for retry", async () => {
   const f = fixture();
   await f.model.refresh();
   let release;
@@ -343,7 +348,8 @@ it("shows a new task immediately, survives refresh, and rolls back a definitely 
     release();
   }
   await rejected;
-  expect(f.model.snapshot().tasks).toHaveLength(0);
+  expect(f.model.snapshot().tasks).toHaveLength(1);
+  expect(f.model.snapshot().queuePaused).toBe(true);
   expect(f.model.snapshot().error).toContain("Signing failed");
   f.model.dispose();
 });
@@ -488,5 +494,128 @@ it("rejects titles exceeding the relay UTF-8 byte limit before signing", () => {
   expect(() =>
     taskTemplate({ ...f.input, title: "é".repeat(256) }),
   ).not.toThrow();
+  f.model.dispose();
+});
+
+it("restores every queued task after reload and retries the original signed event", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  f.session.configArtifactWriter.publish.mockRejectedValueOnce(
+    new Error("offline"),
+  );
+  const first = f.model.save(f.input);
+  const secondInput = {
+    ...f.input,
+    id: "20000000-0000-4000-8000-000000000002",
+    title: "Second",
+    dueDate: "2026-12-01",
+    assignees: [other],
+  };
+  void f.model.save(secondInput);
+  await expect(first).rejects.toThrow("offline");
+  const signed = f.model.snapshot().pending;
+  f.model.dispose();
+  const next = createModel(f.session, f.storage, () => {});
+  await next.refresh();
+  expect(next.snapshot().tasks).toHaveLength(2);
+  expect(
+    next.snapshot().tasks.find((task) => task.id === secondInput.id),
+  ).toMatchObject(secondInput);
+  await next.retrySaved();
+  await vi.waitFor(() => expect(f.records.size).toBe(2));
+  expect(f.session.configArtifactWriter.publish.mock.calls[1][0]).toEqual(
+    signed,
+  );
+  expect(f.session.configArtifactWriter.sign).toHaveBeenCalledTimes(2);
+  expect(f.saved.size).toBe(0);
+  next.dispose();
+});
+
+it("keeps a full unsigned draft across reload after signing fails", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  f.session.configArtifactWriter.sign.mockRejectedValueOnce(
+    new Error("signing unavailable"),
+  );
+  const draft = {
+    ...f.input,
+    title: "Keep me",
+    dueDate: "2026-12-02",
+    assignees: [other],
+  };
+  await expect(f.model.save(draft)).rejects.toThrow("signing unavailable");
+  f.model.dispose();
+  const next = createModel(f.session, f.storage, () => {});
+  await next.refresh();
+  expect(next.snapshot().tasks[0]).toMatchObject(draft);
+  expect(next.snapshot().queuePaused).toBe(true);
+  expect(f.session.configArtifactWriter.publish).not.toHaveBeenCalled();
+  await next.retrySaved();
+  expect(f.records.size).toBe(1);
+  expect(f.saved.size).toBe(0);
+  next.dispose();
+});
+
+it("refuses queue admission synchronously when durable storage fails", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  f.storage.setItem = () => {
+    throw new Error("storage full");
+  };
+  expect(() => f.model.save(f.input)).toThrow("storage full");
+  expect(f.model.snapshot().tasks).toHaveLength(0);
+  expect(f.session.configArtifactWriter.sign).not.toHaveBeenCalled();
+  f.model.dispose();
+});
+
+it("allows explicit discard of a proven-unsent head and continues the durable queue", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  f.session.configArtifactWriter.sign.mockRejectedValueOnce(
+    new Error("signing failed"),
+  );
+  const first = f.model.save(f.input);
+  const secondInput = {
+    ...f.input,
+    id: "20000000-0000-4000-8000-000000000002",
+    title: "Second",
+  };
+  const second = f.model.save(secondInput);
+  await expect(first).rejects.toThrow("signing failed");
+  f.model.discardUnsent();
+  await second;
+  expect([...f.records.keys()]).toEqual([secondInput.id]);
+  expect(f.saved.size).toBe(0);
+  f.model.dispose();
+});
+
+it("does not retire an active save during a refresh before its failed acknowledgement", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  let rejectPublish;
+  f.session.configArtifactWriter.publish.mockImplementationOnce(
+    async (event) => {
+      f.records.set(f.input.id, event);
+      await new Promise((_resolve, reject) => {
+        rejectPublish = reject;
+      });
+    },
+  );
+  const first = f.model.save(f.input);
+  const second = f.model.save({
+    ...f.input,
+    id: "20000000-0000-4000-8000-000000000002",
+    title: "Second",
+  });
+  await vi.waitFor(() => expect(rejectPublish).toBeTypeOf("function"));
+  await f.model.refresh();
+  rejectPublish(new Error("ack lost"));
+  await expect(first).rejects.toThrow("ack lost");
+  expect(f.model.snapshot().pending).not.toBeNull();
+  expect(f.model.snapshot().queuePaused).toBe(false);
+  await f.model.refresh();
+  await second;
+  expect(f.records.size).toBe(2);
+  expect(f.saved.size).toBe(0);
   f.model.dispose();
 });
