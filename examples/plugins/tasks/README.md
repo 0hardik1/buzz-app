@@ -59,6 +59,11 @@ metadata is resolved in a single batch.
 
 No reminders, deletion, task threads or agent tools are included.
 
+Known publication blocker: a definitive relay rejection can leave a saved attempt
+pending because the current host does not expose that outcome separately from
+uncertain delivery. Retry cannot repair a rejected stale revision. This draft
+package should not be published to the marketplace until recovery is resolved.
+
 ## Host requirements and packaging
 
 This version needs a Buzz desktop host exposing the plugin `ui` capability

@@ -1078,8 +1078,8 @@ export function apply(ctx) {
         setDraft(draftRef.current);
       }
     };
-    const finishEdit = async () => {
-      const next = draftRef.current;
+    const finishEdit = async (patch = {}) => {
+      const next = draftRef.current && { ...draftRef.current, ...patch };
       if (!next) return;
       draftRef.current = null;
       const title = titleElement.current.textContent.trim() || savedTask.title;
@@ -1232,6 +1232,10 @@ export function apply(ctx) {
       if (!("done" in patch)) {
         draftRef.current = { ...(draftRef.current ?? task), ...patch };
         setDraft(draftRef.current);
+        return;
+      }
+      if (draftRef.current) {
+        await finishEdit(patch);
         return;
       }
       setError("");
