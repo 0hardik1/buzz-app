@@ -178,12 +178,20 @@ export function createAgentClient(
     path: string,
     body: unknown,
     signal: AbortSignal,
+    requiresCustomCompaction = false,
   ): Promise<Record<string, unknown>> {
     signal.throwIfAborted();
     const credential = await remoteCredential(
       signal,
       path === "cancel-agent-turn",
     );
+    if (
+      requiresCustomCompaction &&
+      credential.account.canCustomizeCompactionWindow !== true
+    )
+      throw new Error(
+        "Custom compaction is no longer available. Other changes can still be saved.",
+      );
     let response: HostResponse;
     try {
       response = await session.request(credential, {
@@ -510,6 +518,7 @@ export function createAgentClient(
           auto_compact_window: settings.autoCompactWindow,
         },
         signal,
+        settings.autoCompactWindow !== undefined,
       );
     },
     async updateInstructions(

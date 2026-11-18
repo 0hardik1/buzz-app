@@ -202,6 +202,9 @@ async function fixture(
       const update = JSON.parse(body ?? "{}");
       agent = {
         ...agent,
+        ...(update.agent_instructions !== undefined
+          ? { instructions: update.agent_instructions }
+          : {}),
         ...(update.model_id !== undefined
           ? {
               modelId: update.model_id,
@@ -222,6 +225,7 @@ async function fixture(
             agent_id: agent.id,
             agent_name: agent.name,
             agent_pubkey: agent.pubkey,
+            agent_instructions: agent.instructions,
             status: 2,
             model_id: agent.modelId,
             reasoning_effort: agent.reasoningEffort,
@@ -256,6 +260,7 @@ async function fixture(
   return {
     request,
     session,
+    client,
     offline: (value: boolean) => {
       offline = value;
     },
@@ -338,12 +343,16 @@ it("saves and clears a compaction window without changing other settings", async
     name: "Auto-compact at",
   });
   expect(field).toHaveValue("40");
-  expect(field).toHaveAccessibleDescription("Thousands of tokens");
+  expect(field).toHaveAccessibleDescription(
+    "Thousands of tokens. Capped at the service’s safe limit for this model. Leave blank for default.",
+  );
   expect(screen.getByText("K", { exact: true })).toBeVisible();
-  await user.hover(
+  await user.click(
     screen.getByRole("button", { name: "About auto-compaction" }),
   );
-  expect(await screen.findByRole("tooltip")).toHaveTextContent(
+  expect(
+    await screen.findByRole("dialog", { name: "About auto-compaction" }),
+  ).toHaveTextContent(
     "Capped at the service’s safe limit for this model. Leave blank for default.",
   );
   await user.keyboard("{Escape}");
@@ -463,11 +472,18 @@ it("keeps an unpersisted window draft and blocks invalid retries", async () => {
   });
 });
 
-it("can restore Default after a committed window fails its confirmation read", async () => {
-  const h = await fixture({ modelSelectionStatus: "valid" });
+it("restores instructions and Default after a committed update fails its confirmation read", async () => {
+  const h = await fixture({
+    modelSelectionStatus: "valid",
+    instructions: "Original instructions.",
+  });
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "Advanced settings" }));
   const field = screen.getByRole("textbox", { name: "Auto-compact at" });
+  const instructions = screen.getByRole("textbox", { name: "Instructions" });
+  fireEvent.change(instructions, {
+    target: { value: "Updated instructions." },
+  });
   fireEvent.change(field, { target: { value: "250" } });
   const implementation = h.request.getMockImplementation();
   if (!implementation) throw new Error("Missing request fixture");
@@ -476,6 +492,9 @@ it("can restore Default after a committed window fails its confirmation read", a
     .mockResolvedValueOnce({ status: 400, headers: {}, body: "{}" });
   await user.click(screen.getByRole("button", { name: "Save" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("HTTP 400");
+  fireEvent.change(instructions, {
+    target: { value: "Original instructions." },
+  });
   fireEvent.change(field, { target: { value: "" } });
   expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   await user.click(screen.getByRole("button", { name: "Try again" }));
@@ -486,9 +505,19 @@ it("can restore Default after a committed window fails its confirmation read", a
     request.url.endsWith("/update-agent"),
   );
   expect(updates.map(([request]) => JSON.parse(request.body ?? "{}"))).toEqual([
-    { agent_pubkey: "ab".repeat(32), auto_compact_window: 250000 },
-    { agent_pubkey: "ab".repeat(32), auto_compact_window: 0 },
+    {
+      agent_pubkey: "ab".repeat(32),
+      agent_instructions: "Updated instructions.",
+      auto_compact_window: 250000,
+    },
+    {
+      agent_pubkey: "ab".repeat(32),
+      agent_instructions: "Original instructions.",
+      auto_compact_window: 0,
+    },
   ]);
+  const [reloaded] = await h.client.list(new AbortController().signal);
+  expect(reloaded?.instructions).toBe("Original instructions.");
 });
 
 it("keeps the Builderlab mark when no shared Harness control is supplied", async () => {
@@ -569,7 +598,7 @@ it("can clear instructions without changing a model when the catalog is empty", 
   expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveValue("");
 });
 
-it("preserves the combined draft when model readback fails and retries one combined update", async () => {
+it("retries model readback without resending acknowledged instructions", async () => {
   const h = await fixture({ instructions: "Saved instructions." });
   const user = userEvent.setup();
   await choose("Model", "Friendly One");
@@ -598,14 +627,21 @@ it("preserves the combined draft when model readback fails and retries one combi
   const updates = h.request.mock.calls.filter(([request]) =>
     request.url.endsWith("/update-agent"),
   );
-  expect(updates).toHaveLength(2);
-  for (const [request] of updates)
-    expect(JSON.parse(request.body ?? "{}")).toEqual({
+  expect(updates.map(([request]) => JSON.parse(request.body ?? "{}"))).toEqual([
+    {
       agent_pubkey: "ab".repeat(32),
       agent_instructions: "Saved instructions. Updated.",
       model_id: "model-one",
       reasoning_effort: "high",
-    });
+    },
+    {
+      agent_pubkey: "ab".repeat(32),
+      model_id: "model-one",
+      reasoning_effort: "high",
+    },
+  ]);
+  const [reloaded] = await h.client.list(new AbortController().signal);
+  expect(reloaded?.instructions).toBe("Saved instructions. Updated.");
 });
 
 it("refuses a combined update for an agent that is no longer Active", async () => {

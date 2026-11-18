@@ -20,6 +20,12 @@ import { IconButton } from "../../../shared/design-system/ui/IconButton";
 import { Input } from "../../../shared/design-system/ui/Input";
 import { InputGroup } from "../../../shared/design-system/ui/InputGroup";
 import { LoadingRegion } from "../../../shared/design-system/ui/LoadingRegion";
+import {
+  PopoverRoot,
+  PopoverTrigger,
+  PopoverPopup,
+  PopoverDescription,
+} from "../../../shared/design-system/ui/Popover";
 import { PreferenceRow } from "../../../shared/design-system/ui/PreferenceRow";
 import { Select } from "../../../shared/design-system/ui/Select";
 import { SettingsGroup } from "../../../shared/design-system/ui/SettingsGroup";
@@ -58,6 +64,8 @@ const accessDenied = (reason: unknown) =>
   reason instanceof Error && "status" in reason && reason.status === 403;
 const accountMismatchMessage =
   "Sign in to the Builderlab account that loaded these settings.";
+const compactionHelp =
+  "Capped at the service’s safe limit for this model. Leave blank for default.";
 const formatCompaction = (tokens: number | undefined) =>
   tokens === undefined ? "" : String(tokens / 1000);
 
@@ -105,7 +113,7 @@ export function ModelSettings({
     signedIn && subject !== undefined && login.account?.subject !== subject;
   const email = mismatch && "email" in settings ? settings.email : undefined;
   const form = useId();
-  const compactionUnitId = useId();
+  const compactionDescriptionId = useId();
   const notify = useToastNotification();
   const [saved, setSaved] = useState(agent);
   const [models, setModels] = useState<readonly RemoteAgentModel[]>();
@@ -233,10 +241,8 @@ export function ModelSettings({
         signal,
       );
       signal.throwIfAborted();
-      if (!saveModel && !compactionChanged) {
-        setSaved({ ...saved, instructions });
-        return;
-      }
+      setSaved({ ...saved, instructions });
+      if (!saveModel && !compactionChanged) return;
       const remote = (await client.list(signal)).find(
         (row) => row.pubkey === saved.pubkey,
       );
@@ -451,12 +457,26 @@ export function ModelSettings({
                         title={
                           <span className="flex items-center gap-1">
                             Auto-compact at
-                            <IconButton
-                              aria-label="About auto-compaction"
-                              title="Capped at the service’s safe limit for this model. Leave blank for default."
-                              size="xs"
-                              icon={<InfoIcon size={16} />}
-                            />
+                            <PopoverRoot>
+                              <PopoverTrigger
+                                render={
+                                  <IconButton
+                                    aria-label="About auto-compaction"
+                                    title={compactionHelp}
+                                    size="xs"
+                                    icon={<InfoIcon size={16} />}
+                                  />
+                                }
+                              />
+                              <PopoverPopup
+                                size="compact"
+                                aria-label="About auto-compaction"
+                              >
+                                <PopoverDescription>
+                                  {compactionHelp}
+                                </PopoverDescription>
+                              </PopoverPopup>
+                            </PopoverRoot>
                           </span>
                         }
                         trailing={
@@ -464,19 +484,19 @@ export function ModelSettings({
                             <InputGroup
                               appearance="outlined"
                               trailing={
-                                <span id={compactionUnitId}>
+                                <span id={compactionDescriptionId}>
                                   {compaction.trim() && (
                                     <span aria-hidden="true">K</span>
                                   )}
                                   <span className="sr-only">
-                                    Thousands of tokens
+                                    Thousands of tokens. {compactionHelp}
                                   </span>
                                 </span>
                               }
                             >
                               <Input
                                 inputMode="decimal"
-                                aria-describedby={compactionUnitId}
+                                aria-describedby={compactionDescriptionId}
                                 placeholder="Default"
                                 value={compaction}
                                 onChange={(event) =>

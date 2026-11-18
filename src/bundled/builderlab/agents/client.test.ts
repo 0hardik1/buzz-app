@@ -38,6 +38,7 @@ async function fixture(subject = "user", canUseRemoteAgents = true) {
         email: "a@example.com",
         canUseRemoteAgents,
         canUseBuilderlabDecisions: false,
+        canCustomizeCompactionWindow: true,
       },
     }),
     undefined,
@@ -441,6 +442,47 @@ it("rejects small compaction writes but allows the minimum and Default", async (
       ),
   ).toEqual([1000, 0]);
 });
+it.each([
+  { autoCompactWindow: 1000, allowed: false },
+  { autoCompactWindow: 0, allowed: undefined },
+])(
+  "rejects compaction $autoCompactWindow disabled during credential refresh",
+  async ({ autoCompactWindow, allowed }) => {
+    const h = await fixture();
+    const credential = h.session.credential();
+    const held = deferred<typeof credential>();
+    vi.spyOn(h.session, "freshCredential").mockReturnValueOnce(held.promise);
+    const instructions = "Keep these edits.";
+    const saved = h.client.configure(
+      row.agent_pubkey,
+      { instructions, autoCompactWindow },
+      h.signal,
+    );
+    const rejected = expect(saved).rejects.toThrow(
+      "Custom compaction is no longer available",
+    );
+    if (allowed === undefined)
+      Reflect.deleteProperty(
+        credential.account,
+        "canCustomizeCompactionWindow",
+      );
+    else
+      Object.assign(credential.account, {
+        canCustomizeCompactionWindow: allowed,
+      });
+    held.resolve(credential);
+    await rejected;
+    expect(h.host.request).not.toHaveBeenCalled();
+    await h.client.configure(row.agent_pubkey, { instructions }, h.signal);
+    expect(
+      vi
+        .mocked(h.host.request)
+        .mock.calls.map(([request]) => JSON.parse(request.body ?? "{}")),
+    ).toEqual([
+      { agent_pubkey: row.agent_pubkey, agent_instructions: instructions },
+    ]);
+  },
+);
 it("replaces instructions verbatim through the authenticated host", async () => {
   const h = await fixture();
   const instructions = "  Review carefully.\nPreserve formatting.\n";
