@@ -1402,6 +1402,9 @@ export function PluginImport({
                         Browse
                       </Button>
                     </section>
+                    <p className="m-0 text-center text-body-sm text-muted">
+                      or
+                    </p>
                     <form
                       aria-label="Add from folder path"
                       onSubmit={(event) => {
@@ -1415,7 +1418,7 @@ export function PluginImport({
                           <Input
                             value={localPath}
                             disabled={blocked}
-                            placeholder="~/Development/my-plugin/dist"
+                            placeholder="~/my-plugin/dist"
                             autoCorrect="off"
                             autoCapitalize="none"
                             spellCheck={false}
