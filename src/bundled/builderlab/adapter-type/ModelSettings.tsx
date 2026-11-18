@@ -448,7 +448,7 @@ export function ModelSettings({
                           Auto-compact at
                           <IconButton
                             aria-label="About auto-compaction"
-                            title="Capped at the model’s available context. Leave blank for default."
+                            title="Capped at the service’s safe limit for this model. Leave blank for default."
                             size="xs"
                             icon={<InfoIcon size={16} />}
                           />

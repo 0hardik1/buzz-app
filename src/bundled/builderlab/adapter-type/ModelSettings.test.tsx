@@ -296,7 +296,7 @@ it("saves and clears a compaction window without changing other settings", async
     screen.getByRole("button", { name: "About auto-compaction" }),
   );
   expect(await screen.findByRole("tooltip")).toHaveTextContent(
-    "Capped at the model’s available context. Leave blank for default.",
+    "Capped at the service’s safe limit for this model. Leave blank for default.",
   );
   await user.keyboard("{Escape}");
   await user.click(field);
