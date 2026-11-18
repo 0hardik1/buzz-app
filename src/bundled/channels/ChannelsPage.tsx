@@ -37,6 +37,7 @@ import { ChannelMembersDialog } from "./ChannelMembersDialog";
 import { ChannelHeaderIdentity, memberAccess } from "./ChannelHeaderIdentity";
 import {
   matchesConversation,
+  newMessage,
   openEmptyChannels,
   soloDraft,
   soloDraftTarget,
@@ -58,12 +59,11 @@ import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { ChannelHeaderMenu } from "./ChannelHeaderMenu";
 import { ChannelSettingsPanel } from "./ChannelSettingsPanel";
 import { ChannelJoinNotice } from "../../features/messages/ChannelJoinNotice";
+import { ChannelStateNotice, ChannelStateRegion } from "./ChannelStateNotice";
 import {
-  ArchivedChannelNotice,
-  ChannelStateNotice,
-  ChannelStateRegion,
-} from "./ChannelStateNotice";
-import { ChannelLifecycleActions } from "./ChannelLifecycleActions";
+  ChannelLifecycleActions,
+  ChannelUnarchiveButton,
+} from "./ChannelLifecycleActions";
 import { lifecycleNoun } from "./ChannelLifecycleDialog";
 import type { PageNavigation } from "../../features/navigation/service";
 import type { Navigation } from "../../features/navigation/controller";
@@ -382,9 +382,11 @@ function ChannelWorkspace({
   archive?: ArchiveShortcut | undefined;
   read?: ReadShortcut | undefined;
 }) {
-  const composingMessage =
-    navigation?.target.kind === "page" &&
-    navigation.target.route?.params === "new-message";
+  const messageDraft =
+    navigation?.target.kind === "page"
+      ? newMessage(navigation.target.route?.params)
+      : undefined;
+  const composingMessage = messageDraft !== undefined;
   const draftTarget = navigation?.target;
   const draft = useMemo(
     () =>
@@ -2190,7 +2192,6 @@ function ChannelWorkspace({
   // Delete all drop the channel from the roster alike.
   const removedTitle =
     removed && `You’re no longer a member of ${removed.label}`;
-  const archivedChannel = current?.archived && !solo ? current : undefined;
   const stateNotice = removedTitle ? (
     <ChannelStateNotice title={removedTitle}>
       <Button
@@ -2202,12 +2203,6 @@ function ChannelWorkspace({
         Back to channels
       </Button>
     </ChannelStateNotice>
-  ) : archivedChannel ? (
-    <ArchivedChannelNotice
-      channel={archivedChannel}
-      session={queries}
-      unarchive={(trigger) => unarchive(archivedChannel, trigger)}
-    />
   ) : undefined;
   // A focused composer that archiving removes hands focus to the history.
   const focusArchivedHistory = useCallback(() => {
@@ -2301,6 +2296,10 @@ function ChannelWorkspace({
     (current.archived ||
       (current.readOnly &&
         (!current.cached || current.viewerRole === "guest")));
+  const archivedMessage =
+    current?.readOnly && !current.cached && current.viewerRole !== "guest"
+      ? "This channel is archived and read-only."
+      : "This channel is archived. It's read-only and hidden from your sidebar.";
   useChannelHistoryFocus(
     historyContainer,
     navigation,
@@ -2313,7 +2312,13 @@ function ChannelWorkspace({
   // The conversation: full width for Solo, or the first main-pane tab.
   const body = (
     <div className={styles.conversationBody}>
-      <ChannelStateRegion>{stateNotice}</ChannelStateRegion>
+      {/* The pill mounts with its text, so announce changes in the existing status. */}
+      <ChannelStateRegion>
+        {stateNotice ??
+          (current?.archived && !solo && (
+            <span className="sr-only">{archivedMessage}</span>
+          ))}
+      </ChannelStateRegion>
       <MessageManagementStatus />
       <section
         data-channel-history
@@ -2367,8 +2372,10 @@ function ChannelWorkspace({
           <ChannelJoinNotice
             key={`join:${current.id}`}
             ready={contentReadyChannel === current.id}
+            showArchivedWhileLoading={!solo}
             channelId={current.id}
             archived={!!current.archived}
+            archivedMessage={!solo ? archivedMessage : undefined}
             place={solo ? "chat" : "channel"}
             guest={current.viewerRole === "guest"}
             joinRole={current.joinRole}
@@ -2382,7 +2389,15 @@ function ChannelWorkspace({
             }
             onJoin={() => setJoiningChannel(current.id)}
             onHeightChange={setJoinNoticeHeight}
-          />
+          >
+            {current.archived && !solo && handoff && (
+              <ChannelUnarchiveButton
+                channel={current}
+                session={queries}
+                unarchive={(trigger) => unarchive(current, trigger)}
+              />
+            )}
+          </ChannelJoinNotice>
         )}
       </section>
       {!cached && (
@@ -2492,11 +2507,7 @@ function ChannelWorkspace({
           canOpenLink={canOpenLink}
           {...(agents ? { agents } : {})}
           onOpenLink={(url, returnFocus) => openLink(url, { returnFocus })}
-          onOpenConversation={
-            navigator && viewer
-              ? (id) => openLink(`buzz://channel/${encodeURIComponent(id)}`)
-              : undefined
-          }
+          onOpenMessage={navigator && viewer ? openLink : undefined}
         />
       )}
       <Panel
@@ -2532,6 +2543,7 @@ function ChannelWorkspace({
         >
           {composingMessage ? (
             <LiveNewMessage
+              intent={messageDraft?.intent}
               host={{ relay, panels, navigation: navigator }}
               session={queries}
               scope={scope}
@@ -2692,7 +2704,7 @@ function ChannelWorkspace({
                           startChat={
                             navigator &&
                             current &&
-                            canStartLinkedChat(queries, current.id) ? (
+                            canStartLinkedChat(queries) ? (
                               <StartLinkedChat
                                 session={queries}
                                 navigation={navigator}
