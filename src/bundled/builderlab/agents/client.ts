@@ -74,6 +74,7 @@ function modelSelectionStatus(
 }
 
 export const MAX_INSTRUCTIONS_LENGTH = 20_000;
+export const MIN_AUTO_COMPACT_WINDOW = 1_000;
 export const validAutoCompactWindow = (value: unknown): value is number =>
   typeof value === "number" &&
   Number.isInteger(value) &&
@@ -493,7 +494,8 @@ export function createAgentClient(
           (!settings.modelId?.trim() || !settings.reasoningEffort?.trim())) ||
         (settings.autoCompactWindow !== undefined &&
           settings.autoCompactWindow !== 0 &&
-          !validAutoCompactWindow(settings.autoCompactWindow))
+          (!validAutoCompactWindow(settings.autoCompactWindow) ||
+            settings.autoCompactWindow < MIN_AUTO_COMPACT_WINDOW))
       )
         throw new Error(
           "Choose a model and reasoning effort and check the instructions.",

@@ -27,6 +27,7 @@ import { Textarea } from "../../../shared/design-system/ui/Textarea";
 import { useToastNotification } from "../../../shared/design-system/ui/Toast";
 import {
   MAX_INSTRUCTIONS_LENGTH,
+  MIN_AUTO_COMPACT_WINDOW,
   validInstructions,
   validAutoCompactWindow,
   type AgentClient,
@@ -185,7 +186,8 @@ export function ModelSettings({
   const validCompaction =
     compaction.trim() === "" ||
     (/^\d+(?:\.\d{1,3})?$/.test(compaction.trim()) &&
-      validAutoCompactWindow(autoCompactWindow));
+      validAutoCompactWindow(autoCompactWindow) &&
+      autoCompactWindow >= MIN_AUTO_COMPACT_WINDOW);
   const compactionChanged =
     compactionUnconfirmed ||
     !validCompaction ||
@@ -434,7 +436,7 @@ export function ModelSettings({
                     labelVisibility="hidden"
                     error={
                       hasAccess && !validCompaction
-                        ? "Enter a positive number or leave blank for default."
+                        ? "Enter at least 1 K or leave blank for default."
                         : undefined
                     }
                   >

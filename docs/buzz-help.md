@@ -1160,7 +1160,8 @@ available rather than silently discarding it.
 - In a Builderlab agent's settings, expand **Advanced settings** to edit
   **Auto-compact at**, which sets when older context is automatically
   summarized. The input uses thousands of tokens, shown by the **K** suffix:
-  enter `40` for 40,000 tokens or `250` for 250,000. Leave blank for the default.
+  enter `40` for 40,000 tokens or `250` for 250,000. The minimum is `1` (1,000
+  tokens). Leave blank for the default.
   The window is capped at the model's context budget and applies from the next
   turn after Save.
 - Some builds offer **AI setup → Automatic** when creating an

@@ -117,7 +117,13 @@ it("lists the authenticated account through the configured native host", async (
   vi.mocked(h.host.request).mockResolvedValueOnce(
     response({
       status: 1,
-      agents: [{ ...row, agent_instructions: "Review carefully." }],
+      agents: [
+        {
+          ...row,
+          agent_instructions: "Review carefully.",
+          auto_compact_window: 999,
+        },
+      ],
     }),
   );
   expect(await h.client.list(h.signal)).toEqual([
@@ -127,6 +133,7 @@ it("lists the authenticated account through the configured native host", async (
       pubkey: row.agent_pubkey,
       status: "Active",
       instructions: "Review carefully.",
+      autoCompactWindow: 999,
     },
   ]);
   expect(h.host.request).toHaveBeenCalledWith({
@@ -413,6 +420,26 @@ it("does not treat empty model fields as reset requests", async () => {
     h.client.updateModel(remoteAgent, "one", "", h.signal),
   ).rejects.toThrow("Choose a model");
   expect(h.host.request).not.toHaveBeenCalled();
+});
+it("rejects small compaction writes but allows the minimum and Default", async () => {
+  const h = await fixture();
+  for (const autoCompactWindow of [1, 999]) {
+    await expect(
+      h.client.configure(row.agent_pubkey, { autoCompactWindow }, h.signal),
+    ).rejects.toThrow();
+  }
+  expect(h.host.request).not.toHaveBeenCalled();
+  vi.mocked(h.host.request).mockResolvedValue(response({}));
+  for (const autoCompactWindow of [1000, 0]) {
+    await h.client.configure(row.agent_pubkey, { autoCompactWindow }, h.signal);
+  }
+  expect(
+    vi
+      .mocked(h.host.request)
+      .mock.calls.map(
+        ([request]) => JSON.parse(request.body ?? "{}").auto_compact_window,
+      ),
+  ).toEqual([1000, 0]);
 });
 it("replaces instructions verbatim through the authenticated host", async () => {
   const h = await fixture();

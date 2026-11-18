@@ -333,7 +333,7 @@ it("saves and clears a compaction window without changing other settings", async
   );
 });
 
-it.each(["0", "-1", "2147483.648", "1.0001"])(
+it.each(["0", "0.001", "0.999", "-1", "2147483.648", "1.0001"])(
   "does not save invalid compaction window %j",
   async (value) => {
     await fixture({ modelSelectionStatus: "valid" });
@@ -345,9 +345,7 @@ it.each(["0", "-1", "2147483.648", "1.0001"])(
     });
     fireEvent.change(field, { target: { value } });
     expect(field).toHaveAccessibleDescription(
-      expect.stringContaining(
-        "Enter a positive number or leave blank for default.",
-      ),
+      expect.stringContaining("Enter at least 1 K or leave blank for default."),
     );
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   },
@@ -382,9 +380,7 @@ it("keeps an unpersisted window draft and blocks invalid retries", async () => {
   await user.click(screen.getByRole("button", { name: "Try again" }));
   expect(updates()).toHaveLength(1);
   expect(field).toHaveAccessibleDescription(
-    expect.stringContaining(
-      "Enter a positive number or leave blank for default.",
-    ),
+    expect.stringContaining("Enter at least 1 K or leave blank for default."),
   );
   fireEvent.change(field, { target: { value: "" } });
   await user.click(screen.getByRole("button", { name: "Try again" }));
