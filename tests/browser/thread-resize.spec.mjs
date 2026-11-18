@@ -65,6 +65,8 @@ test("thread stays beside the channel whenever both panes fit", async ({
       "font-size",
       `${16 * scale}px`,
     );
+    // The interface scale can start a split-width transition; measure at rest.
+    await animationsSettled(page.locator(".shell-content"), { subtree: true });
     const bounds = await channel.boundingBox();
     const pane = await thread.boundingBox();
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(pane.x);

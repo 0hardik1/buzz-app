@@ -7,17 +7,17 @@
   margin-inline-end: 0;
 }
 
-/* Keep the resize grip on the joined sidebar/conversation boundary. */
+/* Place the resize grip in the existing trailing space, 4px from the cards. */
 .handle[aria-orientation="vertical"] {
   --resize-grip-opacity: 0.5;
-  /* Keep the target inside the conversation’s leading inset, clear of both
-     sidebar actions and the header identity artwork. */
+  /* Center the complete 3px line inside its hit area, then offset from the
+     card edge (the sidebar's 24px trailing inset). */
   width: var(--space-2);
   margin-inline: calc(-1 * var(--space-1));
-  translate: 50% 0;
+  translate: calc(var(--space-1) + 0.1875rem / 2 - var(--space-6)) 0;
 }
 .handle[aria-orientation="vertical"]::after {
-  left: 0;
+  left: 50%;
 }
 /* AppShell uses the same physical breakpoint for navigation and resizing. */
 @media (max-width: 650px) {

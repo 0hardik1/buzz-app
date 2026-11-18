@@ -71,6 +71,16 @@ Do not make decorative metadata look like another control.
 
 Use `FullPageSurface` for one page surface, or the existing workspace owner for
 multiple regions. FullPageSurface supplies the surface, not padding or scrolling.
+Message history and side-panel bodies may frame their existing scroller with
+`ScrollEdgeViewport`, using `useScrollEdges("block")` on that direct child.
+It paints `ScrollEdgeMaterial` only once content has passed the top edge;
+headers and composers remain outside the scroller. The material uses progressive
+blur and the panel surface, with an opaque reduced-transparency/forced-colors fallback.
+Message and side-panel headers use `PanelHeader divider={false}` for a continuous
+surface with 16px header insets. Header navigation pills use the shared
+secondary glass material; primary header icon actions use `IconButton
+variant="glass" size="toolbar"`, with compact sibling tab-close controls.
+
 Give each independently scrolling region one intentional scrollport; fix toolbars
 and composers outside it when they must remain available. Let flex/grid children
 shrink before adding overflow. Do not nest an additional scrollport around an
@@ -595,6 +605,8 @@ yellow for Away, and grey for Offline, with semantic light and dark values.
 Online retains its step-10 center inside a 1px inset, same-hue step-11
 outline, which supplies the 3:1 non-text boundary on supported opaque surfaces.
 Away uses an unoutlined Amber 10 fill at the designer's explicit request.
+On Starred cards, `statusSurface="sidebar-card"` adds a card-colored outer
+outline around the badge, separating it from the avatar selection ring.
 **Known accessibility tradeoff:** the light Away badge falls below the WCAG
 1.4.11 3:1 non-text contrast target on supported neutral surfaces. The contrast
 guard reports exact accepted light-mode role/color/surface pairs; other pairs
@@ -2160,27 +2172,15 @@ For full-page destinations, compose native-button `NavigationItem variant="pill"
 inside `nav.chrome-navigation`. It shares the chrome tab material and selected fill
 but keeps normal Tab/Enter and `aria-current="page"` semantics. Do not give route
 buttons a tablist/tabpanel relationship when selection moves focus to main content.
-The wide shell dock is the deliberate exception: global destinations use
-`Tabs variant="dock"` linked to the retained, labelled page panel.
-The dock uses independent 40px icon tiles with 12px corners, a transparent resting
-state, and an inactive hover fill. The active tile uses the theme-accent
-`surface-sidebar-selected` / `text-sidebar-selected` pair and retains its
-accessible selected state.
-Dock artwork stays still on hover and press. Bestie uses its configured avatar
-from the shared page presentation, at the standard avatar size.
-Dock labels remain accessible and use the dock label hover bucket to the right of each vertical dock
-button (beneath horizontal docks); badges overlay the tile. CountBadge uses a compact
-corner capsule straddling the top-right edge, with `surface-dock-count` and
-`text-dock-count` keeping dark fill and readable accent ink in both modes. The
-shell scrollport preserves gutter space for the full capsule and focus ring.
-A tile with a page preview shows its label on keyboard focus and while its preview is closed.
-Up/Down arrow keys move focus in the side dock without selecting; Enter, Space or
-pointer selection changes the page while focus stays on its tab. Horizontal dock
-compositions use Left/Right. The host passes per-opening focus intent so page
-autofocus does not override that handoff. Explicit content openings, including
-New conversation, retain their destination focus.
-Public plugin placements remain compatible: primary topbar and toolbar contributions
-appear in the dock; sidebar contributions retain their sidebar links and exact route.
+The shell places an app switcher at the top of the sidebar scrollport. Its shared
+navigation trigger shows the selected app's artwork and name, with a trailing
+caret. The shared Menu offers Messages, Bestie, and the installed app destinations,
+marks the current app, and includes Open Plugins. Selecting an app retains the
+Messages sidebar and hands focus to the main content. Escape returns focus to
+the trigger. Existing menu motion and keyboard behavior apply; there is no
+additional selection animation or hover preview inside this menu.
+Sidebar contributions retain their sidebar links and exact route. Community and
+account controls sit at the trailing edge of the search bar's header row.
 Settings remains available from the profile menu.
 
 ### Artwork actions (proposed)
@@ -2290,6 +2290,37 @@ surfaces equally, matching the card treatment from the rail exploration.
 Scope headings remain unframed so cards do not acquire a second outer card.
 Keep NavigationSectionHeading and NavigationItem as the heading and row owners;
 features retain their existing drag, collapse, ordering and placement boundaries.
-Movable Team section cards expose a grip with ArrowUp/ArrowDown reordering in
-addition to the existing header drag and menu actions. The bottom New section
-button uses the existing section-creation dialog and preference write gates.
+Movable Team section and Solo workspace cards expose a centered top grip inside
+the existing inset. The grip fades in with pointer proximity and stays visible
+for keyboard focus and dragging, with ArrowUp/ArrowDown reordering in
+addition to the existing header drag and menu actions. Pointer drops settle with
+a short, subtle spring; keyboard moves and reduced motion remain immediate.
+The bottom New section
+button follows the cards in the navigation scrollport. While an eligible row
+is dragged, a prominent capsule floats at the bottom without reserving a footer
+band. Both use the existing section-creation dialog and preference write gates.
+
+Starred uses the Pins exploration's centered avatar grid (up to four columns,
+`space-3` gaps), beneath its existing Activity and Drafts & sent destinations.
+`NavigationItem variant="avatar"` owns the compact button geometry and accessible
+hidden label. Starred retains its channel identity artwork, unread/activity cues,
+selection ring, context menus and existing Team movement boundaries.
+
+
+The shell places Bestie in its own card directly below the scope controls, with its
+existing avatar, agent name and unread presentation. Other global destinations
+remain in Plugins, and the existing community/profile controls remain in Account
+inside the navigation scrollport.
+Plugin destinations use the existing NavigationItem rows with normal Tab/Enter
+and main-content focus handoff. Activity and Drafts & sent lead the Starred
+card. Scope tabs and creation share a separate top card. Cards use a `space-1`
+outer inset and `space-6` trailing space before content, without a painted
+sidebar divider; the existing resize interaction remains.
+
+Solo workspace cards replace Show more/Show fewer with a bottom horizontal resize
+separator. The top card grip and bottom separator overlay the card without
+reserving layout space; both reveal with pointer proximity, keyboard focus and
+active dragging. Dragging previews the row capacity and releasing saves the existing
+per-workspace reveal state; cancellation restores the saved amount. Keep pinned
+and current chats visible. The separator remains keyboard-focusable at its bounds,
+with arrow keys for individual rows and Home/End for the default/all rows.

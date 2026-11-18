@@ -1,3 +1,9 @@
+import {
+  MenuItem,
+  MenuIcon,
+  MenuTrailing,
+} from "../../shared/design-system/ui/Menu";
+import { CheckIcon } from "../../shared/design-system/icons";
 import { ACTIVITY_PAGE } from "./activity-context";
 import { ActivityNavigationIcon } from "./ActivityNavigation";
 import {
@@ -45,7 +51,7 @@ export function PageNavigation({
   currentPage?: string;
   onSelect(key: string, options?: Pick<NavigationOpenOptions, "focus">): void;
   /** The app dock is a vertical icon tablist; the sidebar lists rows. */
-  placement?: "sidebar" | "dock";
+  placement?: "sidebar" | "dock" | "menu";
   /** Show inactive page previews in this navigation surface on hover-capable devices. */
   previews?: boolean;
 }) {
@@ -119,7 +125,7 @@ export function PageNavigation({
     );
   }
   return pages.map((page) => {
-    const { label, icon, image, avatar, placeholder } = presentation(page);
+    const { label } = presentation(page);
     const Badge = page.badge;
     const badge = Badge && (
       <ContributionBoundary key={contributionKey(page)} fallback={null}>
@@ -130,30 +136,27 @@ export function PageNavigation({
       onSelect(page.key);
       document.getElementById("main-content")?.focus({ preventScroll: true });
     };
-    const pageIcon = placeholder ? (
-      <EmptyBestieAvatar key={page.key} compact />
-    ) : avatar ? (
-      <Avatar
-        key={page.key}
-        src={avatar.src}
-        alt=""
-        fallback={label}
-        shape={avatar.shape}
-        size="compact"
-      />
-    ) : page.key === ACTIVITY_PAGE ? (
-      <ActivityNavigationIcon key={page.key}>
-        <PageIcon icon={icon} image={image} size={16} strokeWidth={2.5} />
-      </ActivityNavigationIcon>
-    ) : (
-      <PageIcon
-        key={page.key}
-        icon={icon}
-        image={image}
-        size={16}
-        strokeWidth={2.5}
-      />
-    );
+    const pageIcon = <PageArtwork key={page.key} page={page} />;
+    if (placement === "menu") {
+      return (
+        <MenuItem
+          key={page.key}
+          aria-label={label}
+          aria-current={selected === page.key ? "page" : undefined}
+          onClick={() => onSelect(page.key)}
+        >
+          <MenuIcon>{pageIcon}</MenuIcon>
+          {label}
+          <MenuTrailing>
+            {badge}
+            <BestieUnreadBadge pageKey={page.key} />
+            {selected === page.key && (
+              <CheckIcon size={16} aria-hidden="true" />
+            )}
+          </MenuTrailing>
+        </MenuItem>
+      );
+    }
     const item = (
       <NavigationItem
         key={page.key}
@@ -162,7 +165,12 @@ export function PageNavigation({
         label={label}
         title={page.preview && previewed(page) ? undefined : label}
         variant="row"
-        trailing={badge}
+        trailing={
+          <>
+            {badge}
+            <BestieUnreadBadge pageKey={page.key} />
+          </>
+        }
         icon={<span className="shell-page-icon">{pageIcon}</span>}
       />
     );
@@ -180,6 +188,35 @@ export function PageNavigation({
       item
     );
   });
+}
+
+/** Consistent app identity for the sidebar and its app switcher. */
+export function PageArtwork({
+  page,
+  size = 16,
+}: {
+  page: RegisteredPage;
+  size?: number;
+}) {
+  const presentation = usePagePresentation();
+  const { label, icon, image, avatar, placeholder } = presentation(page);
+  return placeholder ? (
+    <EmptyBestieAvatar compact />
+  ) : avatar ? (
+    <Avatar
+      src={avatar.src}
+      alt=""
+      fallback={label}
+      shape={avatar.shape}
+      size="compact"
+    />
+  ) : page.key === ACTIVITY_PAGE ? (
+    <ActivityNavigationIcon key={page.key}>
+      <PageIcon icon={icon} image={image} size={size} strokeWidth={2.5} />
+    </ActivityNavigationIcon>
+  ) : (
+    <PageIcon icon={icon} image={image} size={size} strokeWidth={2.5} />
+  );
 }
 
 const hoverQuery = "(hover: hover) and (pointer: fine)";

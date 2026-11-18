@@ -20,14 +20,14 @@
   background: transparent;
 }
 .feed {
-  --message-hover-inset: var(--space-panel-inset);
+  --message-hover-inset: var(--space-6);
   --timeline-measure: var(--buzz-message-width, 52rem);
 
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-anchor: none;
-  padding: 0 var(--space-panel-inset);
+  padding: 0 var(--space-6);
   /* Keep fractional last rows reachable despite integer scroll extents. */
   --history-bottom-inset: var(--space-half);
   padding-bottom: var(--history-bottom-inset);
@@ -44,14 +44,6 @@
   scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
-/* Narrow conversations keep the shared compact inset beside the app dock. */
-@container messages (max-width: 30rem) {
-  .feed {
-    --message-hover-inset: var(--space-4);
-    padding-inline: var(--space-4);
-  }
-}
-
 .threadHistory::-webkit-scrollbar {
   width: 8px;
 }
@@ -714,7 +706,9 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   min-width: 0;
 }
 /* Soften the scroll edge without reserving a blank strip above the composer. */
-:is(.feed, .threadHistory)[data-jump-visible] + .composerContext::before {
+:is(.feed, .threadHistory)[data-jump-visible] + .composerContext::before,
+[data-scroll-edge-viewport]:has(> [data-jump-visible])
+  + .composerContext::before {
   content: "";
   position: absolute;
   inset-inline: 0;
@@ -736,7 +730,14 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   border-radius: calc(var(--radius-icon-button) + var(--space-1h) + 1px);
   box-shadow: var(--shadow-xs);
   padding: var(--space-3) var(--space-1h) var(--space-1h);
-  width: min(calc(100% - 2 * var(--space-4)), var(--buzz-message-width, 52rem));
+  width: calc(100% - 2 * var(--space-3));
+  max-width: calc(
+    var(--buzz-message-width, 52rem) +
+    2 *
+    var(--space-6) -
+    2 *
+    var(--space-3)
+  );
   margin: 0 auto var(--space-4);
   display: flex;
   flex-shrink: 0;
@@ -756,12 +757,9 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
 .emptyConversation {
   padding-block: var(--space-panel-inset);
 }
-.composer[data-chat-presentation] {
-  margin-bottom: var(--space-3);
-}
 /* The composer spans the same full width as a compact list. */
 :where(html[data-message-density="compact"]) .composer {
-  width: calc(100% - 2 * var(--space-4));
+  max-width: none;
 }
 .empty {
   padding: var(--space-8) var(--space-4);
@@ -776,13 +774,6 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
   }
   .emptyConversation {
     padding-block: var(--space-3);
-  }
-  .composer {
-    width: min(
-      calc(100% - 2 * var(--space-3)),
-      var(--buzz-message-width, 52rem)
-    );
-    margin: 0 auto var(--space-3);
   }
 }
 .composer[data-editing] {
@@ -1012,14 +1003,14 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
 }
 
 .threadHistory {
-  --message-hover-inset: var(--space-4);
+  --message-hover-inset: var(--space-6);
   --timeline-measure: var(--buzz-message-width, 52rem);
   position: relative;
   flex: 1;
   min-height: 0;
   overflow: auto;
-  /* Narrower than the channel feed's panel inset; aligns with the composer. */
-  padding: 0 var(--space-4);
+  /* Match the main timeline gutter in split threads. */
+  padding: 0 var(--space-6);
   /* The original starts space-4 below the header, less its .message padding. */
   padding-top: calc(var(--space-4) - var(--space-3) - var(--space-half));
   /* The end spacer below replaces bottom padding, so the jump button's sticky
@@ -1036,8 +1027,8 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
 /* Compact gives conversations the window's full width, as list layouts do. */
 :where(html[data-message-density="compact"]) :is(.feed, .threadHistory) {
   --timeline-measure: 100%;
-  --message-hover-start-inset: var(--space-3);
-  padding-inline-start: var(--space-3);
+  --message-hover-start-inset: var(--space-6);
+  padding-inline-start: var(--space-6);
 }
 /* Measure loaded rows without painting a scroll position we will replace,
    then fade them in once positioned. */

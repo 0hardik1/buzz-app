@@ -1,3 +1,5 @@
+import { ScrollEdgeViewport } from "../../shared/design-system/ui/ScrollEdgeViewport";
+import { useScrollEdges } from "../../shared/design-system/ui/useScrollEdges";
 import {
   createContext,
   useCallback,
@@ -436,6 +438,7 @@ export function PanelWorkspace({
       }}
     >
       <PanelHeader
+        divider={false}
         navigation={!identityOnly ? heading : undefined}
         actions={
           active && "toolbar" in active && active.toolbar ? (
@@ -625,12 +628,19 @@ export function PanelLocalTab({
       close: (options) => onClose.current(options),
     });
   }, [register, owner, id, title]);
+  const scrollEdges = useScrollEdges("block");
   const slot = host?.slots.get(id);
   return slot
     ? createPortal(
-        <section className={styles.tabDetail} aria-label={title}>
-          {children}
-        </section>,
+        <ScrollEdgeViewport>
+          <section
+            ref={scrollEdges}
+            className={styles.tabDetail}
+            aria-label={title}
+          >
+            {children}
+          </section>
+        </ScrollEdgeViewport>,
         slot,
       )
     : null;

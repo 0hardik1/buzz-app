@@ -1,3 +1,4 @@
+import { ShellNavigationCards } from "../../app/shell/ShellNavigationCards";
 import { teamSidebarSlotsReady } from "./TeamSidebarSource";
 import { SidebarSectionSlotView } from "../../features/channel-navigation/SidebarSectionSources";
 import {
@@ -8,6 +9,7 @@ import type { SidebarContextProps } from "../../features/sidebar/contracts";
 import { soloNavigationFor } from "../../features/channel-navigation/solo-navigation";
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -133,6 +135,8 @@ function ScopedSidebar({
   scope: string;
   connection: ReturnType<typeof useRelayConnection>;
 }) {
+  const { top: topCard, bottom: navigationCards } =
+    useContext(ShellNavigationCards);
   const attemptView = useMemo(
     () => destinationAttempt(props.navigator),
     [props.navigator],
@@ -304,19 +308,25 @@ function ScopedSidebar({
         </div>
         {props.creationAction}
       </div>
-      {props.children && !restriction && (
-        <div className={styles.destinations}>{props.children}</div>
-      )}
     </>
   );
   return (
     <SidebarBoundary
       key={`${scope}:${connection.generation}`}
-      header={header}
       panelId={panelId}
+      navigation={
+        <>
+          {topCard}
+
+          {header}
+          {!restriction && props.children}
+          {navigationCards}
+        </>
+      }
     >
       {session && (connection.status === "ready" || connection.cached) ? (
         <ChannelInventory
+          starredNavigation={props.children}
           relay={props.relay}
           navigator={props.navigator}
           agents={props.agents}
@@ -344,6 +354,8 @@ function ScopedSidebar({
             content,
             team,
             after,
+            footer,
+            dropTarget,
             dialogs,
           }) => (
             <MessagesSidebarEnvironment
@@ -383,7 +395,6 @@ function ScopedSidebar({
                         scope={scope}
                         resizable
                         label="Sidebar"
-                        header={header}
                         panelId={panelId}
                         {...frame}
                         launchPending={
@@ -414,6 +425,9 @@ function ScopedSidebar({
                           listRef={sidebar.list}
                           dmPreviews={dmPreviews}
                         >
+                          {topCard}
+
+                          {header}
                           <section
                             aria-label={soloTitle}
                             className={styles.sidebarGroup}
@@ -448,8 +462,11 @@ function ScopedSidebar({
                               teamContent
                             )}
                           </div>
+                          {filter !== "solo" && footer}
+                          {navigationCards}
                         </SidebarUnread>
                         {after}
+                        {filter !== "solo" && dropTarget}
                       </props.Frame>
                       {dialogs}
                     </>
@@ -462,13 +479,17 @@ function ScopedSidebar({
       ) : (
         <props.Frame
           label="Sidebar"
-          header={header}
           panelId={panelId}
           launchPending={
             connection.status === "connecting" ? "required" : undefined
           }
         >
           <SidebarList>
+            {topCard}
+
+            {header}
+            {!restriction && props.children}
+            {navigationCards}
             {/* A connection retrying by itself is still connecting; only a
                   settled failure asks for Try again, right beside its notice. */}
             {refused ? (
@@ -564,6 +585,7 @@ function InventoryGroup({
       open={open}
       onToggle={(next) => sidebar.toggle(sectionKey, next)}
       hideMoreActions
+      stickyHeading
       persistentChevron
     >
       {children}

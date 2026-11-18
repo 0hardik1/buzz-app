@@ -10,3 +10,20 @@
   border-radius: 0;
   mask: url("./avatar-squircle.svg") center / 100% 100% no-repeat;
 }
+
+.buzz-avatar-status[data-status][data-status-surface="sidebar-card"]::before {
+  content: "";
+  position: absolute;
+  top: 85%;
+  left: 85%;
+  width: calc(25% + var(--space-1h));
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sidebar-card);
+  pointer-events: none;
+}
+.buzz-avatar-status[data-status-surface][data-shape="squircle"]::before {
+  border-radius: 0;
+  mask: url("./avatar-squircle.svg") center / 100% 100% no-repeat;
+}

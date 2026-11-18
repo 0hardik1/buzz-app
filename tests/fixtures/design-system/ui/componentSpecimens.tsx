@@ -345,6 +345,9 @@ function AvatarStackSpecimen() {
       >
         <AvatarStack items={items} size="small" /> 4 replies
       </Button>
+      <Button variant="ghost" aria-label="Conversation members">
+        <AvatarStack items={items} size="large" />
+      </Button>
       <Button variant="ghost" aria-label="Seven agents to import">
         <AvatarStack
           items={[
@@ -1139,6 +1142,12 @@ function PanelHeaderSpecimen() {
         />
       </SpecimenGroup>
       <SpecimenGroup
+        label="Continuous message surface — no divider"
+        code={`<PanelHeader title="Conversation" divider={false} actions={actions} />`}
+      >
+        <PanelHeader title="Conversation" divider={false} actions={actions} />
+      </SpecimenGroup>
+      <SpecimenGroup
         label="Detail — back navigation before the title"
         code={`<PanelHeader
   title="Profile"
@@ -1400,6 +1409,18 @@ function NavigationItemSpecimen() {
     <div className="component-specimen-stack">
       {/* Interactive: clicking moves `selected`, so the selected fill and the
           unselected rest state are both visible at once and comparable. */}
+      <SpecimenGroup
+        label="Avatar destination — name stays accessible"
+        code={
+          '<NavigationItem variant="avatar" label="Alex" icon={<Avatar size="fill" fallback="Alex" alt="" />} />'
+        }
+      >
+        <NavigationItem
+          variant="avatar"
+          label="Alex"
+          icon={<Avatar size="fill" fallback="Alex" alt="" />}
+        />
+      </SpecimenGroup>
       <SpecimenGroup
         label="Selected, and trailing for metadata — click to move the selection"
         code={`<div className="w-full max-w-sm">

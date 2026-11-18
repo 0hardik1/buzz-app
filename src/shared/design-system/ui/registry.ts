@@ -623,11 +623,12 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     purpose:
       "Show overlapping identities, three unless the caller sets a maximum, and an overflow count on one line. The enclosing control supplies the accessible name.",
     behavior:
-      "Decorative artwork composed from Avatar; mini, small, and hero sizes use a surface-colored inset to separate overlapping images. Identity data stays with the caller. Optional entrance motion respects reduced motion.",
+      "Decorative artwork composed from Avatar; mini, small, and hero sizes use a surface-colored inset to separate overlapping images. The large header size uses secondary glass. Identity data stays with the caller. Optional entrance motion respects reduced motion.",
     variants: [
       "mini",
       "compact",
       "small",
+      "large",
       "hero",
       "hero-large",
       "circle",
@@ -783,7 +784,7 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     purpose:
       "Give a panel a consistent header with optional navigation, icon, title, and actions. The row has a 2.5rem minimum height; the panel and its content stay with the caller.",
     behavior: "Semantic native header.",
-    variants: ["default", "compact", "card"],
+    variants: ["default", "compact", "card", "divider=false"],
     status: "proposed",
     collection: "components",
     owner: "desktop-new Messages",
@@ -868,10 +869,11 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     slug: "navigation-item",
     name: "NavigationItem",
     purpose:
-      "A selectable destination row or pill with optional icon and metadata.",
+      "A selectable destination row, pill, or avatar tile with optional metadata.",
     behavior: "Base UI Button.",
     variants: [
       "row",
+      "avatar",
       "pill",
       "option",
       "text",

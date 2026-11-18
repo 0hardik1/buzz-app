@@ -90,7 +90,7 @@ test("Channels offers empty-section creation with keyboard focus and confirmed p
     const response = await route.fetch({
       headers: { ...(await route.request().allHeaders()), connection: "close" },
     });
-    expect(response.headers()["connection"]).toBe("close");
+    expect(response.headers().connection).toBe("close");
     if (!lostResponse && response.ok()) {
       // The real broker accepts and persists the write, but its response never
       // reaches the dialog. The retry must reconcile that exact creation.
@@ -213,10 +213,7 @@ async function startDrag(page, locator) {
 
 async function dropOnCreate(page) {
   await revealCreate(page);
-  const target = page.locator("[data-create-section-drop]");
-  // Bring the actual target into view before releasing; at enlarged text its
-  // lower edge can sit outside the narrow sidebar's scrollport.
-  await target.hover();
+  // Release over the stable wrapper; the inner capsule scales visually.
   await expect(page.locator('[class*="channelDragOverlay"]')).toBeHidden();
   await page.mouse.up();
 }
@@ -229,17 +226,13 @@ async function revealCreate(page) {
     steps: 4,
   });
   await expect(page.locator("[data-create-section-drop]")).toBeVisible();
-  // Observe completion rather than releasing into still-expanding geometry.
-  await expect
-    .poll(() =>
-      page
-        .locator("[data-create-section-drop]")
-        .evaluate((node) => node.parentElement.style.height),
-    )
-    .toBe("auto");
+  await expect(page.locator("[data-create-section-drop]")).toHaveAttribute(
+    "data-drop-target",
+    "true",
+  );
 }
 
-test("only the top channel-section boundary reveals creation, latches, cancels and saves first", async ({
+test("the floating creation target appears on row drag, cancels and saves first", async ({
   page,
   app,
 }, testInfo) => {
@@ -259,7 +252,7 @@ test("only the top channel-section boundary reveals creation, latches, cancels a
       return !!box && box.y <= pointer.y && pointer.y <= box.y + box.height;
     })
     .toBe(true);
-  await expect(target).toHaveCount(0);
+  await expect(target).toBeVisible();
   // Channels is not first when Work exists: its old gap is an ordinary move area.
   const channels = page.locator('[data-sidebar-section="channels"]');
   const channelsBox = await channels.boundingBox();
@@ -273,14 +266,11 @@ test("only the top channel-section boundary reveals creation, latches, cancels a
     channelsBox.y + 12,
   );
   await expect(channels).toHaveAttribute("data-drop-target", "true");
-  await expect(target).toHaveCount(0);
-  await expect(
-    page.locator("[data-create-section-slot] + [data-sidebar-section]"),
-  ).toHaveAttribute("data-sidebar-section", "group:work");
+  await expect(target).toBeVisible();
   await revealCreate(page);
   await page
     .locator(".shell-sidebar")
-    .screenshot({ path: testInfo.outputPath("top-section-target.png") });
+    .screenshot({ path: testInfo.outputPath("floating-section-target.png") });
   await page.evaluate(() => {
     localStorage.setItem("buzz-appearance.v1", "dark");
     window.dispatchEvent(
@@ -293,9 +283,9 @@ test("only the top channel-section boundary reveals creation, latches, cancels a
   });
   await expect(page.locator("html")).toHaveAttribute("data-color-mode", "dark");
   await page.locator(".shell-sidebar").screenshot({
-    path: testInfo.outputPath("top-section-target-dark.png"),
+    path: testInfo.outputPath("floating-section-target-dark.png"),
   });
-  // Leaving the gap must not collapse it or prevent an ordinary section move.
+  // Moving away keeps the target visible and allows ordinary section moves.
   const work = page.locator('[data-sidebar-section="group:work"] summary');
   const workBox = await work.boundingBox();
   if (!workBox) throw new Error("Work destination missing");
@@ -310,20 +300,13 @@ test("only the top channel-section boundary reveals creation, latches, cancels a
   await page.keyboard.press("Escape");
   await page.mouse.up();
   await expect(target).toHaveCount(0);
-  // The cue retires before its height finishes collapsing. Wait for the layout
-  // boundary before sampling Work's header for the next pointer gesture.
-  await expect(page.locator("[data-create-section-trigger] + div")).toHaveCSS(
-    "height",
-    "0px",
-  );
   expect(app.report.sidebarPublications ?? []).toHaveLength(0);
-  // A lone saved section is not reorderable and cannot reveal creation.
+  // Dragging a card never offers row-to-section creation.
   await startDrag(page, work);
   await expect(target).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.mouse.up();
-  // Release as soon as the original gap accepts the drop, without waiting for
-  // expansion. dnd-kit drops on its rendered target, not the last mouse event.
+  // The stable outer target accepts a drop while its inner capsule animates.
   await startDrag(page, row);
   const gap = await page.locator("[data-create-section-trigger]").boundingBox();
   if (!gap) throw new Error("Create boundary missing");
@@ -350,7 +333,7 @@ test("only the top channel-section boundary reveals creation, latches, cancels a
   await dialog.getByRole("button", { name: "Create and move" }).click();
   await expect(dialog).toHaveCount(0);
   const section = page
-    .locator("[data-sidebar-section]")
+    .locator('[data-sidebar-section^="group:"]')
     .filter({ has: page.locator("summary").filter({ hasText: /^Release$/ }) });
   await expect(section.locator('[data-channel-id="alpha"]')).toBeVisible();
   await expect(
@@ -380,9 +363,9 @@ test("only the top channel-section boundary reveals creation, latches, cancels a
 test.describe("without saved sections", () => {
   test.use({ savedSidebar: false });
 
-  // Only a layout engine proves that the first-section gap is reachable in the
-  // host sidebar, including its scrollport, enlarged text and immediate motion.
-  test("the first Channels boundary works with reduced motion in a narrow sidebar", async ({
+  // Only a layout engine proves the floating target stays reachable outside
+  // the scrollport at narrow widths and enlarged text.
+  test("the floating creation target stays reachable in a narrow sidebar with reduced motion", async ({
     page,
     app,
   }) => {
@@ -399,75 +382,27 @@ test.describe("without saved sections", () => {
         }),
       );
     });
+    // Open the narrow drawer before using destinations now hosted in its cards.
+    await settleShellToggle(page);
+    await page
+      .getByRole("button", { name: "Show navigation", exact: true })
+      .click();
     await openPage(page, "Messages");
     await settleShellToggle(page);
     await page
       .getByRole("button", { name: "Show navigation", exact: true })
       .click();
     await expect(page.locator('[data-sidebar-section="starred"]')).toHaveCount(
-      0,
+      1,
     );
     await expect(page.locator('[data-sidebar-section^="group:"]')).toHaveCount(
       0,
     );
-    // Coalesce the hit area's initial observer delivery with the immediate
-    // reveal. dnd-kit ignores that first delivery; the completed reveal must
-    // establish its expanded collision geometry independently.
-    const resizeGate = await page.evaluateHandle(() => {
-      const NativeResizeObserver = window.ResizeObserver;
-      const pending = new Map();
-      let released = false;
-      window.ResizeObserver = class extends NativeResizeObserver {
-        constructor(callback) {
-          super((entries, observer) => {
-            const create = entries.filter(({ target }) =>
-              target.hasAttribute("data-create-section-trigger"),
-            );
-            const rest = entries.filter(
-              ({ target }) =>
-                !target.hasAttribute("data-create-section-trigger"),
-            );
-            if (rest.length) callback(rest, observer);
-            if (create.length) {
-              if (released) callback(create, observer);
-              else
-                pending.set(observer, {
-                  entries: create,
-                  notify: () => callback(create, observer),
-                });
-            }
-          });
-        }
-      };
-      return {
-        ready: () =>
-          pending.size > 0 &&
-          [...pending.values()].every(({ entries }) =>
-            entries.every(
-              ({ target, contentRect }) =>
-                contentRect.height === target.clientHeight,
-            ),
-          ),
-        release: () => {
-          released = true;
-          for (const { notify } of pending.values()) notify();
-          pending.clear();
-          window.ResizeObserver = NativeResizeObserver;
-        },
-      };
-    });
-    try {
-      await startDrag(page, page.locator('[data-channel-id="alpha"]'));
-      await revealCreate(page);
-      await expect
-        .poll(() => resizeGate.evaluate((gate) => gate.ready()))
-        .toBe(true);
-    } finally {
-      await resizeGate.evaluate((gate) => gate.release());
-      await resizeGate.dispose();
-    }
-    const target = page.locator("[data-create-section-drop]");
-    await target.hover();
+    const row = page.locator('[data-channel-id="alpha"]');
+    await row.scrollIntoViewIfNeeded();
+    await startDrag(page, row);
+    await revealCreate(page);
+
     await expect(page.locator('[class*="channelDragOverlay"]')).toBeHidden();
     await page.mouse.up();
     const dialog = page.getByRole("dialog", { name: "Move to new section" });

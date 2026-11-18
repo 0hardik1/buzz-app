@@ -81,8 +81,8 @@ export function SessionPullLauncher({
   const Icon = stateIcons[pull.state?.state ?? "open"];
   return (
     <IconButton
-      size="sm"
-      variant="ghost"
+      size="toolbar"
+      variant="glass"
       aria-label={label}
       title={label}
       disabled={inBuzz && !canOpen(pull.url)}

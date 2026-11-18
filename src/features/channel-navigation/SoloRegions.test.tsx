@@ -94,6 +94,8 @@ function mount(
         sidebar={{
           list,
           collapsed,
+          teamCardOrder: [],
+          setTeamCardOrder: () => {},
           contributionOrder: order,
           setContributionOrder: (next) => setOrder([...next]),
           toggle,

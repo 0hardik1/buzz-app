@@ -1,3 +1,5 @@
+@reference "../../styles/globals.css";
+
 .root {
   display: inline-flex;
   align-items: center;
@@ -33,7 +35,7 @@
   height: 1.5rem;
 }
 /* Keep short counts round; wider counts grow into a capsule. */
-.root[data-size="small"] .count {
+.root:is([data-size="small"], [data-size="large"]) .count {
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;
@@ -98,4 +100,29 @@
 
 .root[data-size="hero-large"] .item:last-child {
   margin-inline-end: 0;
+}
+
+/* Conversation identity artwork matches the small header controls. */
+.root[data-size="large"] {
+  padding-inline-end: var(--space-2);
+}
+.root[data-size="large"] .item {
+  @apply glass-secondary;
+  padding: 3px;
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+  margin-inline-end: calc(-1 * var(--space-2));
+}
+.root[data-size="large"] .count {
+  @apply glass-secondary;
+  min-width: var(--size-control-sm);
+  height: var(--size-control-sm);
+  margin-inline-end: calc(-1 * var(--space-2));
+}
+
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .root[data-size="large"] :is(.item, .count) {
+    background: var(--surface-panel);
+    backdrop-filter: none;
+  }
 }

@@ -1,0 +1,47 @@
+.artwork {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+.selection {
+  --pin-selection-stroke: calc(var(--space-1h) / 2);
+  position: absolute;
+  inset: calc(-1 * (var(--space-half) + var(--pin-selection-stroke)));
+  padding: var(--pin-selection-stroke);
+  border-radius: var(--radius-pill);
+  background: var(--border-standard);
+  pointer-events: none;
+  overflow: hidden;
+  mask:
+    linear-gradient(currentColor 0 0) content-box,
+    linear-gradient(currentColor 0 0);
+  mask-composite: exclude;
+}
+.selection[data-agent] {
+  border-radius: 0;
+  mask:
+    url("../../shared/design-system/styles/avatar-squircle.svg") center / 100%
+    100% no-repeat,
+    url("../../shared/design-system/styles/avatar-squircle.svg") center /
+    calc(100% - 2 * var(--pin-selection-stroke))
+    calc(100% - 2 * var(--pin-selection-stroke)) no-repeat;
+  mask-composite: exclude;
+}
+.selectionArtwork {
+  position: absolute;
+  inset: -25%;
+  display: flex;
+  filter: blur(var(--space-2)) saturate(4);
+}
+.selection[data-channel] .selectionArtwork {
+  filter: none;
+}
+@media (forced-colors: active) {
+  .selection {
+    background: CanvasText;
+  }
+  .selectionArtwork {
+    display: none;
+  }
+}

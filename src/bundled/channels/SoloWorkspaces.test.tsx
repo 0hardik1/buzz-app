@@ -28,12 +28,25 @@ import {
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import {
   SOLO_CHAT_CAP,
-  SOLO_CHAT_STEP,
   SoloWorkspaces,
   type ChatListItem,
 } from "./SoloWorkspaces";
 import { createSoloRegionFixture } from "../../features/channel-navigation/solo-navigation-testing";
 import { readView } from "../../shared/view-state";
+
+const PAGE_STEP = 10;
+async function resizeCard(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string,
+  key: string,
+) {
+  const handle = await screen.findByRole("separator", {
+    name: `Resize ${name} card`,
+  });
+  handle.focus();
+  await user.keyboard(key);
+  return handle;
+}
 
 const owners: ReturnType<typeof createRelaySession>[] = [];
 afterEach(() => {
@@ -579,15 +592,11 @@ it("lists filed and unfiled chats without workspace chrome while preserving fili
     expect(
       screen.getAllByRole("button", { name: /^Filed chat \d+$/ }),
     ).toHaveLength(SOLO_CHAT_CAP);
-    await user.click(
-      screen.getByRole("button", { name: "Show more chats in Work" }),
-    );
+    await resizeCard(user, "Work", "{PageDown}");
     expect(
       screen.getAllByRole("button", { name: /^Filed chat \d+$/ }),
     ).toHaveLength(filed.length);
-    await user.click(
-      screen.getByRole("button", { name: "Show fewer chats in Work" }),
-    );
+    await resizeCard(user, "Work", "{Home}");
     expect(
       screen.getAllByRole("button", { name: /^Filed chat \d+$/ }),
     ).toHaveLength(SOLO_CHAT_CAP);
@@ -806,10 +815,10 @@ it("prevents rename in a deleting workspace while other workspaces remain editab
   owner.dispose();
 });
 
-it("caps each workspace, keeps pinned chats, and remembers Show more", async () => {
+it("resizes each workspace, preserves pinned chats, and restores its saved reveal amount", async () => {
   const h = fixture();
   const user = userEvent.setup();
-  const total = SOLO_CHAT_CAP + SOLO_CHAT_STEP + 3;
+  const total = SOLO_CHAT_CAP + PAGE_STEP + 3;
   const chats = Array.from({ length: total }, (_, index) => ({
     id: `c${index}`,
     title: `Chat ${index}`,
@@ -829,100 +838,60 @@ it("caps each workspace, keeps pinned chats, and remembers Show more", async () 
     ...chats.slice(0, SOLO_CHAT_CAP).map((chat) => chat.title),
     `Chat ${total - 1}`,
   ]);
-  await user.click(
-    screen.getByRole("button", { name: "Show more chats in Chats" }),
-  );
-  expect(titles()).toHaveLength(SOLO_CHAT_CAP + SOLO_CHAT_STEP + 1);
-  // The last step shows what remains, then only Show fewer is left.
-  await user.click(
-    screen.getByRole("button", { name: "Show more chats in Chats" }),
-  );
+  await resizeCard(user, "Chats", "{PageDown}");
+  expect(titles()).toHaveLength(SOLO_CHAT_CAP + PAGE_STEP + 1);
+  // The handle remains available at the maximum so it can shrink again.
+  await resizeCard(user, "Chats", "{PageDown}");
   expect(titles()).toHaveLength(total);
   expect(
-    screen.queryByRole("button", { name: "Show more chats in Chats" }),
-  ).toBeNull();
+    screen.getByRole("separator", { name: "Resize Chats card" }),
+  ).toHaveFocus();
 
   mounted.unmount();
   render(h.view(h.store().queries, undefined, undefined, chats));
   await waitFor(() => expect(titles()).toHaveLength(total));
-  await user.click(
-    screen.getByRole("button", { name: "Show fewer chats in Chats" }),
-  );
+  await resizeCard(user, "Chats", "{Home}");
   expect(titles()).toHaveLength(SOLO_CHAT_CAP + 1);
 });
 
-it("offers Show fewer beside Show more and always folds back to the cap", async () => {
+it("resizes by one row with arrows and resets to the cap without losing focus", async () => {
   const h = fixture();
   const user = userEvent.setup();
-  const chats = Array.from(
-    { length: SOLO_CHAT_CAP + SOLO_CHAT_STEP * 3 },
-    (_, index) => ({
-      id: `c${index}`,
-      title: `Chat ${index}`,
-    }),
-  );
-  const titles = () =>
-    screen
-      .getAllByRole("button")
-      .filter((button) => /^Chat \d+$/.test(button.textContent ?? ""));
-  render(h.view(h.store().queries, undefined, undefined, chats));
-  const more = await screen.findByRole("button", {
-    name: "Show more chats in Chats",
-  });
-  expect(
-    screen.queryByRole("button", { name: "Show fewer chats in Chats" }),
-  ).toBeNull();
-  await user.click(more);
-  await user.click(
-    screen.getByRole("button", { name: "Show more chats in Chats" }),
-  );
-  expect(titles()).toHaveLength(SOLO_CHAT_CAP + SOLO_CHAT_STEP * 2);
-  const fold = screen.getByRole("button", {
-    name: "Show fewer chats in Chats",
-  });
-  expect(fold).toHaveTextContent(/^Show fewer$/);
-  const row = fold.parentElement;
-  expect(
-    within(row as HTMLElement).getByRole("button", {
-      name: "Show more chats in Chats",
-    }),
-  ).toBeInTheDocument();
-  await user.click(
-    screen.getByRole("button", { name: "Show fewer chats in Chats" }),
-  );
-  expect(titles()).toHaveLength(SOLO_CHAT_CAP);
-});
-
-it("offers no Show more when a workspace fits under the cap", async () => {
-  const h = fixture();
-  render(h.view(h.store().queries));
-  await screen.findByRole("button", { name: "Planning" });
-  expect(document.querySelector("[data-solo-show-more]")).toBeNull();
-});
-
-it("keeps keyboard focus on the row when Show more or Show fewer is spent", async () => {
-  const h = fixture();
-  const user = userEvent.setup();
-  const chats = Array.from({ length: SOLO_CHAT_CAP + 2 }, (_, index) => ({
+  const chats = Array.from({ length: SOLO_CHAT_CAP + 3 }, (_, index) => ({
     id: `c${index}`,
     title: `Chat ${index}`,
   }));
   render(h.view(h.store().queries, undefined, undefined, chats));
-  const more = await screen.findByRole("button", {
-    name: "Show more chats in Chats",
-  });
-  more.focus();
-  await user.keyboard("{Enter}");
-  expect(
-    screen.getByRole("button", { name: "Show fewer chats in Chats" }),
-  ).toHaveFocus();
-  await user.keyboard("{Enter}");
-  expect(
-    screen.getByRole("button", { name: "Show more chats in Chats" }),
-  ).toHaveFocus();
+  const handle = await resizeCard(user, "Chats", "{ArrowDown}{ArrowDown}");
+  expect(screen.getAllByRole("button", { name: /^Chat \d+$/ })).toHaveLength(
+    SOLO_CHAT_CAP + 2,
+  );
+  await user.keyboard("{ArrowUp}");
+  expect(screen.getAllByRole("button", { name: /^Chat \d+$/ })).toHaveLength(
+    SOLO_CHAT_CAP + 1,
+  );
+  await user.keyboard("{End}");
+  expect(handle).toHaveFocus();
+  expect(screen.getAllByRole("button", { name: /^Chat \d+$/ })).toHaveLength(
+    chats.length,
+  );
+  await user.keyboard("{Home}");
+  expect(handle).toHaveFocus();
+  expect(screen.getAllByRole("button", { name: /^Chat \d+$/ })).toHaveLength(
+    SOLO_CHAT_CAP,
+  );
 });
 
-it("moves focus to the last chat when Show fewer leaves nothing to fold", async () => {
+it("offers no reveal handle when a workspace fits under the cap", async () => {
+  const h = fixture();
+  render(h.view(h.store().queries));
+  await screen.findByRole("button", { name: "Planning" });
+  expect(
+    screen.queryByRole("separator", { name: /Resize .* card/ }),
+  ).toBeNull();
+});
+
+it("keeps the handle focused when folding preserves a pinned chat", async () => {
   const h = fixture();
   const user = userEvent.setup();
   const chats = (pinned: boolean) =>
@@ -933,17 +902,13 @@ it("moves focus to the last chat when Show fewer leaves nothing to fold", async 
     }));
   const queries = h.store().queries;
   const mounted = render(h.view(queries, undefined, undefined, chats(false)));
-  await user.click(
-    await screen.findByRole("button", { name: "Show more chats in Chats" }),
-  );
-  // Opening the last chat pins it, so folding hides nothing.
+  await resizeCard(user, "Chats", "{End}");
   mounted.rerender(h.view(queries, undefined, undefined, chats(true)));
-  screen.getByRole("button", { name: "Show fewer chats in Chats" }).focus();
-  await user.keyboard("{Enter}");
-  expect(document.querySelector("[data-solo-show-more]")).toBeNull();
+  const handle = await resizeCard(user, "Chats", "{Home}");
+  expect(handle).toHaveFocus();
   expect(
     screen.getByRole("button", { name: `Chat ${SOLO_CHAT_CAP}` }),
-  ).toHaveFocus();
+  ).toBeVisible();
 });
 
 it("keeps a chat listed after it loses its pin until the workspace folds", async () => {
@@ -965,16 +930,13 @@ it("keeps a chat listed after it loses its pin until the workspace folds", async
   mounted.rerender(h.view(queries, undefined, undefined, chats(false)));
   expect(kept).toBeInTheDocument();
   expect(kept).toHaveFocus();
-  await user.click(
-    screen.getByRole("button", { name: "Show more chats in Chats" }),
-  );
-  screen.getByRole("button", { name: "Show fewer chats in Chats" }).focus();
-  await user.keyboard("{Enter}");
+  await resizeCard(user, "Chats", "{PageDown}");
+  await resizeCard(user, "Chats", "{Home}");
   expect(
     screen.queryByRole("button", { name: `Chat ${SOLO_CHAT_CAP}` }),
   ).toBeNull();
   expect(
-    screen.getByRole("button", { name: "Show more chats in Chats" }),
+    screen.getByRole("separator", { name: "Resize Chats card" }),
   ).toHaveFocus();
 });
 
@@ -1025,7 +987,7 @@ it("lists and focuses a chat moved into a full workspace", async () => {
 it("keeps a pinned chat past the expanded limit held after a partial fold", async () => {
   const h = fixture();
   const user = userEvent.setup();
-  const total = SOLO_CHAT_CAP + SOLO_CHAT_STEP + 3;
+  const total = SOLO_CHAT_CAP + PAGE_STEP + 3;
   const last = `Chat ${total - 1}`;
   const chats = (pinned: boolean) =>
     Array.from({ length: total }, (_, index) => ({
@@ -1035,12 +997,8 @@ it("keeps a pinned chat past the expanded limit held after a partial fold", asyn
     }));
   const queries = h.store().queries;
   const mounted = render(h.view(queries, undefined, undefined, chats(true)));
-  await user.click(
-    await screen.findByRole("button", { name: "Show more chats in Chats" }),
-  );
-  await user.click(
-    screen.getByRole("button", { name: "Show fewer chats in Chats" }),
-  );
+  await resizeCard(user, "Chats", "{PageDown}");
+  await resizeCard(user, "Chats", "{Home}");
   const kept = screen.getByRole("button", { name: last });
   kept.focus();
   // The work finishes: the pin drops, but the row the user is on stays.
@@ -1049,7 +1007,7 @@ it("keeps a pinned chat past the expanded limit held after a partial fold", asyn
   expect(kept).toHaveFocus();
 });
 
-it("offers Show fewer for retained chats in a never-expanded workspace", async () => {
+it("folds retained chats with the handle in a never-expanded workspace", async () => {
   const h = fixture();
   const user = userEvent.setup();
   const chats = (pinned: boolean) =>
@@ -1062,14 +1020,12 @@ it("offers Show fewer for retained chats in a never-expanded workspace", async (
   const mounted = render(h.view(queries, undefined, undefined, chats(true)));
   await screen.findByRole("button", { name: `Chat ${SOLO_CHAT_CAP}` });
   mounted.rerender(h.view(queries, undefined, undefined, chats(false)));
-  await user.click(
-    screen.getByRole("button", { name: "Show fewer chats in Chats" }),
-  );
+  await resizeCard(user, "Chats", "{Home}");
   expect(
     screen.queryByRole("button", { name: `Chat ${SOLO_CHAT_CAP}` }),
   ).toBeNull();
   expect(
-    screen.getByRole("button", { name: "Show more chats in Chats" }),
+    screen.getByRole("separator", { name: "Resize Chats card" }),
   ).toHaveFocus();
 });
 

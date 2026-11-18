@@ -53,19 +53,24 @@ const sameElement = (a: ReactElement, b: ReactElement | undefined) =>
   a.key === b.key &&
   sameProps(a.props as Props, b.props as Props);
 
-type ChannelSidebarRowsProps = { children: ReactElement[]; open: boolean };
+type ChannelSidebarRowsProps = {
+  children: ReactElement[];
+  open: boolean;
+  layout?: "list" | "grid";
+};
 
 /** Keep local movement short; fade distant jumps between their endpoints. */
 export const ChannelSidebarRows = memo(function ChannelSidebarRows({
   children,
   open,
+  layout = "list",
 }: ChannelSidebarRowsProps) {
   const { active } = useDndContext();
   const reducedMotion = useSyncExternalStore(
     subscribeReducedMotion,
     prefersReducedMotion,
   );
-  const animated = open && !active && !reducedMotion;
+  const animated = layout === "list" && open && !active && !reducedMotion;
   const desired = JSON.stringify(children.map((child) => String(child.key)));
   const [order, setOrder] = useState(desired);
   const positions = useRef<RowPositions>(new Map()).current;
@@ -143,7 +148,7 @@ export const ChannelSidebarRows = memo(function ChannelSidebarRows({
       })
     : children;
   return (
-    <div className={styles.rows}>
+    <div className={styles.rows} data-layout={layout}>
       <AnimatePresence
         initial={false}
         mode="popLayout"

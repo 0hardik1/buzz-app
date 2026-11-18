@@ -48,7 +48,7 @@ export function NavigationItem({
   /** Transient picker focus; persistent navigation selection stays separate. */
   highlighted?: boolean;
   inset?: boolean;
-  variant?: "row" | "pill" | "option" | "search" | "text";
+  variant?: "row" | "pill" | "option" | "search" | "text" | "avatar";
   /** Stacked labels grow the row without clipping its primary target. */
   multiline?: boolean;
 } & Omit<ComponentProps<typeof BaseButton>, "className" | "children">) {

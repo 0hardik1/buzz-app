@@ -89,7 +89,7 @@ export function ChannelMemberAvatars({
   const shown = 3;
   return (
     <AvatarStack
-      size="small"
+      size="large"
       max={shown}
       items={preview.map((id, index) =>
         // Members past the shown ones only count.

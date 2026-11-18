@@ -133,6 +133,7 @@ export function ChannelHeaderMenu({
           <IconButton
             hint="familiar"
             ref={trigger}
+            variant={size === "toolbar" ? "glass" : "ghost"}
             size={size}
             aria-label={label}
             title={label}

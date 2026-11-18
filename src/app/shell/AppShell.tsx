@@ -1,11 +1,11 @@
+import { PluginSwitcher } from "./PluginSwitcher";
+import { BESTIE_PAGE } from "./bestie-context";
 import { ActivityNavigationProvider } from "./ActivityNavigation";
+import { ShellNavigationCards } from "./ShellNavigationCards";
+import { SidebarFrame } from "../../features/channel-navigation/SidebarFrame";
+import { SidebarList } from "../../features/channel-navigation/SidebarList";
 import { PageNavigation } from "./PageNavigation";
-import {
-  navigationOwner,
-  orderPages,
-  pagePlacement,
-  legacySidebarAvailable,
-} from "./presentation";
+import { navigationOwner, orderPages, pagePlacement } from "./presentation";
 import {
   useCallback,
   useEffect,
@@ -28,6 +28,7 @@ import type { AccountActionsService } from "../../features/account-actions/servi
 import type { Communities } from "../../features/communities/service";
 import type { CommunityUnreads } from "../../features/notifications/community-unread";
 import type { FederatedIdentity } from "../../features/federated-identity/service";
+import { ResizableSidebar } from "../../features/channel-navigation/ResizableSidebar";
 import type { JoinRequest } from "../../features/communities/invite-intent";
 import type { JoinReports } from "../../features/communities/CommunityDialog";
 import type { OpenTarget } from "../../features/navigation/targets";
@@ -200,9 +201,16 @@ function AppShellContent({
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const openSwitcher = useCallback(() => setSwitcherOpen(true), []);
   const connection = useRelayConnection(communities.relay);
+  const sidebarScope = connection.scope ?? "disconnected";
   const owner = navigationOwner(pages, selected);
-  const hasNavigation =
-    sidebarAvailable ?? legacySidebarAvailable(pages, selected);
+  const channelsNavigation = owner === "buzz.channels/channels";
+  const hasPageNavigation =
+    sidebarAvailable ||
+    channelsNavigation ||
+    pages.some(
+      (page) => page.key === selected && (page.primary || !!page.sidebar),
+    );
+  const hasNavigation = hasPageNavigation || pages.some((page) => page.primary);
   const [narrow, setNarrow] = useState(
     () => window.matchMedia("(max-width: 650px)").matches,
   );
@@ -213,18 +221,14 @@ function AppShellContent({
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
-  const collapsibleSidebar =
-    hasNavigation ||
-    selected === "settings" ||
-    pages.some(
-      (page) => page.key === selected && (page.primary || !!page.sidebar),
-    );
+  const collapsibleSidebar = hasNavigation;
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const visibleSidebar =
     hasNavigation && (narrow ? navigationOpen : sidebarOpen);
-  const creationInNavigation = !!creationAction && creationInSidebar;
+  const creationInNavigation =
+    hasPageNavigation && !!creationAction && creationInSidebar;
   useEffect(
     () =>
       searchServices?.shortcuts.registerHost({
@@ -259,33 +263,83 @@ function AppShellContent({
     }
     setNavigationOpen(false);
   }, [navigationAttempt]);
+  const dockPages = useMemo(
+    () =>
+      orderPages(
+        pages.filter(
+          (page) =>
+            page.primary &&
+            page.key !== BESTIE_PAGE &&
+            pagePlacement(page) !== "sidebar",
+        ),
+        "dock",
+      ),
+    [pages],
+  );
+  const pluginsCard = useMemo(
+    () => (
+      <PluginSwitcher
+        pages={[
+          ...pages.filter((page) => page.key === BESTIE_PAGE && page.primary),
+          ...dockPages,
+        ]}
+        selected={owner}
+        currentPage={selected}
+        onSelect={onSelect}
+      />
+    ),
+    [pages, dockPages, owner, selected, onSelect],
+  );
   // Toggling the sidebar changes only this shell's own state. Keep the
   // navigation element stable across those renders so React skips the whole
   // sidebar subtree instead of re-rendering every row on each click.
   const navigation = useMemo(() => {
+    const selectedPageHasSidebar = pages.some(
+      (page) => page.key === selected && !!page.sidebar,
+    );
     // Sidebars retain their documented app-link and creation slots.
-    const content = sidebar
-      ? sidebar(
-          <nav aria-label="Pages" className="shell-pages">
-            <PageNavigation
-              pages={orderPages(
-                pages.filter((page) => pagePlacement(page) === "sidebar"),
-              )}
-              selected={selected}
-              onSelect={onSelect}
-              previews
-            />
-          </nav>,
+    const content =
+      sidebar && hasPageNavigation ? (
+        sidebar(
+          <>
+            {selectedPageHasSidebar && pluginsCard}
+            <nav aria-label="Pages" className="shell-pages">
+              <PageNavigation
+                pages={orderPages(
+                  pages.filter((page) => pagePlacement(page) === "sidebar"),
+                )}
+                selected={selected}
+                onSelect={onSelect}
+                previews
+              />
+            </nav>
+          </>,
           creationInNavigation ? <div ref={setCreationContainer} /> : null,
         )
-      : null;
-    return content;
-  }, [pages, selected, sidebar, onSelect, creationInNavigation]);
-  const dockPages = orderPages(
-    pages.filter((page) => page.primary && pagePlacement(page) !== "sidebar"),
-    "dock",
-  );
-  const selectedDockPage = dockPages.some((page) => page.key === owner);
+      ) : (
+        <ResizableSidebar scope={sidebarScope} className="shell-sidebar">
+          <SidebarFrame label="Navigation">
+            <SidebarList>{pluginsCard}</SidebarList>
+          </SidebarFrame>
+        </ResizableSidebar>
+      );
+    return selectedPageHasSidebar ? (
+      content
+    ) : (
+      <ShellNavigationCards value={{ top: pluginsCard }}>
+        {content}
+      </ShellNavigationCards>
+    );
+  }, [
+    pages,
+    selected,
+    sidebar,
+    sidebarScope,
+    onSelect,
+    creationInNavigation,
+    pluginsCard,
+    hasPageNavigation,
+  ]);
   return (
     <div
       data-shell-tone={tone}
@@ -359,51 +413,39 @@ function AppShellContent({
         >
           <div className="shell-actions-fixed">
             {launchers}
+            <div className="shell-community-switcher">
+              <CommunityPicker
+                communities={communities}
+                unreads={communityUnreads}
+                invite={invite}
+                joinVisit={joinVisit}
+                onJoin={onJoin}
+                joinReports={joinReports}
+                onInviteClose={onInviteClose}
+                settingsCards={settingsCards}
+                federatedIdentity={federatedIdentity}
+                onSelect={onCommunitySelect}
+                onOpenTarget={onOpenTarget}
+                open={switcherOpen}
+                onOpenChange={setSwitcherOpen}
+              />
+              <ProfileButton
+                communities={communities}
+                accountActions={accountActions}
+                settingsSelected={selected === "settings"}
+                appearance={appearance}
+                pluginRecommendations={pluginRecommendations}
+                onSettings={(section) =>
+                  onSelect("settings", section ? { section } : undefined)
+                }
+              />
+            </div>
             <WindowControls />
           </div>
         </div>
       </header>
 
       <div className="shell-workspace">
-        <nav className="shell-side-dock" aria-label="Apps dock">
-          <div className="shell-dock-pages">
-            <PageNavigation
-              pages={dockPages}
-              selected={owner}
-              currentPage={selected}
-              onSelect={onSelect}
-              placement="dock"
-              previews
-            />
-          </div>
-          <div className="shell-community-switcher">
-            <CommunityPicker
-              communities={communities}
-              unreads={communityUnreads}
-              invite={invite}
-              joinVisit={joinVisit}
-              onJoin={onJoin}
-              joinReports={joinReports}
-              onInviteClose={onInviteClose}
-              settingsCards={settingsCards}
-              federatedIdentity={federatedIdentity}
-              onSelect={onCommunitySelect}
-              onOpenTarget={onOpenTarget}
-              open={switcherOpen}
-              onOpenChange={setSwitcherOpen}
-            />
-            <ProfileButton
-              communities={communities}
-              accountActions={accountActions}
-              settingsSelected={selected === "settings"}
-              appearance={appearance}
-              pluginRecommendations={pluginRecommendations}
-              onSettings={(section) =>
-                onSelect("settings", section ? { section } : undefined)
-              }
-            />
-          </div>
-        </nav>
         <div
           ref={workspaceRef}
           className="shell-dialog-frame"
@@ -453,14 +495,6 @@ function AppShellContent({
                     <PanelFrame scope={connection.scope} companion={companion}>
                       <div
                         id={`shell-page-${owner}`}
-                        {...(selectedDockPage
-                          ? {
-                              role: "tabpanel",
-                              "data-focus-inset": "",
-                              "aria-labelledby": `shell-page-${owner}-tab`,
-                              tabIndex: 0,
-                            }
-                          : {})}
                         className={
                           fillsWorkspace
                             ? "buzz-tabs-panel h-full min-h-0"

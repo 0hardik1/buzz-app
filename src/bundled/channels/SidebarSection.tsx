@@ -1,3 +1,6 @@
+import { motion } from "motion/react";
+import { useSidebarCardMotion } from "../../features/channel-navigation/sidebar-card-motion";
+import { SidebarCardGrip, sidebarGripPointerEvents } from "./SidebarCardGrip";
 import { RenameSidebarSection } from "./RenameSidebarSection";
 import { SidebarActiveDialog, activeWindowLabel } from "./SidebarActiveDialog";
 import { FadingLabel } from "./FadingLabel";
@@ -34,7 +37,6 @@ import {
   ChatUnreadIcon,
   DotsThreeIcon,
   Filter2Icon,
-  GripHorizontalIcon,
   PencilSimpleIcon,
   PlusIcon,
   TextAaIcon,
@@ -50,7 +52,7 @@ import type { ChannelSummary } from "../../features/relay/contracts";
 import type { SidebarSortMode } from "../../features/relay/sidebar-sort";
 import type { SidebarFilter } from "./useSidebarFilters";
 import { SidebarGroupIcon } from "./SidebarGroupIcon";
-import { SidebarStarIcon } from "./SidebarStarIcon";
+import { SectionUnreadDot } from "./SectionUnreadDot";
 import { ChannelSidebarMenuItem } from "./ChannelSidebarMenuItem";
 import styles from "./Channels.module.css";
 
@@ -65,6 +67,7 @@ export function SidebarSection({
   headerNotice,
   hideMoreActions = false,
   persistentChevron = false,
+  stickyHeading = false,
   createChannel,
   createSection,
   newMessage,
@@ -80,6 +83,7 @@ export function SidebarSection({
   onRemove,
   onRename,
   channelCount,
+  unreadChannelIds,
   removalFocus,
   children,
 }: {
@@ -96,7 +100,10 @@ export function SidebarSection({
   hideMoreActions?: boolean;
   /** Keep the disclosure affordance visible instead of revealing it on hover. */
   persistentChevron?: boolean;
+  /** Keep a scope heading visible while its contents scroll. */
+  stickyHeading?: boolean;
   channelCount?: number | undefined;
+  unreadChannelIds?: readonly string[];
   removalFocus?: (() => HTMLElement | null | undefined) | undefined;
   createChannel?:
     | { available: boolean; open: (trigger: HTMLButtonElement) => void }
@@ -145,6 +152,7 @@ export function SidebarSection({
     | undefined;
   children: ReactNode;
 }) {
+  const cardMotion = useSidebarCardMotion();
   const id = useId();
   const cancelRemove = useRef<HTMLButtonElement>(null);
   const actionsTrigger = useRef<HTMLButtonElement>(null);
@@ -172,10 +180,13 @@ export function SidebarSection({
     }
   };
   return (
-    <div
+    <motion.div
+      {...cardMotion}
+      {...sidebarGripPointerEvents}
       ref={dropRef}
       className={styles.channelSection}
       data-sidebar-section={sectionKey}
+      data-sticky-heading={stickyHeading || undefined}
       data-sidebar-card={
         (!sectionKey.startsWith("scope:") &&
           !sectionKey.startsWith("solo-region:")) ||
@@ -186,30 +197,18 @@ export function SidebarSection({
       data-section-dragging={dragging || undefined}
       data-menu-open={menuOpen || undefined}
     >
+      {dragHandle && (
+        <SidebarCardGrip
+          title={title}
+          listeners={dragHandle.listeners}
+          move={move}
+        />
+      )}
       <NavigationSectionHeading
         disclosure
         revealActions
         actions={
           <>
-            {dragHandle && (
-              <span className={styles.sectionGrabber}>
-                <IconButton
-                  {...dragHandle.listeners}
-                  size="compact"
-                  aria-label={`Move ${title} section`}
-                  aria-keyshortcuts="ArrowUp ArrowDown"
-                  aria-description="Use the Up and Down arrow keys to move this section."
-                  icon={<GripHorizontalIcon size={18} />}
-                  onKeyDown={(event) => {
-                    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-                      event.preventDefault();
-                      if (event.key === "ArrowUp") move?.up?.();
-                      else move?.down?.();
-                    }
-                  }}
-                />
-              </span>
-            )}
             {!hideMoreActions && (
               <MenuRoot open={menuOpen} onOpenChange={setMenuOpen}>
                 <MenuTrigger
@@ -562,9 +561,7 @@ export function SidebarSection({
             }}
           >
             <span className={styles.sectionLabel}>
-              {sectionKey === "starred" ? (
-                <SidebarStarIcon />
-              ) : typeof icon === "string" && session ? (
+              {typeof icon === "string" && session ? (
                 <SidebarGroupIcon icon={icon} session={session} />
               ) : (
                 icon
@@ -576,6 +573,12 @@ export function SidebarSection({
               >
                 {title}
               </FadingLabel>
+              {!open && session && unreadChannelIds && (
+                <SectionUnreadDot
+                  session={session}
+                  channelIds={unreadChannelIds}
+                />
+              )}
             </span>
             <span
               className={`${styles.sidebarIcon} ${styles.sectionChevron}`}
@@ -595,6 +598,6 @@ export function SidebarSection({
       >
         <div>{children}</div>
       </div>
-    </div>
+    </motion.div>
   );
 }

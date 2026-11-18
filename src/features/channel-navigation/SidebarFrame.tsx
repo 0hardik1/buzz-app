@@ -30,6 +30,7 @@ export function SidebarFrame({
         <SidebarNavigation>
           {header && <div className={styles.sidebarFilter}>{header}</div>}
           <div
+            data-sidebar-body=""
             className={styles.sidebarBody}
             id={panelId}
             {...(panelId

@@ -73,6 +73,7 @@ export function SoloHeading(props: SoloToolbarProps) {
   ) : (
     <div className={identityStyles.soloHeader}>
       <PanelHeader
+        divider={false}
         title={
           <ChannelMembersButton
             session={props.session}
@@ -165,6 +166,7 @@ export function SoloToolbar({
               <IconButton
                 hint="familiar"
                 ref={actionsTrigger}
+                variant="glass"
                 size="toolbar"
                 aria-label="Chat actions"
                 title="Chat actions"

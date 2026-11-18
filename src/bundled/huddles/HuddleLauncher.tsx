@@ -168,7 +168,7 @@ export function HuddleLauncher(props: Props) {
     <span className={joinable ? styles.activeLauncher : undefined}>
       <IconButton
         size="toolbar"
-        variant="ghost"
+        variant="glass"
         icon={<HeadphonesIcon size={16} aria-hidden="true" />}
         style={joinable ? { color: "var(--status-online)" } : undefined}
         aria-label={label}
@@ -250,7 +250,7 @@ function ActiveHuddle({
       >
         <IconButton
           size="toolbar"
-          variant="ghost"
+          variant="glass"
           style={{ color: "var(--status-online)" }}
           data-huddle-leave=""
           aria-label="Leave huddle"
@@ -281,7 +281,7 @@ function ActiveHuddle({
             render={
               <IconButton
                 size="toolbar"
-                variant="ghost"
+                variant="glass"
                 style={{ color: "var(--status-online)" }}
                 ref={trigger}
                 aria-label="Huddle options"

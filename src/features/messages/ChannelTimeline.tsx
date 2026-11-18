@@ -1,4 +1,6 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: The history region must support keyboard scrolling.
+import { ScrollEdgeViewport } from "../../shared/design-system/ui/ScrollEdgeViewport";
+import { useScrollEdges } from "../../shared/design-system/ui/useScrollEdges";
 import { AgentConnectionSetup } from "../agents/AgentConnectionSetup";
 import { TypingIndicator, useLiveConversationAgents } from "./TypingIndicator";
 import { ActivityGroupPreview } from "./ActivityGroupPreview";
@@ -892,6 +894,14 @@ function Timeline({
       : [],
   );
   const scroller = useRef<HTMLElement>(null);
+  const scrollEdges = useScrollEdges("block");
+  const setScroller = useCallback(
+    (element: HTMLElement | null) => {
+      scroller.current = element;
+      scrollEdges(element);
+    },
+    [scrollEdges],
+  );
   const edge = useRef<HTMLDivElement>(null);
   const activityTail = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -1976,7 +1986,7 @@ function Timeline({
   };
   const feed = (
     <section
-      ref={scroller}
+      ref={setScroller}
       data-message-scroller
       data-chat-presentation={chatPresentation || undefined}
       className={styles.feed}
@@ -2341,5 +2351,9 @@ function Timeline({
       <SelectionQuote list={scroller} />
     </section>
   );
-  return <MessageContextMenus>{feed}</MessageContextMenus>;
+  return (
+    <MessageContextMenus>
+      <ScrollEdgeViewport>{feed}</ScrollEdgeViewport>
+    </MessageContextMenus>
+  );
 }

@@ -6,7 +6,7 @@ export function ScrollEdgeMaterial({
   className,
 }: {
   edge: "top" | "bottom";
-  className?: string;
+  className?: string | undefined;
 }) {
   return (
     <div

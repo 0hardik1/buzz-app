@@ -187,6 +187,28 @@
   position: relative;
   flex-shrink: 0;
 }
+.channelSection[data-sticky-heading] > [data-disclosure] {
+  position: sticky;
+  inset-block-start: calc(-1 * var(--sidebar-padding));
+  z-index: 2;
+  padding-inline: var(--space-3);
+  background: var(--surface-panel);
+}
+/* Keep the heading opaque; feather the cards beneath its lower edge instead. */
+.channelSection[data-sticky-heading] > [data-disclosure]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 100%;
+  height: var(--scroll-fade);
+  background: var(--surface-panel);
+  mask-image: var(--scroll-fade-end);
+  opacity: 0;
+  pointer-events: none;
+}
+.channelSection[data-heading-stuck] > [data-disclosure]::after {
+  opacity: 1;
+}
 .channelSection[data-sidebar-card] {
   min-width: 0;
   padding: var(--space-3);
@@ -194,7 +216,44 @@
   background: var(--surface-sidebar-card);
 }
 .sectionGrabber {
+  position: absolute;
+  /* Lift the padded button so its dots sit at the card edge, above the heading. */
+  inset-block-start: calc(-1 * var(--space-1h));
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
   display: flex;
+  z-index: 1;
+  opacity: var(--sidebar-grabber-proximity, 0);
+  pointer-events: none;
+}
+.grabDots {
+  opacity: 0.4;
+}
+.grabDots path:nth-child(-n + 2) {
+  transform: translateX(calc(var(--space-half) / 2));
+}
+.grabDots path:nth-child(n + 5) {
+  transform: translateX(calc(var(--space-half) / -2));
+}
+@media (hover: hover) and (pointer: fine) {
+  .channelSection[data-sidebar-card]:hover .sectionGrabber {
+    pointer-events: auto;
+  }
+}
+@media (hover: none) {
+  .sectionGrabber {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+.sectionGrabber:hover,
+.sectionGrabber:focus-within,
+.channelSection[data-section-dragging] .sectionGrabber,
+html[data-keyboard-navigation]
+  .channelSection[data-sidebar-card]:focus-within
+  .sectionGrabber {
+  opacity: 1;
+  pointer-events: auto;
 }
 .sectionGrabber button {
   cursor: grab;
@@ -206,88 +265,121 @@
 .newSectionButton {
   display: flex;
   justify-content: center;
-  padding-block: var(--space-4);
+  flex: 0 0 auto;
+  padding-block: var(--space-4) calc(var(--space-8) + var(--space-2));
+}
+[data-sidebar-body]:has(.createSectionSlot[data-shown]) .newSectionButton {
+  visibility: hidden;
 }
 .channelSection + .channelSection {
   margin-top: var(--space-1);
 }
+/* Direct cards use the list gap; nested and slotted cards use margins above. */
+[data-sidebar-list-content] > .channelSection {
+  margin-top: 0;
+}
 [data-sidebar-slot]:has(> .channelSection)
   ~ [data-sidebar-slot]
   > .channelSection:first-child {
   margin-top: var(--space-1);
 }
-[data-sidebar-slot]:has(> .channelSection)
-  ~ [data-sidebar-slot]
-  > .channelSection:first-child {
-  margin-top: var(--space-4);
-}
 .channelSection[data-drop-target] {
   background: var(--affordance-panel-hover);
 }
-.createSectionSlot + .channelSection {
-  margin-top: 0;
-}
-.createSectionHitArea {
+.newSectionDropSlot {
   position: absolute;
-  inset: calc(-1 * var(--space-4)) 0 0;
-  pointer-events: none;
+  inset-inline: 0;
+  bottom: 0;
+  height: 0;
+  z-index: 1;
 }
-.createSectionReveal {
-  overflow: hidden;
+.createSectionSlot {
+  position: absolute;
+  bottom: var(--space-6);
+  inset-inline: var(--space-4);
+  pointer-events: none;
 }
 .createSectionDrop {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
-  /* Match the avatar uploader's compact 80px drop area at the default scale. */
-  min-height: calc(5 * var(--space-4));
-  margin-bottom: var(--space-4);
-  padding: var(--space-2);
-  border: 2px solid transparent;
-  border-radius: var(--radius-control);
-  background: var(--surface-inset);
-  color: var(--text-subtle);
-  text-align: center;
-  transition: background-color var(--duration-state) var(--easing-state);
+  gap: var(--space-2);
+  min-height: var(--size-control);
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--surface-message-own);
+  color: var(--text-message-own);
+  font-size: var(--text-label);
+  font-weight: var(--type-weight-medium);
+  line-height: var(--text-label--line-height);
+  letter-spacing: var(--text-label--letter-spacing);
+  opacity: 0;
+  transform: translateY(var(--space-4)) scale(0.95);
+  transition:
+    transform var(--duration-fast) var(--easing-enter),
+    opacity var(--duration-fast) var(--easing-enter);
 }
-.createSectionDrop > svg {
-  flex-shrink: 0;
+.createSectionSlot[data-shown] {
+  pointer-events: auto;
 }
-.createSectionDrop[data-drop-target] {
-  border-color: var(--text-standard);
-  border-style: dashed;
-  background: var(--affordance-subtle-hover);
-  color: var(--text-standard);
+.createSectionSlot[data-shown] .createSectionDrop {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.createSectionSlot[data-shown] .createSectionDrop[data-drop-target] {
+  background: var(--surface-message-own-hover);
+  transform: translateY(0) scale(1.04);
 }
 @media (prefers-reduced-motion: reduce) {
-  .createSectionDrop {
-    transition: none;
+  .createSectionDrop,
+  .createSectionSlot[data-shown] .createSectionDrop,
+  .createSectionSlot[data-shown] .createSectionDrop[data-drop-target] {
+    transform: none;
+    transition: opacity var(--duration-fast) var(--easing-state);
   }
 }
 [data-channel-dragging],
 .channelSection[data-section-dragging] {
   opacity: 0.3;
 }
-/* A group drop shows the shared tab insertion line, centred in the section gap. */
-.channelSection[data-drop-edge]::before {
+/* Centered landing capsules match the reference card arrangement. */
+.channelSection[data-sidebar-card]::before,
+.channelSection[data-sidebar-card]::after {
   content: "";
   position: absolute;
   inset-inline-start: 50%;
   width: var(--space-16);
   height: var(--space-half);
   border-radius: var(--radius-pill);
-  background: var(--border-accent);
+  background: var(--surface-sidebar-selected);
   pointer-events: none;
+  opacity: 0;
+  transform: translateX(-50%) scaleX(0.75);
+  transition:
+    opacity var(--duration-fast) var(--easing-enter),
+    transform var(--duration-fast) var(--easing-enter);
 }
-.channelSection[data-drop-edge="before"]::before {
-  top: calc(var(--space-half) * -1);
-  transform: translate(-50%, -50%);
+.channelSection[data-sidebar-card]::before {
+  bottom: calc(100% + var(--space-half) / 2);
 }
-.channelSection[data-drop-edge="after"]::before {
-  bottom: calc(var(--space-half) * -1);
-  transform: translate(-50%, 50%);
+.channelSection[data-sidebar-card]::after {
+  top: calc(100% + var(--space-half) / 2);
+}
+.channelSection[data-drop-edge="before"]::before,
+.channelSection[data-drop-edge="after"]::after {
+  opacity: 1;
+  transform: translateX(-50%) scaleX(1);
+  transition:
+    opacity var(--duration-fast) var(--easing-enter),
+    transform var(--duration-settle) cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .channelSection[data-sidebar-card]::before,
+  .channelSection[data-sidebar-card]::after,
+  .channelSection[data-drop-edge="before"]::before,
+  .channelSection[data-drop-edge="after"]::after {
+    transition: none;
+  }
 }
 .channelDragOverlay {
   display: flex;
@@ -387,22 +479,17 @@ details:not([open]) > summary .sectionChevron {
   flex: 1;
 }
 .panelStack {
+  border-inline-start: 1px solid var(--border-standard);
   width: max(
     var(--split-floor, 19.75rem),
     var(--secondary-panel-width, var(--split-default, calc(100cqw / 2.1)))
   );
   position: relative;
-  border-inline-start: 1px solid var(--border-standard);
   grid-column: 2;
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-auto-rows: minmax(0, 1fr);
-}
-.panelStack
-  > :not([inert], [hidden], [data-panel-resize])
-  ~ :not([inert], [hidden], [data-panel-resize]) {
-  border-block-start: 1px solid var(--border-standard);
 }
 .retainedPanel[hidden] {
   display: none;
@@ -1025,4 +1112,14 @@ details:not([open]) > summary .sectionChevron {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+}
+
+.starredDivider {
+  border: 0;
+  border-block-start: 1px solid var(--border-standard);
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.sectionUnreadDot {
+  margin-inline-start: var(--space-2);
 }

@@ -2163,6 +2163,9 @@
   --text-color-categorical-green: var(--text-categorical-green);
   --text-color-categorical-amber: var(--text-categorical-amber);
   --text-color-search-match: var(--text-search-match);
+  --color-surface-categorical-blue: var(--surface-categorical-blue);
+  --color-surface-categorical-green: var(--surface-categorical-green);
+  --color-surface-categorical-orange: var(--surface-categorical-orange);
   --text-color-accent: var(--text-accent);
   --border-color-standard: var(--border-standard);
   --border-color-message-thread: var(--border-message-thread);

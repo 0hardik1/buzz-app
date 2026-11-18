@@ -328,7 +328,7 @@ export function ProfileButton({
         />
         <MenuPopup
           data-profile-menu=""
-          side="right"
+          side="bottom"
           collisionAvoidance={{ fallbackAxisSide: "start" }}
           align="end"
           sideOffset={8}

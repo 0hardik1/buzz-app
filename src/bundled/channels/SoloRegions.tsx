@@ -154,6 +154,7 @@ export function SoloRegions({
       onToggle={groupDisclosure.onToggle}
       hideMoreActions
       persistentChevron
+      stickyHeading
     >
       {ordinary}
     </SidebarSection>
@@ -531,6 +532,7 @@ function RegionFrame({
             }}
             hideMoreActions={first && last}
             persistentChevron={!!groupDisclosure}
+            stickyHeading={!!groupDisclosure}
             headerActions={headerActions}
             headerNotice={headerNotice}
           >

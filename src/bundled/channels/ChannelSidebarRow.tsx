@@ -23,6 +23,7 @@ export function ChannelSidebarRow({
   ordinary = false,
   muted = false,
   dmVisualSpacing = false,
+  avatarOnly = false,
   wrapSelect,
   selected,
   presenceDescription,
@@ -40,6 +41,7 @@ export function ChannelSidebarRow({
   ordinary?: boolean;
   muted?: boolean;
   dmVisualSpacing?: boolean;
+  avatarOnly?: boolean;
   wrapSelect?: ((trigger: ReactElement) => ReactNode) | undefined;
   selected?: string | undefined;
   presenceDescription?: string | undefined;
@@ -98,6 +100,8 @@ export function ChannelSidebarRow({
   const selectButton = (
     <NavigationItem
       ref={selectRef}
+      variant={avatarOnly ? "avatar" : "row"}
+      title={avatarOnly ? channel.name : undefined}
       type="button"
       data-channel-id={channel.id}
       data-working={working || undefined}
@@ -123,13 +127,15 @@ export function ChannelSidebarRow({
       }
       icon={
         <span
-          className={styles.iconSpace}
+          className={avatarOnly ? styles.avatarSpace : styles.iconSpace}
           data-dm-visual={dmVisualSpacing || undefined}
         >
           {icon}
+          {avatarOnly && <span className={styles.avatarBadges}>{badge}</span>}
         </span>
       }
       trailing={
+        !avatarOnly &&
         badge && (
           <span className={styles.badges} data-working={working || undefined}>
             {badge}
@@ -142,6 +148,7 @@ export function ChannelSidebarRow({
     <div
       className={styles.row}
       data-channel-sidebar-row=""
+      data-avatar={avatarOnly || undefined}
       data-ordinary={ordinary || undefined}
       data-selected={selected === channel.id || undefined}
     >

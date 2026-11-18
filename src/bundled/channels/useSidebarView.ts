@@ -5,6 +5,7 @@ import { contributedSidebarSectionKey } from "./sidebar-sections";
 type SidebarView = {
   collapsed: string[];
   contributionOrder: string[];
+  teamCardOrder: string[];
   scrollTop: number;
   /** The destination whose sidebar entry the saved position shows. */
   location?: string | undefined;
@@ -25,6 +26,11 @@ function restore(scope: string): SidebarView {
           .map((key) =>
             key.includes(":") ? key : contributedSidebarSectionKey(key),
           )
+      : [],
+    teamCardOrder: Array.isArray(saved.teamCardOrder)
+      ? saved.teamCardOrder.filter(
+          (key): key is string => typeof key === "string",
+        )
       : [],
     scrollTop:
       typeof saved.scrollTop === "number" &&
@@ -114,13 +120,16 @@ export function useSidebarView(
           JSON.stringify(saved.collapsed) ===
             JSON.stringify(intent.current.collapsed) &&
           JSON.stringify(saved.contributionOrder) ===
-            JSON.stringify(intent.current.contributionOrder)
+            JSON.stringify(intent.current.contributionOrder) &&
+          JSON.stringify(saved.teamCardOrder) ===
+            JSON.stringify(intent.current.teamCardOrder)
         )
           return;
         intent.current = {
           ...intent.current,
           collapsed: saved.collapsed,
           contributionOrder: saved.contributionOrder,
+          teamCardOrder: saved.teamCardOrder,
         };
         setView(intent.current);
       }),
@@ -279,7 +288,15 @@ export function useSidebarView(
     },
     [update],
   );
+  const setTeamCardOrder = useCallback(
+    (teamCardOrder: readonly string[]) => {
+      update({ ...intent.current, teamCardOrder: [...teamCardOrder] });
+    },
+    [update],
+  );
   return {
+    teamCardOrder: view.teamCardOrder,
+    setTeamCardOrder,
     list,
     collapsed: view.collapsed,
     contributionOrder: view.contributionOrder,

@@ -1,0 +1,20 @@
+.viewport {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  /* Keep backdrop layers separate from the composer's caret in WebKit. */
+  isolation: isolate;
+}
+.viewport > .edge {
+  --scroll-edge-surface: var(--surface-panel);
+  inset-block-end: auto;
+  height: var(--space-8);
+  z-index: 1;
+  display: none;
+}
+.viewport:has(> [data-overflow-start]) > .edge {
+  display: block;
+}

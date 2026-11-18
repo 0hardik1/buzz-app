@@ -18,6 +18,7 @@ import type { UnreadSnapshot } from "../../features/relay/unread";
 import type { PresenceStatus } from "../../features/presence/presence";
 import { ChannelSidebarItem } from "./ChannelSidebarItem";
 import { UnreadBadge } from "./UnreadBadge";
+import { SidebarSection } from "./SidebarSection";
 import { createSidebarPreferencesStore } from "../../features/relay/sidebar-preferences-store";
 import type { SidebarPreferences } from "../../features/relay/sidebar-preferences";
 
@@ -784,4 +785,35 @@ it("keeps cached mute from quieting unread but retains confirmed mute through re
   } finally {
     store.dispose();
   }
+});
+
+it("summarizes unread conversations only while their card is collapsed", () => {
+  const state = owner();
+  const card = (open: boolean) => (
+    <SidebarSection
+      sectionKey="dms"
+      title="Direct messages"
+      session={state.session}
+      open={open}
+      onToggle={() => {}}
+      unreadChannelIds={["alpha"]}
+    >
+      <p>Conversations</p>
+    </SidebarSection>
+  );
+  const { rerender, unmount } = render(card(false));
+  const dot = () => screen.queryByRole("img", { name: "Unread messages" });
+  expect(dot()).not.toBeInTheDocument();
+  act(() => state.unread(1));
+  expect(dot()).toBeVisible();
+  rerender(card(true));
+  expect(dot()).not.toBeInTheDocument();
+  rerender(card(false));
+  expect(dot()).toBeVisible();
+  act(() => state.unread(0));
+  expect(dot()).not.toBeInTheDocument();
+  act(() => state.manual());
+  expect(dot()).toBeVisible();
+  unmount();
+  expect(state.listeners.size).toBe(0);
 });

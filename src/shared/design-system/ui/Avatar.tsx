@@ -131,6 +131,7 @@ export function Avatar({
   size = "default",
   shape = "circle",
   statusBadge,
+  statusSurface,
   loading,
 }: {
   src?: string | null | undefined;
@@ -138,10 +139,18 @@ export function Avatar({
   fallback: string;
   fallbackContent?: ReactNode;
   /** Panel-colored monogram for avatars displayed on an inset surface. */
-  fallbackSurface?: "subtle" | "panel";
+  fallbackSurface?:
+    | "subtle"
+    | "panel"
+    | "categorical-purple"
+    | "categorical-blue"
+    | "categorical-green"
+    | "categorical-orange";
   size?: AvatarSize;
   shape?: "circle" | "squircle";
   statusBadge?: "online" | "away" | "offline" | undefined;
+  /** Separates the status badge from selection artwork on a sidebar card. */
+  statusSurface?: "sidebar-card";
   /** Immediate visible editors may bypass lazy scheduling, never image readiness. */
   loading?: "eager" | "lazy";
 }) {
@@ -155,6 +164,7 @@ export function Avatar({
       data-size={size}
       data-shape={shape}
       data-status={statusBadge}
+      data-status-surface={statusSurface}
     >
       <BaseAvatar.Root
         data-buzz-ui=""

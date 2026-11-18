@@ -91,6 +91,7 @@ import {
   isChannelSectionKey,
   sidebarDropRowKinds,
   orderContributedSidebarSections,
+  orderTeamSidebarCards,
 } from "./sidebar-sections";
 import { activityTranscript } from "./working-agents";
 import { SidebarContributionSection } from "../../features/channel-navigation/SidebarContributionSection";
@@ -130,6 +131,8 @@ type Inventory = {
   team(children: ReactNode): ReactNode;
   content: ReactNode;
   after: ReactNode;
+  footer: ReactNode;
+  dropTarget: ReactNode;
   dialogs: ReactNode;
 };
 
@@ -163,6 +166,7 @@ export function ChannelInventory({
   sidebarSections: contributedSections,
   sidebarRows: contributedRows,
   render,
+  starredNavigation,
 }: {
   relay: RelayData;
   navigator: Navigation;
@@ -180,6 +184,7 @@ export function ChannelInventory({
   sidebarSections?: SidebarSections | undefined;
   sidebarRows?: SidebarRows | undefined;
   render(inventory: Inventory): ReactNode;
+  starredNavigation?: ReactNode;
 }) {
   const contributions = useSyncExternalStore(
     contributedSections?.subscribe ?? noSubscription,
@@ -329,6 +334,7 @@ export function ChannelInventory({
       ),
     [channels, preparingDm, promotedDm],
   );
+  const keepStarred = !!starredNavigation;
   const sections = useMemo(
     () =>
       startup.ready
@@ -336,10 +342,12 @@ export function ChannelInventory({
             sidebarChannels,
             preferences.data,
             new Set([...hiddenDms.hiddenIds, ...dmVisibility.hidden]),
+            keepStarred,
           )
         : [],
     [
       startup.ready,
+      keepStarred,
       sidebarChannels,
       preferences.data,
       hiddenDms.hiddenIds,
@@ -383,6 +391,8 @@ export function ChannelInventory({
   const pendingCreate = useRef<ChannelSummary | undefined>(undefined);
   const [creatingSection, setCreatingSection] = useState(false);
   const createSectionTrigger = useRef<HTMLButtonElement>(null);
+  const [createSectionContainer, setCreateSectionContainer] =
+    useState<HTMLDivElement | null>(null);
   const [creatingFor, setCreatingFor] = useState<{
     channel: ChannelSummary;
     surface?: ChannelMenuSurface;
@@ -638,25 +648,28 @@ export function ChannelInventory({
         : sections,
     [sections, rowSortModes, sectionSort, rowUnread, queries.unread],
   );
-  const filteredSections = useSidebarFilters(
-    sortedSections,
-    Object.fromEntries(
-      Object.entries(preferences.data?.filters ?? {}).map(([key, mode]) => [
-        key.startsWith("section:") ? `group:${key.slice(8)}` : key,
-        mode,
-      ]),
-    ),
-    current?.id,
-    queries.unread,
-    Object.fromEntries(
-      Object.entries(preferences.data?.activeWindowSeconds ?? {}).map(
-        ([key, seconds]) => [
+  const filteredSections = orderTeamSidebarCards(
+    useSidebarFilters(
+      sortedSections,
+      Object.fromEntries(
+        Object.entries(preferences.data?.filters ?? {}).map(([key, mode]) => [
           key.startsWith("section:") ? `group:${key.slice(8)}` : key,
-          seconds,
-        ],
+          mode,
+        ]),
       ),
+      current?.id,
+      queries.unread,
+      Object.fromEntries(
+        Object.entries(preferences.data?.activeWindowSeconds ?? {}).map(
+          ([key, seconds]) => [
+            key.startsWith("section:") ? `group:${key.slice(8)}` : key,
+            seconds,
+          ],
+        ),
+      ),
+      list.activityStatus === "ready",
     ),
-    list.activityStatus === "ready",
+    sidebar.teamCardOrder,
   );
   const firstChannelSection = filteredSections.find(({ key }) =>
     isChannelSectionKey(key),
@@ -774,10 +787,35 @@ export function ChannelInventory({
     order.push(...ids.slice(nextActive));
     sidebar.setContributionOrder(order);
   };
-  const moveGroup = (sectionId: string, to: number) => {
-    const ids = groupIds.filter((id) => id !== sectionId);
-    ids.splice(to, 0, sectionId);
-    void preferences.reorderSections(sectionId, ids).catch(() => {});
+  const reorderTeamCards = (
+    sectionKey: string,
+    overKey: string | undefined,
+  ) => {
+    if (!overKey) return;
+    const keys = filteredSections.map(({ key }) => key);
+    const from = keys.indexOf(sectionKey);
+    const to = keys.indexOf(overKey);
+    if (from < 0 || to < 0 || from === to) return;
+    keys.splice(from, 1);
+    keys.splice(to, 0, sectionKey);
+    const active = new Set(keys);
+    let next = 0;
+    const order = sidebar.teamCardOrder.map((key) =>
+      active.has(key) ? (keys[next++] ?? key) : key,
+    );
+    order.push(...keys.slice(next));
+    sidebar.setTeamCardOrder(order);
+    // Keep saved-group reordering on its existing signed preference path.
+    // Built-in cards only change the local layout, never relay records.
+    if (sectionKey.startsWith("group:")) {
+      const ids = keys
+        .filter((key) => key.startsWith("group:"))
+        .map((key) => key.slice(6));
+      if (ids.some((id, index) => id !== groupIds[index]))
+        void preferences
+          .reorderSections(sectionKey.slice(6), ids)
+          .catch(() => {});
+    }
   };
   const setSectionSort = (key: string, mode: SidebarSortMode) => {
     void preferences
@@ -1363,10 +1401,7 @@ export function ChannelInventory({
         onReorder={(sectionKey, overKey) =>
           sectionKey.startsWith("plugin:")
             ? reorderContributions(sectionKey, overKey)
-            : moveGroup(
-                sectionKey.slice("group:".length),
-                groupIds.indexOf(overKey.slice("group:".length)),
-              )
+            : reorderTeamCards(sectionKey, overKey)
         }
         overlay={(id, group) => {
           if (group) {
@@ -1416,37 +1451,35 @@ export function ChannelInventory({
                   render={() => (
                     <DroppableSidebarSection
                       key={section.key}
+                      createSectionContainer={createSectionContainer}
                       createSectionTarget={
                         section.key === firstChannelSection &&
                         preferences.sectionCreationWritable
                       }
-                      groupIndex={groupIds.indexOf(
-                        section.key.slice("group:".length),
-                      )}
-                      disabled={
-                        !placementWritable ||
-                        !sidebarDropRowKinds(section.key).length
-                      }
+                      groupIndex={index}
+                      disabled={!placementWritable}
                       accepts={sidebarDropRowKinds(section.key)}
-                      reorderable={
-                        orderWritable && section.key.startsWith("group:")
-                      }
+                      reorderable={orderWritable}
                       move={
-                        orderWritable && section.key.startsWith("group:")
-                          ? (() => {
-                              const id = section.key.slice("group:".length);
-                              const index = groupIds.indexOf(id);
-                              return {
-                                up:
-                                  index > 0
-                                    ? () => moveGroup(id, index - 1)
-                                    : undefined,
-                                down:
-                                  index < groupIds.length - 1
-                                    ? () => moveGroup(id, index + 1)
-                                    : undefined,
-                              };
-                            })()
+                        orderWritable
+                          ? {
+                              up:
+                                index > 0
+                                  ? () =>
+                                      reorderTeamCards(
+                                        section.key,
+                                        filteredSections[index - 1]?.key,
+                                      )
+                                  : undefined,
+                              down:
+                                index < filteredSections.length - 1
+                                  ? () =>
+                                      reorderTeamCards(
+                                        section.key,
+                                        filteredSections[index + 1]?.key,
+                                      )
+                                  : undefined,
+                            }
                           : undefined
                       }
                       sectionKey={section.key}
@@ -1456,6 +1489,7 @@ export function ChannelInventory({
                       open={!sidebar.collapsed.includes(section.key)}
                       onToggle={(open) => sidebar.toggle(section.key, open)}
                       channelCount={section.allRows.length}
+                      unreadChannelIds={section.allRows.map((row) => row.id)}
                       filter={
                         preferences.data
                           ? {
@@ -1581,7 +1615,16 @@ export function ChannelInventory({
                           : undefined
                       }
                     >
+                      {section.key === "starred" && starredNavigation && (
+                        <>
+                          {starredNavigation}
+                          {section.rows.length > 0 && (
+                            <hr className={styles.starredDivider} />
+                          )}
+                        </>
+                      )}
                       <ChannelSidebarRows
+                        layout={section.key === "starred" ? "grid" : "list"}
                         open={!sidebar.collapsed.includes(section.key)}
                       >
                         {section.rows.map((channel) => {
@@ -1723,6 +1766,16 @@ export function ChannelInventory({
         {startup.ready && list.status === "ready" && !channels.length && (
           <p className={styles.empty}>No channels yet.</p>
         )}
+      </>
+    ),
+    dropTarget: (
+      <div
+        ref={setCreateSectionContainer}
+        className={styles.newSectionDropSlot}
+      />
+    ),
+    footer: (
+      <>
         {startup.ready && (
           <div className={styles.newSectionButton}>
             <Button

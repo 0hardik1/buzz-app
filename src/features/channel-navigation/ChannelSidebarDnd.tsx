@@ -1,3 +1,4 @@
+import { SidebarCardReorder } from "./sidebar-card-motion";
 import {
   DndContext,
   DragOverlay,
@@ -22,7 +23,6 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { frame, motion, useReducedMotion } from "motion/react";
 import { SidebarSection } from "../../bundled/channels/SidebarSection";
 import type { SidebarRowKind } from "../../bundled/channels/sidebar-sections";
 import { PlusIcon } from "../../shared/design-system/icons";
@@ -51,7 +51,18 @@ const sidebarCollisions: CollisionDetection = (args) => {
         (data.current?.groupDomain ?? "channels") === domain,
     )
     .sort((a, b) => a.data.current?.groupIndex - b.data.current?.groupIndex);
-  const hits = pointerWithin({ ...args, droppableContainers: groups });
+  // Card motion and text resizing can outlive dnd-kit's cached measurements
+  // (notably in WebKit). Use the visible card bounds for this small group list.
+  const rects = new Map(args.droppableRects);
+  for (const group of groups) {
+    const node = group.node.current;
+    if (node) rects.set(group.id, node.getBoundingClientRect());
+  }
+  const hits = pointerWithin({
+    ...args,
+    droppableRects: rects,
+    droppableContainers: groups,
+  });
   if (hits.length) return hits;
   const pointer = args.pointerCoordinates;
   if (!pointer) return [];
@@ -59,8 +70,8 @@ const sidebarCollisions: CollisionDetection = (args) => {
     const above = groups[index - 1];
     const below = groups[index];
     if (!above || !below) continue;
-    const top = args.droppableRects.get(above.id);
-    const bottom = args.droppableRects.get(below.id);
+    const top = rects.get(above.id);
+    const bottom = rects.get(below.id);
     if (
       top &&
       bottom &&
@@ -105,6 +116,7 @@ export function ChannelSidebarDnd({
   overlay: (id: string, group: boolean) => ReactNode;
   children: ReactNode;
 }) {
+  const animateDrop = useRef(false);
   const [dragging, setDragging] = useState<{ id: string; group: boolean }>();
   const sensors = useSensors(useSensor(PointerSensor, pointerSensorOptions));
   return (
@@ -113,15 +125,24 @@ export function ChannelSidebarDnd({
       collisionDetection={sidebarCollisions}
       // The sidebar's own status is its loading notice; drag announcements live outside it.
       accessibility={{ container: document.body }}
-      onDragStart={({ active }) =>
+      onDragStart={({ active }) => {
+        animateDrop.current = false;
         setDragging({
           id: String(active.id),
           group: !!active.data.current?.group,
-        })
-      }
-      onDragCancel={() => setDragging(undefined)}
+        });
+      }}
+      onDragCancel={() => {
+        animateDrop.current = false;
+        setDragging(undefined);
+      }}
       onDragEnd={({ active, over }) => {
         setDragging(undefined);
+        animateDrop.current =
+          !!over &&
+          over.id !== active.id &&
+          !!active.data.current?.group &&
+          !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         if (!over) return;
         if (active.data.current?.group) {
           if (over.id !== active.id)
@@ -132,7 +153,9 @@ export function ChannelSidebarDnd({
           onMove(String(active.id), String(over.id));
       }}
     >
-      <Writable.Provider value={writable}>{children}</Writable.Provider>
+      <SidebarCardReorder value={animateDrop}>
+        <Writable.Provider value={writable}>{children}</Writable.Provider>
+      </SidebarCardReorder>
       {createPortal(
         // The optimistic move relocates the row, so nothing remains to settle back onto.
         <DragOverlay dropAnimation={null}>
@@ -144,65 +167,39 @@ export function ChannelSidebarDnd({
   );
 }
 
-function CreateSectionDropTarget() {
-  const { active, measureDroppableContainers } = useDndContext();
+function CreateSectionDropTarget({
+  container,
+}: {
+  container: HTMLElement | null;
+}) {
+  const { active } = useDndContext();
   const enabled =
     useContext(Writable) && !!active && !active.data.current?.group;
-  const reducedMotion = useReducedMotion();
-  const [revealed, setRevealed] = useState(false);
   const { setNodeRef, isOver } = useDroppable({
     id: CREATE_SECTION,
     disabled: !enabled,
-    // dnd-kit treats an empty list as all droppables on resize. Expansion also
-    // shifts the sections below this slot, so their collision rects must refresh.
-    resizeObserverConfig: { updateMeasurementsFor: [] },
   });
-  useDndMonitor({
-    onDragStart: () => setRevealed(false),
-    onDragOver: ({ over }) => {
-      if (enabled && over?.id === CREATE_SECTION) setRevealed(true);
-    },
-    onDragEnd: () => setRevealed(false),
-    onDragCancel: () => setRevealed(false),
-  });
-  const open = enabled && revealed;
-  return (
+  if (!container) return null;
+  return createPortal(
     <div
-      className={`${styles.channelSection} ${styles.createSectionSlot}`}
-      data-create-section-slot=""
+      ref={setNodeRef}
+      className={styles.createSectionSlot}
+      data-create-section-trigger=""
+      data-shown={enabled || undefined}
+      aria-hidden={!enabled}
+      inert={!enabled}
     >
-      {/* The original gap stays inside the target throughout expansion. */}
-      <div
-        ref={setNodeRef}
-        className={styles.createSectionHitArea}
-        data-create-section-trigger=""
-      />
-      <motion.div
-        className={styles.createSectionReveal}
-        initial={false}
-        // The first resize delivery can include the reveal, and dnd-kit
-        // ignores it. Measure after Motion has committed the final height.
-        onAnimationComplete={() =>
-          frame.postRender(() => measureDroppableContainers([]))
-        }
-        animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
-        transition={{
-          duration: reducedMotion ? 0 : open ? 0.22 : 0.12,
-          ease: [0.23, 1, 0.32, 1],
-        }}
-        aria-hidden={!open}
-        inert={!open}
+      <section
+        className={styles.createSectionDrop}
+        aria-label="New section"
+        data-create-section-drop={enabled ? "" : undefined}
+        data-drop-target={isOver || undefined}
       >
-        <div
-          className={`${styles.createSectionDrop} text-caption`}
-          data-create-section-drop={open ? "" : undefined}
-          data-drop-target={isOver || undefined}
-        >
-          <PlusIcon size={24} />
-          <span>Add to new section</span>
-        </div>
-      </motion.div>
-    </div>
+        <PlusIcon size={16} aria-hidden="true" />
+        <span>New section</span>
+      </section>
+    </div>,
+    container,
   );
 }
 
@@ -316,6 +313,7 @@ export function DroppableSidebarSection({
   groupDomain = "channels",
   accepts,
   createSectionTarget,
+  createSectionContainer = null,
   ...section
 }: ComponentProps<typeof SidebarSection> & {
   disabled: boolean;
@@ -325,6 +323,7 @@ export function DroppableSidebarSection({
   /** Row kinds a drop may place here; every row when omitted. */
   accepts?: readonly SidebarRowKind[];
   createSectionTarget?: boolean;
+  createSectionContainer?: HTMLElement | null;
 }) {
   const { setNodeRef, isOver, active } = useDroppable({
     id: section.sectionKey,
@@ -347,7 +346,9 @@ export function DroppableSidebarSection({
   const from = active?.data.current?.groupIndex;
   return (
     <>
-      {createSectionTarget && <CreateSectionDropTarget />}
+      {createSectionTarget && (
+        <CreateSectionDropTarget container={createSectionContainer} />
+      )}
       <SidebarSection
         {...section}
         dropRef={setNodeRef}

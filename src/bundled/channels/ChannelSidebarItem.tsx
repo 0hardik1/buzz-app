@@ -1,3 +1,4 @@
+import { StarredArtwork } from "./StarredArtwork";
 import { UserStatusDisplay } from "../../features/user-status/StatusDisplay";
 import { useIsPresent } from "motion/react";
 import {
@@ -189,8 +190,17 @@ function ChannelSidebarItemCore({
       ordinary={ordinary}
       muted={muted}
       dmVisualSpacing={channel.channelType === "dm"}
+      avatarOnly={sectionKey === "starred"}
       icon={
-        channel.channelType === "dm" ? (
+        sectionKey === "starred" ? (
+          <StarredArtwork
+            channel={channel}
+            profile={profile}
+            session={session}
+            selected={selected === channel.id}
+            presence={presence}
+          />
+        ) : channel.channelType === "dm" ? (
           <DmTypingBadge
             session={session}
             channelId={channel.id}

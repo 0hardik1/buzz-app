@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import {
   orderContributedSidebarSections,
+  orderTeamSidebarCards,
   isChannelSectionKey,
   sidebarDropRowKinds,
   sidebarSections,
@@ -277,3 +278,23 @@ it.each(["starred", "section:work", "channels", "forums", "dms"])(
     );
   },
 );
+
+it("keeps local built-in card placement while applying remote saved-group order", () => {
+  const sections = ["starred", "group:b", "group:a", "channels", "dms"].map(
+    (key) => ({ key }),
+  );
+  const saved = ["channels", "group:a", "starred", "group:b", "dms"];
+  expect(orderTeamSidebarCards(sections, saved).map(({ key }) => key)).toEqual([
+    "channels",
+    "group:b",
+    "starred",
+    "group:a",
+    "dms",
+  ]);
+  expect(
+    orderTeamSidebarCards(
+      sections.filter(({ key }) => key !== "group:a"),
+      saved,
+    ).map(({ key }) => key),
+  ).toEqual(["channels", "starred", "group:b", "dms"]);
+});

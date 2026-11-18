@@ -894,6 +894,23 @@
     color: var(--text-standard);
   }
 
+  .buzz-avatar[data-fallback-surface="categorical-purple"] {
+    background: var(--surface-categorical-purple);
+    color: var(--text-standard);
+  }
+  .buzz-avatar[data-fallback-surface="categorical-blue"] {
+    background: var(--surface-categorical-blue);
+    color: var(--text-standard);
+  }
+  .buzz-avatar[data-fallback-surface="categorical-green"] {
+    background: var(--surface-categorical-green);
+    color: var(--text-standard);
+  }
+  .buzz-avatar[data-fallback-surface="categorical-orange"] {
+    background: var(--surface-categorical-orange);
+    color: var(--text-standard);
+  }
+
   /* Matches reply-stack artwork inside its 24px slot and 1.5px ring. */
   .buzz-avatar[data-size="compact"] {
     @apply text-caption;
@@ -1287,8 +1304,8 @@
     width: var(--size-control);
     height: var(--size-control);
     padding: 0;
-    border-radius: calc(var(--radius-row) - var(--space-1));
-    corner-shape: squircle;
+    border-radius: var(--radius-pill);
+    corner-shape: round;
     color: var(--text-chrome-subtle);
     background: transparent;
   }
@@ -1495,6 +1512,11 @@
     gap: var(--space-2);
     padding-block: 0;
     padding-inline: var(--space-1);
+  }
+
+  .panel-header[data-divider="hidden"] {
+    padding: var(--space-4);
+    border-block-end-color: transparent;
   }
 
   /* Borderless floating cards retain their established optical alignment. */
@@ -1854,7 +1876,6 @@
     --text-row-selected-subtle: var(--text-metadata);
     --text-row-selected-metadata: var(--text-metadata);
     --interaction-selected-text: var(--text-row-selected-subtle);
-    --interaction-selected-metadata: var(--text-metadata);
     --interaction-row-text: var(--text-subtle);
     --interaction-row-metadata: var(--text-metadata);
     background: transparent;
@@ -2011,6 +2032,21 @@
     align-items: flex-start;
     padding-block: var(--space-1);
   }
+  /* Compact identity destinations, as used by the Starred card. */
+  .navigation-item[data-variant="avatar"] {
+    width: var(--size-control-lg);
+    height: var(--size-control-lg);
+    min-height: var(--size-control-lg);
+    padding: var(--space-1);
+    gap: 0;
+    border-radius: var(--radius-pill);
+    flex: none;
+    overflow: visible;
+  }
+  .navigation-item[data-selected][data-variant="avatar"] {
+    --interaction-selected-text: var(--text-standard);
+    background: transparent;
+  }
   .navigation-item {
     display: inline-flex;
     width: 100%;
@@ -2158,6 +2194,9 @@
 
   .navigation-item[data-multiline] .navigation-item-label {
     white-space: normal;
+  }
+  .navigation-item[data-variant="avatar"] .navigation-item-label {
+    @apply sr-only;
   }
   .navigation-item-trailing {
     flex: 0 0 auto;
@@ -2316,7 +2355,24 @@
        The scrollbar track reserves that separator pixel in scrollbars.css. */
     padding-block: calc(var(--space-1) - 0.5px) 0;
   }
+  .panel-header-title:has(> .buzz-tabs[data-variant="navigation"]) {
+    overflow: visible;
+  }
+  .panel-header .buzz-tabs[data-variant="navigation"] {
+    /* Shadow/scrollbar gutters surround the 32px controls, rather than
+       increasing the header's height relative to adjacent panes. */
+    margin-block: calc(-1 * var(--space-1));
+  }
+  .panel-header .buzz-tabs[data-variant="navigation"] .buzz-tabs-list {
+    /* A fixed height with the lower inset left as free space: WebKit's
+       scrollbar takes its track from that space, not from the header. */
+    height: calc(var(--size-control-sm) + 2 * var(--space-1));
+    /* Keep capsule edges and elevation inside the scrollport's clip. */
+    padding: var(--space-1) var(--space-1) 0;
+  }
   .buzz-tabs[data-variant="navigation"] .buzz-tabs-item {
+    @apply glass-secondary;
+    border-radius: var(--radius-pill);
     display: flex;
     position: relative;
     flex: 0 0 auto;
@@ -2329,9 +2385,29 @@
     border-radius: var(--radius-icon-button);
     padding-inline-start: var(--space-2);
     padding-inline-end: var(--space-2);
+    background: transparent;
   }
-  .buzz-tabs[data-variant="navigation"] .navigation-item[data-selected] {
-    background: var(--affordance-subtle);
+  .buzz-tabs[data-variant="navigation"] .buzz-tabs-item:has([data-selected]) {
+    background: var(--bg-glass-secondary-hover);
+  }
+  .buzz-tabs[data-variant="navigation"]
+    .navigation-item[aria-selected="false"]
+    :is(.navigation-item-label, .buzz-tabs-icon) {
+    color: var(--text-disabled);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .buzz-tabs[data-variant="navigation"] .buzz-tabs-item:hover {
+      background: var(--bg-glass-secondary-hover);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+    .buzz-tabs[data-variant="navigation"] .buzz-tabs-item {
+      background: var(--surface-panel);
+      backdrop-filter: none;
+    }
+    .buzz-tabs[data-variant="navigation"] .buzz-tabs-item:has([data-selected]) {
+      background: var(--affordance-subtle);
+    }
   }
   /* Reopening an existing tab identifies it without changing selection or focus. */
   .buzz-tabs-attention {

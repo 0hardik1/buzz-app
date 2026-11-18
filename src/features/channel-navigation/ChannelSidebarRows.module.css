@@ -10,3 +10,15 @@
   border-radius: var(--radius-row);
   background: var(--surface-panel);
 }
+
+.rows[data-layout="grid"] {
+  display: grid;
+  grid-template-columns: repeat(
+      auto-fill,
+      minmax(min(100%, var(--size-control-lg)), 1fr)
+    );
+  max-width: calc(4 * var(--size-control-lg) + 3 * var(--space-3));
+  gap: var(--space-3);
+  margin-inline: auto;
+  justify-items: center;
+}

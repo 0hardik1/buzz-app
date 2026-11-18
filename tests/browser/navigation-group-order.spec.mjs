@@ -13,6 +13,17 @@ const groups = (page) =>
     );
 const header = (page, id) =>
   page.locator(`[data-sidebar-section="group:${id}"] summary`);
+// Wait for the release spring before measuring another drag's landing geometry.
+const settled = (page) =>
+  expect
+    .poll(() =>
+      page
+        .locator("[data-sidebar-section][data-sidebar-card]")
+        .evaluateAll((nodes) =>
+          nodes.every((node) => getComputedStyle(node).transform === "none"),
+        ),
+    )
+    .toBe(true);
 const orders = (app) => {
   const { blob } = app.report.sidebarPublications.at(-1);
   return Object.fromEntries(
@@ -21,6 +32,7 @@ const orders = (app) => {
 };
 // Hold a real pointer drag over another group's header; the caller releases it.
 async function pull(page, from, to) {
+  await settled(page);
   const start = await header(page, from).boundingBox();
   const end = await header(page, to).boundingBox();
   await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
@@ -52,7 +64,7 @@ test("dragging a group header moves the whole group, keeps its state, and persis
     .toEqual(["group:work", "group:missing", "group:laptop"]);
   const work = page.locator('[data-sidebar-section="group:work"]');
   const laptop = page.locator('[data-sidebar-section="group:laptop"]');
-  await header(page, "laptop").click();
+  await header(page, "laptop").click({ position: { x: 12, y: 16 } });
   await expect(laptop.locator("details")).not.toHaveAttribute("open");
 
   // A cancelled drag shows its landing edge, then leaves everything unchanged.
@@ -77,7 +89,12 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   const y = own.y + own.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
-  await page.mouse.move(x, y - 40, { steps: 4 });
+  const previous = await header(page, "missing").boundingBox();
+  await page.mouse.move(
+    previous.x + previous.width / 2,
+    previous.y + previous.height / 2,
+    { steps: 4 },
+  );
   await expect(laptop).toHaveAttribute("data-section-dragging");
   await expect(
     page.locator('[data-sidebar-section="group:missing"]'),
@@ -118,12 +135,12 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   await header(page, "laptop").dispatchEvent("click", { detail: 0 });
   await expect(laptop.locator("details")).not.toHaveAttribute("open");
   // The next deliberate pointer action must still toggle normally.
-  await header(page, "laptop").click();
+  await header(page, "laptop").click({ position: { x: 12, y: 16 } });
   await expect(laptop.locator("details")).toHaveAttribute("open");
-  await header(page, "laptop").click();
+  await header(page, "laptop").click({ position: { x: 12, y: 16 } });
   await expect(laptop.locator("details")).not.toHaveAttribute("open");
 
-  // Built-in sections are not group targets.
+  // Built-in cards accept the same reorder gesture; cancelling keeps order.
   const channels = await page
     .locator('[data-sidebar-section="channels"] summary')
     .boundingBox();
@@ -136,8 +153,9 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   );
   await expect(laptop).toHaveAttribute("data-section-dragging");
   await expect(
-    page.locator("[data-drop-edge], [data-drop-target]"),
-  ).toHaveCount(0);
+    page.locator('[data-sidebar-section="channels"]'),
+  ).toHaveAttribute("data-drop-edge", "after");
+  await page.keyboard.press("Escape");
   await page.mouse.up();
   await expect
     .poll(() => groups(page))
@@ -171,10 +189,11 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   expect(orders(app)).toEqual({ laptop: 0, missing: 1, work: 2 });
 
   // The section menu is the single-pointer and keyboard path.
+  await header(page, "work").hover({ position: { x: 12, y: 16 } });
   await page.getByRole("button", { name: "More actions for Work" }).click();
   await expect(
     page.getByRole("menuitem", { name: "Move down", exact: true }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await page.getByRole("menuitem", { name: "Move up", exact: true }).click();
   await expect
     .poll(() => groups(page))
@@ -213,6 +232,7 @@ test("group move recovery keeps keyboard focus on the group header", async ({
     .getByRole("alert")
     .filter({ hasText: "Couldn’t save the move for Work" });
   const failMove = async () => {
+    await header(page, "work").hover({ position: { x: 12, y: 16 } });
     await page.getByRole("button", { name: "More actions for Work" }).click();
     await page
       .getByRole("menuitem", { name: "Move down", exact: true })
@@ -289,7 +309,7 @@ test("saved groups accept gap drops in both directions", async ({
   expect(orders(app)).toEqual({ laptop: 0, work: 1, missing: 2 });
 
   for (const id of ["work", "missing", "laptop"]) {
-    await header(page, id).click();
+    await header(page, id).click({ position: { x: 12, y: 16 } });
     await expect(
       page.locator(`[data-sidebar-section="group:${id}"] details`),
     ).not.toHaveAttribute("open");
@@ -313,7 +333,7 @@ test("group landing edge follows list order when text size changes during a drag
   page,
   app,
 }) => {
-  await page.setViewportSize({ width: 960, height: 1200 });
+  await page.setViewportSize({ width: 960, height: 1800 });
   await page.addInitScript(() =>
     localStorage.setItem("buzz-appearance.v1", "dark"),
   );
@@ -325,6 +345,8 @@ test("group landing edge follows list order when text size changes during a drag
   await page.evaluate(() => {
     document.documentElement.style.fontSize = "32px";
   });
+  await header(page, "work").scrollIntoViewIfNeeded();
+  await expect(header(page, "missing")).toBeInViewport();
   const initial = await header(page, "work").boundingBox();
   const enlarged = await header(page, "missing").boundingBox();
   // At enlarged text sizes, grab the header's leading edge, clear of its actions.
@@ -334,22 +356,17 @@ test("group landing edge follows list order when text size changes during a drag
     steps: 8,
   });
   await expect(missing).toHaveAttribute("data-drop-edge", "after");
-  // dnd-kit starts each group's ResizeObserver when the drag starts and ignores
-  // its first notification as the initial size. Let a rendering update deliver
-  // it, so the text change below arrives as a separate resize.
-  await page.evaluate(
-    () =>
-      new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve)),
-      ),
-  );
   await page.evaluate(() => {
     document.documentElement.style.fontSize = "16px";
   });
-  // The pointer is still below the resized groups. Wait for collision geometry
-  // to catch up, or the old marker could satisfy the next assertion before the
-  // move is processed and let the drop race against remeasurement.
+  // Clear the old target explicitly: the compact cards can still contain the
+  // original pointer after shrinking. Re-enter only after collision clears.
+  await page.mouse.move(900, 10);
   await expect(missing).not.toHaveAttribute("data-drop-edge");
+  await expect
+    .poll(async () => (await header(page, "missing").boundingBox()).height)
+    .toBeLessThan(enlarged.height);
+  await settled(page);
   const target = await header(page, "missing").boundingBox();
   // The stale initial pixel comparison would now put the line on the wrong side.
   expect(initial.y).toBeGreaterThan(target.y);
@@ -374,8 +391,15 @@ test("the card grip reorders saved sections and retains the order after reload",
   await page.goto(app.origin);
   await openPage(page, "Messages");
   const grip = page.getByRole("button", { name: "Move Laptop section" });
-  await page.locator('[data-sidebar-section="group:laptop"]').hover();
+  const card = page.locator('[data-sidebar-section="group:laptop"]');
+  await card.scrollIntoViewIfNeeded();
+  const cardBox = await card.boundingBox();
+  await page.mouse.move(cardBox.x + 4, cardBox.y + cardBox.height - 4);
+  await expect(card.locator("[data-sidebar-grip]")).toHaveCSS("opacity", "0");
+  const nearGrip = await grip.boundingBox();
+  await page.mouse.move(nearGrip.x - 4, nearGrip.y + nearGrip.height / 2);
   await grip.hover();
+  await expect(card.locator("[data-sidebar-grip]")).toHaveCSS("opacity", "1");
   const start = await grip.boundingBox();
   const target = await header(page, "work").boundingBox();
   await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
@@ -388,13 +412,130 @@ test("the card grip reorders saved sections and retains the order after reload",
   await expect(
     page.locator('[data-sidebar-section="group:work"]'),
   ).toHaveAttribute("data-drop-edge", "before");
+  // Observe before release so a fast spring cannot finish before the assertion.
+  await card.evaluate((element) => {
+    window.sidebarDropMoved = false;
+    const observer = new MutationObserver(() => {
+      if (getComputedStyle(element).transform !== "none") {
+        window.sidebarDropMoved = true;
+        observer.disconnect();
+      }
+    });
+    observer.observe(element, { attributes: true, attributeFilter: ["style"] });
+  });
   await page.mouse.up();
   await expect
     .poll(() => groups(page))
     .toEqual(["group:laptop", "group:work", "group:missing"]);
+  await expect
+    .poll(() => page.evaluate(() => window.sidebarDropMoved))
+    .toBe(true);
+  await settled(page);
   await expect.poll(() => app.report.sidebarPublications?.length ?? 0).toBe(1);
   await page.reload();
   await expect
     .poll(() => groups(page))
     .toEqual(["group:laptop", "group:work", "group:missing"]);
+  await expect(
+    page.getByRole("complementary", { name: "Sidebar", exact: true }),
+  ).not.toHaveAttribute("data-buzz-launch-pending");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const channels = page.locator('[data-sidebar-section="channels"]');
+  await channels.hover();
+  const builtInGrip = page.getByRole("button", {
+    name: "Move Channels section",
+  });
+  await builtInGrip.hover();
+  const from = await builtInGrip.boundingBox();
+  const to = await header(page, "laptop").boundingBox();
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, {
+    steps: 8,
+  });
+  const laptop = page.locator('[data-sidebar-section="group:laptop"]');
+  await expect(laptop).toHaveAttribute("data-drop-edge", "before");
+  await expect
+    .poll(() =>
+      laptop.evaluate(
+        (element) => getComputedStyle(element, "::before").opacity,
+      ),
+    )
+    .toBe("1");
+  await channels.evaluate((element) => {
+    window.reducedDropMoved = false;
+    const observer = new MutationObserver(() => {
+      if (getComputedStyle(element).transform !== "none")
+        window.reducedDropMoved = true;
+    });
+    observer.observe(element, { attributes: true, attributeFilter: ["style"] });
+    window.stopReducedDropObserver = () => observer.disconnect();
+  });
+  await page.mouse.up();
+  const cards = () =>
+    page
+      .locator("[data-sidebar-section][data-sidebar-card]")
+      .evaluateAll((elements) =>
+        elements.map((element) => element.dataset.sidebarSection),
+      );
+  await expect
+    .poll(cards)
+    .toEqual([
+      "starred",
+      "channels",
+      "group:laptop",
+      "group:work",
+      "group:missing",
+      "dms",
+      "shell:plugins",
+      "shell:account",
+    ]);
+  await settled(page);
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      ),
+  );
+  expect(
+    await page.evaluate(() => {
+      window.stopReducedDropObserver();
+      return window.reducedDropMoved;
+    }),
+  ).toBe(false);
+  await page.reload();
+  await expect
+    .poll(cards)
+    .toEqual([
+      "starred",
+      "channels",
+      "group:laptop",
+      "group:work",
+      "group:missing",
+      "dms",
+      "shell:plugins",
+      "shell:account",
+    ]);
+  expect(app.report.sidebarPublications).toHaveLength(1);
+  const create = page.getByRole("button", { name: "New section", exact: true });
+  await create.scrollIntoViewIfNeeded();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Subscribed channels" })
+      .getByRole("button", { name: "New section", exact: true }),
+  ).toBeVisible();
+  const footer = await create.boundingBox();
+  const account = await page
+    .locator('[data-sidebar-section="shell:account"]')
+    .boundingBox();
+  expect(footer.y).toBeGreaterThanOrEqual(account.y + account.height);
+  await page.screenshot({
+    path: test.info().outputPath("sidebar-cards-light.png"),
+  });
+  await page.evaluate(() =>
+    document.documentElement.setAttribute("data-color-mode", "dark"),
+  );
+  await page.screenshot({
+    path: test.info().outputPath("sidebar-cards-dark.png"),
+  });
 });

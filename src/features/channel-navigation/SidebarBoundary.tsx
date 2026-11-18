@@ -6,6 +6,7 @@ import { Button } from "../../shared/design-system/ui/Button";
 export class SidebarBoundary extends Component<
   Pick<ComponentProps<typeof SidebarFrame>, "header" | "panelId"> & {
     children: ReactNode;
+    navigation?: ReactNode;
   },
   { failed: boolean }
 > {
@@ -22,6 +23,7 @@ export class SidebarBoundary extends Component<
           panelId={this.props.panelId}
         >
           <SidebarList>
+            {this.props.navigation}
             <p role="alert">Conversations couldn’t open.</p>
             <Button onClick={() => this.setState({ failed: false })}>
               Retry sidebar

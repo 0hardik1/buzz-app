@@ -157,6 +157,10 @@ const TEXT_ROLES = [
  * every fill it can actually sit on, and hover is one of them.
  */
 const PAIRS = [
+  ...["purple", "blue", "green", "orange"].map((color) => [
+    "--text-standard",
+    `--surface-categorical-${color}`,
+  ]),
   ...["--text-standard", "--text-subtle", "--text-metadata"].map((role) => [
     role,
     "--surface-inset-subtle",

@@ -37,6 +37,7 @@ import type { ChannelDetailsCapability } from "../../features/relay/channel-deta
 import { SIDEBAR_REVEAL_BUDGET_MS } from "../../bundled/channels/useSidebarStartup";
 stubAvatarBrowserApis();
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   for (const owner of owners.splice(0)) owner.dispose();
   localStorage.clear();
@@ -206,6 +207,7 @@ it("keeps focus on a different chat after an Enter-save finishes", async () => {
   expect(destination).toHaveFocus();
 });
 it("shows only Solo under a plugin restriction and restores the saved filter after", async () => {
+  vi.useFakeTimers();
   const user = userEvent.setup();
   let restrictions: readonly RegisteredSidebarRestriction[] = [];
   const listeners = new Set<() => void>();
@@ -224,6 +226,8 @@ it("shows only Solo under a plugin restriction and restores the saved filter aft
   fixture(true, false, undefined, undefined, 0, undefined, undefined, {
     sidebarScope,
   });
+  await act(() => vi.advanceTimersByTimeAsync(SIDEBAR_REVEAL_BUDGET_MS));
+  vi.useRealTimers();
   await user.click(screen.getByRole("tab", { name: "Team" }));
   act(() =>
     publish([
@@ -247,17 +251,20 @@ it("shows only Solo under a plugin restriction and restores the saved filter aft
     "aria-selected",
     "true",
   );
-  expect(screen.getByRole("button", { name: "Inbox" })).toBeVisible();
+  expect(await screen.findByRole("button", { name: "Inbox" })).toBeVisible();
 });
 it("filters the combined sidebar without navigating or resetting Solo sections", async () => {
+  vi.useFakeTimers();
   const user = userEvent.setup();
   const f = fixture(true);
+  await act(() => vi.advanceTimersByTimeAsync(SIDEBAR_REVEAL_BUDGET_MS));
+  vi.useRealTimers();
   const all = screen.getByRole("tab", { name: "All" });
   const solo = screen.getByRole("tab", { name: "Solo" });
   const team = screen.getByRole("tab", { name: "Team" });
   expect(all).toHaveAttribute("aria-selected", "true");
   expect(screen.getByRole("button", { name: "New" })).toBeVisible();
-  expect(screen.getByRole("button", { name: "Inbox" })).toBeVisible();
+  expect(await screen.findByRole("button", { name: "Inbox" })).toBeVisible();
   expect(
     screen.getAllByRole("separator", { name: "Resize sidebar" }),
   ).toHaveLength(1);
@@ -266,13 +273,13 @@ it("filters the combined sidebar without navigating or resetting Solo sections",
   expect(
     screen.queryByRole("button", { name: "New chat" }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Inbox" })).toBeVisible();
+  expect(await screen.findByRole("button", { name: "Inbox" })).toBeVisible();
   expect(screen.getByRole("tabpanel", { name: "Team" })).toHaveAttribute(
     "id",
     team.getAttribute("aria-controls"),
   );
   await user.click(solo);
-  expect(screen.getByRole("button", { name: "Inbox" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Inbox" })).toBeNull();
   expect(screen.queryByRole("heading", { name: "Solo" })).toBeNull();
   // Without its heading, Solo creates from New beside the tabs.
   expect(
@@ -786,11 +793,14 @@ vi.mock("../../bundled/channels/SoloInventory", async (original) => {
 });
 
 it("contains a Solo render failure without rendering the failed inventory in its fallback", async () => {
+  vi.useFakeTimers();
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
   soloFailure.active = true;
   try {
     fixture(true);
-    expect(screen.getByRole("button", { name: "Inbox" })).toBeVisible();
+    await act(() => vi.advanceTimersByTimeAsync(SIDEBAR_REVEAL_BUDGET_MS));
+    vi.useRealTimers();
+    expect(await screen.findByRole("button", { name: "Inbox" })).toBeVisible();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Conversations couldn’t open.",
     );
@@ -1459,8 +1469,9 @@ it.each(["neighbor", "heading", "moved"])(
           navigator={h.navigator}
           target={conversationTarget(h.scope, "chat")}
         >
-          <button type="button">Elsewhere</button>
+          {null}
         </PrimarySidebar>
+        <button type="button">Elsewhere</button>
       </ToastProvider>,
     );
     try {

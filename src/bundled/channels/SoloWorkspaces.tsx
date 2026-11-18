@@ -1,3 +1,9 @@
+import { SectionUnreadDot } from "./SectionUnreadDot";
+import { createContext, useContext } from "react";
+import { motion } from "motion/react";
+import { useSidebarCardMotion } from "../../features/channel-navigation/sidebar-card-motion";
+import { SidebarCardGrip, sidebarGripPointerEvents } from "./SidebarCardGrip";
+import { SidebarRevealHandle } from "./SidebarRevealHandle";
 import { FadingLabel } from "./FadingLabel";
 import { ChannelSidebarRows } from "../../features/channel-navigation/ChannelSidebarRows";
 import { createPortal } from "react-dom";
@@ -86,9 +92,8 @@ export type ChatListItem = Readonly<{
   pinned?: boolean;
 }>;
 
-/** Each workspace lists its most recent chats; Show more adds a step. */
+/** Each workspace initially lists its most recent chats. */
 export const SOLO_CHAT_CAP = 7;
-export const SOLO_CHAT_STEP = 10;
 
 /** The existing relay preference service owns delivery, rollback and retry. */
 export function SoloWorkspaces({
@@ -170,7 +175,10 @@ export function SoloWorkspaces({
       ? Object.fromEntries(
           Object.entries(saved).filter(
             (entry): entry is [string, number] =>
-              typeof entry[1] === "number" && entry[1] > 0,
+              typeof entry[1] === "number" &&
+              Number.isFinite(entry[1]) &&
+              Number.isInteger(entry[1]) &&
+              entry[1] > 0,
           ),
         )
       : {};
@@ -226,31 +234,12 @@ export function SoloWorkspaces({
         : rowFocus;
     document
       .querySelector<HTMLElement>(
-        `[data-solo-menu-id="${target}"]:not([inert] *) button`,
+        `[data-solo-menu-id="${target}"]:not([inert] *) button:not([data-sidebar-grip] *)`,
       )
       ?.focus({ preventScroll: true });
     setRowFocus(undefined);
   }, [rowFocus, collapsed, snapshot.data]);
-  // Show more and Show fewer each unmount once spent; focus stays on the row,
-  // or moves to the workspace's last chat when nothing is left to show or fold.
-  const [stepFocus, setStepFocus] = useState<string>();
-  useLayoutEffect(() => {
-    if (stepFocus === undefined) return;
-    setStepFocus(undefined);
-    const row = document.querySelector<HTMLElement>(
-      `[data-solo-show-more="${CSS.escape(stepFocus)}"]`,
-    );
-    if (row?.contains(document.activeElement)) return;
-    const panel = document.querySelector(
-      `[data-solo-project="${CSS.escape(stepFocus)}"]`,
-    );
-    const chats =
-      panel?.querySelectorAll("[data-solo-menu-id]:not([inert] *)") ?? [];
-    const target =
-      row?.querySelector<HTMLElement>("button") ??
-      [...chats].at(-1)?.querySelector<HTMLElement>("button");
-    target?.focus({ preventScroll: true });
-  }, [stepFocus]);
+  const [resizing, setResizing] = useState<{ id: string; extra: number }>();
   const [creatingFor, setCreatingFor] = useState<ChatListItem>();
   const [settingsFor, setSettingsFor] = useState<{
     id: string;
@@ -263,7 +252,7 @@ export function SoloWorkspaces({
     if (!orderFocus) return;
     document
       .querySelector<HTMLElement>(
-        `[data-solo-menu-id="project-${CSS.escape(orderFocus)}"]:not([inert] *) button`,
+        `[data-solo-menu-id="project-${CSS.escape(orderFocus)}"]:not([inert] *) button:not([data-sidebar-grip] *)`,
       )
       ?.focus({ preventScroll: true });
     setOrderFocus(undefined);
@@ -338,7 +327,7 @@ export function SoloWorkspaces({
     const neighbors = handoff?.soloNeighbors.current?.(channel.id) ?? [];
     const trigger =
       document.querySelector<HTMLElement>(
-        `[data-solo-menu-id="${CSS.escape(channel.id)}"]:not([inert] *) button`,
+        `[data-solo-menu-id="${CSS.escape(channel.id)}"]:not([inert] *) button:not([data-sidebar-grip] *)`,
       ) ?? undefined;
     const current = navigationController?.snapshot();
     const leavesOpenChat =
@@ -399,7 +388,7 @@ export function SoloWorkspaces({
         (current) => new Set([...current].filter((key) => !rows.has(key))),
       );
     }
-    setStepFocus(id);
+    setResizing(undefined);
   };
   const visible = projects
     .filter(
@@ -416,7 +405,14 @@ export function SoloWorkspaces({
     .map((project) => {
       // A list that shrank back under the cap has nothing to fold.
       const extra =
-        project.rows.length > SOLO_CHAT_CAP ? (expanded[project.id] ?? 0) : 0;
+        project.rows.length > SOLO_CHAT_CAP
+          ? Math.min(
+              project.rows.length - SOLO_CHAT_CAP,
+              resizing?.id === project.id
+                ? resizing.extra
+                : (expanded[project.id] ?? 0),
+            )
+          : 0;
       const limit = SOLO_CHAT_CAP + extra;
       // Rows arrive newest first; chats kept past the cap keep that order.
       const listed = project.rows.filter(
@@ -431,13 +427,6 @@ export function SoloWorkspaces({
         listed,
         extra,
         overflow: listed.slice(limit).map((item) => item.id),
-        // Retained chats that are no longer pinned can fold even when unexpanded.
-        foldable:
-          extra > 0 ||
-          listed
-            .slice(limit)
-            .some((item) => !item.pinned && item.id !== renaming),
-        hidden: project.rows.length - listed.length,
       };
     });
   const soloNeighborsRef = handoff?.soloNeighbors;
@@ -522,6 +511,17 @@ export function SoloWorkspaces({
     const frame = (children: ReactNode) => (
       <DropProject
         projectKey={DROP + project.id}
+        title={project.name}
+        move={{
+          up:
+            groupIndex > 0
+              ? () => moveProject(project.id, groupIndex - 1)
+              : undefined,
+          down:
+            groupIndex < groups.length - 1
+              ? () => moveProject(project.id, groupIndex + 1)
+              : undefined,
+        }}
         groupIndex={groupIndex}
         reorderable={reorderable}
         disabled={!preferences.writable}
@@ -625,13 +625,13 @@ export function SoloWorkspaces({
               </>
             }
           >
-            <WorkspaceDragHandle
-              sectionKey={DROP + project.id}
-              groupIndex={groupIndex}
-              reorderable={reorderable}
-            >
-              {primary}
-            </WorkspaceDragHandle>
+            <WorkspaceDragHandle>{primary}</WorkspaceDragHandle>
+            {!open && (
+              <SectionUnreadDot
+                session={session}
+                channelIds={project.rows.map((row) => row.id)}
+              />
+            )}
           </NavigationSectionHeading>
         )}
       </ChatActionsMenu>
@@ -711,34 +711,19 @@ export function SoloWorkspaces({
             );
           })}
         </ChannelSidebarRows>
-        {(project.hidden > 0 || project.foldable) && (
-          <div className={styles.showMore} data-solo-show-more={project.id}>
-            {project.hidden > 0 && (
-              <NavigationItem
-                variant="text"
-                data-solo-show-more-expand=""
-                label="Show more"
-                aria-label={`Show more chats in ${project.name}`}
-                icon={
-                  <span className={styles.conversationIcon} aria-hidden="true">
-                    <CaretDownIcon size={16} />
-                  </span>
-                }
-                onClick={() =>
-                  expand(project.id, project.extra + SOLO_CHAT_STEP)
-                }
-              />
-            )}
-            {project.foldable && (
-              <NavigationItem
-                variant="text"
-                data-solo-show-more-fold=""
-                label="Show fewer"
-                aria-label={`Show fewer chats in ${project.name}`}
-                onClick={() => expand(project.id, 0)}
-              />
-            )}
-          </div>
+        {project.rows.length > SOLO_CHAT_CAP && (
+          <SidebarRevealHandle
+            label={`Resize ${project.name} card`}
+            value={SOLO_CHAT_CAP + project.extra}
+            min={SOLO_CHAT_CAP}
+            max={project.rows.length}
+            shown={project.listed.length}
+            onPreview={(value) =>
+              setResizing({ id: project.id, extra: value - SOLO_CHAT_CAP })
+            }
+            onCommit={(value) => expand(project.id, value - SOLO_CHAT_CAP)}
+            onCancel={() => setResizing(undefined)}
+          />
         )}
         {!compose &&
           !project.rows.length &&
@@ -934,7 +919,7 @@ export function SoloWorkspaces({
           close={() => setConverting(undefined)}
           finalFocus={() =>
             document.querySelector<HTMLElement>(
-              `[data-solo-menu-id="${converting.id}"]:not([inert] *) button`,
+              `[data-solo-menu-id="${converting.id}"]:not([inert] *) button:not([data-sidebar-grip] *)`,
             ) ?? false
           }
         />
@@ -953,7 +938,7 @@ export function SoloWorkspaces({
                 !sharing.trigger.closest("[inert]")
                 ? sharing.trigger
                 : document.querySelector<HTMLElement>(
-                    `[data-solo-menu-id="${sharing.id}"]:not([inert] *) button`,
+                    `[data-solo-menu-id="${sharing.id}"]:not([inert] *) button:not([data-sidebar-grip] *)`,
                   );
             },
           }}
@@ -966,7 +951,7 @@ export function SoloWorkspaces({
           signal={chatSettings.visit}
           finalFocus={() =>
             document.querySelector<HTMLElement>(
-              `[data-solo-menu-id="${chatSettings.item.id}"]:not([inert] *) button`,
+              `[data-solo-menu-id="${chatSettings.item.id}"]:not([inert] *) button:not([data-sidebar-grip] *)`,
             ) ?? false
           }
           session={session}
@@ -1221,8 +1206,14 @@ function ContributedSoloRow({
   );
 }
 
-/** A drop reports only its destination, so it saves exactly like Move to. */
+const WorkspaceDrag =
+  createContext<ReturnType<typeof useSidebarSectionDrag>["handle"]>(undefined);
+
+/** The card owns its drag sensor and shares it with the heading. */
 function DropProject({
+  children,
+  title,
+  move,
   projectKey,
   groupIndex,
   reorderable,
@@ -1230,10 +1221,18 @@ function DropProject({
   ...props
 }: ComponentProps<typeof Collapsible.Root> & {
   projectKey: string;
+  title: string;
+  move: ComponentProps<typeof SidebarCardGrip>["move"];
   groupIndex: number;
   reorderable: boolean;
   disabled: boolean;
 }) {
+  const drag = useSidebarSectionDrag({
+    sectionKey: projectKey,
+    groupIndex,
+    reorderable,
+  });
+  const cardMotion = useSidebarCardMotion();
   const { setNodeRef, isOver, active } = useDroppable({
     id: projectKey,
     data: { group: reorderable, groupIndex },
@@ -1242,39 +1241,46 @@ function DropProject({
   });
   const group = !!active?.data.current?.group;
   return (
-    <Collapsible.Root
-      {...props}
-      ref={setNodeRef}
-      data-drop-target={
-        (!group && isOver && active?.data.current?.sectionKey !== projectKey) ||
-        undefined
-      }
-      data-drop-edge={
-        group && isOver && active?.id !== projectKey
-          ? active?.data.current?.groupIndex < groupIndex
-            ? "after"
-            : "before"
-          : undefined
-      }
-      data-section-dragging={(group && active?.id === projectKey) || undefined}
-    />
+    <WorkspaceDrag value={drag.handle}>
+      <Collapsible.Root
+        {...props}
+        {...sidebarGripPointerEvents}
+        render={<motion.div {...cardMotion} />}
+        ref={setNodeRef}
+        data-drop-target={
+          (!group &&
+            isOver &&
+            active?.data.current?.sectionKey !== projectKey) ||
+          undefined
+        }
+        data-drop-edge={
+          group && isOver && active?.id !== projectKey
+            ? active?.data.current?.groupIndex < groupIndex
+              ? "after"
+              : "before"
+            : undefined
+        }
+        data-section-dragging={
+          (group && active?.id === projectKey) || undefined
+        }
+      >
+        {drag.handle && (
+          <SidebarCardGrip
+            title={title}
+            listeners={drag.handle.listeners}
+            move={move}
+          />
+        )}
+        {children}
+      </Collapsible.Root>
+    </WorkspaceDrag>
   );
 }
 
-function WorkspaceDragHandle({
-  children,
-  ...options
-}: {
-  children: ReactNode;
-  sectionKey: string;
-  groupIndex: number;
-  reorderable: boolean;
-}) {
-  const drag = useSidebarSectionDrag(options);
-  // Preserve the heading recipe's direct trigger and the composed workspace's
-  // existing label/disclosure layout. Actions stay outside this handle.
-  return drag.handle && isValidElement<ComponentProps<"div">>(children)
-    ? cloneElement(children, { ref: drag.handle.ref, ...drag.handle.listeners })
+function WorkspaceDragHandle({ children }: { children: ReactNode }) {
+  const handle = useContext(WorkspaceDrag);
+  return handle && isValidElement<ComponentProps<"div">>(children)
+    ? cloneElement(children, { ref: handle.ref, ...handle.listeners })
     : children;
 }
 
@@ -1306,7 +1312,7 @@ export function ChatActionsMenu({
     );
     return (
       row?.querySelector<HTMLElement>("[data-solo-destination-id]") ??
-      row?.querySelector<HTMLElement>("button") ??
+      row?.querySelector<HTMLElement>("button:not([data-sidebar-grip] *)") ??
       false
     );
   };

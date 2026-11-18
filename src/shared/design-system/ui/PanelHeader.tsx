@@ -8,15 +8,23 @@ export function PanelHeader({
   navigation,
   actions,
   variant = "default",
+  divider = true,
 }: {
   title: ReactNode;
   icon?: ReactNode;
   navigation?: ReactNode;
   actions?: ReactNode;
   variant?: "default" | "compact" | "card";
+  /** Omit the structural line while retaining the header geometry. */
+  divider?: boolean;
 }) {
   return (
-    <header data-buzz-ui="" className="panel-header" data-variant={variant}>
+    <header
+      data-buzz-ui=""
+      className="panel-header"
+      data-variant={variant}
+      data-divider={divider ? undefined : "hidden"}
+    >
       {navigation}
       <div className="panel-header-title">
         {icon}

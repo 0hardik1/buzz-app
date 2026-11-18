@@ -9,18 +9,19 @@
   flex-direction: column;
   /* Figma specifies true Semibold for unread rows, rather than the legacy 500 alias. */
   --type-weight-semibold: 600;
-  --sidebar-padding: var(--space-2);
-  --sidebar-padding-end: var(--sidebar-padding);
+  --sidebar-padding: var(--space-1);
+  --sidebar-padding-end: var(--space-6);
   --channel-row-radius: var(--radius-control);
   --sidenav-emoji-size: 0.8125rem;
   padding-inline: var(--sidebar-padding) var(--sidebar-padding-end);
 }
 .sidebarFilter {
   flex: 0 0 auto;
-  padding: var(--space-3) 0 0;
+  padding: var(--space-1) 0 0;
   min-width: 0;
 }
 .sidebarBody {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -40,7 +41,7 @@
 .channelListFrame {
   position: relative;
   /* Bring the scrollbar near the divider without clipping its native thumb. */
-  width: calc(100% + 6px);
+  width: 100%;
   min-width: 0;
   min-height: calc(var(--space-6) + var(--space-5) + var(--space-1) + 1px);
   flex: 1;
@@ -119,7 +120,7 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: var(--space-half);
+  gap: var(--space-1);
   padding-block-end: var(--sidebar-padding);
 }
 /* Inset Retry like a row, so its focus ring stays inside the scrollport. */
@@ -153,10 +154,17 @@
 }
 
 /* A selected destination carries its fill's ink. */
-.sidebar [data-selected],
+.sidebar [data-selected]:not([data-avatar], [data-variant="avatar"]),
 .sidebar
-  :is([data-channel-sidebar-row], [data-solo-menu-id]):has(
+  :is([data-channel-sidebar-row], [data-solo-menu-id]):not([data-avatar]):has(
     [aria-current="page"]
   ) {
   --text-standard: var(--text-row-selected);
+}
+
+.channelList:has([data-sticky-heading])[data-scroll-fade] {
+  mask-image: none;
+}
+.channelList:has([data-sticky-heading])[data-overflow-end] {
+  mask-image: var(--scroll-fade-end);
 }

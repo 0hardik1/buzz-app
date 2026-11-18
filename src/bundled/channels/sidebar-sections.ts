@@ -43,6 +43,20 @@ export function orderContributedSidebarSections<T extends { key: string }>(
     .map(({ section }) => section);
 }
 
+/** Local card placement never overrides the synced relative order of saved groups. */
+export function orderTeamSidebarCards<T extends { key: string }>(
+  sections: readonly T[],
+  order: readonly string[],
+): T[] {
+  const groups = sections.filter(({ key }) => key.startsWith("group:"));
+  let nextGroup = 0;
+  return orderContributedSidebarSections(sections, order).map((section) =>
+    section.key.startsWith("group:")
+      ? (groups[nextGroup++] ?? section)
+      : section,
+  );
+}
+
 function compareName(a: ChannelSummary, b: ChannelSummary) {
   return a.name.toLowerCase() < b.name.toLowerCase()
     ? -1
@@ -72,6 +86,7 @@ export function sidebarSections<T extends ChannelSummary>(
   channels: readonly T[],
   preferences?: SidebarPreferences,
   hiddenDms: ReadonlySet<string> = new Set(),
+  keepStarred = false,
 ) {
   const active = channels.filter(
     (channel) =>
@@ -151,6 +166,7 @@ export function sidebarSections<T extends ChannelSummary>(
   ].filter(
     (section) =>
       isChannelSectionKey(section.key) ||
+      (keepStarred && section.key === "starred") ||
       section.key === "dms" ||
       section.rows.length,
   );

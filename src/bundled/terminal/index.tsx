@@ -73,6 +73,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     return (
       <IconButton
         size="toolbar"
+        variant="glass"
         icon={<TerminalWindowIcon size={16} aria-hidden="true" />}
         aria-label="Toggle channel terminal"
         title={`Terminal (${formatBinding(TOGGLE_BINDING, isApplePlatform(navigator.platform)).text})`}

@@ -1,3 +1,5 @@
+import { ScrollEdgeViewport } from "../../shared/design-system/ui/ScrollEdgeViewport";
+import { useScrollEdges } from "../../shared/design-system/ui/useScrollEdges";
 import { usePanelTabHost } from "./PanelWorkspace";
 import type { Ref } from "react";
 import { Panel } from "../../shared/design-system/ui/Panel";
@@ -24,6 +26,7 @@ export function PanelCard({
   contentKey?: string;
 }) {
   const tabbed = !!usePanelTabHost();
+  const scrollEdges = useScrollEdges("block");
   return (
     <aside
       ref={ref}
@@ -42,6 +45,7 @@ export function PanelCard({
           <div className={styles.card}>
             {!tabbed && (
               <PanelHeader
+                divider={false}
                 title={
                   panel.launcher ? (
                     <PanelHeaderLabel
@@ -54,6 +58,7 @@ export function PanelCard({
                 }
                 actions={
                   <IconButton
+                    variant="glass"
                     size="toolbar"
                     aria-label={`Close ${panel.title} panel`}
                     onClick={props.close}
@@ -62,9 +67,11 @@ export function PanelCard({
                 }
               />
             )}
-            <div className={styles.content}>
-              <PanelView panel={panel} contentKey={contentKey} {...props} />
-            </div>
+            <ScrollEdgeViewport>
+              <div ref={scrollEdges} className={styles.content}>
+                <PanelView panel={panel} contentKey={contentKey} {...props} />
+              </div>
+            </ScrollEdgeViewport>
           </div>
         </PanelSubviewHost>
       </Panel>

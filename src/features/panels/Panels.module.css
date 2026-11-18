@@ -49,9 +49,9 @@
   --secondary-panel-width: initial;
 }
 .dock {
+  border-inline-start: 1px solid var(--border-standard);
   width: max(18.75rem, var(--secondary-panel-width, 26.25rem));
   position: relative;
-  border-inline-start: 1px solid var(--border-standard);
   display: grid;
   grid-auto-rows: minmax(0, 1fr);
   min-width: 0;
@@ -233,7 +233,9 @@ html[data-keyboard-input] :is(.subviewBase, .subview) {
   flex-wrap: nowrap;
   flex-shrink: 0;
 }
-.workspace > header [class="panel-header-title"] {
+.workspace
+  > header
+  [class="panel-header-title"]:not(:has(> [data-variant="navigation"])) {
   overflow: hidden;
 }
 .workspace > header [class="panel-header-actions"] {
@@ -312,7 +314,6 @@ html[data-keyboard-input] :is(.subviewBase, .subview) {
 
 .paneToggle {
   display: flex;
-  border-inline-start: 1px solid var(--border-standard);
   padding-inline-start: var(--space-1);
 }
 

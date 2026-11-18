@@ -297,7 +297,7 @@ export function CommunityPicker({
                       rows.length;
               rows[next]?.focus();
             }}
-            side="right"
+            side="bottom"
             align="end"
             padding="list"
             finalFocus={() =>
