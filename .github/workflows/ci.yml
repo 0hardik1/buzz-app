@@ -69,6 +69,8 @@ jobs:
           DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED: "false"
           DD_TEST_MANAGEMENT_ENABLED: "false"
           DD_TEST_FAILED_TEST_REPLAY_ENABLED: "false"
+          # Report from the Vitest coordinator so fixture subprocesses can run outside the checkout.
+          DD_EXPERIMENTAL_TEST_OPT_VITEST_NO_WORKER_INIT: "true"
           NODE_OPTIONS: ${{ steps.datadog.outputs.api_key != '' && '--import dd-trace/register.js -r dd-trace/ci/init' || '' }}
         run: ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/ci/vitest.json evidence=test-results/ci/vitest-timing.json title="Vitest shard ${{ matrix.shard }}/8" -- ./bin/pnpm exec vitest run --shard=${{ matrix.shard }}/8 --reporter=default --reporter=json --outputFile=test-results/ci/vitest.json
       - name: Vitest timing evidence
