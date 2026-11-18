@@ -837,7 +837,9 @@ and are asked to sign in again in Buzz.
 - In a channel's main message box, typing `/invite` followed by one or more
   @mentions adds those people or agents, as **Members** does, and a toast shows
   who was added. The command is not posted as a message. People already in the
-  channel are skipped. To add one of your agents from another community,
+  channel are skipped. If some cannot be added, the draft stays and the error
+  names who was added, so sending again adds only the rest. To add one of your
+  agents from another community,
   mention it in a normal message, which asks to bring it here first. To add
   someone to a DM, use the DM's access dialog. Thread replies send `/invite` as
   text.

@@ -843,6 +843,35 @@ it("adds each mentioned person once with /invite, whatever their names", async (
   expect(f.send).not.toHaveBeenCalled();
 });
 
+it("names who /invite added when another addition fails", async () => {
+  const f = fixture({ type: "stream" });
+  const alice = "c".repeat(64);
+  const bob = "d".repeat(64);
+  f.session.memberAdditions.add.mockImplementation(async (_, pubkey) => {
+    if (pubkey === bob) throw new Error("Relay refused");
+  });
+  const text = "/invite @Alice @Bob";
+  writeView(f.scope, `draft:${id}`, {
+    text,
+    recipients: [
+      { pubkey: alice, name: "Alice", start: 8, end: 14 },
+      { pubkey: bob, name: "Bob", start: 15, end: 19 },
+    ],
+  });
+  f.mountWithToasts();
+  const editor = await screen.findByRole("textbox", {
+    name: "Message Planning",
+  });
+  const user = userEvent.setup();
+  await user.click(editor);
+  await user.keyboard("{Enter}");
+  expect(
+    await screen.findByText("Added Alice. Couldn’t add Bob: Relay refused"),
+  ).toBeInTheDocument();
+  expect(f.send).not.toHaveBeenCalled();
+  expect(editor).toHaveValue(text);
+});
+
 it.each([
   {
     why: "text follows the mentions",
@@ -869,7 +898,7 @@ it.each([
     text: "/invite @Teammate",
     addable: true,
     refused: true,
-    error: "Relay refused",
+    error: "Couldn’t add Teammate: Relay refused",
   },
 ])(
   "keeps /invite in the composer when $why",

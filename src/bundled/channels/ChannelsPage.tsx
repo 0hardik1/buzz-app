@@ -996,16 +996,25 @@ function ChannelWorkspace({
       throw new Error(
         `${away.map((person) => person.name).join(", ")} ${away.length > 1 ? "are" : "is"} in your other communities. Mention ${away.length > 1 ? "them" : "it"} in a message to bring ${away.length > 1 ? "them" : "it"} here first.`,
       );
-    const failed = (
-      await Promise.allSettled(
-        added.map((person) =>
-          queries.memberAdditions.add(channel.id, person.pubkey),
-        ),
-      )
-    ).find((result) => result.status === "rejected");
-    if (failed) throw failed.reason;
+    const results = await Promise.allSettled(
+      added.map((person) =>
+        queries.memberAdditions.add(channel.id, person.pubkey),
+      ),
+    );
     const names = (list: typeof people) =>
       list.map((person) => person.name).join(", ");
+    const failed = added.filter((_, i) => results[i]?.status === "rejected");
+    const reason = results.find((result) => result.status === "rejected");
+    // The draft stays for a retry, so say who already got in; they are skipped
+    // next time.
+    if (reason) {
+      const done = added.filter((_, i) => results[i]?.status === "fulfilled");
+      const message =
+        reason.reason instanceof Error ? reason.reason.message : "Try again.";
+      throw new Error(
+        `${done.length ? `Added ${names(done)}. ` : ""}Couldn’t add ${names(failed)}: ${message}`,
+      );
+    }
     notify(
       added.length
         ? `Added ${names(added)} to ${channel.name}`
