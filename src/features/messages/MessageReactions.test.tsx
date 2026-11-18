@@ -105,8 +105,13 @@ function harness(
   const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
   let live!: LiveCallbacks;
   /** How the relay answers a strong read by ID: with the events it `has`,
-   * or by failing. Every such filter is recorded. */
-  const check: { has: RelayEvent[]; fail?: Error; asked: ReadFilter[] } = {
+   * or by failing, once `hold` settles. Every such filter is recorded. */
+  const check: {
+    has: RelayEvent[];
+    fail?: Error;
+    hold?: Promise<void>;
+    asked: ReadFilter[];
+  } = {
     has: [],
     asked: [],
   };
@@ -121,7 +126,7 @@ function harness(
         check.asked.push(...strong);
         return check.fail
           ? Promise.reject(check.fail)
-          : Promise.resolve(
+          : (check.hold ?? Promise.resolve()).then(() =>
               check.has.filter((event) =>
                 strong.some((filter) => filter.ids?.includes(event.id)),
               ),
@@ -1135,6 +1140,41 @@ it("keeps an unconfirmed reaction the relay did receive, and says so", async () 
   expect(removal?.kind).toBe(5);
   expect(removal?.tags).toContainEqual(["e", sent.id]);
   expect(screen.queryByRole("button", { name: "👍: You" })).toBeNull();
+  // Reacting again ended the notice, and it does not return once that settles.
+  expect(h.session.outbox?.snapshot()[0]?.delivery).toBe("accepted");
+  expect(screen.queryByRole("status")).toBeNull();
+});
+
+it("keeps an unconfirmed reaction whose retry lands while Discard is asking the relay", async () => {
+  const publish = vi.fn(intake(unanswered));
+  const h = harness([], publish);
+  render(<h.Controls />);
+  fireEvent.click(picker());
+  await settle();
+  const id = h.session.outbox?.snapshot()[0]?.event.id ?? "";
+  expect(h.session.outbox?.snapshot()[0]?.delivery).toBe("unknown");
+  expire();
+  let answer = () => {};
+  h.check.hold = new Promise<void>((resolve) => {
+    answer = resolve;
+  });
+  h.idle();
+  const discarded = discardReaction(h.session, id);
+  await waitFor(() => expect(h.check.asked).toHaveLength(1));
+  // Retried from elsewhere before the relay answers, and this time it lands.
+  publish.mockImplementation(async () => {});
+  h.session.outbox?.retry(id);
+  await waitFor(() =>
+    expect(h.session.outbox?.snapshot()[0]?.delivery).toBe("accepted"),
+  );
+  answer();
+  // The read found nothing, but the update is no longer unconfirmed.
+  await expect(discarded).resolves.toBe(false);
+  expect(h.session.outbox?.snapshot()[0]).toMatchObject({
+    event: { id },
+    delivery: "accepted",
+  });
+  expect(screen.getByRole("button", { name: "👍: You" })).toBeTruthy();
 });
 
 it("restores my reaction when an unconfirmed removal never reached the relay", async () => {

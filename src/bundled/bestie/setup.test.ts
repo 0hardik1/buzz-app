@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, assert, beforeEach, expect, it, vi } from "vitest";
-import { PublishRejected } from "../../features/relay/outbox";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MAX_INSTRUCTIONS_LENGTH } from "../builderlab/agents/client";
 import { bestieInstructions, promptVersion } from "./prompt";
 import { BUILDERLAB_TYPE } from "./setup";
@@ -500,78 +499,6 @@ it("keeps the first Bestie's home and gives a replacement a new one after a fail
   const intro = welcomes(h, record.channelId);
   expect(intro).toHaveLength(1);
   expect(intro[0]?.tags).toContainEqual(["p", record.agent]);
-});
-
-it("replaces a welcome the relay never received once it is too old to send again", async () => {
-  const h = await bestieFixture(native.invoke);
-  // No answer: the welcome may have reached the relay.
-  h.failPublication(9);
-  await h.bestie.setup();
-  expect(h.bestie.snapshot().status).toBe("error");
-  const first = saved()?.welcomeId;
-  expect(first).toBeDefined();
-  // The relay refuses an event older than its 15-minute window.
-  const publish = h.publish.getMockImplementation();
-  h.publish.mockImplementation(async (event) => {
-    if (event.id === first) throw new PublishRejected("Event too old");
-    await publish?.(event);
-  });
-  const clock = vi
-    .spyOn(Date, "now")
-    .mockReturnValue(Date.now() + 16 * 60 * 1000);
-  try {
-    await h.bestie.setup();
-    expect(h.bestie.snapshot()).toMatchObject({
-      status: "error",
-      message: expect.stringContaining("Retry setup to send a new one"),
-    });
-    expect(
-      h
-        .session()
-        .outbox?.snapshot()
-        .some((item) => item.event.id === first),
-    ).toBe(false);
-    await h.bestie.setup();
-    expect(h.bestie.snapshot().status).toBe("ready");
-    const intro = welcomes(h, HOME);
-    expect(intro).toHaveLength(1);
-    expect(intro[0]?.id).not.toBe(first);
-    expect(saved()?.welcomeId).toBe(intro[0]?.id);
-  } finally {
-    clock.mockRestore();
-  }
-});
-
-it("keeps a welcome the relay did receive, however old, and finishes setup", async () => {
-  const h = await bestieFixture(native.invoke);
-  h.failPublication(9);
-  await h.bestie.setup();
-  expect(h.bestie.snapshot().status).toBe("error");
-  const first = h
-    .session()
-    .outbox?.snapshot()
-    .find((item) => item.event.id === saved()?.welcomeId);
-  assert.exists(first?.signed);
-  // It arrived after all, and the relay refuses to take it twice.
-  h.events.push(first.signed);
-  const publish = h.publish.getMockImplementation();
-  h.publish.mockImplementation(async (event) => {
-    if (event.id === first.event.id) throw new PublishRejected("Event too old");
-    await publish?.(event);
-  });
-  const clock = vi
-    .spyOn(Date, "now")
-    .mockReturnValue(Date.now() + 16 * 60 * 1000);
-  try {
-    await h.bestie.setup();
-    expect(h.bestie.snapshot().status).toBe("ready");
-    expect(welcomes(h, HOME).map((event) => event.id)).toEqual([
-      first.event.id,
-    ]);
-    expect(saved()?.welcomeId).toBe(first.event.id);
-  } finally {
-    clock.mockRestore();
-  }
 });
 
 it.each([

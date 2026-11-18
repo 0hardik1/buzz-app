@@ -157,8 +157,8 @@ export const additionExpired = (item: OutgoingEvent) =>
 /** Saved single additions to a channel that can no longer finish, for one
  * person or everyone: those known not to have been sent, and unconfirmed ones
  * past the relay's intake window, whoever started them. `discardAdditions`
- * gives up an unconfirmed one only after checking the relay for it and, when
- * the relay has it, the roster for its person. */
+ * gives up an unconfirmed one only after reading the roster and, when the
+ * roster lists its person, asking the relay for the request. */
 export const discardableAdditions = (
   saved: readonly OutgoingEvent[],
   channelId: string,

@@ -92,11 +92,16 @@ behavior on the label, so a rename touches copy only.
   a grant the relay does not have can never be sent. The next send or retry in
   that chat then retires the recovery receipt instead of failing: recorded
   grants stand, and the chat continues with the roles the relay has. Inside
-  the window an unfinished setup still holds the chat's messages.
-  In developer builds, Outbox offers **Abandon admin setup** once the create is
-  delivered, which retires the receipt sooner while keeping the chat and granted
-  roles. Grant publication and retirement share the receipt’s durable ownership
-  lock, so another window’s unfinished signature cannot publish after either.
+  the window an unfinished setup still holds the chat's messages: each fails,
+  and its failed row shows the setup's reason beside Retry.
+  Once the create is delivered, that row also offers **Abandon admin setup**,
+  which retires the receipt sooner while keeping the chat and granted roles.
+  Developer builds offer the same action in Outbox. Grant publication and
+  retirement share the receipt’s durable ownership lock, so a grant being
+  published finishes first and another window’s unfinished signature cannot
+  publish after either. A failed row that was held says that setup ended,
+  whether it was abandoned or expired; the note is not saved, and lasts while
+  the row stays mounted.
   Afterwards, retry the opening message with current roles or send a new
   message if its signed timestamp has expired. This needs no relay update
   and does not migrate existing members' roles or change tool-created grants.

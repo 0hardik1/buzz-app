@@ -395,8 +395,10 @@ Local storage is a convenience for editable drafts. Only a
 definitively failed recovery operation can be removed (including through
 Diagnostics in developer builds), releasing the preserved draft for editing or a changed recipient set.
 An uncertain one older than the relay's 15-minute intake window can never be
-confirmed by sending it again, so its next **Retry** (a first message, a forward,
-or an agent share) asks the relay for the event by ID with a fresh strong read:
+confirmed by sending it again, so the next time its surface sends it (**Retry
+send** for a first message, **Retry forward** for a forward, or the next
+**Send** of the same agent copy to the same place, since that dialog has no
+Retry) the relay is asked for the event by ID with a fresh strong read:
 one the relay has is confirmed; one it never received is removed, and the dialog
 says to send it again; a read that fails keeps it. A changed set also invalidates the prepared destination.
 Page exit cancels preparation and its delivery waiter, while the outbox retains

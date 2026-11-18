@@ -13,8 +13,18 @@ import { readSnapshot } from "../../features/agents/agent-share";
 import { agentAvatars } from "../../features/agents/avatar-packs";
 import foilTextureUrl from "../../features/agents/assets/card-foil.webp";
 import type { Agent, RegisteredAgentType } from "../../features/agents/service";
-import type { EventData } from "../../features/relay/events";
-import type { RelaySession } from "../../features/relay/session";
+import type {
+  EventData,
+  ReadFilter,
+  RelayEvent,
+} from "../../features/relay/events";
+import { PublishRejected } from "../../features/relay/outbox";
+import {
+  createRelaySession,
+  type RelaySession,
+} from "../../features/relay/session";
+import { keypair, signed } from "../../features/relay/testing";
+import type { RelayWriter } from "../../features/relay/transport";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { AgentShareDialog } from "./AgentShareDialog";
 
@@ -1128,6 +1138,92 @@ it("sends anew once a failed message is removed from the outbox", async () => {
     "dm-b",
     expect.any(AbortSignal),
   );
+});
+
+it("removes an unconfirmed message the relay never received once it is too old, then shares it anew", async () => {
+  const user = userEvent.setup();
+  const { session, messages, attachments } = community();
+  // The real outbox and delivery check decide, over a relay that never
+  // received the message and refuses it once it is past its window.
+  const me = keypair(),
+    authority = keypair();
+  const publish = vi
+    .fn<RelayWriter["publish"]>()
+    .mockRejectedValueOnce(new Error("Connection lost"))
+    .mockRejectedValue(new PublishRejected("Event too old"));
+  const query = vi.fn(
+    async (_filters: readonly ReadFilter[]): Promise<RelayEvent[]> => [],
+  );
+  const relay = createRelaySession(
+    {
+      scope: "https://media.example",
+      viewer: me.pubkey,
+      relayAuthor: authority.pubkey,
+      media: () => undefined,
+      query,
+      writer: {
+        kinds: [9],
+        sign: async (template) => signed(me, template),
+        publish,
+      },
+    },
+    { outboxStorage: { load: () => [], save: () => {} } },
+  );
+  const real = relay.session;
+  // An upload as this community's media server names it.
+  attachments.upload.mockImplementation(async (file: File) => ({
+    name: file.name,
+    url: `https://media.example/media/${"0".repeat(64)}.png`,
+    type: file.type,
+    size: file.size,
+    sha256: "0".repeat(64),
+  }));
+  messages.send.mockImplementation((...input) =>
+    real.messages.send(
+      ...(input as Parameters<RelaySession["messages"]["send"]>),
+    ),
+  );
+  const clock = vi.spyOn(Date, "now");
+  try {
+    share({
+      ...session,
+      outbox: real.outbox,
+      directMessages: {
+        ...session.directMessages,
+        delivered: real.directMessages.delivered,
+      },
+    } as RelaySession);
+    await user.click(await choice("Bea"));
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn’t send to Bea.",
+    );
+    const [first] = messages.send.mock.results;
+    assert(first?.type === "return");
+    expect(real.directMessages.delivery(first.value)).toBe("unknown");
+    // Past the relay's 15-minute window, the next Send of this copy to Bea
+    // asks the relay for it, and removes it.
+    clock.mockReturnValue(Date.now() + 16 * 60 * 1000);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await vi.waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Couldn’t send to Bea. This message never reached the conversation and is too old to send again, so it was removed. Send it again.",
+      ),
+    );
+    expect(
+      real.outbox?.snapshot().some((item) => item.event.id === first.value),
+    ).toBe(false);
+    expect(messages.send).toHaveBeenCalledOnce();
+    // The next Send shares it anew.
+    publish.mockResolvedValue(undefined);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("Sent Ada to Bea.")).toBeInTheDocument();
+    expect(messages.send).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  } finally {
+    clock.mockRestore();
+    relay.dispose();
+  }
 });
 
 it("keeps a delivered message for confirming when the outbox can't let it go", async () => {

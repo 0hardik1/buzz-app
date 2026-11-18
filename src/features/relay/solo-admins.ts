@@ -71,6 +71,14 @@ export function soloAdminSetup(item: OutgoingEvent) {
   }
 }
 
+/** The receipt whose dismissal abandons a setup. Only a delivered create has
+ * a chat to continue in. */
+export function abandonableSetup(item: OutgoingEvent) {
+  return item.delivery === "accepted" || item.delivery === "seen"
+    ? soloAdminSetup(item)?.recovery
+    : undefined;
+}
+
 function readSoloAdminSetup(item: OutgoingEvent) {
   const create = item.event;
   const channel = create.tags.find(([tag]) => tag === "h")?.[1];

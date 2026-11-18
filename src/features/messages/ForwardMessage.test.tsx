@@ -22,8 +22,15 @@ import { createNavigationController } from "../navigation/controller";
 import { createMemoryHistory } from "../navigation/history";
 import { forwardBody } from "../relay/forwarded-message";
 import type { ChannelSummary, ChannelMessage } from "../relay/contracts";
-import type { OutboxRecovery, OutgoingEvent } from "../relay/outbox";
-import type { RelaySession } from "../relay/session";
+import {
+  PublishRejected,
+  type OutboxRecovery,
+  type OutgoingEvent,
+} from "../relay/outbox";
+import { createRelaySession, type RelaySession } from "../relay/session";
+import { keypair, signed } from "../relay/testing";
+import type { ReadFilter, RelayEvent } from "../relay/events";
+import type { RelayWriter } from "../relay/transport";
 import { ForwardMessageProvider, useForwardMessage } from "./ForwardMessage";
 import { MessageActionBar } from "./MessageActionBar";
 import { MessageMarkdown } from "./MessageMarkdown";
@@ -144,10 +151,13 @@ function setup({
   saved = [] as OutgoingEvent[],
   nested = false,
   content = <Trigger />,
+  relay,
 }: {
   saved?: OutgoingEvent[];
   nested?: boolean;
   content?: ReactNode;
+  /** A real session whose outbox and delivery check the dialog uses. */
+  relay?: RelaySession;
 } = {}) {
   const history = createMemoryHistory();
   const controller = createNavigationController(history);
@@ -242,11 +252,17 @@ function setup({
       },
     ),
   };
+  if (relay) {
+    directMessages.delivered.mockImplementation(relay.directMessages.delivered);
+    messages.send.mockImplementation((...input) =>
+      relay.messages.send(...input),
+    );
+  }
   const session = {
     viewer,
     directMessages,
     messages,
-    outbox,
+    outbox: relay?.outbox ?? outbox,
     channels: {
       list: () => channels,
       subscribeList: () => () => {},
@@ -548,6 +564,83 @@ it("keeps an uncertain send locked and retries its exact event without another D
   expect(messages.send.mock.calls[0]?.[1]).toBe(
     forwardBody(sourceSnapshot, ""),
   );
+});
+
+it("removes an unconfirmed forward the relay never received once Retry forward finds it too old, then forwards again", async () => {
+  const user = userEvent.setup();
+  const me = keypair(),
+    authority = keypair();
+  const publish = vi
+    .fn<RelayWriter["publish"]>()
+    .mockRejectedValueOnce(new Error("Connection lost"))
+    .mockRejectedValue(new PublishRejected("Event too old"));
+  // The relay has never received it.
+  const query = vi.fn(
+    async (_filters: readonly ReadFilter[]): Promise<RelayEvent[]> => [],
+  );
+  const owner = createRelaySession(
+    {
+      viewer: me.pubkey,
+      relayAuthor: authority.pubkey,
+      media: () => undefined,
+      query,
+      writer: {
+        kinds: [9],
+        sign: async (template) => signed(me, template),
+        publish,
+      },
+    },
+    { outboxStorage: { load: () => [], save: () => {} } },
+  );
+  stops.push(owner.dispose);
+  const real = owner.session;
+  // The quoted snapshot reads like a shortcode, so the catalog must be read.
+  await real.emoji.ensure();
+  const { navigation, messages } = setup({ relay: real });
+  const clock = vi.spyOn(Date, "now");
+  await choose(user);
+  await user.click(
+    screen.getByRole("button", { name: "Forward to Avery Chen" }),
+  );
+  await screen.findByRole("button", { name: "Retry forward" });
+  const [first] = messages.send.mock.results;
+  if (first?.type !== "return") throw new Error("Nothing was forwarded");
+  expect(real.directMessages.delivery(first.value)).toBe("unknown");
+  // Past the relay's 15-minute window.
+  clock.mockReturnValue(Date.now() + 16 * 60 * 1000);
+  await user.click(screen.getByRole("button", { name: "Retry forward" }));
+  await waitFor(() =>
+    expect(
+      screen.getByText(
+        "This message never reached the conversation and is too old to send again, so it was removed. Send it again.",
+        { selector: "[role=dialog] *" },
+      ),
+    ).toBeInTheDocument(),
+  );
+  expect(
+    real.outbox?.snapshot().some((item) => item.event.id === first.value),
+  ).toBe(false);
+  expect(
+    screen.queryByRole("button", { name: "Retry forward" }),
+  ).not.toBeInTheDocument();
+  // Nothing pending holds another forward any more.
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  await user.click(screen.getByRole("button", { name: "Forward another" }));
+  expect(navigation.snapshot().entry.target).toMatchObject({
+    forward: "f".repeat(64),
+  });
+  expect(
+    screen.queryByRole("button", { name: "Review pending forward" }),
+  ).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Cancel" }));
+  publish.mockResolvedValue(undefined);
+  await choose(user);
+  await user.click(
+    screen.getByRole("button", { name: "Forward to Avery Chen" }),
+  );
+  await screen.findByText("Message forwarded to Avery Chen");
+  expect(messages.send).toHaveBeenCalledTimes(2);
+  clock.mockRestore();
 });
 
 it("restores a saved forward after reload and confirms its exact event instead of sending again", async () => {

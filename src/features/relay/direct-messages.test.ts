@@ -409,6 +409,49 @@ describe("an unconfirmed first message the relay can no longer take", () => {
       t.owner.dispose();
     }
   });
+
+  it("keeps it when a retry begins while the relay is being asked", async () => {
+    const t = await unconfirmed();
+    const clock = t.expire();
+    let asked = () => {};
+    const asking = new Promise<void>((resolve) => {
+      asked = resolve;
+    });
+    let answer = (_events: RelayEvent[]) => {};
+    const read = t.query.getMockImplementation();
+    if (!read) throw new Error("No relay");
+    // The read by ID is held until the test answers it.
+    t.query.mockImplementation((filters) =>
+      filters.some((filter) => filter.ids?.includes(t.message))
+        ? new Promise<RelayEvent[]>((resolve) => {
+            answer = resolve;
+            asked();
+          })
+        : read(filters),
+    );
+    let sent = () => {};
+    try {
+      const confirmed = t.confirm();
+      await asking;
+      // A retry starts while the relay is still being asked.
+      t.publish.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            sent = resolve;
+          }),
+      );
+      t.outbox.retry(t.message);
+      expect(t.saved()?.delivery).toBe("sending");
+      answer([]);
+      await expect(confirmed).rejects.toThrow("Event too old");
+      expect(t.saved()).toMatchObject({ delivery: "sending", recovery });
+    } finally {
+      answer([]);
+      sent();
+      clock.mockRestore();
+      t.owner.dispose();
+    }
+  });
 });
 it("reads paginated verified profiles, excludes the viewer, and cancels with the caller", async () => {
   const t = setup();

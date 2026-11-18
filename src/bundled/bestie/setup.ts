@@ -489,40 +489,7 @@ export function createRemoteBestie(
       } catch (error) {
         record[failed] = session.channelWrites.failed(id) || undefined;
         save();
-        // The relay takes a signed event for 15 minutes. A welcome that got
-        // no answer and is older than that can never be confirmed by sending
-        // it again, so setup could never finish. A strong read by ID decides:
-        // the relay has it, or it is given up and the next run sends a new one.
-        const item = outbox?.snapshot().find((entry) => entry.event.id === id);
-        if (
-          field !== "welcomeId" ||
-          item?.delivery !== "unknown" ||
-          Date.now() / 1000 - item.event.created_at < 15 * 60
-        )
-          throw error;
-        // Remote only: a plain read would answer with the unsent copy.
-        const events = await session
-          .readRemote([{ ids: [id], limit: 1, consistency: "strong" }], {
-            signal,
-          })
-          .catch(() => {
-            throw error;
-          });
-        check();
-        if (!events.some((event) => event.id === id)) {
-          // A retry that began during the read keeps it.
-          if (
-            outbox?.snapshot().find((entry) => entry.event.id === id)
-              ?.delivery !== "unknown"
-          )
-            throw error;
-          await outbox.dismiss(id, item.recovery);
-          record[field] = undefined;
-          save();
-          throw new Error(
-            "Bestie's welcome message never reached the chat and is too old to send again. Retry setup to send a new one.",
-          );
-        }
+        throw error;
       }
       check();
     }

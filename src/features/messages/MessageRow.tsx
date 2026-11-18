@@ -1728,7 +1728,7 @@ function MessageRowContent({
             </MessageTimestampHint>
           </div>
           {!reactionsInBubble && reactionContent}
-          <DeliveryNotice row={row} retry={retry} />
+          <DeliveryNotice row={row} retry={retry} outbox={session?.outbox} />
           {session && scope && (
             <AgentDeclineNotes
               session={session}

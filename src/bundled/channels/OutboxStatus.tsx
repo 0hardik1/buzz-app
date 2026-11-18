@@ -1,5 +1,4 @@
 import { Button } from "../../shared/design-system/ui/Button";
-import { AlertDialog } from "../../shared/design-system/ui/AlertDialog";
 import { isWorkflowOperation } from "../../features/workflows/protocol";
 import { useRef, useState, useSyncExternalStore } from "react";
 import type { RelayProfiler } from "../../features/relay/profiling";
@@ -12,7 +11,11 @@ import {
 } from "../../features/relay/outbox";
 import type { RelaySession } from "../../features/relay/session";
 import { isBatchAddition } from "../../features/channel-members/members";
-import { soloAdminSetup } from "../../features/relay/solo-admins";
+import {
+  abandonableSetup,
+  soloAdminSetup,
+} from "../../features/relay/solo-admins";
+import { AbandonAdminSetup } from "../../features/messages/AbandonAdminSetup";
 
 /** A batch names everyone its Retry re-adds. */
 function additionLabel(tags: readonly (readonly string[])[]) {
@@ -40,21 +43,15 @@ export function OutboxStatus({
     .filter((item) => item.event.kind !== PRODUCT_FEEDBACK_KIND)
     .map((item) => {
       const setup = soloAdminSetup(item);
-      const abandonSetup =
-        item.delivery === "accepted" || item.delivery === "seen"
-          ? setup?.recovery
-          : undefined;
-      return { ...item, setup, abandonSetup };
+      return { ...item, setup, abandonSetup: abandonableSetup(item) };
     });
   const [error, setError] = useState<string>();
   const [abandon, setAbandon] = useState<{
     id: string;
     recovery: OutboxRecovery;
   }>();
-  const [abandoning, setAbandoning] = useState(false);
   const summary = useRef<HTMLElement>(null);
   const abandonButton = useRef<HTMLButtonElement>(null);
-  const cancel = useRef<HTMLButtonElement>(null);
   const closeAbandon = () => {
     setError(undefined);
     setAbandon(undefined);
@@ -200,45 +197,17 @@ export function OutboxStatus({
         ))}
       </ul>
       {abandon && (
-        <AlertDialog
-          title="Abandon admin setup?"
-          description="The chat keeps its current roles. Retry your opening message to continue, or send a new message if it expired."
-          initialFocus={cancel}
+        <AbandonAdminSetup
+          outbox={outbox}
+          id={abandon.id}
+          recovery={abandon.recovery}
           finalFocus={() =>
             abandonButton.current?.isConnected
               ? abandonButton.current
               : summary.current
           }
-          pending={abandoning}
           onClose={closeAbandon}
-          actions={
-            <>
-              <Button ref={cancel} disabled={abandoning} onClick={closeAbandon}>
-                Cancel
-              </Button>
-              <Button
-                variant="prominent"
-                disabled={abandoning}
-                onClick={async () => {
-                  setAbandoning(true);
-                  setError(undefined);
-                  try {
-                    await outbox.dismiss(abandon.id, abandon.recovery);
-                    closeAbandon();
-                  } catch (reason) {
-                    setError(String(reason));
-                  } finally {
-                    setAbandoning(false);
-                  }
-                }}
-              >
-                Abandon admin setup
-              </Button>
-            </>
-          }
-        >
-          {error && <p role="alert">{error}</p>}
-        </AlertDialog>
+        />
       )}
       {!abandon && error && <p role="alert">{error}</p>}
       <RelayTimings profiling={profiling} />

@@ -453,11 +453,12 @@ and are asked to sign in again in Buzz.
   without sharable attachment metadata (including custom emoji), show an
   explanation before sending. Forward and Copy as forward are disabled; **Copy link** is available
   in the dialog. A link still requires access to the original conversation.
-  A forward, a first message in **New message**, or a shared agent copy that
-  could not be confirmed is kept so **Retry** can check it again. Once it is 15
-  minutes old it can no longer be sent: Retry then checks the community,
-  confirms it if it arrived, and otherwise removes it and asks you to send it
-  again.
+  A forward or a first message in **New message** that could not be confirmed
+  is kept so **Retry forward** or **Retry send** can check it again. A shared
+  agent copy has no Retry: choose **Send** again for the same copy and place.
+  Once the message is 15 minutes old it can no longer be sent: that Retry or
+  Send then checks the community, confirms it if it arrived, and otherwise
+  removes it and asks you to send it again.
 - Select text in a message, such as by double-clicking a word, then right-click
   the highlight and choose **Quote highlight** (or press Q) to add it to that
   conversation's draft as a quote, ready for your reply below it. Published
@@ -495,15 +496,17 @@ and are asked to sign in again in Buzz.
   later to a Solo chat you own also join as admins, whether from the composer or
   Chat access. Other people's agents get ordinary participation; later additions
   use Bot. Existing members keep their saved roles.
-  If admin setup is interrupted, **Retry** on the opening message attempts to
-  finish it without restoring later demotions or removals. Setup that still
-  has not finished 15 minutes after you started the chat can no longer finish,
-  so it ends: the chat keeps the roles it has, and your next message sends. An
-  opening message that old can no longer be sent either; delete it from its
-  menu and send it again.
-  Developer builds only: **Abandon admin setup** in Outbox ends setup sooner,
-  as soon as the chat exists. It keeps the chat and current roles and stops
-  unfinished setup in other windows.
+  If admin setup is interrupted, messages in that chat fail, and each failed
+  message says why. **Retry** on it attempts to finish setup without restoring
+  later demotions or removals. **Abandon admin setup**, beside Retry as soon
+  as the chat exists, ends setup at once: it keeps the chat and its current
+  roles, stops unfinished setup in other windows, and lets Retry send the
+  message. Setup that still has not finished 15 minutes after you started the
+  chat can no longer finish, so it ends by itself: the chat keeps the roles it
+  has, and your next message sends. While the chat stays open, a failed
+  message that was waiting on setup says that setup ended. An opening message
+  that old can no longer be sent either; delete it from its menu and send it
+  again. Developer builds also offer **Abandon admin setup** in Outbox.
   Solo conversations continue at the chat's top level
   rather than requiring a new thread for each reply. Where available, use
   **Model and effort** in the composer before sending; Solo keeps those choices

@@ -27,7 +27,7 @@ import type { PageNavigation } from "../navigation/service";
 import userEvent from "@testing-library/user-event";
 import type { ChannelSummary, Profile } from "../relay/contracts";
 import type { VerifiedProfile } from "../relay/verified-profile";
-import type { OutgoingEvent } from "../relay/outbox";
+import { PublishRejected, type OutgoingEvent } from "../relay/outbox";
 import {
   pickerText,
   readSearchUsage,
@@ -38,7 +38,10 @@ import {
   abbreviatedPublicKey,
   publicKeyLabels,
 } from "../../shared/identity/public-key";
-import type { RelaySession } from "../relay/session";
+import { createRelaySession, type RelaySession } from "../relay/session";
+import { keypair, signed } from "../relay/testing";
+import type { ReadFilter, RelayEvent } from "../relay/events";
+import type { RelayWriter } from "../relay/transport";
 import { NewMessage } from "./NewMessage";
 import { createAgentChoices } from "../agents/choices";
 import type { LocalAgentsSnapshot } from "../agents/local";
@@ -1490,36 +1493,77 @@ it("locks during opening and delivery, waits for confirmation, and retries the s
 });
 
 it("unlocks with its draft once Retry send gives up a message that can never arrive", async () => {
-  const t = setup();
-  t.mount();
-  t.directMessages.delivery.mockReturnValue("unknown");
-  const gone =
-    "This message never reached the conversation and is too old to send again, so it was removed. Send it again.";
-  t.directMessages.delivered
-    .mockRejectedValueOnce(new Error("Delivery uncertain"))
-    // Past the relay's window the delivery check removes it and says so.
-    .mockImplementationOnce(async () => {
-      await t.outbox.dismiss();
-      throw new Error(gone);
-    });
-  await t.user.click(await screen.findByRole("option", { name: "Person 1" }));
-  await t.user.type(screen.getByRole("textbox"), "Keep this draft");
-  await t.user.click(send());
-  await screen.findByRole("button", { name: "Retry send" });
-  expect(recipient()).toBeDisabled();
-  await t.user.click(screen.getByRole("button", { name: "Retry send" }));
-  await waitFor(() =>
-    expect(screen.getByRole("alert")).toHaveTextContent(gone),
+  // The real delivery check and outbox decide, over a relay that never
+  // received the message and refuses it once it is past its window.
+  const me = keypair(),
+    relay = keypair();
+  const publish = vi
+    .fn<RelayWriter["publish"]>()
+    .mockRejectedValueOnce(new Error("Connection lost"))
+    .mockRejectedValue(new PublishRejected("Event too old"));
+  const query = vi.fn(
+    async (_filters: readonly ReadFilter[]): Promise<RelayEvent[]> => [],
   );
-  // Nothing holds the page any more, and what was written is still there.
-  expect(
-    screen.queryByRole("button", { name: "Retry send" }),
-  ).not.toBeInTheDocument();
-  expect(screen.getByRole("textbox")).toHaveTextContent("Keep this draft");
-  await waitFor(() => expect(send()).toBeEnabled());
-  await t.user.click(send());
-  await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
-  expect(t.messages.send).toHaveBeenCalledTimes(2);
+  const owner = createRelaySession(
+    {
+      viewer: me.pubkey,
+      relayAuthor: relay.pubkey,
+      media: () => undefined,
+      query,
+      writer: {
+        kinds: [9],
+        sign: async (template) => signed(me, template),
+        publish,
+      },
+    },
+    { outboxStorage: { load: () => [], save: () => {} } },
+  );
+  const real = owner.session;
+  const t = setup();
+  Object.assign(t.session, { outbox: real.outbox });
+  Object.assign(t.directMessages, {
+    delivered: real.directMessages.delivered,
+    delivery: real.directMessages.delivery,
+  });
+  t.messages.send.mockImplementation((...input) =>
+    real.messages.send(...input),
+  );
+  const clock = vi.spyOn(Date, "now");
+  try {
+    t.mount();
+    const gone =
+      "This message never reached the conversation and is too old to send again, so it was removed. Send it again.";
+    await t.user.click(await screen.findByRole("option", { name: "Person 1" }));
+    await t.user.type(screen.getByRole("textbox"), "Keep this draft");
+    await t.user.click(send());
+    await screen.findByRole("button", { name: "Retry send" });
+    expect(recipient()).toBeDisabled();
+    const [first] = t.messages.send.mock.results;
+    assert(first?.type === "return");
+    expect(real.directMessages.delivery(first.value)).toBe("unknown");
+    // Past the relay's 15-minute window.
+    clock.mockReturnValue(Date.now() + 16 * 60 * 1000);
+    await t.user.click(screen.getByRole("button", { name: "Retry send" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(gone),
+    );
+    expect(
+      real.outbox?.snapshot().some((item) => item.event.id === first.value),
+    ).toBe(false);
+    // Nothing holds the page any more, and what was written is still there.
+    expect(
+      screen.queryByRole("button", { name: "Retry send" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveTextContent("Keep this draft");
+    await waitFor(() => expect(send()).toBeEnabled());
+    publish.mockResolvedValue(undefined);
+    await t.user.click(send());
+    await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
+    expect(t.messages.send).toHaveBeenCalledTimes(2);
+  } finally {
+    clock.mockRestore();
+    owner.dispose();
+  }
 });
 
 it("preserves recipients and draft after opening fails and across remount", async () => {

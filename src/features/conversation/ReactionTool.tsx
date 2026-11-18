@@ -199,6 +199,8 @@ export function ReactionDelivery({
   // What the last Discard found, for the update it was asked about.
   const [outcome, setOutcome] = useState<{
     id: string;
+    /** When that update was signed. */
+    sent: number;
     kept?: string;
     error?: string;
   }>();
@@ -208,9 +210,20 @@ export function ReactionDelivery({
       ["failed", "unknown"].includes(item.delivery) &&
       session.messages.reactionTarget(item.event) === messageId,
   );
+  // What the last Discard found ends when the person next reacts here: the
+  // update it was asked about held every later one, so only a new one is newer.
+  if (
+    outcome &&
+    operations.some(
+      (item) =>
+        item.event.created_at > outcome.sent &&
+        session.messages.reactionTarget(item.event) === messageId,
+    )
+  )
+    setOutcome(undefined);
   if (!operation)
     return outcome?.kept ? <span role="status">{outcome.kept}</span> : null;
-  const { id } = operation.event;
+  const { id, created_at: sent } = operation.event;
   const failed = operation.delivery === "failed";
   // Past the window Retry can only be refused again, so Discard stands alone.
   // Inside it an unconfirmed update may still arrive, so only Retry is offered.
@@ -253,11 +266,13 @@ export function ReactionDelivery({
                 if (await discardReaction(session, id))
                   setOutcome({
                     id,
+                    sent,
                     kept: "This reaction update had already been delivered, so it was kept.",
                   });
               } catch (cause) {
                 setOutcome({
                   id,
+                  sent,
                   error:
                     cause instanceof Error
                       ? cause.message
