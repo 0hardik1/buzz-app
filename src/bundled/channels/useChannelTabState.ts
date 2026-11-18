@@ -42,6 +42,8 @@ export type ConversationTab =
       revealRequest?: number | undefined;
       /** Transient visual cue when an opening reuses this tab. */
       attentionRequest?: number | undefined;
+      /** Each opening that names a read time asks for its divider anew. */
+      unreadRequest?: { readThrough: number } | undefined;
       /** The reader's verified root, which may differ from a link's hint. */
       rootId?: string | undefined;
       /** A name given to the tab, shown instead of its root's text. */
@@ -168,6 +170,7 @@ function withThread(
   rootId: string,
   intent: ThreadIntent | undefined,
   attention = false,
+  unreadSince?: number,
 ): State {
   const existing = threadTab(state.tabs, channelId, rootId);
   const baseId = `thread:${channelId}:${rootId}`;
@@ -198,12 +201,17 @@ function withThread(
       intent === "focus" || (attention && intent === undefined)
         ? (prior?.focusRequest ?? 0) + 1
         : prior?.focusRequest,
+    // An opening at a read time asks for its line, not an earlier reveal.
     revealRequest:
       intent === "reveal"
         ? (prior?.revealRequest ?? 0) + 1
-        : prior?.revealRequest,
+        : unreadSince === undefined
+          ? prior?.revealRequest
+          : undefined,
     rootId: prior?.rootId,
     name: prior?.name,
+    unreadRequest:
+      unreadSince === undefined ? undefined : { readThrough: unreadSince },
   };
   const tabs = existing
     ? state.tabs.map((tab) => (tab.id === id ? next : tab))
@@ -580,9 +588,10 @@ export function useChannelTabState(
       messageId: string,
       rootId: string,
       intent?: ThreadIntent,
+      unreadSince?: number,
     ) =>
       update((state) =>
-        withThread(state, channelId, messageId, rootId, intent, true),
+        withThread(state, channelId, messageId, rootId, intent, true, unreadSince),
       ),
     [update],
   );

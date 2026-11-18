@@ -13,6 +13,7 @@ import { Button } from "../../shared/design-system/ui/Button";
 import { EmptyState } from "../../shared/design-system/ui/EmptyState";
 import { communityRefusalTitle } from "../../features/federated-identity/CommunitySignIn";
 import { NoConversationSelected } from "../../features/conversation/NoConversationSelected";
+import { InboxBadge } from "./InboxBadge";
 import { InboxPreview } from "./InboxPreview";
 import styles from "./Inbox.module.css";
 import {
@@ -62,6 +63,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     layout: "workspace",
     primary: true,
     route: { version: 1, validate: isInboxRoute },
+    badge: () => <InboxBadge relay={relay} />,
     component: ({ navigation }) => (
       <ActivityAddress relay={relay} navigation={navigation} />
     ),

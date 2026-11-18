@@ -12,6 +12,7 @@ async function resizeTo(page, width, height) {
   await page.setViewportSize({ width, height });
   await hideNarrowConversationList(page);
 }
+import { chooseDefaultSkinTone } from "./skin-tone.mjs";
 
 test.use({
   productionBroker: true,
@@ -1009,6 +1010,7 @@ test("profile menus and composer pickers keep message hover actions out of the w
   page,
   app,
 }) => {
+  await chooseDefaultSkinTone(page);
   await open(page, app);
   const event = app.append("primary", "alpha", "Background hover target");
   const row = page.locator(

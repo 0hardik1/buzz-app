@@ -48,6 +48,7 @@ import { avatarMedia } from "../../shared/avatar-source";
 const noExclusions: readonly string[] = [];
 const personKey = (pubkey: string) => `person:${pubkey}`;
 const channelKey = (id: string) => `channel:${id}`;
+export type RecipientChannel = ChannelSummary;
 const noChannels: readonly ChannelSummary[] = [];
 /** Channels To can address: ones the viewer can post a new message in. */
 export function addressableChannels(channels: readonly ChannelSummary[]) {
@@ -81,11 +82,13 @@ export function RecipientPicker({
   disabled,
   excludedPubkeys = noExclusions,
   initiallyOpen = true,
+  searchOnly = false,
   maxRecipients = 8,
   appearance = "header",
   channelOptions = noChannels,
   selectedChannel,
-  onChooseChannel,
+  onChannelChange,
+  onChooseChannel = onChannelChange,
   trailing,
   onChange,
   onComplete,
@@ -97,6 +100,7 @@ export function RecipientPicker({
   selectedChannel?: ChannelSummary | undefined;
   /** Choosing a channel replaces the people; undefined removes it. */
   onChooseChannel?: ((channel: ChannelSummary | undefined) => void) | undefined;
+  onChannelChange?: ((channel: RecipientChannel | undefined) => void) | undefined;
   /** Beside the To field in the header row. */
   trailing?: ReactNode | undefined;
   session: RelaySession;
@@ -109,6 +113,7 @@ export function RecipientPicker({
   excludedPubkeys?: readonly string[];
   /** Share dialogs keep the people list closed until the To field is used. */
   initiallyOpen?: boolean;
+  searchOnly?: boolean;
   maxRecipients?: number;
   /** A panel's header row, or a filled control inside a dialog form. */
   appearance?: "header" | "field";
@@ -137,7 +142,7 @@ export function RecipientPicker({
   });
   const agents = useAgentChoices(session, false, true);
   const removal = useChipRemoval();
-  const atLimit = selected.length >= maxRecipients;
+  const atLimit = (appearance === "field" && !!selectedChannel) || selected.length >= maxRecipients;
   const needle = query.trim().toLowerCase();
   const typed = pickerText("dm", needle);
   const invalid = !open && !!needle && selected.length > 0;
@@ -355,14 +360,16 @@ export function RecipientPicker({
     excludedPubkeys,
     session,
   ]);
+  const channelsOnly = !!channelOptions.length && needle.startsWith("#");
+  const channelNeedle = needle.replace(/^#/, "");
   // Channels, above people: the closest names while typing, else the most
   // recently active few.
   const channelRows = useMemo(() => {
-    if (!onChooseChannel || !channelOptions.length) return [];
+    if (!onChooseChannel || !channelOptions.length || (appearance === "field" && (selected.length || selectedChannel))) return [];
     const open = channelOptions.filter(
       (channel) => channel.id !== selectedChannel?.id,
     );
-    if (!needle)
+    if (!channelNeedle)
       return [...open]
         .sort(
           (left, right) =>
@@ -371,7 +378,7 @@ export function RecipientPicker({
         .slice(0, 3);
     return open
       .flatMap((channel) => {
-        const match = matchPerson(channel.name, needle);
+        const match = matchPerson(channel.name, channelNeedle);
         return match ? [{ channel, tier: match.tier }] : [];
       })
       .sort(
@@ -382,15 +389,15 @@ export function RecipientPicker({
       )
       .slice(0, 4)
       .map((row) => row.channel);
-  }, [onChooseChannel, channelOptions, selectedChannel?.id, needle]);
+  }, [onChooseChannel, channelOptions, selectedChannel, channelNeedle, appearance, selected.length]);
   const channelById = new Map(
     channelRows.map((channel) => [channelKey(channel.id), channel]),
   );
   const rowKeys = [
     ...channelRows.map((channel) => channelKey(channel.id)),
-    ...keys,
+    ...(channelsOnly ? [] : keys),
   ];
-  const optionCount = channelRows.length + candidates.length;
+  const optionCount = channelRows.length + (channelsOnly ? 0 : candidates.length);
   function chooseKey(key: string) {
     const channel = channelById.get(key);
     if (channel) {
@@ -418,7 +425,8 @@ export function RecipientPicker({
       : undefined;
   const label = (person: Recipient) =>
     [person.name, discriminator(person)].filter(Boolean).join(" ");
-  const listed = open && !disabled && !atLimit;
+  const visible = open && !disabled && (!searchOnly || !!needle);
+  const listed = visible && !atLimit;
   const highlight = useSearchHighlight({
     query,
     keys: rowKeys,
@@ -434,7 +442,7 @@ export function RecipientPicker({
   // name or a namesake, so Space waits for the full list. A verified person
   // found by an editable profile name is that name's namesake too.
   const exactRecipient = () =>
-    listed && !directory.loading && !directory.error && !directory.tooShort
+    listed && !channelsOnly && !directory.loading && !directory.error && !directory.tooShort
       ? exactName(
           eligible,
           (person) => [...namesOf(person), ...(person.profileNames ?? [])],
@@ -542,7 +550,7 @@ export function RecipientPicker({
   return (
     <Popover.Root
       modal={false}
-      open={open && !disabled}
+      open={visible}
       onOpenChange={(next, details) => {
         // The editable To field is the anchor, rather than a toggle button.
         const target =
@@ -665,7 +673,7 @@ export function RecipientPicker({
               className={styles.toInput}
               aria-label="Message recipients"
               role="combobox"
-              aria-expanded={open && !disabled}
+              aria-expanded={visible}
               aria-controls={listed ? highlight.listId : undefined}
               aria-autocomplete="list"
               aria-describedby={invalid ? errorId : undefined}
@@ -827,7 +835,7 @@ export function RecipientPicker({
                     if (
                       list.scrollHeight - list.scrollTop - list.clientHeight <
                         80 &&
-                      !directory.loading &&
+                      !channelsOnly && !directory.loading &&
                       !directory.error
                     )
                       directory.loadMore();
@@ -869,7 +877,7 @@ export function RecipientPicker({
                     />
                   ))}
                   <Virtualizer
-                    data={candidates}
+                    data={channelsOnly ? [] : candidates}
                     keepMounted={
                       highlight.active && keys.includes(highlight.active)
                         ? [keys.indexOf(highlight.active)]
@@ -878,17 +886,16 @@ export function RecipientPicker({
                   >
                     {renderOption}
                   </Virtualizer>
-                  {!directory.loading &&
-                    !directory.error &&
-                    !candidates.length &&
+                  {(channelsOnly || (!directory.loading && !directory.error)) &&
+                    (channelsOnly || !candidates.length) &&
                     !channelRows.length && (
                       <p>
-                        {directory.tooShort
+                        {channelsOnly ? "No matching channels." : directory.tooShort
                           ? `Type at least ${SEARCH_MIN_CHARS} characters to search people.`
                           : "No matching people."}
                       </p>
                     )}
-                  {directory.loading &&
+                  {!channelsOnly && directory.loading &&
                     (!query.trim() || !candidates.length) && (
                       <div role="status" aria-label="Loading people">
                         <div aria-hidden="true">
@@ -908,10 +915,10 @@ export function RecipientPicker({
                         </div>
                       </div>
                     )}
-                  {directory.error && (
+                  {!channelsOnly && directory.error && (
                     <p role="alert">Could not load people.</p>
                   )}
-                  {!directory.loading && directory.hasMore && (
+                  {!channelsOnly && !directory.loading && directory.hasMore && (
                     <Button
                       type="button"
                       onMouseDown={(event) => event.preventDefault()}

@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import type { RelaySession } from "../../features/relay/session";
+import { rowUnread } from "../../features/relay/unread";
 import styles from "./Channels.module.css";
 
 type UnreadSnapshot = ReturnType<RelaySession["unread"]["snapshot"]>;
@@ -35,11 +36,7 @@ export function channelUnread(
   dm: boolean,
   muted = false,
 ) {
-  const { observedCount, attentionCount } = shown(snapshot);
-  return (
-    snapshot.manual !== "none" ||
-    ((observedCount ?? 0) > 0 && (dm || !muted || (attentionCount ?? 0) > 0))
-  );
+  return rowUnread(snapshot, dm, muted);
 }
 
 /** Observe only confirmed preferences; optimistic menu intents do not quiet unread. */
@@ -87,7 +84,7 @@ export function useUnreadState(
   const muted = useConfirmedMute(session, channelId);
   const { observedCount: count, attentionCount } = shown(snapshot);
   const manual = snapshot.manual !== "none";
-  const unread = channelUnread(snapshot, dm, muted);
+  const unread = rowUnread(snapshot, dm, muted);
   const ordinary = ordinaryUnread(snapshot, dm, muted);
   const threadCount = snapshot.row?.threadCount ?? activity.items?.length ?? 0;
   return {

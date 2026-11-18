@@ -115,6 +115,10 @@ export async function showRailCards(page) {
   if (await expand.isVisible()) await expand.click();
 }
 
+export function activityRow(page) {
+  return rail(page).getByRole("button", { name: /^Activity(?: \d+ unread)?$/ });
+}
+
 export async function openPage(page, name, { connected = true } = {}) {
   await showRailCards(page);
   // The community switcher appears after local startup has replaced the launch
@@ -349,11 +353,28 @@ export async function openCommunityPicker(page) {
   return picker;
 }
 
+/** The switcher trigger for `name`, with or without the elsewhere-unread suffix. */
+export function communitySwitcher(page, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return page.getByRole("button", {
+    name: new RegExp(
+      `^Community switcher: ${escaped}(, unread in other communities)?$`,
+    ),
+  });
+}
+
 export async function selectCommunity(page, name) {
   const picker = await openCommunityPicker(page);
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // A row's name carries its unread suffix once that community's unread is known.
   await picker
     .getByRole("button", {
-      name: name === "Personal space" ? name : `Switch to ${name}`,
+      name:
+        name === "Personal space"
+          ? name
+          : new RegExp(
+              `^Switch to ${escaped}(, unread|, \\d+ items? needs? you)?$`,
+            ),
       exact: true,
     })
     .click();

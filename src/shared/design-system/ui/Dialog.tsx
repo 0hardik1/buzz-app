@@ -82,7 +82,7 @@ export type DialogProps = {
   /** Subtle dimming for anchored reading sheets; regular task modals keep default contrast. */
   backdrop?: "default" | "subtle";
   actions?: ReactNode;
-  /** Tighter heading-to-body spacing for compact forms. */
+  /** Both values use the shared 12px heading-to-body gap. Compact is a legacy alias. */
   headerGap?: "default" | "compact";
   /** Keep spacing beside scrolling content on the fixed header and footer. */
   chromeSpacing?: "default" | "padded";

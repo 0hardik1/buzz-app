@@ -275,6 +275,13 @@ test("rail loads relay-owned image icons for inactive communities without acquir
       : emojiIcon;
     return route.fulfill({ json: { icon } });
   });
+  // The inactive community's background unread session is held: its icon
+  // must load without it.
+  const background = Promise.withResolvers();
+  await page.route("**/api/relay/secondary/session", async (route) => {
+    await background.promise;
+    await route.fallback().catch(() => {});
+  });
   await open(page, app);
   const rail = await openCommunityPicker(page);
   for (const [name, icon] of [
@@ -289,6 +296,10 @@ test("rail loads relay-owned image icons for inactive communities without acquir
   }
   expect(infoRequests).toHaveLength(2);
   expect(app.report.sessions).toEqual(["primary"]);
+  background.resolve();
+  await expect
+    .poll(() => app.report.sessions)
+    .toEqual(["primary", "secondary"]);
 });
 
 // Team's page choice opens its list in place; keyboard page search focuses main.

@@ -260,37 +260,42 @@ function setup({ archived = [] as string[] } = {}) {
       signal: new AbortController().signal,
     }),
   });
-  const mount = (
-    visit?: PageNavigation,
-    options: Pick<
-      ComponentProps<typeof NewMessage>,
-      "solo" | "allowChannels" | "extensions"
-    > = {},
-  ) =>
-    render(
-      <NewMessage
-        {...options}
-        channels={channels.channels}
-        host={
-          {
-            panels: {
-              snapshot: () => emptyPanels,
-              subscribe: () => () => {},
-              resolve: () => undefined,
-            },
-            relay: {
-              snapshot: () => ({ status: "ready", session: session, scope }),
-            },
-            navigation: { open: vi.fn() },
-          } as unknown as ConversationHostServices
-        }
-        session={session}
-        scope={scope}
-        visit={visit}
-        onOpenThread={onOpenThread}
-        onStarted={onStarted}
-      />,
-    );
+  type Options = Pick<ComponentProps<typeof NewMessage>, "solo" | "allowChannels" | "extensions">;
+  const page = (visit: PageNavigation | undefined, options: Options, to?: string, at = Date.now()) => (
+    <NewMessage
+      {...options}
+      intent={to ? { to, at } : undefined}
+      channels={channels.channels}
+      host={
+        {
+          panels: {
+            snapshot: () => emptyPanels,
+            subscribe: () => () => {},
+            resolve: () => undefined,
+          },
+          relay: {
+            snapshot: () => ({ status: "ready", session: session, scope }),
+          },
+          navigation: { open: vi.fn() },
+        } as unknown as ConversationHostServices
+      }
+      session={session}
+      scope={scope}
+      visit={visit}
+      onOpenThread={onOpenThread}
+      onStarted={onStarted}
+    />
+  );
+  const mount = (visit?: PageNavigation, choice?: Options | string, at?: number) => {
+    const options = typeof choice === "object" ? choice : {};
+    const to = typeof choice === "string" ? choice : undefined;
+    const view = render(page(visit, options, to, at));
+    return {
+      ...view,
+      readdress: (next: string, nextAt: number) =>
+        view.rerender(page(visit, options, next, nextAt)),
+    };
+  };
   return {
     session,
     profiles,
@@ -428,6 +433,7 @@ it("finds a hosted agent by its owned name and sends without local custody", asy
   expect(t.directMessages.open).toHaveBeenCalledWith(
     [hosted.pubkey],
     expect.any(AbortSignal),
+    true,
   );
   expect(t.messages.send).toHaveBeenCalledOnce();
 });
@@ -1127,6 +1133,92 @@ it("shows selected recipient artwork without opening or sending, and updates it 
   expect(t.onOpenThread).not.toHaveBeenCalled();
 });
 
+it("addresses the draft to the person it was opened from, creating the DM only on send", async () => {
+  const t = setup();
+  const [person] = people;
+  if (!person) throw new Error("No person");
+  t.profiles.set(person.pubkey, { name: person.name });
+  t.mount(undefined, person.pubkey);
+  expect(
+    await screen.findByRole("button", { name: "Remove Person 1" }),
+  ).toBeVisible();
+  expect(t.directMessages.open).not.toHaveBeenCalled();
+  await t.user.type(screen.getByRole("textbox"), "Hello");
+  await t.user.click(send());
+  await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
+  expect(t.directMessages.open).toHaveBeenCalledExactlyOnceWith(
+    [person.pubkey],
+    expect.any(AbortSignal),
+    true,
+  );
+  expect(t.messages.send).toHaveBeenCalledOnce();
+});
+
+it("takes each choice of a person once, so returning keeps later recipients", async () => {
+  const t = setup();
+  const [first] = people;
+  if (!first) throw new Error("No people");
+  t.profiles.set(first.pubkey, { name: first.name });
+  const now = Date.now();
+  const view = t.mount(undefined, first.pubkey, now + 2);
+  await t.user.click(
+    await screen.findByRole("button", { name: "Remove Person 1" }),
+  );
+  await t.user.click(await screen.findByRole("option", { name: "Person 3" }));
+  view.unmount();
+  // Back, a reload or closing Settings returns to the same choice, and Back
+  // to an earlier one is older still.
+  for (const at of [now + 2, now + 1]) {
+    const again = t.mount(undefined, first.pubkey, at);
+    expect(
+      await screen.findByRole("button", { name: "Remove Person 3" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Remove Person 1" }),
+    ).not.toBeInTheDocument();
+    again.unmount();
+  }
+  // Choosing that person again addresses the draft anew.
+  t.mount(undefined, first.pubkey, now + 3);
+  expect(
+    await screen.findByRole("button", { name: "Remove Person 1" }),
+  ).toBeVisible();
+});
+
+it("holds a choice made during a send until the send settles, keeping the send's recipients", async () => {
+  const t = setup();
+  let fail: (reason: Error) => void = () => {};
+  t.directMessages.open.mockImplementationOnce(
+    () =>
+      new Promise((_, reject) => {
+        fail = reject;
+      }),
+  );
+  const view = t.mount();
+  await t.user.click(await screen.findByRole("option", { name: "Person 1" }));
+  await t.user.type(screen.getByRole("textbox"), "Mid-send");
+  await t.user.click(send());
+  const third = people[2];
+  if (!third) throw new Error("No people");
+  t.profiles.set(third.pubkey, { name: third.name });
+  view.readdress(third.pubkey, Date.now() + 1);
+  expect(
+    screen.getByRole("button", { name: "Remove Person 1" }),
+  ).toBeInTheDocument();
+  expect(t.directMessages.open).toHaveBeenCalledExactlyOnceWith(
+    [people[0]?.pubkey],
+    expect.any(AbortSignal),
+    true,
+  );
+  await act(async () => fail(new Error("Could not open")));
+  expect(
+    await screen.findByRole("button", { name: "Remove Person 3" }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "Remove Person 1" }),
+  ).not.toBeInTheDocument();
+});
+
 it("requires an arrow key before Enter selects a recipient", async () => {
   const t = setup();
   t.mount();
@@ -1343,6 +1435,7 @@ it("holds Send while the To field has text that is not a recipient", async () =>
   expect(t.directMessages.open).toHaveBeenCalledWith(
     [people[0]?.pubkey],
     expect.any(AbortSignal),
+    true,
   );
 });
 
@@ -1440,7 +1533,7 @@ it("locks only while a new DM opens, then queues the message and opens the conve
   ).not.toBeInTheDocument();
 });
 
-it("sends into the DM it already shows without a waiting state", async () => {
+it("reconfirms current DM membership before queuing its message", async () => {
   const t = setup();
   t.channels.channels = [
     {
@@ -1462,11 +1555,9 @@ it("sends into the DM it already shows without a waiting state", async () => {
   await t.user.type(screen.getByRole("textbox"), "Hello again");
   await t.user.click(send());
   expect(t.directMessages.open).toHaveBeenCalledOnce();
-  expect(screen.queryByText("Sending message…")).not.toBeInTheDocument();
-  expect(screen.getByRole("textbox")).toHaveAttribute(
-    "contenteditable",
-    "true",
-  );
+  expect(screen.getByText("Sending message…")).toBeInTheDocument();
+  expect(send()).toBeDisabled();
+  expect(t.messages.send).not.toHaveBeenCalled();
   release(channel);
   await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
 });
@@ -2049,6 +2140,7 @@ it("labels people by verified identity, never an editable handle, and opens the 
   expect(t.directMessages.open).toHaveBeenCalledWith(
     [aleksandr.pubkey],
     expect.any(AbortSignal),
+    true,
   );
 });
 

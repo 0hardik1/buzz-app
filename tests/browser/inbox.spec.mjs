@@ -7,6 +7,8 @@ import {
   hideNarrowConversationList,
   openPage,
 } from "./navigation.mjs";
+import { activityRow } from "./navigation.mjs";
+import { releasing } from "./reading.mjs";
 
 // Browser-only contract: Activity's list routes to exact thread targets and
 // real media dismissal. Matrices stay in RTL/unread tests.
@@ -53,7 +55,7 @@ test.describe("signed newest-first Inbox windows", () => {
       exact: true,
     });
     const target = detail.locator(`[data-message-id="${oldest.id}"]`);
-    await expect(target).toBeInViewport();
+    await releasing(app, () => expect(target).toBeInViewport({ timeout: 100 }));
     await expect(
       detail.getByRole("textbox", { name: "Reply to thread" }),
     ).toBeVisible();

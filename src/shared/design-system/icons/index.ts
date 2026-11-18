@@ -172,6 +172,8 @@ import TablerMessageIcon from "@tabler/icons-react/dist/esm/icons/IconMessage.mj
 export const MessageIcon = defineIcon("tabler", TablerMessageIcon);
 import TablerMessageReplyIcon from "@tabler/icons-react/dist/esm/icons/IconMessageReply.mjs";
 export const MessageReplyIcon = defineIcon("tabler", TablerMessageReplyIcon);
+import TablerMessage2Icon from "@tabler/icons-react/dist/esm/icons/IconMessage2.mjs";
+export const ThreadIcon = defineIcon("tabler", TablerMessage2Icon);
 import TablerChatsCircleIcon from "@tabler/icons-react/dist/esm/icons/IconMessages.mjs";
 export const ChatsCircleIcon = defineIcon("tabler", TablerChatsCircleIcon);
 import { ChatUnreadArtwork } from "./ChatUnread";

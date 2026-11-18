@@ -17,6 +17,7 @@ export const ChannelBody = memo(function ChannelBody({
   intro,
   viewer,
   revealMessageId,
+  openThreadRootId,
   inlineTarget,
   marksRead,
   holding,
@@ -32,6 +33,7 @@ export const ChannelBody = memo(function ChannelBody({
   viewer?: string | undefined;
   navigation?: PageNavigation | undefined;
   revealMessageId?: string | undefined;
+  openThreadRootId?: string | undefined;
   /** One exact visit to a loaded message, without a page navigation. */
   inlineTarget?: ChannelTimelineProps["inlineTarget"];
   /** False: viewing rows marks nothing read. */
@@ -146,6 +148,7 @@ export const ChannelBody = memo(function ChannelBody({
       onReply={onReply}
       {...(onOpenThread ? { onOpenThread } : {})}
       revealMessageId={revealMessageId}
+      openThreadRootId={openThreadRootId}
       inlineTarget={inlineTarget}
       marksRead={marksRead}
       navigation={navigation}

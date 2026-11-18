@@ -311,6 +311,20 @@ test("ordinary openings request reply focus each time; restoration does not", ()
   expect(h.result.current.tabs[0]).toMatchObject({ focusRequest: 3 });
 });
 
+test("an opening at a read time asks for its line instead of an earlier reveal", () => {
+  const session = {} as RelaySession;
+  const h = renderHook(() => useChannelTabState(session, "alpha"));
+  act(() => h.result.current.openThreadTab("alpha", "reply", "root", "reveal"));
+  expect(h.result.current.tabs[0]).toMatchObject({ revealRequest: 1 });
+  act(() =>
+    h.result.current.openThreadTab("alpha", "root", "root", "focus", 5),
+  );
+  expect(h.result.current.tabs[0]).toMatchObject({
+    revealRequest: undefined,
+    unreadRequest: { readThrough: 5 },
+  });
+});
+
 // A move reorders the channel-owned list without changing the tab's
 // identity, and selection follows it.
 test("moving a thread reorders it", () => {

@@ -23,10 +23,18 @@ import { useReferenceDirectory } from "../../features/messages/ReferenceText";
 import { channelIcon } from "../../features/channels/channel-icon";
 import { ChannelAvatar } from "../../features/channels/ChannelAvatar";
 import {
+  generalAccessOptions,
+  generalAccessValue,
+  type GeneralAccess,
+} from "../../features/channels/general-access";
+import {
   GearIcon,
   CircleNotchIcon,
   CaretRightIcon,
   CopyIcon,
+  EyeIcon,
+  GlobeIcon,
+  LockIcon,
   PencilSimpleIcon,
 } from "../../shared/design-system/icons/index";
 import { Tabs } from "../../shared/design-system/ui/Tabs";
@@ -235,6 +243,22 @@ export function ChannelSettingsPanel({
                       membership={membership}
                     />
                   )}
+                {channel.visibility &&
+                  openMembers &&
+                  (channel.channelType === "stream" ||
+                    channel.channelType === "forum") &&
+                  !channel.cached &&
+                  !channel.archived &&
+                  (channel.readOnly || details?.available) && (
+                    <AccessDetail
+                      access={generalAccessValue({
+                        visibility: channel.visibility,
+                        joinRole: channel.joinRole,
+                      })}
+                      canChange={!!edit}
+                      onOpen={openMembers}
+                    />
+                  )}
                 {channel.members && (
                   <SettingsDetail
                     label="Members"
@@ -412,6 +436,43 @@ function ChannelDescription({
       media={session.media}
       onOpenLink={onOpenLink}
       canOpenLink={canOpenLink}
+    />
+  );
+}
+
+const accessIcons = {
+  public: GlobeIcon,
+  "view-only": EyeIcon,
+  private: LockIcon,
+} as const;
+
+/** Shows who can access the channel; Members changes it for people who can edit. */
+function AccessDetail({
+  access,
+  canChange,
+  onOpen,
+}: {
+  access: GeneralAccess;
+  canChange: boolean;
+  onOpen(trigger: HTMLButtonElement): void;
+}) {
+  const Icon = accessIcons[access];
+  const { label } = generalAccessOptions[access];
+  return (
+    <SettingsDetail
+      label="Access"
+      value={label}
+      content={
+        <span className={styles.settingsAccess}>
+          <Icon size={16} aria-hidden="true" />
+          {label}
+        </span>
+      }
+      actionLabel="Change"
+      trailingIcon={
+        canChange && <CaretRightIcon size={16} aria-hidden="true" />
+      }
+      onOpen={canChange ? onOpen : undefined}
     />
   );
 }

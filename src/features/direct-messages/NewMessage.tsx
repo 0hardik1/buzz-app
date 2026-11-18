@@ -49,6 +49,8 @@ import { usePassThroughUntilDrafted } from "../messages/draft-visit";
 import type { PageNavigation } from "../navigation/service";
 import styles from "./NewMessage.module.css";
 import { ExistingDiscussion } from "./ExistingDiscussion";
+import type { MessageIntent } from "../channel-navigation/routes";
+import { abbreviatedPublicKey } from "../../shared/identity/public-key";
 
 const draftKey = "direct-message:new-draft";
 const channelViewKey = "direct-message:channel";
@@ -69,6 +71,7 @@ export function NewMessage({
   onOpenThread,
   onStarted,
   visit,
+  intent,
   allowChannels = false,
   expanded = false,
   contentContainer,
@@ -88,6 +91,7 @@ export function NewMessage({
   onOpenChat?: ((channelId: string) => void) | undefined;
   session: RelaySession;
   scope: string;
+  intent?: MessageIntent | undefined;
   /** The visit presenting this composer, a Back stop only once drafted. */
   visit?: PageNavigation | undefined;
   extensions?: ConversationExtensions | undefined;
@@ -223,6 +227,19 @@ export function NewMessage({
     setError("");
     setUploadFailed(false);
   }
+  // A newer profile Message choice addresses this shared creation draft once.
+  // An in-flight send keeps its recipients until it settles.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: consume each explicit intent once, after the send unlocks.
+  useEffect(() => {
+    if (!intent || locked || attempt.current) return;
+    const taken = readView<unknown>(scope, "direct-message:addressed-at", 0);
+    if (typeof taken === "number" && intent.at <= taken) return;
+    writeView(scope, "direct-message:addressed-at", intent.at);
+    if (intent.to === session.viewer) return;
+    const profile = session.profiles.snapshot().get(intent.to);
+    void session.profiles.ensure([intent.to]).catch(() => {});
+    change([{ pubkey: intent.to, name: profile?.name ?? abbreviatedPublicKey(intent.to) ?? "", ...(profile?.isAgent ? { isAgent: true } : {}) }]);
+  }, [locked, intent?.to, intent?.at]);
   async function send(
     draft: MentionDraft,
     files?: AttachmentDraft,
@@ -253,14 +270,13 @@ export function NewMessage({
       if (!channelId) {
         validateAgents();
         const pubkeys = recipients.map((person) => person.pubkey);
-        // Only a DM that must be created waits on the relay.
-        if (!existing) {
-          onPreparing?.(pubkeys);
-          setBusy("opening");
-        }
+        // The relay owns current people/agent membership and history admission.
+        onPreparing?.(pubkeys);
+        setBusy("opening");
         channelId = await session.directMessages.open(
           pubkeys,
           controller.signal,
+          true,
         );
         controller.signal.throwIfAborted();
         validateAgents();
@@ -310,9 +326,11 @@ export function NewMessage({
         channels,
         session.viewer,
         recipients.map((person) => person.pubkey),
+        (key) => recipients.some((person) => person.pubkey === key && person.isAgent) || !!profiles.get(key)?.isAgent,
       ),
-    [channels, recipients, session.viewer],
+    [channels, recipients, session.viewer, profiles],
   );
+  const joining = existing ? named.filter((person) => !existing.members?.includes(person.pubkey)) : [];
   const channelChoices = useMemo(
     () => (allowChannels ? addressableChannels(channels) : []),
     [allowChannels, channels],
@@ -491,6 +509,7 @@ export function NewMessage({
             ) : null}
           </div>
           <div className={styles.feedback}>
+            {joining.length > 0 && <p role="status">Sending adds {new Intl.ListFormat(undefined, { type: "conjunction" }).format(joining.map((person) => person.name))} to this DM. {joining.length === 1 ? "It" : "They"} can read its earlier messages.</p>}
             {busy && (
               <p role="status">
                 {busy === "uploading" ? "Uploading files…" : "Sending message…"}

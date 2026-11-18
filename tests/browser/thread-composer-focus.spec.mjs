@@ -72,7 +72,7 @@ for (const owner of ["menu", "dialog"]) {
     page,
     app,
   }) => {
-    await open(page, app);
+    await open(page, app, { cold: true });
     const root = app.histories.get("primary/beta")[0];
     let release;
     let started;
@@ -82,7 +82,7 @@ for (const owner of ["menu", "dialog"]) {
     const pending = new Promise((resolve) => {
       started = resolve;
     });
-    await page.route("**/api/relay/**/query", async (route) => {
+    await page.route("**/api/relay/primary/query", async (route) => {
       if (
         route
           .request()

@@ -19,11 +19,11 @@ import {
   type Panels,
 } from "../../features/panels/service";
 import { useTabDrag } from "../../features/panels/useTabDrag";
-import { PanelCard } from "../../features/panels/PanelCard";
+import { PanelMediaCard } from "./PanelMediaCard";
 import type { MessageLinkOrigin } from "../../features/messages/MessageRow";
 import {
   BrowserIcon,
-  MessageReplyIcon,
+  ThreadIcon,
   InfoIcon,
 } from "../../shared/design-system/icons";
 import { parseBuzzLink } from "../../features/navigation/buzz-links";
@@ -523,9 +523,10 @@ export function useConversationTabs({
     messageId: string,
     rootId: string,
     intent?: "reply" | "reveal" | "focus",
+    unreadSince?: number,
   ) => {
     if (!currentVisit()) return;
-    tabState.openThreadTab(channelId, messageId, rootId, intent);
+    tabState.openThreadTab(channelId, messageId, rootId, intent, unreadSince);
     if (
       opening.current &&
       panelTabId(opening.current) !== tabState.getSelected()
@@ -696,12 +697,7 @@ export function useConversationTabs({
               conversationName={target.name}
               canOpenLink={canOpenLink}
               onOpenLink={(url) => openConversationLink(target.id, url)}
-              onOpenConversation={(id) =>
-                openConversationLink(
-                  target.id,
-                  `buzz://channel/${encodeURIComponent(id)}`,
-                )
-              }
+              onOpenMessage={(url) => openConversationLink(target.id, url)}
             />
           ),
         }),
@@ -711,7 +707,7 @@ export function useConversationTabs({
           : (target?.name ?? "Unavailable conversation"),
       icon:
         tab.kind === "thread" ? (
-          <MessageReplyIcon size="1rem" />
+          <ThreadIcon size="1rem" />
         ) : target ? (
           conversationIcon(target)
         ) : (
@@ -767,12 +763,26 @@ export function useConversationTabs({
       instance: entry,
       label: entry.panel.title,
       ...(entry.channelContext && {
-        icon: <InfoIcon size="1rem" />,
+        icon: entry.panel.tabIcon ? (
+          <entry.panel.tabIcon />
+        ) : (
+          <InfoIcon size="1rem" />
+        ),
       }),
       close: () => closeTab(entry),
       content:
         !entry.panel.deferUntilShown || visitTab.shown.has(id) ? (
-          <PanelCard
+          <PanelMediaCard
+            session={queries}
+            scope={scope}
+            channelId={entry.channelId}
+            channelName={
+              entry.channelContext?.channelName ?? current?.name ?? ""
+            }
+            extensions={extensions}
+            isActive={() =>
+              panelActive(entry) && tabState.paneOpen
+            }
             panel={entry.panel}
             contentKey={panelContentTarget(entry)}
             target={entry.target}

@@ -46,6 +46,7 @@ import {
   type EntityRoute,
 } from "../../features/repos/routes";
 import type { GitSnapshot } from "../../features/repos/git";
+import { formatFileSize } from "../../features/messages/FileAttachment";
 import { formatPublicKey } from "../../shared/identity/public-key";
 import { Header } from "../../shared/design-system/ui/Header";
 import { FullPageSurface } from "../../shared/design-system/ui/FullPageSurface";
@@ -549,6 +550,9 @@ function Destination({
   );
 }
 
+const commitCount = (count: number) =>
+  `${count} ${count === 1 ? "commit" : "commits"}`;
+
 function GitContent({
   git,
   active,
@@ -570,7 +574,10 @@ function GitContent({
         {git.file.content !== null ? (
           <pre className="repo-code text-code">{git.file.content}</pre>
         ) : (
-          <p>Binary file or text larger than 1 MiB ({git.file.size} bytes).</p>
+          <p>
+            Binary file, or text too large to show (
+            {formatFileSize(git.file.size)}).
+          </p>
         )}
       </>
     ) : (
@@ -581,7 +588,7 @@ function GitContent({
             <Button variant="link" onClick={() => selectFile(file.path)}>
               {file.path}
             </Button>
-            <small>{file.size} bytes</small>
+            <small>{formatFileSize(file.size)}</small>
           </li>
         ))}
         {!git.files.length && <li>No files.</li>}
@@ -590,14 +597,19 @@ function GitContent({
   if (active === "commits")
     return git.diff !== null ? (
       <>
-        <h2 className="text-heading">Commit {git.head}</h2>
+        <h2 className="text-heading">
+          Commit{" "}
+          <span title={git.head ?? undefined}>{git.head?.slice(0, 10)}</span>
+        </h2>
         <section aria-label="Commit changes">
           <pre className="repo-code text-code">{git.diff}</pre>
         </section>
       </>
     ) : (
       <>
-        <p className="text-secondary">Latest {git.commits.length} commits</p>
+        <p className="text-secondary">
+          Latest {commitCount(git.commits.length)}
+        </p>
         <ul className="repo-list">
           {git.commits.map((commit) => (
             <li key={commit.hash}>
@@ -618,7 +630,7 @@ function GitContent({
   return (
     <>
       <p className="text-secondary">
-        Contributors in the latest {git.commits.length} commits
+        Contributors in the latest {commitCount(git.commits.length)}
       </p>
       <ul className="repo-list">
         {[...counts]
@@ -626,7 +638,7 @@ function GitContent({
           .map(([name, count]) => (
             <li key={name}>
               <span>{name}</span>
-              <small>{count} commits</small>
+              <small>{commitCount(count)}</small>
             </li>
           ))}
       </ul>

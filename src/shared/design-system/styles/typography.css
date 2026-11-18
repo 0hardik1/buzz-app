@@ -68,7 +68,7 @@
   /* Message prose and composer text share one compact reading rhythm. */
   --text-message: var(--type-size-14);
   --text-message--line-height: 1.5357142857142858;
-  --text-message--letter-spacing: 0em;
+  --text-message--letter-spacing: -0.01em;
   --text-message--font-weight: var(--type-weight-normal);
   --text-label: var(--type-size-16);
   --text-label--line-height: 1.5;

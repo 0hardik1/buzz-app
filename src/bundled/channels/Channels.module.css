@@ -104,20 +104,6 @@
   gap: var(--space-half);
   margin-bottom: var(--space-3);
 }
-.sidebarFilter > .destinations {
-  margin-bottom: calc(var(--space-3) + var(--space-2));
-}
-@media (hover: hover) and (pointer: fine) {
-  .sidebar [data-icon-variant="ghost"]:hover:not([data-disabled]) {
-    background: var(--affordance-panel-hover);
-  }
-}
-.sidebar
-  [data-icon-variant="ghost"]:is(:active, [aria-expanded="true"]):not(
-    [data-disabled]
-  ) {
-  background: var(--affordance-panel-hover);
-}
 .sidebarIcon > :is(svg, img) {
   max-width: 100%;
   max-height: 100%;
@@ -346,6 +332,11 @@
 .channelSection + .channelSection {
   margin-top: var(--space-4);
 }
+[data-sidebar-slot]:has(> .channelSection)
+  ~ [data-sidebar-slot]
+  > .channelSection:first-child {
+  margin-top: var(--space-4);
+}
 .channelSection[data-drop-target] {
   border-radius: var(--radius-row);
   background: var(--affordance-panel-hover);
@@ -491,11 +482,6 @@ body:has([data-create-section-drop][data-drop-target]) .channelDragOverlay {
 }
 details:not([open]) > summary .sectionChevron {
   transform: rotate(-90deg);
-}
-@media (hover: none) {
-  .channelList {
-    scrollbar-color: var(--scrollbar-thumb-quiet) transparent;
-  }
 }
 .preferenceNotice {
   padding: var(--space-2);
@@ -725,29 +711,12 @@ details:not([open]) > summary .sectionChevron {
   width: 0;
   height: 1em;
   vertical-align: middle;
-  opacity: 0;
-  transform: translateX(calc(-1 * var(--space-1)));
-  transition:
-    opacity var(--duration-state) var(--easing-state),
-    transform var(--duration-state) var(--easing-state);
 }
 .settingsTitlePencil > svg {
   position: absolute;
   inset-inline-start: var(--space-2);
   top: 50%;
   transform: translateY(-50%);
-}
-.settingsTitleAction[aria-busy="true"] .settingsTitlePencil,
-.settingsTitleAction:hover .settingsTitlePencil,
-.settingsTitleAction:focus-visible .settingsTitlePencil {
-  opacity: 1;
-  transform: translateX(0);
-}
-@media (hover: none) {
-  .settingsTitlePencil {
-    opacity: 1;
-    transform: none;
-  }
 }
 .settingsIcon {
   display: grid;
@@ -804,39 +773,21 @@ details:not([open]) > summary .sectionChevron {
 .settingsDetailIcon {
   display: inline-flex;
   color: var(--text-subtle);
-  opacity: 0;
-  transform: translateX(calc(-1 * var(--space-1)));
-  transition:
-    opacity var(--duration-state) var(--easing-state),
-    transform var(--duration-state) var(--easing-state);
 }
-.settingsDetailAction[aria-busy="true"] .settingsDetailIcon,
-.settingsDetailAction:hover .settingsDetailIcon,
-.settingsDetailAction:focus-visible .settingsDetailIcon,
-.settingsDetails > div:hover .settingsLabelAction .settingsDetailIcon {
-  opacity: 1;
-  transform: translateX(0);
+html[data-keyboard-navigation] .settingsTitleAction:focus-visible,
+html[data-keyboard-navigation] .settingsLabelAction:focus-visible {
+  border-radius: var(--radius-control);
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
 }
-@media (hover: none) {
-  .settingsDetailIcon {
-    opacity: 1;
-    transform: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .settingsTitlePencil,
-  .settingsTitleAction:hover .settingsTitlePencil,
-  .settingsTitleAction:focus-visible .settingsTitlePencil,
-  .settingsDetailIcon,
-  .settingsDetailAction:hover .settingsDetailIcon,
-  .settingsDetailAction:focus-visible .settingsDetailIcon,
-  .settingsDetails > div:hover .settingsLabelAction .settingsDetailIcon {
-    transform: none;
-    transition: none;
-  }
-}
-.settingsDetailAction:focus-visible {
+.settingsDetailAction:not(.settingsLabelAction):focus-visible {
   outline: none;
+}
+html[data-keyboard-navigation]
+  .settingsDetails
+  > div:has(.settingsDetailAction:not(.settingsLabelAction):focus-visible) {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
 }
 .settingsDetailAction:not(.settingsLabelAction)::after {
   content: "";
@@ -857,6 +808,11 @@ details:not([open]) > summary .sectionChevron {
 .settingsDetails dd {
   margin: var(--space-1) 0 0;
   color: var(--text-subtle);
+}
+.settingsAccess {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 /* The switch trails its description; an error spans the row below both. */
 .settingsSwitch > dd {
@@ -1118,44 +1074,30 @@ details:not([open]) > summary .sectionChevron {
   min-height: 0;
 }
 
-/* Hovered and selected rows take the row's paired ink, so navigation text
-   follows the fill instead of staying gray on an accent row. Selection has
-   its own ink: in dark mode it carries the accent on a neutral fill.
-   A row owner (a channel row or Solo chat row with its attached actions)
-   holds exactly one row, so hovering its actions still inks that row.
-   Structural selectors such as `:hover > * > row` also match a hovered
-   list and would ink every row in it. */
-.sidebar [data-variant="row"]:hover,
-.sidebar
-  :is([data-channel-sidebar-row], [data-solo-menu-id]):hover
-  [data-variant="row"]:not([data-selected]) {
-  color: var(--text-row);
-}
-.sidebar [data-variant="row"][data-selected],
-.sidebar
-  :is([data-channel-sidebar-row], [data-solo-menu-id])[data-selected]
-  [data-variant="row"] {
-  color: var(--text-row-selected);
-}
-
-/* A selected destination carries its fill's ink. Small status/count badges
-   use a quieter paired surface so working never resembles the overflow glyph. */
-.sidebar [data-selected],
-.sidebar
-  :is([data-channel-sidebar-row], [data-solo-menu-id]):has(
-    [aria-current="page"]
-  ) {
-  --text-standard: var(--text-row-selected);
-}
-.sidebar [data-selected] :is(.dmCount, .typing, .thinkingBadge) {
+/* Small status/count badges on a selected sidebar destination use a quieter
+   paired surface so working never resembles the overflow glyph. */
+[class~="buzz-sidebar-navigation"]
+  [data-selected]
+  :is(.dmCount, .typing, .thinkingBadge) {
   background: var(--surface-row-selected-detail);
   color: var(--text-row-selected-detail);
 }
-.sidebar [data-selected] .typing > span {
+[class~="buzz-sidebar-navigation"] [data-selected] .typing > span {
   background: currentColor;
 }
 .sidebar [data-selected] :is(.priorityDot, .threadActivityDot) {
   box-shadow: 0 0 0 var(--space-half) var(--surface-rail-card);
+}
+[class~="buzz-sidebar-navigation"]
+  [data-selected]
+  :is(.priorityDot, .threadActivityDot) {
+  background: var(--text-row-selected);
+}
+
+/* Feather only message history, with the shared always-on scroll fade; the
+   header and composer stay sharp. */
+.conversation [data-message-scroller] {
+  mask-image: var(--scroll-fade-always);
 }
 
 .conversationBody {

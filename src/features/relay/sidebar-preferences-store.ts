@@ -9,6 +9,8 @@ import type {
   SidebarSectionRemovalMutator,
   SidebarSectionRenameMutator,
   SidebarSectionCreationMutator,
+  SidebarSectionDraft,
+  SidebarSectionEdit,
   SidebarMuteMutator,
   SidebarPreferences,
 } from "./sidebar-preferences";
@@ -135,6 +137,7 @@ export function createSidebarPreferencesStore({
         const section = {
           id: created.id,
           name: created.name.trim(),
+          ...(created.icon === undefined ? {} : { icon: created.icon }),
           order:
             created.position === "first"
               ? Math.min(0, ...sections.map(({ order }) => order)) - 1
@@ -250,6 +253,9 @@ export function createSidebarPreferencesStore({
               return;
             }
             if (invalidation !== refreshInvalidation) continue;
+            // Reconciliation installs current preferences, not confirmation of
+            // the failed creation. Its caller retains the error and exact draft;
+            // a conflicting retry is rejected by the existing writer policy.
             if (authoritative) reconciled = refreshInvalidation;
             readFailure = undefined;
             creationUncertain = false;
@@ -523,11 +529,23 @@ export function createSidebarPreferencesStore({
       get sectionRenameWritable() {
         return renameWritable();
       },
-      renameSection(sectionId: string, name: string) {
+      renameSection(
+        sectionId: string,
+        edit: string | SidebarSectionEdit,
+        expectedName?: string,
+      ) {
         if (!renameWritable() || !renameSection)
-          return Promise.reject(new Error("Section rename is unavailable"));
-        return writeGroups("Section rename is unavailable", (signal) =>
-          renameSection({ sectionId, name }, signal),
+          return Promise.reject(new Error("Section edit is unavailable"));
+        const changes = typeof edit === "string" ? { name: edit } : edit;
+        return writeGroups("Section edit is unavailable", (signal) =>
+          renameSection(
+            {
+              sectionId,
+              ...changes,
+              ...(expectedName === undefined ? {} : { expectedName }),
+            },
+            signal,
+          ),
         );
       },
       get sectionCreationWritable() {
@@ -538,17 +556,15 @@ export function createSidebarPreferencesStore({
           !!(createSection || write)
         );
       },
-      createSection(section: Readonly<{ id: string; name: string }>) {
+      createSection(section: SidebarSectionDraft) {
         const failure = groupsOnly
           ? "Workspaces are unavailable"
           : "Section creation is unavailable";
         const create =
           createSection ??
           (write
-            ? (
-                section: Readonly<{ id: string; name: string }>,
-                signal: AbortSignal,
-              ) => write({ createSection: section }, signal)
+            ? (section: SidebarSectionDraft, signal: AbortSignal) =>
+                write({ createSection: section }, signal)
             : undefined);
         if (!writable() || creationUncertain || snapshot.cached || !create)
           return Promise.reject(new Error(failure));

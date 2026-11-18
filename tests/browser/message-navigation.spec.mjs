@@ -375,7 +375,7 @@ for (const nested of [false, true])
             intercepted = resolve;
           });
           let first = true;
-          await page.route("**/api/relay/**/query", async (route) => {
+          await page.route("**/api/relay/primary/query", async (route) => {
             if (
               !first ||
               !route
@@ -508,7 +508,7 @@ test("superseding a held exact read cancels it; a late response cannot steal foc
   const held = new Promise((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/relay/**/query", async (route) => {
+  await page.route("**/api/relay/primary/query", async (route) => {
     const filters = route.request().postDataJSON();
     if (!filters?.some((filter) => filter.ids?.includes(app.exact.target.id)))
       return route.continue();
@@ -563,7 +563,7 @@ for (const selected of ["reply", "root"]) {
     let reconnecting = false;
     let rosterRequested = false;
     let exactReads = 0;
-    await page.route("**/api/relay/**/query", async (route) => {
+    await page.route("**/api/relay/primary/query", async (route) => {
       const filters = route.request().postDataJSON();
       if (
         reconnecting &&
@@ -865,7 +865,7 @@ readTest(
     const seen = new Promise((resolve) => {
       intercepted = resolve;
     });
-    await page.route("**/api/relay/**/query", async (route) => {
+    await page.route("**/api/relay/primary/query", async (route) => {
       if (
         !route
           .request()
@@ -1156,7 +1156,7 @@ liveTest(
         .postDataJSON()
         .some((filter) => filter.ids?.includes(app.exact.target.id));
     let first = true;
-    await page.route("**/api/relay/**/query", async (route) => {
+    await page.route("**/api/relay/primary/query", async (route) => {
       if (!first || !isExactQuery(route.request())) return route.continue();
       first = false;
       seen.resolve();

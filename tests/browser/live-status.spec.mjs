@@ -49,7 +49,9 @@ test.describe("held setup", () => {
     await expect.poll(() => app.relay.hasRoute("primary", "beta")).toBe(true);
     await expect(warning).toHaveCount(0);
     const streams = () =>
-      app.report.brokerRequests.filter((r) => r.url.endsWith("/stream")).length;
+      app.report.brokerRequests.filter(
+        (r) => r.url === "/api/relay/primary/stream",
+      ).length;
     const before = streams();
     await channelRow(page, "beta").click();
     await expect(
@@ -149,9 +151,13 @@ for (const target of ["alpha", "profiles"]) {
         (r) => r.community === "primary" && r.routes.includes(target),
       );
     const streams = () =>
-      app.report.brokerRequests.filter((r) => r.url.endsWith("/stream")).length;
+      app.report.brokerRequests.filter(
+        (r) => r.url === "/api/relay/primary/stream",
+      ).length;
     const streamCount = streams();
-    const sockets = app.relay.sockets.length;
+    const sockets = app.relay.sockets.filter(
+      (s) => s.community === "primary",
+    ).length;
     for (let attempt = 0; attempt < 4; attempt++) {
       const before = requests().length;
       app.relay.failRoute("primary", target, rejected);
@@ -223,7 +229,9 @@ for (const target of ["alpha", "profiles"]) {
     ).toBeVisible();
     await expect(warning).toHaveCount(0);
     expect(streams()).toBe(streamCount);
-    expect(app.relay.sockets).toHaveLength(sockets);
+    expect(
+      app.relay.sockets.filter((s) => s.community === "primary"),
+    ).toHaveLength(sockets);
   });
 }
 
@@ -299,8 +307,13 @@ test("long recovery stays above the composer at enlarged text size", async ({
 async function openDiagnostics(page) {
   // A quick reopen can retain the outgoing settings DOM during its exit.
   const summary = page.getByText("Diagnostics", { exact: true });
-  if ((await summary.locator("..").getAttribute("open")) === null)
-    await summary.click();
+  // A recovery toast can cover the bottom of Channel settings.
+  if ((await summary.locator("..").getAttribute("open")) === null) {
+    await summary.focus();
+    await page.keyboard.press("Enter");
+    // Move the mouse off Channel actions, which a wider viewport puts over Activity's hover preview.
+    await summary.hover({ force: true });
+  }
   await expect(summary.locator("..")).toHaveAttribute("open", "");
 }
 
@@ -344,7 +357,7 @@ test.describe("public preview recovery", () => {
     const headGate = new Promise((resolve) => {
       releaseHead = resolve;
     });
-    await page.route("**/api/relay/**/query", async (route) => {
+    await page.route("**/api/relay/primary/query", async (route) => {
       const isPreviewHead = route
         .request()
         .postDataJSON()

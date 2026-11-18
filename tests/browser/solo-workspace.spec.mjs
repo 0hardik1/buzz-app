@@ -157,7 +157,7 @@ test.describe("personal recipients", () => {
       releaseHead = resolve;
     });
     let readHead = false;
-    await page.route("**/api/relay/**/query", async (route) => {
+    await page.route("**/api/relay/primary/query", async (route) => {
       if (
         !route
           .request()
