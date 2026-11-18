@@ -41,54 +41,55 @@ export type CompletionMatch = Readonly<{
   provider: Contribution<ComposerCompletion>;
   query: CompletionQuery;
 }>;
-const order = (value: ComposerCompletion) =>
-  Number.isFinite(value.order) ? (value.order ?? 0) : 0;
-/** Provider precedence: `order`, then contribution key. */
-export const byOrder = (
-  a: Contribution<ComposerCompletion>,
-  b: Contribution<ComposerCompletion>,
-) => order(a) - order(b) || a.key.localeCompare(b.key);
 export function matchCompletion(
   providers: readonly Contribution<ComposerCompletion>[],
   observation: ComposerObservation,
   context: CompletionContext,
   resolved: readonly Readonly<{ start: number; end: number }>[] = [],
-): (CompletionMatch & { supplements: readonly CompletionMatch[] }) | undefined {
-  let winner: CompletionMatch | undefined;
-  const supplements: CompletionMatch[] = [];
-  for (const provider of [...providers].sort(byOrder)) {
+) {
+  const order = (value: ComposerCompletion) =>
+    Number.isFinite(value.order) ? (value.order ?? 0) : 0;
+  const matches: CompletionMatch[] = [];
+  for (const provider of [...providers].sort(
+    (a, b) => order(a) - order(b) || a.key.localeCompare(b.key),
+  )) {
     try {
       const query = provider.match(observation, context);
       // A later trigger owns the caret over a broad earlier query (e.g.
       // @Mary Jane :smile). Order/key resolve providers claiming the same start.
       // A trigger inside a resolved chip is not an open query.
       if (
-        !validQuery(query, observation) ||
-        resolved.some(
+        validQuery(query, observation) &&
+        !resolved.some(
           (span) => span.start <= query.start && query.start < span.end,
         )
       )
-        continue;
-      const match = Object.freeze({
-        provider,
-        query: Object.freeze({
-          start: query.start,
-          end: query.end,
-          query: query.query,
-        }),
-      });
-      if (provider.supplement === true) supplements.push(match);
-      else if (!winner || query.start > winner.query.start) winner = match;
+        matches.push({
+          provider,
+          query: Object.freeze({
+            start: query.start,
+            end: query.end,
+            query: query.query,
+          }),
+        });
     } catch {
       /* A broken optional matcher cannot break editing. */
     }
   }
+  const owners = matches.filter(({ provider }) => provider.supplement !== true);
+  const start = Math.max(...owners.map(({ query }) => query.start));
+  const winner = owners.find(({ query }) => query.start === start);
+  // The winner and its supplements, in provider precedence.
+  const sources = matches.filter(
+    (match) =>
+      match === winner ||
+      (match.provider.supplement === true && match.query.start === start),
+  );
   return (
     winner && {
       ...winner,
-      supplements: supplements.filter(
-        (match) => match.query.start === winner.query.start,
-      ),
+      sources,
+      supplements: sources.filter((match) => match !== winner),
     }
   );
 }
