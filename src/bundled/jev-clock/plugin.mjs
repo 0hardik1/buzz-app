@@ -3,11 +3,12 @@
 // the ones worth seeing float in around the clock. Click one to read and reply
 // in place; it is marked read and leaves the canvas.
 //
-// Prototype, ported from the installed plugin as it ran: a plain ES module
-// that takes React from ctx.react and has no runtime imports.
+// Prototype, ported from the installed plugin as it ran:
+// one plain module with injected styles. Bundled, it imports React itself.
+
+import * as React from "react";
 
 export const inject = [
-  "react",
   "pages",
   "relay",
   "decisions",
@@ -143,7 +144,7 @@ function clip(text, n) {
   const flat = String(text || "")
     .replace(/\s+/g, " ")
     .trim();
-  return flat.length > n ? flat.slice(0, n - 1) + "…" : flat;
+  return flat.length > n ? `${flat.slice(0, n - 1)}…` : flat;
 }
 function tag(event, name) {
   const found = event.tags.find((t) => t[0] === name);
@@ -588,7 +589,6 @@ const PALETTE = [
 // ---------------------------------------------------------------------------
 
 export function apply(ctx) {
-  const React = ctx.react;
   const h = React.createElement;
   const {
     useState,
@@ -1061,7 +1061,7 @@ export function apply(ctx) {
           if (dm) timing.dmEvents++;
           if (event.pubkey === viewer) continue;
           const item = ingest(event, "history");
-          if (!item || item.mode !== "history") continue;
+          if (item?.mode !== "history") continue;
           touched.add(item);
           if (dm) {
             timing.dmMessages++;
@@ -3134,29 +3134,27 @@ export function apply(ctx) {
       h(
         "ul",
         null,
-        log
-          .slice(0, 120)
-          .map((entry, i) =>
+        log.slice(0, 120).map((entry, i) =>
+          h(
+            "li",
+            { key: `${entry.at}-${i}` },
             h(
-              "li",
-              { key: `${entry.at}-${i}` },
-              h(
-                "span",
-                {
-                  className: "jc-s",
-                  "data-shown": entry.shown ? "" : undefined,
-                },
-                entry.failed ? "—" : entry.p.toFixed(2),
-              ),
-              h("b", null, entry.from),
-              h(
-                "span",
-                { className: "jc-w" },
-                ` · ${entry.where}${entry.messages > 1 ? ` · ${entry.messages} unread` : ""} · ${entry.mode}${entry.reused ? " · reused" : ""}${entry.failed ? ` · ${entry.failed}, shown` : ""}`,
-              ),
-              h("div", null, entry.text),
+              "span",
+              {
+                className: "jc-s",
+                "data-shown": entry.shown ? "" : undefined,
+              },
+              entry.failed ? "—" : entry.p.toFixed(2),
             ),
+            h("b", null, entry.from),
+            h(
+              "span",
+              { className: "jc-w" },
+              ` · ${entry.where}${entry.messages > 1 ? ` · ${entry.messages} unread` : ""} · ${entry.mode}${entry.reused ? " · reused" : ""}${entry.failed ? ` · ${entry.failed}, shown` : ""}`,
+            ),
+            h("div", null, entry.text),
           ),
+        ),
       ),
     );
   }
@@ -3500,7 +3498,7 @@ export function apply(ctx) {
         root.style.clipPath = `inset(${-(rect.top - origin.top)}px ${-(origin.right - rect.right)}px ${-(origin.bottom - rect.bottom)}px ${-(rect.left - origin.left)}px)`;
       }
     };
-    React.useLayoutEffect(() => {
+    useLayoutEffect(() => {
       const root = rootRef.current;
       const shell = root?.closest(".shell-background");
       if (!root || !shell) {
