@@ -23,6 +23,9 @@ jobs:
     if: github.event_name != 'workflow_dispatch'
     name: JavaScript (${{ matrix.shard }}/8)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
     # Vitest shards by path hash and equal file count, not duration, so slow
     # files can share one. At six, 5/6 held the live-continuity model and
     # ChannelMembersDialog suites and reached this deadline; seven still
@@ -42,10 +45,31 @@ jobs:
       # check already ran TypeScript; do not repeat pnpm build's typecheck.
       - name: Frontend build
         run: ./bin/pnpm exec vite build
+      # The intake mapping must also restrict issuance to this workflow on main pushes.
+      - name: Get Datadog intake key via OIDC
+        id: datadog
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DD_ORG_UUID != ''
+        uses: DataDog/datadog-workload-identity-federation-github-action/intake@08e47f7c6f805efc5eef19953e33c523915acd85
+        with:
+          org_uuid: ${{ vars.DD_ORG_UUID }}
+          site: datadoghq.com
       - name: Vitest shard
         env:
           # Bound contention between suites that sign and verify large fixtures.
           BUZZ_TEST_WORKERS: "2"
+          DD_API_KEY: ${{ steps.datadog.outputs.api_key }}
+          DD_CIVISIBILITY_AGENTLESS_ENABLED: ${{ steps.datadog.outputs.api_key != '' }}
+          DD_SITE: datadoghq.com
+          DD_SERVICE: buzz-app
+          DD_ENV: ci
+          DD_TEST_SESSION_NAME: vitest
+          # CI owns test selection and retries. Datadog only reports results.
+          DD_CIVISIBILITY_ITR_ENABLED: "false"
+          DD_CIVISIBILITY_FLAKY_RETRY_ENABLED: "false"
+          DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED: "false"
+          DD_TEST_MANAGEMENT_ENABLED: "false"
+          DD_TEST_FAILED_TEST_REPLAY_ENABLED: "false"
+          NODE_OPTIONS: ${{ steps.datadog.outputs.api_key != '' && '--import dd-trace/register.js -r dd-trace/ci/init' || '' }}
         run: ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/ci/vitest.json evidence=test-results/ci/vitest-timing.json title="Vitest shard ${{ matrix.shard }}/8" -- ./bin/pnpm exec vitest run --shard=${{ matrix.shard }}/8 --reporter=default --reporter=json --outputFile=test-results/ci/vitest.json
       - name: Vitest timing evidence
         if: always()
