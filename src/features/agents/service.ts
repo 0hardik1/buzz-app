@@ -2181,15 +2181,16 @@ export class AgentsService extends Service implements Agents {
         : undefined;
     const conversation = trigger && conversationOf(trigger);
     const running = this.state.running.find((each) => each.key === agent);
+    // Frozen: each hook in turn reads what core attested.
     return dispatchAgentHooks(
       this.hookContributions.handlers(harness, event),
       input,
-      {
+      Object.freeze({
         agent,
         session,
         ...(trigger && { direct: directTrigger(trigger, running?.owner) }),
-        ...(conversation && { conversation }),
-      },
+        ...(conversation && { conversation: Object.freeze(conversation) }),
+      }),
       options.accepts,
       options.milliseconds,
       options.compose,
