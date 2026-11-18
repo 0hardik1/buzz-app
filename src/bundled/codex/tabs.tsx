@@ -1504,7 +1504,7 @@ export function createTabs(
               description={
                 bound
                   ? "The adapter selects a workspace for each conversation session."
-                  : "Codex starts here with full access to your files and network. Buzz tools run inside the app. Inherited MCP tools are disabled."
+                  : "Codex starts here with full access to your files and network. Buzz tools run inside the app. MCP servers load as your Codex configuration says."
               }
             >
               <Input

@@ -1,6 +1,6 @@
 # Harness MCP servers
 
-Each harness has its own default for the MCP servers in its configuration: Codex threads in Buzz load none of them, Claude Code loads its own. One optional plugin may override that default for an agent. With no such plugin enabled, launches, thread configuration and behavior are unchanged, and no launch waits for one.
+Each harness has its own default for the MCP servers in its configuration. Codex and Claude Code both load the servers their configuration turns on, except for a protected agent, which loads none. One optional plugin may override that default for an agent. With no such plugin enabled, launches, thread configuration and behavior are unchanged, and no launch waits for one. When the owner disables or removes that plugin, each harness's default applies again, including to servers the plugin had turned off.
 
 ## Plugin API
 
@@ -28,14 +28,14 @@ Such a check is only as strong as the harness's hooks. Codex runs a call when it
 
 ## Adapters
 
-A type declares `harnessMcp: { report(agent), inspect?(agent, server) }`, or `harnessMcp: { client: false }` when its harness has no MCP client (Pi). `report` names servers from the harness's own configuration without starting any. An adapter asks `agents.harness.mcp.choice(agent)` when it launches a session and applies the answer; execution targets report and apply nothing.
+A type declares `harnessMcp: { report(agent), inspect?(agent, server) }`, or `harnessMcp: { client: false }` when its harness has no MCP client (Pi). `report` names servers from the harness's own configuration without starting any. An adapter asks `agents.harness.mcp.choice(agent)` when it launches a session and applies the answer; execution targets report and apply nothing, so a session there loads what the remote host's configuration turns on.
 
 ### Codex
 
-- Names come from `config/read`. A server chosen on has no thread entry, so `config.toml` applies; with `{ off, known }` it gets `off` as `disabled_tools` (joined with its own). Codex can leave out single tools, so it ignores `known`. Every other server keeps `enabled: false`. Buzz never sends `enabled: true` and never sends a name `config/read` does not list.
+- Names come from `config/read`. A server chosen on has no thread entry, so `config.toml` applies; with `{ off, known }` it gets `off` as `disabled_tools` (joined with its own). Codex can leave out single tools, so it ignores `known`. A server chosen off gets `enabled: false`. A name the choice leaves out has no entry, as with no choice, except for a protected agent, whose every server gets `enabled: false`. Buzz never sends `enabled: true` and never sends a name `config/read` does not list.
 - A server with `enabled: false` is not started by Codex (checked against 0.164.0 and 0.167.2).
-- The read-back calls `mcpServerStatus/list` once for each `config/read` name, with the thread's `threadId` and that `serverName`, which reads the thread's own connection. Without a `serverName`, or without a `threadId`, that call starts servers again, so Buzz never makes it that way. A name the choice leaves out is checked as off. With no choice Buzz makes no status call.
-- Compaction resumes its thread with every server off, and reads that back when a choice is in play.
+- The read-back calls `mcpServerStatus/list` once for each `config/read` name, with the thread's `threadId` and that `serverName`, which reads the thread's own connection. Without a `serverName`, or without a `threadId`, that call starts servers again, so Buzz never makes it that way. A name the choice leaves out is checked as the report's default. With no choice Buzz makes no status call.
+- Compaction resumes its thread with every server off, with or without a choice, and reads that back when a choice is in play.
 - The report names servers only. The read-back passes each loaded server's state and tools, with descriptions, to `started`, so the control's `loaded` gets them. `inspect` runs an ephemeral thread with every other server `enabled: false` and `thread_unload_delay_secs: 0`, reads status for that `threadId`, then unsubscribes, so Codex unloads the thread and stops its server. No turn runs and nothing is saved.
 - `state` is `disabled` only when `config/read` shows `enabled = false`; a server Buzz turned off in a thread has no state.
 - The chat-title thread turns every listed server off by name.

@@ -780,12 +780,10 @@ it("hands over promptly and runs conversations independently on one server", asy
       },
     },
   });
-  expect((started.config as Record<string, unknown>).mcp_servers).toEqual({
-    "company.tools": { enabled: false, command: "secret-tool" },
-  });
+  // The agent's own server has no entry, so its Codex configuration applies.
+  expect((started.config as Record<string, unknown>).mcp_servers).toEqual({});
   expect(started.config).toMatchObject({
     web_search: "disabled",
-    mcp_servers: { "company.tools": { enabled: false } },
     "features.apps": false,
     "features.plugins": false,
   });
@@ -809,11 +807,8 @@ it("leaves Codex's Apps and plugins to its configuration only for an agent that 
   const { config } = started;
   expect(config).not.toHaveProperty("features.apps");
   expect(config).not.toHaveProperty("features.plugins");
-  // Everything else inherited stays off.
-  expect(config).toMatchObject({
-    web_search: "disabled",
-    mcp_servers: { "company.tools": { enabled: false } },
-  });
+  // Web search stays off.
+  expect(config).toMatchObject({ web_search: "disabled" });
   f.complete(0, "DONE");
   await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
 });
@@ -829,7 +824,14 @@ it("keeps Codex's Apps and plugins off for a protected agent that allows them", 
     expect(
       f.worker.sent.find((wire) => wire.method === "thread/start")?.params,
     ).toMatchObject({
-      config: { "features.apps": false, "features.plugins": false },
+      config: {
+        "features.apps": false,
+        "features.plugins": false,
+        // With no control, a protected agent's own servers stay off too.
+        mcp_servers: {
+          "company.tools": { enabled: false, command: "secret-tool" },
+        },
+      },
     });
     await f.worker.complete(0, "");
   } finally {
@@ -8027,9 +8029,7 @@ describe("harness MCP choice", () => {
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
     expect(kit.choice).toHaveBeenCalledOnce();
     expect(threadConfig(f)).toEqual(threadConfig(plain));
-    expect(threadConfig(f).mcp_servers).toEqual({
-      "company.tools": { command: "secret-tool", enabled: false },
-    });
+    expect(threadConfig(f).mcp_servers).toEqual({});
     expect(f.sent.map((wire) => wire.method)).toEqual(
       plain.sent.map((wire) => wire.method),
     );
@@ -8060,12 +8060,12 @@ describe("harness MCP choice", () => {
     f.servers.beta = server("beta", { disabled_tools: ["delete"] })[1];
     await f.runtime.run(f.delivery("@Codex hello"));
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
-    // Alpha has no entry, so `config.toml` applies; beta keeps its own list
-    // too; the rest stay off as before. Nothing is forced on.
+    // Alpha and delta, which the choice leaves out, have no entry, so
+    // `config.toml` applies; beta keeps its own list too; gamma is off.
+    // Nothing is forced on.
     expect(threadConfig(f).mcp_servers).toEqual({
       beta: { disabled_tools: ["delete", "write"] },
       gamma: off("gamma"),
-      delta: off("delta"),
     });
   });
 
@@ -8074,6 +8074,7 @@ describe("harness MCP choice", () => {
       ghost: true,
       phantom: { off: ["x"], known: ["x"] },
       alpha: true,
+      beta: false,
     });
     const f = fixture(
       [],
@@ -8160,7 +8161,8 @@ describe("harness MCP choice", () => {
     expect(order.indexOf("mcpServerStatus/list")).toBeLessThan(
       order.indexOf("turn/start"),
     );
-    // A server that is off is not loaded, so only alpha is listed.
+    // A server that is off is not loaded, so only alpha is listed. Beta,
+    // left out, is read back as the default: on.
     expect(started).toHaveBeenCalledWith(
       expect.objectContaining({ key: pubkey }),
       "thread-1",
@@ -8171,7 +8173,7 @@ describe("harness MCP choice", () => {
           tools: [{ name: "read", description: "Reads" }, { name: "write" }],
         },
       ],
-      { alpha: true, beta: false },
+      { alpha: true, beta: true },
     );
   });
 
@@ -8274,9 +8276,9 @@ describe("harness MCP choice", () => {
     asSoloChat(f);
     await f.runtime.run({ ...f.delivery("@Codex fix it"), named: vi.fn() });
     await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    // The conversation leaves gamma to `config.toml`; the title turns it off.
     expect(threadConfig(f, 0).mcp_servers).toEqual({
       beta: { disabled_tools: ["write"] },
-      gamma: off("gamma"),
     });
     expect(threadConfig(f, 1).mcp_servers).toEqual({
       alpha: off("alpha"),
@@ -8380,6 +8382,47 @@ describe("harness MCP choice", () => {
     await compacted;
   });
 
+  it("compacts with every server off when nothing chooses, without a status call", async () => {
+    const f = fixture();
+    withServers(f, "alpha");
+    const delivery = f.delivery("first");
+    const agent = {
+      ...delivery.agent,
+      config: delivery.config,
+    } as unknown as Agent;
+    const place = { channelId: "channel", root };
+    await f.runtime.run(delivery);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    // The conversation leaves alpha to `config.toml`; compaction turns it off.
+    expect(threadConfig(f).mcp_servers).toEqual({});
+    await f.complete();
+    await vi.waitFor(() =>
+      expect(f.runtime.sessionState(agent, place)).toBe("idle"),
+    );
+    const compacted = f.runtime
+      .session(agent, place, "compact")
+      .catch((error) => error);
+    await vi.waitFor(() =>
+      expect(f.sent.map((wire) => wire.method)).toContain(
+        "thread/compact/start",
+      ),
+    );
+    const resumes = f.sent.filter((wire) => wire.method === "thread/resume");
+    expect(
+      (
+        resumes.at(-1)?.params as
+          | { config: Record<string, unknown> }
+          | undefined
+      )?.config.mcp_servers,
+    ).toEqual({ alpha: off("alpha") });
+    expect(statusCalls(f)).toEqual([]);
+    await f.runtime.session(agent, place, "interrupt");
+    f.emit({
+      method: "turn/started",
+      params: { threadId: "thread-1", turn: { id: "compact" } },
+    });
+    await compacted;
+  });
   it("reads the same choice for a watch's one-off thread, before its turn", async () => {
     const started = vi.fn();
     const kit = mcpKit({ alpha: true }, started);
@@ -8409,13 +8452,15 @@ describe("harness MCP choice", () => {
       prompt: async () => "check",
     });
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
-    expect(threadConfig(f).mcp_servers).toEqual({ beta: off("beta") });
+    expect(threadConfig(f).mcp_servers).toEqual({});
+    // Unsubscribing unloads it at once, which stops the servers it started.
+    expect(threadConfig(f).thread_unload_delay_secs).toBe(0);
     expect(started).toHaveBeenCalledWith(
       expect.objectContaining({ key: pubkey }),
       "thread-1",
       [{ name: "alpha", state: "connected", tools: [] }],
-      // A name the choice leaves out is checked as off, Codex's default.
-      { alpha: true, beta: false },
+      // A name the choice leaves out is checked as the default: on.
+      { alpha: true, beta: true },
     );
   });
 });
@@ -8436,7 +8481,7 @@ describe("harness MCP report and inspect", () => {
     expect(report).toEqual({
       tools: true,
       servers: [
-        { name: "alpha", default: false },
+        { name: "alpha", default: true },
         { name: "beta", default: false, state: "disabled" },
       ],
     });

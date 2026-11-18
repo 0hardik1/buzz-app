@@ -80,7 +80,7 @@ const nativeSpawn = async (_id, options = {}) => {
       "-c",
       'web_search="live"',
       "-c",
-      `mcp_servers={"fixture.tools"={command="sh",args=["-c",${JSON.stringify(`touch '${join(workspace, "mcp-must-not-start")}'`)}]}}`,
+      `mcp_servers={"fixture.tools"={command="sh",args=["-c",${JSON.stringify(`touch '${join(workspace, "mcp-started")}'`)}]}}`,
     ],
     {
       // Like the desktop host, expand ~ in a process's working directory.
@@ -410,12 +410,13 @@ try {
   assert.match(published.at(-1).content, /SETTINGS_CLEARED/);
   assert.doesNotMatch(published.at(-1).content, /INSTRUCTIONS_UPDATED/);
   assert.equal(binding().threadId, saved.threadId);
-  assert.equal(await exists("mcp-must-not-start"), false);
+  // The configuration's own server loads, as Claude Code's do.
+  assert.equal(await exists("mcp-started"), true);
   assert(!notices.some((wire) => wire.params?.item?.type === "mcpToolCall"));
   assert(!notices.some((wire) => wire.method === "item/agentMessage/delta"));
   assert(sent.some((wire) => wire.method === "thread/unsubscribe"));
   console.log(
-    "PASS set and cleared instructions on resume, inherited MCP disabled, response deltas suppressed",
+    "PASS set and cleared instructions on resume, configured MCP server loaded, response deltas suppressed",
   );
   await runtime.run(
     delivery(

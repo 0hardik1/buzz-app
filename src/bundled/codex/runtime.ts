@@ -848,7 +848,7 @@ export class CodexRuntime {
         {},
         undefined,
         home,
-        choice && "none",
+        "none",
       );
       try {
         signal.throwIfAborted();
@@ -859,7 +859,7 @@ export class CodexRuntime {
           excludeTurns: true,
         });
         signal.throwIfAborted();
-        await this.verifyMcp(rpc, who, thread.threadId, applied);
+        await this.verifyMcp(rpc, who, thread.threadId, choice && applied);
         await this.compact(rpc, signal, thread.threadId, agent.key, key);
         this.status(agent.key, key, "Idle");
       } catch (error) {
@@ -976,7 +976,7 @@ export class CodexRuntime {
       ...(calls && { calls: true as const }),
       servers: Object.entries(servers).map(([name, server]) => ({
         name,
-        default: false,
+        default: server.enabled !== false,
         ...(server.enabled === false && { state: "disabled" as const }),
       })),
     };
@@ -2327,6 +2327,8 @@ export class CodexRuntime {
         "thread/start",
         {
           ...params,
+          // Unloads once unsubscribed, which stops the servers it started.
+          config: { ...params.config, thread_unload_delay_secs: 0 },
           ephemeral: true,
           dynamicTools: dynamicTools(this.added(agent.key)),
         },
@@ -2930,14 +2932,12 @@ export class CodexRuntime {
     );
     // A server chosen on has no entry, so `config.toml` applies; with `off`
     // tools it keeps its own disabled tools too. Nothing is ever forced on.
-    // Codex's default is off, so a name the choice leaves out is off.
+    // A name the choice leaves out follows `config.toml`, as Claude Code's
+    // servers do, except for a protected agent.
     const picks = named.map(([name, server]) => {
-      const picked = choice === "none" ? undefined : choice?.[name];
-      return [
-        name,
-        server,
-        typeof picked === "object" ? picked : picked === true,
-      ] as const;
+      const picked =
+        choice === "none" ? false : (choice?.[name] ?? !agent.protection);
+      return [name, server, picked] as const;
     });
     const mcp = Object.fromEntries(
       picks.flatMap(([name, server, picked]): [string, object][] => {
@@ -3031,7 +3031,8 @@ export class CodexRuntime {
       summary,
       bridge,
       applied,
-      // What the thread's `mcp_servers` is with no choice: the title thread's.
+      // What the thread's `mcp_servers` is with every server off: the title
+      // thread's.
       silenced: { ...silenced, ...bridge?.config },
     };
   }
