@@ -1,6 +1,18 @@
 # Home
 
-Home is a bundled workspace destination using the active community session.
+Home is a bundled workspace destination using the active community session. It is an inbox that Jev keeps, ported from the Jev Inbox plugin (`inbox.mjs`, one plain module with injected styles).
+
+- Jev judges every incoming conversation with one yes/no question, "should this be shown", against the reader's own description of what they need to see. The ones that reach the threshold land as cards in a centered column, newest on top. A card arriving while you read animates in; when the column is scrolled, a "new" pill counts what arrived above.
+- A card appears only when it is complete: after Jev has judged it and, for a thread or channel Jev finds long enough, after its one-line summary is in. A summary that takes longer than 45 seconds is given up on and the card shows without it.
+- Summaries are written by the saved Bestie: Home wakes it with up to six conversations as data, and it answers with the `home_inbox_summarize` tool. Without a Bestie, cards show the latest messages only.
+- Click a card to read and reply in place; it is marked read and leaves the inbox. Chat opens a note to Bestie about that item, which Bestie can use to adjust the prompt (`home_inbox_get_prompt`, `home_inbox_update_prompt`).
+- The prompt, threshold and the last few notes save in this installation's local storage. Reload replays the last hours of messages through Jev.
+
+Jev and the summaries have not been run in a browser test: both need the hosted decision service and a live agent.
+
+## Earlier canvas
+
+The canvas Home (`HomeCanvas.tsx` and the files beside it, `src/features/home`, and the `home-canvas` browser fixture) is still in the tree and tested, but no page renders it. What follows describes it.
 
 - Attention uses the existing verified inbox feed: mentions, DMs, and thread replies.
 - Open/reply shows the shared thread or conversation reader on Home. The shared navigation controller owns Back, Forward, and dismissal. Previewing does not mark the entire channel read.
