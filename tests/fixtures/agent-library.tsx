@@ -1,6 +1,7 @@
 import { createAppearance } from "../../src/shared/theme/service";
 import { ClaudeLogoIcon } from "../../src/shared/design-system/icons";
 import { agentAvatars } from "../../src/features/agents/avatar-packs";
+import { bitties } from "../../src/bundled/bitties";
 import { createRoot } from "react-dom/client";
 import { useId, useState } from "react";
 import { AgentSaveButton } from "../../src/features/agents/AgentSaveButton";
@@ -17,6 +18,7 @@ import type {
   AgentUpdateRequest,
   NewAgent,
   AgentViewProps,
+  RegisteredAgentAvatarSource,
 } from "../../src/features/agents/service";
 import type { RelayData } from "../../src/features/relay/service";
 import { AgentInstructions } from "../../src/features/agents/AgentInstructions";
@@ -431,10 +433,21 @@ Object.assign(window, {
   creationReviewResult: () => reviewed,
   updateReviewResult: () => changed,
 });
-const noAvatarSources: readonly never[] = [];
+// `?bitties` adds the bundled Bitties source, as the app does by default.
+const avatarSources: readonly RegisteredAgentAvatarSource[] =
+  new URLSearchParams(location.search).has("bitties")
+    ? [
+        Object.freeze({
+          ...bitties,
+          key: "buzz.bitties/bitties",
+          pluginId: "buzz.bitties",
+          revision: "bundled",
+        }),
+      ]
+    : [];
 const agents = {
   snapshot: () => snapshot,
-  avatarSources: () => noAvatarSources,
+  avatarSources: () => avatarSources,
   subscribe: (listener: () => void) => {
     listeners.add(listener);
     return () => listeners.delete(listener);
