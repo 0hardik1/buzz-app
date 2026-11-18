@@ -1079,7 +1079,8 @@ export function apply(ctx) {
       }
     };
     const finishEdit = async (patch = {}) => {
-      const next = draftRef.current && { ...draftRef.current, ...patch };
+      const original = draftRef.current;
+      const next = original && { ...original, ...patch };
       if (!next) return;
       draftRef.current = null;
       const title = titleElement.current.textContent.trim() || savedTask.title;
@@ -1091,7 +1092,7 @@ export function apply(ctx) {
           titleElement.current.textContent = title;
       } catch (error) {
         if (!draftRef.current) {
-          draftRef.current = { ...next, title };
+          draftRef.current = { ...original, title };
           setDraft(draftRef.current);
         }
         setError(error.message);
@@ -1338,7 +1339,7 @@ export function apply(ctx) {
               position: "absolute",
               inset: 0,
               borderRadius: "0.5rem",
-              background: "var(--blue-9)",
+              background: "var(--accent-9)",
               pointerEvents: "none",
             },
           }),
