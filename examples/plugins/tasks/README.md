@@ -73,10 +73,18 @@ windows remain readable; close the owning Buzz window to hand over the save
 journal. Web Locks are required so windows cannot overwrite one another's queued
 work. Restored private drafts stay hidden until fresh access is verified.
 
+## Damaged local recovery
+
+If the journal is unreadable, editing stops without replacing it. **Show saved task backup** displays its exact plaintext for copying. **Recover saved tasks** asks for confirmation, then preserves and verifies a local backup before resetting the active journal. Failed backup leaves the original untouched. Unsent drafts leave the list; previously published attempts may still arrive. Backup keys start with the active journal key followed by `:recovery:`.
+
 ## Host requirements and packaging
 
 This version needs a Buzz desktop host exposing the plugin `ui` capability
 (Calendar and Popover components). Install that host support before this plugin.
+Missing Calendar/Popover or Web Locks shows an update message before editors mount.
+
+`plugin.js` is generated from `squareup/agents` at `buzz-plugins/plugins/to-do` with `pnpm build`; edit that source and copy its bundled output here. Shared artifact refusal/access helpers are bundled; the local journal owns durable writes.
+
 The folder is directly installable. To create a single-file artifact from the
 repository root:
 
