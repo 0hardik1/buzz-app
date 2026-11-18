@@ -374,7 +374,7 @@ function VoiceJumpBody({
           />
         }
       />
-      {phase.kind === "none" ? (
+      {phase.kind === "none" && !candidates.length ? (
         <EmptyState
           frame="none"
           icon={<MicrophoneIcon size={20} />}
@@ -392,6 +392,17 @@ function VoiceJumpBody({
         />
       ) : (
         <>
+          {phase.kind === "none" && (
+            // Close but not sure enough: the nearest places stay to choose.
+            <div className={styles.notice}>
+              <p className={styles.status} aria-live="polite">
+                Didn't find a great match. Closest places:
+              </p>
+              <Button size="sm" variant="subtle" onClick={listen}>
+                Try again
+              </Button>
+            </div>
+          )}
           {phase.kind !== "failed" && candidates.length > 0 && (
             <ul className={styles.candidates} aria-label="Likeliest places">
               {candidates.map(({ place, probability }) => (
@@ -409,9 +420,11 @@ function VoiceJumpBody({
               ))}
             </ul>
           )}
-          <p className={styles.status} aria-live="polite">
-            {status}
-          </p>
+          {phase.kind !== "none" && (
+            <p className={styles.status} aria-live="polite">
+              {status}
+            </p>
+          )}
         </>
       )}
     </div>
