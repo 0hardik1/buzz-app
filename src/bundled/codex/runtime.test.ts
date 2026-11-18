@@ -8286,7 +8286,7 @@ describe("harness MCP choice", () => {
     });
   });
 
-  it("gives a protected worker the empty proof before its first turn", async () => {
+  it("reads back a protected worker's empty listing before its first turn", async () => {
     const started = vi.fn();
     const kit = mcpKit("none", started);
     const f = protectedPreview(undefined, kit);
@@ -8662,6 +8662,15 @@ describe("harness MCP report and inspect", () => {
       f.sent.find((wire) => wire.method === "thread/unsubscribe")?.params,
     ).toEqual({ threadId: "thread-1" });
     expect(f.sent.map((wire) => wire.method)).not.toContain("turn/start");
+  });
+
+  it("starts no thread for a server its configuration does not name", async () => {
+    const f = fixture();
+    withServers(f, "alpha");
+    await expect(f.runtime.inspectMcp(agentOf(f), "missing")).rejects.toThrow(
+      "no MCP server named missing",
+    );
+    expect(f.sent.map((wire) => wire.method)).not.toContain("thread/start");
   });
 });
 

@@ -1,6 +1,5 @@
 import { Context } from "@deepseek-ai/cordis";
 import { expect, it, vi } from "vitest";
-import type { AgentProtection } from "../agent-protection/service";
 import {
   createHarnessMcp,
   type HarnessMcpControl,
@@ -17,9 +16,7 @@ const agent = {
 } as Agent;
 const handle = { key } as never;
 
-function setup(
-  options: { harnessMcp?: unknown; protectionUnavailable?: string } = {},
-) {
+function setup(options: { harnessMcp?: unknown } = {}) {
   const status = {
     unavailable: false,
     settled: true,
@@ -37,8 +34,8 @@ function setup(
     },
   };
   const root = new Context();
-  /** What runs here: the agent, and the protection core binds for it. */
-  const live: { agent: Agent; protection?: AgentProtection } = { agent };
+  /** What runs here. */
+  const live = { agent };
   const created = createHarnessMcp(
     () =>
       ({
@@ -57,12 +54,8 @@ function setup(
         key: "third/type",
         pluginId: "third",
         ...(options.harnessMcp ? { harnessMcp: options.harnessMcp } : {}),
-        ...(options.protectionUnavailable
-          ? { protectionUnavailable: options.protectionUnavailable }
-          : {}),
       } as never,
     ],
-    () => live.protection,
   );
   /** A plugin's view of the kit; by default the plugin that registered the type. */
   const kitOf = (id = "third") =>
@@ -336,121 +329,29 @@ it("takes one control, needs the manifest key, and drops it with the plugin's sc
   await expect(mcp.kit.choice(handle)).resolves.toEqual({ b: true });
 });
 
-/** The protection as core hands it to a runtime. */
-const guard = (
-  mcp: ReturnType<typeof setup>["mcp"],
-  base: AgentProtection,
-): AgentProtection => {
-  const guarded = mcp.require(base, agent);
-  if (!guarded) throw new Error("No protection");
-  return guarded;
-};
-const protection = (name = "p1") =>
-  ({
-    key: name,
-    check: vi.fn(async () => undefined),
-    checkEvidence: vi.fn(async () => undefined),
-  }) as unknown as AgentProtection & {
-    check: ReturnType<typeof vi.fn>;
-    checkEvidence: ReturnType<typeof vi.fn>;
-  };
-
-it("refuses a protected agent's checks until a session has shown no MCP server loaded", async () => {
-  const { mcp, live } = setup({
-    harnessMcp: { report: async () => undefined },
-    protectionUnavailable: "No proof of unloaded MCP servers",
-  });
-  const base = protection();
-  live.agent = { ...agent, protection: { provider: "p", policy: {} } } as Agent;
-  live.protection = base;
-  const guarded = guard(mcp, base);
-  const action = { kind: "context", session: "s", content: {} } as never;
-  const evidence = {} as never;
-  const signal = new AbortController().signal;
-  const bound = { key, protection: base } as never;
-  // unproven
-  await expect(mcp.kit.choice(bound)).resolves.toBe("none");
-  await expect(guarded.check(action, signal)).rejects.toThrow(
-    "No proof of unloaded MCP servers",
-  );
-  await expect(guarded.checkEvidence(action, evidence, signal)).rejects.toThrow(
-    "No proof",
-  );
-  expect(base.check).not.toHaveBeenCalled();
-  // a listed server is no proof
-  expect(() => mcp.kit.started(bound, "s1", loaded("alpha"), "none")).toThrow();
-  await expect(guarded.check(action, signal)).rejects.toThrow("No proof");
-  // proven: an empty listing opens the checks
-  mcp.kit.started(bound, "s1", [], "none");
-  await guarded.check(action, signal);
-  await guarded.checkEvidence(action, evidence, signal);
-  expect(base.check).toHaveBeenCalledTimes(1);
-  expect(base.checkEvidence).toHaveBeenCalledTimes(1);
-  // another session starting does not interrupt a proven one
-  await mcp.kit.choice(bound);
-  await guarded.check(action, signal);
-  // any session that loads a server revokes the proof, whatever was passed
-  expect(() =>
-    mcp.kit.started(bound, "s2", loaded("alpha"), undefined),
-  ).toThrow(/alpha/);
-  await expect(guarded.check(action, signal)).rejects.toThrow("No proof");
-  // a proof belongs to the protection it was given under
-  mcp.kit.started(bound, "s3", [], "none");
-  await guarded.check(action, signal);
-  const replaced = guard(mcp, protection("p2"));
-  await expect(replaced.check(action, signal)).rejects.toThrow("No proof");
-});
-
 it("takes what a session loaded only from the plugin that runs the agent's harness, for the agent as it runs", async () => {
   const { mcp, live, kitOf } = setup({
     harnessMcp: { report: async () => undefined },
-    protectionUnavailable: "No proof of unloaded MCP servers",
   });
-  const base = protection();
   live.agent = { ...agent, protection: { provider: "p", policy: {} } } as Agent;
-  live.protection = base;
-  const guarded = guard(mcp, base);
-  const action = { kind: "context", session: "s", content: {} } as never;
-  const signal = new AbortController().signal;
-  // Another plugin can't prove an empty session for the agent.
   expect(() =>
-    kitOf("other").started(
-      { key, protection: base } as never,
-      "s1",
-      [],
-      "none",
-    ),
+    kitOf("other").started({ key } as never, "s1", [], "none"),
   ).toThrow("Only the plugin that runs this agent's harness");
-  await expect(guarded.check(action, signal)).rejects.toThrow("No proof");
-  // The protection is the one core bound for the running agent, not the caller's.
-  expect(() =>
-    mcp.kit.started(
-      { key, protection: protection("forged") } as never,
-      "s1",
-      [],
-      "none",
-    ),
-  ).not.toThrow();
-  await guarded.check(action, signal);
-  // Leaving protection out doesn't let a session of a protected agent load a server.
+  // The agent's protection is read from what runs: leaving it out doesn't let
+  // a session of a protected agent load a server.
   expect(() =>
     mcp.kit.started({ key } as never, "s2", loaded("alpha"), { alpha: true }),
   ).toThrow(/alpha/);
-  await expect(guarded.check(action, signal)).rejects.toThrow("No proof");
+  expect(() =>
+    mcp.kit.started({ key } as never, "s3", [], "none"),
+  ).not.toThrow();
   // An agent that doesn't run here has no sessions to report.
   expect(() =>
-    mcp.kit.started({ key: "gone" } as never, "s3", [], "none"),
+    mcp.kit.started({ key: "gone" } as never, "s4", [], "none"),
   ).toThrow("not running here");
 });
 
-it("leaves protection alone for a type that does not report MCP servers", () => {
-  const { mcp } = setup();
-  const base = protection();
-  expect(mcp.require(base, agent)).toBe(base);
-  expect(mcp.require(undefined, agent)).toBeUndefined();
-});
-
-it("gives a type with no MCP client no report, and asks its protected agents no proof", async () => {
+it("gives a type with no MCP client no report", async () => {
   const { mcp, scope } = setup({ harnessMcp: { client: false } });
   await expect(mcp.report(scope(false), key)).rejects.toThrow(
     "Declare host.agentMcp",
@@ -459,8 +360,6 @@ it("gives a type with no MCP client no report, and asks its protected agents no 
   await expect(mcp.inspect(scope(), key, "alpha")).rejects.toThrow(
     "cannot list",
   );
-  const base = protection();
-  expect(mcp.require(base, agent)).toBe(base);
 });
 
 const report = (overrides: Partial<HarnessMcpReport> = {}) => ({
@@ -515,7 +414,7 @@ it("reports a type's servers only to a plugin with the manifest key, and keeps n
   ).resolves.toBeUndefined();
 });
 
-it("lists a type's tools only for a known server of an unprotected agent", async () => {
+it("lists a server's tools through the type, which rejects what it can't list", async () => {
   const inspect = vi.fn(async () => [{ name: "read" }]);
   const { mcp, scope } = setup({
     harnessMcp: { report: async () => report(), inspect },
@@ -523,7 +422,6 @@ it("lists a type's tools only for a known server of an unprotected agent", async
   await expect(mcp.inspect(scope(false), key, "alpha")).rejects.toThrow(
     "Declare host.agentMcp",
   );
-  await expect(mcp.inspect(scope(), key, "missing")).rejects.toThrow(/missing/);
   expect(inspect).not.toHaveBeenCalled();
   await expect(mcp.inspect(scope(), key, "alpha")).resolves.toEqual([
     { name: "read" },
@@ -535,74 +433,21 @@ it("lists a type's tools only for a known server of an unprotected agent", async
   );
 });
 
-it("checks again after the report, before a server starts", async () => {
-  const inspect = vi.fn(async () => [{ name: "read" }]);
-  let current: Agent = agent;
-  const types = () => [
-    {
-      key: "third/type",
-      harnessMcp: {
-        report: async () => {
-          // The agent turns protected while its type reports.
-          current = {
-            ...agent,
-            protection: { provider: "p", policy: {} },
-          } as Agent;
-          return report();
-        },
-        inspect,
-      },
-    } as never,
-  ];
-  const mcp = createHarnessMcp(
-    () => ({ isActive: () => true, subscribe: () => () => {} }) as never,
-    () => current,
-    types,
-    () => undefined,
-  );
-  const { scope } = setup();
-  await expect(mcp.inspect(scope(), key, "alpha")).rejects.toThrow("protected");
-  const {
-    mcp: stopped,
-    scope: stoppedScope,
-    status,
-  } = setup({
-    harnessMcp: { report: async () => report(), inspect },
-  });
-  status.change({ active: false });
-  await expect(stopped.inspect(stoppedScope(), key, "alpha")).rejects.toThrow(
-    "not running",
-  );
-  expect(inspect).not.toHaveBeenCalled();
-});
-
-it("never lists tools for a protected agent or a type that cannot", async () => {
-  const protectedAgent = {
-    ...agent,
-    protection: { provider: "p", policy: {} },
-  };
+it("never lists tools for a protected agent, a type that cannot, or a stopped plugin", async () => {
   const inspect = vi.fn(async () => []);
-  const { mcp, scope } = setup({
+  const { mcp, scope, live, status } = setup({
     harnessMcp: { report: async () => report(), inspect },
   });
-  const guarded = createHarnessMcp(
-    () => ({ isActive: () => true, subscribe: () => () => {} }) as never,
-    () => protectedAgent as never,
-    () => [
-      {
-        key: "third/type",
-        harnessMcp: { report: async () => report(), inspect },
-      } as never,
-    ],
-    () => undefined,
-  );
-  await expect(guarded.inspect(scope(), key, "alpha")).rejects.toThrow(
-    "protected",
+  live.agent = { ...agent, protection: { provider: "p", policy: {} } } as Agent;
+  await expect(mcp.inspect(scope(), key, "alpha")).rejects.toThrow("protected");
+  live.agent = agent;
+  status.change({ active: false });
+  await expect(mcp.inspect(scope(), key, "alpha")).rejects.toThrow(
+    "not running",
   );
   expect(inspect).not.toHaveBeenCalled();
   const plain = setup({ harnessMcp: { report: async () => report() } });
   await expect(plain.mcp.inspect(plain.scope(), key, "alpha")).rejects.toThrow(
     "cannot list",
   );
-  expect((await mcp.report(scope(), key))?.inspect).toBe(true);
 });

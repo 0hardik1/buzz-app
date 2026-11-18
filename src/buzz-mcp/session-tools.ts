@@ -48,10 +48,8 @@ export type AddedTool = Readonly<{
   name: string;
   description: string;
   inputSchema: Readonly<Record<string, unknown>>;
-  /** Whether the agent's sessions get the tool; absent, every agent's do.
-   * Asked as a session starts, before each turn and on each call, so it
-   * must answer at once from what the plugin already knows. Only `true`
-   * admits; a `when` that throws leaves out only this tool. */
+  /** Whether the agent's sessions get the tool (absent: all). Asked often, so
+   * answer at once; only `true` admits, and a throw leaves out this tool. */
   when?: (agent: Agent) => boolean;
   /** A provider operation checked with these exact tool arguments. */
   operation?: AgentToolOperation;

@@ -209,19 +209,15 @@ export type Context = Readonly<{
   root?: string;
   topLevel?: boolean;
   wholeChannel?: boolean;
-  /** The owner's own message started the run and nothing else joined it.
-   * Absent where the harness does not tell: treat it as false. Core passes
-   * on what the harness gives and does not check it, so a tool that allows
-   * more on it trusts it only from a harness that works it out from the
-   * owner's own signed message, as Pi does. */
+  /** The owner's own signed message started the run and nothing else joined
+   * it, as Pi works it out. Absent where the harness does not tell: false. */
   direct?: boolean;
   /** The folder the conversation works in, as the agent's settings give it
    * (it may start with `~/`). Absent where the harness does not tell. */
   folder?: string;
 }>;
-/** The protection checker's session for a call in `context`: where the agent
- * is working, without `direct` and `folder`, so one conversation stays one
- * session as its runs change. */
+/** The protection checker's session for a call: where the agent works,
+ * without `direct` and `folder`, so a conversation stays one session. */
 export const protectionSession = ({
   direct: _,
   folder: __,

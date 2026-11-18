@@ -999,6 +999,8 @@ export class CodexRuntime {
       throw new Error("A protected agent loads no MCP server");
     const { rpc, cwd, servers } = await this.mcpServers(agent);
     lifetime.throwIfAborted();
+    if (!Object.hasOwn(servers, server))
+      throw new Error(`The harness has no MCP server named ${server}`);
     const started = await rpc.request<{ thread: { id: string } }>(
       "thread/start",
       {

@@ -504,7 +504,7 @@ describe("harnessKit.tools", () => {
     expect(read).toHaveBeenCalledWith("./a.txt");
   });
 
-  it("lists the agent's own plugin tools and tells them the run's direct and folder", async () => {
+  it("lists the agent's own plugin tools and calls them in the conversation", async () => {
     const call = vi.fn<AddedTool["call"]>(async () => "noted");
     const { kit, agent, delivery } = setup({
       added: (key) =>
@@ -525,10 +525,7 @@ describe("harnessKit.tools", () => {
       "thread",
     );
     if (!conversation) throw new Error("not admitted");
-    const handler = kit.tools(agent, conversation, {
-      direct: true,
-      folder: "~/work",
-    });
+    const handler = kit.tools(agent, conversation);
     const listed = (await handler({
       jsonrpc: "2.0",
       id: 1,
@@ -543,12 +540,7 @@ describe("harnessKit.tools", () => {
     });
     expect(call).toHaveBeenCalledWith(
       expect.anything(),
-      {
-        channel,
-        root: conversation.root,
-        direct: true,
-        folder: "~/work",
-      },
+      { channel, root: conversation.root },
       {},
     );
   });

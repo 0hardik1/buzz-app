@@ -100,20 +100,11 @@ export type HarnessKit = Readonly<{
   standalonePrompt(agent: AgentHandle, text: string): string;
   /** Answers the agent's Buzz tools over MCP, for `Host.serveMcp`, acting in
    * `conversation`, or nowhere by default for a standalone turn. `read` gives
-   * the file an upload names; without it, uploads of local files fail.
-   * `direct` and `folder` go to plugins' tools as `Context.direct` (the
-   * owner's own message started the run and nothing else joined it) and
-   * `Context.folder` (where the conversation works). Core does not check
-   * `direct`, and tools may allow more on it: give it only from the owner's
-   * own signed message, as Pi does. */
+   * the file an upload names; without it, uploads of local files fail. */
   tools(
     agent: AgentHandle,
     conversation?: HarnessConversation,
-    options?: Readonly<{
-      read?(path: string): Promise<Uint8Array>;
-      direct?: boolean;
-      folder?: string;
-    }>,
+    options?: Readonly<{ read?(path: string): Promise<Uint8Array> }>,
   ): McpHandler;
   /** Posts `text` as the agent in the conversation: in the event's thread, or
    * at the top level. `notifyOwner` tags the owner, as for a failed turn. */
@@ -124,7 +115,7 @@ export type HarnessKit = Readonly<{
     options?: Readonly<{ notifyOwner?: boolean }>,
   ): Promise<void>;
   /** Which of the harness's own MCP servers a session loads, as the agent's
-   * controlling plugin chose, and the proof that the choice took effect. */
+   * controlling plugin chose, and the check that the choice took effect. */
   mcp: HarnessMcpKit;
 }>;
 
@@ -422,7 +413,7 @@ export function harnessKit(sources: Sources): Omit<HarnessKit, "mcp"> {
 
     tools(agent, conversation, options = {}) {
       const solo = conversation && known(conversation).solo;
-      const destination: Context = !conversation
+      const context: Context = !conversation
         ? {}
         : conversation.topLevel
           ? {
@@ -432,11 +423,6 @@ export function harnessKit(sources: Sources): Omit<HarnessKit, "mcp"> {
           : conversation.root
             ? { channel: conversation.channel, root: conversation.root }
             : { channel: conversation.channel };
-      const context: Context = {
-        ...destination,
-        ...(options.direct !== undefined && { direct: options.direct }),
-        ...(options.folder !== undefined && { folder: options.folder }),
-      };
       const pubkey = agent.pubkey;
       const reads = () => ownerReads(sources.relay(agent.key), pubkey);
       return async (message) => {

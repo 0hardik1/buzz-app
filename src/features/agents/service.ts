@@ -948,13 +948,9 @@ export type AgentType<Config = unknown> = {
   voice?(seat: AgentVoiceSeat<Config>): Promise<AgentVoiceConnection>;
   /** Native callback events this harness exposes to plugins. */
   hooks?: Readonly<{ events: readonly string[] }>;
-  /** The MCP servers this harness loads by itself, for the plugin that chooses
-   * them (`docs/harness-mcp.md`). `report` lists names from the harness's own
-   * configuration without starting a server; `undefined` when it cannot tell.
-   * `inspect` lists one server's tools in a session with no model turn and no
-   * other server, and never calls a tool. Adapters read the choice through
-   * `agents.harness.mcp`. `{ client: false }` says the harness has no MCP
-   * client: it loads no server, so core gives no report and asks no proof. */
+  /** The MCP servers this harness loads by itself (`docs/harness-mcp.md`).
+   * `report` lists them without starting one, `inspect` lists one server's
+   * tools with no model turn. `{ client: false }`: no MCP client, no report. */
   harnessMcp?:
     | Readonly<{
         report(
@@ -1457,9 +1453,8 @@ export type Agents = {
   /** What the agent's type reports of its MCP servers, undefined when it does
    * not report. Needs `host.agentMcp`. */
   harnessMcp(agent: AgentKey): Promise<HarnessMcpReport | undefined>;
-  /** Lists one reported server's tools without a model turn or any other
-   * server. Core keeps nothing. Rejects for protected agents and for names
-   * the report lacks. Needs `host.agentMcp`. */
+  /** Lists one server's tools with no model turn; rejects for a protected
+   * agent. Needs `host.agentMcp`. */
   inspectHarnessMcp(
     agent: AgentKey,
     server: string,
@@ -1504,13 +1499,11 @@ export type Agents = {
    * device only while such a plugin is on; with none, it is off for every
    * agent. */
   controlAttention(): void;
-  /** Adds a tool to every agent session in the app, or to those of the
-   * agents its `when` accepts, beside the Buzz tools. The tool acts as the
-   * agent, like the rest of a trusted plugin's code acts as its owner. A
-   * session lists the tools its agent gets when it starts, and one that
-   * cannot take a changed list is replaced when it is next used. Returns a
-   * function that removes the tool, and frees its name, before the plugin
-   * stops. */
+  /** Adds a tool to every agent session in the app, or to those its `when`
+   * accepts, beside the Buzz tools. The tool acts as the agent, like the rest
+   * of a trusted plugin's code acts as its owner. A session lists the tools
+   * there are when it starts, and one that cannot take a changed list is
+   * replaced when it is next used. Returns a function that removes it. */
   addTool(tool: AddedTool): () => void;
   /** A provider keeps the resolver and shares only its operation descriptor. */
   createToolOperation(id: string): AgentToolProvider;
@@ -2554,8 +2547,7 @@ export class AgentsService extends Service implements Agents {
           ? teamPrompt(this.allTeams(), this.teammates(origin), member.pubkey)
           : "";
       },
-      protection: (agent) =>
-        this.mcp.require(this.protection.bind(agent), agent),
+      protection: (agent) => this.protection.bind(agent),
       agentTypes: () =>
         this.types()
           .filter((type) => !type.remote)
@@ -3212,8 +3204,6 @@ export class AgentsService extends Service implements Agents {
       this.toolNames.add(tool.name);
       return () => this.toolNames.delete(tool.name);
     });
-    // A plugin whose tools come from elsewhere (an MCP server's list)
-    // replaces one by removing it and adding the new one.
     return () => {
       remove();
       void release();
@@ -3633,8 +3623,7 @@ export class AgentsService extends Service implements Agents {
     };
   }
   tools = () => this.addedTools.snapshot();
-  /** Added tools whose `when` threw. Every listing, turn and call asks again,
-   * so each registration warns once; one added again is a new registration. */
+  /** Added tools whose `when` threw, so each registration warns once. */
   private readonly whenFailed = new WeakSet<AddedTool>();
   toolsFor = (key?: AgentKey): readonly AddedTool[] => {
     const agent = key === undefined ? undefined : this.agent(key);
@@ -3657,7 +3646,6 @@ export class AgentsService extends Service implements Agents {
     () => this.ctx.pluginStatus,
     (key) => this.state.running.find((agent) => agent.key === key),
     () => this.types(),
-    (agent) => this.protection.bind(agent),
   );
   private readonly harnessShared = harnessKit({
     relay: (key) => this.relay(key),
