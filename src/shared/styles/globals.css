@@ -239,14 +239,13 @@
     justify-self: center;
     container-type: inline-size;
   }
-  .shell-background .shell-menu-search > .buzz-button {
+  /* The Search capsule fills the row; voice jump's microphone beside it
+     keeps IconButton's square size. */
+  .shell-background
+    .shell-menu-search
+    > .buzz-button:not([data-shell-voice-jump]) {
     width: 100%;
     min-width: 0;
-  }
-  /* Voice jump's microphone sits beside the Search capsule at its own size. */
-  .shell-background .shell-menu-search > [data-shell-voice-jump] {
-    width: auto;
-    flex: none;
   }
   .shell-background .shell-menu-search .buzz-button-label {
     width: 100%;
