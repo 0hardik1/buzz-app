@@ -48,7 +48,6 @@ const languages = (files: FileDiffMetadata[]) => [
   ...new Set(files.map((file) => file.lang ?? "text")),
 ];
 
-
 function RawDiff({ content }: { content: string }) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: Preserve keyboard-scrollable literal diff fallback.
