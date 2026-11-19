@@ -217,6 +217,11 @@
 }
 /* Cards line up with the conversation: their tops meet, and they sit a panel
    gap from the window's edge and from the conversation. */
+/* Nothing above the first card adds space, so its top always meets the
+   conversation's. */
+.cards .sidebar .sidebarFilter {
+  padding-block-start: 0;
+}
 /* The shell already keeps a panel gap on both sides of the sidebar. */
 .cards .sidebar {
   --sidebar-padding-inline: 0px;

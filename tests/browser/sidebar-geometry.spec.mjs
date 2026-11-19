@@ -771,3 +771,37 @@ test("the unified sidebar fills its rows and keeps heading actions in their row 
   });
   expect(placed).toBe(true);
 });
+
+test("sidebar cards meet the conversation's top and sit one even gap apart", async ({
+  page,
+  app,
+}) => {
+  await page.goto(app.origin);
+  for (const [width, scale] of [
+    [1440, 1],
+    [900, 2],
+  ]) {
+    await page.setViewportSize({ width, height: 950 });
+    await setAppearance(page, "light", scale);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const main = document.getElementById("main-content");
+          const cards = [
+            ...document.querySelectorAll(
+              "[data-sidebar-cards] [data-sidebar-card]",
+            ),
+          ].map((card) => card.getBoundingClientRect());
+          if (!main || cards.length < 2) return undefined;
+          const gaps = cards
+            .slice(1)
+            .map((card, index) => Math.round(card.top - cards[index].bottom));
+          return {
+            top: Math.round(cards[0].top - main.getBoundingClientRect().top),
+            gaps: [...new Set(gaps)].length,
+          };
+        }),
+      )
+      .toEqual({ top: 0, gaps: 1 });
+  }
+});

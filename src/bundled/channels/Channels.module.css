@@ -313,7 +313,6 @@
     transition: none;
   }
 }
-[data-channel-dragging],
 /* On the tint, a section is its own card (its surface is Panel's). Cards keep
    their content height, let drop lines into the gap, and sit a panel gap apart. */
 [data-sidebar-cards] .channelSection[data-sidebar-card] {
@@ -322,6 +321,10 @@
   /* The top holds the grab dots, clear of the title and the round corner. */
   padding: var(--space-3) var(--space-1) var(--space-1);
   --affordance-panel-hover: var(--affordance-sidebar-hover);
+}
+/* Every card, Favorites and the hidden new-workspace slot included, sits the
+   same gap from the one before it. */
+[data-sidebar-cards] .channelSection {
   --sidebar-section-gap: var(--space-1h);
 }
 /* The hidden new-workspace slot already holds the gap above the next card. */
@@ -334,6 +337,7 @@
 [data-sidebar-cards] .channelSection[data-sidebar-card][data-drop-target] {
   border-radius: var(--radius-container);
 }
+[data-channel-dragging],
 .channelSection[data-section-dragging] {
   opacity: 0.3;
 }
