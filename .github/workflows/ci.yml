@@ -114,15 +114,19 @@ jobs:
 
   native:
     if: github.event_name != 'workflow_dispatch'
-    name: Rust and tool integration
+    name: Rust and tool integration (${{ matrix.cores }} cores)
+    strategy:
+      fail-fast: false
+      matrix:
+        cores: [8, 16]
     # Use the PR author so a human rerunning a bot PR keeps standard runners.
     # Fork-owned workflows also retain runners they can access.
-    runs-on: &linux_8core_or_standard >-
+    runs-on: >-
       ${{ fromJSON(
         github.repository == 'block/buzz-app' &&
         github.event_name == 'pull_request' &&
         github.event.pull_request.user.type == 'User' &&
-        '{"group":"buzz-runners","labels":"buzz-ubuntu-x64-8core"}' ||
+        format('{{"group":"buzz-runners","labels":"buzz-ubuntu-x64-{0}core"}}', matrix.cores) ||
         '"ubuntu-24.04"'
       ) }}
     # A Cargo.lock change rebuilds most crates from a cold cache, and only a
@@ -277,7 +281,16 @@ jobs:
   browser_fixture:
     if: github.event_name != 'workflow_dispatch'
     name: Native browser fixture
-    runs-on: *linux_8core_or_standard
+    # Use the PR author so a human rerunning a bot PR keeps standard runners.
+    # Fork-owned workflows also retain runners they can access.
+    runs-on: &linux_8core_or_standard >-
+      ${{ fromJSON(
+        github.repository == 'block/buzz-app' &&
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.user.type == 'User' &&
+        '{"group":"buzz-runners","labels":"buzz-ubuntu-x64-8core"}' ||
+        '"ubuntu-24.04"'
+      ) }}
     timeout-minutes: 15
     outputs:
       artifact-id: ${{ steps.fixture-upload.outputs.artifact-id }}
