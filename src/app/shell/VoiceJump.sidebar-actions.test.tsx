@@ -19,15 +19,47 @@ import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { VoiceJump, type VoiceJumpServices } from "./VoiceJump";
 
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
+const dictation = vi.hoisted(() => ({
+  current: undefined as
+    | {
+        onText: (next: string) => void;
+        onPause: (spoken: string) => void;
+        onEnd: (spoken: string) => void;
+      }
+    | undefined,
+}));
+const forgetFocus = vi.hoisted(() => vi.fn());
+vi.mock("../../features/search/voice-context", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../features/search/voice-context")
+    >();
+  return {
+    ...actual,
+    trackPointerPosition: () => {
+      const tracker = actual.trackPointerPosition();
+      return {
+        ...tracker,
+        forgetFocus: () => {
+          forgetFocus();
+          tracker.forgetFocus();
+        },
+      };
+    },
+  };
+});
 vi.mock("../../features/search/voice-dictation", () => ({
   prepareVoice: () => {},
   useVoiceSearchAvailable: (enabled: boolean) => enabled,
-  useVoiceDictation: () => ({
-    state: "idle" as const,
-    start: async () => {},
-    stop: () => {},
-    cancel: () => {},
-  }),
+  useVoiceDictation: (callbacks: typeof dictation.current) => {
+    dictation.current = callbacks;
+    return {
+      state: "idle" as const,
+      start: async () => {},
+      stop: () => {},
+      cancel: () => {},
+    };
+  },
 }));
 
 afterEach(() => {
@@ -197,6 +229,20 @@ function setup(decide: ReturnType<typeof answering>) {
     setPreference,
     navOpen,
     decide,
+    /** Hovers `html`'s first element and presses the shortcut. */
+    async open(html?: string, hover?: string) {
+      const fixture = document.getElementById("dom-fixture");
+      if (fixture && html) fixture.innerHTML = html;
+      const target = hover
+        ? fixture?.querySelector(hover)
+        : fixture?.firstElementChild;
+      document.elementsFromPoint = vi.fn(() => (target ? [target] : []));
+      window.dispatchEvent(
+        new MouseEvent("pointermove", { clientX: 10, clientY: 10 }),
+      );
+      act(() => registered?.run());
+      await screen.findByRole("searchbox");
+    },
     /** Hovers `html`'s first element, presses the shortcut, types `text`
      * and presses Enter. */
     async say(text: string, html?: string, hover?: string) {
@@ -371,5 +417,59 @@ describe("voice box → message and thread actions", () => {
         }),
       ),
     );
+  });
+});
+
+describe("voice box review checks", () => {
+  it("never lets a slow answer for earlier words replace the chip for later ones", async () => {
+    // The pause's answer ("…called read") is held until after the final
+    // answer ("…called reading list") has shown its chip.
+    let releasePause = () => {};
+    const immediate = answering({ action: "Create a new sidebar section" });
+    const decide = vi.fn(async (request: DecisionRequest) => {
+      const answer = immediate(request);
+      if (!request.state.includes("reading list")) {
+        await new Promise<void>((resolve) => {
+          releasePause = resolve;
+        });
+      }
+      return answer;
+    });
+    const h = setup(decide as unknown as ReturnType<typeof answering>);
+    await h.open();
+    const early = "create a section called read";
+    const final = "create a section called reading list";
+    act(() => dictation.current?.onText(early));
+    act(() => dictation.current?.onPause(early));
+    act(() => dictation.current?.onText(final));
+    act(() => dictation.current?.onEnd(final));
+    const chip = await screen.findByRole("region", {
+      name: "Confirm voice action",
+    });
+    await waitFor(() => expect(chip).toHaveTextContent("Reading List"));
+    await act(async () => releasePause());
+    await act(async () => {});
+    expect(
+      screen.getByRole("region", { name: "Confirm voice action" }),
+    ).toHaveTextContent("Reading List");
+    const user = userEvent.setup();
+    await user.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(h.prefs.createSection).toHaveBeenCalledWith({
+        id: expect.any(String),
+        name: "Reading List",
+      }),
+    );
+    expect(h.prefs.createSection).toHaveBeenCalledOnce();
+  });
+
+  it("discounts the box's own focus when it closes", async () => {
+    // The box focuses its field and returns focus on close; neither is the
+    // person moving focus, so the resting pointer must still decide.
+    const h = setup(answering({ action: "Mute #buzz-security" }));
+    await h.open(channelRow);
+    act(() => dictation.current?.onEnd("mute this"));
+    await closed();
+    expect(forgetFocus).toHaveBeenCalled();
   });
 });
