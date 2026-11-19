@@ -315,6 +315,96 @@ it("refuses Save when the newest pick fails, then saves the next pick", async ()
   expect(await file?.text()).toBe("blue");
 });
 
+it("refuses every Save after the newest pick fails, rather than saving the face from before", async () => {
+  const { user, save, agents, choose } = setup();
+  vi.mocked(uploadAvatar).mockResolvedValue("https://images.example/face");
+  await user.click(screen.getByRole("tab", { name: "Faces" }));
+  await user.click(screen.getByRole("button", { name: /Red face/ }));
+  await screen.findByRole("button", { name: "Red face red" });
+  choose(Promise.reject(new Error("Couldn't draw this face.")), "broken");
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn't draw this face.",
+  );
+  // The failure is already showing when Save is pressed, twice.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await user.click(save());
+    await waitFor(() => expect(save()).toBeEnabled());
+    expect(
+      screen.getAllByText("Couldn't draw this face.").length,
+    ).toBeGreaterThan(0);
+  }
+  expect(uploadAvatar).not.toHaveBeenCalled();
+  expect(agents.save).not.toHaveBeenCalled();
+  // Another tab's avatar is what the preview shows, so it saves; back on
+  // the source, its failure still stands.
+  await user.click(screen.getByRole("tab", { name: "Gloopies" }));
+  await user.click(screen.getByRole("tab", { name: "Faces" }));
+  await user.click(save());
+  await waitFor(() => expect(save()).toBeEnabled());
+  expect(uploadAvatar).not.toHaveBeenCalled();
+  // A pick that lands clears it.
+  await user.click(screen.getByRole("button", { name: "Blue face" }));
+  await screen.findByRole("button", { name: "Red face blue" });
+  await user.click(save());
+  await waitFor(() => expect(agents.save).toHaveBeenCalled());
+  const files = vi.mocked(uploadAvatar).mock.calls.map(([file]) => file);
+  expect(files).toHaveLength(1);
+  expect(await files[0]?.text()).toBe("blue");
+});
+
+it("saves another tab's avatar after a source's pick fails", async () => {
+  const { user, save, agents, choose } = setup();
+  await user.click(screen.getByRole("tab", { name: "Faces" }));
+  await user.click(screen.getByRole("button", { name: /Red face/ }));
+  await screen.findByRole("button", { name: "Red face red" });
+  choose(Promise.reject(new Error("Couldn't draw this face.")), "broken");
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn't draw this face.",
+  );
+  await user.click(screen.getByRole("tab", { name: "Gloopies" }));
+  await user.click(save());
+  await waitFor(() => expect(agents.save).toHaveBeenCalledOnce());
+  // The Gloopie shown is saved; the failed source's bytes never upload.
+  expect(uploadAvatar).not.toHaveBeenCalled();
+  const [, change] = agents.save.mock.calls[0] ?? [];
+  expect(change.picture).not.toMatch(/^data:|images\.example\/face/);
+});
+
+it("observes a promise handed to a choose whose source is gone", async () => {
+  const { user, setSources, choose } = setup();
+  await user.click(screen.getByRole("tab", { name: "Faces" }));
+  setSources([]);
+  const unhandled: unknown[] = [];
+  const note = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", note);
+  try {
+    choose(Promise.reject(new Error("late failure")), "late");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } finally {
+    process.off("unhandledRejection", note);
+  }
+  expect(unhandled).toEqual([]);
+});
+
+it("ends Save's wait at once when the source goes, without asking to choose there", async () => {
+  const { user, save, agents, choose, setSources } = setup();
+  vi.mocked(uploadAvatar).mockResolvedValue("https://images.example/face");
+  await user.click(screen.getByRole("tab", { name: "Faces" }));
+  await user.click(screen.getByRole("button", { name: /Red face/ }));
+  await screen.findByRole("button", { name: "Red face red" });
+  choose(new Promise<Blob>(() => {}), "stuck");
+  await user.click(save());
+  const started = Date.now();
+  setSources([]);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "This avatar's source is off. Choose another avatar.",
+  );
+  expect(Date.now() - started).toBeLessThan(PICK_WAIT_MS / 2);
+  expect(screen.queryByText(/Choose it again/)).not.toBeInTheDocument();
+  expect(uploadAvatar).not.toHaveBeenCalled();
+  expect(agents.save).not.toHaveBeenCalled();
+});
+
 it("rejects a pick the avatar previews could not show", async () => {
   const { user, choose } = setup();
   await user.click(screen.getByRole("tab", { name: "Faces" }));
@@ -530,6 +620,11 @@ it("refuses Save, without hanging, when a pick never arrives", async () => {
   } finally {
     vi.useRealTimers();
   }
+  expect(uploadAvatar).not.toHaveBeenCalled();
+  // A second Save with no new choice refuses too; it never sends red.
+  await expect(act(() => prepare("https://a.example"))).rejects.toThrow(
+    "Faces didn't finish this avatar. Choose it again, then save.",
+  );
   expect(uploadAvatar).not.toHaveBeenCalled();
   // The stuck pick is retired; the next one saves.
   act(() => choose(png("blue"), "blue"));

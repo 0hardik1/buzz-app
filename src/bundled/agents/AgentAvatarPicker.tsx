@@ -105,6 +105,10 @@ export type AvatarSelection =
       seed?: string;
       previous: BuiltInSelection;
       attempt?: AvatarAttempt;
+      /** Why the source's newest pick failed. Save refuses with it, rather
+       * than saving the avatar shown from before, until a pick lands or
+       * another avatar is chosen. */
+      failed?: string;
     };
 /** One Save of a source's pick, frozen at Save start: the preview, upload,
  * retry and the agent write all use it, and only in its community. */
@@ -234,6 +238,16 @@ export function AgentAvatarPicker({
     sourcePicks.current.set(pick.entry, pick);
   const latest = useRef(selection);
   latest.current = selection;
+  /** Marks the source's draft with its newest pick's failure, which every
+   * Save refuses with until a pick lands or another avatar is chosen. */
+  const markFailed = (entry: RegisteredAgentAvatarSource, failed: string) => {
+    const now = latest.current;
+    if (now.kind !== "source" || now.entry !== entry) return;
+    const next = { ...now, failed };
+    keepPick(next);
+    latest.current = next;
+    onChange(next);
+  };
   // Only the newest pick may land: a new pick, a tab change or the end of
   // Save's wait retires every pick still on its way.
   const pickToken = useRef(0);
@@ -244,6 +258,8 @@ export function AgentAvatarPicker({
         entry: RegisteredAgentAvatarSource;
         token: number;
         done: Promise<SourceSelection | Error | undefined>;
+        /** Ends the wait at once, as when its source goes. */
+        retire(error: Error): void;
       }
     | undefined
   >(undefined);
@@ -265,6 +281,16 @@ export function AgentAvatarPicker({
     tabs?.addEventListener("focusin", note);
     return () => tabs?.removeEventListener("focusin", note);
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a pick on its way stops when its source goes.
+  useEffect(() => {
+    const waiting = landing.current;
+    if (!waiting || live().includes(waiting.entry)) return;
+    pickToken.current += 1;
+    landing.current = undefined;
+    waiting.retire(
+      new Error("This avatar's source is off. Choose another avatar."),
+    );
+  }, [sources]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a sources change may remove the focused tab or control.
   useEffect(() => {
     // Focus on a tab or control that went away returns to the selected tab.
@@ -528,13 +554,18 @@ export function AgentAvatarPicker({
           if (outcome === "late") {
             pickToken.current += 1;
             if (landing.current === waiting) landing.current = undefined;
-            throw new Error(
+            markFailed(
+              waiting.entry,
               `${waiting.entry.title} didn't finish this avatar. Choose it again, then save.`,
             );
           }
-          if (outcome instanceof Error) throw outcome;
+          // Its source went while Save waited: there is no tab to choose in.
+          if (outcome instanceof Error && !live().includes(waiting.entry))
+            throw outcome;
         }
         const selection = latest.current;
+        if (selection.kind === "source" && selection.failed)
+          throw new Error(selection.failed);
         // Default framing keeps the original upload.
         if (cropping)
           await image?.decode().catch(() => {
@@ -670,52 +701,60 @@ export function AgentAvatarPicker({
   const chooseFrom =
     (entry: RegisteredAgentAvatarSource, active: () => boolean) =>
     (image: unknown, seed?: unknown) => {
+      // Observed at once, so a promise the host ignores never rejects
+      // unhandled.
+      const arriving = Promise.resolve(image);
+      arriving.catch(() => {});
       if (lockedRef.current || !active()) return;
+      const token = ++pickToken.current;
       if (!validSeed(seed)) {
-        setError("That avatar source gave an invalid seed.");
+        const message = "That avatar source gave an invalid seed.";
+        markFailed(entry, message);
+        setError(message);
         return;
       }
-      const token = ++pickToken.current;
       // A pick lands only if it is still the newest and its contribution is
       // live in the registry. Save waits for it, then retires what follows.
       const current = () =>
         token === pickToken.current && active() && live().includes(entry);
-      const done: Promise<SourceSelection | Error | undefined> =
-        Promise.resolve(image)
-          .then(sourcePicture)
-          .then(
-            ({ picture, file }) => {
-              const now = latest.current;
-              if (!current() || now.kind !== "source" || now.entry !== entry)
-                return undefined;
-              const next: SourceSelection = {
-                kind: "source",
-                entry,
-                picture,
-                file,
-                ...(seed === undefined ? {} : { seed }),
-                previous: now.previous,
-              };
-              keepPick(next);
-              // Save may read it before the next render.
-              latest.current = next;
-              setError("");
-              onChange(next);
-              return next;
-            },
-            (reason: unknown) => {
-              // A retired pick's failure is dropped; it never reaches Save.
-              if (!current()) return undefined;
-              const failed =
-                reason instanceof Error ? reason : new Error(pickError);
-              if (!saveWaiting.current) setError(failed.message);
-              return failed;
-            },
-          )
-          .finally(() => {
-            if (landing.current?.done === done) landing.current = undefined;
-          });
-      landing.current = { entry, token, done };
+      let retire: (error: Error) => void = () => {};
+      const retired = new Promise<Error>((resolve) => (retire = resolve));
+      const made: Promise<SourceSelection | Error | undefined> = arriving
+        .then(sourcePicture)
+        .then(
+          ({ picture, file }) => {
+            const now = latest.current;
+            if (!current() || now.kind !== "source" || now.entry !== entry)
+              return undefined;
+            const next: SourceSelection = {
+              kind: "source",
+              entry,
+              picture,
+              file,
+              ...(seed === undefined ? {} : { seed }),
+              previous: now.previous,
+            };
+            keepPick(next);
+            // Save may read it before the next render.
+            latest.current = next;
+            setError("");
+            onChange(next);
+            return next;
+          },
+          (reason: unknown) => {
+            // A retired pick's failure is dropped; it never reaches Save.
+            if (!current()) return undefined;
+            const failed =
+              reason instanceof Error ? reason : new Error(pickError);
+            markFailed(entry, failed.message);
+            if (!saveWaiting.current) setError(failed.message);
+            return failed;
+          },
+        );
+      const done = Promise.race([made, retired]).finally(() => {
+        if (landing.current?.done === done) landing.current = undefined;
+      });
+      landing.current = { entry, token, done, retire };
     };
   const emojiPan = useAvatarPan(
     crop,
