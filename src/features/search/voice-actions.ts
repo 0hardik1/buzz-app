@@ -610,6 +610,8 @@ export function buildActionDecision(
           if (
             directEntity &&
             directProb >= threshold &&
+            // The hovered thing fills the other slot, never this one too.
+            directEntity.id !== binding.bound?.id &&
             (!binding.action.filterSlot ||
               binding.action.filterSlot(
                 binding.missingSlot as EntitySlotKind,
@@ -761,8 +763,30 @@ export function buildActionDecision(
       actionAnswer.confidence ??
       0;
 
+    // Navigate only when the place isn't what the other top-two option would
+    // act on: then the place is what they named, not where they want to go.
+    // "Put buzz feedback in here" over a section finds #buzz-feedback as a
+    // place as well as the channel to move.
+    const rivalAction = actionCandidates
+      .slice(0, 2)
+      .find((candidate) => candidate.kind === "action");
+    const placeIsActionObject =
+      placeResolved.outcome === "found" &&
+      [rivalAction?.owner, rivalAction?.target].some(
+        (entity) =>
+          !!entity &&
+          entity.id ===
+            (placeResolved.place.kind === "thread"
+              ? placeResolved.place.rootId
+              : placeResolved.place.channelId),
+      );
+
     if (actionAnswer.choice === ACTION_NAVIGATE_OPTION) {
-      if (actionProb >= threshold && placeResolved.outcome === "found") {
+      if (
+        actionProb >= threshold &&
+        placeResolved.outcome === "found" &&
+        !placeIsActionObject
+      ) {
         return {
           kind: "navigate",
           place: placeResolved.place,
@@ -782,6 +806,7 @@ export function buildActionDecision(
     const tryNavigateOverride = (): ResolvedAction | undefined => {
       if (
         navigateInTopTwo &&
+        !placeIsActionObject &&
         placeResolved.outcome === "found" &&
         placeResolved.probability >=
           Math.max(threshold, NAVIGATE_OVERRIDE_PLACE_THRESHOLD)
