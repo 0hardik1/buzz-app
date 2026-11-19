@@ -23,6 +23,10 @@
   padding: var(--space-3) 0 0;
   min-width: 0;
 }
+/* A header with nothing in it takes no room. */
+.sidebarFilter:empty {
+  display: none;
+}
 .sidebarBody {
   display: flex;
   flex-direction: column;
@@ -210,4 +214,22 @@
   height: 100%;
   min-height: 0;
   --affordance-panel-hover: var(--affordance-backdrop-hover);
+}
+/* Cards line up with the conversation: their tops meet, and they sit a panel
+   gap from the window's edge and from the conversation. */
+/* The shell already keeps a panel gap on both sides of the sidebar. */
+.cards .sidebar {
+  padding-inline: 0;
+}
+/* Cards scroll without a visible scrollbar. */
+.cards .sidebar .channelList {
+  padding-block-start: 0;
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+}
+.cards .sidebar .channelList::-webkit-scrollbar {
+  display: none;
+}
+.cards .channelListFrame {
+  width: 100%;
 }
