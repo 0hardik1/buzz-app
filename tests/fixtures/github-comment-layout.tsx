@@ -9,6 +9,17 @@ import {
 import type { GitHubCli } from "../../src/bundled/github/gh";
 import type { Snapshot } from "../../src/bundled/github/pr-comments";
 import { GitHubComment } from "../../src/bundled/github/GitHubComment";
+import {
+  SmileyPlusIcon,
+  SmileyIcon,
+  PlusIcon,
+} from "../../src/shared/design-system/icons/index";
+import {
+  PopoverRoot,
+  PopoverTrigger,
+  PopoverPopup,
+} from "../../src/shared/design-system/ui/Popover";
+import { reactionNames } from "../../src/bundled/github/pr-reactions";
 import { Button } from "../../src/shared/design-system/ui/Button";
 import { InlineCommentForm } from "../../src/bundled/github/InlineCommentForm";
 import { DiffViewer } from "../../src/bundled/diffs/DiffViewer";
@@ -154,6 +165,101 @@ function Thread({
     </section>
   );
 }
+function ReactionOption({ option }: { option: number }) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<ReactionContent>();
+  const iconOnly = option < 3;
+  const icon =
+    option === 3 ? (
+      <SmileyIcon size={14} />
+    ) : option === 5 ? (
+      <PlusIcon size={14} />
+    ) : (
+      <SmileyPlusIcon size={14} />
+    );
+  const text = option === 5 ? "Add emoji" : "React";
+  const labels = [
+    "Smile +",
+    "Outlined smile +",
+    "Smile and text",
+    "Outlined with text",
+    "Add emoji link",
+  ];
+  return (
+    <section className={styles.thread} aria-label={`Option ${option}`}>
+      <h2 className="text-label">
+        {option}. {labels[option - 1]}
+      </h2>
+      <p className="text-body-sm">
+        Could we give this value a more descriptive name?
+      </p>
+      <div className={styles.controls}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            setSelected(selected === "HEART" ? undefined : "HEART")
+          }
+        >
+          ❤️ {selected === "HEART" ? 4 : 3}
+        </Button>
+        {selected && selected !== "HEART" && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setSelected(undefined)}
+          >
+            {reactionNames[selected][0]} 1
+          </Button>
+        )}
+        <PopoverRoot open={open} onOpenChange={setOpen}>
+          <PopoverTrigger
+            render={
+              <Button
+                size={iconOnly ? "sm" : "xs"}
+                variant={
+                  option === 2 || option === 4
+                    ? "outline"
+                    : option === 5
+                      ? "link"
+                      : "ghost"
+                }
+                {...(iconOnly
+                  ? { shape: "icon" as const, "aria-label": "React" }
+                  : {})}
+                title="React"
+              >
+                {icon}
+                {!iconOnly && text}
+              </Button>
+            }
+          />
+          <PopoverPopup size="compact" aria-label="Choose reaction">
+            <div className={styles.emojiGrid}>
+              {(Object.keys(reactionNames) as ReactionContent[]).map(
+                (content) => (
+                  <Button
+                    key={content}
+                    size="sm"
+                    variant="ghost"
+                    shape="icon"
+                    aria-label={reactionNames[content][1]}
+                    onClick={() => {
+                      setSelected(content);
+                      setOpen(false);
+                    }}
+                  >
+                    {reactionNames[content][0]}
+                  </Button>
+                ),
+              )}
+            </div>
+          </PopoverPopup>
+        </PopoverRoot>
+      </div>
+    </section>
+  );
+}
 function Preview() {
   const [dark, setDark] = useState(false);
   const [narrow, setNarrow] = useState(false);
@@ -183,6 +289,14 @@ function Preview() {
           {narrow ? "Wide layout" : "Narrow layout"}
         </Button>
       </div>
+      <section aria-label="Reaction button options">
+        <h2 className="text-title-sm">Reaction button options</h2>
+        <div className={styles.options}>
+          {[1, 2, 3, 4, 5].map((option) => (
+            <ReactionOption key={option} option={option} />
+          ))}
+        </div>
+      </section>
       <DiffViewer
         content={fixturePatch}
         files={parsePatch(fixturePatch)}
