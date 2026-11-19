@@ -2356,4 +2356,53 @@ describe("Recommended setup", () => {
       expect.objectContaining({ type: "test/echo", config: { reply: "" } }),
     );
   });
+
+  /** A local harness with its own configuration group, as Claude's, which
+   * holds creation until it reports ready. */
+  const configured = () =>
+    ({
+      ...harness("claude-code", "Claude", () => true),
+      CreateConfiguration: function Configured({
+        harnessControl,
+        onReadyChange,
+      }: {
+        harnessControl: ReactNode;
+        onReadyChange?: (ready: boolean) => void;
+      }) {
+        useEffect(() => {
+          onReadyChange?.(true);
+        }, [onReadyChange]);
+        return <div>{harnessControl}</div>;
+      },
+    }) as unknown as RegisteredAgentType;
+  const claudeCandidate = {
+    harness: "claude-code",
+    model: "model-c",
+    effort: "high",
+    label: "Model C",
+  };
+
+  it("creates on a local harness with its own configuration group that Automatic picked", async () => {
+    vi.stubEnv(
+      "VITE_BUZZ_RECOMMENDED_AGENT",
+      JSON.stringify([claudeCandidate]),
+    );
+    const { agents, dialog, user } = setup([configured()]);
+    await inspectModel(user, dialog, "Model C · High");
+    await user.type(within(dialog).getByLabelText("Name"), "Agent A");
+    await waitFor(() => expect(createButton()).toBeEnabled());
+    await user.click(createButton());
+    await waitFor(() => expect(agents.create).toHaveBeenCalled());
+  });
+
+  it("creates on a local harness with its own configuration group chosen under Custom", async () => {
+    const { agents, dialog, user } = setup([goose, codex, configured()]);
+    await inspectModel(user, dialog, "Model A · High");
+    await chooseCustom(user, dialog);
+    await pickOption(user, harnessSelect(dialog), /^Claude/);
+    await user.type(within(dialog).getByLabelText("Name"), "Agent A");
+    await waitFor(() => expect(createButton()).toBeEnabled());
+    await user.click(createButton());
+    await waitFor(() => expect(agents.create).toHaveBeenCalled());
+  });
 });

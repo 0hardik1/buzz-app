@@ -1590,6 +1590,60 @@ it("passes the real Claude Thinking choice through Create agent", async () => {
   );
 });
 
+it("creates a Claude agent on Automatic in a build with a recommendation", async () => {
+  // A synthetic candidate Claude lists.
+  vi.stubEnv(
+    "VITE_BUZZ_RECOMMENDED_AGENT",
+    JSON.stringify([
+      {
+        harness: "claude-code",
+        model: "sonnet",
+        effort: "high",
+        label: "Model S",
+      },
+    ]),
+  );
+  try {
+    const { type } = installed();
+    const registeredType = {
+      ...type,
+      key: "buzz.claude-code/claude-code",
+      pluginId: "buzz.claude-code",
+      revision: "r1",
+    } as unknown as RegisteredAgentType;
+    const create = vi.fn(async (input: NewAgent) => ({
+      ...agent({ ...DEFAULT_CONFIG, ...(input.config as Config) }),
+      name: input.name,
+      type: input.type,
+    }));
+    render(
+      <AgentCreateDialog
+        agents={{ create } as unknown as Agents}
+        types={[registeredType]}
+        onCreated={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Create agent" });
+    const user = userEvent.setup();
+    await user.type(within(dialog).getByLabelText("Name"), "Nova");
+    const button = within(dialog).getByRole("button", { name: "Create agent" });
+    // Automatic's rows stand in for Claude's own configuration group, so
+    // creation waits only for the pick.
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "buzz.claude-code/claude-code",
+        config: expect.objectContaining({ preset: "recommended" }),
+      }),
+    );
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 it("returns Claude create-time effort to Default when the inherited model changes", async () => {
   const { type } = installed();
   function Controls() {

@@ -234,7 +234,11 @@ export function AgentCreateDialog({
       ?.focus();
   }, [harnessId, type?.key]);
   const CreateAction = type?.CreateAction;
-  const canCreate = !Configuration || configurationReady;
+  // With a recommendation, a local harness shows Automatic and Custom's rows
+  // in place of its own configuration group.
+  const sharedRows = recommendable && !type?.remote;
+  // Only a mounted configuration group reports readiness to wait for.
+  const canCreate = sharedRows || !Configuration || configurationReady;
   const close = () => setOpen(false);
   const chooseModel = (
     item: RegisteredAgentType,
@@ -564,7 +568,7 @@ export function AgentCreateDialog({
               reveal(event.target instanceof HTMLElement ? event.target : null)
             }
           >
-            {recommendable && !type?.remote ? (
+            {sharedRows ? (
               // Local harnesses only. A hosted type, chosen under Manual's
               // Harness, keeps its own group below, as on main.
               <SettingsGroup>
