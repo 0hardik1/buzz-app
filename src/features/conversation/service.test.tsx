@@ -413,6 +413,41 @@ it("owns completion registration through disable, replacement and failed activat
   );
   expect(broken.service.completions.snapshot()).toHaveLength(0);
 });
+it("makes a supplement only through registerCompletionSupplement", async () => {
+  const provider = {
+    title: "Rows",
+    match: () => null,
+    component: Component,
+  };
+  const h = harness({
+    inject: ["conversation"],
+    apply(ctx) {
+      ctx.conversation.registerCompletion({ ...provider, id: "owner" });
+      ctx.conversation.registerCompletionSupplement({
+        ...provider,
+        id: "rows",
+      });
+      expect(() =>
+        ctx.conversation.registerCompletion({
+          ...provider,
+          id: "refused",
+          supplement: true,
+        }),
+      ).toThrow("registerCompletionSupplement");
+    },
+  });
+  h.runtime.reconcile([h.plugin]);
+  await vi.waitFor(() =>
+    expect(
+      h.service.completions
+        .snapshot()
+        .map(({ id, supplement }) => [id, supplement === true]),
+    ).toEqual([
+      ["owner", false],
+      ["rows", true],
+    ]),
+  );
+});
 it.each([
   [emoji, ["typeahead"]],
   [mentions, ["typeahead", "folders", "skills"]],

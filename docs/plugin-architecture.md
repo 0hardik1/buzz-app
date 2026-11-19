@@ -3159,7 +3159,10 @@ Before the first publication the menu is also hidden: syntax matching is not evi
 of loading. Providers must publish an explicit status for actual pending work. Escape
 still revokes unpublished work, without exposing ARIA controls for a missing listbox.
 
-A provider registered with `supplement: true` never owns the caret. It mounts
+A provider registered with `ctx.conversation.registerCompletionSupplement(provider)`
+never owns the caret. Hosts without supplements lack that method, so a plugin
+calls it with `?.` and adds nothing on them. `registerCompletion` refuses
+`supplement`, so that method is the only way to register one. It mounts
 beside the winner when its own match has the same start, with its own query, and
 it never opens a menu alone. Each provider's rows form a section, and sections
 follow `order`, then the contribution key, with the winner among them. A
