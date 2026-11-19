@@ -18,6 +18,7 @@ const HINT_CHARS: usize = 100;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) enum VoiceEvent {
     /// The microphone is on.
     Listening,
@@ -30,6 +31,7 @@ pub(crate) enum VoiceEvent {
 }
 
 impl VoiceEvent {
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn from_native(kind: i32, text: String) -> Option<Self> {
         Some(match kind {
             0 => Self::Listening,
