@@ -1,5 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
 import { Button } from "../../shared/design-system/ui/Button";
+import { SmileyPlusIcon } from "../../shared/design-system/icons/index";
 import {
   PopoverRoot,
   PopoverTrigger,
@@ -82,13 +83,18 @@ export function GitHubReactions({
         <PopoverRoot open={open} onOpenChange={setOpen}>
           <PopoverTrigger
             render={
-              <Button size="xs" variant="ghost" disabled={blocked}>
-                React
+              <Button
+                size="sm"
+                shape="icon"
+                variant="ghost"
+                aria-label="React"
+                title="React"
+                disabled={blocked}
+              >
+                <SmileyPlusIcon size={14} />
               </Button>
             }
-          >
-            React
-          </PopoverTrigger>
+          />
           <PopoverPopup size="compact" aria-label="Choose reaction">
             <div className={styles.reactionPicker}>
               {(Object.keys(reactionNames) as ReactionContent[]).map(
