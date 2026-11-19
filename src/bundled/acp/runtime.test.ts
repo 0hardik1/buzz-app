@@ -460,6 +460,44 @@ describe("AcpRuntime", () => {
     expect(fake.harnesses[0]?.turns ?? []).toHaveLength(0);
   });
 
+  it("takes no plugin notes when its harness exits while its prompt is built", async () => {
+    const config = await confirmed();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let reads = 0;
+    const { fake, deliver, sync, agent } = setup(
+      {},
+      {
+        read: async () => {
+          reads++;
+          await gate;
+          return [];
+        },
+      },
+    );
+    sync(config);
+    const pending = ["<note>Ticket ABC-1 is open.</note>"];
+    const notes = vi.fn(() => pending.splice(0));
+    const restoreNotes = vi.fn((_c: string, back: readonly string[]) =>
+      pending.push(...back),
+    );
+    Object.assign(agent, { notes, restoreNotes });
+    const mention = message("1", "@Opal hi");
+    const settled = vi.fn();
+    await deliver(mention, config, undefined, {
+      workingUntil: (done: Promise<unknown>) => void done.finally(settled),
+    } as unknown as Partial<Delivery>).run;
+    await vi.waitFor(() => expect(reads).toBe(1));
+    fake.harnesses[0]?.exit();
+    await vi.waitFor(() => expect(settled).toHaveBeenCalled());
+    release();
+    // The builder has finished: its read is answered and the turn is over.
+    await flush(50);
+    expect(notes).not.toHaveBeenCalled();
+    expect(pending).toEqual(["<note>Ticket ABC-1 is open.</note>"]);
+    expect(fake.harnesses.flatMap((h) => h.turns)).toHaveLength(0);
+  });
+
   it("sends the instructions as ACP's appended system prompt when advertised", async () => {
     const config = await confirmed();
     const { fake, deliver, sync } = setup({

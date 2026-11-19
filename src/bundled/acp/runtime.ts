@@ -452,6 +452,9 @@ export class AcpRuntime {
     // Plugins' notes, taken once the prompt is built; back if never sent.
     let notes: readonly string[] = [];
     let sent = false;
+    // Once its delivery has settled, a late build takes no notes: they could
+    // be neither sent nor given back.
+    let settled = false;
     const done = entry.sessions.deliver(key, "", event.created_at, {
       // Built when it is sent, from what the session has definitely seen.
       build: async (from, pinned) => {
@@ -476,7 +479,8 @@ export class AcpRuntime {
         const wakePrompt = wake
           ? ((await wakeText?.()) ?? wake.text)
           : undefined;
-        notes = [...notes, ...(agent.notes?.(channel, noteRoot) ?? [])];
+        if (!settled)
+          notes = [...notes, ...(agent.notes?.(channel, noteRoot) ?? [])];
         const prompt = turnPrompt({
           ...turn,
           agent: agent.pubkey,
@@ -518,6 +522,7 @@ export class AcpRuntime {
     this.notify();
     void done
       .then((result) => {
+        settled = true;
         if (!sent && notes.length)
           agent.restoreNotes?.(channel, notes, noteRoot);
         signedIn(entry, generation, result);
