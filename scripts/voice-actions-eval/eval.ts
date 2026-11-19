@@ -11,7 +11,7 @@ import {
 import { ACTIONS, CONFIRM, ENTITIES, PLACES, hover } from "./catalog";
 import { PEOPLE } from "./world";
 import { CASES, type Case, type Category, type Expected } from "./cases";
-import { HELDOUT, HELDOUT2 } from "./cases-heldout";
+import { HELDOUT, HELDOUT2, HELDOUT3 } from "./cases-heldout";
 import {
   buildActionDecision,
   type ResolvedAction,
@@ -339,9 +339,11 @@ export async function main(
       ? HELDOUT
       : options.set === "heldout2"
         ? HELDOUT2
-        : options.set === "all"
-          ? [...CASES, ...HELDOUT, ...HELDOUT2]
-          : CASES;
+        : options.set === "heldout3"
+          ? HELDOUT3
+          : options.set === "all"
+            ? [...CASES, ...HELDOUT, ...HELDOUT2, ...HELDOUT3]
+            : CASES;
   const cases = set.filter(
     (c) =>
       !options.filter ||

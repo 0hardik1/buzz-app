@@ -53,8 +53,12 @@ function followActions(following: boolean): AppVoiceAction[] {
         ctx.session.unread.following(channel.id, rootOf(bound)) !== following
       );
     },
+    // Said as what it changes, notifications, so "open this thread" reads
+    // as opening it, not as following it.
     describe: ({ bound }) =>
-      `${following ? "Follow" : "Unfollow"} the thread of ${bound?.label ?? "this message"}`,
+      following
+        ? `Get notified of new replies to ${bound?.label ?? "this message"} (follow its thread)`
+        : `Stop notifications for replies to ${bound?.label ?? "this message"} (unfollow its thread)`,
     summary: ({ owner }) =>
       `${following ? "Follow" : "Unfollow"} the thread of ${owner?.label ?? "this message"}`,
     run: async ({ ctx, owner }, env) => {
