@@ -1,14 +1,14 @@
-//! Speech-to-text for voice jump, on device. On macOS, `voice_search.swift`
-//! (linked in by build.rs) records the microphone and transcribes it with
-//! Apple's speech recognition: SpeechAnalyzer on macOS 26, SFSpeechRecognizer
-//! restricted to on-device recognition before that. Audio never leaves the
-//! Mac and no key or server is needed. Elsewhere voice jump is unavailable.
+//! Speech-to-text for voice jump. Hosted OpenAI Realtime is the default
+//! when the distributor configured a key endpoint. Debug builds can opt in
+//! to on-device Apple speech, which keeps audio on the Mac.
 //!
-//! One listen runs at a time: starting another cancels the first. Its events
-//! reach the webview on the channel it passed, until it ends or fails.
+//! Apple speech (linked in by build.rs) runs one listen at a time and
+//! sends its events to the webview on the channel it passed.
 use serde::Serialize;
 use std::sync::Mutex;
 use tauri::ipc::Channel;
+
+mod realtime;
 
 /// Hints bias recognition toward the names voice jump can match. Beyond
 /// this many (Apple's limit for contextual strings) they are dropped, as are
@@ -176,27 +176,62 @@ mod native {
     pub(super) fn cancel(_session: u64) {}
 }
 
-/// Whether this device can transcribe speech on device.
-#[tauri::command]
-pub(crate) fn voice_search_available() -> bool {
-    native::available()
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum VoiceBackend {
+    Realtime,
+    Apple,
 }
 
-/// Loads the speech model ahead of listening, downloading it the first time.
+fn apple_selected() -> bool {
+    cfg!(debug_assertions) && std::env::var("BUZZ_VOICE_BACKEND").as_deref() == Ok("apple")
+}
+
+/// The configured recognizer, if it can be used on this device.
 #[tauri::command]
-pub(crate) fn voice_search_prepare() {
-    native::prepare();
+pub(crate) fn voice_search_backend() -> Option<VoiceBackend> {
+    if apple_selected() {
+        native::available().then_some(VoiceBackend::Apple)
+    } else {
+        realtime::endpoint().map(|_| VoiceBackend::Realtime)
+    }
+}
+
+/// Warms the selected recognizer: an Apple speech model or a Realtime key.
+#[tauri::command]
+pub(crate) async fn voice_search_prepare() -> Result<(), String> {
+    if apple_selected() {
+        native::prepare();
+        Ok(())
+    } else {
+        realtime::prepare().await
+    }
+}
+
+/// Answers the webview's WebRTC offer without exposing the transcription key.
+#[tauri::command]
+pub(crate) async fn voice_search_connect(offer: String) -> Result<String, String> {
+    if apple_selected() {
+        return Err("Hosted voice search is not selected".into());
+    }
+    realtime::connect(offer).await
 }
 
 /// Starts listening, biased toward `hints`; returns the listen's number for
 /// finishing or cancelling it.
 #[tauri::command]
-pub(crate) fn voice_search_start(hints: Vec<String>, on_event: Channel<VoiceEvent>) -> u64 {
+pub(crate) fn voice_search_start(
+    hints: Vec<String>,
+    on_event: Channel<VoiceEvent>,
+) -> Result<u64, String> {
+    if !apple_selected() {
+        return Err("On-device voice search is not selected".into());
+    }
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let session = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     *current() = Some((session, on_event));
     native::start(session, &hint_lines(&hints));
-    session
+    Ok(session)
 }
 
 /// Stops listening; the final transcript follows as `ended`.

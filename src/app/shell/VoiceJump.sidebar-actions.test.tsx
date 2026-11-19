@@ -53,7 +53,7 @@ vi.mock("../../features/search/voice-context", async (importOriginal) => {
 });
 vi.mock("../../features/search/voice-dictation", () => ({
   prepareVoice: () => {},
-  useVoiceSearchAvailable: (enabled: boolean) => enabled,
+  useVoiceSearchBackend: (enabled: boolean) => (enabled ? "realtime" : null),
   useVoiceDictation: (callbacks: typeof dictation.current) => {
     dictation.current = callbacks;
     return {
