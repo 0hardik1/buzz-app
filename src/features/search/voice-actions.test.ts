@@ -411,10 +411,10 @@ describe("buildActionDecision & decideVoiceAction", () => {
       action: {
         type: "choice",
         choice:
-          "Put a channel in here, into section Work (move or add it to this section)",
+          "Put a channel in here, into section Work (move it to this section)",
         confidence: 0.92,
         probabilities: {
-          "Put a channel in here, into section Work (move or add it to this section)": 0.92,
+          "Put a channel in here, into section Work (move it to this section)": 0.92,
         },
       },
       channel: {

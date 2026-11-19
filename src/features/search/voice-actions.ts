@@ -24,6 +24,9 @@ export const VOICE_ACTION_AUTO_THRESHOLD = 0.7;
 export const VOICE_ACTION_LIVE_THRESHOLD = 0.8;
 /** Minimum place confidence when navigate is in top two and action misses auto-run threshold. */
 export const NAVIGATE_OVERRIDE_PLACE_THRESHOLD = 0.8;
+/** Step 2 also needs navigate itself to be a real contender: a confident
+ * place with navigate at 0.13 is a named channel, not a wish to go there. */
+export const NAVIGATE_OVERRIDE_MIN = 0.3;
 
 export const ACTION_NAVIGATE_OPTION = "Ignore hover, just navigate to a place";
 export const ACTION_NONE_OPTION = "None of these";
@@ -475,7 +478,7 @@ export function buildActionDecision(
   for (const label of actionLabels) actionOptions[label] = "";
   if (placeBuilt) {
     actionOptions[ACTION_NAVIGATE_OPTION] =
-      "The person wants to jump/navigate to a channel, DM, chat, or thread instead of acting on the hovered item.";
+      "The person wants to jump/navigate to a channel, DM, chat, or thread instead of acting on the hovered item. Not when they asked to move, arrange or change something: that is an action, or none of these if no option does it.";
   }
   actionOptions[ACTION_NONE_OPTION] =
     "None of these actions or navigation applies to what the person said.";
@@ -799,6 +802,8 @@ export function buildActionDecision(
         placeResolved.probability >= threshold;
       const step2 =
         navigateInTopTwo &&
+        (actionAnswer.probabilities[ACTION_NAVIGATE_OPTION] ?? 0) >=
+          NAVIGATE_OVERRIDE_MIN &&
         placeResolved.probability >=
           Math.max(threshold, NAVIGATE_OVERRIDE_PLACE_THRESHOLD);
       if (!step1 && !step2) return undefined;
