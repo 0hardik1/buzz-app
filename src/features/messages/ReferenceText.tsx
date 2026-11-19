@@ -111,7 +111,9 @@ export function ProfileMention({
       <MentionLabel
         agent={agent}
         label={label}
-        avatar={key ? avatarMedia(profiles.get(key)?.picture, media) : undefined}
+        avatar={
+          key ? avatarMedia(profiles.get(key)?.picture, media) : undefined
+        }
       />
     </Mention>
   );
