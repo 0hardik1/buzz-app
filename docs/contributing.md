@@ -816,15 +816,14 @@ the complete correctness suite still runs with `pnpm test` / `just scan`:
   broker's 100,000-channel scale check in `browser-host/relay-broker-live.test.mjs`
   alone, with `BUZZ_BROKER_SCALE` set; the JavaScript shards skip that test.
 - **Browser journeys:** twenty-nine runners (eleven Chromium and eighteen WebKit
-  file-level shards), each with two workers. `PWTEST_SHARD_WEIGHTS` assigns fewer
-  tests to slower sections of the suite, preserving automatic discovery and
-  existing fixture groups. The weights use browser timings from six runs
-  44597394669–44597443187 on the 8-core runners (November 19, 2026); retune when
-  the slowest shard changes substantially. This is supported by the pinned
-  Playwright 1.63 implementation; the integration discovery check verifies that
-  it honors the weights and still covers every test exactly once. The numbers
-  are relative test counts, so new tests remain included without editing a list.
-  They start alongside measurements on separate
+  file-level shards), each with two workers. `PWTEST_SHARD_WEIGHTS` gives shards
+  with slower tests a smaller share of the tests. Playwright still finds new
+  tests automatically and applies its usual rules for keeping tests together.
+  The weights use timings from six runs (44597394669–44597443187) on the 8-core
+  runners on November 19, 2026. Adjust them if some shards start taking much
+  longer than others. The coverage check verifies that Playwright applies the
+  weights and runs every test exactly once, including after a Playwright upgrade.
+  Browser journeys start alongside measurements on separate
   runners; `CI required` still requires both lanes. A separate required Ubuntu
   job builds the native plugin-manager fixture once with Hermit's pinned Cargo.
   It uploads a tar with executable permission, checkout revision and SHA-256
