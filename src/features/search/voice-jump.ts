@@ -167,27 +167,13 @@ export function jumpPlaces(sources: JumpSources): JumpPlace[] {
   return [...detailed, ...recentThreads].slice(0, MAX_PLACES);
 }
 
-/** Words for actions said by voice, which speech recognition may otherwise
- * hear as other words. */
-const ACTION_WORDS = [
-  "star",
-  "unstar",
-  "move",
-  "forward",
-  "react",
-  "follow",
-  "unfollow",
-  "pin",
-  "mark as read",
-  "section",
-  "favorites",
-];
 /** Apple's Speech headers ask for no more than 100 contextual strings. */
 const MAX_HINTS = 100;
 
 /** What speech recognition should expect to hear: the names of the places
- * here and the people in their DMs, most recent first, then action words.
- * A `#buzz-security` is also hinted as "buzz security", as it is said. */
+ * here and the people in their DMs, most recent first. A `#buzz-security` is
+ * also hinted as "buzz security", as it is said. Native code drops lone
+ * ordinary words, which the recognizer already knows. */
 export function voiceHints(places: readonly JumpPlace[]): string[] {
   const hints = new Map<string, string>();
   const add = (hint: string) => {
@@ -203,8 +189,7 @@ export function voiceHints(places: readonly JumpPlace[]): string[] {
       add(name.replace(/[-_]+/g, " "));
     }
   }
-  const names = [...hints.values()].slice(0, MAX_HINTS - ACTION_WORDS.length);
-  return [...names, ...ACTION_WORDS];
+  return [...hints.values()].slice(0, MAX_HINTS);
 }
 
 /** A place Jev gave a real share of its probability, with its option label. */

@@ -315,7 +315,7 @@ describe("voiceHints", () => {
     name: string,
     key = name,
   ): JumpPlace => ({ key, kind, channelId: key, name, at: 0 });
-  it("hints place and people names as said, then action words", () => {
+  it("hints place and people names as said", () => {
     const hints = voiceHints([
       place("channel", "buzz-security"),
       place("dm", "Dana Lee, murderbot"),
@@ -332,16 +332,15 @@ describe("voiceHints", () => {
       "Fizz",
     ]);
     expect(hints).not.toContain("Logo options");
-    expect(hints).toContain("forward");
   });
-  it("keeps to a hundred hints, keeping the action words", () => {
+  it("keeps to a hundred hints, most recent first", () => {
     const places = Array.from({ length: 150 }, (_, n) =>
       place("channel", `room${n}`),
     );
     const hints = voiceHints(places);
     expect(hints).toHaveLength(100);
     expect(hints[0]).toBe("room0");
-    expect(hints).toContain("star");
+    expect(hints.at(-1)).toBe("room99");
   });
 });
 
