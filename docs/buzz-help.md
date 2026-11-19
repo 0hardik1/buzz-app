@@ -304,6 +304,9 @@ In a Codex agent’s settings, open **Huddle voice** in the **Settings** tab to 
   also find people already verified by a matching verified name or username.
   Adding channel members also finds a verified person by their verified name,
   or by their public key, even if they never set up a profile.
+  An agent's `users` name search, and a person an agent names to its tools
+  (such as a message search's author), match a verified name, username or full
+  name as well as the profile's display name and name.
 - Profile names omit surrounding whitespace. Names with layout or directional
   controls fall back to a safe handle or public-key fragment. Names that match
   a loaded verified name after ignoring hidden characters gain a public-key suffix.
