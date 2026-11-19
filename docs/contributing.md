@@ -819,7 +819,15 @@ the complete correctness suite still runs with `pnpm test` / `just scan`:
   serially on a separate isolated runner, in parallel with browser measurements.
   Its success is also required by `CI required`.
 - **Browser journeys:** twenty-nine runners (eleven Chromium and eighteen WebKit
-  file-level shards), each with two workers. They start alongside measurements on separate
+  file-level shards), each with two workers. `PWTEST_SHARD_WEIGHTS` assigns fewer
+  tests to slower sections of the suite, preserving automatic discovery and
+  existing fixture groups. The weights use browser timings from six runs
+  44597394669–44597443187 on the 8-core runners (November 19, 2026); retune when
+  the slowest shard changes substantially. This is supported by the pinned
+  Playwright 1.63 implementation; the integration discovery check verifies that
+  it honors the weights and still covers every test exactly once. The numbers
+  are relative test counts, so new tests remain included without editing a list.
+  They start alongside measurements on separate
   runners; `CI required` still requires both lanes. A separate required Ubuntu
   job builds the native plugin-manager fixture once with Hermit's pinned Cargo.
   It uploads a tar with executable permission, checkout revision and SHA-256
