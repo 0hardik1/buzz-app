@@ -18,6 +18,7 @@ import type {
   VoiceSlotKind,
   VoiceThing,
 } from "../../src/features/search/voice-context";
+import { channelVoiceActions } from "../../src/features/search/voice-actions-channel";
 import { quickMessageVoiceActions } from "../../src/features/search/voice-actions-message-quick";
 import {
   CHANNELS,
@@ -31,6 +32,14 @@ import {
 } from "./world";
 
 type OwnerKind = Exclude<EntitySlotKind, "emoji">;
+
+const realMoveToSection = (() => {
+  const found = channelVoiceActions.find(
+    (action) => action.id === "channel.move_to_section",
+  );
+  if (!found) throw new Error("No channel.move_to_section action");
+  return found;
+})();
 
 const a = (
   id: string,
@@ -103,12 +112,20 @@ export const ACTIONS: readonly VoiceActionSpec[] = [
     confirm: "none",
     filterSlot: (slot, entity) =>
       slot === "section" ? entity.id !== "s-Starred" : true,
+    // The real action's sentences. It is owned by the section, so its roles
+    // are this stand-in's the other way round.
     describe: ({ hoveredRole, bound }) =>
       hoveredRole === "target" && bound?.id === "s-Starred"
         ? "Star a channel (add a channel to Starred / Favorites)"
-        : hoveredRole === "owner"
-          ? `Move ${bound?.label ?? "this channel"} into a section`
-          : `Move a channel into ${bound?.label ?? "this section"}`,
+        : realMoveToSection.describe({
+            hoveredRole:
+              hoveredRole === "owner"
+                ? "target"
+                : hoveredRole === "target"
+                  ? "owner"
+                  : hoveredRole,
+            bound,
+          }),
   },
   a(
     "channel.move_next_to",
