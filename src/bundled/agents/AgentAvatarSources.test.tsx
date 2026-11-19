@@ -352,6 +352,28 @@ it("refuses every Save after the newest pick fails, rather than saving the face 
   expect(await files[0]?.text()).toBe("blue");
 });
 
+it.each([
+  ["an Error with no message", () => new Error()],
+  ["an Error with only spaces", () => new Error("   ")],
+  ["no reason", () => undefined],
+  ["an empty string", () => ""],
+])("refuses Save when the newest pick rejects with %s", async (_, reason) => {
+  const { user, save, agents, choose } = setup();
+  vi.mocked(uploadAvatar).mockResolvedValue("https://images.example/face");
+  await user.click(screen.getByRole("tab", { name: "Faces" }));
+  await user.click(screen.getByRole("button", { name: /Red face/ }));
+  await screen.findByRole("button", { name: "Red face red" });
+  choose(Promise.reject(reason()), "blank");
+  const pickError = "Choose a PNG, JPEG, GIF or WebP image under 380 KiB.";
+  expect(await screen.findByRole("alert")).toHaveTextContent(pickError);
+  await user.click(save());
+  await waitFor(() => expect(save()).toBeEnabled());
+  expect(screen.getAllByText(pickError).length).toBeGreaterThan(0);
+  // Red is still shown, but it isn't the pick last made, so nothing saves.
+  expect(uploadAvatar).not.toHaveBeenCalled();
+  expect(agents.save).not.toHaveBeenCalled();
+});
+
 it("saves another tab's avatar after a source's pick fails", async () => {
   const { user, save, agents, choose } = setup();
   await user.click(screen.getByRole("tab", { name: "Faces" }));

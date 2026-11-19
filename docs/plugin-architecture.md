@@ -1077,7 +1077,9 @@ on Save and stores the uploaded URL, so a saved avatar is an ordinary image
 that stays when the plugin is off or gone. Save never calls the source. It
 waits up to 8 seconds for the newest pick to arrive and decode, then saves it;
 a pick that rejects, fails validation or does not arrive in time refuses that
-Save with a message, and the user can pick again. A pick belongs to the exact registration that made it: when
+Save with a message, and the user can pick again. A rejection without its own
+text, such as `new Error()` or `reject()`, still refuses Save and shows the host's
+image error. A pick belongs to the exact registration that made it: when
 a source is turned off, removed or replaced (even under the same id), its tab
 goes and the choice beneath returns, so an unchanged avatar stays unchanged.
 The one exception is a Save that has started: its file, preview and community

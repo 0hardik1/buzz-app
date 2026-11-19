@@ -107,8 +107,8 @@ export type AvatarSelection =
       attempt?: AvatarAttempt;
       /** Why the source's newest pick failed. Save refuses with it, rather
        * than saving the avatar shown from before, until a pick lands or
-       * another avatar is chosen. */
-      failed?: string;
+       * another avatar is chosen. Present means failed, whatever its text. */
+      failed?: { message: string };
     };
 /** One Save of a source's pick, frozen at Save start: the preview, upload,
  * retry and the agent write all use it, and only in its community. */
@@ -152,6 +152,10 @@ const maxPickBytes = 380 * 1024;
 const pickError = "Choose a PNG, JPEG, GIF or WebP image under 380 KiB.";
 /** How long Save waits for a source's newest pick to arrive and decode. */
 export const PICK_WAIT_MS = 8_000;
+/** A reason's own text, or `fallback` when it has none worth showing: a
+ * blank `Error`, or a rejection with no `Error` at all. */
+const reasonText = (reason: unknown, fallback: string) =>
+  reason instanceof Error && reason.message.trim() ? reason.message : fallback;
 const sourceImage = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.*)$/;
 const dataUrl = (image: Blob) =>
   new Promise<string>((resolve, reject) => {
@@ -240,10 +244,10 @@ export function AgentAvatarPicker({
   latest.current = selection;
   /** Marks the source's draft with its newest pick's failure, which every
    * Save refuses with until a pick lands or another avatar is chosen. */
-  const markFailed = (entry: RegisteredAgentAvatarSource, failed: string) => {
+  const markFailed = (entry: RegisteredAgentAvatarSource, message: string) => {
     const now = latest.current;
     if (now.kind !== "source" || now.entry !== entry) return;
-    const next = { ...now, failed };
+    const next = { ...now, failed: { message } };
     keepPick(next);
     latest.current = next;
     onChange(next);
@@ -564,8 +568,8 @@ export function AgentAvatarPicker({
             throw outcome;
         }
         const selection = latest.current;
-        if (selection.kind === "source" && selection.failed)
-          throw new Error(selection.failed);
+        if (selection.kind === "source" && selection.failed !== undefined)
+          throw new Error(selection.failed.message);
         // Default framing keeps the original upload.
         if (cropping)
           await image?.decode().catch(() => {
@@ -666,11 +670,7 @@ export function AgentAvatarPicker({
     } catch (reason) {
       if (request.signal.aborted) return;
       restore();
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "Image upload failed. Try again.",
-      );
+      setError(reasonText(reason, "Image upload failed. Try again."));
     } finally {
       if (!request.signal.aborted) {
         pending.current = null;
@@ -744,8 +744,7 @@ export function AgentAvatarPicker({
           (reason: unknown) => {
             // A retired pick's failure is dropped; it never reaches Save.
             if (!current()) return undefined;
-            const failed =
-              reason instanceof Error ? reason : new Error(pickError);
+            const failed = new Error(reasonText(reason, pickError));
             markFailed(entry, failed.message);
             if (!saveWaiting.current) setError(failed.message);
             return failed;
