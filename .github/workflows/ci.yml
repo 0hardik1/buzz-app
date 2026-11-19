@@ -118,7 +118,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [standard, 8core, 16core]
+        runner: [8core, 16core]
     # Use the PR author so a human rerunning a bot PR keeps standard runners.
     # Fork-owned workflows also retain runners they can access.
     runs-on: >-
@@ -149,7 +149,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Compare cold builds without downloading or writing Rust caches.
+          lookup-only: true
+          save-if: false
       - name: Dependency policy
         run: ./bin/cargo-deny --locked check
       - name: Rust formatting
