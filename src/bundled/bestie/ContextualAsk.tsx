@@ -76,6 +76,7 @@ import {
 const TARGET = "buzz://bestie/ask";
 const CATCH_UP_TARGET = "buzz://bestie/catch-up";
 const RECENT_CATCH_UP_SECONDS = 2 * 86_400;
+const MAX_UNREAD_CATCH_UP_MESSAGES = 100;
 const PERSONAL_CATCH_UP =
   "Lead with the few things most relevant to me based on what you know about my priorities, work, and people, and briefly say why. If you lack that context, prioritize decisions, direct asks, risks, blockers, and meaningful changes. Summarize everything else at a very high level. Link the important sources, and skip the play-by-play unless I ask.";
 const PERSONAL_CATCH_UP_ENDING = `. ${PERSONAL_CATCH_UP}`;
@@ -92,8 +93,11 @@ type ChannelCatchUpBase = {
   latest: string;
   agent: string;
 };
+type UnreadCatchUpTarget = Readonly<
+  ChannelCatchUpBase & { oldest: string; limit?: number }
+>;
 type ChannelCatchUpTarget =
-  | Readonly<ChannelCatchUpBase & { oldest: string }>
+  | UnreadCatchUpTarget
   | Readonly<ChannelCatchUpBase & { since: number }>;
 type CatchUpTarget =
   | ChannelCatchUpTarget
@@ -115,6 +119,9 @@ const singleUnreadRange = new RegExp(
 );
 const unreadRange = new RegExp(
   String.raw`^from \[the first unread message\]\(${messageTargetPattern}\) through \[the latest message at this moment\]\(${messageTargetPattern}\)$`,
+);
+const limitedUnreadRange = new RegExp(
+  String.raw`^using at most the newest ${MAX_UNREAD_CATCH_UP_MESSAGES} messages in the unread range through \[the latest message at this moment\]\(${messageTargetPattern}\); older unread messages were skipped$`,
 );
 const recentRange = new RegExp(
   String.raw`^covering the two days since \`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\` through \[the latest message at this moment\]\(${messageTargetPattern}\)$`,
@@ -205,9 +212,11 @@ export function catchUpRequestSummary(content: string) {
     ? "unread message"
     : unreadRange.test(range)
       ? "unread → now"
-      : recentRange.test(range)
-        ? "last 2 days"
-        : undefined;
+      : limitedUnreadRange.test(range)
+        ? `newest ${MAX_UNREAD_CATCH_UP_MESSAGES} messages`
+        : recentRange.test(range)
+          ? "last 2 days"
+          : undefined;
   if (!rangeLabel) return;
   return `Catch me up on #${label.replace(/\\([\\`[\]*_~<>&|])/g, "$1")} · ${rangeLabel}`;
 }
@@ -254,8 +263,7 @@ export function CatchUpRequestMessage({
 
 const isUnreadCatchUp = (
   target: ChannelCatchUpTarget,
-): target is Readonly<ChannelCatchUpBase & { oldest: string }> =>
-  "oldest" in target;
+): target is UnreadCatchUpTarget => "oldest" in target;
 
 export function contextualAskTarget({ source, agent }: AskTarget) {
   const target = new URL(TARGET);
@@ -378,9 +386,11 @@ function catchUpDraft(
   const label = channelName.replace(/[\\`[\]*_~<>&|]/g, "\\$&");
   const draft = followupDraft([{ pubkey: bestie.pubkey, name: bestie.name }]);
   const range = isUnreadCatchUp(target)
-    ? target.oldest === target.latest
-      ? `using [the unread message](${messageLink(target.channel, target.oldest)})`
-      : `from [the first unread message](${messageLink(target.channel, target.oldest)}) through [the latest message at this moment](${latest})`
+    ? target.limit
+      ? `using at most the newest ${target.limit} messages in the unread range through [the latest message at this moment](${latest}); older unread messages were skipped`
+      : target.oldest === target.latest
+        ? `using [the unread message](${messageLink(target.channel, target.oldest)})`
+        : `from [the first unread message](${messageLink(target.channel, target.oldest)}) through [the latest message at this moment](${latest})`
     : `covering the two days since \`${new Date(target.since * 1000).toISOString()}\` through [the latest message at this moment](${latest})`;
   const request = `Catch me up on [#${label}](${channel}), ${range}`;
   return mentionDraft({
@@ -577,7 +587,13 @@ function catchUpRange(
   if (shown.observedCount === null) return;
   if (shown.observedCount > 0)
     return unread.oldestUnreadId && unread.latestMessage?.id
-      ? { oldest: unread.oldestUnreadId, latest: unread.latestMessage.id }
+      ? {
+          oldest: unread.oldestUnreadId,
+          latest: unread.latestMessage.id,
+          ...(shown.observedCount > MAX_UNREAD_CATCH_UP_MESSAGES
+            ? { limit: MAX_UNREAD_CATCH_UP_MESSAGES }
+            : {}),
+        }
       : undefined;
   if (
     shown.observedCount !== 0 ||
