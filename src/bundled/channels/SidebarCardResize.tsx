@@ -19,6 +19,10 @@ const DEFAULT_ROWS = 10;
 const MAX_ROWS = 50;
 /** The saved height of a card opened full. */
 const ALL_ROWS = Number.MAX_SAFE_INTEGER;
+/** Set once someone drags or double-clicks any grip on this device. */
+const learnedScope = "device";
+const learnedKey = "sidebar:grip-learned";
+const learn = () => writeView(learnedScope, learnedKey, true);
 
 function savedHeights(scope: string, key: string): Record<string, number> {
   const saved = readView<unknown>(scope, key, {});
@@ -91,6 +95,11 @@ export function SidebarCardResize({
   useEffect(() => () => stop.current?.(), []);
   const [count, setCount] = useState(0);
   const saved = useRef(height);
+  // The hint explains the grip until it has been used once.
+  const learned = useSyncExternalStore(
+    (change) => subscribeView(learnedScope, change),
+    () => readView<unknown>(learnedScope, learnedKey, false) === true,
+  );
   // Apply the saved height before paint, and again whenever rows come, go or
   // first get a size (a card opened after starting closed).
   useLayoutEffect(() => {
@@ -135,6 +144,7 @@ export function SidebarCardResize({
         <Tooltip
           side="bottom"
           closeOnClick={false}
+          {...(learned && { open: false })}
           content={
             height === ALL_ROWS
               ? "Drag to resize · Double-click to show less"
@@ -148,7 +158,10 @@ export function SidebarCardResize({
             aria-orientation="horizontal"
             aria-valuenow={height === ALL_ROWS ? undefined : height}
             tabIndex={0}
-            onDoubleClick={onToggle}
+            onDoubleClick={() => {
+              learn();
+              onToggle();
+            }}
             onKeyDown={(event) => {
               const rows = list.current;
               if (!rows || event.altKey || event.ctrlKey || event.metaKey)
@@ -205,6 +218,7 @@ export function SidebarCardResize({
                 // A click without a drag (half of a double-click) changes nothing.
                 if (event.type !== "pointerup" || next === start)
                   return clip(rows, height);
+                learn();
                 const settled = nearest(rows, next);
                 const target = settled >= max ? ALL_ROWS : settled;
                 if (target === height) clip(rows, height);
