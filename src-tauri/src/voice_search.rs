@@ -28,6 +28,11 @@ pub(crate) enum VoiceEvent {
     Ended { text: String },
     /// Listening failed; nothing follows.
     Error { message: String },
+    /// The language model is downloading, the first time only; listening
+    /// follows once it's installed.
+    Downloading,
+    /// Microphone or speech recognition access is denied; nothing follows.
+    Denied { message: String },
 }
 
 impl VoiceEvent {
@@ -38,12 +43,17 @@ impl VoiceEvent {
             1 => Self::Text { text },
             2 => Self::Ended { text },
             3 => Self::Error { message: text },
+            4 => Self::Downloading,
+            5 => Self::Denied { message: text },
             _ => return None,
         })
     }
 
     fn last(&self) -> bool {
-        matches!(self, Self::Ended { .. } | Self::Error { .. })
+        matches!(
+            self,
+            Self::Ended { .. } | Self::Error { .. } | Self::Denied { .. }
+        )
     }
 }
 
@@ -248,8 +258,18 @@ mod tests {
             VoiceEvent::from_native(3, text()),
             Some(VoiceEvent::Error { message: text() })
         );
+        assert_eq!(
+            VoiceEvent::from_native(4, text()),
+            Some(VoiceEvent::Downloading)
+        );
+        assert_eq!(
+            VoiceEvent::from_native(5, text()),
+            Some(VoiceEvent::Denied { message: text() })
+        );
         assert_eq!(VoiceEvent::from_native(9, text()), None);
         assert!(!VoiceEvent::Listening.last());
         assert!(VoiceEvent::Ended { text: text() }.last());
+        assert!(!VoiceEvent::Downloading.last());
+        assert!(VoiceEvent::Denied { message: text() }.last());
     }
 }

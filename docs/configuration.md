@@ -45,6 +45,7 @@ Debug native builds also read `BUZZ_VOICE_AUDIO_FILE`, an audio file voice
 jump hears instead of the microphone, and `BUZZ_VOICE_RECOGNIZER=legacy`, the
 pre-macOS 26 recognizer, from the process environment.
 
+
 `BUZZ_BUILD_AGENT_ENV`, `BUZZ_BUILD_BUZZ_AGENT_PROVIDER`,
 `BUZZ_BUILD_AGENT_ACCESS_OWNER_ONLY` and `BUZZ_OWNER_MCP_COMMUNITIES` are no
 longer read. Remove them.

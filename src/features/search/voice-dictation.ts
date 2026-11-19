@@ -47,13 +47,19 @@ export function useVoiceSearchAvailable(enabled: boolean) {
   return enabled && value;
 }
 
-export type DictationState = "idle" | "starting" | "listening";
+/** `downloading`: the speech model is being fetched, the first time only. */
+export type DictationState = "idle" | "starting" | "downloading" | "listening";
+/** Why listening failed: `denied` means microphone or speech recognition
+ * access is turned off, so the person has to allow it in System Settings. */
+export type DictationFailure = "denied" | "failed";
 
 type VoiceEvent =
   | { kind: "listening" }
   | { kind: "text"; text: string }
   | { kind: "ended"; text: string }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  | { kind: "downloading" }
+  | { kind: "denied"; message: string };
 
 export function useVoiceDictation({
   onText,
@@ -67,7 +73,7 @@ export function useVoiceDictation({
   onPause?: (text: string) => void;
   /** The finished transcript, once speech pauses or the person stops. */
   onEnd: (text: string) => void;
-  onError?: (message: string) => void;
+  onError?: (message: string, failure: DictationFailure) => void;
 }) {
   const [state, setState] = useState<DictationState>("idle");
   const run = useRef<{ stop: () => void; cancel: () => void } | undefined>(
@@ -123,9 +129,16 @@ export function useVoiceDictation({
     };
     const onEvent = new Channel<VoiceEvent>((event) => {
       if (ended) return;
-      if (event.kind === "error") {
-        callbacks.current.onError?.(event.message);
+      if (event.kind === "error" || event.kind === "denied") {
+        callbacks.current.onError?.(
+          event.message,
+          event.kind === "denied" ? "denied" : "failed",
+        );
         return close(false);
+      }
+      if (event.kind === "downloading") {
+        if (!ending) setState("downloading");
+        return;
       }
       if (event.kind === "ended") return close(true, event.text || text);
       if (event.kind === "listening") {
@@ -155,6 +168,7 @@ export function useVoiceDictation({
       if (!ended)
         callbacks.current.onError?.(
           typeof error === "string" ? error : "Voice search failed",
+          "failed",
         );
       return close(false);
     }

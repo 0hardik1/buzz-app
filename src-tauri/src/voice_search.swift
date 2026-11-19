@@ -21,11 +21,20 @@ private enum Event: Int32 {
     case text = 1
     case ended = 2
     case error = 3
+    /// The language model is downloading, the first time only.
+    case downloading = 4
+    /// Microphone or speech recognition access is denied; nothing follows.
+    case denied = 5
 }
 
 private struct VoiceError: Error {
     let message: String
-    init(_ message: String) { self.message = message }
+    /// Access was refused: the person has to allow it in System Settings.
+    let denied: Bool
+    init(_ message: String, denied: Bool = false) {
+        self.message = message
+        self.denied = denied
+    }
 }
 
 extension NSLock {
@@ -37,8 +46,10 @@ extension NSLock {
     }
 }
 
-private let micDenied = "Allow Buzz to use your microphone to search by voice."
-private let speechDenied = "Allow Buzz to use speech recognition to search by voice."
+private let micDenied =
+    "Buzz can't use the microphone. Turn it on in System Settings → Privacy & Security → Microphone, then press the microphone to try again. You can type instead."
+private let speechDenied =
+    "Buzz can't use speech recognition. Turn it on in System Settings → Privacy & Security → Speech Recognition, then press the microphone to try again. You can type instead."
 private let unavailable = "Voice search isn't available on this Mac."
 
 /// A recognition in progress: its owner can finish it, reporting the final
@@ -73,6 +84,8 @@ private final class Reporter: @unchecked Sendable {
     func text(_ text: String) { send(.text, text) }
     func ended(_ text: String) { send(.ended, text, last: true) }
     func failed(_ message: String) { send(.error, message, last: true) }
+    func denied(_ message: String) { send(.denied, message, last: true) }
+    func downloading() { send(.downloading, "") }
     /// Ends silently, for a cancelled recognition.
     func close() {
         lock.lock()
@@ -152,7 +165,7 @@ private func microphoneAccess() async throws {
         if await AVCaptureDevice.requestAccess(for: .audio) { return }
     default: break
     }
-    throw VoiceError(micDenied)
+    throw VoiceError(micDenied, denied: true)
 }
 
 #if BUZZ_VOICE_FILE_INPUT
@@ -258,12 +271,19 @@ private final class AudioInput: @unchecked Sendable {
             )
         }
 
+        static func installed(_ module: DictationTranscriber) async -> Bool {
+            await AssetInventory.status(forModules: [module]) == .installed
+        }
+
         /// Installs the language model if it's missing, the first time only
-        /// downloading it.
-        static func install(_ module: DictationTranscriber) async throws {
-            if await AssetInventory.status(forModules: [module]) == .installed { return }
+        /// downloading it; `downloading` runs just before a download starts.
+        static func install(
+            _ module: DictationTranscriber, downloading: () -> Void = {}
+        ) async throws {
+            if await installed(module) { return }
             guard let request = try await AssetInventory.assetInstallationRequest(supporting: [module])
             else { return }
+            downloading()
             try await request.downloadAndInstall()
         }
 
@@ -276,10 +296,12 @@ private final class AudioInput: @unchecked Sendable {
             )
         }
 
-        /// Loads the model ahead of the first start.
+        /// Loads the model ahead of the first start, if it's already on this
+        /// Mac: a missing model downloads on first use, never just because
+        /// the app launched.
         static func warm() async throws {
             let module = transcriber(await locale())
-            try await install(module)
+            guard await installed(module) else { return }
             guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module])
             else { return }
             let analyzer = analyzer(module)
@@ -308,7 +330,7 @@ private final class AudioInput: @unchecked Sendable {
 
         func start(hints: [String]) async throws {
             let module = Analyzer.transcriber(await Analyzer.locale())
-            try await Analyzer.install(module)
+            try await Analyzer.install(module) { [reporter] in reporter.downloading() }
             guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module])
             else { throw VoiceError(unavailable) }
             let analyzer = Analyzer.analyzer(module)
@@ -450,7 +472,7 @@ private func speechAccess() async throws {
         if status == .authorized { return }
     default: break
     }
-    throw VoiceError(speechDenied)
+    throw VoiceError(speechDenied, denied: true)
 }
 
 /// An on-device recognizer for this Mac's language, or US English.
@@ -588,7 +610,7 @@ public func buzzVoiceStart(_ session: UInt64, _ hints: UnsafePointer<CChar>?, _ 
             Current.shared.attach(session, recognition)
             try await recognition.start(hints: hints)
         } catch let error as VoiceError {
-            reporter.failed(error.message)
+            if error.denied { reporter.denied(error.message) } else { reporter.failed(error.message) }
         } catch {
             reporter.failed("Voice search couldn't start.")
         }
