@@ -94,8 +94,10 @@ const FAILED = "⚠️ I couldn't finish that. Details are in my activity.";
 const launchOf = ({ command, args, env, workspace, approval }: Config) =>
   JSON.stringify([command, args, env, workspace, approval]);
 
-/** Sets or clears `entry`'s sign-in state from a turn's `result`. */
-function signedIn(entry: Entry, result: Settled) {
+/** Sets or clears `entry`'s sign-in state from the `result` of a turn
+ * delivered on launch `generation`; an older launch's says nothing of it. */
+function signedIn(entry: Entry, generation: Generation, result: Settled) {
+  if (generation !== entry.generation) return;
   if (result.ok) entry.signIn = undefined;
   else if (result.code === AUTH_REQUIRED)
     entry.signIn = {
@@ -439,6 +441,7 @@ export class AcpRuntime {
         ...owed.get(key).filter((id) => id !== event.id),
         event.id,
       ]);
+    const { generation } = entry;
     // Plugins' notes and instructions are keyed by the session's own
     // conversation: a channel-scoped one's is the whole channel.
     const noteRoot = key === channel ? undefined : context.root;
@@ -509,7 +512,7 @@ export class AcpRuntime {
       .then((result) => {
         if (result.undelivered && notes.length)
           agent.restoreNotes?.(channel, notes, noteRoot);
-        signedIn(entry, result);
+        signedIn(entry, generation, result);
         // Of the messages one turn answered, only one has its error. A
         // delivery cancelled by its own signal says nothing; it stays owed.
         if (result.error !== undefined && !signal.aborted)
@@ -542,6 +545,7 @@ export class AcpRuntime {
     entry.handle = agent;
     entry.team = team ?? "";
     entry.syncedModel = !!delivery.synced?.model;
+    const { generation } = entry;
     const done = entry.sessions.runOnce(
       key,
       async (pinned) => {
@@ -561,7 +565,7 @@ export class AcpRuntime {
     this.notify();
     return done
       .then((result) => {
-        signedIn(entry, result);
+        signedIn(entry, generation, result);
         return result;
       })
       .finally(() => this.notify());

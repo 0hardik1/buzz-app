@@ -2069,6 +2069,28 @@ describe("AcpRuntime", () => {
     expect(runtime.signIn(self)).toBeUndefined();
   });
 
+  it("keeps the current launch's sign-in state when an older launch's turn succeeds", async () => {
+    const config = await confirmed();
+    const { fake, deliver, sync, runtime } = setup({
+      hold: true,
+      authMethods: [{ id: "login", name: "Log in" }],
+    });
+    sync(config);
+    await deliver(message("1", "@Opal one"), config).run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+    const next = await confirmed({ args: ["acp", "-v"] });
+    sync(next);
+    await deliver(message("2", "@Opal two"), next).run;
+    await vi.waitFor(() => expect(fake.harnesses[1]?.turns).toHaveLength(1));
+    fake.harnesses[1]?.turns[0]?.fail(-32000, "Sign in first");
+    await vi.waitFor(() =>
+      expect(runtime.signIn(self)).toEqual({ methods: [{ name: "Log in" }] }),
+    );
+    fake.harnesses[0]?.turns[0]?.finish();
+    await flush(50);
+    expect(runtime.signIn(self)).toEqual({ methods: [{ name: "Log in" }] });
+  });
+
   it("sets the sign-in state when a standalone turn's session needs a login", async () => {
     const config = await confirmed();
     const { runtime, sync } = setup({
