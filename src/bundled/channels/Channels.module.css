@@ -325,14 +325,14 @@
 /* Every card, Favorites and the hidden new-workspace slot included, sits the
    same gap from the one before it. */
 [data-sidebar-cards] .channelSection {
-  --sidebar-section-gap: var(--space-1h);
+  --sidebar-section-gap: var(--space-panel-gap);
 }
 /* The hidden new-workspace slot already holds the gap above the next card. */
 [data-sidebar-cards] .createSectionSlot + .channelSection {
   margin-top: 0;
 }
 [data-sidebar-cards] .createSectionDrop {
-  margin-bottom: var(--space-1h);
+  margin-bottom: var(--sidebar-section-gap);
 }
 [data-sidebar-cards] .channelSection[data-sidebar-card][data-drop-target] {
   border-radius: var(--radius-container);

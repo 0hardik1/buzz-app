@@ -323,7 +323,7 @@
   }
   .shell-body {
     @apply relative flex min-h-0 min-w-0 flex-1;
-    padding-inline: calc(var(--space-panel-gap) - var(--space-half));
+    padding-inline: var(--space-panel-gap);
     padding-bottom: var(--space-panel-gap);
   }
   /* Keep the modal portal outside the query container so its fixed backdrop
@@ -333,8 +333,7 @@
   }
   .shell-dialog-frame {
     position: absolute;
-    inset: 0 calc(var(--space-panel-gap) - var(--space-half))
-      var(--space-panel-gap);
+    inset: 0 var(--space-panel-gap) var(--space-panel-gap);
     pointer-events: none;
   }
   .shell-dialog-frame > * {
@@ -347,8 +346,7 @@
       position: fixed;
       /* Fixed positioning creates a stacking context; raise it with the dialog. */
       z-index: var(--layer-dialog);
-      inset: var(--size-topbar) calc(var(--space-panel-gap) - var(--space-half))
-        var(--space-panel-gap);
+      inset: var(--size-topbar) var(--space-panel-gap) var(--space-panel-gap);
     }
   }
   .shell-content {

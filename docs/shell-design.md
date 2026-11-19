@@ -150,9 +150,8 @@ semantic tokens, UI authoring rules and the local component reference.
   Sidebar page links retain their exact route and focus main content when
   selected. Dock destinations never become companion launchers.
   The shell owns one joined Panel around navigation and page content. The shell
-  body uses `--space-panel-gap` minus `--space-half` on its inline edges and the
-  full `--space-panel-gap` below. When the dock is present, it supplies the
-  leading space. Nested Panels keep their opaque fill and clipping but drop
+  body uses `--space-panel-gap` on its inline edges and below, the same gap that
+  separates the sidebar's cards from each other and from the page. Nested Panels keep their opaque fill and clipping but drop
   individual borders, radii, and shadows. Layout owners add one-pixel semantic
   dividers. Document pages scroll inside the remaining viewport.
 - `SettingsSidebar.tsx` composes shared SidebarNavigation with

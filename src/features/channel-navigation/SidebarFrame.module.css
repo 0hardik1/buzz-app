@@ -222,6 +222,11 @@
 .cards .sidebar .sidebarFilter {
   padding-block-start: 0;
 }
+/* Cards space themselves; the list's row gap would add to every card gap, and
+   twice around the hidden new-workspace slot. */
+.cards .sidebar .channelListContent {
+  gap: 0;
+}
 /* The shell already keeps a panel gap on both sides of the sidebar. */
 .cards .sidebar {
   --sidebar-padding-inline: 0px;
