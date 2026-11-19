@@ -460,6 +460,52 @@ test("a refused chat gives the question back when clearing the draft had failed"
   expect(errors.unexplained()).toEqual([]);
 });
 
+test("a second ask while the first chat is still starting keeps its question", async ({
+  page,
+}) => {
+  const errors = watchPageErrors(page);
+  await page.goto(
+    "/tests/fixtures/guest-agent-solo-ask.html?refuse-create=held",
+  );
+  await page
+    .getByRole("button", { name: "Launch channel", exact: true })
+    .click();
+  const composer = page.getByRole("textbox", { name: "Message launch" });
+  await mention(page, composer, "FIRST question");
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Pollen can’t reply here" });
+  await dialog.getByRole("button", { name: "Ask in a Solo chat" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(composer).not.toContainText("FIRST question");
+  // The relay hasn't answered the first chat's create yet.
+  await mention(page, composer, "SECOND question");
+  await page.keyboard.press("Enter");
+  await dialog.getByRole("button", { name: "Ask in a Solo chat" }).click();
+  await expect(
+    page.getByText(
+      "Your Solo chat with Pollen is still starting. Ask again once it’s ready. Your draft is kept.",
+    ),
+  ).toBeVisible();
+  await expect(composer).toContainText("SECOND question");
+  // Only the first question waits on the chat.
+  expect(
+    await page.evaluate(() =>
+      window.soloMessages.filter((message) =>
+        message.content.includes("SECOND question"),
+      ),
+    ),
+  ).toEqual([]);
+  await page.evaluate(() => window.refuseCreate());
+  await expect(
+    page.getByRole("dialog", {
+      name: "Couldn’t start your Solo chat with Pollen, so the question wasn’t sent.",
+    }),
+  ).toBeVisible();
+  // The question in the draft is never replaced or lost.
+  await expect(composer).toContainText("SECOND question");
+  expect(errors.unexplained()).toEqual([]);
+});
+
 for (const away of [false, true])
   test(`a file added while the chat starts keeps its draft when the relay refuses${
     away ? ", after the composer remounts" : ""

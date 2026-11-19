@@ -154,11 +154,15 @@ export function askInSolo(
   if (!text)
     throw new Error("This thread can’t be linked yet. Your draft is kept.");
   const existing = soloAskChat(session, ask.agent.pubkey, ask.channelId);
+  // A chat an earlier ask is still starting can still be refused, and a
+  // refusal withdraws every question queued behind it; only the draft it
+  // came from could take one back. So a later ask waits, its draft kept.
+  if (existing && session.channelWrites.starting(existing.id))
+    throw new Error(
+      `Your Solo chat with ${ask.agent.name} is still starting. Ask again once it’s ready. Your draft is kept.`,
+    );
   const channelId = existing?.id ?? crypto.randomUUID();
-  // A chat an earlier ask is still starting can still be refused.
-  let ready =
-    (existing && session.channelWrites.starting(existing.id)) ||
-    Promise.resolve();
+  let ready = Promise.resolve();
   if (!existing) {
     const label = askLabel(ask.channelId);
     if (

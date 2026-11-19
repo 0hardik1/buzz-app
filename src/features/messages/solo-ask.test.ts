@@ -23,7 +23,10 @@ afterEach(() => localStorage.clear());
 
 function fakeSession({
   available = true,
-  ready = (): Promise<void> => Promise.resolve(),
+  ready,
+}: {
+  available?: boolean;
+  ready?: () => Promise<void>;
 } = {}) {
   const channels: ChannelSummary[] = [];
   const starts = new Map<string, Promise<void>>();
@@ -51,8 +54,16 @@ function fakeSession({
           ...(options?.labels ?? []),
         ],
       } as ChannelSummary);
+      // Started at once, unless a test holds the start open; as the real
+      // writer does, a start is forgotten once it settles.
+      if (!ready)
+        return { create: Promise.resolve(), ready: Promise.resolve() };
       const started = ready();
       starts.set(id, started);
+      void started.then(
+        () => starts.delete(id),
+        () => starts.delete(id),
+      );
       return { create: Promise.resolve(), ready: started };
     },
   );
@@ -229,25 +240,47 @@ it("creates and sends nothing when Solo chats are unavailable", () => {
   expect(f.send).not.toHaveBeenCalled();
 });
 
-it("continues a chat this device is still starting", () => {
-  const f = fakeSession();
+it("waits on a chat this device is still starting, then continues it", async () => {
+  let release = (): void => {};
+  const f = fakeSession({
+    ready: () => new Promise<void>((resolve) => (release = resolve)),
+  });
   const first = askInSolo(f.session, ask());
   // Listed before the relay confirms it: pending, no visibility yet.
   const { visibility: _visibility, ...listed } = f
     .channels[0] as ChannelSummary;
   f.channels.splice(0, 1, { ...listed, pending: true } as ChannelSummary);
-  expect(askInSolo(f.session, ask()).channelId).toBe(first.channelId);
+  // A refusal would withdraw a question queued behind the first, after its
+  // draft was cleared, so a second ask is refused and sends nothing.
+  expect(() => askInSolo(f.session, ask({ question: "And Friday?" }))).toThrow(
+    "Your Solo chat with Bestie is still starting. Ask again once it’s ready. Your draft is kept.",
+  );
+  expect(f.send).toHaveBeenCalledOnce();
+  f.channels.splice(0, 1, {
+    ...listed,
+    visibility: "private",
+  } as ChannelSummary);
+  release();
+  await first.ready;
+  // Once started, the next ask continues it.
+  const second = askInSolo(f.session, ask({ question: "And Friday?" }));
+  expect(second).toMatchObject({ channelId: first.channelId, reused: true });
+  expect(f.start).toHaveBeenCalledOnce();
+  expect(f.send).toHaveBeenCalledTimes(2);
 });
 
-it("reports a chat the relay never made, for a reused chat too", async () => {
+it("reports a chat the relay never made, and sends nothing behind it", async () => {
+  let refuse = (): void => {};
   const refused = new ChatNotStarted("refused");
-  const f = fakeSession({ ready: () => Promise.reject(refused) });
+  const f = fakeSession({
+    ready: () =>
+      new Promise<void>((_, reject) => (refuse = () => reject(refused))),
+  });
   const first = askInSolo(f.session, ask());
+  expect(() => askInSolo(f.session, ask())).toThrow("still starting");
+  refuse();
   await expect(first.ready).rejects.toBe(refused);
-  // A second ask before the refusal lands continues the starting chat.
-  const second = askInSolo(f.session, ask());
-  expect(second.reused).toBe(true);
-  await expect(second.ready).rejects.toBe(refused);
+  expect(f.send).toHaveBeenCalledOnce();
 });
 
 it("signs the question's chips, as an ordinary send does", () => {
