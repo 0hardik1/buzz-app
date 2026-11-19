@@ -2,7 +2,24 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { launchEnvironment, nativeMcpInstance } from "./desktop-config.mjs";
+import {
+  dropVariable,
+  launchEnvironment,
+  nativeMcpInstance,
+} from "./desktop-config.mjs";
+
+it("drops a launcher-owned variable in any letter case", () => {
+  // Windows resolves variables without regard to case, so a variant the shell
+  // exported would otherwise still reach the app.
+  const env = {
+    BUZZ_DEV_RELEASE_KEY: "1",
+    buzz_dev_release_key: "1",
+    Buzz_Dev_Release_Key: "1",
+    BUZZ_DEV_RELEASE_KEY_OTHER: "kept",
+  };
+  dropVariable(env, "BUZZ_DEV_RELEASE_KEY");
+  expect(env).toEqual({ BUZZ_DEV_RELEASE_KEY_OTHER: "kept" });
+});
 
 it("layers the me settings over .env.local, under the process", () => {
   const root = mkdtempSync(join(tmpdir(), "desktop-config-"));

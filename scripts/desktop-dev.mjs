@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { loadEnv } from "vite";
 import {
   desktopOverlay,
+  dropVariable,
   launchEnvironment,
   ME_SETTINGS,
   options,
@@ -42,7 +43,7 @@ const port = values.port === undefined ? undefined : Number(values.port);
 const help = forwarded.some((arg) => arg === "--help" || arg === "-h");
 const root = fileURLToPath(new URL("../", import.meta.url));
 const env = launchEnvironment(root, me ? ME_SETTINGS : undefined);
-delete env.BUZZ_DEV_RELEASE_KEY;
+dropVariable(env, "BUZZ_DEV_RELEASE_KEY");
 if (me) env.BUZZ_DEV_RELEASE_KEY = "1";
 // On macOS `me` also routes Keychain items through a helper it installs once,
 // so approvals survive rebuilds. Like the release key, only `me` turns it on.
@@ -51,7 +52,7 @@ for (const name of [
   "BUZZ_DEV_CREDENTIAL_HELPER_AUTHORIZE",
   "BUZZ_DEV_HELPER_SIGNING",
 ])
-  delete env[name];
+  dropVariable(env, name);
 if (me && !help && process.platform === "darwin") {
   try {
     const { helper, identity } = prepareCredentialHelper(root);
@@ -74,6 +75,7 @@ if (me && !help && process.platform === "darwin") {
 // frontend actually uses.
 // `me` signs in natively, as the installed build does: a pinned viewer would
 // swap that for the development broker and turn its sign-in servers off.
+dropVariable(env, "BUZZ_DEV_VIEWER");
 env.BUZZ_DEV_VIEWER = me
   ? ""
   : (loadEnv("development", root, "BUZZ_DEV_VIEWER").BUZZ_DEV_VIEWER ?? "");

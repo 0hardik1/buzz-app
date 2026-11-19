@@ -43,6 +43,14 @@ export function launchEnvironment(root, me) {
   };
 }
 
+// Removes `name` from a launch environment in any letter case. The environment
+// is a plain object, so `delete env.NAME` leaves a `name` the shell exported,
+// and Windows, whose variables ignore case, would still hand it to the app.
+export function dropVariable(env, name) {
+  for (const key of Object.keys(env))
+    if (key.toUpperCase() === name) delete env[key];
+}
+
 // Pull `--<name> <value>` and `--<name>=<value>` out of a launcher's arguments.
 // Scanning stops at `--`, after which everything belongs to Tauri's runner, and the
 // last occurrence wins, as it does for Tauri's own repeated flags. A named option
