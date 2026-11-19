@@ -263,11 +263,7 @@ impl FederatedIdentity {
             record: Some(root.join(format!("{account}.customers"))),
         });
         let signed_out = Some(root.join(format!("{account}.signed-out")));
-        let store = Arc::new(store::SecureStore {
-            account: account.clone(),
-            root,
-            bundled: store::BUNDLED,
-        });
+        let store = Arc::new(store::SecureStore::open(account.clone())?);
         Ok(Self::build(
             config,
             fingerprint,
@@ -1434,7 +1430,12 @@ impl FederatedIdentity {
             self.remove_retired(session.clone(), &revision).await;
             // Whatever the removal found: this copy's token only, never a
             // record read back from the item, which may be another copy's.
-            self.revoke(&session);
+            // One `just desktop me` borrowed stays Buzz.app's to end.
+            let held = session.record.revision.clone();
+            let borrowed = self.storage(move |store| Ok(store.release_holds(&held)));
+            if !matches!(borrowed.await, Ok(true)) {
+                self.revoke(&session);
+            }
             Ok(())
         } else {
             // Also retries an incomplete deletion or sign-out during restore.
@@ -1645,14 +1646,6 @@ pub(crate) fn federated_identity_sign_in_link(
         .server_for_command(relay.as_deref(), server.as_deref())?
         .sign_in_link())
 }
-const SHARED_SIGN_OUT_CANCELLED: &str =
-    "Sign-out cancelled. The installed Buzz app is still signed in.";
-/// A `just desktop me` build's sign-out, confirmed (see `store::shares_release`).
-async fn confirmed_shared_sign_out() -> bool {
-    tauri::async_runtime::spawn_blocking(store::confirm_shared_sign_out)
-        .await
-        .unwrap_or(false)
-}
 #[tauri::command]
 pub(crate) async fn federated_identity_sign_out(
     host: tauri::State<'_, FederatedIdentity>,
@@ -1662,18 +1655,6 @@ pub(crate) async fn federated_identity_sign_out(
     revision: Option<String>,
 ) -> Result<Snapshot, String> {
     let server = host.server_for_command(relay.as_deref(), server.as_deref())?;
-    // Only a sign-out that would end something asks: not a server already
-    // signed out, nor a revision a newer session has replaced.
-    if store::shares_release() {
-        let current = server.snapshot();
-        let ends = !matches!(current.status, Status::SignedOut | Status::Unconfigured)
-            && revision
-                .as_ref()
-                .is_none_or(|expected| *expected == current.revision);
-        if ends && !confirmed_shared_sign_out().await {
-            return Err(SHARED_SIGN_OUT_CANCELLED.into());
-        }
-    }
     match tokens.for_server(&server) {
         Some(tokens) => tokens.sign_out(revision.as_deref()).await,
         None => Ok(server.sign_out(revision.as_deref()).await),

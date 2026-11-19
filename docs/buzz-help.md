@@ -1881,9 +1881,7 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
 On macOS, `just desktop me` debug builds keep their Keychain items through a local
 credential helper, so Keychain asks once per item rather than after each rebuild.
 See [local credential helper](identity.md#local-credential-helper-on-macos).
-Release builds ignore it. A `just desktop me` build also uses the installed app's
-saved sign-ins, so signing out of a server there asks first: it also removes the
-installed app's sign-in, and its agents can stop until you sign in again.
+Release builds ignore it.
 
 ### Builderlab in development
 

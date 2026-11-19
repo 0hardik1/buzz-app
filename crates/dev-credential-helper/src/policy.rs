@@ -106,9 +106,8 @@ fn plain(account: &str, prefix: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b".-_:".contains(&byte))
 }
 
-/// The exact debug-build items `just desktop me` reads and writes, the
-/// release human key, which it may only read, and the release build's
-/// sign-in sessions, which `me` shares.
+/// The exact debug-build items `just desktop me` reads and writes, and the
+/// release human key and sign-ins, which it may only read.
 pub fn allowed(operation: Operation, service: &str, account: &str) -> bool {
     use Operation::*;
     match service {
@@ -127,8 +126,9 @@ pub fn allowed(operation: Operation, service: &str, account: &str) -> bool {
         "xyz.block.buzz.desktop.agents" | "dev.local.buzz.foundation.agents" => {
             account == "agent-bundle-v1" || plain(account, "agent:")
         }
-        "xyz.block.buzz.desktop.federated-session"
-        | "xyz.block.buzz.desktop.federated-session.debug" => hex64(account),
+        // The release build's sign-ins, for `me`: read only, like its key.
+        "xyz.block.buzz.desktop.federated-session" => operation == Read && hex64(account),
+        "xyz.block.buzz.desktop.federated-session.debug" => hex64(account),
         "xyz.block.buzz.desktop.jev-key.debug" | "dev.local.buzz.foundation.jev-key.debug" => {
             account == "typesafe"
         }
@@ -217,14 +217,8 @@ mod tests {
                 "xyz.block.buzz.desktop.federated-session.debug",
                 hex.as_str(),
             ),
-            // `me` shares the release build's sessions.
             (
-                Replace,
-                "xyz.block.buzz.desktop.federated-session",
-                hex.as_str(),
-            ),
-            (
-                Delete,
+                Read,
                 "xyz.block.buzz.desktop.federated-session",
                 hex.as_str(),
             ),
@@ -273,7 +267,17 @@ mod tests {
             ),
             (Read, "xyz.block.buzz.desktop.agents", "secrets"),
             (Read, "xyz.block.buzz.desktop.agents", "agent:"),
-            // Other release-build keys belong to the release app.
+            // Release-build sessions and keys belong to the release app.
+            (
+                Replace,
+                "xyz.block.buzz.desktop.federated-session",
+                hex.as_str(),
+            ),
+            (
+                Delete,
+                "xyz.block.buzz.desktop.federated-session",
+                hex.as_str(),
+            ),
             (
                 Read,
                 "xyz.block.buzz.desktop.federated-session",

@@ -1,43 +1,23 @@
 //! Secure records plus durable, nonsensitive refusal markers outside wiped app data.
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, path::PathBuf, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 use zeroize::{Zeroize, Zeroizing};
 
 /// Not keyed by app identifier: like the human key, every Buzz copy of this
 /// flavour shares each server's session per profile, and Sign out of Buzz
-/// erases them all. A `just desktop me` build is a copy of the release
-/// flavour: it shares the release build's sessions, grants and locks.
-pub(crate) fn service() -> &'static str {
-    service_for(cfg!(debug_assertions) && !shares_release())
-}
-const fn service_for(debug: bool) -> &'static str {
-    if debug {
-        "xyz.block.buzz.desktop.federated-session.debug"
-    } else {
-        "xyz.block.buzz.desktop.federated-session"
-    }
-}
-/// Whether this debug build uses the release build's sessions, as
-/// `just desktop me` does along with its key. Signing out of a server here
-/// then signs the installed app out too, so that command confirms first.
-/// Sign out of Buzz erases only this build's own namespace (`own_root`),
-/// as it deletes only this build's own key.
-pub(crate) fn shares_release() -> bool {
-    buzz_credential_store::reads_release_human()
-}
-/// Asks before a `me` build's sign-out. Blocking: call it off the async runtime.
-pub(crate) fn confirm_shared_sign_out() -> bool {
-    let sign_out = "Sign out";
-    let result = rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Warning)
-        .set_title("Sign the installed Buzz out too?")
-        .set_description("This development build shares the installed Buzz app's sign-ins. Signing out here also removes the installed app's saved sign-in, and its agents can stop until you sign in again.")
-        .set_buttons(rfd::MessageButtons::OkCancelCustom(sign_out.into(), "Cancel".into()))
-        .show();
-    // Windows without common-controls-v6 falls back to the standard OK label.
-    result == rfd::MessageDialogResult::Ok
-        || result == rfd::MessageDialogResult::Custom(sign_out.into())
-}
+/// erases them all.
+pub(crate) const SERVICE: &str = if cfg!(debug_assertions) {
+    "xyz.block.buzz.desktop.federated-session.debug"
+} else {
+    RELEASE_SERVICE
+};
+/// Buzz.app's, which `just desktop me` reads but never writes (`SecureStore::release`).
+const RELEASE_SERVICE: &str = "xyz.block.buzz.desktop.federated-session";
 const MAX_BUNDLE: usize = 1024 * 1024;
 
 pub(crate) type LoadedRecord = (Option<Zeroizing<Vec<u8>>>, Option<String>);
@@ -53,6 +33,11 @@ pub(crate) trait Store: Send + Sync {
     ) -> Result<(), &'static str>;
     fn load(&self) -> Result<LoadedRecord, &'static str>;
     fn remove(&self, expected: &[u8], revision: &str) -> Result<(), &'static str>;
+    /// Whether Buzz.app may still hold the session at `revision`, which
+    /// `just desktop me` borrowed: signing out here must not end it there.
+    fn release_holds(&self, _revision: &str) -> bool {
+        false
+    }
 }
 
 pub(crate) struct SecureStore {
@@ -61,6 +46,11 @@ pub(crate) struct SecureStore {
     /// Whether grants share the session's item; otherwise each record is an
     /// item of its own, as before bundles.
     pub(super) bundled: bool,
+    /// In `just desktop me`, Buzz.app's records folder. Each item reads from
+    /// there, read only, until this store first saves it: every save writes
+    /// the item's index here first, so from then on this store's copy is the
+    /// only one read, even once it is empty.
+    pub(super) release: Option<PathBuf>,
 }
 /// Only macOS prompts once per item, and a Windows credential holds at most
 /// 2,560 bytes, so only macOS bundles (as the native agent key bundle does).
@@ -136,17 +126,27 @@ fn error(error: buzz_credential_store::Error) -> &'static str {
     }
 }
 
-/// The OS secure items under `service()`.
+/// The OS secure items under `SERVICE`.
 #[cfg(not(test))]
 mod items {
-    use super::{error, service};
+    use super::{error, SERVICE};
     use std::path::Path;
     use zeroize::Zeroizing;
     pub(super) fn read(
         _: &Path,
         account: &str,
     ) -> Result<Option<Zeroizing<Vec<u8>>>, &'static str> {
-        match buzz_credential_store::read_session(service(), account) {
+        read_in(SERVICE, account)
+    }
+    /// Buzz.app's item, for `just desktop me`.
+    pub(super) fn read_release(
+        _: &Path,
+        account: &str,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>, &'static str> {
+        read_in(super::RELEASE_SERVICE, account)
+    }
+    fn read_in(service: &str, account: &str) -> Result<Option<Zeroizing<Vec<u8>>>, &'static str> {
+        match buzz_credential_store::read_session(service, account) {
             Ok(value) => Ok(Some(value)),
             Err(buzz_credential_store::Error::Absent) => Ok(None),
             Err(value) => Err(error(value)),
@@ -162,18 +162,11 @@ mod items {
         expected: Option<&[u8]>,
         replacement: Option<&[u8]>,
     ) -> Result<(), &'static str> {
-        buzz_credential_store::compare_session(service(), account, expected, replacement)
+        buzz_credential_store::compare_session(SERVICE, account, expected, replacement)
             .map_err(error)
     }
     pub(super) fn delete(_: &Path, account: &str) -> Result<(), &'static str> {
-        erase(service(), account)
-    }
-    /// Sign out of Buzz erases this build's own items, never ones it shares.
-    pub(super) fn erase_own(_: &Path, account: &str) -> Result<(), &'static str> {
-        erase(super::service_for(cfg!(debug_assertions)), account)
-    }
-    fn erase(service: &str, account: &str) -> Result<(), &'static str> {
-        match buzz_credential_store::delete_session(service, account) {
+        match buzz_credential_store::delete_session(SERVICE, account) {
             Ok(()) | Err(buzz_credential_store::Error::Absent) => Ok(()),
             Err(value) => Err(error(value)),
         }
@@ -221,6 +214,12 @@ pub(crate) mod items {
             items.get(account).cloned().map(Zeroizing::new)
         })
     }
+    pub(crate) fn read_release(
+        root: &Path,
+        account: &str,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>, &'static str> {
+        read(root, account)
+    }
     pub(crate) fn compare(
         root: &Path,
         account: &str,
@@ -249,17 +248,44 @@ pub(crate) mod items {
             items.remove(account);
         })
     }
-    pub(crate) fn erase_own(root: &Path, account: &str) -> Result<(), &'static str> {
-        delete(root, account)
-    }
 }
 
 impl SecureStore {
-    fn marker(&self, revision: &str) -> Result<PathBuf, &'static str> {
+    /// This build's store for `account`, reading through to Buzz.app's in
+    /// `just desktop me`, as that build reads Buzz.app's key.
+    pub(crate) fn open(account: String) -> Result<Self, &'static str> {
+        Self::open_as(account, buzz_credential_store::reads_release_human())
+    }
+    fn open_as(account: String, me: bool) -> Result<Self, &'static str> {
+        let release = me
+            .then(|| {
+                dirs::data_dir()
+                    .map(|path| path.join(format!(".{RELEASE_SERVICE}")))
+                    .ok_or("storage-unavailable")
+            })
+            .transpose()?;
+        Ok(Self {
+            account,
+            root: root()?,
+            bundled: BUNDLED,
+            release,
+        })
+    }
+    /// Buzz.app's folder, while `account`'s item still reads from there.
+    fn borrowed(&self, account: &str) -> Option<&Path> {
+        let own = || self.root.join(format!("{account}.record")).exists();
+        self.release.as_deref().filter(|_| !own())
+    }
+    /// The item at `account` as this store reads it (see `release`).
+    fn seen(&self, account: &str) -> Result<Item, &'static str> {
+        match self.borrowed(account) {
+            Some(release) => items::read_release(release, account),
+            None => items::read(&self.root, account),
+        }
+    }
+    fn marker(&self, root: &Path, revision: &str) -> Result<PathBuf, &'static str> {
         let revision = uuid::Uuid::parse_str(revision).map_err(|_| "storage-corrupt")?;
-        Ok(self
-            .root
-            .join(format!("{}.{revision}.refused", self.account)))
+        Ok(root.join(format!("{}.{revision}.refused", self.account)))
     }
     fn index(&self) -> PathBuf {
         self.root.join(format!("{}.record", self.account))
@@ -287,7 +313,10 @@ impl SecureStore {
         Ok(Transaction(file, process))
     }
     fn refused(&self, revision: &str) -> Result<Option<String>, &'static str> {
-        match fs::read_to_string(self.marker(revision)?) {
+        self.refused_in(&self.root, revision)
+    }
+    fn refused_in(&self, root: &Path, revision: &str) -> Result<Option<String>, &'static str> {
+        match fs::read_to_string(self.marker(root, revision)?) {
             Ok(contents) if contents == revision => Ok(Some(contents)),
             Ok(_) => Err("storage-corrupt"),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -300,7 +329,7 @@ impl SecureStore {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(self.marker(revision)?)
+            .open(self.marker(&self.root, revision)?)
             .map_err(|_| "storage-unavailable")?;
         use std::io::Write;
         file.write_all(revision.as_bytes())
@@ -308,16 +337,21 @@ impl SecureStore {
             .map_err(|_| "storage-unavailable")
     }
     fn clear_refusal(&self, revision: &str) -> Result<(), &'static str> {
-        match fs::remove_file(self.marker(revision)?) {
+        match fs::remove_file(self.marker(&self.root, revision)?) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(_) => Err("storage-unavailable"),
         }
     }
-    /// The item as read, and the bundle it holds.
+    /// This store's item as read, and the bundle it reads (which, borrowed,
+    /// is Buzz.app's: the first save copies it here).
     fn bundle(&self) -> Result<(Item, Bundle), &'static str> {
         let raw = items::read(&self.root, &self.account)?;
-        let bundle = match raw.as_deref() {
+        let seen = match self.borrowed(&self.account) {
+            Some(_) => self.seen(&self.account)?,
+            None => raw.clone(),
+        };
+        let bundle = match seen.as_deref() {
             Some(raw) => decode(raw)?,
             None => Bundle::default(),
         };
@@ -395,6 +429,7 @@ impl SecureStore {
             account: key.into(),
             root: self.root.clone(),
             bundled: false,
+            release: self.release.clone(),
         }
     }
     /// The grant (or retirement) record at `key`. Only absence from a
@@ -404,14 +439,14 @@ impl SecureStore {
     pub(crate) fn grant(&self, key: &str) -> Result<Option<Zeroizing<Vec<u8>>>, &'static str> {
         if !self.bundled {
             let _transaction = self.item(key).lock()?;
-            return items::read(&self.root, key);
+            return self.seen(key);
         }
         let _transaction = self.lock()?;
         let (raw, mut bundle) = self.bundle()?;
         if let Some(value) = bundle.grants.get(key) {
             return Ok(Some(Zeroizing::new(value.as_bytes().to_vec())));
         }
-        let Some(value) = items::read(&self.root, key)? else {
+        let Some(value) = self.seen(key)? else {
             return Ok(None);
         };
         bundle.grants.insert(key.into(), text(&value)?);
@@ -508,7 +543,8 @@ impl Store for SecureStore {
             Some(raw) if raw.len() <= 64 * 1024 => {
                 let record: super::Record =
                     serde_json::from_slice(raw).map_err(|_| "storage-corrupt")?;
-                self.refused(&record.revision)?
+                let root = self.borrowed(&self.account).unwrap_or(&self.root);
+                self.refused_in(root, &record.revision)?
             }
             Some(_) => return Err("storage-corrupt"),
             None => None,
@@ -523,6 +559,22 @@ impl Store for SecureStore {
         self.swap(Some(expected), None)?;
         self.clear_refusal(revision)
     }
+    fn release_holds(&self, revision: &str) -> bool {
+        let Some(release) = &self.release else {
+            return false;
+        };
+        let read = items::read_release(release, &self.account)
+            .and_then(|raw| raw.map(|raw| decode(&raw)).transpose());
+        match read {
+            Ok(Some(bundle)) => bundle.session.as_deref().is_some_and(|session| {
+                serde_json::from_str::<super::Record>(session)
+                    .map_or(true, |record| record.revision == revision)
+            }),
+            Ok(None) => false,
+            // What can't be read may still be Buzz.app's.
+            Err(_) => true,
+        }
+    }
 }
 
 /// Key of one agent's grant inside the owner's bundle, and of its item from
@@ -536,23 +588,12 @@ pub(crate) fn agent_grant_key(account: &str, owner: &str, agent: &str) -> String
 }
 
 pub(crate) fn root() -> Result<PathBuf, &'static str> {
-    root_of(service())
-}
-/// This build's own records, which a `just desktop me` build leaves for the
-/// release build's: the only ones Sign out of Buzz erases (`remove_all`). A
-/// pending sign-out is shared by every development copy, so the copy that
-/// finishes it must never reach sessions the copy that asked did not use.
-pub(crate) fn own_root() -> Result<PathBuf, &'static str> {
-    root_of(service_for(cfg!(debug_assertions)))
-}
-fn root_of(service: &str) -> Result<PathBuf, &'static str> {
     dirs::data_dir()
-        .map(|path| path.join(format!(".{service}")))
+        .map(|path| path.join(format!(".{SERVICE}")))
         .ok_or("storage-unavailable")
 }
 
-/// Called with `own_root` before the existing boot owner deletes the human
-/// key or opens a WebView.
+/// Called before the existing boot owner deletes the human key or opens a WebView.
 pub(crate) fn remove_all(root: PathBuf) -> Result<(), String> {
     let entries = match fs::read_dir(&root) {
         Ok(entries) => entries,
@@ -584,11 +625,12 @@ pub(crate) fn remove_all(root: PathBuf) -> Result<(), String> {
             account: account.to_owned(),
             root: root.clone(),
             bundled: BUNDLED,
+            release: None,
         };
         let _transaction = store.lock()?;
         // The boot owner's durable pending sign-out fences all app activity.
         // Wiping an indexed slot needs neither its schema nor read permission.
-        items::erase_own(&root, account)?;
+        items::delete(&root, account)?;
         fs::remove_file(path).map_err(|_| "Federated session index removal failed")?;
     }
     Ok(())
@@ -612,6 +654,7 @@ mod tests {
             account: "ab".repeat(32),
             root: root.path().into(),
             bundled: true,
+            release: None,
         }
     }
     fn item(store: &SecureStore, account: &str) -> Option<Vec<u8>> {
@@ -632,6 +675,7 @@ mod tests {
             account,
             root: root.path().into(),
             bundled: true,
+            release: None,
         };
         let held = elsewhere(&store);
         assert_eq!(remove_all(root.path().into()), Err("storage-busy".into()));
@@ -898,37 +942,6 @@ mod tests {
     }
 
     #[test]
-    fn two_copies_on_one_item_keep_each_others_grants() {
-        // The installed app and a `just desktop me` build share one item.
-        assert_eq!(
-            service_for(false),
-            "xyz.block.buzz.desktop.federated-session"
-        );
-        assert_ne!(service_for(true), service_for(false));
-        let root = tempfile::tempdir().unwrap();
-        let (a, b) = (secure(&root), secure(&root));
-        let session = super::super::tests::record();
-        a.compare(None, Some(&session.raw)).unwrap();
-        let keys: Vec<_> = (0..4)
-            .map(|agent| agent_grant_key(&a.account, "owner", &agent.to_string()))
-            .collect();
-        for (index, key) in keys.iter().enumerate() {
-            let copy = if index % 2 == 0 { &a } else { &b };
-            copy.set_grant(key, Some(b"grant")).unwrap();
-        }
-        b.set_grant(&keys[0], None).unwrap();
-        // While one copy writes, the other is refused, never written over.
-        let held = elsewhere(&a);
-        assert_eq!(b.set_grant(&keys[0], Some(b"late")), Err("storage-busy"));
-        drop(held);
-        assert!(a.grant(&keys[0]).unwrap().is_none());
-        for key in &keys[1..] {
-            assert_eq!(a.grant(key).unwrap().unwrap().as_slice(), b"grant");
-        }
-        assert_eq!(b.read().unwrap().unwrap().as_slice(), &session.raw[..]);
-    }
-
-    #[test]
     fn a_stale_copys_removal_keeps_its_refusal_and_the_newer_session() {
         let root = tempfile::tempdir().unwrap();
         // Two Buzz copies on one item: B replaces the session A still holds.
@@ -952,6 +965,7 @@ mod tests {
             account: "fixture".into(),
             root: root.path().into(),
             bundled: true,
+            release: None,
         };
         let old = uuid::Uuid::new_v4().to_string();
         let newer = uuid::Uuid::new_v4().to_string();
@@ -989,5 +1003,85 @@ mod tests {
             Some(newer.as_str())
         );
         drop(inherited);
+    }
+
+    #[test]
+    fn only_me_reads_buzz_apps_records_and_both_keep_their_own() {
+        let account = "ab".repeat(32);
+        for me in [false, true] {
+            let store = SecureStore::open_as(account.clone(), me).unwrap();
+            assert_eq!(store.root, root().unwrap());
+            assert!(store.root.ends_with(format!(".{SERVICE}")));
+            assert_eq!(
+                store.release,
+                me.then(|| dirs::data_dir()
+                    .unwrap()
+                    .join(".xyz.block.buzz.desktop.federated-session"))
+            );
+        }
+        assert_ne!(SERVICE, RELEASE_SERVICE);
+    }
+
+    #[test]
+    fn me_copies_buzz_apps_record_on_first_write_and_never_changes_it() {
+        let release = tempfile::tempdir().unwrap();
+        let app = secure(&release);
+        let session = super::super::tests::record();
+        let revision = session.record.revision.clone();
+        let session = session.raw.to_vec();
+        app.compare(None, Some(&session)).unwrap();
+        app.set_grant("cd", Some(b"app-grant")).unwrap();
+        let saved = item(&app, &app.account);
+        let debug = tempfile::tempdir().unwrap();
+        let me = SecureStore {
+            release: Some(release.path().into()),
+            ..secure(&debug)
+        };
+
+        // Reads come from Buzz.app's record until the first write.
+        assert_eq!(
+            me.load().unwrap().0.map(|raw| raw.to_vec()),
+            Some(session.clone())
+        );
+        assert_eq!(
+            me.grant("cd").unwrap().map(|raw| raw.to_vec()),
+            Some(b"app-grant".to_vec())
+        );
+        assert_eq!(item(&me, &me.account), None);
+        assert!(me.release_holds(&revision));
+
+        // The first write copies the whole bundle here, without mixing.
+        me.set_grant("ef", Some(b"me-grant")).unwrap();
+        assert_eq!(item(&app, &app.account), saved);
+        assert_eq!(
+            me.read().unwrap().map(|raw| raw.to_vec()),
+            Some(session.clone())
+        );
+        assert_eq!(
+            me.grant("cd").unwrap().map(|raw| raw.to_vec()),
+            Some(b"app-grant".to_vec())
+        );
+        assert_eq!(app.grant("ef").unwrap(), None);
+
+        // Signing out empties this copy and never falls back to Buzz.app's.
+        me.remove(&session, &revision).unwrap();
+        me.set_grant("cd", None).unwrap();
+        me.set_grant("ef", None).unwrap();
+        assert_eq!(item(&me, &me.account), None);
+        assert_eq!(me.load().unwrap().0, None);
+        assert!(me.release_holds(&revision));
+        assert!(!me.release_holds(&uuid::Uuid::new_v4().to_string()));
+
+        // Sign out of Buzz erases only this copy, and reads Buzz.app's again.
+        remove_all(debug.path().into()).unwrap();
+        assert_eq!(item(&app, &app.account), saved);
+        assert!(release
+            .path()
+            .join(format!("{}.record", app.account))
+            .exists());
+        assert_eq!(
+            me.load().unwrap().0.map(|raw| raw.to_vec()),
+            Some(session.clone())
+        );
     }
 }

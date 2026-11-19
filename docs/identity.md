@@ -570,7 +570,7 @@ builds, or `xyz.block.buzz.desktop.identity.debug` with Rust debug assertions,
 account `human`. Debug worktrees share the debug item, not the release identity;
 ports and frontend dev mode do not isolate it. `just desktop me` is the one
 exception: it signs in with the release key (and
-[shares its sign-ins](#sharing-the-installed-apps-sign-ins-in-development)), read from
+[its sign-ins](#sharing-the-installed-apps-sign-ins-in-development)), read from
 `xyz.block.buzz.desktop.identity` (else its pre-1.0 service), and never copies,
 replaces or deletes it. Create, import and Sign out still use only the debug item,
 so Sign out ends the session but the next launch reads the release key again. A
@@ -673,9 +673,10 @@ and 13 occupied; other failures are unavailable. Requests time out after five
 seconds, or two minutes under `BUZZ_DEV_CREDENTIAL_HELPER_AUTHORIZE=1`.
 
 The helper serves only an exact list of items and refuses any other service or
-account. It may only read the release key, never write, copy over or delete it, and
-it never replaces the debug human key, which stays create-only. Of the release
-build's other items it serves only the federated sessions `me` shares. Before it reads a
+account. It may only read the release key and the release build's sign-ins
+(`xyz.block.buzz.desktop.federated-session`), never write, copy over or delete
+them, and
+it never replaces the debug human key, which stays create-only. Before it reads a
 value or touches the Keychain, it checks that stdout is a Unix socket whose peer is
 its parent process, by audit token, and that the peer's live code signature meets
 the recorded requirement. The requirement file must belong to the user and be
@@ -1193,8 +1194,7 @@ return permission. Other platforms keep manual focus return.
 
 FI records use the OS secure-store service
 `xyz.block.buzz.desktop.federated-session` (with `.debug` for Rust debug
-builds other than [`just desktop me`](#sharing-the-installed-apps-sign-ins-in-development)),
-keyed by profile and each server's deployment fingerprint, so a build's
+builds), keyed by profile and each server's deployment fingerprint, so a build's
 first server keeps the sessions it saved as the only server. Neither includes the
 app identifier: like the human key, copies in one debug/release namespace that
 use the same server (Buzz and Buzz Staging both use the public server) share its
@@ -1211,60 +1211,33 @@ prompts once; Windows and Linux keep one item per record. Older macOS items
 move into it on read. This is a one-way development migration: close older
 Buzz copies, including other debug worktrees, before the first upgraded launch
 and use the upgraded build afterward. An older copy still running can write a
-grant the bundle no longer reads, which leaves that agent stopped. Release
-builds already run one instance, beside which a `just desktop me` build may
-run. Every session and grant write holds the account's file lock beside the FI
-records across its read and write, and replaces the item only if it still holds
-what was read, so two copies never drop each other's records; a copy that finds
-the lock held reports a retryable busy error rather than waiting. Account indices and
+grant the bundle no longer reads, which leaves that agent stopped. Release builds already run one instance. Account indices and
 revision-specific refusal markers contain no credential and live outside wiped
 Buzz data. Failed removal of a known record leaves refusal durable before any
 secure-store access, so that revision cannot restore until cleanup succeeds.
 Sign out of Buzz removes indexed FI records across profiles/configurations in
-its own debug/release namespace (a `just desktop me` build's is still debug) before deleting the human key or opening a WebView.
+its debug/release namespace before deleting the human key or opening a WebView.
 
 #### Sharing the installed app's sign-ins in development
 
-A `just desktop me` debug build is a copy of the release flavour for FI: with
-`BUZZ_DEV_RELEASE_KEY` set it uses the release service and its records folder,
-so it restores the installed app's sessions and agent grants without a new
-browser sign-in, takes the same locks, and shares the signed-out marks. Plain
-`just desktop` keeps the `.debug` namespace. Sessions are keyed by each
-server's descriptor, so the build finds a session only for a server it lists
-exactly as the installed build does: `me` loads the installed build's settings
-from [`~/.buzz-foundation/desktop-me.env`](configuration.md#launch-environment).
-Without that file it shares storage but lists only the built-in server.
-
-Whatever the build writes, the installed app reads. Signing out of a server
-(Settings, **Switch account**, **Use a different account**) removes the
-installed app's saved session and agent grants and ends that session at the
-server, so its agents can stop until someone signs in again. In a `me` build
-`federated_identity_sign_out` therefore first shows a native confirmation,
-whenever the call would end a session: not for a server already signed out, or
-a revision a newer session replaced. **Cancel** changes nothing and the caller
-gets an error. Two things the confirmation does not cover: an installed app
-that is running keeps the session it holds in memory until that session is
-refused or the app restarts, and a completed browser sign-in with a different
-account saves over the shared session and retires the other account's grants,
-as it does between any two copies.
-
-**Sign out of Buzz** is the exception. In a `me` build it erases only the
-debug build's own FI records (`store::own_root`), as it deletes only the debug
-key, never the release key: every development copy shares one pending
-sign-out, so the copy that finishes it at startup must not reach sessions the
-copy that asked never used. The next `me` launch reads the release key and its
-sign-ins again.
-
-On macOS the build reaches the shared items through the
-[local credential helper](#local-credential-helper-on-macos), whose protocol 2
-serves them; moving to it asks for every item once more. The installed app
-created these items, so the helper is approved once per item. An item is
-deleted when its last record goes, and whichever copy saves it next creates
-it, so after a sign-out and a new sign-in the other copy is asked once more.
-Run `me` only from a checkout with the same record layout as the installed
-app: a copy on either side of a layout change can write records the other
-rejects, as with the bundle migration above. Sessions the `.debug` namespace
-saved before are neither moved nor removed.
+`just desktop me` reads the installed app's sign-ins as it reads its key: read
+only, never copied over, replaced or deleted. With the installed build's
+[settings](configuration.md), it lists the same servers, so each server's account
+key names the same item. Until the debug build first saves a server's item, it
+reads that item, and its refusal markers, from the release namespace. Every
+save goes to the debug namespace: the first copies the whole release item there
+(session and grants, nothing mixed in from an older debug item), and its account
+index, written before the save, makes the debug copy the only one read from then
+on, even once it is empty. So a sign-out in `me` clears only the debug copy,
+the next launch stays signed out, and a browser sign-in or agent enrollment
+there stays in the debug namespace. Signing out of a session the release item
+still holds does not end it at the server, so the installed app stays signed in.
+Sign out of Buzz removes only the debug records, so the next `me` launch reads
+the installed app's sign-ins again. Plain `just desktop` reads only the debug
+namespace, and once `me` has saved a server's item, both read the same debug copy.
+The installed app's sign-out, or Sign out of Buzz, does not reach a server whose
+item `me` has already saved. Builderlab customers' servers that the installed
+app has listed are added in `me` when one of their communities is first routed.
 
 The app's `federatedIdentity` service exposes this public state to the shared
 sign-in UI. Session record revision survives restore and scopes account caches
