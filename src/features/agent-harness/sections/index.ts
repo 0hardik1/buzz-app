@@ -13,6 +13,10 @@ import posting from "./posting.md?raw";
 import repoConventions from "./repo-conventions.md?raw";
 import sessionModelChannel from "./session-model.channel.md?raw";
 import sessionModelCommunity from "./session-model.community.md?raw";
+import sessionModelInChannel from "./session-model.in-channel.md?raw";
+import sessionModelInConversation from "./session-model.in-conversation.md?raw";
+import sessionModelInThread from "./session-model.in-thread.md?raw";
+import sessionModelStandalone from "./session-model.standalone.md?raw";
 import sessionModelThread from "./session-model.thread.md?raw";
 import threading from "./threading.md?raw";
 import tools from "./tools.md?raw";
@@ -24,8 +28,13 @@ import workspaceLayoutOwnFolder from "./workspace-layout.own-folder.md?raw";
  * a host variant section. */
 export type Facts = Readonly<{
   /** Whether each thread is a session of its own, or the whole channel or
-   * community is one. Absent for a harness whose prompt has no Session Model. */
-  scope?: "thread" | "channel" | "community";
+   * community is one. */
+  scope: "thread" | "channel" | "community";
+  /** What the session is, for a harness that states it: one thread, one
+   * whole conversation (a DM, a personal chat, a huddle or a channel's top
+   * level), or a watch's or timer's run that joins no conversation. Without
+   * it, the Session Model describes the scope alone. */
+  place?: "thread" | "conversation" | "standalone" | undefined;
   /** The agent's workspace, absolute, when the conversation works in a folder
    * of its own instead. */
   ownFolder?: string | undefined;
@@ -34,8 +43,8 @@ export type Facts = Readonly<{
 export type Section = Readonly<{
   id: string;
   /** The section's text. A function is a host variant section: the facts
-   * pick a complete text, or none to leave the section out. A string is
-   * locked: nothing replaces or removes it. */
+   * pick a complete text. A string is locked: nothing replaces or removes
+   * it. */
   text: string | ((facts: Facts) => string);
 }>;
 
@@ -62,13 +71,19 @@ export const SECTIONS: readonly Section[] = [
   { id: "product-help", text: `## Product help\n\n${BUZZ_HELP_PROMPT}` },
   {
     id: "session-model",
-    text: ({ scope }) =>
-      scope === "thread"
-        ? sessionModelThread
-        : scope === "channel"
-          ? sessionModelChannel
-          : scope === "community"
-            ? sessionModelCommunity
-            : "",
+    text: ({ scope, place }) =>
+      scope === "community"
+        ? sessionModelCommunity
+        : place === "standalone"
+          ? sessionModelStandalone
+          : !place
+            ? scope === "thread"
+              ? sessionModelThread
+              : sessionModelChannel
+            : scope === "channel"
+              ? sessionModelInChannel
+              : place === "thread"
+                ? sessionModelInThread
+                : sessionModelInConversation,
   },
 ];
