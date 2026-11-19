@@ -145,3 +145,32 @@ it("keeps them for the session where storage is refused", () => {
     if (own) Object.defineProperty(globalThis, "localStorage", own);
   }
 });
+
+it("keeps an open pull request's review, so an approved one opens approved", () => {
+  const remembered = createRememberedStates(localStorage);
+  remembered.remember(
+    [
+      [pull, { state: "open", title: "A", review: "approved" }],
+      [issue, { state: "open", review: "changes requested" }],
+    ],
+    1,
+  );
+  const later = createRememberedStates(localStorage);
+  expect(later.get(pull)).toEqual({
+    state: "open",
+    title: "A",
+    review: "approved",
+  });
+  expect(later.get(issue)).toEqual({
+    state: "open",
+    review: "changes requested",
+  });
+
+  localStorage.setItem(
+    "buzz.github.link-states.v1",
+    JSON.stringify({
+      [pull]: { at: 1, state: { state: "open", review: "rubber-stamped" } },
+    }),
+  );
+  expect(createRememberedStates(localStorage).get(pull)).toBeUndefined();
+});

@@ -10,10 +10,10 @@ export const REMEMBERED_STATES = 500;
  * polled each minute does not rewrite them all each minute. */
 export const RESAVE_MS = 5 * 60_000;
 
-/** What a link shows: its state, title, checks and conflicts. */
+/** What a link shows: its state, title, review, checks and conflicts. */
 export type RememberedState = Pick<
   PullState,
-  "state" | "reason" | "title" | "checks" | "conflicts"
+  "state" | "reason" | "title" | "review" | "checks" | "conflicts"
 >;
 
 export type RememberedStates = Readonly<{
@@ -33,6 +33,7 @@ type Saved = Readonly<{ at: number; state: RememberedState }>;
 const states = new Set(["open", "draft", "merged", "closed"]);
 const reasons = new Set(["completed", "not planned"]);
 const checks = new Set(["success", "failure", "pending"]);
+const reviews = new Set(["approved", "changes requested"]);
 
 /** One saved entry, or undefined for anything else. */
 function parse(value: unknown): Saved | undefined {
@@ -47,6 +48,8 @@ function parse(value: unknown): Saved | undefined {
     (saved.reason !== undefined &&
       (typeof saved.reason !== "string" || !reasons.has(saved.reason))) ||
     (saved.title !== undefined && typeof saved.title !== "string") ||
+    (saved.review !== undefined &&
+      (typeof saved.review !== "string" || !reviews.has(saved.review))) ||
     (saved.checks !== undefined &&
       (typeof saved.checks !== "string" || !checks.has(saved.checks))) ||
     (saved.conflicts !== undefined && typeof saved.conflicts !== "boolean")
@@ -61,6 +64,7 @@ function pick(state: PullState): RememberedState {
     state: state.state,
     ...(state.reason !== undefined && { reason: state.reason }),
     ...(state.title !== undefined && { title: state.title }),
+    ...(state.review !== undefined && { review: state.review }),
     ...(state.checks !== undefined && { checks: state.checks }),
     ...(state.conflicts !== undefined && { conflicts: state.conflicts }),
   };
