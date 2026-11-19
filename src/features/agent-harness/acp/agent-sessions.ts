@@ -649,10 +649,14 @@ export class AgentSessions<S = unknown> {
   }
   /** Waits for the conversation's session to finish its work, then compacts
    * it or closes it, so the message opens a new one. Without an open session
-   * there is nothing to do. */
+   * only a new one has anything to do: forget the saved one. */
   async reset(key: string, action: SessionAction): Promise<Settled> {
     const live = this.live.get(key);
-    if (!live?.session.open) return { ok: true };
+    if (!live?.session.open) {
+      if (action === "new" && this.options.resume && !this.opening.has(key))
+        this.options.store?.drop?.(key);
+      return { ok: true };
+    }
     await live.session.idle();
     if (this.disposed) return this.stopped;
     if (this.live.get(key) !== live || !live.session.open) return { ok: true };

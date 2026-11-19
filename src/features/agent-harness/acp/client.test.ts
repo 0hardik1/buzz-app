@@ -1099,6 +1099,18 @@ describe("a pinned session's record", () => {
     expect(writes).toEqual(["advance chat session-1 1", "drop chat"]);
     sessions.dispose();
   });
+
+  it("is dropped by a new-session reset once its session has gone idle", async () => {
+    const harness = fakeHarness();
+    const saved = { chat: { at: 0, id: "old", covered: 0, context: SAVED } };
+    const { sessions, writes } = pinnedSessions(harness, { saved });
+    await sessions.reset("chat", "new");
+    expect(writes).toEqual(["drop chat"]);
+    await sessions.deliver("chat", "a", 1, { build: build(1) });
+    expect(harness.sent("session/resume")).toHaveLength(0);
+    expect(harness.sent("session/new")).toHaveLength(1);
+    sessions.dispose();
+  });
 });
 
 describe("a pinned session's launch generation", () => {
