@@ -615,6 +615,37 @@ describe("VoiceJump contextual voice actions", () => {
     ).toBeInTheDocument();
   });
 
+  it("falls back to generic empty message when a free-text action is below 0.7", async () => {
+    const h = setup(async () => ({
+      outcome: "answered",
+      backend: "test",
+      model: "jev",
+      answers: {
+        action: {
+          type: "choice",
+          choice: "Create a new sidebar section",
+          confidence: 0.45,
+          probabilities: {
+            "Create a new sidebar section": 0.45,
+          },
+        },
+        place: {
+          type: "choice",
+          choice: "none",
+          confidence: 0.95,
+          probabilities: { none: 0.95 },
+        },
+      },
+    }));
+
+    h.triggerShortcut();
+    act(() => {
+      dictationHandlers.current?.onEnd("blorp");
+    });
+
+    expect(await screen.findByText("Didn't find anything")).toBeInTheDocument();
+  });
+
   it("ignores hover and navigates when Jev picks navigate", async () => {
     const h = setup(async () => ({
       outcome: "answered",

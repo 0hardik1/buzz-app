@@ -695,6 +695,10 @@ export function VoiceJumpBody({
     return [{ candidate, resolved, label }];
   });
 
+  const needsName =
+    actionCandidates[0]?.binding?.missingSlot === "text" &&
+    actionCandidates[0].probability >= VOICE_ACTION_AUTO_THRESHOLD;
+
   const confirmDetails =
     phase.kind === "confirm"
       ? (() => {
@@ -843,13 +847,9 @@ export function VoiceJumpBody({
         <EmptyState
           frame="none"
           icon={<MicrophoneIcon size={20} />}
-          title={
-            actionCandidates[0]?.binding?.missingSlot === "text"
-              ? "Say the section's name"
-              : "Didn't find anything"
-          }
+          title={needsName ? "Say the section's name" : "Didn't find anything"}
           description={
-            actionCandidates[0]?.binding?.missingSlot === "text"
+            needsName
               ? "Try saying the name you want to use, for example “create a section called Work”."
               : phase.text
                 ? `Nothing matched “${phase.text}”. Try an action name or a channel, person or chat.`
@@ -867,7 +867,7 @@ export function VoiceJumpBody({
             // Close but not sure enough: the nearest actions/places stay to choose.
             <div className={styles.notice}>
               <p className={styles.status} aria-live="polite">
-                {actionCandidates[0]?.binding?.missingSlot === "text"
+                {needsName
                   ? "Say the section's name, or pick an option:"
                   : "Not sure enough to act automatically. Closest options:"}
               </p>
