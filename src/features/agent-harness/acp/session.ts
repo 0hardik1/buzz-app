@@ -51,6 +51,8 @@ export class AcpSession {
   private runWaiters: ((runId: string | undefined) => void)[] = [];
   /** A `session/prompt` is in flight. */
   private prompting = false;
+  /** Confirms the in-flight prompt once the harness starts or answers it. */
+  private confirmPrompt: (() => void) | undefined;
   private readonly steering = new Set<Waiter>();
   private steered = Promise.resolve();
   /** Turns to run, each with the model and level it was asked for, if any. */
@@ -280,7 +282,10 @@ export class AcpSession {
     const runId = steering ? steering.runId(update) : null;
     if (runId !== null) {
       this.runId = runId;
-      if (runId) this.ranAs(runId);
+      if (runId) {
+        this.confirmPrompt?.();
+        this.ranAs(runId);
+      }
     }
     if (kind === "session_info_update" || runId !== null) return;
     const step = stepLabel(update);
@@ -456,7 +461,10 @@ export class AcpSession {
             continue;
           }
           accepted?.();
-          delivered?.();
+          this.confirmPrompt = () => {
+            this.confirmPrompt = undefined;
+            delivered?.();
+          };
           sent = true;
           if (waiter) this.sent(waiter);
           const lead = this.preamble;
@@ -466,6 +474,7 @@ export class AcpSession {
               { type: "text", text: lead ? `${lead}\n\n${prompt}` : prompt },
             ],
           })) as { stopReason?: string };
+          this.confirmPrompt?.();
           // A rejected prompt never reached the model: the next one leads.
           this.preamble = "";
           if (stopReason === "cancelled") this.cancelEnded();
@@ -484,6 +493,8 @@ export class AcpSession {
             error: errorMessage(error),
             ...(code === undefined ? {} : { code }),
           };
+        } finally {
+          this.confirmPrompt = undefined;
         }
       }
     } finally {
