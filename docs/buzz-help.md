@@ -1827,6 +1827,14 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   **Changes** use syntax highlighting, including Kotlin, even for small changes
   deep in large files. Oversized, unsupported or unparseable patches remain
   readable without syntax colors.
+- In GitHub **Changes**, use the line gutter or **Comment location** selector to
+  post a single-line comment, or **Reply** in an existing thread. Context lines
+  require an explicit old/new side. Comments post immediately with your signed-in
+  `gh` account. Raw or unmapped patches cannot accept new line comments.
+  Draft text survives closing and reopening the panel during the plugin session.
+  After a PR changes, refresh and select the line again. If delivery is unknown,
+  use **Check delivery** before another submission; Buzz never automatically
+  resends it. Restarting or reloading the app clears drafts and delivery tracking.
 - Some desktop plugins can upload images you provide to services they declare.
 - Plugin sharing search groups people who have not been added under **Not yet
   added**, or a heading chosen by the plugin. Its **Copy link** action appears

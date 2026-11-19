@@ -30,6 +30,7 @@ export function githubCommentHost() {
     in_reply_to_id?: number | undefined;
   };
   const state = {
+    patch: fixturePatch,
     head: "a".repeat(40),
     base: "b".repeat(40),
     viewer: "example-reviewer",
@@ -49,6 +50,7 @@ export function githubCommentHost() {
       args: readonly string[];
       input: unknown;
     }) => {},
+    snapshotFailed: false,
     refreshFailed: false,
     release: () => {},
   };
@@ -106,11 +108,47 @@ export function githubCommentHost() {
           exit(status >= 400 ? 1 : 0);
         };
         if (id === "diff") {
-          options.onStdout?.(fixturePatch);
+          options.onStdout?.(state.patch);
           exit(0);
           return;
         }
         if (id === "graphql") {
+          if (String(value.query).includes("r0:")) {
+            answer({
+              r0: {
+                viewerDefaultMergeMethod: "SQUASH",
+                squashMergeAllowed: true,
+                mergeCommitAllowed: true,
+                pullRequest: {
+                  id: "pull-fixture",
+                  title: "Inline comments demonstration",
+                  state: "OPEN",
+                  isDraft: false,
+                  body: "Fictional pull request. Every GitHub endpoint is stubbed locally.",
+                  author: { login: "example-reviewer" },
+                  baseRefName: "main",
+                  baseRefOid: state.base,
+                  headRefName: "example-change",
+                  headRefOid: state.head,
+                  headRepository: { nameWithOwner: "example-org/sample" },
+                  baseRepository: { nameWithOwner: "example-org/sample" },
+                  additions: 2,
+                  deletions: 1,
+                  changedFiles: 1,
+                  mergeStateStatus: "CLEAN",
+                  reviewDecision: "REVIEW_REQUIRED",
+                  viewerCanUpdate: false,
+                  viewerCanUpdateBranch: false,
+                  viewerCanMergeAsAdmin: false,
+                  reviewRequests: { nodes: [] },
+                  latestOpinionatedReviews: { nodes: [] },
+                  reviewThreads: { nodes: [] },
+                  commits: { nodes: [] },
+                },
+              },
+            });
+            return;
+          }
           if (
             state.mode === "refresh-failed" &&
             state.comments.length &&
@@ -178,6 +216,10 @@ export function githubCommentHost() {
           return;
         }
         if (method === "GET") {
+          if (state.snapshotFailed && !path.includes("/comments?")) {
+            answer({ message: "Synthetic snapshot refresh failed" }, 503);
+            return;
+          }
           if (path.includes("/files?")) {
             const pageNumber = Number(
               new URLSearchParams(path.split("?")[1]).get("page"),

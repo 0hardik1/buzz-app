@@ -1,15 +1,45 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useMemo, useState, type ReactNode } from "react";
 import {
   getFiletypeFromFileName,
   getHighlighterIfLoaded,
   parsePatchFiles,
   preloadHighlighter,
   type FileDiffMetadata,
+  type DiffLineAnnotation,
 } from "@pierre/diffs";
 import { FileDiff as ReactFileDiff } from "@pierre/diffs/react";
 import { bundledLanguages } from "./grammars";
 import { gitPatch, type FileData } from "./parse";
 import styles from "./Diffs.module.css";
+import { Button } from "../../shared/design-system/ui/Button";
+import { Select } from "../../shared/design-system/ui/Select";
+
+export type DiffLine = { side: "deletions" | "additions"; lineNumber: number };
+export type DiffComments = {
+  readOnly?: boolean;
+  onAvailabilityChange?(path: string, available: boolean): void;
+  annotations: (DiffLine & { path: string; content: ReactNode })[];
+  onSelect(path: string, lines: DiffLine[], restoreFocus: () => void): void;
+};
+
+/** Context retains both coordinates so selecting it never guesses a side. */
+export function commentLines(file: FileData): DiffLine[][] {
+  return file.hunks.flatMap((hunk) =>
+    hunk.changes.map((change): DiffLine[] =>
+      change.type === "normal"
+        ? [
+            { side: "deletions", lineNumber: change.oldLineNumber },
+            { side: "additions", lineNumber: change.newLineNumber },
+          ]
+        : [
+            {
+              side: change.type === "delete" ? "deletions" : "additions",
+              lineNumber: change.lineNumber,
+            },
+          ],
+    ),
+  );
+}
 
 const theme = { light: "pierre-light", dark: "pierre-dark" } as const;
 
@@ -52,11 +82,13 @@ export function DiffViewer({
   files,
   filePath,
   viewType = "unified",
+  comments,
 }: {
   content: string;
   files: FileData[] | undefined;
   filePath?: string | undefined;
   viewType?: "unified" | "split";
+  comments?: DiffComments | undefined;
 }) {
   if (!files) return <RawDiff content={content} />;
   if (!files.length) return <p className="text-body-sm">No diff content</p>;
@@ -69,6 +101,7 @@ export function DiffViewer({
       files={files}
       filePath={filePath}
       viewType={viewType}
+      comments={comments}
     />
   );
 }
@@ -78,11 +111,13 @@ function ParsedDiff({
   files,
   filePath,
   viewType,
+  comments,
 }: {
   content: string;
   files: FileData[];
   filePath?: string | undefined;
   viewType: "unified" | "split";
+  comments?: DiffComments | undefined;
 }) {
   const parsed = useMemo(() => {
     try {
@@ -156,6 +191,8 @@ function ParsedDiff({
           // biome-ignore lint/suspicious/noArrayIndexKey: A path may repeat across commits; its position is stable in this patch.
           key={`${file.prevName ?? ""}:${file.name}:${index}`}
           file={file}
+          source={files[index]}
+          comments={comments}
           filePath={filePath}
           hideHeader={
             parsed.length === 1 &&
@@ -173,39 +210,140 @@ function ParsedDiff({
 
 function PierreFile({
   file,
+  source,
   filePath,
   hideHeader,
   onFailure,
   themeType,
   viewType,
+  comments,
 }: {
   file: FileDiffMetadata;
+  source: FileData | undefined;
   filePath?: string | undefined;
   hideHeader: boolean;
   onFailure: () => void;
   themeType: "light" | "dark";
   viewType: "unified" | "split";
+  comments?: DiffComments | undefined;
 }) {
+  const section = useRef<HTMLElement>(null);
+  const availability = comments?.onAvailabilityChange;
+  useEffect(() => {
+    availability?.(file.name, true);
+    return () => availability?.(file.name, false);
+  }, [availability, file.name]);
+  const [chosen, setChosen] = useState("");
+  const rows = useMemo(() => (source ? commentLines(source) : []), [source]);
+  const choices = rows.flat();
+  const path = file.name;
+  const select = (line: DiffLine, element: HTMLElement) => {
+    const candidates = rows.find((row) =>
+      row.some(
+        (entry) =>
+          entry.side === line.side && entry.lineNumber === line.lineNumber,
+      ),
+    );
+    if (candidates) comments?.onSelect(path, candidates, () => element.focus());
+  };
+  const annotations: DiffLineAnnotation<ReactNode>[] =
+    comments?.annotations
+      .filter(
+        (entry) =>
+          entry.path === path &&
+          choices.some(
+            (line) =>
+              line.side === entry.side && line.lineNumber === entry.lineNumber,
+          ),
+      )
+      .map(({ side, lineNumber, content }) => ({
+        side,
+        lineNumber,
+        metadata: content,
+      })) ?? [];
   return (
     <section
+      ref={section}
       className={styles.file}
       aria-label={filePath || file.name}
       // biome-ignore lint/a11y/noNoninteractiveTabindex: File-level keyboard focus precedes inner code scrollports.
       tabIndex={0}
     >
+      {comments && !comments.readOnly && (
+        <div className={styles.lineActions}>
+          <Select
+            label={`Comment location in ${path}`}
+            variant="compact"
+            value={chosen}
+            placeholder="Choose a line"
+            size="sm"
+            groups={[
+              {
+                label: "Diff lines",
+                options: choices.map((line) => ({
+                  value: `${line.side}:${line.lineNumber}`,
+                  label: `${line.side === "deletions" ? "Old" : "New"} line ${line.lineNumber}`,
+                })),
+              },
+            ]}
+            onValueChange={setChosen}
+          />
+          <Button
+            size="sm"
+            disabled={!chosen}
+            onClick={(event) => {
+              const line = choices.find(
+                (line) => `${line.side}:${line.lineNumber}` === chosen,
+              );
+              const button = event.currentTarget;
+              if (line) comments.onSelect(path, [line], () => button.focus());
+            }}
+          >
+            Comment on line
+          </Button>
+        </div>
+      )}
       <ReactFileDiff
         fileDiff={file}
+        lineAnnotations={annotations}
+        renderAnnotation={(annotation) => annotation.metadata}
         options={{
           theme,
           themeType,
           diffStyle: viewType,
           diffIndicators: "classic",
+          enableGutterUtility: !!comments && !comments.readOnly,
+          onLineEnter: ({ numberElement }) => {
+            const root = numberElement.getRootNode();
+            if (root instanceof ShadowRoot)
+              root
+                .querySelector("[data-utility-button]")
+                ?.setAttribute("aria-label", "Comment on hovered line");
+          },
+          ...(comments && !comments.readOnly
+            ? {
+                onGutterUtilityClick: (range: {
+                  start: number;
+                  side?: "deletions" | "additions";
+                }) => {
+                  if (!range.side || !section.current) return;
+                  select(
+                    { side: range.side, lineNumber: range.start },
+                    section.current,
+                  );
+                },
+              }
+            : {}),
           disableFileHeader: hideHeader,
           overflow: "scroll",
           tokenizeMaxLineLength: 2_000,
           onPostRender: (node) => {
             if (node.shadowRoot?.querySelector("[data-error-wrapper]"))
               onFailure();
+            const utility = node.shadowRoot?.querySelector(
+              "[data-utility-button]",
+            );
+            utility?.setAttribute("aria-label", "Comment on hovered line");
             // Split code columns own their horizontal scrollports.
             const columns = node.shadowRoot?.querySelectorAll("code") ?? [];
             for (const [index, code] of Array.from(columns).entries()) {

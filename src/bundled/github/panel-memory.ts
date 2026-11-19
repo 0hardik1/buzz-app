@@ -1,3 +1,4 @@
+import { createInlineDraft, type InlineDraftStore } from "./inline-draft";
 import type { ReviewEvent } from "./pull";
 import { parseGitHubReference } from "./references";
 
@@ -14,6 +15,7 @@ export type ReviewDraft = Readonly<{
  * channel unmounts its panels when you leave it, so the next panel on a pull
  * request starts where the last one was. Only pull requests are kept. */
 export type PanelMemory = Readonly<{
+  inline(url: string): InlineDraftStore;
   /** The view `url`'s panel was left on in `channelId`, and its unsent
    * review, which is the same from any channel: GitHub keeps one pending
    * review per pull request. */
@@ -39,8 +41,18 @@ const keyOf = (url: string) => {
 export function createPanelMemory(): PanelMemory {
   const views = new Map<string, PanelView>();
   const reviews = new Map<string, ReviewDraft>();
+  const inline = new Map<string, InlineDraftStore>();
   const viewKey = (key: string, channelId = "") => `${channelId} ${key}`;
   return {
+    inline(url) {
+      const key = keyOf(url) ?? url;
+      let draft = inline.get(key);
+      if (!draft) {
+        draft = createInlineDraft();
+        inline.set(key, draft);
+      }
+      return draft;
+    },
     get(url, channelId) {
       const key = keyOf(url);
       return key

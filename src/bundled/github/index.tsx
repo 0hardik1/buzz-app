@@ -64,6 +64,8 @@ import { presentPull } from "./attention";
 import { SubmitReview } from "./SubmitReview";
 import { createPanelMemory, type PanelMemory } from "./panel-memory";
 import { PullFiles } from "./PullFiles";
+import { createPrComments, type PrComments } from "./pr-comments";
+import { PrFiles } from "./PrFiles";
 import { GitHubSettings } from "./GitHubSettings";
 import { openGitHubLinksInBuzz } from "./link-preference";
 
@@ -74,6 +76,7 @@ export const inject = ["panels", "host", "conversation", "relay", "agents"];
 export const apply: PluginModule["apply"] = (ctx) => {
   const gh = gitHubCli(ctx.host);
   const diff = gitHubDiff(ctx.host);
+  const comments = createPrComments(ctx.host);
   // A pull request's state is nobody's community's: one store serves every
   // session's sidebar, every link in messages, the panel and agents, so one
   // shown in several places costs one read.
@@ -104,6 +107,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
           {...props}
           gh={gh}
           diff={diff}
+          comments={comments}
           states={states}
           memory={memory}
           {...(channelId && {
@@ -336,6 +340,7 @@ export function GitHubPanel({
   context,
   gh,
   diff,
+  comments,
   states: shared,
   memory: sharedMemory,
   chatLink,
@@ -351,6 +356,7 @@ export function GitHubPanel({
   /** The person's `gh`, where the app can run it. */
   gh?: GitHubCli | undefined;
   diff?: GitHubDiff | undefined;
+  comments?: PrComments | undefined;
   /** The plugin's pull request store; a panel alone keeps its own. */
   states?: PullStates | undefined;
   /** The plugin's panel memory; a panel alone keeps its own. */
@@ -373,6 +379,7 @@ export function GitHubPanel({
       reference={reference}
       gh={gh}
       diff={diff}
+      comments={comments}
       states={states}
       memory={memory}
       channelId={context?.channelId}
@@ -407,6 +414,7 @@ function openCommandClickInBrowser(event: MouseEvent<HTMLElement>) {
 }
 
 function ObjectPanel({
+  comments,
   reference,
   gh,
   diff,
@@ -417,6 +425,7 @@ function ObjectPanel({
   resolveActions,
   retry,
 }: {
+  comments: PrComments | undefined;
   reference: GitHubReference;
   gh: GitHubCli | undefined;
   diff: GitHubDiff | undefined;
@@ -602,12 +611,25 @@ function ObjectPanel({
       )}
       {files && changesShown && (
         <div hidden={!showChanges}>
-          <PullFiles
-            key={`${files.base}...${files.head}:${files.merged}`}
-            url={reference.url}
-            pull={files}
-            diff={files.diff}
-          />
+          {comments ? (
+            <PrFiles
+              api={comments}
+              pull={{
+                repository: files.repository,
+                number: Number(reference.label.slice(1)),
+              }}
+              head={files.head}
+              base={files.base}
+              draft={memory.inline(reference.url)}
+            />
+          ) : (
+            <PullFiles
+              key={`${files.base}...${files.head}:${files.merged}`}
+              url={reference.url}
+              pull={files}
+              diff={files.diff}
+            />
+          )}
         </div>
       )}
       {reference.kind !== "pull" && (
