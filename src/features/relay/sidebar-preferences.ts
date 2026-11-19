@@ -294,9 +294,20 @@ export function workspacePayloadForSigning(
   legacy: SidebarGroups | undefined,
   previous?: Record<string, unknown>,
 ) {
-  const record = workspaceRecordForWrite(payload, legacy, previous);
+  let record = workspaceRecordForWrite(payload, legacy, previous);
   const packed = compactWorkspaceRecord(record);
   if (workspaceRecordFits(packed)) return packed;
+
+  // Imports pass the seed array by reference. Saved and edited orders own a
+  // separate array, even when they contain the same section keys.
+  if (
+    legacy?.sectionOrder?.length &&
+    payload.sectionOrder === legacy.sectionOrder
+  ) {
+    record = { ...record, sectionOrder: [] };
+    const withoutSeed = compactWorkspaceRecord(record);
+    if (workspaceRecordFits(withoutSeed)) return withoutSeed;
+  }
 
   // Close catch-up only from a complete legacy read, and only when every
   // legacy leaf is already represented or intentionally suppressed.

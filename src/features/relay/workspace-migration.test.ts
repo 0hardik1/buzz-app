@@ -13,6 +13,7 @@ import {
   decodeLegacyWorkspaceEnvelope,
   encodeLegacyWorkspaceEnvelope,
   expandWorkspaceRecord,
+  projectWorkspaceGroups,
   workspaceSectionOrder,
   workspacePayloadForSigning,
   workspaceRecordForWrite,
@@ -328,6 +329,44 @@ it("keeps an explicit unfile or removal when the legacy entry is already absent"
   expect(removed.removedSections).toEqual(["work"]);
   expect(removed.unfiled).toBeUndefined();
   expect(importWorkspaceFallback(removed, groups)).toEqual(removed);
+});
+
+it("omits only the imported order when it would prevent a large workspace rename", () => {
+  const sections = Array.from({ length: 134 }, (_, order) => ({
+    id: `00000000-0000-4000-8000-${String(order).padStart(12, "0")}`,
+    name: "界".repeat(227),
+    order,
+  }));
+  const assignments = Object.fromEntries(
+    Array.from({ length: 540 }, (_, index) => [
+      `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      sections[index % sections.length]?.id,
+    ]),
+  ) as SidebarGroups["assignments"];
+  const legacy = mergeLegacyWorkspaces({ sections, assignments }, undefined);
+  const decoded = decodeLegacyWorkspaceEnvelope(
+    encodeLegacyWorkspaceEnvelope(legacy),
+  );
+  const current = workspaceBaseRecord(decoded);
+  const id = sections[0]?.id ?? "";
+  const renamed = editSidebarSectionRename(current, 0, id, "Renamed");
+  const packed = workspacePayloadForSigning(renamed, decoded, current);
+  expect(
+    new TextEncoder().encode(JSON.stringify(packed)).length,
+  ).toBeLessThanOrEqual(128 * 1024);
+  const restored = expandWorkspaceRecord(packed);
+  expect(restored).toMatchObject({ assignments, sectionOrder: [] });
+  expect(projectWorkspaceGroups(restored).sections[0]?.name).toBe("Renamed");
+  expect(importWorkspaceFallback(restored, decoded).sectionOrder).toEqual(
+    legacy.sectionOrder,
+  );
+  const explicit = {
+    ...renamed,
+    sectionOrder: [...(decoded.sectionOrder ?? [])],
+  };
+  expect(() => workspacePayloadForSigning(explicit, decoded, current)).toThrow(
+    "storage limit",
+  );
 });
 
 it("only reclaims an unchanged archived filing when a new filing needs room", () => {
