@@ -1180,7 +1180,7 @@ export function ChannelInventory({
             >
               <MenuRadioItem value="starred" closeOnClick={false}>
                 <MenuIcon>★</MenuIcon>
-                Starred
+                Favorites
               </MenuRadioItem>
               {preferences.data?.sections.map((group) => (
                 <MenuRadioItem

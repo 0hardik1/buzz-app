@@ -91,7 +91,8 @@ export function compareRecent(a: ChannelSummary, b: ChannelSummary) {
 }
 
 const titles: Record<string, string> = {
-  starred: "Starred",
+  pages: "Plugins",
+  starred: "Favorites",
   solo: "Solo",
   channels: "Team",
   forums: "Forums",

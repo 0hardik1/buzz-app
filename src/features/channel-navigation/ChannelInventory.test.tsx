@@ -1252,12 +1252,12 @@ it.each(["ready", "error"] as const)(
   },
 );
 
-it.each(["Laptop", "Team", "Starred"])(
+it.each(["Laptop", "Team", "Favorites"])(
   "uses only the invoking section for placement (%s)",
   async (section) => {
     vi.stubGlobal("crypto", webcrypto);
     const fromGroup = section === "Laptop";
-    const fromStarred = section === "Starred";
+    const fromStarred = section === "Favorites";
     const preferences = createSidebarPreferencesStore({
       read: async () => ({
         sections: [{ id: "laptop", name: "Laptop", icon: "💻", order: 0 }],
@@ -1296,9 +1296,9 @@ it.each(["Laptop", "Team", "Starred"])(
         name: `More actions for ${section}`,
       }).parentElement;
       assert.exists(header);
-      if (section === "Starred") {
+      if (section === "Favorites") {
         const icon = screen
-          .getByLabelText("Starred")
+          .getByLabelText("Favorites")
           .querySelector("[data-sidebar-group-icon]");
         const emoji = screen
           .getByLabelText("Laptop")
@@ -1330,7 +1330,7 @@ it.each(["Laptop", "Team", "Starred"])(
       const title = fromGroup
         ? "Create a channel in Laptop"
         : fromStarred
-          ? "Create a channel in Starred"
+          ? "Create a channel in Favorites"
           : "Create a channel";
       expect(screen.getByRole("dialog")).toHaveAccessibleName(title);
       if (fromGroup)
@@ -1676,7 +1676,7 @@ it("gates all creation entry points while uncertain creation reconciles, preserv
       await screen.findByRole("menuitem", { name: "Create new…" }),
     ).toHaveAttribute("aria-disabled", "true");
     expect(
-      screen.getByRole("menuitemradio", { name: "Starred" }),
+      screen.getByRole("menuitemradio", { name: "Favorites" }),
     ).not.toHaveAttribute("aria-disabled", "true");
     await act(async () => {
       finish(data);

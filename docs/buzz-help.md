@@ -567,7 +567,7 @@ and are asked to sign in again in Buzz.
 - **Workspaces** can hold any mix of chats, channels, forums and DMs. Use **Move to…**
   in a conversation’s menu or drag the row to a workspace. Unfiled items appear
   in **Solo**, **Team**, **Forums**, or **Direct messages**. Reorder any section,
-  including **Starred**, by dragging its heading or using **Move up** and
+  including **Favorites**, by dragging its heading or using **Move up** and
   **Move down** in its **…** menu. Escape cancels a drag.
   The arrow beside a workspace’s creation icon offers **New chat**, **New channel**
   and **New DM**. The last choice becomes that workspace’s icon and primary action.
@@ -1050,7 +1050,7 @@ and are asked to sign in again in Buzz.
   Scroll the pinned area if the window is too short to show every page.
   Community and profile controls sit at the bottom of the dock. Search stays
   wide in the top bar.
-  Messages shows your workspaces, Starred and unfiled conversations together.
+  Messages shows your workspaces, Favorites and unfiled conversations together.
   Other apps can provide their own sidebar. Pages listed in the Messages
   sidebar, such as the Drafts & sent plugin, keep Messages selected in the dock. The
   Messages sidebar stays open unless the page provides its own sidebar, which
@@ -1136,12 +1136,13 @@ and are asked to sign in again in Buzz.
   **Remove emoji** in the picker to clear it. Changes require writable saved
   sidebar preferences.
 - **Moving conversations** works by dragging or choosing **Move to…** from the
-  row’s menu. Workspaces and **Starred** accept any type. Unfiled conversations
+  row’s menu. Workspaces and **Favorites** accept any type. Unfiled conversations
   return to the home for their type, **Solo**, **Team**, **Forums** or
   **Direct messages**.
-- Saved workspaces, stars, mutes, sorting and filters update while connected in
-  hosts that support saved sidebar preferences. Moving a starred conversation
-  to a workspace or home section from the sidebar clears its star.
+- Saved workspaces, Favorites, mutes, sorting and filters update while connected in
+  hosts that support saved sidebar preferences. Moving a conversation out of
+  Favorites to a workspace or home section from the sidebar removes it from
+  Favorites.
 - **Plugin channel rows**: a plugin can open a channel from its Solo row and keep
   that row selected. The sidebar then keeps its scroll position and open
   sections. When a plugin is explicitly disabled, its existing chats appear as

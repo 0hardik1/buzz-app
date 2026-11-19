@@ -83,7 +83,7 @@ it.each([true, false])(
     render(
       <SidebarSection
         sectionKey="starred"
-        title="Starred"
+        title="Favorites"
         open={false}
         onToggle={toggle}
         createChannel={{ available, open }}
@@ -103,7 +103,7 @@ it.each([true, false])(
     }
     expect(toggle).not.toHaveBeenCalled();
     expect(
-      screen.getByLabelText("Starred").closest("details"),
+      screen.getByLabelText("Favorites").closest("details"),
     ).not.toHaveAttribute("open");
   },
 );

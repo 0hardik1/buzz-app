@@ -2378,7 +2378,7 @@ export function createRelaySession(
             }
             if (setup.starred && !sidebarPreferences.queries.starWritable)
               throw new Error(
-                "Starred placement is unavailable; refresh your sidebar before creating the channel",
+                "Favorites placement is unavailable; refresh your sidebar before creating the channel",
               );
             if (setup.groupId) {
               const state = sidebarPreferences.queries.snapshot();
@@ -2395,7 +2395,7 @@ export function createRelaySession(
             await settledPreferences();
             if (!sidebarPreferences.queries.starWritable)
               throw new Error(
-                "Starred placement is unavailable; keep the partial channel and star it separately",
+                "Favorites placement is unavailable; keep the partial channel and add it to Favorites separately",
               );
             if (
               sidebarPreferences.queries.snapshot().data?.starred.includes(id)
