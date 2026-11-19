@@ -126,7 +126,9 @@ export const channelVoiceActions: readonly AppVoiceAction[] = [
       hoveredRole === "owner"
         ? bound?.id === "starred"
           ? "Star a channel (add a channel to Starred / Favorites)"
-          : `Move or add a channel into ${bound?.label ?? "this section"}`
+          : // Said the way people ask while pointing at the section, so
+            // "put X in here" reads as this move, not as going to X.
+            `Put a channel in here, into ${bound?.label ?? "this section"} (move or add it to this section)`
         : `Move ${bound?.label ?? "this channel"} into a sidebar section`,
     summary: ({ owner, target }) =>
       `Move ${target?.label ?? "channel"} to ${owner?.label ?? "section"}`,

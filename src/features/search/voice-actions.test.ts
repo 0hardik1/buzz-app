@@ -410,10 +410,11 @@ describe("buildActionDecision & decideVoiceAction", () => {
     const resolved = built.resolve({
       action: {
         type: "choice",
-        choice: "Move or add a channel into section Work",
+        choice:
+          "Put a channel in here, into section Work (move or add it to this section)",
         confidence: 0.92,
         probabilities: {
-          "Move or add a channel into section Work": 0.92,
+          "Put a channel in here, into section Work (move or add it to this section)": 0.92,
         },
       },
       channel: {
@@ -924,7 +925,7 @@ describe("the place an action would act on", () => {
       entities,
       places,
     });
-    const move = optionFor(built.request, "Move");
+    const move = optionFor(built.request, "Put a channel in here");
     const resolved = built.resolve({
       action: {
         type: "choice",
