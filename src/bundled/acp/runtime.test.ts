@@ -419,6 +419,27 @@ describe("AcpRuntime", () => {
     expect(conversationInstructions).toHaveBeenCalledWith(channel, mention.id);
   });
 
+  it.each(["thread", "channel"] as const)(
+    "adds the %s session's plugin notes to its prompt",
+    async (scope) => {
+      const config = await confirmed({ scope });
+      const { fake, deliver, sync, agent } = setup();
+      sync(config);
+      const notes = vi.fn(() => ["<note>Ticket ABC-1 is open.</note>"]);
+      Object.assign(agent, { notes, restoreNotes: vi.fn() });
+      const mention = message("1", "@Opal hi");
+      await deliver(mention, config).run;
+      await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+      expect(fake.harnesses[0]?.turns[0]?.text).toContain(
+        "<note>Ticket ABC-1 is open.</note>",
+      );
+      expect(notes).toHaveBeenCalledWith(
+        channel,
+        scope === "thread" ? mention.id : undefined,
+      );
+    },
+  );
+
   it("sends the instructions as ACP's appended system prompt when advertised", async () => {
     const config = await confirmed();
     const { fake, deliver, sync } = setup({

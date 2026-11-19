@@ -375,6 +375,11 @@ export class AcpRuntime {
         ...owed.get(key).filter((id) => id !== event.id),
         event.id,
       ]);
+    // Plugins' notes and instructions are keyed by the session's own
+    // conversation: a channel-scoped one's is the whole channel.
+    const noteRoot = key === channel ? undefined : context.root;
+    // Plugins' notes, taken once the prompt is built; back if never sent.
+    let notes: readonly string[] = [];
     const done = entry.sessions.deliver(key, "", event.created_at, {
       // Built when it is sent, from what the session has definitely seen.
       build: async (from, pinned) => {
@@ -398,10 +403,13 @@ export class AcpRuntime {
         const wakePrompt = wake
           ? ((await wakeText?.()) ?? wake.text)
           : undefined;
+        notes = agent.notes?.(channel, noteRoot) ?? [];
         return {
           text: this.review(
             entry,
-            context,
+            channel,
+            noteRoot,
+            notes,
             turnPrompt({
               ...turn,
               agent: agent.pubkey,
@@ -435,6 +443,8 @@ export class AcpRuntime {
     this.notify();
     void done
       .then((result) => {
+        if (result.undelivered && notes.length)
+          agent.restoreNotes?.(channel, notes, noteRoot);
         signedIn(entry, result);
         // Of the messages one turn answered, only one has its error. A
         // delivery cancelled by its own signal says nothing; it stays owed.
@@ -493,12 +503,19 @@ export class AcpRuntime {
       .finally(() => this.notify());
   }
 
-  /** `text` with the Buzz tools' end-of-turn note for conversation
-   * `context`, when they have one. ACP has no community session, so no
-   * instructions are cleared when absent. */
-  private review(entry: Entry, { channel, root }: Context, text: string) {
-    const note = turnNote(entry.handle, channel, root);
-    return note ? `${text}\n\n${note}` : text;
+  /** `text` with plugins' `notes`, then the Buzz tools' end-of-turn note
+   * for conversation `channel`/`root`, when they have one. ACP has no
+   * community session, so no instructions are cleared when absent. */
+  private review(
+    entry: Entry,
+    channel: string,
+    root: string | undefined,
+    notes: readonly string[],
+    text: string,
+  ) {
+    return [text, ...notes, turnNote(entry.handle, channel, root)]
+      .filter(Boolean)
+      .join("\n\n");
   }
 
   /** Says in the thread that a turn failed, so nobody waits on it. */
