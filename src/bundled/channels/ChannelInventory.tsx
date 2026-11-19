@@ -1771,35 +1771,34 @@ export function ChannelInventory({
         writable={placementWritable}
         onCreateSection={(channelId) => {
           const channel = sidebarChannels.find(({ id }) => id === channelId);
+          if (
+            !channel ||
+            prepareSoloMove(queries, channelId) ||
+            !queries.sidebarPreferences.sectionCreationWritable
+          )
+            return;
+          // Create in the same frame as the drop, so the row lands in its new
+          // workspace instead of returning home until the save settles. A
+          // failed save falls back to the dialog, which shows why.
+          const id = crypto.randomUUID();
+          const key = `group:${id}`;
+          preferences
+            .createAndAssign(channelId, {
+              id,
+              name: "Untitled workspace",
+              position: "first",
+            })
+            .catch(() => {
+              if (!mounted.current) return;
+              setNamingWorkspace((current) =>
+                current === key ? undefined : current,
+              );
+              setCreatingFor({ channel, position: "first" });
+            });
+          sidebar.toggle(key, true);
           // Finish releasing the pointer before the new name takes focus.
           requestAnimationFrame(() => {
-            if (
-              !mounted.current ||
-              !channel ||
-              prepareSoloMove(queries, channelId) ||
-              !queries.sidebarPreferences.sectionCreationWritable
-            )
-              return;
-            // A drop makes the workspace at once and opens its name in place;
-            // a failed save falls back to the dialog, which shows why.
-            const id = crypto.randomUUID();
-            preferences
-              .createAndAssign(channelId, {
-                id,
-                name: "Untitled workspace",
-                position: "first",
-              })
-              .then(
-                () => {
-                  if (!mounted.current) return;
-                  sidebar.toggle(`group:${id}`, true);
-                  setNamingWorkspace(`group:${id}`);
-                },
-                () => {
-                  if (mounted.current)
-                    setCreatingFor({ channel, position: "first" });
-                },
-              );
+            if (mounted.current) setNamingWorkspace(key);
           });
         }}
         onMove={(channelId, sectionKey) => {
