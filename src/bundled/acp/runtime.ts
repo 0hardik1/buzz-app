@@ -45,6 +45,9 @@ import {
   type AgentHandle,
   type Agents,
   type Delivery,
+  type SessionControlAction,
+  type SessionPlace,
+  type SessionState,
   type StandaloneTurn,
   type TurnResult,
 } from "../../features/agents/service";
@@ -272,6 +275,43 @@ export class AcpRuntime {
     for (const listener of this.listeners) listener();
   }
 
+  /** The conversation the session controls act on at `place`: a live
+   * session's, under its pinned scope, or the agent's scope now. */
+  private controlKey(agent: Agent, { channelId, root }: SessionPlace) {
+    const entry = this.agents.get(agent.key);
+    const place = { channel: channelId, root: root ?? "", whole: !root };
+    return (
+      entry?.sessions.route((pinned) => keyOf(pinned.config.scope, place))
+        ?.key ?? keyOf(config(agent.config).scope, place).key
+    );
+  }
+  sessionState(agent: Agent, place: SessionPlace): SessionState {
+    const key = this.controlKey(agent, place);
+    return this.agents.get(agent.key)?.sessions.active(key) ? "active" : "idle";
+  }
+  /** Stops the place's turn, or closes its session so the next message
+   * opens a new one. ACP has no common way to compact a session. */
+  async session(
+    agent: Agent,
+    place: SessionPlace,
+    action: SessionControlAction,
+    reset?: (change: () => Promise<void>) => Promise<void>,
+  ) {
+    const sessions = this.agents.get(agent.key)?.sessions;
+    const key = this.controlKey(agent, place);
+    if (action === "interrupt") return sessions?.interrupt(key);
+    if (action === "compact")
+      throw new Error("ACP agents can't compact their sessions.");
+    if (this.sessionState(agent, place) !== "idle")
+      throw new Error("Wait for the active turn to finish first.");
+    const change = async () => {
+      const result = await sessions?.reset(key, action);
+      if (result && !result.ok) throw new Error(result.error);
+    };
+    await (reset ? reset(change) : change());
+    this.notify();
+  }
+
   dispose() {
     for (const entry of this.agents.values()) this.stop(entry);
     this.agents.clear();
@@ -363,7 +403,10 @@ export class AcpRuntime {
       ? { channel, topLevel }
       : place.whole
         ? { channel }
-        : { channel, root: place.root };
+        : key === channel
+          ? // A thread of a channel-scoped session: one conversation.
+            { channel, root: place.root, wholeChannel: true }
+          : { channel, root: place.root };
     // A new session's first turn is where a harness asks to sign in.
     const first = !entry.sessions.seen(key);
     // Owed from now until a committed prompt has carried it: a turn that

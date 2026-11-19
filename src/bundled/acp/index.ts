@@ -126,6 +126,13 @@ export const apply: PluginModule["apply"] = (ctx) => {
         component: HistoryTab,
       },
     ],
+    sessionControls: {
+      scope: (agent) => config(agent.config).scope,
+      state: (agent, place) => runtime.sessionState(agent, place),
+      run: (agent, place, action, reset) =>
+        runtime.session(agent, place, action, reset),
+      subscribe: (listener) => runtime.subscribe(listener),
+    },
     run: (delivery) => runtime.run(delivery),
     runOnce: (turn) => runtime.runOnce(turn),
     timeoutMs: HANDOVER_MS,

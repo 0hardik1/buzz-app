@@ -5,7 +5,7 @@ import { apply, PROTECTION_UNAVAILABLE } from "./index";
 
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
 
-it("registers without protection support, saying why a protected agent doesn't run", () => {
+function registered() {
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
   let type: AgentType | undefined;
   apply({
@@ -21,6 +21,18 @@ it("registers without protection support, saying why a protected agent doesn't r
     },
     effect: vi.fn(),
   } as never);
+  return type;
+}
+
+it("tells the host each agent's session scope", () => {
+  const scope = (value: string) =>
+    registered()?.sessionControls?.scope({ config: { scope: value } } as never);
+  expect(scope("channel")).toBe("channel");
+  expect(scope("thread")).toBe("thread");
+});
+
+it("registers without protection support, saying why a protected agent doesn't run", () => {
+  const type = registered();
   expect(type?.protection).toBeUndefined();
   expect(type?.protectionUnavailable).toBe(PROTECTION_UNAVAILABLE);
 });

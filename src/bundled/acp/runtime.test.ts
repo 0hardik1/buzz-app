@@ -1535,6 +1535,72 @@ describe("AcpRuntime", () => {
     expect(two.publish).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["channel", "That is this conversation."],
+    ["thread", "Queued self-handoff"],
+  ] as const)(
+    "tells a %s-scoped session's other threads apart for self_handoff",
+    async (scope, answer) => {
+      const config = await confirmed({ scope });
+      const { fake, deliver, sync, agent } = setup({ hold: true });
+      sync(config);
+      const other = message("3", "other thread");
+      const handoff = vi.fn();
+      const query = vi.fn(async (filters: unknown) =>
+        JSON.stringify(filters).includes("39000")
+          ? [
+              {
+                ...message("4", ""),
+                kind: 39000,
+                tags: [["d", channel]],
+              },
+            ]
+          : [other],
+      );
+      Object.assign(agent, { query });
+      const root = message("1", "start");
+      const reply = message("2", "@Opal hi");
+      reply.tags.push(["e", root.id, "", "root"]);
+      await deliver(reply, config, undefined, {
+        agent: { ...agent, handoff },
+      } as unknown as Partial<Delivery>).run;
+      await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+      const result = await fake.harnesses[0]?.mcp(
+        fake.harnesses[0]?.turns[0]?.sessionId ?? "",
+        "tools/call",
+        {
+          name: "self_handoff",
+          arguments: { channel, thread: other.id, text: "carry on" },
+        },
+      );
+      expect(JSON.stringify(result)).toContain(answer);
+      expect(handoff).toHaveBeenCalledTimes(scope === "thread" ? 1 : 0);
+    },
+  );
+
+  it("starts a new session from the session controls, and can't compact", async () => {
+    const config = await confirmed({ scope: "channel" });
+    const { fake, deliver, sync, runtime, agent } = setup();
+    sync(config);
+    const subject = { ...agent, config } as unknown as Parameters<
+      AcpRuntime["session"]
+    >[0];
+    const place = { channelId: channel };
+    await deliver(message("1", "@Opal one"), config).run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+    await vi.waitFor(() =>
+      expect(runtime.sessionState(subject, place)).toBe("idle"),
+    );
+    await expect(runtime.session(subject, place, "compact")).rejects.toThrow(
+      "can't compact",
+    );
+    await runtime.session(subject, place, "new");
+    await deliver(message("2", "@Opal two"), config).run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(2));
+    const [one, two] = fake.harnesses[0]?.turns ?? [];
+    expect(two?.sessionId).not.toBe(one?.sessionId);
+  });
+
   it("acts with a standalone turn's own handle after a mention arrives", async () => {
     const config = await confirmed();
     const { fake, deliver, sync, runtime, agent } = setup({ hold: true });
