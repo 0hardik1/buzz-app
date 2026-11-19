@@ -947,7 +947,9 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         decisions::decide,
         voice_search::voice_search_available,
         voice_search::voice_search_prepare,
-        voice_search::voice_search_connect,
+        voice_search::voice_search_start,
+        voice_search::voice_search_finish,
+        voice_search::voice_search_cancel,
         title_bar_double_click,
         notification_show,
         #[cfg(target_os = "macos")]

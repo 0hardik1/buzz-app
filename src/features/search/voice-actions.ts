@@ -497,7 +497,7 @@ export function buildActionDecision(
     action: {
       type: "choice",
       instructions:
-        "A person hovered an item in a chat app (described in `hovered`) and spoke `spoken_request` aloud. It is an automatic speech transcript, so names may be misspelled phonetically. Pick the single action they asked to run, or pick 'Ignore hover, just navigate to a place' if they are trying to jump somewhere instead of acting on the hovered item, or 'None of these' if nothing matches.",
+        "A person hovered an item in a chat app (described in `hovered`) and spoke `spoken_request` aloud. It is an automatic speech transcript, so names may be misspelled phonetically and 'star' may be written as 'start'. Pick the single action they asked to run, or pick 'Ignore hover, just navigate to a place' if they are trying to jump somewhere instead of acting on the hovered item, or 'None of these' if nothing matches.",
       options: actionOptions,
     },
   };
