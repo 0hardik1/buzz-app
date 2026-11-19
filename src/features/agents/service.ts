@@ -1,3 +1,4 @@
+import type { PublishOptions } from "../../buzz-mcp/client";
 import { followUpQueue } from "../messages/follow-up-queue";
 import type {
   AgentModelSettings,
@@ -579,7 +580,11 @@ export type AgentHandle = Readonly<{
    * undefined while the channel is not known here yet. */
   threadsApart?(channel: string): boolean | undefined;
   /** Rechecks an operation lifetime after channel startup, before signing. */
-  publish(event: AgentEventTemplate, check?: () => void): Promise<RelayEvent>;
+  publish(
+    event: AgentEventTemplate,
+    check?: () => void,
+    options?: PublishOptions,
+  ): Promise<RelayEvent>;
   /** Reads the community as the agent, seeing only what it may see. */
   query(filters: readonly object[]): Promise<RelayEvent[]>;
   effectiveEdit(id: string, channel: string): Promise<RelayEvent>;
@@ -1023,10 +1028,13 @@ export type AgentType<Config = unknown> = {
    * row alongside its own controls and keeps discovery/recovery with them.
    * Takes precedence over CreateModel in the creation dialog. Report readiness
    * of the displayed choices through onReadyChange, independently of edits;
-   * the dialog waits for true before allowing creation. */
+   * the dialog waits for true before allowing creation. With `rowsOnly`, the
+   * host already supplies the group (under AI setup's Custom): return the
+   * same rows without one. */
   CreateConfiguration?: ComponentType<
     AgentCreateProps<Config> & {
       harnessControl: ReactNode;
+      rowsOnly?: boolean;
       onReadyChange?: (ready: boolean) => void;
     }
   >;
@@ -2435,6 +2443,14 @@ export class AgentsService extends Service implements Agents {
       agent: (key) => this.agent(key),
       member: (agent, event) => this.member(agent, event),
       reads: (agent, event) => this.reads(agent, event),
+      resolveChannels: async (agent, ids, signal) => {
+        const channels = this.bindingOf(agent)?.session.channels;
+        const unknown = ids.filter(
+          (id) => !this.channelOf(agent, { tags: [["h", id]] }),
+        );
+        if (unknown.length)
+          await channels?.resolve?.(unknown, { signal, viewerLookup: false });
+      },
       dm: (agent, event) => this.dm(agent, event),
       unattended: (agent, event, live) => {
         const channel = event.tags.find((tag) => tag[0] === "h")?.[1];
