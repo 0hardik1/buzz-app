@@ -1903,6 +1903,19 @@ describe("reading a transcript", () => {
     expect(size(diffs)).toBeLessThan(4096);
   });
 
+  it("replaces a tool's diffs when an update resends its content", async () => {
+    const diff = { type: "diff", path: "a.ts", newText: "two", oldText: "one" };
+    const transcript = await read([
+      tool({ content: [diff] }),
+      { ...tool({ content: [diff] }), sessionUpdate: "tool_call_update" },
+      { ...tool({ status: "completed" }), sessionUpdate: "tool_call_update" },
+    ]);
+    const [item] = transcript?.turns.flatMap((turn) => turn.items) ?? [];
+    expect(item?.type === "tool" && item.diffs).toEqual([
+      { path: "a.ts", newText: "two", oldText: "one" },
+    ]);
+  });
+
   it("marks a turn partial when it drops the turn's own content", async () => {
     const at = { _meta: { timestamp: 1_000 } };
     const transcript = await read([

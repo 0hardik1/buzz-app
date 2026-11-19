@@ -248,6 +248,13 @@ class Rebuild {
       item.input = this.set(turn, item.input, display(update.rawInput), item);
     const content = Array.isArray(update.content) ? update.content : undefined;
     if (content) {
+      // An update's content is the tool's whole content: its diffs replace
+      // the earlier ones, whose room goes back.
+      this.admit(
+        turn,
+        -item.diffs.reduce((sum, diff) => sum + diffSize(diff), 0),
+      );
+      item.diffs = [];
       const text: string[] = [];
       for (const entry of content) {
         const value = (entry ?? {}) as Json;
@@ -259,17 +266,16 @@ class Rebuild {
             typeof value.oldText === "string"
               ? this.cut(value.oldText, item)
               : undefined;
-          const size =
-            ITEM_BYTES + bytes(path) + bytes(newText) + bytes(oldText ?? "");
-          if (!this.admit(turn, size)) {
-            item.truncated = true;
-            continue;
-          }
-          item.diffs.push({
+          const diff = {
             path,
             newText,
             ...(oldText === undefined ? {} : { oldText }),
-          });
+          };
+          if (!this.admit(turn, diffSize(diff))) {
+            item.truncated = true;
+            continue;
+          }
+          item.diffs.push(diff);
         } else if (block.type === "text" && typeof block.text === "string")
           text.push(block.text);
       }
@@ -408,6 +414,11 @@ class Rebuild {
 const encoder = new TextEncoder();
 /** `text`'s size in UTF-8. */
 const bytes = (text: string) => encoder.encode(text).length;
+const diffSize = (diff: { path: string; newText: string; oldText?: string }) =>
+  ITEM_BYTES +
+  bytes(diff.path) +
+  bytes(diff.newText) +
+  bytes(diff.oldText ?? "");
 const planBytes = (entries: readonly { content: string; status: string }[]) =>
   entries.reduce(
     (sum, entry) =>
