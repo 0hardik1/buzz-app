@@ -211,24 +211,6 @@
   .shell-backdrop {
     z-index: -1;
   }
-  .shell-side-dock {
-    display: flex;
-    flex: none;
-    flex-direction: column;
-    align-items: center;
-    padding: var(--space-2) var(--space-1h) var(--space-panel-gap);
-    min-height: 0;
-  }
-  .shell-dock-pages {
-    /* Keep corner counts and focus rings inside the scrollport without
-       changing the dock width or the tile positions. */
-    padding: var(--space-3);
-    margin: calc(-1 * var(--space-3));
-    min-height: 0;
-    flex: 1;
-    overflow-y: auto;
-    scrollbar-width: none;
-  }
   .shell-menu-search {
     width: 100%;
     max-width: 32rem;
@@ -276,14 +258,6 @@
     content: "";
     flex: none;
     width: calc(var(--space-16) + var(--space-4));
-  }
-  .shell-community-switcher {
-    display: flex;
-    flex: none;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-2);
-    padding-top: var(--space-2);
   }
   .shell-actions-fixed {
     display: flex;
@@ -351,9 +325,6 @@
     @apply relative flex min-h-0 min-w-0 flex-1;
     padding-inline: calc(var(--space-panel-gap) - var(--space-half));
     padding-bottom: var(--space-panel-gap);
-  }
-  .shell-side-dock ~ .shell-body {
-    padding-inline-start: 0;
   }
   /* Keep the modal portal outside the query container so its fixed backdrop
      still blocks the whole window, including the header. */
@@ -557,15 +528,11 @@
   .danger {
     @apply text-danger;
   }
-  /* Header controls and the app dock keep the solid shell color beneath them
-     and their focus rings, so their ink and fills keep the pairing they were
-     designed for. The sidebar, also on the tint, gets the same color as a
-     rounded surface; the conversation's card is already opaque. */
-  .shell-background > .shell-backdrop ~ .shell-header > *,
-  .shell-background
-    > .shell-backdrop
-    ~ :where(.shell-workspace)
-    > .shell-side-dock {
+  /* Header controls keep the solid shell color beneath them and their focus
+     rings, so their ink and fills keep the pairing they were designed for.
+     The sidebar, also on the tint, gets the same color as a rounded surface;
+     the conversation's card is already opaque. */
+  .shell-background > .shell-backdrop ~ .shell-header > * {
     border-radius: var(--radius-pill);
     background: var(--bg-app);
     box-shadow: 0 0 0 var(--space-2) var(--bg-app);

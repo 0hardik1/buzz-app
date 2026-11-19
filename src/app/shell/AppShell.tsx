@@ -284,11 +284,6 @@ function AppShellContent({
       : null;
     return content;
   }, [pages, selected, sidebar, onSelect, creationInNavigation]);
-  const dockPages = orderPages(
-    pages.filter((page) => page.primary && pagePlacement(page) !== "sidebar"),
-    "dock",
-  );
-  const selectedDockPage = dockPages.some((page) => page.key === owner);
   return (
     <div
       data-shell-tone={tone}
@@ -362,24 +357,6 @@ function AppShellContent({
         >
           <div className="shell-actions-fixed">
             {launchers}
-            <WindowControls />
-          </div>
-        </div>
-      </header>
-
-      <div className="shell-workspace">
-        <nav className="shell-side-dock" aria-label="Apps dock">
-          <div className="shell-dock-pages">
-            <PageNavigation
-              pages={dockPages}
-              selected={owner}
-              currentPage={selected}
-              onSelect={onSelect}
-              placement="dock"
-              previews
-            />
-          </div>
-          <div className="shell-community-switcher">
             <CommunityPicker
               communities={communities}
               unreads={communityUnreads}
@@ -405,8 +382,12 @@ function AppShellContent({
                 onSelect("settings", section ? { section } : undefined)
               }
             />
+            <WindowControls />
           </div>
-        </nav>
+        </div>
+      </header>
+
+      <div className="shell-workspace">
         <div
           ref={workspaceRef}
           className="shell-dialog-frame"
@@ -455,14 +436,6 @@ function AppShellContent({
                   <PanelFrame scope={connection.scope} companion={companion}>
                     <div
                       id={`shell-page-${owner}`}
-                      {...(selectedDockPage
-                        ? {
-                            role: "tabpanel",
-                            "data-focus-inset": "",
-                            "aria-labelledby": `shell-page-${owner}-tab`,
-                            tabIndex: 0,
-                          }
-                        : {})}
                       className={
                         fillsWorkspace
                           ? "buzz-tabs-panel h-full min-h-0"
