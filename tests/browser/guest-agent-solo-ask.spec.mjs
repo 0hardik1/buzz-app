@@ -120,7 +120,7 @@ test("a Viewing-only agent is asked in your Solo chat, which later asks from the
   // One chat in Solo, opened beside #launch, which stays open.
   await expect(
     page
-      .getByRole("navigation", { name: "Solo conversations" })
+      .locator('[data-sidebar-section="solo"]')
       .getByRole("button", { name: "launch-ask-pollen", exact: true }),
   ).toHaveCount(1);
   await expect(composer).toBeVisible();
@@ -406,7 +406,7 @@ test("a Solo chat the relay refuses gives the question back", async ({
   // The chat that never started is gone from Solo.
   await expect(
     page
-      .getByRole("navigation", { name: "Solo conversations" })
+      .locator('[data-sidebar-section="solo"]')
       .getByRole("button", { name: "launch-ask-pollen", exact: true }),
   ).toHaveCount(0);
   expect(errors.unexplained()).toEqual([]);
@@ -460,10 +460,19 @@ test("a refused chat gives the question back when clearing the draft had failed"
   expect(errors.unexplained()).toEqual([]);
 });
 
-test("a second ask while the first chat is still starting keeps its question", async ({
+test("a second ask while the first chat is still starting keeps both questions", async ({
   page,
 }) => {
   const errors = watchPageErrors(page);
+  // Intercept only the OS clipboard boundary.
+  await page.addInitScript(() => {
+    window.copiedText = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (text) => window.copiedText.push(text) },
+    });
+  });
+  await page.clock.install();
   await page.goto(
     "/tests/fixtures/guest-agent-solo-ask.html?refuse-create=held",
   );
@@ -496,12 +505,22 @@ test("a second ask while the first chat is still starting keeps its question", a
     ),
   ).toEqual([]);
   await page.evaluate(() => window.refuseCreate());
-  await expect(
-    page.getByRole("dialog", {
-      name: "Couldn’t start your Solo chat with Pollen, so the question wasn’t sent.",
-    }),
-  ).toBeVisible();
+  const refused = page.getByRole("dialog", {
+    name: "Couldn’t start your Solo chat with Pollen, so the question wasn’t sent.",
+  });
+  await expect(refused).toBeVisible();
   // The question in the draft is never replaced or lost.
+  await expect(composer).toContainText("SECOND question");
+  // The first question, which can't go back into the occupied draft, stays
+  // on offer until it is copied, past an ordinary notice's 8 seconds.
+  await page.clock.runFor(9000);
+  await refused.getByRole("button", { name: "Copy question" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Question copied" }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => window.copiedText)).toEqual([
+    expect.stringContaining("FIRST question"),
+  ]);
   await expect(composer).toContainText("SECOND question");
   expect(errors.unexplained()).toEqual([]);
 });

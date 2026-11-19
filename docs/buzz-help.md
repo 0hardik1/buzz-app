@@ -570,11 +570,14 @@ and are asked to sign in again in Buzz.
   thread, in your Solo chat with that agent for that channel, named
   `<channel>-ask-<agent>` (for example `launch-ask-pollen`). Later asks from
   the same channel continue that chat, even after you rename it. If it is
-  archived, the agent has left it, or it is no longer private to you and the
-  agent (shared, or someone else joined), the next ask starts a new one. Chips
-  in your message go with it. You stay in the channel; **Open** on the
-  confirmation opens the chat beside it. If the chat can't be started, your
-  message comes back to the draft.
+  archived, the agent has left it or is Viewing only there, or it is no longer
+  private to you and the agent (shared, or someone else joined), the next ask
+  starts a new one. Chips in your message go with it. You stay in the channel;
+  **Open** on the confirmation opens the chat beside it. While the chat is
+  still starting, another ask waits and keeps its draft. If the chat can't be
+  started, your message comes back to the draft. If you've written something
+  else there since, the error offers **Copy question** instead, and stays until
+  you copy or close it.
 - **Workspaces** can hold any mix of chats, channels, forums and DMs. Use **Move to…**
   in a conversation’s menu or drag the row to a workspace. Unfiled items appear
   in **Solo**, **Team**, **Forums**, or **Direct messages**. Reorder any section,

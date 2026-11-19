@@ -3185,12 +3185,32 @@ function Composer({
                         `${failed} Your draft is back.`,
                       ),
                     });
-                  notify(
-                    restored
-                      ? `${failed} It’s back in your draft in #${here.name}.`
-                      : failed,
-                    "error",
-                  );
+                  if (restored) {
+                    notify(
+                      `${failed} It’s back in your draft in #${here.name}.`,
+                      "error",
+                    );
+                    return;
+                  }
+                  // The draft holds something newer, so the question can't
+                  // go back there: it stays on offer until it is copied.
+                  const copy = async () => {
+                    try {
+                      await writeClipboardText(captured.text);
+                      notify("Question copied", "success");
+                    } catch {
+                      notify("Couldn’t copy the question", "error", {
+                        label: "Try again",
+                        onClick: () => void copy(),
+                        timeout: Infinity,
+                      });
+                    }
+                  };
+                  notify(failed, "error", {
+                    label: "Copy question",
+                    onClick: () => void copy(),
+                    timeout: Infinity,
+                  });
                 },
               );
               return;
