@@ -944,8 +944,8 @@ and are asked to sign in again in Buzz.
   at its bottom right to make emoji bigger or smaller, or click it to step to
   the next size. With the keyboard, focus the corner and use the arrow keys.
   **Settings → Appearance → Emoji size** offers the same choices: Default,
-  Medium and Large. The size applies to emoji-only messages, including
-  drafts in the message box, and Large also shows reaction emoji bigger.
+  Medium, Large and Huge. The size applies to emoji-only messages, including
+  drafts in the message box, and Large and Huge also show reaction emoji bigger.
   Only you see it, and the choice applies on this device only.
 - **Time format**: **Settings → Appearance → Clock** chooses 12-hour or
   24-hour times. System, the default, follows the desktop app's operating

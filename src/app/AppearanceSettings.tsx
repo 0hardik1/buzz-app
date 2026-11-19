@@ -379,6 +379,7 @@ export function AppearanceSettings({
                       { value: "default", label: "Default" },
                       { value: "medium", label: "Medium" },
                       { value: "large", label: "Large" },
+                      { value: "huge", label: "Huge" },
                     ],
                   },
                 ]}
