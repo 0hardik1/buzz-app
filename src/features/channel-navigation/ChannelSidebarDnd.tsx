@@ -155,6 +155,7 @@ export function ChannelSidebarDnd({
     >
       <Writable.Provider value={writable}>{children}</Writable.Provider>
       <CollapsedDragAnchor />
+      <CardDropLine />
       {createPortal(
         // The optimistic move relocates the row, so nothing remains to settle back onto.
         <DragOverlay dropAnimation={null}>
@@ -239,6 +240,94 @@ function CollapsedDragAnchor() {
       );
   }, [id, measureDroppableContainers]);
   return null;
+}
+
+/** How far an element's CSS translate moves it down right now. */
+function shiftOf(element: HTMLElement) {
+  const [, y] = getComputedStyle(element).translate.split(" ");
+  return y ? Number.parseFloat(y) || 0 : 0;
+}
+
+/**
+ * Where a moved card will land, between cards. The cards below the landing
+ * gap slide down a little to give the line room, and the line sits in the
+ * measured middle of that gap whatever spaces the cards apart, so it is even
+ * above and below whichever way the card is moving.
+ */
+function CardDropLine() {
+  const { active, over } = useDndContext();
+  const from = active?.data.current?.group
+    ? active.data.current.groupIndex
+    : undefined;
+  const to = over?.data.current?.groupIndex;
+  const target =
+    from !== undefined && to !== undefined && over && over.id !== active?.id
+      ? String(over.id)
+      : undefined;
+  const before = target !== undefined && from > to;
+  const line = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const node = line.current;
+    const card = target
+      ? document.querySelector<HTMLElement>(
+          `[data-sidebar-section="${CSS.escape(target)}"]`,
+        )
+      : null;
+    const cards = card?.closest("[data-sidebar-cards]");
+    const list = card && scroller(card);
+    if (!node || !card || !cards || !list) return;
+    const shown = [
+      ...cards.querySelectorAll<HTMLElement>("[data-sidebar-section]"),
+    ].filter(
+      (element) =>
+        element.getClientRects().length > 0 &&
+        !element.parentElement?.closest("[data-sidebar-section]"),
+    );
+    const index = shown.indexOf(card) + (before ? 0 : 1);
+    const [upper, lower] = [shown[index - 1], shown[index]];
+    const moved = shown.slice(index);
+    for (const element of moved) element.setAttribute("data-drop-shift", "");
+    card.setAttribute("data-drop-line", "");
+    let request = 0;
+    const place = () => {
+      const box = card.getBoundingClientRect();
+      const room = node.offsetHeight;
+      const lowerTop = lower?.getBoundingClientRect().top;
+      const top = upper?.getBoundingClientRect().bottom;
+      // Between two cards, the middle of their gap; at either end of the
+      // list, the middle of the room the slide opens.
+      const middle =
+        top !== undefined && lowerTop !== undefined
+          ? (top + lowerTop) / 2
+          : top !== undefined
+            ? top + room / 2
+            : lower && lowerTop !== undefined
+              ? lowerTop - shiftOf(lower) / 2
+              : undefined;
+      const view = list.getBoundingClientRect();
+      if (middle === undefined || middle < view.top || middle > view.bottom)
+        node.style.visibility = "hidden";
+      else {
+        node.style.visibility = "";
+        node.style.top = `${middle - room / 2}px`;
+        node.style.left = `${box.left}px`;
+        node.style.width = `${box.width}px`;
+      }
+      request = requestAnimationFrame(place);
+    };
+    place();
+    return () => {
+      cancelAnimationFrame(request);
+      for (const element of moved) element.removeAttribute("data-drop-shift");
+      card.removeAttribute("data-drop-line");
+    };
+  }, [target, before]);
+  return target
+    ? createPortal(
+        <div ref={line} className={styles.cardDropLine} aria-hidden="true" />,
+        document.body,
+      )
+    : null;
 }
 
 function CreateSectionDropTarget({ available }: { available: boolean }) {

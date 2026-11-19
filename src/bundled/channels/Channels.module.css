@@ -325,8 +325,8 @@
    same gap from the one before it. */
 [data-sidebar-cards] .channelSection {
   --sidebar-section-gap: var(--space-panel-gap);
-  /* A landing gap opens smoothly. */
-  transition: margin var(--duration-fast) var(--easing-state);
+  /* Cards slide smoothly to open a landing gap. */
+  transition: translate var(--duration-fast) var(--easing-state);
 }
 @media (prefers-reduced-motion: reduce) {
   [data-sidebar-cards] .channelSection {
@@ -365,17 +365,36 @@
   bottom: calc(var(--space-2) * -1);
   transform: translateY(50%);
 }
-/* Between cards the landing gap opens a little so the line has room above
-   and below; the line is a short, round bar centred in it. */
-[data-sidebar-cards] .channelSection[data-drop-edge="before"] {
-  margin-top: calc(var(--sidebar-section-gap) + var(--space-2));
+/* Between cards the line sits in the middle of the gap. */
+[data-sidebar-cards] .channelSection[data-drop-edge="before"]::before {
+  top: calc(var(--space-1) * -1);
 }
-[data-sidebar-cards] .channelSection[data-drop-edge="after"] {
-  margin-bottom: var(--space-2);
+[data-sidebar-cards] .channelSection[data-drop-edge="after"]::before {
+  bottom: calc(var(--space-1) * -1);
 }
-[data-sidebar-cards] .channelSection[data-drop-edge]::before {
+/* A card the list can measure draws its landing line from the list instead
+   (CardDropLine): the cards below the gap slide down to give it room. */
+[data-sidebar-cards] .channelSection[data-drop-line]::before {
+  content: none;
+}
+[data-sidebar-cards] [data-drop-shift] {
+  translate: 0 var(--space-2);
+}
+.cardDropLine {
+  position: fixed;
+  z-index: 1;
+  block-size: var(--space-4);
+  pointer-events: none;
+}
+.cardDropLine::before {
+  content: "";
+  position: absolute;
   inset-inline: var(--space-3);
-  height: var(--space-1);
+  top: 50%;
+  height: calc(var(--space-1) / 2 + 1px);
+  border-radius: var(--radius-pill);
+  background: var(--border-accent);
+  transform: translateY(-50%);
 }
 .channelDragOverlay {
   display: flex;
