@@ -114,19 +114,20 @@ jobs:
 
   native:
     if: github.event_name != 'workflow_dispatch'
-    name: Rust and tool integration (${{ matrix.cores }} cores)
+    name: Rust and tool integration (${{ matrix.runner }})
     strategy:
       fail-fast: false
       matrix:
-        cores: [8, 16]
+        runner: [standard, 8core, 16core]
     # Use the PR author so a human rerunning a bot PR keeps standard runners.
     # Fork-owned workflows also retain runners they can access.
     runs-on: >-
       ${{ fromJSON(
+        matrix.runner != 'standard' &&
         github.repository == 'block/buzz-app' &&
         github.event_name == 'pull_request' &&
         github.event.pull_request.user.type == 'User' &&
-        format('{{"group":"buzz-runners","labels":"buzz-ubuntu-x64-{0}core"}}', matrix.cores) ||
+        format('{{"group":"buzz-runners","labels":"buzz-ubuntu-x64-{0}"}}', matrix.runner) ||
         '"ubuntu-24.04"'
       ) }}
     # A Cargo.lock change rebuilds most crates from a cold cache, and only a
