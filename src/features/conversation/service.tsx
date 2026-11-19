@@ -82,6 +82,9 @@ export type Conversation = {
   registerTool(tool: ComposerTool): void;
   completions: ContributionReader<ComposerCompletion>;
   registerCompletion(provider: ComposerCompletion): void;
+  /** Registers `provider` with `supplement: true`. Hosts without supplements
+   * lack this method, so plugins call it as `registerCompletionSupplement?.()`. */
+  registerCompletionSupplement(provider: ComposerCompletion): void;
   annotators: ContributionReader<ComposerAnnotator>;
   /** Marks on the focused composer's prose; see `ComposerAnnotator`. */
   registerAnnotator(annotator: ComposerAnnotator): void;
@@ -397,10 +400,23 @@ export class ConversationService extends Service implements Conversation {
     this.toolEntries.register(this.ctx, value);
   }
   registerCompletion(value: ComposerCompletion) {
+    if (value?.supplement !== undefined)
+      throw new Error(
+        "Register a supplement with registerCompletionSupplement",
+      );
+    this.addCompletion(value);
+  }
+  registerCompletionSupplement(value: ComposerCompletion) {
+    this.addCompletion(value, true);
+  }
+  private addCompletion(value: ComposerCompletion, supplement?: true) {
     validate(value);
     if (typeof value.match !== "function")
       throw new Error("A completion provider needs a matcher");
-    this.completionEntries.register(this.ctx, value);
+    this.completionEntries.register(
+      this.ctx,
+      supplement ? { ...value, supplement } : value,
+    );
   }
   registerAnnotator(value: ComposerAnnotator) {
     validate(value);

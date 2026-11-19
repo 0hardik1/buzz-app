@@ -450,7 +450,8 @@ export type ComposerCompletion = Readonly<{
   id: string;
   title: string;
   order?: number;
-  /** Adds rows beside the provider that owns the caret when this one's match
+  /** Set only by `registerCompletionSupplement`; `registerCompletion` refuses
+   * it. Adds rows beside the provider that owns the caret when this one's match
    * has the same `start`; never owns it, so never opens alone. Its rows sit
    * under a host-drawn `title`, sections in `order` then key. Publish on
    * mount, even with no rows: until then the winner's exact match waits. Its
