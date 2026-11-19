@@ -66,6 +66,7 @@ for (const layout of ["Unified", "Split"]) {
       page.getByText(/src\/example.ts · New line 5001/),
     ).toBeVisible();
     await page.screenshot({
+      animations: "disabled",
       path: testInfo.outputPath(`inline-${layout}-light.png`),
     });
     await page.getByRole("button", { name: "Post to GitHub" }).click();
@@ -92,6 +93,7 @@ for (const layout of ["Unified", "Split"]) {
       document.documentElement.dataset.colorMode = "dark";
     });
     await page.screenshot({
+      animations: "disabled",
       path: testInfo.outputPath(`inline-${layout}-dark.png`),
     });
     await page.reload();
@@ -161,7 +163,10 @@ test("reconciles timeout-after-success across panel remount without reposting", 
   await expect(
     page.getByRole("button", { name: "Post to GitHub" }),
   ).toBeDisabled();
-  await page.screenshot({ path: testInfo.outputPath("unknown-delivery.png") });
+  await page.screenshot({
+    animations: "disabled",
+    path: testInfo.outputPath("unknown-delivery.png"),
+  });
   await page.getByRole("button", { name: "Check delivery" }).click();
   await expect(
     page.getByText("Uncertain delivery", { exact: true }),
@@ -252,12 +257,14 @@ test("narrow enlarged-text panel keeps composer controls reachable", async ({
   await send.scrollIntoViewIfNeeded();
   await expect(send).toBeVisible();
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("inline-narrow-large-light.png"),
   });
   await page.evaluate(() => {
     document.documentElement.dataset.colorMode = "dark";
   });
   await page.screenshot({
+    animations: "disabled",
     path: testInfo.outputPath("inline-narrow-large-dark.png"),
   });
 });
