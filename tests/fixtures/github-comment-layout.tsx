@@ -1,5 +1,13 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
+import { GitHubReactions } from "../../src/bundled/github/GitHubReactions";
+import {
+  createPrReactions,
+  type ReactionGroup,
+  type ReactionContent,
+} from "../../src/bundled/github/pr-reactions";
+import type { GitHubCli } from "../../src/bundled/github/gh";
+import type { Snapshot } from "../../src/bundled/github/pr-comments";
 import { GitHubComment } from "../../src/bundled/github/GitHubComment";
 import { Button } from "../../src/shared/design-system/ui/Button";
 import { InlineCommentForm } from "../../src/bundled/github/InlineCommentForm";
@@ -11,6 +19,51 @@ import "../../src/shared/styles/globals.css";
 import styles from "./github-comment-layout.module.css";
 
 const pull = "https://github.com/example-org/sample/pull/1";
+const snapshot: Snapshot = {
+  repository: "example-org/sample",
+  number: 1,
+  pullId: "preview",
+  viewer: "you",
+  head: "a",
+  base: "b",
+  diff: fixturePatch,
+  files: [],
+};
+const initialGroups: ReactionGroup[] = [
+  { content: "HEART", viewerHasReacted: false, users: { totalCount: 3 } },
+];
+const reactionGroups = new Map<string, ReactionGroup[]>();
+const previewGh: GitHubCli = async <T,>(
+  query: string,
+  variables: Record<string, unknown>,
+) => {
+  const id = String(variables.id);
+  let groups = reactionGroups.get(id) ?? initialGroups;
+  if (query.startsWith("mutation")) {
+    const add = query.includes("addReaction");
+    const content = variables.content as ReactionContent;
+    const before = groups.find((group) => group.content === content);
+    groups = [
+      ...groups.filter((group) => group.content !== content),
+      {
+        content,
+        viewerHasReacted: add,
+        users: { totalCount: (before?.users.totalCount ?? 0) + (add ? 1 : -1) },
+      },
+    ];
+    reactionGroups.set(id, groups);
+    return {
+      [add ? "addReaction" : "removeReaction"]: {
+        subject: { id, reactionGroups: groups },
+      },
+    } as T;
+  }
+  return {
+    viewer: { login: "you" },
+    node: { id, pullRequest: { id: "preview" }, reactionGroups: groups },
+  } as T;
+};
+const reactions = createPrReactions(previewGh);
 const sample: {
   id?: string;
   author: string;
@@ -45,22 +98,29 @@ function Thread({
   const [localReplies, setLocalReplies] = useState<typeof sample>([]);
   return (
     <section className={styles.thread} aria-label={label}>
-      {[...comments, ...localReplies].map((comment, index) => (
-        <GitHubComment
-          key={comment.id ?? `${comment.author}:${comment.body}`}
-          comment={{
-            id: comment.id ?? String(index),
-            databaseId: index + 1,
-            author: comment.author,
-            avatarUrl: comment.avatar,
-            body: comment.body,
-            url: `${pull}#discussion_r${index + 1}`,
-            createdAt: "2026-01-01T00:00:00Z",
-            commit: null,
-            originalCommit: null,
-          }}
-        />
-      ))}
+      {[...comments, ...localReplies].map((row, index) => {
+        const comment = {
+          id: row.id ?? `${label}:${index}`,
+          databaseId: index + 1,
+          author: row.author,
+          avatarUrl: row.avatar,
+          body: row.body,
+          url: `${pull}#discussion_r${index + 1}`,
+          createdAt: "2026-01-01T00:00:00Z",
+          commit: null,
+          originalCommit: null,
+          reactions: initialGroups,
+        };
+        return (
+          <GitHubComment key={comment.id} comment={comment}>
+            <GitHubReactions
+              api={reactions}
+              snapshot={snapshot}
+              comment={comment}
+            />
+          </GitHubComment>
+        );
+      })}
       {replying && (
         <InlineCommentForm
           body={body}

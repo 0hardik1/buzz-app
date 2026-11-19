@@ -139,7 +139,9 @@ it("keeps ordinary new files over the token budget structured and commentable", 
     expect(root?.querySelector('pre [data-line="386"]')).toBeTruthy();
   });
   expect(screen.queryByRole("region", { name: "Raw diff" })).toBeNull();
-  expect(onAvailabilityChange).toHaveBeenCalledWith("sample.kt", true);
+  await vi.waitFor(() =>
+    expect(onAvailabilityChange).toHaveBeenCalledWith("sample.kt", true),
+  );
   expect(pierre.preloadHighlighter).toHaveBeenCalledWith(
     expect.objectContaining({ langs: ["text"] }),
   );

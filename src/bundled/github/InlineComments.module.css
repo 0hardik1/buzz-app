@@ -48,3 +48,10 @@
   min-width: 0;
   flex: 1;
 }
+
+.reactionPicker {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-1);
+  justify-items: center;
+}

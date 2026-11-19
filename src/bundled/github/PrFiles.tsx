@@ -16,6 +16,7 @@ import {
   type DiffLine,
 } from "../diffs/DiffViewer";
 import { parsePatch } from "../diffs/parse";
+import { GitHubReactions } from "./GitHubReactions";
 import { GitHubComment } from "./GitHubComment";
 import { InlineCommentForm } from "./InlineCommentForm";
 import type { InlineDeliveryStore } from "./inline-delivery";
@@ -465,37 +466,47 @@ export function PrFiles({
           </p>
         )}
         {thread.comments.map((comment) => (
-          <GitHubComment key={comment.id} comment={comment} />
+          <GitHubComment key={comment.id} comment={comment}>
+            {api.reactions && snapshot && (
+              <GitHubReactions
+                api={api.reactions}
+                snapshot={snapshot}
+                comment={comment}
+              />
+            )}
+          </GitHubComment>
         ))}
-        {!thread.commentsComplete && (
-          <Button size="sm" onClick={() => void more(thread)}>
-            Load more replies
+        <div className={styles.actions}>
+          {!thread.commentsComplete && (
+            <Button size="sm" onClick={() => void more(thread)}>
+              Load more replies
+            </Button>
+          )}
+          <Button
+            size="sm"
+            disabled={
+              !snapshot ||
+              loading ||
+              status.busy ||
+              status.unknown ||
+              !thread.rootCommentId
+            }
+            onClick={(event) => {
+              const button = event.currentTarget;
+              choose(
+                thread.path,
+                {
+                  side: thread.side === "LEFT" ? "deletions" : "additions",
+                  lineNumber: thread.line ?? 0,
+                },
+                () => button.focus(),
+                thread.rootCommentId,
+              );
+            }}
+          >
+            Reply
           </Button>
-        )}
-        <Button
-          size="sm"
-          disabled={
-            !snapshot ||
-            loading ||
-            status.busy ||
-            status.unknown ||
-            !thread.rootCommentId
-          }
-          onClick={(event) => {
-            const button = event.currentTarget;
-            choose(
-              thread.path,
-              {
-                side: thread.side === "LEFT" ? "deletions" : "additions",
-                lineNumber: thread.line ?? 0,
-              },
-              () => button.focus(),
-              thread.rootCommentId,
-            );
-          }}
-        >
-          Reply
-        </Button>
+        </div>
       </section>
     );
   }

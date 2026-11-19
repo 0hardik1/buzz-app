@@ -1,3 +1,9 @@
+import {
+  createPrReactions,
+  reactionFields,
+  type ReactionGroup,
+  type PrReactions,
+} from "./pr-reactions";
 import { commentableLine } from "../diffs/comment-lines";
 import type { Host } from "../../features/host/service";
 import {
@@ -34,6 +40,7 @@ export type Comment = Readonly<{
   body: string;
   author: string;
   avatarUrl?: string | undefined;
+  reactions?: readonly ReactionGroup[] | undefined;
   url: string;
   createdAt: string;
   commit: string | null;
@@ -76,6 +83,7 @@ export class PrCommentError extends Error {
   }
 }
 export interface PrComments {
+  reactions?: PrReactions | undefined;
   loadSnapshot(pull: PullRef, signal?: AbortSignal): Promise<Snapshot>;
   loadThreads(
     pull: PullRef,
@@ -164,9 +172,12 @@ const commentOf = (value: RestComment): Comment => ({
   commit: value.commit_id,
   originalCommit: value.original_commit_id,
 });
-const commentFields =
-  "id databaseId body author { login avatarUrl } url createdAt commit { oid } originalCommit { oid }";
-type GraphComment = Omit<Comment, "author" | "commit" | "originalCommit"> & {
+const commentFields = `id databaseId body author { login avatarUrl } url createdAt commit { oid } originalCommit { oid } ${reactionFields}`;
+type GraphComment = Omit<
+  Comment,
+  "author" | "commit" | "originalCommit" | "reactions"
+> & {
+  reactionGroups?: readonly ReactionGroup[];
   author: { login: string; avatarUrl?: string } | null;
   commit: { oid: string } | null;
   originalCommit: { oid: string } | null;
@@ -185,6 +196,7 @@ const graphComment = (comment: GraphComment): Comment => ({
   ...comment,
   author: comment.author?.login ?? "deleted user",
   avatarUrl: comment.author?.avatarUrl,
+  reactions: comment.reactionGroups,
   commit: comment.commit?.oid ?? null,
   originalCommit: comment.originalCommit?.oid ?? null,
 });
@@ -405,7 +417,9 @@ export function createPrComments(
     }
     return result;
   }
+  const reactions = createPrReactions(gh);
   return {
+    reactions,
     async loadSnapshot(pull, signal) {
       try {
         const before = await meta(pull, signal);
@@ -474,6 +488,7 @@ export function createPrComments(
       }
     },
     async loadThreads(pull, cursor, signal) {
+      const started = reactions.revision();
       try {
         type Row = Omit<
           Thread,
@@ -492,6 +507,7 @@ export function createPrComments(
         };
         const [owner, name] = pull.repository.split("/");
         const data = await gh<{
+          viewer: { login: string };
           repository: {
             pullRequest: {
               headRefOid: string;
@@ -500,7 +516,7 @@ export function createPrComments(
             };
           };
         }>(
-          `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid baseRefOid reviewThreads(first:100,after:$cursor){nodes{id path diffSide line originalLine isOutdated isResolved comments(first:100){nodes{${commentFields}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}}`,
+          `query($owner:String!,$name:String!,$number:Int!,$cursor:String){viewer{login} repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid baseRefOid reviewThreads(first:100,after:$cursor){nodes{id path diffSide line originalLine isOutdated isResolved comments(first:100){nodes{${commentFields}} pageInfo{hasNextPage endCursor}}} pageInfo{hasNextPage endCursor}}}}}`,
           { owner, name, number: pull.number, cursor: cursor ?? null },
           signal,
         );
@@ -517,7 +533,15 @@ export function createPrComments(
             outdated: row.isOutdated,
             resolved: row.isResolved,
             rootCommentId: row.comments.nodes[0]?.databaseId ?? 0,
-            comments: row.comments.nodes.map(graphComment),
+            comments: row.comments.nodes.map((comment) => {
+              reactions.accept(
+                comment.id,
+                data.viewer?.login,
+                comment.reactionGroups,
+                started,
+              );
+              return graphComment(comment);
+            }),
             commentsComplete: !row.comments.pageInfo.hasNextPage,
             commentsCursor: row.comments.pageInfo.hasNextPage
               ? row.comments.pageInfo.endCursor
@@ -530,9 +554,13 @@ export function createPrComments(
       }
     },
     async loadComments(threadId, cursor, signal) {
+      const started = reactions.revision();
       try {
-        const data = await gh<{ node: { comments: Connection<GraphComment> } }>(
-          `query($id:ID!,$cursor:String){node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{${commentFields}} pageInfo{hasNextPage endCursor}}}}}`,
+        const data = await gh<{
+          viewer: { login: string };
+          node: { comments: Connection<GraphComment> };
+        }>(
+          `query($id:ID!,$cursor:String){viewer{login} node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{${commentFields}} pageInfo{hasNextPage endCursor}}}}}`,
           { id: threadId, cursor: cursor ?? null },
           signal,
         );
@@ -542,7 +570,18 @@ export function createPrComments(
             "not-found",
           );
         const page = pageOf(data.node.comments);
-        return { ...page, items: page.items.map(graphComment) };
+        return {
+          ...page,
+          items: page.items.map((comment) => {
+            reactions.accept(
+              comment.id,
+              data.viewer?.login,
+              comment.reactionGroups,
+              started,
+            );
+            return graphComment(comment);
+          }),
+        };
       } catch (error) {
         signal?.throwIfAborted();
         throw failure(error);
