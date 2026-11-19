@@ -982,6 +982,32 @@ describe("the place an action would act on", () => {
     });
   });
 
+  it("doesn't navigate through step 2 when navigate itself is a long shot", () => {
+    const built = buildActionDecision({
+      spoken: "bring design over next to this",
+      hovered: hoveredChannel,
+      actions: channelVoiceActions.slice(0, 1),
+      entities,
+      places,
+    });
+    const star = optionFor(built.request, "Star");
+    const resolved = built.resolve({
+      action: {
+        type: "choice",
+        choice: star,
+        confidence: 0.67,
+        probabilities: { [star]: 0.67, [ACTION_NAVIGATE_OPTION]: 0.13 },
+      },
+      place: {
+        type: "choice",
+        choice: "#design",
+        confidence: 0.9,
+        probabilities: { "#design": 0.9 },
+      },
+    });
+    expect(resolved.kind).toBe("none");
+  });
+
   it("never fills a slot with the hovered thing itself", () => {
     const nextTo: VoiceActionSpec = {
       id: "channel.move_next_to",
