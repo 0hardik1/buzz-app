@@ -209,3 +209,105 @@ export const FINAL: readonly Case[] = ROWS.map(
     expect,
   }),
 );
+
+// "In here" set (`--set here`): written before the move-into-section wording
+// change it scores, on moves said as "put X in here" over a section and on
+// real navigates with a section hovered. Scored once, apart from `final`.
+const HERE_ROWS: Row[] = [
+  [
+    "reverse",
+    "section:Projects",
+    "drop data platform in here",
+    act("channel.move_to_section", "c-data-platform", "s-Projects"),
+  ],
+  [
+    "reverse",
+    "section:Later",
+    "stick the coffee channel here",
+    act("channel.move_to_section", "c-coffee", "s-Later"),
+  ],
+  [
+    "reverse",
+    "section:Work",
+    "put the product channel in here",
+    act("channel.move_to_section", "c-product", "s-Work"),
+  ],
+  [
+    "reverse",
+    "section:Agents",
+    "throw goose in here",
+    act("channel.move_to_section", "c-goose", "s-Agents"),
+  ],
+  [
+    "reverse",
+    "section:Escalations",
+    "add incidents to this section",
+    act("channel.move_to_section", "c-incidents", "s-Escalations"),
+  ],
+  [
+    "reverse",
+    "section:Oncall",
+    "drop sre alerts in here",
+    act("channel.move_to_section", "c-sre-alerts", "s-Oncall"),
+  ],
+  [
+    "reverse",
+    "section:Later",
+    "put hiring here",
+    act("channel.move_to_section", "c-hiring", "s-Later"),
+  ],
+  [
+    "reverse",
+    "section:Projects",
+    "this is where web perf goes",
+    act("channel.move_to_section", "c-web-perf", "s-Projects"),
+  ],
+  [
+    "reverse",
+    "section:Social",
+    "put analytics in here",
+    act("channel.move_to_section", "c-analytics", "s-Social"),
+  ],
+  [
+    "reverse",
+    "section:Work",
+    "move relay perf in",
+    act("channel.move_to_section", "c-relay-perf", "s-Work"),
+  ],
+  [
+    "navigate",
+    "section:Work",
+    "open data platform",
+    go("channel:c-data-platform"),
+  ],
+  [
+    "navigate",
+    "section:Projects",
+    "take me to growth experiments",
+    go("channel:c-growth-experiments"),
+  ],
+  [
+    "navigate",
+    "section:Oncall",
+    "go to the incidents channel",
+    go("channel:c-incidents"),
+  ],
+  ["navigate", "section:Later", "show me hiring", go("channel:c-hiring")],
+  [
+    "navigate",
+    "section:Social",
+    "jump to ux research",
+    go("channel:c-ux-research"),
+  ],
+  ["navigate", "section:Agents", "open my chat with Honey", go("chat:d-Honey")],
+];
+
+export const HERE: readonly Case[] = HERE_ROWS.map(
+  ([category, hover, spoken, expect], i) => ({
+    id: `here-${category}-${String(i + 1).padStart(3, "0")}`,
+    category,
+    hover,
+    spoken,
+    expect,
+  }),
+);
