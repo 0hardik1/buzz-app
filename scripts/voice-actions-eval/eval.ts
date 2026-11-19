@@ -8,7 +8,14 @@ import {
   type DecisionAnswer,
   type DecisionRequest,
 } from "../../src/features/decisions/service";
-import { ACTIONS, CONFIRM, ENTITIES, PLACES, hover } from "./catalog";
+import {
+  ACTIONS,
+  CONFIRM,
+  ENTITIES,
+  PLACES,
+  UNOFFERED,
+  hover,
+} from "./catalog";
 import { PEOPLE } from "./world";
 import { CASES, type Case, type Category, type Expected } from "./cases";
 import { FINAL, HERE } from "./cases-final";
@@ -233,6 +240,13 @@ export type CaseResult = Readonly<{
   error?: string;
 }>;
 
+/** What a case should get from the app: no action at all when it asks for
+ * one the app doesn't offer. */
+const asksUnoffered = (c: Case) =>
+  "action" in c.expect && UNOFFERED.has(c.expect.action);
+const expectOf = (c: Case): Expected =>
+  asksUnoffered(c) ? { none: true } : c.expect;
+
 const build = (c: Case) =>
   buildActionDecision({
     spoken: c.spoken,
@@ -250,7 +264,7 @@ export function rescoreCase(
   answers: Readonly<Record<string, DecisionAnswer>>,
 ) {
   const got = normalize(build(c).resolve(answers));
-  const s = score(c.expect, got);
+  const s = score(expectOf(c), got);
   const misfire = s.acted && !s.correct;
   return {
     got: describe(got),
@@ -268,7 +282,7 @@ export async function runCase(decide: Decide, c: Case): Promise<CaseResult> {
     category: c.category,
     hover: c.hover,
     spoken: c.spoken,
-    expected: describeExpected(c.expect),
+    expected: describeExpected(expectOf(c)),
   };
   if (!request) throw new Error(`${c.id}: no request`);
   const invalid = checkRequest(request);
@@ -284,7 +298,7 @@ export async function runCase(decide: Decide, c: Case): Promise<CaseResult> {
   try {
     const { answers, ms } = await decide(request);
     const got = normalize(resolve(answers));
-    const s = score(c.expect, got);
+    const s = score(expectOf(c), got);
     const action = answers.action;
     const topActions =
       action?.type === "choice"
@@ -400,7 +414,9 @@ export async function main(
     (c) =>
       !options.filter ||
       c.id.includes(options.filter) ||
-      c.category === options.filter,
+      c.category === options.filter ||
+      // `--filter unoffered`: the cases asking for what the app can't do.
+      (options.filter === "unoffered" && asksUnoffered(c)),
   );
   const results: CaseResult[] = [];
   for (let round = 0; round < (options.repeat ?? 1); round++)
