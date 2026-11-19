@@ -713,7 +713,7 @@ export class ClaudeProcess {
         .filter(
           ({ name, status }) => name !== TOOL_SERVER && status === "pending",
         )
-        .map(({ name }) => name),
+        .flatMap(({ name }) => [name, mcpName(name)]),
     );
     if (tools.some((tool) => pending.has(tool?.serverName)))
       rows = await this.readMcpStatus();
@@ -1150,16 +1150,20 @@ export class ClaudeProcess {
   }
   private catalogCall(
     name: string,
-    server: string,
+    reported: string,
     catalog: ReadonlyMap<string, readonly HarnessMcpTool[]>,
   ) {
-    const tools = catalog
-      .get(server)
-      ?.filter(
-        (tool) => `mcp__${mcpName(server)}__${mcpName(tool.name)}` === name,
-      );
-    const tool = tools?.length === 1 ? tools[0]?.name : undefined;
-    return tool === undefined ? undefined : { server, tool };
+    const found = [...catalog].flatMap(([server, tools]) =>
+      server === reported || mcpName(server) === reported
+        ? tools
+            .filter(
+              (tool) =>
+                `mcp__${mcpName(server)}__${mcpName(tool.name)}` === name,
+            )
+            .map((tool) => ({ server, tool: tool.name }))
+        : [],
+    );
+    return found.length === 1 ? found[0] : undefined;
   }
   private nativeCall(name: unknown) {
     if (typeof name !== "string" || !name.startsWith("mcp__")) return;

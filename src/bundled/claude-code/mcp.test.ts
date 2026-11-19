@@ -116,7 +116,7 @@ it.each([
     context: [
       {
         name: "mcp__claude_ai_Weather_Preview__search_docs",
-        serverName: "claude.ai Weather (Preview)",
+        serverName: "claude_ai_Weather_Preview",
       },
     ],
     name: "mcp__claude_ai_Weather_Preview__search_docs",
@@ -124,6 +124,14 @@ it.each([
       mcp_server: "claude.ai Weather (Preview)",
       mcp_tool: "search.docs",
     },
+  },
+  {
+    label: "dotted server names",
+    servers: ["fix n1.dot"],
+    catalog: { "fix n1.dot": ["n_echo"] },
+    context: [{ name: "mcp__fix_n1_dot__n_echo", serverName: "fix_n1_dot" }],
+    name: "mcp__fix_n1_dot__n_echo",
+    identity: { mcp_server: "fix n1.dot", mcp_tool: "n_echo" },
   },
   {
     label: "overlapping server prefixes",
@@ -847,39 +855,55 @@ it.each(["unique", "ambiguous"] as const)(
   },
 );
 
-it("verifies tools already admitted as a server connects during startup", async () => {
-  const pending = new Set(["alpha"]);
-  const f = native(
-    ["alpha"],
-    ["write_marker"],
-    {},
-    undefined,
-    undefined,
-    undefined,
-    { pending, beforeContext: () => pending.clear() },
-  );
-  const mcp = settings();
-  const process = await ClaudeProcess.start(f.spawn, {
-    cwd: "/work",
-    systemPrompt: "",
-    mcp,
-  });
-  try {
-    expect(mcp.started).toHaveBeenCalledWith(
-      "initial",
-      [
-        {
-          name: "alpha",
-          state: "connected",
-          tools: [{ name: "write_marker" }],
-        },
-      ],
-      mcp.choice,
+it.each([
+  { server: "alpha", context: undefined, applied: undefined },
+  {
+    server: "fix n1.dot",
+    context: [
+      { name: "mcp__fix_n1_dot__write_marker", serverName: "fix_n1_dot" },
+    ],
+    applied: {
+      alpha: { off: ["write_marker"], known: ["read_echo", "write_marker"] },
+      beta: false,
+      "fix n1.dot": true,
+    },
+  },
+])(
+  "verifies tools already admitted as a server connects during startup: $server",
+  async ({ server, context, applied }) => {
+    const pending = new Set([server]);
+    const f = native(
+      [server],
+      ["write_marker"],
+      {},
+      context,
+      undefined,
+      undefined,
+      { pending, beforeContext: () => pending.clear() },
     );
-  } finally {
-    await process.kill();
-  }
-});
+    const mcp = settings();
+    const process = await ClaudeProcess.start(f.spawn, {
+      cwd: "/work",
+      systemPrompt: "",
+      mcp,
+    });
+    try {
+      expect(mcp.started).toHaveBeenCalledWith(
+        "initial",
+        [
+          {
+            name: server,
+            state: "connected",
+            tools: [{ name: "write_marker" }],
+          },
+        ],
+        applied ?? mcp.choice,
+      );
+    } finally {
+      await process.kill();
+    }
+  },
+);
 
 it("never prompts after core rejects readback, and strict-none keeps the SDK server out of the listing", async () => {
   const f = native();
