@@ -271,48 +271,6 @@
   border-radius: var(--radius-row);
   background: var(--affordance-panel-hover);
 }
-.createSectionSlot + .channelSection {
-  margin-top: 0;
-}
-.createSectionHitArea {
-  position: absolute;
-  inset: calc(-1 * var(--sidebar-section-gap)) 0 0;
-  pointer-events: none;
-}
-.createSectionReveal {
-  overflow: hidden;
-}
-.createSectionDrop {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-  /* Match the avatar uploader's compact 80px drop area at the default scale. */
-  min-height: calc(5 * var(--space-4));
-  margin-bottom: var(--space-4);
-  padding: var(--space-2);
-  border: 2px solid transparent;
-  border-radius: var(--radius-control);
-  background: var(--surface-inset);
-  color: var(--text-subtle);
-  text-align: center;
-  transition: background-color var(--duration-state) var(--easing-state);
-}
-.createSectionDrop > svg {
-  flex-shrink: 0;
-}
-.createSectionDrop[data-drop-target] {
-  border-color: var(--text-standard);
-  border-style: dashed;
-  background: var(--affordance-subtle-hover);
-  color: var(--text-standard);
-}
-@media (prefers-reduced-motion: reduce) {
-  .createSectionDrop {
-    transition: none;
-  }
-}
 /* On the tint, a section is its own card (its surface is Panel's). Cards keep
    their content height, let drop lines into the gap, and sit a panel gap apart. */
 [data-sidebar-cards] .channelSection[data-sidebar-card] {
@@ -321,8 +279,7 @@
   padding: var(--space-1);
   --affordance-panel-hover: var(--affordance-sidebar-hover);
 }
-/* Every card, Favorites and the hidden new-workspace slot included, sits the
-   same gap from the one before it. */
+/* Every card, Favorites included, sits the same gap from the one before it. */
 [data-sidebar-cards] .channelSection {
   --sidebar-section-gap: var(--space-panel-gap);
   /* Cards slide smoothly to open a landing gap. */
@@ -332,13 +289,6 @@
   [data-sidebar-cards] .channelSection {
     transition: none;
   }
-}
-/* The hidden new-workspace slot already holds the gap above the next card. */
-[data-sidebar-cards] .createSectionSlot + .channelSection {
-  margin-top: 0;
-}
-[data-sidebar-cards] .createSectionDrop {
-  margin-bottom: var(--sidebar-section-gap);
 }
 [data-sidebar-cards] .channelSection[data-sidebar-card][data-drop-target] {
   border-radius: var(--radius-container);
@@ -426,10 +376,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-/* The highlighted destination replaces the preview while it accepts the drop. */
-body:has([data-create-section-drop][data-drop-target]) .channelDragOverlay {
-  visibility: hidden;
 }
 /* The heading row is the design system's NavigationSectionHeading; this module
    keeps only the section's own label content and unread emphasis. */

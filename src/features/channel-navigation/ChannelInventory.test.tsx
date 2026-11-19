@@ -1638,7 +1638,6 @@ it("gates all creation entry points while uncertain creation reconciles, preserv
     const user = userEvent.setup();
     render(h.view("alpha"));
     const row = await screen.findByRole("button", { name: "beta" });
-    expect(document.querySelector("[data-create-section-trigger]")).toBeNull();
     fireEvent.keyDown(row, { key: "ContextMenu" });
     await user.hover(await screen.findByRole("menuitem", { name: "Move to…" }));
     expect(
@@ -1652,9 +1651,7 @@ it("gates all creation entry points while uncertain creation reconciles, preserv
       await creating;
     });
     await waitFor(() =>
-      expect(
-        document.querySelector("[data-create-section-trigger]"),
-      ).not.toBeNull(),
+      expect(preferences.queries.sectionCreationWritable).toBe(true),
     );
   } finally {
     finish(data);
@@ -2503,11 +2500,6 @@ it("moves a saved group from its menu, rolls back a failed save, and retries it"
     await waitFor(() =>
       expect(groups()).toEqual(["group:work", "group:later"]),
     );
-    expect(
-      document.querySelector(
-        "[data-create-section-slot] + [data-sidebar-section]",
-      ),
-    ).toHaveAttribute("data-sidebar-section", "group:work");
     await user.click(
       screen.getByRole("button", { name: "More actions for Work" }),
     );
@@ -2538,11 +2530,6 @@ it("moves a saved group from its menu, rolls back a failed save, and retries it"
     await waitFor(() =>
       expect(groups()).toEqual(["group:later", "group:work"]),
     );
-    expect(
-      document.querySelector(
-        "[data-create-section-slot] + [data-sidebar-section]",
-      ),
-    ).toHaveAttribute("data-sidebar-section", "group:later");
     expect(order).toHaveBeenLastCalledWith(
       [
         "pages",

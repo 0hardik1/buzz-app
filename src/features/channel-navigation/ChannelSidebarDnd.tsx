@@ -23,16 +23,13 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { frame, motion, useReducedMotion } from "motion/react";
 import { SidebarSection } from "../../bundled/channels/SidebarSection";
 import type { SidebarRowKind } from "../../bundled/channels/sidebar-sections";
-import { PlusIcon } from "../../shared/design-system/icons";
 import { NavigationSectionHeading } from "../../shared/design-system/ui/NavigationSection";
 import { Panel } from "../../shared/design-system/ui/Panel";
 import styles from "../../bundled/channels/Channels.module.css";
 
 const Writable = createContext(false);
-const CREATE_SECTION = "create-section";
 
 // Group gaps target the neighbour whose insertion edge lies in that same gap.
 export const sidebarCollisions: CollisionDetection = (args) => {
@@ -115,14 +112,12 @@ export function ChannelSidebarDnd({
   writable,
   onMove,
   onReorder,
-  onCreateSection,
   overlay,
   children,
 }: {
   writable: boolean;
   onMove: (channelId: string, sectionKey: string) => void;
   onReorder: (sectionKey: string, overKey: string) => void;
-  onCreateSection?: ((channelId: string) => void) | undefined;
   overlay: (id: string, group: boolean) => ReactNode;
   children: ReactNode;
 }) {
@@ -149,8 +144,6 @@ export function ChannelSidebarDnd({
         if (active.data.current?.group) {
           if (over.id !== active.id)
             onReorder(String(active.id), String(over.id));
-        } else if (over.id === CREATE_SECTION) {
-          if (writable) onCreateSection?.(String(active.id));
         } else if (over.id !== active.data.current?.sectionKey)
           onMove(String(active.id), String(over.id));
       }}
@@ -358,71 +351,6 @@ function CardDropLine() {
     : null;
 }
 
-function CreateSectionDropTarget({ available }: { available: boolean }) {
-  const { active, measureDroppableContainers } = useDndContext();
-  const enabled =
-    useContext(Writable) &&
-    available &&
-    !!active &&
-    !active.data.current?.group;
-  const reducedMotion = useReducedMotion();
-  const [revealed, setRevealed] = useState(false);
-  const { setNodeRef, isOver } = useDroppable({
-    id: CREATE_SECTION,
-    disabled: !enabled,
-    // dnd-kit treats an empty list as all droppables on resize. Expansion also
-    // shifts the sections below this slot, so their collision rects must refresh.
-    resizeObserverConfig: { updateMeasurementsFor: [] },
-  });
-  useDndMonitor({
-    onDragStart: () => setRevealed(false),
-    onDragOver: ({ over }) => {
-      if (enabled && over?.id === CREATE_SECTION) setRevealed(true);
-    },
-    onDragEnd: () => setRevealed(false),
-    onDragCancel: () => setRevealed(false),
-  });
-  const open = enabled && revealed;
-  return (
-    <div
-      className={`${styles.channelSection} ${styles.createSectionSlot}`}
-      data-create-section-slot=""
-    >
-      {/* The original gap stays inside the target throughout expansion. */}
-      <div
-        ref={setNodeRef}
-        className={styles.createSectionHitArea}
-        data-create-section-trigger={available ? "" : undefined}
-      />
-      <motion.div
-        className={styles.createSectionReveal}
-        initial={false}
-        // The first resize delivery can include the reveal, and dnd-kit
-        // ignores it. Measure after Motion has committed the final height.
-        onAnimationComplete={() =>
-          frame.postRender(() => measureDroppableContainers([]))
-        }
-        animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
-        transition={{
-          duration: reducedMotion ? 0 : open ? 0.22 : 0.12,
-          ease: [0.23, 1, 0.32, 1],
-        }}
-        aria-hidden={!open}
-        inert={!open}
-      >
-        <div
-          className={`${styles.createSectionDrop} text-caption`}
-          data-create-section-drop={open ? "" : undefined}
-          data-drop-target={isOver || undefined}
-        >
-          <PlusIcon size={24} />
-          <span>Add to new workspace</span>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
 /**
  * Frames only a channel's select surface, so its sessions never start a move.
  * The frame stays mounted while placement is read-only: the row keeps its
@@ -526,7 +454,6 @@ export function DroppableSidebarSection({
   groupIndex,
   groupDomain = "channels",
   accepts,
-  createSectionTarget,
   ...section
 }: ComponentProps<typeof SidebarSection> & {
   disabled: boolean;
@@ -535,7 +462,6 @@ export function DroppableSidebarSection({
   groupDomain?: string;
   /** Row kinds a drop may place here; every row when omitted. */
   accepts?: readonly SidebarRowKind[];
-  createSectionTarget?: "available" | "unavailable" | undefined;
 }) {
   const { setNodeRef, isOver, active } = useDroppable({
     id: section.sectionKey,
@@ -557,30 +483,23 @@ export function DroppableSidebarSection({
   const group = !!active?.data.current?.group;
   const from = active?.data.current?.groupIndex;
   return (
-    <>
-      {createSectionTarget && (
-        <CreateSectionDropTarget
-          available={createSectionTarget === "available"}
-        />
-      )}
-      <SidebarSection
-        {...section}
-        dropRef={setNodeRef}
-        dropTarget={
-          !group &&
-          isOver &&
-          active?.data.current?.sectionKey !== section.sectionKey
-        }
-        dropEdge={
-          group && isOver && active?.id !== section.sectionKey
-            ? from !== undefined && from < groupIndex
-              ? "after"
-              : "before"
-            : undefined
-        }
-        dragHandle={drag.handle}
-        dragging={drag.isDragging}
-      />
-    </>
+    <SidebarSection
+      {...section}
+      dropRef={setNodeRef}
+      dropTarget={
+        !group &&
+        isOver &&
+        active?.data.current?.sectionKey !== section.sectionKey
+      }
+      dropEdge={
+        group && isOver && active?.id !== section.sectionKey
+          ? from !== undefined && from < groupIndex
+            ? "after"
+            : "before"
+          : undefined
+      }
+      dragHandle={drag.handle}
+      dragging={drag.isDragging}
+    />
   );
 }
