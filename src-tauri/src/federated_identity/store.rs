@@ -181,23 +181,34 @@ pub(crate) mod items {
     use zeroize::Zeroizing;
     type Items = HashMap<PathBuf, HashMap<String, Vec<u8>>>;
     static ITEMS: Mutex<Option<Items>> = Mutex::new(None);
-    static UNCERTAIN: Mutex<Option<PathBuf>> = Mutex::new(None);
-    static LOST: Mutex<Option<PathBuf>> = Mutex::new(None);
-    static HELPER_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
+    // Each test arms its own roots, so parallel tests never take another's.
+    static UNCERTAIN: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+    static LOST: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+    static HELPER_ROOTS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
     pub(crate) fn uncertain_write(root: &Path) {
-        *HELPER_ROOT.lock().unwrap() = Some(root.into());
+        HELPER_ROOTS.lock().unwrap().push(root.into());
         failed_write(root);
     }
     /// The next write at `root` lands but reports storage-unavailable.
     pub(crate) fn failed_write(root: &Path) {
-        *UNCERTAIN.lock().unwrap() = Some(root.into());
+        UNCERTAIN.lock().unwrap().push(root.into());
     }
     /// The next write at `root` reports storage-unavailable and lands nothing.
     pub(crate) fn lost_write(root: &Path) {
-        *LOST.lock().unwrap() = Some(root.into());
+        LOST.lock().unwrap().push(root.into());
+    }
+    /// Whether `root` was armed in `hook`, disarming it.
+    fn take(hook: &Mutex<Vec<PathBuf>>, root: &Path) -> bool {
+        let mut roots = hook.lock().unwrap();
+        let armed = roots.iter().position(|armed| armed == root);
+        armed.map(|index| roots.swap_remove(index)).is_some()
     }
     pub(super) fn helper_selected(root: &Path) -> bool {
-        HELPER_ROOT.lock().unwrap().as_deref() == Some(root)
+        HELPER_ROOTS
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|armed| armed == root)
     }
     pub(crate) fn enable(root: &Path) {
         ITEMS
@@ -235,12 +246,9 @@ pub(crate) mod items {
         expected: Option<&[u8]>,
         replacement: Option<&[u8]>,
     ) -> Result<(), &'static str> {
-        let mut lost = LOST.lock().unwrap();
-        if lost.as_deref() == Some(root) {
-            lost.take();
+        if take(&LOST, root) {
             return Err("storage-unavailable");
         }
-        drop(lost);
         with(root, |items| {
             if items.get(account).map(Vec::as_slice) != expected {
                 return Err("session-changed");
@@ -251,9 +259,7 @@ pub(crate) mod items {
             };
             Ok(())
         })??;
-        let mut uncertain = UNCERTAIN.lock().unwrap();
-        if uncertain.as_deref() == Some(root) {
-            uncertain.take();
+        if take(&UNCERTAIN, root) {
             return Err("storage-unavailable");
         }
         Ok(())
