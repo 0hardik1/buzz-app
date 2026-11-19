@@ -216,6 +216,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     adopt: (carry, saved) => ({
       ...saved,
       instructions: carry.instructions ?? saved.instructions,
+      scope: carry.sessionScope ?? saved.scope,
       // Codex runs only in an absolute or home workspace.
       workspace:
         carry.workspace && validWorkspace(carry.workspace)
@@ -223,14 +224,15 @@ export const apply: PluginModule["apply"] = (ctx) => {
           : saved.workspace,
     }),
     carry: (saved) => {
-      const { instructions, workspace } = config(saved);
+      const { instructions, workspace, scope } = config(saved);
       return {
         ...(instructions.trim() && { instructions }),
         ...(workspace !== defaults.workspace && { workspace }),
+        ...(scope !== defaults.scope && { sessionScope: scope }),
       };
     },
     describeMigration: (saved) => {
-      const { model, effort, scope, voice } = config(saved);
+      const { model, effort, voice } = config(saved);
       return [
         { id: "model", label: "Model", isOverride: Boolean(model.trim()) },
         {
@@ -239,12 +241,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
           isOverride: Boolean(effort),
         },
         { id: "voice", label: "Voice", isOverride: Boolean(voice) },
-        {
-          id: "sessions",
-          label: "Sessions",
-          isOverride: scope !== defaults.scope,
-          unchangedKey: scope,
-        },
       ];
     },
     migrationWarning: "Any commands Codex left running will stop.",

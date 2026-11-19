@@ -48,6 +48,7 @@ import {
   mentionAuthority,
   workflowOf,
 } from "../../features/agents/owner-attestation";
+import { compactAt } from "../../features/agents/compact-at";
 import { type AgentKey, pubkeyOf } from "../../features/agents/membership";
 import { directTrigger } from "../../features/agents/hooks";
 import { sessionPrompts } from "../../features/agents/session-prompts";
@@ -103,6 +104,9 @@ export type Config = Readonly<{
   workspace: string;
   /** Whether each thread is its own conversation, or the whole channel is one. */
   scope: Scope;
+  /** The context size, in tokens, its conversations compact at; unset is
+   * Pi's own. This device's only. */
+  compactAt?: string;
 }>;
 export const DEFAULT_CONFIG: Config = Object.freeze({
   provider: "",
@@ -1464,9 +1468,13 @@ export class PiRuntime {
   }
 
   private async open(agent: AgentKey) {
-    const handle = this.agents.get(agent)?.handle ?? this.handle(agent);
+    const entry = this.agents.get(agent);
+    const handle = entry?.handle ?? this.handle(agent);
+    const tokens = compactAt(entry?.config.compactAt);
     await this.pi.request("open", {
       agent,
+      // Pi resumes an unfinished run with it, before any turn brings it.
+      ...(tokens && { compactAt: tokens }),
       // Whichever host runs the agent fills in its tools' credential.
       ...(handle && { as: { pubkey: handle.pubkey, relay: handle.relay } }),
       tools: sessionTools(this.added(agent)),
@@ -1524,6 +1532,9 @@ export class PiRuntime {
       provider: entry.config.provider,
       model: entry.config.model,
       thinking: entry.config.effort,
+      ...(compactAt(entry.config.compactAt) && {
+        compactAt: compactAt(entry.config.compactAt),
+      }),
       // Apart, so a request that steers a working run changes only these.
       pick: { model, thinking: effort },
       cwd: workspace,
