@@ -1569,12 +1569,86 @@ it("shows Dreaming set up by hand as one line with Review, and a saved version w
   expect(save.mock.calls[0]?.[1].attention).toEqual({
     [DREAM]: { type: "interest", instructions: original },
   });
-  // Undone, it is customized again, with Review its one way to version 3.
+  // Undone, it is customized again with Review, and its own row can put
+  // back the text from before the Undo.
   rerender(<Tab agent={own} />);
   const again = line(`Customized · version ${dream.version} available`);
   expect(within(again).getByRole("button", { name: "Review" })).toBeVisible();
+  expect(
+    within(again).queryByRole("button", { name: /Undo|Restore/ }),
+  ).toBeNull();
+  const undone = line(`Undid version ${dream.version} · ${today}`);
+  expect(
+    within(undone).getByText(
+      "The text before the Undo is kept on this device.",
+    ),
+  ).toBeVisible();
+  expect(
+    within(undone).getByRole("button", { name: "Restore previous text" }),
+  ).toBeVisible();
   expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
   expect(screen.queryByText(/^Saved /)).toBeNull();
+});
+
+it("puts back lines added after a new version, from the row an Undo leaves", async () => {
+  const user = userEvent.setup();
+  const { relay } = community(ada.pubkey);
+  const { agents, save } = host();
+  const Tab = bestieTab(relay, agents, navigation, settingsCards).component;
+  const added = "ADDED LATER. Mention the weather.";
+  for (const [before, take, change] of [
+    // Adopted from steps set up by hand, then a line added after them.
+    [
+      `${dreamV2}\n\n${ownLines}`,
+      "Review",
+      (text: string) => `${text}\n\n${added}`,
+    ],
+    // Updated from version 2 as shipped, then one of its steps edited.
+    [
+      dreamV2,
+      "See changes",
+      (text: string) => text.replace("1. READ.", "1. READ, slowly."),
+    ],
+  ] as const) {
+    localStorage.clear();
+    save.mockClear();
+    const { rerender, unmount } = render(<Tab agent={dreaming(before)} />);
+    await user.click(screen.getByRole("button", { name: take }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", {
+        name:
+          take === "Review"
+            ? `Use version ${dream.version}`
+            : `Update to version ${dream.version}`,
+      }),
+    );
+    const saved = save.mock.calls[0]?.[1].attention?.[DREAM];
+    expect(saved?.type).toBe("interest");
+    const updated = (saved as { instructions: string }).instructions;
+    const edited = change(updated);
+    expect(edited).not.toBe(updated);
+    // The owner changes it, then undoes the update anyway.
+    rerender(<Tab agent={dreaming(edited)} />);
+    await user.click(screen.getByRole("button", { name: "Undo" }));
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Undo anyway",
+      }),
+    );
+    expect(save.mock.calls[1]?.[1].attention).toEqual({
+      [DREAM]: { type: "interest", instructions: before },
+    });
+    // The offer is back, and the row the Undo left puts the added line back.
+    rerender(<Tab agent={dreaming(before)} />);
+    await user.click(
+      screen.getByRole("button", { name: "Restore previous text" }),
+    );
+    expect(save.mock.calls[2]?.[1].attention).toEqual({
+      [DREAM]: { type: "interest", instructions: edited },
+    });
+    unmount();
+  }
 });
 
 it("keeps Dreaming set up by hand, or with a changed start or end line, as is once the owner says so", async () => {

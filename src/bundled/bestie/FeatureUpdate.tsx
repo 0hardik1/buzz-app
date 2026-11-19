@@ -281,21 +281,32 @@ export function FeatureUpdate({
       </Button>,
     );
   const accepted = acceptedVersion(receipts, feature, live);
-  // An Undo's own Undo would apply the version an offer above already
-  // leads to, so the offer is the one way there.
+  // What was saved here last, with the way back. After an Undo it can hold
+  // text no offer rebuilds, such as lines added after an update, so it
+  // stays.
+  const name = (label: string) =>
+    label === "untracked" ? "your earlier text" : `version ${label.slice(1)}`;
+  const undid = last?.action === "undo";
   const saved =
-    state.state === "ahead" ? null : last?.status === "applied" &&
-      !(last.action === "undo" && row !== null) ? (
+    state.state === "ahead" ? null : last?.status === "applied" ? (
       <PreferenceRow
-        title={`Saved ${last.to === "untracked" ? "your earlier text" : `version ${last.to.slice(1)}`} · ${date(last.at)}`}
-        subtitle="The text before is kept on this device."
+        title={
+          undid
+            ? `Undid ${name(last.from)} · ${date(last.at)}`
+            : `Saved ${name(last.to)} · ${date(last.at)}`
+        }
+        subtitle={
+          undid
+            ? "The text before the Undo is kept on this device."
+            : "The text before is kept on this device."
+        }
         trailing={
           <Button
             variant="outline"
             disabled={saving}
             onClick={() => void apply({ action: "undo", receipt: last })}
           >
-            Undo
+            {undid ? "Restore previous text" : "Undo"}
           </Button>
         }
       />

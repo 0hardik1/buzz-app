@@ -1500,7 +1500,9 @@ available rather than silently discarding it.
   keeps the blocks you leave checked and replaces the rest, or **Keep as is**
   hides it until a newer version. The text before each change is kept on this
   device, and **Undo**, on the row that says what was saved, puts it back,
-  asking first if it has changed since. A check-in paused in the Attention tab
+  asking first if it has changed since. After an Undo, that row offers
+  **Restore previous text**, which puts back the text from before the Undo.
+  A check-in paused in the Attention tab
   shows **Restart**, which runs it again from now with its steps unchanged;
   turning a check-in off deletes its steps, with any changes to them.
 - Only the current Bestie checks in. Replacing or removing it stops its check-ins
