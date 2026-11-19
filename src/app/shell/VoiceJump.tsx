@@ -43,7 +43,8 @@ import type { Decisions } from "../../features/decisions/service";
 import {
   prepareVoice,
   useVoiceDictation,
-  useVoiceSearchAvailable,
+  useVoiceSearchBackend,
+  type VoiceBackend,
 } from "../../features/search/voice-dictation";
 import {
   holdsLead,
@@ -120,7 +121,8 @@ export function VoiceJump({
   services?: VoiceJumpServices | undefined;
 }) {
   const decisions = services?.decisions;
-  const voiceAvailable = useVoiceSearchAvailable(!!decisions && isTauri());
+  const voiceBackend = useVoiceSearchBackend(!!decisions && isTauri());
+  const voiceAvailable = voiceBackend !== null;
   const available = !!decisions && (voiceAvailable || import.meta.env.DEV);
   const [open, setOpen] = useState(false);
   const openRef = useRef(open);
@@ -271,7 +273,7 @@ export function VoiceJump({
           <VoiceJumpBody
             services={services}
             decisions={decisions}
-            voiceAvailable={voiceAvailable}
+            voiceBackend={voiceBackend}
             denied={denied}
             onAccess={setDenied}
             initialHovered={hovered}
@@ -293,7 +295,7 @@ export function VoiceJump({
 export function VoiceJumpBody({
   services,
   decisions,
-  voiceAvailable = true,
+  voiceBackend,
   denied,
   onAccess,
   initialHovered = NOTHING,
@@ -305,7 +307,7 @@ export function VoiceJumpBody({
 }: {
   services: VoiceJumpServices;
   decisions: Decisions;
-  voiceAvailable?: boolean | undefined;
+  voiceBackend: VoiceBackend | null;
   /** Why microphone or speech access was denied this session, if it was. */
   denied?: string | undefined;
   /** Records a denial's message, or clears it once listening works. */
@@ -317,6 +319,7 @@ export function VoiceJumpBody({
   go: (place: JumpPlace) => void;
   onDone: () => void;
 }) {
+  const voiceAvailable = voiceBackend !== null;
   const notify = useToastNotification();
   const channelNavigation = useChannelNavigation();
   const relay = useSyncExternalStore(
@@ -673,6 +676,7 @@ export function VoiceJumpBody({
   submitRef.current = submit;
 
   const dictation = useVoiceDictation({
+    backend: voiceBackend,
     onText: (next) => {
       run.current.latest = next;
       setPhase({ kind: "listening" });
@@ -691,15 +695,15 @@ export function VoiceJumpBody({
 
   const listen = useCallback(() => {
     restart();
-    // Recognition expects the names it may hear, so they're read up front.
+    // Both recognizers use the same place and people context for decisions.
     const places = jumpPlaces(sources(session, resolveName));
     run.current.places = places;
     setCandidates([]);
     setActionCandidates([]);
     setText("");
     setPhase({ kind: "listening" });
-    void start(voiceHints(places));
-  }, [restart, start, session, resolveName]);
+    void start(voiceBackend === "apple" ? voiceHints(places) : undefined);
+  }, [restart, start, session, resolveName, voiceBackend]);
 
   // Listening starts as the box opens when speech recognition is available.
   // biome-ignore lint/correctness/useExhaustiveDependencies: Once per opening.

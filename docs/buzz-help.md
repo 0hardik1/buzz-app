@@ -696,14 +696,13 @@ and are asked to sign in again in Buzz.
   **Join**. Private
   channels appear only once someone adds you. Search reopens where you left it
   for a few minutes; Escape starts fresh next time.
-- **Jumping by voice**: on a Mac, ⇧⌘K or the microphone beside Search opens
-  a box with the microphone already on, and what you say appears in it as you
-  speak. Speech is recognized on the Mac itself, with no account or key; the
-  first time, macOS asks to let Buzz use the microphone, and before macOS 26
-  also speech recognition. The first use may also download the speech model,
-  which the box says while it happens. If you turn access down, the box stops
-  starting the microphone by itself (press it to try again) and says where to allow
-  it (System Settings → Privacy & Security); typing still works. Buzz picks among
+- **Jumping by voice**: when hosted voice is configured, ⇧⌘K (Ctrl+Shift+K
+  elsewhere) or the microphone beside Search opens a box that listens as soon
+  as you allow microphone access. Buzz streams your voice to OpenAI Realtime
+  for transcription and shows what it hears. On Mac debug builds, an optional
+  on-device mode keeps audio on the Mac and may download the speech model on
+  first use. If access is denied, the box stops starting the microphone by
+  itself (press it to try again); typing still works. Buzz picks among
   the channels, DMs, agent chats and threads it already has loaded, by name
   and recent messages, and lists the likeliest as you talk. It opens a match
   as soon as it is sure, or when you pause. If nothing is a likely match after
