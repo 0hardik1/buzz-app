@@ -339,3 +339,130 @@ export const HELDOUT2: readonly Case[] = ROWS2.map(
     expect,
   }),
 );
+
+// Third held-out set: the message and thread actions (react, reply,
+// follow, copy link, mark unread) against navigating to a thread, emoji
+// named aloud, and messaging someone with a DM already open
+// (`--set heldout3`).
+const ROWS3: Row[] = [
+  [
+    "navigate",
+    "message:m-pets",
+    "jump to the incident thread",
+    go("thread:m-incident"),
+  ],
+  [
+    "navigate",
+    "message:m-incident",
+    "open this thread",
+    go("thread:m-incident"),
+  ],
+  [
+    "navigate",
+    "message:m-standup",
+    "go to the thread about relay auth",
+    go("thread:m-relay-auth"),
+  ],
+  [
+    "navigate",
+    "message:m-voice-pr",
+    "show me the replies",
+    go("thread:m-voice-pr"),
+  ],
+  [
+    "forward",
+    "message:m-incident",
+    "reply to this",
+    act("message.reply", "m-incident"),
+  ],
+  [
+    "forward",
+    "message:m-deploy",
+    "answer this in a thread",
+    act("message.reply", "m-deploy"),
+  ],
+  [
+    "forward",
+    "message:m-standup",
+    "reply to Arjun",
+    act("message.reply", "m-standup"),
+  ],
+  [
+    "forward",
+    "message:m-voice-pr",
+    "watch this thread",
+    act("message.follow", "m-voice-pr"),
+  ],
+  [
+    "forward",
+    "message:m-lunch",
+    "stop following this",
+    act("message.unfollow", "m-lunch"),
+  ],
+  [
+    "forward",
+    "thread:m-incident",
+    "follow this",
+    act("thread.follow", "m-incident"),
+  ],
+  [
+    "forward",
+    "thread:m-relay-auth",
+    "mute this thread",
+    act("thread.unfollow", "m-relay-auth"),
+  ],
+  [
+    "forward",
+    "message:m-pets",
+    "party popper",
+    act("message.react", "m-pets", "e-tada"),
+  ],
+  [
+    "forward",
+    "message:m-deploy",
+    "add a fire emoji",
+    act("message.react", "m-deploy", "e-fire"),
+  ],
+  [
+    "forward",
+    "message:m-release-notes",
+    "eyes emoji",
+    act("message.react", "m-release-notes", "e-eyes"),
+  ],
+  [
+    "forward",
+    "message:m-standup",
+    "praying hands",
+    act("message.react", "m-standup", "e-pray"),
+  ],
+  [
+    "forward",
+    "message:m-lunch",
+    "plus one this",
+    act("message.react", "m-lunch", "e-plus one"),
+  ],
+  [
+    "forward",
+    "message:m-deploy",
+    "copy the link to this message",
+    act("message.copy_link", "m-deploy"),
+  ],
+  [
+    "forward",
+    "message:m-incident",
+    "mark as unread",
+    act("message.mark_unread", "m-incident"),
+  ],
+  ["no-hover", null, "message Arjun", go("dm:d-Arjun")],
+  ["none", "message:m-pets", "that's cute", none],
+];
+
+export const HELDOUT3: readonly Case[] = ROWS3.map(
+  ([category, hover, spoken, expect], i) => ({
+    id: `heldout3-${category}-${String(i + 1).padStart(3, "0")}`,
+    category,
+    hover,
+    spoken,
+    expect,
+  }),
+);

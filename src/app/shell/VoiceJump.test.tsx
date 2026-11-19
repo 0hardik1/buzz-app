@@ -126,6 +126,8 @@ function setup(
       inbox: () => ({ items: [] }),
       sync: () => ({ capability: "frontier-sync" }),
       snapshot: () => ({ manual: "none", observedCount: 0 }),
+      following: () => false,
+      attention: () => ({ unread: false, forced: false }),
     },
     channelLifecycle: { available: false },
     sidebarPreferences: {
