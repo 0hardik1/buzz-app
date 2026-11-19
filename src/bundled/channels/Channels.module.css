@@ -329,6 +329,13 @@
   > .channelSection:first-child {
   margin-top: var(--space-panel-gap);
 }
+/* The hidden new-workspace slot already holds the gap above the next card. */
+[data-sidebar-cards] .createSectionSlot + .channelSection {
+  margin-top: 0;
+}
+[data-sidebar-cards] .createSectionDrop {
+  margin-bottom: var(--space-panel-gap);
+}
 [data-sidebar-cards] .channelSection[data-sidebar-card][data-drop-target] {
   border-radius: var(--radius-container);
 }
