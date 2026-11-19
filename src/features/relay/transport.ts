@@ -1563,7 +1563,7 @@ export async function connectSignedTransport(
             profiling,
             event.id,
             principal().api,
-            "foreground",
+            event.kind === ARTIFACT_KIND ? "artifact" : "foreground",
             false,
             refusalText,
           ).catch((error) => {
@@ -1631,7 +1631,7 @@ async function signedPost(
   profiling: RelayProfiler,
   id: string,
   admission: Parameters<typeof admittedApiRequest>[0],
-  priority: "foreground" | "background" = "foreground",
+  priority: Parameters<typeof admittedApiRequest>[3] = "foreground",
   optionalPresence = false,
   reason?: (body: unknown, status: number) => string | undefined,
 ) {
@@ -1648,7 +1648,7 @@ async function signedPost(
         signer.request(url, body, signal),
       );
     });
-  });
+  }, priority);
 }
 export async function acceptReadStatePublish(response: Response, id: string) {
   if (!response.ok) {
