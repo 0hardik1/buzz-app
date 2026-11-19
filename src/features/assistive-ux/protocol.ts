@@ -1,5 +1,5 @@
-import type { RelayEvent } from "../relay/events";
-import type { AssistiveExperienceId } from "./catalog";
+import type { RelayEvent } from "../relay/events.ts";
+import type { AssistiveExperienceId } from "./catalog.ts";
 
 export const ASSISTIVE_TAG = "buzz-assistive-v1";
 export const OUTCOMES = ["seen", "dismissed", "completed"] as const;
