@@ -139,7 +139,7 @@ import {
   CreateChannelDialog,
   type CreateChannelInput,
 } from "./CreateChannelDialog";
-import { writeView } from "../../shared/view-state";
+import { readView, writeView } from "../../shared/view-state";
 import { useChannelReadAction } from "./useChannelReadAction";
 import {
   type ChannelMenuSurface,
@@ -258,6 +258,15 @@ export function ChannelInventory({
     contributedRows?.settled ?? noPendingPlugins,
   );
   const preferences = useSidebarPreferences(queries.sidebarPreferences);
+  const layoutPreferences = useMemo(() => {
+    const data = preferences.data;
+    // Older builds saved this view even without any named workspaces.
+    return data &&
+      !data.sectionOrder?.length &&
+      readView<unknown>(scope, "navigation-scope", null) !== null
+      ? { ...data, sectionOrder: [SIDEBAR_PAGES_SECTION, "solo", "starred"] }
+      : data;
+  }, [preferences.data, scope]);
   const sectionSort = useCallback(
     (key: string): SidebarSortMode => {
       const saved =
@@ -476,7 +485,7 @@ export function ChannelInventory({
       startup.ready
         ? sidebarSections(
             sidebarChannels,
-            preferences.data,
+            layoutPreferences,
             new Set([...hiddenDms.hiddenIds, ...dmVisibility.hidden]),
             chatsOnly,
             new Set<string>(JSON.parse(activeDraftSections)),
@@ -488,7 +497,7 @@ export function ChannelInventory({
       hasPages,
       startup.ready,
       sidebarChannels,
-      preferences.data,
+      layoutPreferences,
       hiddenDms.hiddenIds,
       dmVisibility.hidden,
       chatsOnly,
@@ -1037,7 +1046,7 @@ export function ChannelInventory({
     preferences.writable && preferences.starWritable && !!preferences.data;
   // Group drags land on the placement drop targets, so they need both writers.
   const orderWritable = placementWritable && preferences.sectionOrderWritable;
-  const groupIds = workspaceSectionOrder(preferences.data);
+  const groupIds = workspaceSectionOrder(layoutPreferences);
   const visibleGroupIds = filteredSections.map(({ key }) => key);
   // Saved order uses the same section keys as collapse and drag.
   const orderedContributions = orderContributedSidebarSections(
@@ -1703,6 +1712,7 @@ export function ChannelInventory({
     sidebar,
     workspaceComposition: {
       sections: composedChatSections,
+      order: groupIds,
       pendingChatClick,
       collapsed: sidebar.collapsed,
       toggle: sidebar.toggle,

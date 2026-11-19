@@ -163,10 +163,19 @@ it("reads legacy preferences through the production session, transport, and boun
       headers: { "Content-Type": "application/json", Origin: origin },
       body: JSON.stringify(value),
     });
+  const sectionOrder = [
+    "pages",
+    "solo",
+    "starred",
+    "group:work",
+    "channels",
+    "forums",
+    "dms",
+  ];
   try {
     expect(await owner.session.sidebarPreferences.read()).toEqual({
       ...expected,
-      sectionOrder: [],
+      sectionOrder,
     });
     const reads = upstream.mock.calls.flatMap(([, init]) =>
       (JSON.parse(String(init?.body ?? "[]")) as { "#d"?: string[] }[]).flatMap(
@@ -196,7 +205,7 @@ it("reads legacy preferences through the production session, transport, and boun
     ];
     expect(await owner.session.sidebarPreferences.read()).toEqual({
       ...expected,
-      sectionOrder: [],
+      sectionOrder,
       muted: ["general"],
       sort: { channels: "recent" },
     });
@@ -301,7 +310,7 @@ it("reads legacy preferences through the production session, transport, and boun
     expect(await owner.session.sidebarPreferences.read()).toEqual({
       sections: expected.sections,
       assignments: expected.assignments,
-      sectionOrder: [],
+      sectionOrder,
       starred: [],
       muted: [],
     });

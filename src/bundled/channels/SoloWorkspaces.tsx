@@ -301,7 +301,8 @@ export function SoloWorkspaces({
     id: string;
     name: string;
   }>();
-  const order = workspaceSectionOrder(snapshot.data);
+  const order =
+    workspaceComposition?.order ?? workspaceSectionOrder(snapshot.data);
   const sections = snapshot.data?.sections ?? [];
   const groups = snapshot.data?.sectionOrder
     ? order.flatMap((key) => sections.filter(({ id }) => key === `group:${id}`))

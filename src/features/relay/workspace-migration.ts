@@ -1,14 +1,37 @@
 import type { Groups } from "../channel-templates/model";
-import type { SidebarGroups } from "./sidebar-preferences";
+import {
+  HOME_SIDEBAR_SECTIONS,
+  SIDEBAR_PAGES_SECTION,
+  type SidebarGroups,
+} from "./sidebar-preferences";
 
 const displacedTeamPrefix = "legacy-team:";
+
+function legacySectionOrder(
+  sections: SidebarGroups["sections"],
+  soloCount: number,
+) {
+  if (!sections.length) return [];
+  // The old sidebar displayed Solo workspaces and Chats above the Team area.
+  const [starred, chats, ...teamHomes] = HOME_SIDEBAR_SECTIONS;
+  const keys = sections.map(({ id }) => `group:${id}`);
+  return [
+    SIDEBAR_PAGES_SECTION,
+    ...keys.slice(0, soloCount),
+    chats,
+    starred,
+    ...keys.slice(soloCount),
+    ...teamHomes,
+  ];
+}
 
 /** Both sources are verified heads. Preserve Solo IDs as template coordinates. */
 export function mergeLegacyWorkspaces(
   team: SidebarGroups,
   solo: Groups | undefined,
 ): SidebarGroups {
-  if (!solo) return team;
+  if (!solo)
+    return { ...team, sectionOrder: legacySectionOrder(team.sections, 0) };
   const soloIds = new Set(solo.groups.map(({ id }) => id));
   const teamIds = new Set(team.sections.map(({ id }) => id));
   const remapTeam = (id: string) => {
@@ -44,5 +67,6 @@ export function mergeLegacyWorkspaces(
         defaultTemplateId ? [[id, defaultTemplateId]] : [],
       ),
     ),
+    sectionOrder: legacySectionOrder(sections, solo.groups.length),
   };
 }

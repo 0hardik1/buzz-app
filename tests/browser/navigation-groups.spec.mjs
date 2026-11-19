@@ -95,6 +95,16 @@ test("an existing unified layout remains writable during a legacy read failure",
   app,
 }) => {
   await open(page, app);
+  const sections = sidebar(page).locator(
+    '[data-sidebar-section="solo"], [data-sidebar-section="starred"], [data-sidebar-section="group:work"], [data-sidebar-section="channels"]',
+  );
+  const sectionOrder = ["solo", "starred", "group:work", "channels"];
+  const visibleOrder = () =>
+    sections.evaluateAll((items) =>
+      items.map((item) => item.dataset.sidebarSection),
+    );
+  await expect.poll(visibleOrder).toEqual(sectionOrder);
+  expect(app.report.sidebarPublications ?? []).toHaveLength(0);
   await openMove(page, rowIn(page, "group:work"));
   await page.getByRole("menuitemradio", { name: "Team", exact: true }).click();
   await saved(page, app, 1);
@@ -121,6 +131,7 @@ test("an existing unified layout remains writable during a legacy read failure",
   expect(rejected).toBeGreaterThan(0);
   await page.reload();
   await expect(rowIn(page, "group:work")).toBeVisible();
+  await expect.poll(visibleOrder).toEqual(sectionOrder);
 });
 
 test("a failed first legacy read keeps verified preferences and disables only workspace edits", async ({

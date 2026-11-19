@@ -137,6 +137,59 @@ const defaultPages = (
   </nav>
 );
 
+it.each([
+  {
+    name: "a sidebar without a legacy layout",
+    legacy: false,
+    saved: [],
+    first: "starred",
+  },
+  {
+    name: "an upgrade with only stars",
+    legacy: true,
+    saved: [],
+    first: "solo",
+  },
+  {
+    name: "an upgrade with older cached preferences",
+    legacy: true,
+    saved: undefined,
+    first: "solo",
+  },
+  {
+    name: "an upgrade with a saved order",
+    legacy: true,
+    saved: ["starred", "solo"],
+    first: "starred",
+  },
+])("orders Solo and Starred on $name", async ({ legacy, saved, first }) => {
+  const preferences = createSidebarPreferencesStore({
+    read: async () => ({
+      sections: [],
+      assignments: {},
+      starred: ["alpha"],
+      muted: [],
+      ...(saved ? { sectionOrder: saved } : {}),
+    }),
+    available: true,
+  });
+  try {
+    const h = fixture(preferences.queries);
+    if (legacy)
+      writeView(h.session.scope, "navigation-scope", { filter: "all" });
+    await preferences.queries.ensure();
+    render(h.view("alpha"));
+    await screen.findByRole("button", { name: "alpha" });
+    const sections = document.querySelectorAll(
+      '[data-sidebar-section="solo"], [data-sidebar-section="starred"]',
+    );
+    expect(sections).toHaveLength(2);
+    expect(sections[0]).toHaveAttribute("data-sidebar-section", first);
+  } finally {
+    preferences.dispose();
+  }
+});
+
 function fixture(
   sidebarPreferences?: ReturnType<
     typeof createSidebarPreferencesStore

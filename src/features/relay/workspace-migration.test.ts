@@ -10,7 +10,10 @@ import { createRelaySession } from "./session";
 import { importWorkspaceFallback } from "./sidebar-registers";
 import {
   workspaceBaseRecord,
+  decodeLegacyWorkspaceEnvelope,
+  encodeLegacyWorkspaceEnvelope,
   expandWorkspaceRecord,
+  workspaceSectionOrder,
   workspacePayloadForSigning,
   workspaceRecordForWrite,
   type SidebarGroups,
@@ -89,7 +92,19 @@ it("preserves both sets of filings, template coordinates and ordering when legac
     ],
     assignments: { dm: "work", forum: "second" },
   };
-  expect(mergeLegacyWorkspaces(team, solo)).toEqual({
+  const legacy = mergeLegacyWorkspaces(team, solo);
+  const sectionOrder = [
+    "pages",
+    "group:work",
+    "solo",
+    "starred",
+    "group:legacy-team:work",
+    "group:second",
+    "channels",
+    "forums",
+    "dms",
+  ];
+  expect(legacy).toEqual({
     sections: [
       { id: "work", name: "Notes", order: 0 },
       { id: "legacy-team:work", name: "Release", order: 1, icon: "📚" },
@@ -97,7 +112,38 @@ it("preserves both sets of filings, template coordinates and ordering when legac
     ],
     assignments: { chat: "work", dm: "legacy-team:work", forum: "second" },
     legacyTemplates: { work: "old-template" },
+    sectionOrder,
   });
+  const decoded = decodeLegacyWorkspaceEnvelope(
+    encodeLegacyWorkspaceEnvelope(legacy),
+  );
+  expect(workspaceSectionOrder(workspaceBaseRecord(decoded))).toEqual(
+    sectionOrder,
+  );
+});
+
+it("puts Solo before Starred and existing Team sections even without Solo workspaces", () => {
+  const team: SidebarGroups = {
+    sections: [{ id: "team", name: "Team workspace", order: 0 }],
+    assignments: {},
+  };
+  const legacy = mergeLegacyWorkspaces(team, undefined);
+  expect(workspaceSectionOrder(workspaceBaseRecord(legacy))).toEqual([
+    "pages",
+    "solo",
+    "starred",
+    "group:team",
+    "channels",
+    "forums",
+    "dms",
+  ]);
+  const fresh = mergeLegacyWorkspaces(
+    { sections: [], assignments: {} },
+    undefined,
+  );
+  expect(workspaceSectionOrder(workspaceBaseRecord(fresh)).slice(0, 3)).toEqual(
+    ["pages", "starred", "solo"],
+  );
 });
 
 function legacyWithFilings(count: number, idLength: number): SidebarGroups {

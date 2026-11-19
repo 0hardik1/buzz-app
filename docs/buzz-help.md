@@ -1034,6 +1034,8 @@ and are asked to sign in again in Buzz.
   Messages sidebar. Community and profile controls
   sit at the bottom of the dock. Search stays wide in the top bar.
   Messages shows your workspaces, Starred and unfiled conversations together.
+  When an older sidebar layout is brought over, Solo chats and their workspaces
+  appear above Starred and the channel sections. You can reorder the headings.
   Other apps can provide their own sidebar. Pages listed in the Messages
   sidebar, such as the Drafts & sent plugin, keep Messages selected in the dock. The
   Messages sidebar stays open unless the page provides its own sidebar, which

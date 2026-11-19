@@ -9,6 +9,7 @@ import type { SidebarRows } from "../../features/channel-navigation/sidebar-rows
 
 /** The existing navigation environment, shared without another data owner. */
 export type WorkspaceSidebarComposition = Readonly<{
+  order: readonly string[];
   sections: ReadonlySet<string>;
   pendingChatClick: RefObject<ReturnType<typeof setTimeout> | undefined>;
   collapsed: readonly string[];
