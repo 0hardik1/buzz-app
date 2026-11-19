@@ -94,6 +94,23 @@ describe("GooseProcess", () => {
     },
   );
 
+  it.each([
+    [undefined, undefined],
+    [200000, "200000"],
+  ])("starts goose compacting by %s tokens", async (compactAt, limit) => {
+    const fake = fakeSpawn();
+    const goose = await GooseProcess.start(fake.spawn, {
+      cwd: "/work",
+      ...(compactAt && { compactAt }),
+    });
+    try {
+      expect(fake.geese[0]?.env.GOOSE_AUTO_COMPACT_TOKEN_LIMIT).toBe(limit);
+    } finally {
+      await goose.kill();
+      await goose.exited;
+    }
+  });
+
   it("starts goose-acp without the app's Buzz identity or goose choice", async () => {
     const { process } = await start();
     expect(process.options.cwd).toBe("/work");
@@ -326,11 +343,11 @@ describe("GooseProcess", () => {
     const session = await open();
     session.conversation = "channel/root";
     const response = await process.mcp(session.id, "tools/list");
-    expect(tools).toHaveBeenCalledWith("channel/root", {
-      id: 1,
-      method: "tools/list",
-      params: {},
-    });
+    expect(tools).toHaveBeenCalledWith(
+      "channel/root",
+      { id: 1, method: "tools/list", params: {} },
+      expect.objectContaining({ aborted: true }),
+    );
     // goose matches the reply to its request by the id it sent.
     expect(response).toEqual({
       jsonrpc: "2.0",
