@@ -54,9 +54,6 @@ it("signs literal send content without inferred p-tags through /events", async (
   expect(stored).toHaveLength(1);
   const event = stored[0] as Event;
   expect(event.content).toBe(text);
-  expect(new TextEncoder().encode(event.content)).toEqual(
-    new TextEncoder().encode(text),
-  );
   expect(event.pubkey).toBe(agent.pubkey);
   expect(event.kind).toBe(9);
   expect(event.tags.filter(([tag]) => tag === "p")).toEqual([]);
