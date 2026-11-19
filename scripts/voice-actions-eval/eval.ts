@@ -11,7 +11,7 @@ import {
 import { ACTIONS, CONFIRM, ENTITIES, PLACES, hover } from "./catalog";
 import { PEOPLE } from "./world";
 import { CASES, type Case, type Category, type Expected } from "./cases";
-import { FINAL } from "./cases-final";
+import { FINAL, HERE } from "./cases-final";
 import { HELDOUT, HELDOUT2, HELDOUT3 } from "./cases-heldout";
 import {
   buildActionDecision,
@@ -37,6 +37,7 @@ export const ALL_CASES: readonly Case[] = [
   ...HELDOUT2,
   ...HELDOUT3,
   ...FINAL,
+  ...HERE,
 ];
 
 export const typesafe =
@@ -386,9 +387,11 @@ export async function main(
           ? HELDOUT3
           : options.set === "final"
             ? FINAL
-            : options.set === "all"
-              ? ALL_CASES
-              : CASES;
+            : options.set === "here"
+              ? HERE
+              : options.set === "all"
+                ? ALL_CASES
+                : CASES;
   const cases = set.filter(
     (c) =>
       !options.filter ||
