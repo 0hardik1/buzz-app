@@ -37,12 +37,20 @@ export type ScheduledMessages = ReturnType<typeof createScheduledMessages>;
 type Template = Pick<EventTemplate, "kind" | "content" | "tags">;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+const schedulingErrors: Readonly<Partial<Record<number, string>>> = {
+  400: "The relay rejected this schedule. Check the message and send time.",
+  401: "Sign in to this community again before scheduling.",
+  403: "You no longer have permission to schedule messages here.",
+  404: "This community does not support scheduled delivery right now.",
+  409: "This message changed or the queue is full. Refresh before trying again.",
+  429: "The relay is limiting scheduling requests. Try again shortly.",
+};
+
 class ScheduledRequestError extends Error {
   constructor(readonly status: number) {
     super(
-      status === 409
-        ? "This message changed or the queue is full. Refresh before trying again."
-        : "Could not reach scheduled delivery. Refresh to check whether the change was saved.",
+      schedulingErrors[status] ??
+        "Could not reach scheduled delivery. Refresh to check whether the change was saved.",
     );
   }
 }

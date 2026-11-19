@@ -61,6 +61,17 @@ function fixture(mentioned = true) {
 }
 
 describe("relay-backed scheduled messages", () => {
+  it.each([
+    [400, "Check the message and send time"],
+    [403, "permission to schedule messages"],
+    [404, "does not support scheduled delivery"],
+    [503, "Refresh to check whether the change was saved"],
+  ])("explains a scheduling refusal with HTTP %s", async (status, message) => {
+    const h = fixture();
+    h.request.mockResolvedValueOnce(new Response(null, { status }));
+    await expect(h.service.create(h.input)).rejects.toThrow(message);
+  });
+
   it("retries an uncertain create with the same operation and signed event", async () => {
     const h = fixture();
     h.request.mockRejectedValueOnce(new Error("Response lost"));

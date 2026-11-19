@@ -2656,7 +2656,10 @@ function Composer({
     return { recipients, references };
   }
   async function send(scheduledAt?: number) {
-    if (scheduledAt !== undefined && (editing.target || submission || valueRef.current.forward)) {
+    if (
+      scheduledAt !== undefined &&
+      (editing.target || submission || valueRef.current.forward)
+    ) {
       setError("Finish the current action before scheduling a message.");
       return false;
     }
@@ -3530,11 +3533,7 @@ function Composer({
           !chatCards?.length &&
           ((!!submission && !submission.allowAttachmentOnly) ||
             (!attachments.items.length && !gifs?.length)) &&
-          !(
-            editing.target &&
-            requestDeletion &&
-            session.outbox?.supports(5)
-          ))
+          !(editing.target && requestDeletion && session.outbox?.supports(5)))
       }
       icon={<ArrowUpIcon size={16} />}
     />
@@ -4213,7 +4212,10 @@ function Composer({
                   place={sessionPlace}
                 />
               )}
-            {session.scheduledMessages && !editing.target && !submission && !value.forward ? (
+            {session.scheduledMessages &&
+            !editing.target &&
+            !submission &&
+            !value.forward ? (
               <ScheduleMessageMenu
                 disabled={
                   disabled ||

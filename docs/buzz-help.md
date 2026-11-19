@@ -1092,13 +1092,10 @@ and are asked to sign in again in Buzz.
   the conversation sidebar available, so you can switch straight back to a chat.
   Saved links to it open the plugin, or offer to turn it on. Use the **Drafts**
   and **Sent** tabs to switch lists; a relay that supports scheduling also adds
-  **Scheduled**. Buzz remembers your choice for this community. A clock and count
-  beside **Drafts & sent** show messages waiting for scheduled delivery.
-  Scheduled refreshes when opened and periodically checks for changes from other devices.
-  Messages containing composer chips cannot be scheduled yet; send them now or
-  remove the chips first. A refused schedule keeps the original draft intact.
-  To change text or recipients on a scheduled message with mentions, save it to
-  drafts and use the composer. Rescheduling and sending now remain available.
+  **Scheduled**. Open it to check queued messages, change a send time, or cancel
+  delivery. Use the arrow beside **Send** to schedule a message. Messages with
+  composer chips can be sent immediately. If the relay refuses a schedule, the
+  draft stays in the composer.
   Drafts save automatically as you type—leave a message unfinished, open
   **Drafts & sent → Drafts**, then select it to continue writing.
   Rows lead with the destination and message text. It lists

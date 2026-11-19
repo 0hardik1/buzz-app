@@ -234,11 +234,7 @@ function ScopedPage({
   );
   const resolveName = useIdentityNames(session.names);
   const now = useNow();
-  const [searches, setSearches] = useState<Record<DraftsSentTab, string>>({
-    drafts: "",
-    scheduled: "",
-    sent: "",
-  });
+  const [search, setSearch] = useState("");
   const [view, setView] = useState<DraftsSentTab>(() => {
     const saved =
       requestedTab ??
@@ -258,16 +254,16 @@ function ScopedPage({
           : requestedTab,
       );
   }, [requestKey, requestedTab, session]);
-  const search = searches[view];
-  const setSearch = (value: string) =>
-    setSearches((current) => ({ ...current, [view]: value }));
-  const scheduled = useScheduledMessages(session.scheduledMessages);
+  const scheduled = useScheduledMessages(
+    session.scheduledMessages,
+    view === "scheduled",
+  );
   const revalidateScheduled = scheduled.revalidate;
-  // A new visit or tab selection must discover schedules made on other devices.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: A new visit revalidates even when the selected tab is unchanged.
+  // A new navigation visit can bring the user back to an already open queue.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Revalidate on a new visit even if the selected tab is unchanged.
   useEffect(() => {
     if (view === "scheduled") revalidateScheduled();
-  }, [view, requestKey, revalidateScheduled]);
+  }, [requestKey, revalidateScheduled, view]);
   const [notice, setNotice] = useState<string>();
   const searchInput = useRef<HTMLInputElement>(null);
   const { sent, refresh: refreshSent } = useSent(session, viewer);
@@ -708,7 +704,10 @@ function ScopedPage({
     else groups.push({ label, rows: [item] });
   }
   const refresh = () => {
-    scheduled.refresh();
+    if (view === "scheduled") {
+      scheduled.refresh();
+      return;
+    }
     session.channels.refreshList?.();
     refreshSent.current();
     context.refresh.current();
@@ -737,19 +736,14 @@ function ScopedPage({
       />
     ) : null;
 
-  const searchLabel = {
-    drafts: "Search drafts",
-    scheduled: "Search scheduled messages",
-    sent: "Search sent messages",
-  }[view];
   const searchField = (
     <div className={styles.toolbar}>
       <SearchField
         variant="default"
         value={search}
         onValueChange={setSearch}
-        label={searchLabel}
-        placeholder={searchLabel}
+        label="Search drafts and sent messages"
+        placeholder="Search drafts and sent messages"
         inputRef={searchInput}
       />
     </div>
@@ -763,7 +757,11 @@ function ScopedPage({
             icon={<ArrowsClockwiseIcon size={16} />}
             aria-label="Refresh"
             title="Refresh"
-            disabled={sent.status === "loading"}
+            disabled={
+              view === "scheduled"
+                ? scheduled.loading
+                : sent.status === "loading"
+            }
             onClick={refresh}
           />
         }
@@ -792,17 +790,6 @@ function ScopedPage({
                       value: "scheduled" as const,
                       label: "Scheduled",
                       panelId: "scheduled-view",
-                      trailing: scheduled.items.filter(
-                        (item) => item.status !== "sent",
-                      ).length ? (
-                        <span className="text-caption text-subtle">
-                          {
-                            scheduled.items.filter(
-                              (item) => item.status !== "sent",
-                            ).length
-                          }
-                        </span>
-                      ) : undefined,
                     },
                   ]
                 : []),
@@ -826,27 +813,25 @@ function ScopedPage({
         {announcement}
       </p>
       <div className={styles.sections}>
-        <section
-          role="tabpanel"
-          id="scheduled-view"
-          aria-labelledby="scheduled-view-tab"
-          hidden={view !== "scheduled"}
-          className={styles.scheduledSection}
-        >
-          {view === "scheduled" && searchField}
-          <ScheduledMessagesList
-            session={session}
-            search={search}
-            items={scheduled.items}
-            loading={scheduled.loading}
-            error={scheduled.error}
-            refresh={scheduled.refresh}
-            onDraft={() => {
-              setView("drafts");
-              writeView(session.scope, "drafts-sent-tab", "drafts");
-            }}
-          />
-        </section>
+        {session.scheduledMessages && (
+          <section
+            role="tabpanel"
+            id="scheduled-view"
+            aria-labelledby="scheduled-view-tab"
+            hidden={view !== "scheduled"}
+            className={styles.scheduledSection}
+          >
+            {view === "scheduled" && (
+              <ScheduledMessagesList
+                service={session.scheduledMessages}
+                items={scheduled.items}
+                loading={scheduled.loading}
+                error={scheduled.error}
+                refresh={scheduled.refresh}
+              />
+            )}
+          </section>
+        )}
         <section
           role="tabpanel"
           id="drafts-view"

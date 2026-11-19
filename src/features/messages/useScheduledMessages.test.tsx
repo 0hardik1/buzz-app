@@ -59,11 +59,11 @@ const item = (id: string, sendAt = Date.now() + 60000): ScheduledMessage => ({
   status: "scheduled",
 });
 
-it("shares loading and invalidation between sidebar and page without extra relay reads", async () => {
+it("shares loading and invalidation between queue views without extra relay reads", async () => {
   const h = fixture();
   const mounted = render(
     <>
-      <View service={h.service} name="sidebar" />
+      <View service={h.service} name="queue" />
       <View service={h.service} name="page" />
     </>,
   );
@@ -74,7 +74,7 @@ it("shares loading and invalidation between sidebar and page without extra relay
   expect(h.listeners.size).toBe(1);
   act(() => h.change([item("queued")]));
   await waitFor(() =>
-    expect(screen.getByLabelText("sidebar").textContent).toBe("queued"),
+    expect(screen.getByLabelText("queue").textContent).toBe("queued"),
   );
   expect(screen.getByLabelText("page").textContent).toBe("queued");
   expect(h.service.list).toHaveBeenCalledTimes(2);
@@ -116,7 +116,7 @@ it("refreshes once when the nearest scheduled delivery becomes due", async () =>
   const h = fixture();
   render(
     <>
-      <View service={h.service} name="sidebar" />
+      <View service={h.service} name="queue" />
       <View service={h.service} name="page" />
     </>,
   );
@@ -167,7 +167,7 @@ it("revalidates an empty queue on the shared long backstop and stops on unmount"
   vi.useFakeTimers();
   vi.spyOn(Math, "random").mockReturnValue(0.5);
   const h = fixture();
-  const mounted = render(<View service={h.service} name="sidebar" />);
+  const mounted = render(<View service={h.service} name="queue" />);
   await act(async () => {});
   expect(h.service.list).toHaveBeenCalledTimes(1);
   h.setRows([item("remote", Date.now() + 86400000)]);
@@ -175,7 +175,7 @@ it("revalidates an empty queue on the shared long backstop and stops on unmount"
   expect(h.service.list).toHaveBeenCalledTimes(1);
   await act(async () => vi.advanceTimersByTimeAsync(1));
   expect(h.service.list).toHaveBeenCalledTimes(2);
-  expect(screen.getByLabelText("sidebar").textContent).toBe("remote");
+  expect(screen.getByLabelText("queue").textContent).toBe("remote");
   mounted.unmount();
   await act(async () => vi.advanceTimersByTimeAsync(1800000));
   expect(h.service.list).toHaveBeenCalledTimes(2);

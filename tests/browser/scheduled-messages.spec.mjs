@@ -200,7 +200,7 @@ test.describe("localized schedule values", () => {
   });
 });
 
-test("manages the scheduled queue with tab-scoped search and safe draft recovery", async ({
+test("reschedules and cancels messages from Drafts & sent", async ({
   page,
 }, testInfo) => {
   const queue = new Map();
@@ -224,10 +224,6 @@ test("manages the scheduled queue with tab-scoped search and safe draft recovery
       });
     }
     if (body.action === "cancel") queue.delete(body.id);
-    if (body.action === "send_now") {
-      const row = queue.get(body.id);
-      queue.set(body.id, { ...row, status: "sent" });
-    }
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify(
@@ -254,58 +250,32 @@ test("manages the scheduled queue with tab-scoped search and safe draft recovery
       animations: "disabled",
     });
   }
-  const search = page.getByRole("searchbox", {
-    name: "Search scheduled messages",
-  });
-  await search.fill("weekly");
-  await expect(list.getByRole("listitem")).toHaveCount(1);
-  await search.fill("missing");
-  await expect(
-    page.getByText("No scheduled messages match “missing”."),
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Clear search scheduled messages" })
-    .click();
   const row = list.getByRole("listitem").filter({ hasText: "Review tomorrow" });
-  await row.getByRole("button", { name: "Edit message", exact: true }).click();
-  const edit = page.getByRole("dialog", { name: "Edit scheduled message" });
-  await edit
-    .getByRole("textbox", { name: "Message", exact: true })
-    .fill("Updated launch notes");
-  await edit.getByRole("button", { name: "Save changes" }).click();
-  const updated = list
-    .getByRole("listitem")
-    .filter({ hasText: "Updated launch notes" });
-  await expect(updated).toBeVisible();
-  await updated.getByRole("button", { name: "Reschedule message" }).click();
+  const previousTime = await row.locator("time").getAttribute("datetime");
+  await row.getByRole("button", { name: "Reschedule message" }).click();
   const reschedule = page.getByRole("dialog", { name: "Reschedule message" });
-  await reschedule
-    .getByRole("combobox", { name: "Schedule time" })
-    .fill("10:17 AM");
-  await reschedule
-    .getByRole("combobox", { name: "Schedule time" })
-    .press("Tab");
+  const time = reschedule.getByRole("combobox", { name: "Schedule time" });
+  await time.fill("10:17 AM");
+  await time.press("Tab");
   await reschedule.getByRole("button", { name: "Save changes" }).click();
   await expect(reschedule).not.toBeVisible();
-  await updated.getByRole("button", { name: "More message actions" }).click();
-  await expect(page.getByRole("menu")).toBeVisible();
-  await expect(page.getByRole("menu")).toHaveCSS("opacity", "1");
-  await page.screenshot({
-    path: testInfo.outputPath("scheduled-actions.png"),
-    animations: "disabled",
-  });
-  await page
-    .getByRole("menuitem", { name: "Cancel schedule and save to drafts" })
-    .click();
-  const confirm = page.getByRole("alertdialog");
-  await confirm
-    .getByRole("button", { name: "Save to drafts", exact: true })
-    .click();
-  await expect(page.getByRole("tab", { name: /^Drafts/ })).toHaveAttribute(
-    "aria-selected",
-    "true",
+  await expect(row.locator("time")).not.toHaveAttribute(
+    "datetime",
+    previousTime,
   );
-  await expect(
-    page.getByRole("button", { name: /Continue draft.*Updated launch notes/ }),
-  ).toBeVisible();
+  await expect(row).toContainText("Review tomorrow");
+
+  const cancel = row.getByRole("button", { name: "Cancel scheduled message" });
+  await cancel.click();
+  const confirm = page.getByRole("alertdialog", {
+    name: "Cancel this scheduled message?",
+  });
+  await confirm.getByRole("button", { name: "Keep scheduled" }).click();
+  await expect(row).toBeVisible();
+  await cancel.click();
+  await confirm
+    .getByRole("button", { name: "Cancel message", exact: true })
+    .click();
+  await expect(row).toHaveCount(0);
+  await expect(list.getByRole("listitem")).toHaveCount(1);
 });

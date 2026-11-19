@@ -9,17 +9,10 @@ Attachments finish uploading before the queue accepts the message.
 Enable the bundled **Drafts & sent** plugin to manage messages in one place.
 Its **Drafts** tab lists unfinished messages saved automatically by the composer;
 **Scheduled** lists queued messages and **Sent** shows recent sent messages.
-The sidebar shows a draft count and a clock with the scheduled count. No separate
-Scheduled messages sidebar entry is needed. Scheduled rows support editing,
-rescheduling, sending now, cancelling to drafts and deleting. The main composer
-preserves formatting, mentions, attachments and thread destinations. Editing a
-queued message retains its original destination and attachment tags.
-
-Draft conversion currently supports text, formatting, mentions and root-thread
-replies. It refuses attachments, nested reply parents, media targets, explicit
-model/effort settings and unaddressed slash commands, preserving the scheduled
-message instead of silently changing its delivery. Ordinary drafts remain local
-to this device; cross-device draft sync is not part of this change.
+In **Scheduled**, you can change a message’s delivery time or cancel it.
+The queue loads when you open the tab. The composer preserves formatting,
+mentions, attachments and thread destinations. Messages with composer chips
+cannot be scheduled yet. A refused schedule leaves the draft in the composer.
 
 The session's `scheduledMessages` service prepares ordinary kind:9 messages
 through the existing message builder. A native or browser-host signer signs the

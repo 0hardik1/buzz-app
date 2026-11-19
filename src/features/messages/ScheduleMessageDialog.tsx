@@ -95,7 +95,9 @@ export function ScheduleMessageDialog({
         {failed && (
           <p role="alert" className="text-body-sm text-danger">
             {error ||
-              "Could not schedule this message. Your draft is still here."}
+              (initialTime === undefined
+                ? "Could not schedule this message. Your draft is still here."
+                : "Could not change the send time. Refresh the queue before trying again.")}
           </p>
         )}
       </form>

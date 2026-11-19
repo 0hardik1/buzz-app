@@ -12,7 +12,7 @@ type Snapshot = Readonly<{
 const EMPTY: Snapshot = { items: [], loading: false };
 const noop = () => {};
 
-/** The sidebar and page share one queue read, invalidation listener and timer. */
+/** Open queue views share one read, invalidation listener and timer. */
 function createStore(service: ScheduledMessages) {
   let snapshot = EMPTY;
   const listeners = new Set<() => void>();
@@ -89,7 +89,7 @@ function createStore(service: ScheduledMessages) {
     snapshot: () => snapshot,
     refresh,
     revalidate() {
-      // Opening the page shares an already-running sidebar read.
+      // Reuse an in-flight read when navigation revalidates the queue.
       if (!request) refresh();
     },
     subscribe(listener: () => void) {
