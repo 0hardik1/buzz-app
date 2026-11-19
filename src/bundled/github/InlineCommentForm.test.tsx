@@ -3,12 +3,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { InlineCommentForm } from "./InlineCommentForm";
 
-it("focuses its labelled field and closes on Escape without clearing text", () => {
+it("focuses its labelled field and delegates Escape dismissal", () => {
   const onCancel = vi.fn();
   const onChange = vi.fn();
   render(
     <InlineCommentForm
-      body="Preserved draft"
+      body="Unsent comment"
       busy={false}
       blocked={false}
       onChange={onChange}

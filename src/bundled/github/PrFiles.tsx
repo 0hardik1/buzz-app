@@ -17,9 +17,10 @@ import {
 } from "../diffs/DiffViewer";
 import { parsePatch } from "../diffs/parse";
 import { InlineCommentForm } from "./InlineCommentForm";
-import type { InlineDraftStore, InlineTarget } from "./inline-draft";
+import type { InlineDeliveryStore } from "./inline-delivery";
 import {
   anchorInSnapshot,
+  type Anchor,
   type PrComments,
   type PullRef,
   type Snapshot,
@@ -29,6 +30,9 @@ import {
 import { readable } from "./object";
 import styles from "./InlineComments.module.css";
 
+type InlineTarget = Anchor & { viewer: string; replyTo?: number | undefined };
+type Composer = { body: string; target: InlineTarget; operation: string };
+
 const rowKey = (path: string, side: string, line: number) =>
   JSON.stringify([path, side, line]);
 export function PrFiles({
@@ -36,15 +40,16 @@ export function PrFiles({
   pull,
   head,
   base,
-  draft,
+  delivery,
 }: {
   api: PrComments;
   pull: PullRef;
   head: string;
   base: string;
-  draft: InlineDraftStore;
+  delivery: InlineDeliveryStore;
 }) {
-  const saved = useSyncExternalStore(draft.subscribe, draft.get);
+  const status = useSyncExternalStore(delivery.subscribe, delivery.get);
+  const [composer, setComposer] = useState<Composer>();
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const snapshotRef = useRef<Snapshot | undefined>(undefined);
   const [threads, setThreads] = useState<readonly Thread[]>([]);
@@ -52,7 +57,6 @@ export function PrFiles({
   const [threadError, setThreadError] = useState<string>();
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(!!saved.target);
   const [layout, setLayout] = useState<"unified" | "split">("unified");
   const [choice, setChoice] = useState<{ path: string; lines: DiffLine[] }>();
   const [available, setAvailable] = useState<ReadonlySet<string>>(new Set());
@@ -108,6 +112,7 @@ export function PrFiles({
     setSnapshot(undefined);
     setAvailable(new Set());
     setChoice(undefined);
+    setComposer(undefined);
     setLoading(true);
     setError(undefined);
     setThreads([]);
@@ -147,12 +152,11 @@ export function PrFiles({
     [snapshot],
   );
   const stale =
-    !!saved.target &&
+    !!composer &&
     (!snapshot ||
-      saved.stale ||
-      saved.target.head !== snapshot.head ||
-      saved.target.base !== snapshot.base ||
-      saved.target.viewer !== snapshot.viewer);
+      composer.target.head !== snapshot.head ||
+      composer.target.base !== snapshot.base ||
+      composer.target.viewer !== snapshot.viewer);
   const mapped = (thread: Thread) =>
     !!snapshot &&
     !loading &&
@@ -166,15 +170,17 @@ export function PrFiles({
       base: snapshot.base,
     });
   const targetMapped =
-    !!saved.target &&
+    !!composer &&
     !stale &&
     !loading &&
-    available.has(saved.target.path) &&
+    available.has(composer.target.path) &&
     !!snapshot &&
-    anchorInSnapshot(snapshot, saved.target);
+    anchorInSnapshot(snapshot, composer.target);
   function choose(path: string, line: DiffLine, replyTo?: number) {
-    if (!snapshot || saved.busy || saved.unknown || loading) return;
-    draft.update({
+    if (!snapshot || status.busy || status.unknown || loading) return;
+    setComposer({
+      body: "",
+      operation: crypto.randomUUID(),
       target: {
         path,
         side: line.side === "deletions" ? "LEFT" : "RIGHT",
@@ -184,30 +190,24 @@ export function PrFiles({
         viewer: snapshot.viewer,
         replyTo,
       },
-      stale: false,
-      error: undefined,
-      sentUrl: undefined,
     });
+    delivery.update({ error: undefined, sentUrl: undefined });
     setChoice(undefined);
-    setOpen(true);
   }
   async function applyResult(
     result: WriteResult,
     current: Snapshot | undefined,
   ) {
     if (result.status === "sent") {
-      draft.update({
+      delivery.update({
         busy: false,
         unknown: false,
         attempt: undefined,
-        body: "",
-        target: undefined,
-        operation: crypto.randomUUID(),
         error: undefined,
         sentUrl: result.comment.url,
       });
       if (alive.current) {
-        setOpen(false);
+        setComposer(undefined);
         restoreFocus();
       }
       if (!current) return;
@@ -224,7 +224,7 @@ export function PrFiles({
           );
       }
     } else if (result.status === "unknown") {
-      draft.update({
+      delivery.update({
         busy: false,
         unknown: true,
         attempt: result.attempt,
@@ -232,26 +232,24 @@ export function PrFiles({
           "Delivery unknown. Check delivery before trying another submission.",
       });
     } else if (result.status === "stale") {
-      draft.update({
+      delivery.update({
         busy: false,
-        stale: true,
-        error:
-          "PR changed. Your text is saved; refresh and select a line again.",
+        error: "PR changed. Select a line again in the refreshed diff.",
       });
       if (alive.current) setRevision((previous) => previous + 1);
-    } else draft.update({ busy: false, error: result.error.message });
+    } else delivery.update({ busy: false, error: result.error.message });
   }
   async function submit() {
     if (
       !snapshot ||
+      !composer?.body.trim() ||
       stale ||
       loading ||
-      (!targetMapped && !saved.target?.replyTo)
+      (!targetMapped && !composer?.target.replyTo)
     )
       return;
-    const captured = draft.begin();
-    if (!captured) return;
-    const { target, body, operation } = captured;
+    if (!delivery.begin()) return;
+    const { target, body, operation } = composer;
     try {
       const result =
         target.replyTo === undefined
@@ -260,7 +258,7 @@ export function PrFiles({
       await applyResult(result, snapshot);
     } catch (failure) {
       // An unexpected rejection cannot establish whether a mutation happened.
-      draft.update({
+      delivery.update({
         busy: false,
         unknown: true,
         error: `Delivery unknown: ${readable(failure).message}`,
@@ -268,39 +266,39 @@ export function PrFiles({
     }
   }
   async function reconcile() {
-    if (!saved.attempt || saved.busy) return;
-    draft.update({ busy: true });
+    if (!status.attempt || status.busy) return;
+    delivery.update({ busy: true });
     try {
-      await applyResult(await api.reconcile(saved.attempt), snapshot);
+      await applyResult(await api.reconcile(status.attempt), snapshot);
     } catch (failure) {
-      draft.update({ busy: false, error: readable(failure).message });
+      delivery.update({ busy: false, error: readable(failure).message });
     }
   }
   const form = (
     <InlineCommentForm
-      body={saved.body}
-      busy={saved.busy}
+      body={composer?.body ?? ""}
+      busy={status.busy}
       blocked={
         !!stale ||
         loading ||
-        saved.unknown ||
+        status.unknown ||
         !snapshot?.writable ||
-        (!targetMapped && !saved.target?.replyTo)
+        (!targetMapped && !composer?.target.replyTo)
       }
       notice={
         stale
-          ? "Draft saved. Select a line or reply again in the latest diff."
-          : saved.target
-            ? `${saved.target.path} · ${saved.target.side === "LEFT" ? "Old" : "New"} line ${saved.target.line} · ${saved.target.head.slice(0, 7)}`
+          ? "Select a line again in the latest diff."
+          : composer?.target
+            ? `${composer?.target.path} · ${composer?.target.side === "LEFT" ? "Old" : "New"} line ${composer?.target.line} · ${composer.target.head.slice(0, 7)}`
             : undefined
       }
-      error={saved.error}
       onChange={(body) => {
-        if (!draft.get().busy && !draft.get().unknown) draft.update({ body });
+        if (!delivery.get().busy && !delivery.get().unknown)
+          setComposer((current) => current && { ...current, body });
       }}
       onSubmit={() => void submit()}
       onCancel={() => {
-        setOpen(false);
+        setComposer(undefined);
         restoreFocus();
       }}
     />
@@ -388,8 +386,8 @@ export function PrFiles({
           disabled={
             !snapshot?.writable ||
             loading ||
-            saved.busy ||
-            saved.unknown ||
+            status.busy ||
+            status.unknown ||
             !thread.rootCommentId
           }
           onClick={(event) => {
@@ -439,16 +437,16 @@ export function PrFiles({
   for (const thread of threads)
     if (mapped(thread) && thread.line !== null)
       annotate({ ...thread, line: thread.line }, threadView(thread));
-  if (open && saved.target && targetMapped)
-    annotate(saved.target, <div key="draft">{form}</div>);
+  if (composer && targetMapped)
+    annotate(composer.target, <div key="composer">{form}</div>);
   const comments: DiffComments = {
     annotations: [...annotations.values()],
     onAvailabilityChange: availability,
     onSelect(path, lines, restoreFocus) {
       if (
         !snapshot?.files.some((file) => file.path === path) ||
-        saved.busy ||
-        saved.unknown ||
+        status.busy ||
+        status.unknown ||
         loading
       )
         return;
@@ -463,7 +461,7 @@ export function PrFiles({
         <Button
           size="sm"
           ref={refreshButton}
-          disabled={loading || saved.busy}
+          disabled={loading || status.busy}
           onClick={() => setRevision((previous) => previous + 1)}
         >
           Refresh changes
@@ -485,11 +483,6 @@ export function PrFiles({
             setLayout(value === "split" ? "split" : "unified")
           }
         />
-        {!open && saved.target && (
-          <Button size="sm" onClick={() => setOpen(true)}>
-            Resume draft
-          </Button>
-        )}
       </div>
       {snapshot && (
         <p>
@@ -509,12 +502,12 @@ export function PrFiles({
           ))}
         </section>
       )}
-      {saved.sentUrl && (
+      {status.sentUrl && (
         <p role="status">
           Comment sent.{" "}
           <a
             className="text-link"
-            href={saved.sentUrl}
+            href={status.sentUrl}
             target="_blank"
             rel="noreferrer"
           >
@@ -522,19 +515,24 @@ export function PrFiles({
           </a>
         </p>
       )}
-      {saved.unknown && (
+      {status.busy && (
+        <p role="status">
+          {status.unknown ? "Checking delivery…" : "Posting comment…"}
+        </p>
+      )}
+      {status.error && <p role="alert">{status.error}</p>}
+      {status.unknown && (
         <div className={styles.actions}>
-          <p role="alert">{saved.error}</p>
           <Button
             size="sm"
-            disabled={saved.busy || !saved.attempt}
+            disabled={status.busy || !status.attempt}
             onClick={() => void reconcile()}
           >
             Check delivery
           </Button>
         </div>
       )}
-      {open && saved.target && !targetMapped && form}
+      {composer && !targetMapped && form}
       {error && <p role="alert">{error}</p>}
       {threadError && <p role="alert">{threadError}</p>}
       <LoadingRegion

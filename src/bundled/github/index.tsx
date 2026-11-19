@@ -612,16 +612,18 @@ function ObjectPanel({
       {files && changesShown && (
         <div hidden={!showChanges}>
           {comments ? (
-            <PrFiles
-              api={comments}
-              pull={{
-                repository: files.repository,
-                number: Number(reference.label.slice(1)),
-              }}
-              head={files.head}
-              base={files.base}
-              draft={memory.inline(reference.url)}
-            />
+            showChanges && (
+              <PrFiles
+                api={comments}
+                pull={{
+                  repository: files.repository,
+                  number: Number(reference.label.slice(1)),
+                }}
+                head={files.head}
+                base={files.base}
+                delivery={memory.delivery(reference.url)}
+              />
+            )
           ) : (
             <PullFiles
               key={`${files.base}...${files.head}:${files.merged}`}

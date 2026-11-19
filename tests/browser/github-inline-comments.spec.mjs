@@ -36,6 +36,15 @@ async function line(page, value = "Old line 5000") {
   await expect(field).toBeFocused();
   return field;
 }
+async function lineBlocked(page) {
+  await select(page, "Comment location in src/example.ts", "New line 5001");
+  await page
+    .getByRole("button", { name: "Comment on line", exact: true })
+    .click();
+  await expect(
+    page.getByRole("textbox", { name: "GitHub comment" }),
+  ).toHaveCount(0);
+}
 const posts = (page) =>
   page.evaluate(
     () =>
@@ -55,13 +64,19 @@ for (const layout of ["Unified", "Split"]) {
     await expect(
       page.getByRole("button", { name: "Comment on line", exact: true }),
     ).toBeFocused();
+    await line(page);
+    await field.fill("Discard when leaving Changes");
+    await page.getByRole("tab", { name: "Summary", exact: true }).click();
+    await page.getByRole("tab", { name: /^Changes/ }).click();
+    await expect(field).toHaveCount(0);
     await page
       .locator(
         'diffs-container [data-column-number="5001"][data-line-type="change-addition"]',
       )
       .hover();
     await page.getByRole("button", { name: "Comment on hovered line" }).click();
-    await expect(field).toHaveValue("Synthetic inline feedback");
+    await expect(field).toHaveValue("");
+    await field.fill("Synthetic inline feedback");
     await expect(
       page.getByText(/src\/example.ts · New line 5001/),
     ).toBeVisible();
@@ -107,38 +122,35 @@ for (const layout of ["Unified", "Split"]) {
   });
 }
 for (const field of ["head", "base"]) {
-  test(`preserves stale ${field} draft and requires reselection`, async ({
+  test(`rejects stale ${field} and opens a fresh composer after reselection`, async ({
     page,
   }) => {
     await open(page);
     const input = await line(page);
-    await input.fill("Retain stale draft");
+    await input.fill("Unsent stale comment");
     await page.getByRole("button", { name: `Advance ${field}` }).click();
     await page.getByRole("button", { name: "Post to GitHub" }).click();
-    await expect(input).toHaveValue("Retain stale draft");
+    await expect(input).toHaveCount(0);
+    expect(await posts(page)).toBe(0);
+    await line(page, "New line 5001");
+    await expect(input).toHaveValue("");
     await expect(
       page.getByRole("button", { name: "Post to GitHub" }),
     ).toBeDisabled();
-    expect(await posts(page)).toBe(0);
-    await line(page, "New line 5001");
-    await expect(input).toHaveValue("Retain stale draft");
-    await expect(
-      page.getByRole("button", { name: "Post to GitHub" }),
-    ).toBeEnabled();
   });
 }
 for (const [mode, message] of [
   ["denied", "Resource not accessible"],
   ["validation", "Invalid diff line"],
 ]) {
-  test(`retains draft on ${mode}`, async ({ page }) => {
+  test(`keeps text in the open composer on ${mode}`, async ({ page }) => {
     await open(page);
     await select(page, "Stub scenario", mode);
     const input = await line(page);
-    await input.fill("Retain refused draft");
+    await input.fill("Refused comment");
     await page.getByRole("button", { name: "Post to GitHub" }).click();
     await expect(page.getByRole("alert")).toHaveText(message);
-    await expect(input).toHaveValue("Retain refused draft");
+    await expect(input).toHaveValue("Refused comment");
     expect(await posts(page)).toBe(1);
     expect(
       await page.evaluate(() => window.inlineFixture.state.comments.length),
@@ -159,10 +171,8 @@ test("reconciles timeout-after-success across panel remount without reposting", 
   await page.getByRole("button", { name: "Remount panel" }).click();
   await expect(
     page.getByRole("textbox", { name: "GitHub comment" }),
-  ).toHaveValue("Uncertain delivery");
-  await expect(
-    page.getByRole("button", { name: "Post to GitHub" }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
+  await lineBlocked(page);
   await page.screenshot({
     animations: "disabled",
     path: testInfo.outputPath("unknown-delivery.png"),
@@ -225,19 +235,16 @@ test("context hover requires an explicit old/new choice", async ({ page }) => {
     .click();
   await expect(page.getByText(/src\/example.ts · Old line 5001/)).toBeVisible();
 });
-test("raw fallback retains draft and removes posting authority", async ({
+test("refresh into raw fallback discards composer and removes posting authority", async ({
   page,
 }) => {
   await open(page);
   const input = await line(page);
-  await input.fill("Preserved through fallback");
+  await input.fill("Unsent before fallback");
   await page.getByRole("button", { name: "Show raw patch" }).click();
   await page.getByRole("button", { name: "Refresh changes" }).click();
   await expect(page.getByRole("region", { name: "Raw diff" })).toBeVisible();
-  await expect(input).toHaveValue("Preserved through fallback");
-  await expect(
-    page.getByRole("button", { name: "Post to GitHub" }),
-  ).toBeDisabled();
+  await expect(input).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Comment on line", exact: true }),
   ).toHaveCount(0);
@@ -268,21 +275,18 @@ test("narrow enlarged-text panel keeps composer controls reachable", async ({
     path: testInfo.outputPath("inline-narrow-large-dark.png"),
   });
 });
-test("failed snapshot refresh preserves text and invalidates posting authority", async ({
+test("failed snapshot refresh discards composer and invalidates posting authority", async ({
   page,
 }) => {
   await open(page);
   const input = await line(page);
-  await input.fill("Keep after read failure");
+  await input.fill("Unsent before refresh failure");
   await page.getByRole("button", { name: "Toggle snapshot failure" }).click();
   await page.getByRole("button", { name: "Refresh changes" }).click();
   await expect(page.getByRole("alert")).toContainText(
     "Synthetic snapshot refresh failed",
   );
-  await expect(input).toHaveValue("Keep after read failure");
-  await expect(
-    page.getByRole("button", { name: "Post to GitHub" }),
-  ).toBeDisabled();
+  await expect(input).toHaveCount(0);
   expect(await posts(page)).toBe(0);
   await page.getByRole("button", { name: "Advance head" }).click();
   await page.getByRole("button", { name: "Toggle snapshot failure" }).click();
@@ -290,14 +294,12 @@ test("failed snapshot refresh preserves text and invalidates posting authority",
   await expect(
     page.getByRole("combobox", { name: "Comment location in src/example.ts" }),
   ).toBeVisible();
+  await expect(input).toHaveCount(0);
+  await line(page, "New line 5001");
+  await expect(input).toHaveValue("");
   await expect(
     page.getByRole("button", { name: "Post to GitHub" }),
   ).toBeDisabled();
-  await line(page, "New line 5001");
-  await expect(input).toHaveValue("Keep after read failure");
-  await expect(
-    page.getByRole("button", { name: "Post to GitHub" }),
-  ).toBeEnabled();
 });
 test("checks unknown delivery even after snapshot refresh fails", async ({
   page,

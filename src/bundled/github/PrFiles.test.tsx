@@ -1,13 +1,22 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { expect, it, vi } from "vitest";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
 import { PrFiles } from "./PrFiles";
-import { createInlineDraft } from "./inline-draft";
+import { createInlineDelivery } from "./inline-delivery";
 import { createPrComments, type Comment, type Thread } from "./pr-comments";
 import {
   fixturePull,
   githubCommentHost,
 } from "../../../tests/fixtures/github-comment-host";
+
+afterEach(cleanup);
 
 // Keep thread rows outside the renderer: this test exercises async panel ownership.
 vi.mock("../diffs/DiffViewer", () => ({ DiffViewer: () => null }));
@@ -65,7 +74,7 @@ it("discards a reply page that completes after a new snapshot replaces its owner
       pull={fixturePull}
       head={snapshot.head}
       base={snapshot.base}
-      draft={createInlineDraft()}
+      delivery={createInlineDelivery()}
     />,
   );
   fireEvent.click(
@@ -86,4 +95,83 @@ it("discards a reply page that completes after a new snapshot replaces its owner
   expect(
     screen.getByRole("button", { name: "Load more replies" }),
   ).toBeTruthy();
+});
+
+async function setupComposer() {
+  const fixture = githubCommentHost();
+  const api = createPrComments(fixture.host);
+  if (!api) throw new Error("Missing adapter");
+  const snapshot = await api.loadSnapshot(fixturePull);
+  await api.create(
+    snapshot,
+    { ...snapshot, path: "src/example.ts", side: "RIGHT", line: 5001 },
+    "Existing thread",
+    "seed",
+  );
+  const delivery = createInlineDelivery();
+  const panel = () => (
+    <PrFiles
+      api={api}
+      pull={fixturePull}
+      head={snapshot.head}
+      base={snapshot.base}
+      delivery={delivery}
+    />
+  );
+  const open = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: "Reply" }));
+    return screen.getByRole("textbox", { name: "GitHub comment" });
+  };
+  return { ...fixture, panel, open, delivery };
+}
+it.each(["Cancel", "Escape", "refresh", "unmount"])(
+  "discards unsent text on %s and reopens empty",
+  async (action) => {
+    const { panel, open } = await setupComposer();
+    let view = render(panel());
+    const input = await open();
+    fireEvent.change(input, { target: { value: "Disposable text" } });
+    if (action === "Cancel")
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    else if (action === "Escape") fireEvent.keyDown(input, { key: "Escape" });
+    else if (action === "refresh")
+      fireEvent.click(screen.getByRole("button", { name: "Refresh changes" }));
+    else {
+      view.unmount();
+      view = render(panel());
+    }
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    expect(await open()).toHaveProperty("value", "");
+  },
+);
+it("keeps an in-flight lock and unknown receipt after cancel and remount", async () => {
+  const { panel, open, state, delivery } = await setupComposer();
+  state.mode = "hold";
+  const view = render(panel());
+  const input = await open();
+  fireEvent.change(input, { target: { value: "Submitted once" } });
+  const form = input.closest("form");
+  if (!form) throw new Error("Missing composer");
+  fireEvent.submit(form);
+  await waitFor(() => expect(state.release).toBeTypeOf("function"));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  view.unmount();
+  render(panel());
+  expect(screen.queryByRole("textbox")).toBeNull();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reply" })).toHaveProperty(
+      "disabled",
+      true,
+    ),
+  );
+  state.mode = "timeout";
+  await act(async () => {
+    state.release?.();
+  });
+  await screen.findByRole("button", { name: "Check delivery" });
+  expect(delivery.get().unknown).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Check delivery" }));
+  await screen.findByRole("link", { name: "View on GitHub" });
+  expect(state.calls.filter((call) => call.args[0] === "POST")).toHaveLength(2); // seed + one submission
+  expect(delivery.get().unknown).toBe(false);
 });

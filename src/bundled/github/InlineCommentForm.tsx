@@ -8,7 +8,6 @@ export function InlineCommentForm({
   body,
   busy,
   blocked,
-  error,
   notice,
   onChange,
   onSubmit,
@@ -17,7 +16,6 @@ export function InlineCommentForm({
   body: string;
   busy: boolean;
   blocked: boolean;
-  error?: string | undefined;
   notice?: string | undefined;
   onChange(body: string): void;
   onSubmit(): void;
@@ -35,7 +33,7 @@ export function InlineCommentForm({
         if (!busy && !blocked && body.trim()) onSubmit();
       }}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && !busy) {
+        if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
           onCancel();
@@ -53,10 +51,9 @@ export function InlineCommentForm({
         />
       </Field>
       {notice && <p role="status">{notice}</p>}
-      {error && <p role="alert">{error}</p>}
       <div className={styles.actions}>
-        <Button size="sm" disabled={busy} onClick={onCancel}>
-          Close draft
+        <Button size="sm" onClick={onCancel}>
+          Cancel
         </Button>
         <Button
           size="sm"
