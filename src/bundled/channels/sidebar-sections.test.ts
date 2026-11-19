@@ -122,7 +122,6 @@ it("intersects groups/stars with active authorized streams and movable DMs", () 
     { key: "group:channels", ids: ["grouped-dm", "work"] },
     { key: "solo", ids: [] },
     { key: "channels", ids: ["other"] },
-    { key: "forums", ids: [] },
     { key: "dms", ids: ["home-dm"] },
   ];
   expect(project(roster, new Set(["hidden-dm"]))).toEqual(expectedProjection);
@@ -146,11 +145,11 @@ it("intersects groups/stars with active authorized streams and movable DMs", () 
       new Set(["hidden-dm"]),
     ).find(({ key }) => key === "starred")?.ids,
   ).toEqual(["forum", "solo", "star"]);
+  // Forums shows only once there is a forum to list.
   expect(sidebarSections([])).toEqual([
     { key: "starred", title: "Favorites", icon: undefined, rows: [] },
     { key: "solo", title: "Solo", icon: undefined, rows: [] },
     { key: "channels", title: "Team", icon: undefined, rows: [] },
-    { key: "forums", title: "Forums", icon: undefined, rows: [] },
     { key: "dms", title: "Direct messages", icon: undefined, rows: [] },
   ]);
   expect(
@@ -268,7 +267,6 @@ it("Star projection is exclusive and retains empty saved groups", () => {
     ["group:work", []],
     ["solo", []],
     ["channels", []],
-    ["forums", []],
     ["dms", []],
   ]);
   expect(placements(["alpha"])).toEqual([
@@ -276,7 +274,6 @@ it("Star projection is exclusive and retains empty saved groups", () => {
     ["group:work", ["beta"]],
     ["solo", []],
     ["channels", []],
-    ["forums", []],
     ["dms", []],
   ]);
   expect(saved.assignments).toEqual({ beta: "work" });

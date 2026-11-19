@@ -47,7 +47,6 @@ it("filters sections independently while preserving their saved sort and roster 
     ["group:work", []],
     ["solo", []],
     ["channels", ["newer", "older"]],
-    ["forums", []],
     ["dms", []],
   ]);
   unmount();

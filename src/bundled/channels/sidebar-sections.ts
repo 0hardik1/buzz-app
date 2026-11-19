@@ -144,6 +144,8 @@ export function sidebarSections<T extends ChannelSummary>(
     // chat is filed in a workspace.
     if (chatsOnly && key !== "solo" && !rows.length && !draftSections.has(key))
       return [];
+    // Forums are rare; their section appears only once there is one to show.
+    if (key === "forums" && !rows.length && !draftSections.has(key)) return [];
     const mode = preferences?.sort?.[group ? `section:${group.id}` : key];
     rows.sort(
       mode === "recent" || (mode === undefined && key === "solo")
