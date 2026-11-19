@@ -679,7 +679,7 @@ it("shows the selected community's current status above the profile avatar", asy
     expect(preview).toHaveTextContent("On vacation");
     expect(
       within(preview).getByRole("img", {
-        name: "Presence: Active",
+        name: "Presence: Online",
         hidden: true,
       }),
     ).toHaveTextContent("●");
