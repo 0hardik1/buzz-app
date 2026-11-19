@@ -7,7 +7,7 @@ import {
 } from "react";
 import type { RelaySession } from "../relay/session";
 import { motion, useReducedMotion } from "motion/react";
-import type { ButtonProps } from "../../shared/design-system/ui/Button";
+import { Button, type ButtonProps } from "../../shared/design-system/ui/Button";
 import { accentButtonStyle } from "../../shared/theme/accent";
 import { AgentsContext, useSessionState } from "../agents/react";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
@@ -26,12 +26,15 @@ export function QueuedFollowUps({
   disabled,
   focusComposer,
   onEdit,
+  agentName,
 }: {
   session: RelaySession;
   channelId: string;
   disabled: boolean;
   focusComposer(): void;
   onEdit?(id: string): void;
+  /** Names the agent in Send now's tooltip. */
+  agentName?(pubkey: string): string | undefined;
 }) {
   const queue = followUpQueue(session);
   const entries = useSyncExternalStore(queue.subscribe, queue.snapshot).filter(
@@ -41,6 +44,10 @@ export function QueuedFollowUps({
     queue.subscribe,
     queue.storageError,
   );
+  const pause = useSyncExternalStore(queue.subscribe, queue.pauses).get(
+    channelId,
+  );
+  const [resumeError, setResumeError] = useState<string>();
   const section = useRef<HTMLElement>(null);
   const focused = useRef<
     { id: string; action: "send" | "remove" | "preview" | "edit" } | undefined
@@ -74,6 +81,45 @@ export function QueuedFollowUps({
           {storageError}
         </p>
       )}
+      {pause && entries.length > 0 && (
+        <div className={styles.paused}>
+          <p className="text-caption" role="status">
+            Queued ({entries.length}) · paused after Stop
+            {pause.sentBeforeStop
+              ? ". One message was already being sent and may still go out."
+              : ""}
+          </p>
+          <Button
+            size="xs"
+            variant="subtle"
+            disabled={disabled}
+            onClick={() => {
+              setResumeError(undefined);
+              // Resume removes this button; keep keyboard focus in the chat.
+              focusComposer();
+              queue
+                .resume(channelId)
+                .catch(() =>
+                  setResumeError(
+                    "Queue resumed in this window only. Couldn’t save that, so other windows or a restart may keep it paused.",
+                  ),
+                );
+            }}
+          >
+            Resume queue
+          </Button>
+        </div>
+      )}
+      {pause?.saveError && (
+        <p role="alert" className="text-body-sm text-danger">
+          {pause.saveError}
+        </p>
+      )}
+      {resumeError && !pause && (
+        <p role="alert" className="text-body-sm text-danger">
+          {resumeError}
+        </p>
+      )}
       <ol className={styles.list}>
         {entries.map((entry) => (
           <li key={entry.id} className={styles.row}>
@@ -90,7 +136,7 @@ export function QueuedFollowUps({
               {entry.sending && !entry.error && (
                 <p className="text-caption">Sending…</p>
               )}
-              {entry.restored && !entry.sending && !entry.error && (
+              {entry.restored && !pause && !entry.sending && !entry.error && (
                 <p className="text-caption">
                   {entry.predecessorRemoved
                     ? "Paused because an earlier message was handled in another window. Send when ready."
@@ -137,6 +183,11 @@ export function QueuedFollowUps({
               <QueuedSend
                 channelId={channelId}
                 recipients={entry.recipients}
+                name={
+                  entry.recipients.length === 1 && entry.recipients[0]
+                    ? agentName?.(entry.recipients[0])
+                    : undefined
+                }
                 onFocus={() => {
                   focused.current = { id: entry.id, action: "send" };
                 }}
@@ -239,12 +290,14 @@ function QueuePreview({ text, onFocus }: { text: string; onFocus(): void }) {
 function QueuedSend({
   recipients,
   channelId,
+  name,
   send,
   ...props
 }: Pick<ButtonProps, "disabled" | "onFocus"> & {
   send(check: () => void): void;
   recipients: readonly string[];
   channelId: string;
+  name?: string | undefined;
 }) {
   const agents = useContext(AgentsContext);
   const state = useSessionState(agents, recipients, {
@@ -253,8 +306,12 @@ function QueuedSend({
   const compacting = state === "compacting";
   return (
     <Tooltip
-      content="Wait for compaction to finish, or interrupt it."
-      {...(!compacting ? { open: false } : {})}
+      content={
+        compacting
+          ? "Wait for compaction to finish, or interrupt it."
+          : `Send now. If ${name?.trim() || (recipients.length > 1 ? "an agent" : "the agent")} is busy, it may add this to its current task.`
+      }
+      {...(props.disabled && !compacting ? { open: false } : {})}
       disableHoverablePopup
     >
       <IconButton
@@ -280,7 +337,7 @@ function QueuedSend({
         size="xs"
         shape="round"
         style={accentButtonStyle}
-        aria-label="Send"
+        aria-label="Send now"
         icon={<ArrowUpIcon size={12} strokeWidth={2.5} />}
         disabled={props.disabled || compacting}
         focusableWhenDisabled={compacting || undefined}

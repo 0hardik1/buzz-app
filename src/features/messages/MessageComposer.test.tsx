@@ -81,6 +81,7 @@ import { MessageEditScope, useMessageEditScope } from "./MessageEditScope";
 import { registerMessageList } from "./message-selection";
 import { setEditWithUpArrowPreference } from "./edit-key-preference";
 import { createRelaySession, type RelaySession } from "../relay/session";
+import { followUpQueue } from "./follow-up-queue";
 import { keypair, metadata, roster, signed } from "../relay/testing";
 import type { EventTemplate } from "nostr-tools";
 import type { RelayEvent } from "../relay/events";
@@ -14897,6 +14898,118 @@ it("queues an agent follow-up that also references a person outside the Solo cha
   expect(h.messages.send).not.toHaveBeenCalled();
 });
 
+it.each([
+  ["queues", "your own agent", { managed: true }, true],
+  ["queues", "your hosted agent", { managed: false, messageable: true }, true],
+  ["sends now", "another owner's agent", { managed: false }, true],
+  ["sends now", "an archived or deleting agent", { managed: true }, false],
+] as const)(
+  "%s an untagged DM message to %s while it works",
+  async (outcome, _label, ownership, selectable) => {
+    localStorage.setItem("buzz-follow-up-behavior.v1", "queue");
+    const h = mount({}, undefined, "viewer");
+    h.setProfiles(new Map([[first.pubkey, { name: "Honey", isAgent: true }]]));
+    const list = {
+      status: "ready",
+      channels: [
+        {
+          id: "channel",
+          name: "Honey",
+          channelType: "dm",
+          members: ["viewer", first.pubkey],
+        },
+      ],
+    };
+    const real = h.session.agentChoices;
+    const choice = { ...first, ...ownership };
+    const choices = {
+      ...real.snapshot(),
+      complete: true,
+      identities: [choice],
+      selectable: selectable ? [choice] : [],
+    };
+    const activity = {
+      status: "listening",
+      records: [],
+      turns: [],
+      typing: [],
+      local: [
+        {
+          agent: first.pubkey,
+          channelId: "channel",
+          messageId: "previous",
+          state: "working",
+          scope: "scope",
+          threadRootId: "",
+          startedAt: 1,
+        },
+      ],
+    };
+    Object.assign(h.session, {
+      viewer: "viewer",
+      channels: { ...h.session.channels, list: () => list },
+      channelWrites: { refreshMembership: async () => list.channels[0] },
+      agentChoices: { ...real, snapshot: () => choices },
+      agentActivity: {
+        activate: () => () => {},
+        subscribe: () => () => {},
+        snapshot: () => activity,
+      },
+    });
+    act(() => h.commands().insertText("Use the other repo"));
+    h.submit();
+    if (outcome === "sends now") {
+      await waitFor(() =>
+        expect(h.messages.send).toHaveBeenCalledWith(
+          "channel",
+          "Use the other repo",
+          [],
+          [],
+        ),
+      );
+      expect(followUpQueue(h.session).snapshot()).toEqual([]);
+      return;
+    }
+    await screen.findByRole("region", { name: "Queued follow-ups" });
+    expect(h.messages.send).not.toHaveBeenCalled();
+    // The row waits on the DM's agent; publication keeps the typed mentions.
+    const [row] = followUpQueue(h.session).snapshot();
+    expect(row?.recipients).toEqual([first.pubkey]);
+    expect(row?.message).toMatchObject({
+      recipients: [],
+      dmAgent: first.pubkey,
+    });
+  },
+);
+
+it("sends now an untagged DM message to a person", async () => {
+  localStorage.setItem("buzz-follow-up-behavior.v1", "queue");
+  const h = mount({}, undefined, "viewer");
+  const person = "e".repeat(64);
+  h.setProfiles(new Map([[person, { name: "Teammate" }]]));
+  const list = {
+    status: "ready",
+    channels: [
+      {
+        id: "channel",
+        name: "Teammate",
+        channelType: "dm",
+        members: ["viewer", person],
+      },
+    ],
+  };
+  Object.assign(h.session, {
+    viewer: "viewer",
+    channels: { ...h.session.channels, list: () => list },
+  });
+  act(() => h.commands().insertText("Lunch?"));
+  h.submit();
+  await waitFor(() =>
+    expect(h.messages.send).toHaveBeenCalledWith("channel", "Lunch?", [], []),
+  );
+  expect(followUpQueue(h.session).snapshot()).toEqual([]);
+});
+
 it("sends now a shared Solo chat message whose only tag is a reference, like untagged conversation", async () => {
   localStorage.setItem("buzz-follow-up-behavior.v1", "queue");
   const h = mount();
@@ -15202,11 +15315,11 @@ it.each([
     h.submit();
     await screen.findByRole("region", { name: "Queued follow-ups" });
     expect(h.messages.send).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Send" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send now" })).toBeVisible();
     h.fill("Keep typing");
     if (mode === "compacting") {
       act(() => agents?.setSessionState("compacting"));
-      expect(screen.getByRole("button", { name: "Send" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Send now" })).toHaveAttribute(
         "aria-disabled",
         "true",
       );
@@ -15240,7 +15353,7 @@ it.each([
       );
       if (mode === "compacting") {
         act(() => agents?.setSessionState("idle"));
-        fireEvent.click(screen.getByRole("button", { name: "Send" }));
+        fireEvent.click(screen.getByRole("button", { name: "Send now" }));
         await waitFor(() => expect(h.messages.send).toHaveBeenCalledOnce());
         expect(h.input()).toHaveValue("Keep typing");
         return;

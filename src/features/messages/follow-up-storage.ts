@@ -19,6 +19,10 @@ export type FollowUpMessage = {
   text: string;
   recipients: readonly string[];
   explicitRecipientIds?: readonly string[];
+  /** In the owner's DM with their agent: the agent this row waits on and
+   * revalidates. Publication still mentions only `recipients`, as an
+   * immediate DM send does; the relay layer adds the DM partner's tag. */
+  dmAgent?: string;
   attachments: readonly UploadedAttachment[];
   references: readonly string[];
   picks: MentionPicks;
@@ -38,6 +42,13 @@ export type FollowUpHandoff = {
   owner?: string;
 };
 const prefix = "follow-up:";
+/** The agents a queued row waits on: its mentions, plus a DM's agent. */
+export const followUpTargets = (
+  message: Pick<FollowUpMessage, "recipients" | "dmAgent">,
+): readonly string[] =>
+  message.dmAgent && !message.recipients.includes(message.dmAgent)
+    ? [...message.recipients, message.dmAgent]
+    : message.recipients;
 export const followUpRecovery = (id: string) => ({
   key: prefix + id,
   value: id,
@@ -131,6 +142,15 @@ export function followUpStorage(scope: string) {
     },
     remove(id: string) {
       clearView(scope, key(id));
+      clearView(scope, `follow-up-held:${id}`);
+    },
+    /** A row behind an unresolved hand-off waits for its own Send, across restarts. */
+    held(id: string) {
+      return readView<unknown>(scope, `follow-up-held:${id}`, null) === true;
+    },
+    hold(id: string) {
+      if (!writeView(scope, `follow-up-held:${id}`, true))
+        throw new Error("Could not save the hold on a queued message.");
     },
     handoff(channelId: string): FollowUpHandoff | null {
       const name = `follow-up-handoff:${channelId}`;
@@ -152,6 +172,25 @@ export function followUpStorage(scope: string) {
       )
         throw new Error("Queued message ordering is unavailable. Try again.");
       return value as FollowUpHandoff;
+    },
+    /** The owner stopped this chat's work; its queue releases nothing on its own. */
+    paused(channelId: string) {
+      return (
+        readView<unknown>(scope, `follow-up-paused:${channelId}`, null) === true
+      );
+    },
+    pause(channelId: string, paused: boolean) {
+      const name = `follow-up-paused:${channelId}`;
+      if (!paused) {
+        try {
+          clearView(scope, name);
+        } catch {
+          throw new Error("Could not save the queue pause.");
+        }
+        return;
+      }
+      if (!writeView(scope, name, true))
+        throw new Error("Could not save the queue pause.");
     },
     claim(channelId: string, handoff: FollowUpHandoff) {
       if (!writeView(scope, `follow-up-handoff:${channelId}`, handoff))
@@ -216,6 +255,8 @@ function valid(value: unknown): value is SavedFollowUp {
       (strings(v.explicitRecipientIds) &&
         v.explicitRecipientIds.length <= 32 &&
         v.explicitRecipientIds.every((id) => v.recipients.includes(id)))) &&
+    (v.dmAgent === undefined ||
+      (typeof v.dmAgent === "string" && /^[0-9a-f]{64}$/.test(v.dmAgent))) &&
     strings(v.references) &&
     Array.isArray(v.attachments) &&
     v.attachments.every(isUploadedAttachment) &&

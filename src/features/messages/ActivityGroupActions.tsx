@@ -13,7 +13,7 @@ import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { InfoIcon, StopIcon, XIcon } from "../../shared/design-system/icons";
 import { AgentsContext, useAgentsSnapshot } from "../agents/react";
 import { requestWork } from "../agents/request-work";
-import { workStop } from "../agents/work-stop";
+import { queuePause, workStop } from "../agents/work-stop";
 import { useWorkStops } from "../agents/use-work-stops";
 import {
   openProfileTranscript,
@@ -105,9 +105,11 @@ export function ActivityGroupActions({
         channelId: latest.channelId,
         messageId: requestId,
         threadRootId: latest.threadRootId ?? requestId,
+        topLevel: !latest.threadRootId,
       },
       session.agentActivity,
       agents,
+      queuePause(session),
     );
     return control ? [{ control, agent: entry.agent }] : [];
   });

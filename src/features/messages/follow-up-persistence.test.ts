@@ -2,10 +2,11 @@
 import { cleanup as cleanupUI, render, screen } from "@testing-library/react";
 import { QueuedFollowUps } from "./QueuedFollowUps";
 import { createElement } from "react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { finalizeEvent, getPublicKey } from "nostr-tools";
 import type { LocalWork } from "../agents/local-activity";
 import type { RelaySession } from "../relay/session";
+import type { ProfileQueries } from "../relay/profile-directory";
 import {
   createOutbox,
   PublishRejected,
@@ -77,6 +78,7 @@ function fixture(
   partition = scope,
   records: readonly OutgoingEvent[] = [],
   incremental = false,
+  dm = false,
 ) {
   let signGate: Promise<void> | undefined;
   let persisted = structuredClone(records);
@@ -133,16 +135,31 @@ function fixture(
   const listeners = new Set<() => void>();
   let working = true;
   let complete = true;
-  let selectable = [{ pubkey: agent }];
+  let selectable: { pubkey: string; managed?: boolean }[] = [
+    { pubkey: agent, ...(dm ? { managed: true } : {}) },
+  ];
   let local: LocalWork[] = [];
   let observedRequest: string | undefined;
-  let channel = {
-    id: "chat",
-    channelType: "solo",
-    creator: viewer,
-    members: [viewer, agent],
-    archived: false,
-  };
+  let channel: {
+    id: string;
+    channelType: string;
+    creator?: string;
+    members: string[];
+    archived: boolean;
+  } = dm
+    ? {
+        id: "chat",
+        channelType: "dm",
+        members: [viewer, agent],
+        archived: false,
+      }
+    : {
+        id: "chat",
+        channelType: "solo",
+        creator: viewer,
+        members: [viewer, agent],
+        archived: false,
+      };
   let rosterStatus = "ready";
   let channelVisible = true;
   const channelListeners = new Set<() => void>();
@@ -155,6 +172,15 @@ function fixture(
     () => {},
     () => true,
     "https://relay.example",
+    undefined,
+    undefined,
+    {
+      snapshot: () => new Map([[agent, { name: "Agent", isAgent: true }]]),
+    } as unknown as ProfileQueries,
+    (id) =>
+      id === channel.id && channel.channelType === "dm"
+        ? channel.members.filter((key) => key !== viewer)
+        : [],
   );
   const send = vi.spyOn({ ...messages }, "send");
   const session = {
@@ -261,12 +287,22 @@ function fixture(
     deny() {
       channel = { ...channel, members: [viewer] };
     },
-    enqueue(value = message) {
-      queue.submit({
-        ...value,
-        message: value,
-        ...followUpMessage(session, value),
-      });
+    members(keys: string[]) {
+      channel = { ...channel, members: keys };
+    },
+    ownership(choice: { managed?: boolean; messageable?: boolean } | null) {
+      selectable = choice ? [{ pubkey: agent, ...choice }] : [];
+      for (const listener of listeners) listener();
+    },
+    enqueue(value = message, validated = false) {
+      queue.submit(
+        {
+          ...value,
+          message: value,
+          ...followUpMessage(session, value),
+        },
+        validated,
+      );
       return queue.snapshot().at(-1)?.id ?? "missing";
     },
   };
@@ -2274,4 +2310,403 @@ it("allows clearing a queued forward note and labels the remaining content", asy
     }),
   );
   expect(screen.getAllByText("Forwarded message").length).toBeGreaterThan(0);
+});
+
+const dmMessage: FollowUpMessage = {
+  channelId: "chat",
+  text: "Use the other repo",
+  recipients: [],
+  dmAgent: agent,
+  attachments: [],
+  references: [],
+  picks: {},
+};
+
+it("releases an untagged DM row to the owner's agent with an immediate send's tags", async () => {
+  const h = fixture(scope, [], false, true);
+  await h.owner.ready;
+  const id = h.enqueue(dmMessage);
+  expect(h.queue.snapshot()[0]?.recipients).toEqual([agent]);
+  expect(h.send).not.toHaveBeenCalled();
+  h.finish();
+  await vi.waitFor(() => expect(h.queue.snapshot()).toEqual([]));
+  expect(h.send).toHaveBeenCalledWith(
+    "chat",
+    "Use the other repo",
+    [],
+    [],
+    followUpRecovery(id),
+    [],
+    {},
+  );
+  h.session.messages.send("chat", "Use the other repo", [], []);
+  await vi.waitFor(() => expect(h.publish).toHaveBeenCalledTimes(2));
+  // Each event has its own client ID and timing; every other tag matches.
+  const [queued, immediate] = (
+    h.publish.mock.calls as unknown as [{ tags: string[][] }][]
+  ).map(([event]) =>
+    event.tags.filter(([name]) => name !== "client-id" && name !== "ms"),
+  );
+  expect(queued).toContainEqual(["p", agent]);
+  expect(queued).toEqual(immediate);
+});
+
+it("restores a DM row with its agent and sends it on Send now", async () => {
+  const first = fixture(scope, [], false, true);
+  first.enqueue(dmMessage);
+  const restored = fixture(scope, [], false, true);
+  await restored.owner.ready;
+  const [row] = restored.queue.snapshot();
+  expect(row?.recipients).toEqual([agent]);
+  expect(row?.message?.dmAgent).toBe(agent);
+  restored.finish();
+  expect(restored.send).not.toHaveBeenCalled();
+  restored.queue.sendNow(row?.id ?? "missing");
+  await vi.waitFor(() => expect(restored.queue.snapshot()).toEqual([]));
+  expect(restored.send).toHaveBeenCalledWith(
+    "chat",
+    "Use the other repo",
+    [],
+    [],
+    followUpRecovery(row?.id ?? "missing"),
+    [],
+    {},
+  );
+});
+
+it.each([
+  [
+    "someone joins the DM",
+    (h: ReturnType<typeof fixture>) =>
+      h.members([viewer, agent, "c".repeat(64)]),
+    "This DM's members changed",
+  ],
+  [
+    "the agent becomes another owner's",
+    (h: ReturnType<typeof fixture>) => h.ownership({ managed: false }),
+    "no longer available",
+  ],
+  [
+    "the agent is archived or deleting",
+    (h: ReturnType<typeof fixture>) => h.ownership(null),
+    "no longer available",
+  ],
+] as const)(
+  "keeps a DM row queued with an error when %s",
+  async (_label, change, error) => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    h.enqueue(dmMessage);
+    change(h);
+    h.finish();
+    await vi.waitFor(() =>
+      expect(h.queue.snapshot()[0]?.error).toContain(error),
+    );
+    expect(h.send).not.toHaveBeenCalled();
+    expect(followUpStorage(scope).load()).toHaveLength(1);
+  },
+);
+
+it("refuses a DM row whose saved recipients are empty", async () => {
+  const h = fixture(scope, [], false, true);
+  await h.owner.ready;
+  const { dmAgent: _, ...untargeted } = dmMessage;
+  h.enqueue(untargeted);
+  h.finish();
+  await vi.waitFor(() => expect(h.queue.snapshot()[0]?.error).toBeTruthy());
+  expect(h.send).not.toHaveBeenCalled();
+});
+
+it("holds at most 20 rows in a DM queue", async () => {
+  const h = fixture(scope, [], false, true);
+  for (let index = 0; index < 20; index++)
+    h.enqueue({ ...dmMessage, text: `Row ${index}` });
+  expect(() => h.enqueue(dmMessage)).toThrow(
+    "Queue is full: remove one or send now.",
+  );
+  expect(h.queue.snapshot()).toHaveLength(20);
+});
+
+describe("Stop pauses the queue", () => {
+  it("holds automatic release until Resume queue, then releases in order", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    h.enqueue({ ...dmMessage, text: "First" });
+    h.enqueue({ ...dmMessage, text: "Second" });
+    await h.queue.pause("chat");
+    expect(h.queue.pauses().get("chat")).toEqual({});
+    expect(followUpStorage(scope).paused("chat")).toBe(true);
+    h.finish();
+    await Promise.resolve();
+    expect(h.send).not.toHaveBeenCalled();
+    await h.queue.resume("chat");
+    await vi.waitFor(() => expect(h.send).toHaveBeenCalledOnce());
+    expect(h.send.mock.calls[0]?.[1]).toBe("First");
+    const firstId = h.send.mock.results[0]?.value as string;
+    h.work(firstId, "working");
+    h.work(firstId, "done");
+    await vi.waitFor(() => expect(h.send).toHaveBeenCalledTimes(2));
+    expect(h.send.mock.calls[1]?.[1]).toBe("Second");
+    expect(followUpStorage(scope).paused("chat")).toBe(false);
+  });
+
+  it("sends only the chosen row on Send now and keeps the chat paused", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    h.enqueue({ ...dmMessage, text: "First" });
+    const second = h.enqueue({ ...dmMessage, text: "Correction" });
+    await h.queue.pause("chat");
+    h.finish();
+    h.queue.sendNow(second);
+    await vi.waitFor(() => expect(h.send).toHaveBeenCalledOnce());
+    expect(h.send.mock.calls[0]?.[1]).toBe("Correction");
+    const id = h.send.mock.results[0]?.value as string;
+    h.work(id, "working");
+    h.work(id, "done");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.send).toHaveBeenCalledOnce();
+    expect(h.queue.pauses().has("chat")).toBe(true);
+    expect(h.queue.snapshot().map((row) => row.text)).toEqual(["First"]);
+  });
+
+  it("keeps the in-memory pause and reports separately when it cannot be saved", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    h.enqueue(dmMessage);
+    const request = navigator.locks.request.bind(navigator.locks);
+    vi.spyOn(navigator.locks, "request").mockImplementation(((
+      name: string,
+      ...rest: unknown[]
+    ) =>
+      name.startsWith("buzz-follow-up-chat:")
+        ? Promise.reject(new Error("Locks unavailable"))
+        : (request as (...args: unknown[]) => Promise<unknown>)(
+            name,
+            ...rest,
+          )) as typeof navigator.locks.request);
+    await expect(h.queue.pause("chat")).rejects.toThrow("Locks unavailable");
+    expect(h.queue.pauses().get("chat")?.saveError).toBe(
+      "Queue paused in this window only. Couldn’t save the pause, so other windows or a restart may not keep it.",
+    );
+    h.finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps a saved pause across restart, even when interrupted turns resume", async () => {
+    const first = fixture(scope, [], false, true);
+    await first.owner.ready;
+    first.enqueue(dmMessage);
+    await first.queue.pause("chat");
+    const restored = fixture(scope, [], false, true);
+    await restored.owner.ready;
+    expect(restored.queue.pauses().has("chat")).toBe(true);
+    restored.queue.resumeAfter(agent, { previous: "chat" });
+    restored.work("previous", "done");
+    restored.finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(restored.send).not.toHaveBeenCalled();
+    await restored.queue.resume("chat");
+    await vi.waitFor(() => expect(restored.send).toHaveBeenCalledOnce());
+  });
+
+  it("reports a row already being sent at Stop as one that may still go out", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    const gate = deferredVoid();
+    h.enqueue({ ...dmMessage, text: "First" });
+    h.enqueue({ ...dmMessage, text: "Second" });
+    // Hold the Outbox journal save: the first row is past its final check.
+    const save = h.save.getMockImplementation();
+    h.save.mockImplementation(async (...args) => {
+      await gate.promise;
+      return save?.(...args);
+    });
+    h.finish();
+    await vi.waitFor(() => expect(h.queue.snapshot()[0]?.sending).toBe(true));
+    void h.queue.pause("chat");
+    expect(h.queue.pauses().get("chat")).toEqual({ sentBeforeStop: true });
+    gate.resolve();
+    await vi.waitFor(() =>
+      expect(h.queue.snapshot().map((row) => row.text)).toEqual(["Second"]),
+    );
+    const id = h.send.mock.results[0]?.value as string;
+    h.work(id, "working");
+    h.work(id, "done");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.send).toHaveBeenCalledOnce();
+  });
+
+  it("queues a new message while paused rows wait, and sends at once after they leave", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    const first = h.enqueue({ ...dmMessage, text: "First" });
+    await h.queue.pause("chat");
+    h.finish();
+    // The agent is idle, but the paused row still waits, so a new message joins it.
+    const next = h.enqueue({ ...dmMessage, text: "Next" }, true);
+    await Promise.resolve();
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.queue.snapshot().map((row) => row.text)).toEqual([
+      "First",
+      "Next",
+    ]);
+    h.queue.remove(first);
+    h.queue.remove(next);
+    await vi.waitFor(() => expect(h.queue.pauses().size).toBe(0));
+    // With nothing left to protect, a correction sends at once.
+    h.enqueue({ ...dmMessage, text: "Correction" }, true);
+    await vi.waitFor(() => expect(h.send).toHaveBeenCalledOnce());
+    expect(h.send.mock.calls[0]?.[1]).toBe("Correction");
+    expect(h.queue.snapshot()).toEqual([]);
+  });
+
+  it("does nothing without queued rows and clears once the queue empties", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    await h.queue.pause("chat");
+    expect(h.queue.pauses().size).toBe(0);
+    const only = h.enqueue(dmMessage);
+    await h.queue.pause("chat");
+    h.queue.sendNow(only);
+    await vi.waitFor(() => expect(h.queue.snapshot()).toEqual([]));
+    await vi.waitFor(() => expect(h.queue.pauses().size).toBe(0));
+    await vi.waitFor(() =>
+      expect(followUpStorage(scope).paused("chat")).toBe(false),
+    );
+  });
+});
+
+function deferredVoid() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+describe("Stop pause across windows and restarts", () => {
+  it("keeps each successor held after overriding an unresolved handoff for one row", async () => {
+    const storage = followUpStorage(scope);
+    storage.save({ ...dmMessage, id: "second", createdAt: 2 });
+    storage.save({ ...dmMessage, id: "third", createdAt: 3 });
+    storage.claim("chat", {
+      id: "first",
+      message: "f".repeat(64),
+      recipients: [agent],
+      owner: "buzz-follow-up-window:closed",
+    });
+    storage.pause("chat", true);
+    const restarted = fixture(scope, [], true, true);
+    await restarted.owner.ready;
+    restarted.finish();
+    await restarted.queue.resume("chat");
+    await storage.lockChat("chat", async () => {});
+    expect(restarted.queue.snapshot()[0]?.error).toContain(
+      "earlier queued message",
+    );
+    expect(restarted.send).not.toHaveBeenCalled();
+
+    restarted.queue.sendNow("second");
+    await vi.waitFor(() =>
+      expect(restarted.queue.snapshot().map((row) => row.id)).toEqual([
+        "third",
+      ]),
+    );
+    const sent = restarted.send.mock.results[0]?.value as string;
+    restarted.work(sent, "done");
+    await storage.lockChat("chat", async () => {});
+    expect(restarted.send).toHaveBeenCalledOnce();
+    expect(storage.has("third")).toBe(true);
+  });
+
+  it("saves the hold on later rows when Send now goes first, across another restart", async () => {
+    const storage = followUpStorage(scope);
+    storage.save({ ...dmMessage, id: "second", createdAt: 2 });
+    storage.save({ ...dmMessage, id: "third", createdAt: 3 });
+    storage.claim("chat", {
+      id: "first",
+      message: "f".repeat(64),
+      recipients: [agent],
+      owner: "buzz-follow-up-window:closed",
+    });
+    const restarted = fixture(scope, [], true, true);
+    await restarted.owner.ready;
+    restarted.finish();
+    // Send now before Resume queue still replaces the unresolved hand-off.
+    restarted.queue.sendNow("second");
+    await vi.waitFor(() =>
+      expect(restarted.queue.snapshot().map((row) => row.id)).toEqual([
+        "third",
+      ]),
+    );
+    expect(storage.held("third")).toBe(true);
+    const sent = restarted.send.mock.results[0]?.value as string;
+    restarted.work(sent, "done");
+    await restarted.queue.resume("chat");
+    await storage.lockChat("chat", async () => {});
+    expect(restarted.send).toHaveBeenCalledOnce();
+
+    const again = fixture(scope, [], true, true);
+    await again.owner.ready;
+    again.finish();
+    expect(again.queue.snapshot()[0]?.error).toContain(
+      "earlier queued message",
+    );
+    again.queue.resumeAfter(agent, { [sent]: "chat" });
+    await again.queue.resume("chat");
+    await storage.lockChat("chat", async () => {});
+    expect(again.send).not.toHaveBeenCalled();
+    again.queue.sendNow("third");
+    await vi.waitFor(() => expect(again.send).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(storage.held("third")).toBe(false));
+  });
+
+  it("persists Stop when another window queued after this window stopped observing", async () => {
+    const stopping = fixture(scope, [], true, true);
+    const producing = fixture(scope, [], true, true);
+    await Promise.all([stopping.owner.ready, producing.owner.ready]);
+    producing.enqueue(dmMessage);
+    expect(stopping.queue.snapshot()).toEqual([]);
+    await stopping.queue.pause("chat");
+    producing.finish();
+    await followUpStorage(scope).lockChat("chat", async () => {});
+    expect(producing.send).not.toHaveBeenCalled();
+    expect(followUpStorage(scope).paused("chat")).toBe(true);
+  });
+
+  it("keeps the saved pause if another window still has a waiting row", async () => {
+    const first = fixture(scope, [], true, true);
+    await first.owner.ready;
+    const id = first.enqueue(dmMessage);
+    await first.queue.pause("chat");
+    const second = fixture(scope, [], true, true);
+    await second.owner.ready;
+    const remaining = second.enqueue({ ...dmMessage, text: "Still paused" });
+    expect(first.queue.snapshot().map((row) => row.id)).toEqual([id]);
+    first.queue.remove(id);
+    await vi.waitFor(() => expect(followUpStorage(scope).has(id)).toBe(false));
+    await followUpStorage(scope).lockChat("chat", async () => {});
+    expect(followUpStorage(scope).has(remaining)).toBe(true);
+    expect(followUpStorage(scope).paused("chat")).toBe(true);
+  });
+
+  it("keeps a restored successor held when the former owner's handoff is unresolved", async () => {
+    const storage = followUpStorage(scope);
+    storage.save({ ...dmMessage, id: "successor", createdAt: 2 });
+    storage.claim("chat", {
+      id: "first",
+      message: "f".repeat(64),
+      recipients: [agent],
+      owner: "buzz-follow-up-window:closed",
+    });
+    storage.pause("chat", true);
+    const restarted = fixture(scope, [], true, true);
+    await restarted.owner.ready;
+    restarted.finish();
+    await restarted.queue.resume("chat");
+    await storage.lockChat("chat", async () => {});
+    expect(restarted.send).not.toHaveBeenCalled();
+    expect(storage.has("successor")).toBe(true);
+  });
 });

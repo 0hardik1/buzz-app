@@ -1088,12 +1088,20 @@ Codex resumes it.
 ### Saved Solo follow-ups
 
 The queued rows above the Solo composer are unsent messages, separate from the
-agent runner's interrupted turns. They are saved on this device in view storage,
+agent runner's interrupted turns. With **Queue** follow-up behavior, the owner's
+one-to-one DM with their own agent queues the same way. That agent must be selectable
+(not archived or deleting) and the owner's to message (`canMessageAgent`). An untagged
+message there, including one whose mention was removed or which has only references,
+waits on the DM's agent (`dmAgent`); publication keeps the typed mentions, so the
+released event has the same tags as an immediate DM send. A typed person, another
+owner's agent or a thread reply sends now. Release refuses the row, keeping it with an
+error, if the DM gains a member or the agent stops being selectable or messageable. A DM
+holds at most 20 queued rows. They are saved on this device in view storage,
 partitioned by account and community. Text, recipients, uploaded attachments,
 references, and model/effort choices survive a reload or app restart. An upload
 still in progress has not yet entered this queue.
 
-Restored rows remain paused with **Send** and **Remove** while the owner decides.
+Restored rows remain paused with **Send now** and **Remove** while the owner decides.
 **Resume** also unpauses saved follow-ups in the chats whose interrupted requests
 are being resumed. Each chat waits for those exact requests to settle, including
 the read/startup gap, then sends one queued message per completed turn. An old
@@ -1114,10 +1122,27 @@ window that cannot establish that predecessor's completion pauses its competing
 rows for explicit Send rather than starting overlapping work. The paused rows explain that an earlier message was
 handled in another window.
 **Don’t resume** leaves the saved follow-ups paused. Other chats remain paused.
+**Stop** on top-level work pauses that chat's queue. The pause is set in memory before
+the interrupt is sent, so Stop never waits for it; saving the pause runs in parallel
+under the chat lock, and a failed save is reported separately from the Stop. Stop
+checks the saved rows too, so a row another window queued is paused even before this
+window hears of it. Release checks the in-memory and saved pause in the same
+synchronous step as its final publication guards, so a row already past that step may
+still publish; the paused header says one message was already being sent and may still
+go out, and later rows stay paused. **Send now** on a paused row sends only that row;
+the chat stays paused until **Resume queue**. Resume of interrupted turns does not clear
+a Stop pause. A Stop inside a thread leaves the chat's queue alone; a hosted turn is
+top-level only when its own request is the thread root. A chat drops its pause only
+when no saved rows are left in any window, checked again under the chat lock, so the
+next message sends as usual. An earlier hand-off that this window doesn't own and that
+has no completion evidence holds every row behind it, each until its own **Send now**.
+**Resume queue** and a **Send now** that goes past that hand-off both save the hold
+first, under a separate per-row key, so it survives another restart and an
+interrupted-turn Resume. Removing or sending the row clears it.
 Every release rechecks membership and recipient availability. A failed save keeps the
 composer draft; a failed removal keeps the row. Delivery transfers to the existing
 Outbox only after its journal is durable. Once Outbox owns a message, Remove stays
-disabled even if saving its recovery receipt fails; Send retries that same receipt.
+disabled even if saving its recovery receipt fails; Send now retries that same receipt.
 Remove is disabled during an active handoff;
 a per-row lock also prevents another window from removing it mid-send. If another window has begun sending,
 reload to recover its original receipt rather than publishing a second message.
