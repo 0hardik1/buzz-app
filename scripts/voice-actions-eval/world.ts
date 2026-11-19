@@ -218,6 +218,19 @@ export const MESSAGES: readonly Message[] = [
     text: "Relay p95 is back under 200 ms after the index fix",
     replies: 7,
   },
+  // Used only by the held-out cases.
+  {
+    id: "m-deploy",
+    channel: "buzz-relay",
+    author: "Jonas",
+    text: "deploy to staging finished, smoke tests are green",
+  },
+  {
+    id: "m-lunch",
+    channel: "random",
+    author: "Sam Rivera",
+    text: "who wants tacos at noon?",
+  },
 ];
 
 /** Quick reactions: name -> emoji. */

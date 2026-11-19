@@ -3,7 +3,7 @@
 // Jev). Needs a TypeSafe key in TYPESAFE_API_KEY or ~/.typesafe; without one
 // it stops rather than mock the service.
 //
-//   bin/node scripts/voice-actions-eval/run.mjs [--repeat N] [--filter ID|CATEGORY] [--out FILE.json]
+//   bin/node scripts/voice-actions-eval/run.mjs [--repeat N] [--filter ID|CATEGORY] [--set tuned|heldout|all] [--out FILE.json]
 import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,8 @@ const { values } = parseArgs({
     repeat: { type: "string", default: "1" },
     filter: { type: "string" },
     out: { type: "string" },
+    // tuned (default), heldout, or all.
+    set: { type: "string", default: "tuned" },
   },
 });
 let key = process.env.TYPESAFE_API_KEY?.trim();
@@ -39,6 +41,7 @@ const { module } = await runnerImport(
 const { results, summary } = await module.main(key, {
   repeat: Number(values.repeat),
   filter: values.filter,
+  set: values.set,
 });
 console.table(summary);
 if (values.out) {
