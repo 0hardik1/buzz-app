@@ -761,12 +761,14 @@ export class AcpRuntime {
       } catch (error) {
         console.warn("ACP agent could not read the conversation", error);
       }
-    // A session already has its own replies; a new one is shown them too.
+    // A session already has its own replies; a new one is shown them too. A
+    // resumed turn's thread may sit below the mark another thread moved, so
+    // it is shown all of it but what the session saw by id.
     const candidates = earlier.filter(
       (item) =>
-        (item.created_at >= from.at || owed.includes(item.id)) &&
+        (resumed || item.created_at >= from.at || owed.includes(item.id)) &&
         !from.ids.includes(item.id) &&
-        (fresh || item.pubkey !== pubkeyOf(self)),
+        (fresh || resumed || item.pubkey !== pubkeyOf(self)),
     );
     // Owed messages come first; the newest others fill what is left.
     const others = candidates.filter((item) => !owed.includes(item.id));

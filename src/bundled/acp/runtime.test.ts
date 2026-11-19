@@ -600,6 +600,46 @@ describe("AcpRuntime", () => {
     fake.harnesses[0]?.turns[0]?.finish();
   });
 
+  it("resumes two threads of one channel session, each with its own history", async () => {
+    const config = await confirmed({ scope: "channel" });
+    const at = (event: RelayEvent, created_at: number, root?: RelayEvent) => {
+      event.created_at = created_at;
+      if (root) event.tags.push(["e", root.id, "", "root"]);
+      return event;
+    };
+    const a = at(message("1", "@Opal thread A"), 101);
+    const aLater = at(message("2", "A: also this.", "b".repeat(64)), 150, a);
+    const b = at(message("3", "@Opal thread B"), 102);
+    const bDone = at(message("4", "B: done, deployed.", self), 120, b);
+    const bFix = at(
+      message("5", "B: use staging instead.", "b".repeat(64)),
+      121,
+      b,
+    );
+    const { fake, sync, deliver } = setup(
+      { hold: true },
+      { read: async () => [a, aLater, b, bDone, bFix] },
+    );
+    sync(config);
+    const resume = (event: RelayEvent) =>
+      deliver(event, config, undefined, {
+        trigger: { type: "mention", event, resumed: true },
+      } as unknown as Partial<Delivery>).run;
+    await resume(a);
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+    fake.harnesses[0]?.turns[0]?.finish();
+    await resume(b);
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(2));
+    const [first, second] = fake.harnesses[0]?.turns ?? [];
+    expect(second?.sessionId).toBe(first?.sessionId);
+    const text = second?.text ?? "";
+    expect(text).toContain("B: done, deployed.");
+    expect(text).toContain("B: use staging instead.");
+    // Still only its own thread, and nothing the session already saw.
+    expect(text).not.toContain("A: also this.");
+    second?.finish();
+  });
+
   it("lets a channel-level wake reply in a thread", async () => {
     const config = await confirmed();
     const { fake, runtime, sync, workingUntil, published, agent } = setup({
