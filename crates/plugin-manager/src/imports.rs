@@ -314,21 +314,15 @@ fn read_saved_folder(manager: &Manager, id: &str) -> Result<(ReloadSource, Relea
     let InstallSource::Folder(folder) = &source else {
         return Err("Plugin has no saved folder source".into());
     };
-    let prefix = if folder.path == "." {
-        "Selected folder"
-    } else {
-        &folder.path
-    };
-    let release = prepare_reload_artifact(&source)
-        .and_then(|release| {
-            if release.validate()?.id != id {
-                return Err(
-                    "The saved folder no longer contains this plugin at its installed path.".into(),
-                );
-            }
-            Ok(release)
-        })
-        .map_err(|reason| format!("{prefix}: {reason}"))?;
+    let release = prepare_reload_artifact(&source)?;
+    let manifest = release
+        .validate()
+        .map_err(|reason| folder.read_error(reason))?;
+    if manifest.id != id {
+        return Err(folder.read_error(
+            "The saved folder no longer contains this plugin at its installed path.".into(),
+        ));
+    }
     Ok((folder.clone(), release))
 }
 
@@ -2551,10 +2545,25 @@ mod tests {
         assert!(bound
             .install(&manager, &bound.preview.token, "other")
             .is_err());
+        fs::remove_file(source.join("plugin.signature.json")).unwrap();
+        let expected = "dist: Incomplete signed plugin release pair";
+        assert_eq!(
+            check_saved_folder(&manager, "example.checked").unwrap_err(),
+            expected
+        );
+        assert_eq!(
+            prepare_saved_folder(&manager, "example.checked")
+                .err()
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            manager.reload_live("example.checked").err().unwrap(),
+            expected
+        );
+
         fs::remove_file(source.join("plugin.js")).unwrap();
-        for name in ["plugin.artifact.json", "plugin.signature.json"] {
-            fs::remove_file(source.join(name)).unwrap();
-        }
+        fs::remove_file(source.join("plugin.artifact.json")).unwrap();
         let error = check_saved_folder(&manager, "example.checked").unwrap_err();
         assert!(error.contains("dist:"), "{error}");
         assert!(error.contains("plugin.js"), "{error}");
