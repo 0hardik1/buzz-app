@@ -451,7 +451,7 @@ function AppShellContent({
               >
                 {/* The conversation floats as its own card; the sidebar
                       sits beside it on the window's tint. */}
-                <Panel as="div">
+                <Panel as="div" flat>
                   <PanelFrame scope={connection.scope} companion={companion}>
                     <div
                       id={`shell-page-${owner}`}

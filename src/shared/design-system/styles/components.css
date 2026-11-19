@@ -1050,6 +1050,14 @@
     border-radius: var(--radius-pill);
   }
 
+  /* A flat panel has no edge; its fill separates it from the tint. Sidebar
+     cards on the tint are always flat. */
+  .panel[data-flat],
+  :where([data-sidebar-cards] [data-sidebar-card]) {
+    border-color: transparent;
+    box-shadow: none;
+  }
+
   /* A joined surface keeps one outer edge; nested panels retain opaque
      fills for responsive overlays while their layout owns the separators. */
   .panel[data-joined] .panel {
