@@ -104,8 +104,16 @@ export function trackPointerPosition(
   target: Window | undefined = typeof window !== "undefined"
     ? window
     : undefined,
-): { current: () => PointerSnapshot; stop: () => void } {
+): {
+  current: () => PointerSnapshot;
+  /** Discounts focus moves so far, and any until the next key or pointer
+   * input: the voice box's own focus, and focus returning when it closes,
+   * are not the person moving focus. */
+  forgetFocus: () => void;
+  stop: () => void;
+} {
   let seq = 0;
+  let ignoringFocus = false;
   let state: PointerSnapshot = {
     x: 0,
     y: 0,
@@ -113,8 +121,13 @@ export function trackPointerPosition(
     pointerAt: 0,
     focusAt: 0,
   };
-  if (!target) return { current: () => state, stop: () => {} };
+  if (!target)
+    return { current: () => state, forgetFocus: () => {}, stop: () => {} };
+  const onInput = () => {
+    ignoringFocus = false;
+  };
   const onMove = (event: PointerEvent | MouseEvent) => {
+    ignoringFocus = false;
     state = {
       ...state,
       x: event.clientX,
@@ -129,6 +142,7 @@ export function trackPointerPosition(
   const onFocus = (event: FocusEvent) => {
     const doc = target.document;
     if (
+      ignoringFocus ||
       event.target === target ||
       event.target === doc ||
       event.target === doc?.body ||
@@ -152,10 +166,16 @@ export function trackPointerPosition(
     passive: true,
     capture: true,
   });
+  target.addEventListener("keydown", onInput, { passive: true, capture: true });
   docEl?.addEventListener("mouseleave", onLeave, { passive: true });
   return {
     current: () => state,
+    forgetFocus: () => {
+      ignoringFocus = true;
+      state = { ...state, focusAt: 0 };
+    },
     stop: () => {
+      target.removeEventListener("keydown", onInput, { capture: true });
       target.removeEventListener("pointermove", onMove, { capture: true });
       target.removeEventListener("pointerdown", onMove, { capture: true });
       target.removeEventListener("blur", onLeave);

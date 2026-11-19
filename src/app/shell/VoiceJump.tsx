@@ -182,6 +182,9 @@ export function VoiceJump({
 
   const close = useCallback(() => {
     setOpen(false);
+    // Focus moved by the box itself, and returned on close, isn't the
+    // person's: a resting pointer still decides the next hover.
+    pointerRef.current?.forgetFocus();
     // The next opening starts with a key already fetched.
     if (voiceAvailable) prepareVoice();
   }, [voiceAvailable]);
@@ -312,6 +315,9 @@ export function VoiceJumpBody({
     pending?: string | undefined;
     lead?: LiveLead | undefined;
     actionLead?: LiveActionLead | undefined;
+    /** The newest words heard or typed; a pause's answer for older words
+     * never shows a chip over them. */
+    latest?: string | undefined;
     done: boolean;
   }>({ epoch: 0, answers: new Map(), live: false, done: false });
 
@@ -528,8 +534,11 @@ export function VoiceJumpBody({
     const current = run.current;
     const scope = scopeNow();
     if (current.done || !scope || !said.trim()) return;
+    // A pause is on the newest words; anything heard or typed after it wins.
+    current.latest = said;
     void ask(said, scope.communityOrigin, scope).then((result) => {
-      if (run.current !== current || current.done) return;
+      if (run.current !== current || current.done || current.latest !== said)
+        return;
       show(result);
       if (
         result.kind === "navigate" &&
@@ -566,6 +575,7 @@ export function VoiceJumpBody({
       });
     const current = run.current;
     if (current.done) return;
+    current.latest = said;
     setPhase({ kind: "matching" });
     void ask(said, scope.communityOrigin, scope).then((result) => {
       if (run.current !== current || current.done) return;
@@ -614,6 +624,7 @@ export function VoiceJumpBody({
 
   const dictation = useVoiceDictation({
     onText: (next) => {
+      run.current.latest = next;
       setPhase({ kind: "listening" });
       setText(next);
       // The dictation hook keeps the newest callbacks, so this is current.
