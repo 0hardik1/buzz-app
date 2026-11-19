@@ -966,6 +966,99 @@ it("groups unread thread activity by same-channel root and clears one item witho
   });
 });
 
+const imeta = (url: string, mime: string) => [
+  "imeta",
+  `url ${url}`,
+  `m ${mime}`,
+];
+
+it.each([
+  ["", [imeta("https://example.test/a.png", "image/png")], "Image"],
+  [
+    "![photo](https://example.test/a.png)",
+    [imeta("https://example.test/a.png", "image/png")],
+    "Image",
+  ],
+  [
+    "![one](https://example.test/a.png)\n\n![two](https://example.test/b.png)",
+    [],
+    "2 images",
+  ],
+  [
+    "",
+    [
+      imeta("https://example.test/a.mp4", "video/mp4"),
+      imeta("https://example.test/b.mp4", "video/mp4"),
+    ],
+    "2 videos",
+  ],
+  [
+    "",
+    [
+      imeta("https://example.test/a.png", "image/png"),
+      imeta("https://example.test/b.mp4", "video/mp4"),
+    ],
+    "2 attachments",
+  ],
+  [
+    "A caption\n\n![photo](https://example.test/a.png)",
+    [imeta("https://example.test/a.png", "image/png")],
+    "A caption",
+  ],
+] as const)(
+  "activity and Inbox previews describe attachment-only messages: %j %j",
+  (content, media, preview) => {
+    const h = setup();
+    h.grant("room");
+    const root = message(h.viewer, "room", "root", 10);
+    const reply = message(h.alice, "room", content, 11, [
+      ["e", root.id, "", "reply"],
+      ...media.map((tag) => [...tag]),
+    ]);
+    const mention = message(h.alice, "room", content, 12, [
+      ["p", h.viewer.pubkey],
+      ...media.map((tag) => [...tag]),
+    ]);
+    h.emit([root, reply, mention]);
+    expect(h.session.unread.activity("room").items?.[0]?.preview).toBe(preview);
+    expect(
+      h.session.unread
+        .inbox()
+        .items.find((item) => item.previewMessageId === mention.id)?.preview,
+    ).toBe(preview);
+  },
+);
+
+it("activity attachment labels follow edits and notify preview subscribers", () => {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.viewer, "room", "root", 10);
+  const reply = message(
+    h.alice,
+    "room",
+    "A caption\n\n![photo](https://example.test/a.png)",
+    11,
+    [["e", root.id, "", "reply"]],
+  );
+  h.emit([root, reply]);
+  expect(h.session.unread.activity("room").items?.[0]?.preview).toBe(
+    "A caption",
+  );
+  const changes: ThreadActivitySnapshot[] = [];
+  h.session.unread.subscribeActivity("room", () =>
+    changes.push(h.session.unread.activity("room")),
+  );
+  h.emit([
+    signed(h.alice, {
+      kind: 40003,
+      content:
+        "![one](https://example.test/a.png)\n\n![two](https://example.test/b.png)",
+      tags: [["e", reply.id]],
+    }),
+  ]);
+  expect(changes.at(-1)?.items?.[0]?.preview).toBe("2 images");
+});
+
 it("activity previews use edited and unwrapped current message content and notify subscribers", () => {
   const h = setup();
   h.grant("room");
@@ -1127,9 +1220,17 @@ it("lists unread top-level mentions apart from thread activity, never for a DM o
   h.emit([newer, message(h.alice, "dm", "Direct ask", 25, tag)]);
 
   expect(changed).toHaveBeenCalled();
-  // The reply's mention stays with its thread.
+  // The reply's mention stays with its thread, which also says the viewer
+  // is in it.
   expect(h.session.unread.activity("room")).toMatchObject({
-    items: [{ rootId: root.id, latestMessageId: reply.id }],
+    items: [
+      {
+        rootId: root.id,
+        latestMessageId: reply.id,
+        participating: true,
+        mention: { messageId: reply.id, preview: "In your thread" },
+      },
+    ],
     mentions: [
       {
         channelId: "room",
@@ -2188,6 +2289,49 @@ it("undoes captured ordinary reads, saved reminders and forced overlays as one e
   ).toBeUndefined();
 });
 
+it.each(["first-then-second", "second-then-first"] as const)(
+  "keeps captured Undo independent across channels (%s)",
+  async (order) => {
+    const h = setup();
+    h.grant("room");
+    h.grant("other");
+    const first = message(h.alice, "room", "first", 11);
+    const second = message(h.alice, "other", "second", 12);
+    h.emit([first, second]);
+    const unread = h.session.unread;
+    const firstRead = await requireCapturedRead(unread, [first.id]);
+    const secondRead = await requireCapturedRead(unread, [second.id]);
+    const firstUndoAction = firstRead.undo;
+    const secondUndoAction = secondRead.undo;
+    assert(firstUndoAction && secondUndoAction);
+
+    const firstUndo =
+      order === "first-then-second" ? firstUndoAction : secondUndoAction;
+    const secondUndo =
+      order === "first-then-second" ? secondUndoAction : firstUndoAction;
+    const firstUndoMessage = order === "first-then-second" ? first : second;
+    const secondUndoMessage = order === "first-then-second" ? second : first;
+    await firstUndo();
+    expect(
+      unread.attention(
+        firstUndoMessage === first ? "room" : "other",
+        firstUndoMessage.id,
+      ).unread,
+    ).toBe(true);
+    expect(
+      unread.attention(
+        secondUndoMessage === first ? "room" : "other",
+        secondUndoMessage.id,
+      ).unread,
+    ).toBe(false);
+
+    await secondUndo();
+    expect(unread.attention("room", first.id).unread).toBe(true);
+    expect(unread.attention("other", second.id).unread).toBe(true);
+    await expect(firstUndo()).rejects.toThrow("Reading observation expired");
+  },
+);
+
 it("captured ordinary Undo preserves already-read and own messages without rewinding synced prefixes", async () => {
   const h = setup();
   h.grant("room");
@@ -2308,9 +2452,18 @@ it.each(["selected", "unrelated"] as const)(
     );
     const afterRead = h.journal();
 
-    await expect(result.undo()).rejects.toThrow("Reading observation expired");
-    expect(h.journal()).toEqual(afterRead);
-    expect(unread.attention("room", a.id).unread).toBe(false);
+    if (target === "selected") {
+      await expect(result.undo()).rejects.toThrow(
+        "Reading observation expired",
+      );
+      expect(h.journal()).toEqual(afterRead);
+      expect(unread.attention("room", a.id).unread).toBe(false);
+    } else {
+      await result.undo();
+      expect(unread.attention("room", a.id).unread).toBe(true);
+      expect(unread.attention("room", b.id).unread).toBe(false);
+      expect(h.journal()?.state.frontiers[`msg:${b.id}`]).toBe(b.created_at);
+    }
     expect(unread.attention("room", later.id).unread).toBe(false);
   },
 );
@@ -2526,28 +2679,112 @@ it("expires captured-read Undo after a newer saved journal revision", async () =
   expect(h.journal()?.state.frontiers[`msg:${row.id}`]).toBe(row.created_at);
 });
 
-it("expires captured-read Undo after newer message-force intent", async () => {
+it.each(["selected", "unrelated"] as const)(
+  "scopes captured Undo to %s newer message-force intent",
+  async (target) => {
+    const h = setup();
+    h.grant("room");
+    const row = message(h.alice, "room", "selected", 11);
+    const other = message(h.alice, "room", "unrelated", 12);
+    h.emit([row, other]);
+    const unread = h.session.unread;
+    await unread.markUnreadLocal({
+      kind: "message",
+      channelId: "room",
+      messageId: row.id,
+    });
+    const result = await requireCapturedRead(unread, [row.id]);
+    assert(result.undo);
+    const forced = target === "selected" ? row : other;
+    await unread.markMessageUnread("room", forced.id);
+    const newer = h.journal();
+
+    if (target === "selected") {
+      await expect(result.undo()).rejects.toThrow(
+        "Reading observation expired",
+      );
+      expect(h.journal()).toEqual(newer);
+      expect(h.journal()?.localUnread[`msg:${row.id}`]).toBeUndefined();
+      expect(h.journal()?.state.frontiers[`msg:${row.id}`]).toBe(
+        row.created_at,
+      );
+    } else {
+      await result.undo();
+      expect(h.journal()?.localUnread[`msg:${row.id}`]).toBeDefined();
+      expect(h.journal()?.state.frontiers[`msg:${row.id}`]).toBeUndefined();
+      expect(unread.attention("room", row.id)).toMatchObject({
+        unread: true,
+        forced: false,
+      });
+    }
+    expect(unread.attention("room", forced.id)).toMatchObject({ forced: true });
+    expect(h.journal()?.localUnread["message-force:room"]).toBeGreaterThan(0);
+  },
+);
+
+it("expires captured-read Undo after a newer local unread mark is cleared", async () => {
   const h = setup();
   h.grant("room");
   const row = message(h.alice, "room", "selected", 11);
   h.emit([row]);
   const unread = h.session.unread;
-  await unread.markUnreadLocal({
-    kind: "message",
-    channelId: "room",
-    messageId: row.id,
-  });
   const result = await requireCapturedRead(unread, [row.id]);
   assert(result.undo);
-  await unread.markMessageUnread("room", row.id);
-  const newer = h.journal();
+
+  const target = {
+    kind: "message" as const,
+    channelId: "room",
+    messageId: row.id,
+  };
+  await unread.markUnreadLocal(target);
+  await unread.clearUnreadLocal(target);
+  const afterClear = h.journal();
+  expect(afterClear?.localUnread[`msg:${row.id}`]).toBeUndefined();
 
   await expect(result.undo()).rejects.toThrow("Reading observation expired");
-  expect(h.journal()).toEqual(newer);
-  expect(h.journal()?.localUnread[`msg:${row.id}`]).toBeUndefined();
+  expect(h.journal()).toEqual(afterClear);
   expect(h.journal()?.state.frontiers[`msg:${row.id}`]).toBe(row.created_at);
-  expect(unread.attention("room", row.id)).toMatchObject({ forced: true });
-  expect(h.journal()?.localUnread["message-force:room"]).toBeGreaterThan(0);
+  expect(unread.attention("room", row.id).unread).toBe(false);
+});
+
+it("keeps captured Undo after ingesting an unrelated peer read", async () => {
+  const h = setup();
+  h.grant("room");
+  h.grant("other");
+  const selected = message(h.alice, "room", "selected", 11);
+  const peerRead = message(h.alice, "other", "peer read", 12);
+  h.emit([selected, peerRead]);
+  const unread = h.session.unread;
+  const result = await requireCapturedRead(unread, [selected.id]);
+  assert(result.undo);
+
+  const createdAt = Math.floor(Date.now() / 1000);
+  const marker = await signReadState(
+    {
+      slot: "a".repeat(32),
+      createdAt,
+      blob: {
+        v: 1,
+        client_id: "peer",
+        contexts: { [`msg:${peerRead.id}`]: peerRead.created_at },
+      },
+    },
+    h.viewer.secret,
+    createdAt,
+  );
+  h.emit([marker]);
+  await vi.waitFor(() =>
+    expect(h.journal()?.state.frontiers[`msg:${peerRead.id}`]).toBe(
+      peerRead.created_at,
+    ),
+  );
+
+  await result.undo();
+  expect(unread.attention("room", selected.id).unread).toBe(true);
+  expect(unread.attention("other", peerRead.id).unread).toBe(false);
+  expect(h.journal()?.state.frontiers[`msg:${peerRead.id}`]).toBe(
+    peerRead.created_at,
+  );
 });
 
 it("expires one captured-set Undo when access to one selected channel is revoked", async () => {
@@ -2813,23 +3050,54 @@ it("refuses an exact read that would raise the local floor over unselected messa
   });
 });
 
-it("clears a captured own-message overlay without inventing a read frontier", async () => {
-  const h = setup();
-  h.grant("room");
-  const own = message(h.viewer, "room", "own", 11);
-  h.emit([own]);
-  const unread = h.session.unread;
-  await unread.markMessageUnread("room", own.id);
+it.each(["captured", "direct", "channel", "unrelated channel"] as const)(
+  "a later %s read respects own-message captured Undo without inventing receipts",
+  async (nextRead) => {
+    clock(20);
+    const h = setup();
+    h.grant("room");
+    h.grant("other");
+    const own = message(h.viewer, "room", "own", 11);
+    h.emit([own]);
+    const unread = h.session.unread;
+    await unread.markMessageUnread("room", own.id);
 
-  await expect(requireCapturedRead(unread, [own.id])).resolves.toMatchObject({
-    durability: "saved",
-    sync: "local-only",
-  });
+    const result = await requireCapturedRead(unread, [own.id]);
+    expect(result).toMatchObject({
+      durability: "saved",
+      sync: "local-only",
+    });
 
-  expect(unread.attention("room", own.id).forced).toBe(false);
-  expect(h.journal()?.state.frontiers).toEqual({});
-  expect(h.journal()?.localUnread["message-force:room"]).toBeGreaterThan(0);
-});
+    expect(unread.attention("room", own.id).forced).toBe(false);
+    expect(h.journal()?.state.frontiers).toEqual({});
+    expect(h.journal()?.localUnread["message-force:room"]).toBeGreaterThan(0);
+    assert(result.undo);
+
+    if (nextRead === "captured") await requireCapturedRead(unread, [own.id]);
+    else if (nextRead === "direct")
+      await unread.markMessageRead("room", own.id);
+    else
+      await unread.markChannelRead(nextRead === "channel" ? "room" : "other");
+    const afterRead = h.journal();
+    if (nextRead === "unrelated channel") {
+      await result.undo();
+      expect(unread.attention("room", own.id).forced).toBe(true);
+    } else {
+      await expect(result.undo()).rejects.toThrow(
+        "Reading observation expired",
+      );
+      expect(h.journal()).toEqual(afterRead);
+      expect(unread.attention("room", own.id).forced).toBe(false);
+    }
+    expect(h.journal()?.state.frontiers).toEqual(
+      nextRead === "channel"
+        ? { room: 20 }
+        : nextRead === "unrelated channel"
+          ? { other: 20 }
+          : {},
+    );
+  },
+);
 
 it("serializes overlapping captured sets in either order and releases locks after failure", async () => {
   const h = setup();
@@ -3976,6 +4244,36 @@ it.each(["channel", "thread"] as const)(
   },
 );
 
+it("judges a reply's unread as of an earlier thread read time, keeping its individual marks", async () => {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.viewer, "room", "root", 11);
+  const first = message(h.alice, "room", "first", 12, [
+    ["e", root.id, "", "reply"],
+  ]);
+  const second = message(h.alice, "room", "second", 13, [
+    ["e", root.id, "", "reply"],
+  ]);
+  h.emit([root, first, second]);
+  const thread = {
+    kind: "thread" as const,
+    channelId: "room",
+    rootId: root.id,
+  };
+  const reading = h.session.unread.reading("room", root.id);
+  await reading.observe([first.id]);
+  reading.dispose();
+  const before = h.session.unread.threadReadThrough("room", root.id);
+  await h.session.unread.markThrough(thread, second.id);
+  const unread = (id: string, through?: number) =>
+    h.session.unread.attention("room", id, through).unread;
+  expect([unread(first.id), unread(second.id)]).toEqual([false, false]);
+  // As of the earlier time, the reply read on its own stays read.
+  expect([unread(first.id, before), unread(second.id, before)]).toEqual([
+    false,
+    true,
+  ]);
+});
 it("thread bottom catch-up clears only its thread and preserves local and remote manual intent", async () => {
   const h = setup();
   h.grant("room");
@@ -3996,10 +4294,14 @@ it("thread bottom catch-up clears only its thread and preserves local and remote
   };
   await h.session.unread.markUnreadLocal(thread);
   const lease = h.session.unread.reading("room");
+  expect(h.session.unread.threadReadThrough("room", root.id)).toBeLessThan(11);
   await lease.catchUp(reply.id, root.id);
   expect(h.journal()?.state.frontiers).toEqual({
     [`thread-activity:${root.id}`]: 13,
   });
+  // Every reply through the catch-up is read; the other thread is not.
+  expect(h.session.unread.threadReadThrough("room", root.id)).toBe(13);
+  expect(h.session.unread.threadReadThrough("room", other.id)).toBeLessThan(12);
   expect(h.session.unread.snapshot(thread)).toMatchObject({
     observedCount: 0,
     manual: "local-only",

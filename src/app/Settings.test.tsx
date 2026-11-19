@@ -17,6 +17,7 @@ import { ToastProvider } from "../shared/design-system/ui/Toast";
 import { Context } from "@deepseek-ai/cordis";
 import { afterEach, expect, it, onTestFinished, vi } from "vitest";
 import { createCommunityMembership } from "../bundled/moderation/membership";
+import performanceDiagnosticsManifest from "../bundled/performance-diagnostics/manifest.json";
 import {
   SettingsCardsService,
   type SettingsCard,
@@ -341,6 +342,15 @@ it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
       discovery: { category: "communication" },
     },
   });
+  ready.configuration.catalog.plugins.push({
+    manifest: performanceDiagnosticsManifest,
+    source: "bundled",
+    enabled: essentials,
+    revision: "bundled",
+    previous: null,
+    reloadable: false,
+    error: null,
+  });
   render(
     <Settings
       {...host}
@@ -498,7 +508,9 @@ it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
   await waitFor(() =>
     expect(within(content).getByText("Invoices")).toBeVisible(),
   );
-  fireEvent.change(search, { target: { value: "no-match" } });
+  fireEvent.change(search, {
+    target: { value: "buzz.performance-diagnostics" },
+  });
   expect(within(content).queryAllByRole("article")).toHaveLength(0);
   expect(within(content).getByText("No plugins match")).toBeVisible();
   const clearFilters = within(content).getByRole("button", {
