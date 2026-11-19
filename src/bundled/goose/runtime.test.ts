@@ -3078,7 +3078,7 @@ it("keeps the active Solo Canvas when a speculative community request is stopped
   }
 });
 
-it("retains a community wake deadline after final publication until native idle", async () => {
+it("retains a stopped community wake after final publication until native idle", async () => {
   const f = setup({ hold: true, scope: "community" });
   f.agent.query.mockResolvedValue([message("1", "origin")]);
   const abort = new AbortController();
