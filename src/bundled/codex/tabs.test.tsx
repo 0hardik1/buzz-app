@@ -28,6 +28,10 @@ import {
   localStore,
   type AgentStore,
 } from "../../features/agents/state";
+import {
+  awaitRecommendation,
+  setRuntimeRecommendation,
+} from "../../features/agents/recommended";
 import type { AgentViewProps } from "../../features/agents/service";
 import { AgentCreateDialog } from "../agents/AgentCreateDialog";
 import type { HostProcessOptions } from "../../features/host/service";
@@ -2907,6 +2911,52 @@ describe("Recommended", () => {
     ).resolves.toBe(false);
   });
 
+  it("keeps and reports no pick before a bundled plugin's setup is final, and tells readers when it is", async () => {
+    const pluginPick = {
+      harness: "codex",
+      model: "model-a",
+      effort: "low",
+      label: "Model A",
+    };
+    let answer = (_setup: unknown) => {};
+    const final = awaitRecommendation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    try {
+      const f = fixture();
+      const heard = vi.fn();
+      f.provider.subscribe(heard);
+      // The catalog loads first: the build's candidate, not kept.
+      await f.provider.check();
+      expect(f.provider.recommended()).toEqual(candidate);
+      // Nor reported: a read says it isn't loaded yet.
+      const saved = { ...defaults, preset: "recommended" as const };
+      expect(f.provider.readModelSettings(saved).model).toEqual({
+        source: "recommended",
+        resolved: { unavailable: "not-loaded" },
+      });
+      heard.mockClear();
+      answer({ recommendedBy: "Example Org", candidates: [pluginPick] });
+      await final;
+      await Promise.resolve();
+      // Readers hear, and then see the plugin's.
+      expect(heard).toHaveBeenCalled();
+      expect(f.provider.recommended()).toEqual(pluginPick);
+      expect(f.provider.readModelSettings(saved).model).toEqual({
+        source: "recommended",
+        resolved: { value: "model-a", source: "recommended" },
+      });
+    } finally {
+      // Never leave the wait open for later tests.
+      answer(undefined);
+      await final;
+      setRuntimeRecommendation(undefined);
+    }
+  });
+
   it("runs an agent on Recommended on the first candidate its catalog offers", async () => {
     vi.stubEnv(
       "VITE_BUZZ_RECOMMENDED_AGENT",
@@ -3590,6 +3640,53 @@ it("saves the voice against the latest synced revision", async () => {
         instructions: "Synced instructions",
       }),
       { base: { settings: "synced" } },
+    ),
+  );
+});
+
+it("blocks an unsupported proposal effort and lets the owner clear it", async () => {
+  const f = fixture();
+  const user = userEvent.setup();
+  const save = vi.fn(async () => {});
+  render(
+    <f.tabs.SettingsTab
+      {...f.props({ ...defaults, model: "model-b", effort: "xhigh" }, save)}
+      settingsHost={{ proposedModelOrEffort: true, pendingSave: save }}
+    />,
+  );
+  await screen.findByRole("combobox", { name: "Model" });
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByText(/Choose a thinking level/)).toBeVisible();
+  expect(save).not.toHaveBeenCalled();
+  await user.click(
+    screen.getByRole("button", { name: "Clear model and thinking overrides" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({ model: "", effort: "" }),
+  );
+});
+
+it("saves proposed model and effort overrides for a verified execution target", async () => {
+  const binding = { provider: "test/guest" };
+  const f = fixture({ binding });
+  const save = vi.fn(async () => {});
+  const props = f.props(
+    { ...defaults, model: "target-custom-model", effort: "high" },
+    save,
+  );
+  render(
+    <f.tabs.SettingsTab
+      {...props}
+      agent={{ ...props.agent, executionBinding: binding }}
+      settingsHost={{ proposedModelOrEffort: true, pendingSave: save }}
+    />,
+  );
+  await screen.findByDisplayValue("Selected when the session starts");
+  await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "target-custom-model", effort: "high" }),
     ),
   );
 });

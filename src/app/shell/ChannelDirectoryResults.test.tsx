@@ -622,6 +622,8 @@ it("puts channels to join, in arrival order, before joined matches after later p
         "design-crit",
         "design-guests",
         "design-private",
+        // A whole-word match ranks after every prefix match.
+        "design",
       ]),
     );
   } finally {
