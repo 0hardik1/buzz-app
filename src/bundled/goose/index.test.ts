@@ -83,6 +83,7 @@ it.each(["room", ""])(
       host: { request: vi.fn() },
       agentProtection: { registerModels: vi.fn() },
       agents: {
+        harness,
         register: (registered: AgentType) => {
           type = registered;
         },
