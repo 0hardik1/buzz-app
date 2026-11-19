@@ -3196,7 +3196,11 @@ function Composer({
                   // go back there: it stays on offer until it is copied.
                   const copy = async () => {
                     try {
-                      await writeClipboardText(captured.text);
+                      // The question as it would have been sent, with its
+                      // chat cards, GIFs and formatting, as typed.
+                      await writeClipboardText(
+                        composerMarkdown(captured, { authored: true }),
+                      );
                       notify("Question copied", "success");
                     } catch {
                       notify("Couldn’t copy the question", "error", {
