@@ -182,6 +182,7 @@ pub(crate) mod items {
     type Items = HashMap<PathBuf, HashMap<String, Vec<u8>>>;
     static ITEMS: Mutex<Option<Items>> = Mutex::new(None);
     static UNCERTAIN: Mutex<Option<PathBuf>> = Mutex::new(None);
+    static LOST: Mutex<Option<PathBuf>> = Mutex::new(None);
     static HELPER_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
     pub(crate) fn uncertain_write(root: &Path) {
         *HELPER_ROOT.lock().unwrap() = Some(root.into());
@@ -190,6 +191,10 @@ pub(crate) mod items {
     /// The next write at `root` lands but reports storage-unavailable.
     pub(crate) fn failed_write(root: &Path) {
         *UNCERTAIN.lock().unwrap() = Some(root.into());
+    }
+    /// The next write at `root` reports storage-unavailable and lands nothing.
+    pub(crate) fn lost_write(root: &Path) {
+        *LOST.lock().unwrap() = Some(root.into());
     }
     pub(super) fn helper_selected(root: &Path) -> bool {
         HELPER_ROOT.lock().unwrap().as_deref() == Some(root)
@@ -230,6 +235,12 @@ pub(crate) mod items {
         expected: Option<&[u8]>,
         replacement: Option<&[u8]>,
     ) -> Result<(), &'static str> {
+        let mut lost = LOST.lock().unwrap();
+        if lost.as_deref() == Some(root) {
+            lost.take();
+            return Err("storage-unavailable");
+        }
+        drop(lost);
         with(root, |items| {
             if items.get(account).map(Vec::as_slice) != expected {
                 return Err("session-changed");
@@ -365,29 +376,29 @@ impl SecureStore {
     /// remain refused until their write succeeds.
     fn save(&self, current: Option<&[u8]>, bundle: &mut Bundle) -> Result<Item, &'static str> {
         let next = self.encode(bundle)?;
-        let borrowed = self.borrowed();
+        if let Some(release) = self.borrowed() {
+            self.copy_refusal(release, bundle)?;
+        }
+        self.commit(current, next.as_deref().map(Vec::as_slice))?;
+        Ok(next)
+    }
+    /// Replaces this store's item read as `current`, indexing it first.
+    fn commit(&self, current: Option<&[u8]>, next: Option<&[u8]>) -> Result<(), &'static str> {
+        let borrowed = self.borrowed().is_some();
         // Register before writing any secret. Buzz identity deletion walks these
         // public account keys even after configuration or profile changes.
         fs::create_dir_all(&self.root).map_err(|_| "storage-unavailable")?;
-        if let Some(release) = borrowed {
-            self.copy_refusal(release, bundle)?;
-        }
         fs::write(self.index(), b"1").map_err(|_| "storage-unavailable")?;
-        let written = items::compare(
-            &self.root,
-            &self.account,
-            current,
-            next.as_deref().map(Vec::as_slice),
-        );
-        // A first save that left this item as it was keeps reading Buzz.app's.
-        if borrowed.is_some()
+        let written = items::compare(&self.root, &self.account, current, next);
+        // A first write in `me` that left the item as it was keeps reading Buzz.app's.
+        if borrowed
             && written.is_err()
             && items::read(&self.root, &self.account)
                 .is_ok_and(|item| item.as_deref().map(Vec::as_slice) == current)
         {
             let _ = fs::remove_file(self.index());
         }
-        written.map(|()| next)
+        written
     }
     /// What `save` writes for `bundle`: nothing once it is empty.
     fn encode(&self, bundle: &mut Bundle) -> Result<Item, &'static str> {
@@ -499,15 +510,9 @@ impl SecureStore {
             let Some(value) = value else {
                 return self.forget_item(key);
             };
-            // Registered before the write, so a full Buzz sign-out erases it.
-            fs::write(item.index(), b"1").map_err(|_| "storage-unavailable")?;
+            // Indexed before the write, so a full Buzz sign-out erases it.
             let current = items::read(&self.root, key)?;
-            return items::compare(
-                &self.root,
-                key,
-                current.as_deref().map(Vec::as_slice),
-                Some(value),
-            );
+            return item.commit(current.as_deref().map(Vec::as_slice), Some(value));
         }
         let _transaction = self.lock()?;
         let (raw, mut bundle) = self.bundle()?;
@@ -1101,6 +1106,37 @@ mod tests {
         assert_eq!(item(&me, &me.account), None);
         assert!(me.release_holds(&revision));
 
+        // A first write that lands nothing keeps reading Buzz.app's.
+        items::lost_write(debug.path());
+        assert_eq!(
+            me.set_grant("cd", Some(b"lost")),
+            Err("storage-unavailable")
+        );
+        assert_eq!(
+            me.grant("cd").unwrap().map(|raw| raw.to_vec()),
+            Some(b"app-grant".to_vec())
+        );
+        assert_eq!(
+            me.load().unwrap().0.map(|raw| raw.to_vec()),
+            Some(session.clone())
+        );
+        // One that may have landed makes this copy its own.
+        let landed = tempfile::tempdir().unwrap();
+        let other = SecureStore {
+            bundled,
+            release: Some(release.path().into()),
+            ..secure(&landed)
+        };
+        items::failed_write(landed.path());
+        assert_eq!(
+            other.set_grant("cd", Some(b"landed")),
+            Err("storage-unavailable")
+        );
+        assert_eq!(
+            other.grant("cd").unwrap().map(|raw| raw.to_vec()),
+            Some(b"landed".to_vec())
+        );
+
         // The first write copies the whole bundle here, without mixing.
         me.set_grant("ef", Some(b"me-grant")).unwrap();
         assert_eq!(item(&app, &app.account), saved);
@@ -1185,18 +1221,5 @@ mod tests {
         assert_eq!(me.load().unwrap().1, Some(revision.clone()));
         assert_eq!(me.grant("gh").unwrap(), None);
         assert_eq!(item(&app, "gh"), Some(b"old-grant".to_vec()));
-
-        // A failed save that may have written leaves this copy its own.
-        let other = tempfile::tempdir().unwrap();
-        let me = SecureStore {
-            release: Some(release.path().into()),
-            ..secure(&other)
-        };
-        items::failed_write(other.path());
-        assert_eq!(
-            me.set_grant("ef", Some(b"me-grant")),
-            Err("storage-unavailable")
-        );
-        assert!(me.borrowed().is_none());
     }
 }
