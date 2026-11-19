@@ -7,7 +7,12 @@ const byId = (id: string) => {
 };
 import type { ChannelMessage, ChannelSummary } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
-import { captureVoiceThing, trackPointerPosition } from "./voice-context";
+import {
+  captureVoiceThing,
+  captureVoiceThingFromElement,
+  isMiddleClickExcluded,
+  trackPointerPosition,
+} from "./voice-context";
 
 function makeSession({
   channels = [],
@@ -358,5 +363,77 @@ describe("captureVoiceThing", () => {
       activeChannelName: "general",
       label: "nothing",
     });
+  });
+
+  it("captures directly clicked voice targets without falling back to activeElement", () => {
+    const session = makeSession({
+      channels: [
+        { id: "c1", name: "general", channelType: "stream" } as ChannelSummary,
+      ],
+    });
+    document.body.innerHTML = `
+      <button type="button" data-channel-id="c1" id="row"><span>general</span></button>
+      <div id="blank">Empty space</div>
+    `;
+    byId("row").focus();
+
+    expect(
+      captureVoiceThingFromElement(byId("row").querySelector("span"), {
+        session,
+      }),
+    ).toMatchObject({
+      kind: "channel",
+      id: "c1",
+      name: "general",
+      label: "#general",
+    });
+    expect(
+      captureVoiceThingFromElement(byId("blank"), { session }),
+    ).toBeUndefined();
+  });
+
+  it("excludes text fields, embedded web pages, closable tabs, and Buzz links from middle-click voice", () => {
+    document.body.innerHTML = `
+      <div data-message-id="m1">
+        <p id="plain">Hello</p>
+        <a id="buzz-link" href="buzz://channel/c1"><span>#general</span></a>
+        <a id="panel-link" href="panel:foo" data-panel-target="panel:foo">Open</a>
+        <a id="web-link" href="https://example.com">Example</a>
+        <textarea id="edit-box">Draft</textarea>
+        <div id="rich" contenteditable="true"><span id="pill" contenteditable="false">@Ada</span></div>
+      </div>
+      <span class="buzz-tabs-item" data-closable=""><button type="button" id="closable-tab">Thread</button></span>
+      <section aria-label="Browser"><div id="browser-toolbar">Toolbar</div></section>
+      <iframe id="frame"></iframe>
+    `;
+
+    const auxClickOn = (el: Element | null) => {
+      assert(el);
+      const event = new MouseEvent("auxclick", {
+        bubbles: true,
+        cancelable: true,
+        button: 1,
+      });
+      let excluded = false;
+      window.addEventListener(
+        "auxclick",
+        (e) => {
+          excluded = isMiddleClickExcluded(e);
+        },
+        { once: true },
+      );
+      el.dispatchEvent(event);
+      return excluded;
+    };
+
+    expect(auxClickOn(byId("plain"))).toBe(false);
+    expect(auxClickOn(byId("web-link"))).toBe(false);
+    expect(auxClickOn(byId("buzz-link").querySelector("span"))).toBe(true);
+    expect(auxClickOn(byId("panel-link"))).toBe(true);
+    expect(auxClickOn(byId("edit-box"))).toBe(true);
+    expect(auxClickOn(byId("pill"))).toBe(true);
+    expect(auxClickOn(byId("closable-tab"))).toBe(true);
+    expect(auxClickOn(byId("browser-toolbar"))).toBe(true);
+    expect(auxClickOn(byId("frame"))).toBe(true);
   });
 });

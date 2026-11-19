@@ -1,7 +1,15 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 const byId = (id: string) => {
   const el = document.getElementById(id);
@@ -10,13 +18,16 @@ const byId = (id: string) => {
 };
 import type { DecisionResult } from "../../features/decisions/service";
 import type { Communities } from "../../features/communities/service";
+import { MessageLink } from "../../features/conversation/MessageLink";
 import type { Navigation } from "../../features/navigation/controller";
 import type {
   ChannelMessage,
   ChannelSummary,
 } from "../../features/relay/contracts";
+import type { DictationState } from "../../features/search/voice-dictation";
 import type { Shortcut } from "../../features/shortcuts/service";
 import { ACTION_NAVIGATE_OPTION } from "../../features/search/voice-actions";
+import { Tabs } from "../../shared/design-system/ui/Tabs";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { VoiceJump, type VoiceJumpServices } from "./VoiceJump";
 
@@ -29,6 +40,7 @@ const dictationHandlers = vi.hoisted(() => ({
         onError: (message: string) => void;
       }
     | undefined,
+  state: "listening" as DictationState,
   start: vi.fn(async () => {}),
   stop: vi.fn(),
   cancel: vi.fn(),
@@ -44,7 +56,7 @@ vi.mock("../../features/search/voice-dictation", () => ({
   useVoiceDictation: (callbacks: typeof dictationHandlers.current) => {
     dictationHandlers.current = callbacks;
     return {
-      state: "listening" as const,
+      state: dictationHandlers.state,
       start: dictationHandlers.start,
       stop: dictationHandlers.stop,
       cancel: dictationHandlers.cancel,
@@ -56,6 +68,7 @@ afterEach(() => {
   cleanup();
   document.body.innerHTML = "";
   dictationHandlers.current = undefined;
+  dictationHandlers.state = "listening";
   vi.clearAllMocks();
 });
 
@@ -67,6 +80,7 @@ const msgId = "e".repeat(64);
 
 function setup(
   decideImpl: (req: { state: string }) => Promise<DecisionResult>,
+  extra?: ReactNode,
 ) {
   const setStar = vi.fn(async () => ["sec"]);
   const assign = vi.fn(async () => ({ sections: [], assignments: {} }));
@@ -227,6 +241,7 @@ function setup(
   render(
     <ToastProvider>
       <div id="dom-fixture" />
+      {extra}
       <VoiceJump services={services} />
     </ToastProvider>,
   );
@@ -694,5 +709,269 @@ describe("VoiceJump contextual voice actions", () => {
       ),
     );
     expect(h.setStar).not.toHaveBeenCalled();
+  });
+});
+
+function dispatchAuxClick(target: Element, button = 1) {
+  const event = new MouseEvent("auxclick", {
+    bubbles: true,
+    cancelable: true,
+    button,
+  });
+  fireEvent(target, event);
+  return event;
+}
+
+describe("VoiceJump middle-click", () => {
+  it("starts listening with the clicked channel as target and runs the same action flow as the shortcut", async () => {
+    const h = setup(async () => ({
+      outcome: "answered",
+      backend: "test",
+      model: "jev",
+      answers: {
+        action: {
+          type: "choice",
+          choice: "Star #buzz-security (pin to Starred / Favorites)",
+          confidence: 0.96,
+          probabilities: {
+            "Star #buzz-security (pin to Starred / Favorites)": 0.96,
+          },
+        },
+        place: {
+          type: "choice",
+          choice: "none",
+          confidence: 0.9,
+          probabilities: { none: 0.9 },
+        },
+      },
+    }));
+
+    const fixture = byId("dom-fixture");
+    fixture.innerHTML = `
+      <input id="focused-input" />
+      <button type="button" data-channel-id="sec"><span>buzz-security</span></button>
+    `;
+    // Even if keyboard focus is elsewhere and no pointermove happened, middle-click targets what was clicked.
+    byId("focused-input").focus();
+    const label = fixture.querySelector('[data-channel-id="sec"] span');
+    assert(label);
+
+    const event = dispatchAuxClick(label, 1);
+    expect(event.defaultPrevented).toBe(true);
+    expect(await screen.findByText("#buzz-security")).toBeInTheDocument();
+    expect(dictationHandlers.start).toHaveBeenCalledOnce();
+
+    act(() => {
+      dictationHandlers.current?.onText("star this");
+    });
+
+    await waitFor(() => expect(h.setStar).toHaveBeenCalledWith("sec", true));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Jump or act by voice" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("starts listening with a middle-clicked message as target", async () => {
+    setup(async () => ({
+      outcome: "answered",
+      backend: "test",
+      model: "jev",
+      answers: {},
+    }));
+
+    const fixture = byId("dom-fixture");
+    fixture.innerHTML = `
+      <section data-channel-timeline="sec">
+        <div data-message-id="${msgId}">
+          <span data-message-author="">Alice</span>
+          <p id="msg-text">Please review this</p>
+        </div>
+      </section>
+    `;
+
+    dispatchAuxClick(byId("msg-text"), 1);
+    expect(
+      await screen.findByText('message from Alice: "Please review this"'),
+    ).toBeInTheDocument();
+    expect(dictationHandlers.start).toHaveBeenCalledOnce();
+  });
+
+  it("stops listening early on middle-click while voice is listening, except inside text fields", async () => {
+    setup(async () => ({
+      outcome: "answered",
+      backend: "test",
+      model: "jev",
+      answers: {},
+    }));
+
+    const fixture = byId("dom-fixture");
+    fixture.innerHTML = `<button type="button" data-channel-id="sec" id="row">buzz-security</button>`;
+    dispatchAuxClick(byId("row"), 1);
+    const input = await screen.findByRole("searchbox");
+    expect(dictationHandlers.stop).not.toHaveBeenCalled();
+
+    // Middle-click on VoiceJump's own text input leaves the text field alone.
+    const inputEvent = dispatchAuxClick(input, 1);
+    expect(inputEvent.defaultPrevented).toBe(false);
+    expect(dictationHandlers.stop).not.toHaveBeenCalled();
+
+    // Middle-click elsewhere stops listening early.
+    const dialog = screen.getByRole("dialog", { name: "Jump or act by voice" });
+    const stopEvent = dispatchAuxClick(dialog, 1);
+    expect(stopEvent.defaultPrevented).toBe(true);
+    expect(dictationHandlers.stop).toHaveBeenCalledOnce();
+  });
+
+  it("does not restart or stop on middle-click when open and not listening", async () => {
+    dictationHandlers.state = "idle";
+    setup(async () => ({
+      outcome: "answered",
+      backend: "test",
+      model: "jev",
+      answers: {},
+    }));
+
+    const fixture = byId("dom-fixture");
+    fixture.innerHTML = `<button type="button" data-channel-id="sec" id="row">buzz-security</button>`;
+    dispatchAuxClick(byId("row"), 1);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Jump or act by voice",
+    });
+    dictationHandlers.start.mockClear();
+
+    const event = dispatchAuxClick(dialog, 1);
+    expect(event.defaultPrevented).toBe(false);
+    expect(dictationHandlers.stop).not.toHaveBeenCalled();
+    expect(dictationHandlers.start).not.toHaveBeenCalled();
+  });
+
+  it("keeps middle-click closing closable tabs without starting voice", () => {
+    const closeTab = vi.fn();
+    setup(
+      async () => ({
+        outcome: "answered",
+        backend: "test",
+        model: "jev",
+        answers: {},
+      }),
+      <Tabs
+        value="thread"
+        onValueChange={() => {}}
+        label="Panel tabs"
+        variant="navigation"
+        items={[
+          { value: "channel", label: "Channel" },
+          { value: "thread", label: "Thread", onClose: closeTab },
+        ]}
+      />,
+    );
+
+    const closable = screen.getByRole("tab", { name: "Thread" });
+    const closeEvent = dispatchAuxClick(closable, 1);
+    expect(closeEvent.defaultPrevented).toBe(true);
+    expect(closeTab).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole("dialog", { name: "Jump or act by voice" }),
+    ).not.toBeInTheDocument();
+    expect(dictationHandlers.start).not.toHaveBeenCalled();
+
+    // Non-closable tab is also not a voice target.
+    const nonClosable = screen.getByRole("tab", { name: "Channel" });
+    const nonCloseEvent = dispatchAuxClick(nonClosable, 1);
+    expect(nonCloseEvent.defaultPrevented).toBe(false);
+    expect(
+      screen.queryByRole("dialog", { name: "Jump or act by voice" }),
+    ).not.toBeInTheDocument();
+    expect(dictationHandlers.start).not.toHaveBeenCalled();
+  });
+
+  it("keeps middle-click opening Buzz links in messages without starting voice", () => {
+    const onOpenLink = vi.fn(() => true);
+    const buzzUrl = "buzz://channel/design";
+    setup(
+      async () => ({
+        outcome: "answered",
+        backend: "test",
+        model: "jev",
+        answers: {},
+      }),
+      <section data-channel-timeline="sec">
+        <div data-message-id={msgId}>
+          <MessageLink
+            url={buzzUrl}
+            registry={undefined}
+            onOpenLink={onOpenLink}
+          >
+            #design
+          </MessageLink>
+        </div>
+      </section>,
+    );
+
+    const link = screen.getByRole("link", { name: "#design" });
+    const event = dispatchAuxClick(link, 1);
+    expect(event.defaultPrevented).toBe(true);
+    expect(onOpenLink).toHaveBeenCalledExactlyOnceWith(buzzUrl);
+    expect(
+      screen.queryByRole("dialog", { name: "Jump or act by voice" }),
+    ).not.toBeInTheDocument();
+    expect(dictationHandlers.start).not.toHaveBeenCalled();
+  });
+
+  it("leaves text fields, embedded web pages, non-targets, non-middle buttons, and mousedown alone", () => {
+    setup(async () => ({
+      outcome: "answered",
+      backend: "test",
+      model: "jev",
+      answers: {},
+    }));
+
+    const fixture = byId("dom-fixture");
+    fixture.innerHTML = `
+      <div data-message-id="${msgId}" data-channel-timeline="sec">
+        <textarea id="inline-edit">Editing</textarea>
+        <div id="rich-edit" contenteditable="true">Rich editing</div>
+      </div>
+      <section aria-label="Browser"><div id="browser-area">Page</div></section>
+      <iframe id="embed"></iframe>
+      <button type="button" data-channel-id="sec" id="row">buzz-security</button>
+      <div id="blank">Empty background</div>
+    `;
+    // Focused channel row must not be used when middle-clicking blank background.
+    byId("row").focus();
+
+    for (const id of [
+      "inline-edit",
+      "rich-edit",
+      "browser-area",
+      "embed",
+      "blank",
+    ]) {
+      const event = dispatchAuxClick(byId(id), 1);
+      expect(event.defaultPrevented).toBe(false);
+    }
+
+    // Left, right, and mouse thumb back/forward buttons do not start voice.
+    for (const button of [0, 2, 3, 4]) {
+      const event = dispatchAuxClick(byId("row"), button);
+      expect(event.defaultPrevented).toBe(false);
+    }
+
+    // Pressing and holding middle button without completing a click does not start voice.
+    fireEvent(
+      byId("row"),
+      new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: 1,
+      }),
+    );
+
+    expect(
+      screen.queryByRole("dialog", { name: "Jump or act by voice" }),
+    ).not.toBeInTheDocument();
+    expect(dictationHandlers.start).not.toHaveBeenCalled();
   });
 });
