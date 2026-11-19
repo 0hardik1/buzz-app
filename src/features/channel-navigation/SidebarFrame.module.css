@@ -52,7 +52,7 @@
   opacity: 1;
 }
 @media (prefers-reduced-motion: reduce) {
-  .sidebarFilter::after {
+  .sidebarFilter:not(:empty)::after {
     transition: none;
   }
 }
