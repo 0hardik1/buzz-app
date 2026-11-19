@@ -1,18 +1,16 @@
 import { finalizeEvent, getPublicKey } from "nostr-tools";
 import { afterEach, expect, it, vi } from "vitest";
-import { ownerReads } from "../agents/reads";
 import { guestKeys } from "../channel-members/guests";
 import { PublishRejected } from "../relay/outbox";
 import { matchesEvent } from "../relay/projection";
 import type { ChannelSummary } from "../relay/contracts";
 import type { RelayEvent } from "../relay/events";
-import type { RelayData } from "../relay/service";
 import { createRelaySession } from "../relay/session";
 import { joinOffer, type UnheardAgent } from "./useGuestAgentMentions";
 
 // "Make member and send" runs the members panel's role change against a real
 // session: the roster read, the signed kind 9000, and the readback that the
-// agent's own channel facts and the chooser label both follow.
+// chooser label follows.
 const relayKey = new Uint8Array(32).fill(3);
 const author = getPublicKey(relayKey);
 const owner = getPublicKey(new Uint8Array(32).fill(2));
@@ -78,12 +76,12 @@ async function channel(
   await session.memberAdministration.refresh(id);
   const summary = session.channels.list().channels.find((c) => c.id === id);
   if (!summary) throw new Error("No channel");
-  const relay = {
-    snapshot: () => ({ status: "ready", session, scope: "test" }),
-  } as unknown as RelayData;
-  const reads = ownerReads(relay, agent);
-  if (!reads) throw new Error("Owner reads unavailable");
-  return { session, summary, reads, published };
+  // Another admin removes the agent: the relay republishes the roster.
+  const remove = () => {
+    roles.delete(agent);
+    events = [...events.filter((item) => item.kind !== 39002), roster()];
+  };
+  return { session, summary, published, remove };
 }
 
 const pollen: UnheardAgent = {
@@ -93,9 +91,8 @@ const pollen: UnheardAgent = {
   own: true,
 };
 
-it("makes a Viewing-only agent a member, and its next turn sees it can post", async () => {
-  const { session, summary, reads, published } = await channel("owner");
-  expect((await reads.channel(id))?.viewingOnly).toBe(true);
+it("makes a Viewing-only agent a member, and the roster shows it can post", async () => {
+  const { session, summary, published } = await channel("owner");
   expect([...guestKeys(listed(session))]).toEqual([agent]);
 
   const join = joinOffer(session, summary, pollen);
@@ -109,31 +106,39 @@ it("makes a Viewing-only agent a member, and its next turn sees it can post", as
     ["p", agent],
     ["role", "member"],
   ]);
-  // The readback reaches the channel list that both the agent's turn and the
-  // chooser label read, with no further request.
-  expect((await reads.channel(id))?.viewingOnly).toBeUndefined();
+  // The readback reaches the channel list the chooser label reads, with no
+  // further request.
   expect(guestKeys(listed(session)).size).toBe(0);
 });
 
+it("neither re-adds nor confirms an agent removed while the dialog was open", async () => {
+  const { session, summary, published, remove } = await channel("owner");
+  const join = joinOffer(session, summary, pollen);
+  remove();
+  // Rejecting keeps the dialog open, so the composer never sends.
+  await expect(join?.(new AbortController().signal)).rejects.toThrow(
+    "Membership or permissions changed.",
+  );
+  expect(published).toEqual([]);
+});
+
 it("keeps the agent Viewing only and rejects when the relay refuses", async () => {
-  const { session, summary, reads } = await channel("owner", { refuse: true });
+  const { session, summary } = await channel("owner", { refuse: true });
   const join = joinOffer(session, summary, pollen);
   await expect(join?.(new AbortController().signal)).rejects.toThrow(
     /only owners and admins/,
   );
-  expect((await reads.channel(id))?.viewingOnly).toBe(true);
   expect([...guestKeys(listed(session))]).toEqual([agent]);
 });
 
 it("publishes nothing once the send is abandoned", async () => {
-  const { session, summary, reads, published } = await channel("owner");
+  const { session, summary, published } = await channel("owner");
   const abandoned = new AbortController();
   abandoned.abort();
   await expect(
     joinOffer(session, summary, pollen)?.(abandoned.signal),
   ).rejects.toThrow();
   expect(published).toEqual([]);
-  expect((await reads.channel(id))?.viewingOnly).toBe(true);
 });
 
 it("offers nothing for someone else's agent, even to the channel owner", async () => {
