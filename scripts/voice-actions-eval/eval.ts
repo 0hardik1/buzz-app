@@ -11,7 +11,8 @@ import {
 import { ACTIONS, CONFIRM, ENTITIES, PLACES, hover } from "./catalog";
 import { PEOPLE } from "./world";
 import { CASES, type Case, type Category, type Expected } from "./cases";
-import { HELDOUT, HELDOUT2 } from "./cases-heldout";
+import { FINAL } from "./cases-final";
+import { HELDOUT, HELDOUT2, HELDOUT3 } from "./cases-heldout";
 import {
   buildActionDecision,
   type ResolvedAction,
@@ -30,6 +31,14 @@ type Decide = (request: DecisionRequest) => Promise<{
 }>;
 
 /** One TypeSafe call, encoded and decoded as `decisions.rs` does. */
+export const ALL_CASES: readonly Case[] = [
+  ...CASES,
+  ...HELDOUT,
+  ...HELDOUT2,
+  ...HELDOUT3,
+  ...FINAL,
+];
+
 export const typesafe =
   (key: string): Decide =>
   async (request) => {
@@ -215,17 +224,42 @@ export type CaseResult = Readonly<{
   topActions: readonly (readonly [string, number])[];
   /** Every find question's pick and its probability. */
   slots: Readonly<Record<string, readonly [string, number]>>;
+  /** The checked answers, so `rescore.ts` can resolve them again under
+   * changed decision rules without asking Jev again. */
+  answers?: Readonly<Record<string, DecisionAnswer>>;
   error?: string;
 }>;
 
-export async function runCase(decide: Decide, c: Case): Promise<CaseResult> {
-  const { request, resolve } = buildActionDecision({
+const build = (c: Case) =>
+  buildActionDecision({
     spoken: c.spoken,
     hovered: hover(c.hover),
     actions: ACTIONS,
     entities: ENTITIES,
     places: PLACES,
   });
+
+/** Scores answers Jev already gave, under the decision rules as they are
+ * now: the request is rebuilt from the case, so it must be the same world
+ * (`VOICE_EVAL_SCALE`) the answers came from. */
+export function rescoreCase(
+  c: Case,
+  answers: Readonly<Record<string, DecisionAnswer>>,
+) {
+  const got = normalize(build(c).resolve(answers));
+  const s = score(c.expect, got);
+  const misfire = s.acted && !s.correct;
+  return {
+    got: describe(got),
+    correct: s.correct,
+    misfire,
+    misfireConfirmed:
+      misfire && got.kind === "action" && CONFIRM.has(got.actionId),
+  };
+}
+
+export async function runCase(decide: Decide, c: Case): Promise<CaseResult> {
+  const { request, resolve } = build(c);
   const base = {
     id: c.id,
     category: c.category,
@@ -279,6 +313,7 @@ export async function runCase(decide: Decide, c: Case): Promise<CaseResult> {
       ms: Math.round(ms),
       topActions,
       slots,
+      answers,
     };
   } catch (error) {
     return {
@@ -347,9 +382,13 @@ export async function main(
       ? HELDOUT
       : options.set === "heldout2"
         ? HELDOUT2
-        : options.set === "all"
-          ? [...CASES, ...HELDOUT, ...HELDOUT2]
-          : CASES;
+        : options.set === "heldout3"
+          ? HELDOUT3
+          : options.set === "final"
+            ? FINAL
+            : options.set === "all"
+              ? ALL_CASES
+              : CASES;
   const cases = set.filter(
     (c) =>
       !options.filter ||

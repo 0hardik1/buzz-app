@@ -18,6 +18,7 @@ import type {
   VoiceSlotKind,
   VoiceThing,
 } from "../../src/features/search/voice-context";
+import { quickMessageVoiceActions } from "../../src/features/search/voice-actions-message-quick";
 import {
   CHANNELS,
   EMOJI,
@@ -174,17 +175,9 @@ export const ACTIONS: readonly VoiceActionSpec[] = [
     (o, t) => `Forward ${o} to ${t}`,
     "confirm",
   ),
-  a("message.react", "message", "emoji", (o, t) => `React to ${o} with ${t}`),
-  a("message.reply", "message", undefined, (o) => `Reply in a thread to ${o}`),
-  a("message.follow", "message", undefined, (o) => `Follow the thread of ${o}`),
-  a(
-    "message.unfollow",
-    "message",
-    undefined,
-    (o) => `Unfollow the thread of ${o}`,
-  ),
-  a("message.copy_link", "message", undefined, (o) => `Copy a link to ${o}`),
-  a("message.mark_unread", "message", undefined, (o) => `Mark ${o} as unread`),
+  // The real quick message and thread actions (react, reply, follow,
+  // unfollow, copy link, mark unread), with their own sentences.
+  ...quickMessageVoiceActions,
   a("message.delete", "message", undefined, (o) => `Delete ${o}`, "confirm"),
   // People.
   a("person.profile", "person", undefined, (o) => `Open ${o}'s profile`),
@@ -329,7 +322,8 @@ export const PLACES: readonly JumpPlace[] = [
 ].slice(0, 200);
 
 /** Hover targets, by a short spec: `#name`, `section:Name`, `person:name`,
- * `message:id`, or null for nothing. */
+ * `message:id`, `thread:id` (an open thread, by its root), or null for
+ * nothing. */
 export function hover(spec: string | null): VoiceThing | null {
   if (spec === null) return null;
   if (spec.startsWith("#")) {
@@ -371,6 +365,15 @@ export function hover(spec: string | null): VoiceThing | null {
       authorName: m.author,
       preview: m.text,
       label: `this message from ${m.author}`,
+    };
+  }
+  if (kind === "thread") {
+    const m = message(rest);
+    return {
+      kind: "thread",
+      id: m.id,
+      channelId: `c-${m.channel}`,
+      label: `the thread "${m.text}" in #${m.channel}`,
     };
   }
   throw new Error(`Bad hover spec ${spec}`);

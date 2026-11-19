@@ -97,6 +97,13 @@ const BASE_CHANNELS: readonly Channel[] = [
   ch("sre-alerts", "Paging alerts for SRE"),
   ch("release-1-7", "The 1.7 release train"),
   ch("web-perf", "Web performance budgets"),
+  // Used only by the final set.
+  ch("data-platform", "Warehouse and pipelines"),
+  ch("growth-experiments", "A/B tests and results"),
+  ch("ios-beta-2", "Second iOS beta cohort"),
+  ch("support-escalations", "Escalated customer issues", {
+    section: "Escalations",
+  }),
 ];
 
 /** Sidebar sections the user made; `Starred` is the built-in one. */
@@ -108,6 +115,8 @@ export const SECTIONS: readonly string[] = [
   "Social",
   "Agents",
   "Later",
+  // Used only by the final set.
+  "Escalations",
 ];
 
 const BASE_PEOPLE: readonly Person[] = [
@@ -135,6 +144,10 @@ const BASE_PEOPLE: readonly Person[] = [
   { id: "p-mei", name: "Mei Lin" },
   { id: "p-omar", name: "Omar" },
   { id: "p-scout2", name: "scout2", agent: true, dm: true },
+  // Final set only.
+  { id: "p-ines", name: "Ines Duarte" },
+  { id: "p-rahul", name: "Rahul" },
+  { id: "p-tracer9", name: "tracer9", agent: true },
 ];
 
 // VOICE_EVAL_SCALE=1 grows the workspace toward the app's caps (200 places,
@@ -227,6 +240,14 @@ export const MESSAGES: readonly Message[] = [
     author: "murderbot",
     text: "Relay p95 is back under 200 ms after the index fix",
     replies: 7,
+  },
+  // Used only by the final set.
+  {
+    id: "m-outage",
+    channel: "support-escalations",
+    author: "Rahul",
+    text: "customer reports login loops since 9am",
+    replies: 3,
   },
   // Used only by the held-out cases.
   {

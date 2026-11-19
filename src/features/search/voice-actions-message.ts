@@ -26,7 +26,7 @@ function messageIdsFromEntity(owner: VoiceEntity): {
   return { messageId: owner.id, channelId, threadRootId };
 }
 
-async function resolveMessageRow(
+export async function resolveMessageRow(
   session: RelaySession,
   channelId: string,
   messageId: string,
