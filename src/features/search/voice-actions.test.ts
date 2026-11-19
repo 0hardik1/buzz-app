@@ -882,3 +882,124 @@ describe("sessionVoiceEntities & M1 action execution", () => {
     expect(ACTION_NONE_OPTION).toBe("None of these");
   });
 });
+
+describe("the place an action would act on", () => {
+  const moveIntoSection = channelVoiceActions.filter(
+    (action) => action.id === "channel.move_to_section",
+  );
+  const optionFor = (request: DecisionRequest | undefined, start: string) => {
+    const question = request?.questions.action;
+    const option =
+      question?.type === "choice"
+        ? Object.keys(question.options).find((key) => key.startsWith(start))
+        : undefined;
+    if (!option) throw new Error(`No option starting ${start}`);
+    return option;
+  };
+
+  it("shows options instead of navigating to the channel a move would move", () => {
+    const built = buildActionDecision({
+      spoken: "put design in here",
+      hovered: hoveredSection,
+      actions: moveIntoSection,
+      entities,
+      places,
+    });
+    const move = optionFor(built.request, "Move");
+    const resolved = built.resolve({
+      action: {
+        type: "choice",
+        choice: ACTION_NAVIGATE_OPTION,
+        confidence: 0.74,
+        probabilities: { [ACTION_NAVIGATE_OPTION]: 0.74, [move]: 0.21 },
+      },
+      channel: {
+        type: "choice",
+        choice: "#design",
+        confidence: 1,
+        probabilities: { "#design": 1 },
+      },
+      place: {
+        type: "choice",
+        choice: "#design",
+        confidence: 1,
+        probabilities: { "#design": 1 },
+      },
+    });
+    expect(resolved.kind).toBe("none");
+    expect(resolved.actionCandidates.map((c) => c.kind)).toEqual([
+      "navigate",
+      "action",
+    ]);
+  });
+
+  it("still navigates to a place the rival action wouldn't act on", () => {
+    const built = buildActionDecision({
+      spoken: "jump to design",
+      hovered: hoveredChannel,
+      actions: channelVoiceActions.slice(0, 1),
+      entities,
+      places,
+    });
+    const star = optionFor(built.request, "Star");
+    const resolved = built.resolve({
+      action: {
+        type: "choice",
+        choice: star,
+        confidence: 0.52,
+        probabilities: { [star]: 0.52, [ACTION_NAVIGATE_OPTION]: 0.45 },
+      },
+      place: {
+        type: "choice",
+        choice: "#design",
+        confidence: 0.92,
+        probabilities: { "#design": 0.92 },
+      },
+    });
+    expect(resolved).toMatchObject({
+      kind: "navigate",
+      place: { channelId: "design" },
+    });
+  });
+
+  it("never fills a slot with the hovered thing itself", () => {
+    const nextTo: VoiceActionSpec = {
+      id: "channel.move_next_to",
+      owner: "channel",
+      target: "channel",
+      confirm: "none",
+      describe: ({ hoveredRole }) =>
+        hoveredRole === "owner"
+          ? "Move #buzz-security next to another channel"
+          : "Move another channel next to #buzz-security",
+    };
+    const built = buildActionDecision({
+      spoken: "put this right after random",
+      hovered: hoveredChannel,
+      actions: [nextTo],
+      entities,
+      places,
+    });
+    const resolved = built.resolve({
+      action: {
+        type: "choice",
+        choice: "Move #buzz-security next to another channel",
+        confidence: 1,
+        probabilities: { "Move #buzz-security next to another channel": 1 },
+      },
+      channel: {
+        type: "choice",
+        choice: "#buzz-security",
+        confidence: 0.9,
+        probabilities: { "#buzz-security": 0.9 },
+      },
+      place: {
+        type: "choice",
+        choice: "#buzz-security",
+        confidence: 0.8,
+        probabilities: { "#buzz-security": 0.8 },
+      },
+    });
+    expect(resolved.kind).toBe("none");
+  });
+});
