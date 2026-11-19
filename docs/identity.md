@@ -1228,8 +1228,9 @@ reads that item from the release namespace, honoring either namespace's
 refusal markers. Every save goes to the debug namespace: the first copies the
 whole release item there (session and grants, nothing mixed in from an older
 debug item), and its account index, written before the save, makes the debug
-copy the only one read from then on, even once it is empty. A first save that
-fails without writing removes that index again. So a sign-out in `me` clears only the debug copy,
+copy the only one read from then on, even once it is empty. The first save
+refuses here a session it copies that Buzz.app refused, and one that fails
+without writing removes that index again. So a sign-out in `me` clears only the debug copy,
 the next launch stays signed out, and a browser sign-in or agent enrollment
 there stays in the debug namespace. Signing out of a session the release item
 still holds does not end it at the server, so the installed app stays signed in.
