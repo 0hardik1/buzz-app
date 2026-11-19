@@ -3,7 +3,7 @@ import { CODEX_HOOK_EVENTS } from "./hook-bridge";
 import { repositoriesContext } from "../../features/communities/repositories";
 import { isTauri } from "@tauri-apps/api/core";
 import { pubkeyOf } from "../../features/agents/membership";
-import { ownerReads } from "../../features/agents/reads";
+import { ownerReads, readyOwnerReads } from "../../features/agents/reads";
 import type { PluginModule } from "../../plugins/api";
 import { CodexLogoIcon } from "../../shared/design-system/icons";
 import { type Config, config, defaults, validWorkspace } from "./config";
@@ -13,7 +13,11 @@ import { CodexSetup, explainTurn, reviewHome, withScript } from "./setup";
 import { CodexProvider, createTabs } from "./tabs";
 import { readUsage } from "./usage";
 import { reviewModel } from "./security-review";
-import { followRecommended } from "../../features/agents/recommended";
+import {
+  candidatesFor,
+  followRecommended,
+  recommendationReady,
+} from "../../features/agents/recommended";
 import { AppServer, listModels } from "./rpc";
 /** How often Buzz's copy of Codex looks for a new release. */
 const UPDATE_MS = 6 * 60 * 60_000;
@@ -78,6 +82,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
     ctx.host,
     (pubkey) => ctx.agents.handle(pubkey),
     ctx.host.resolveDirectory?.bind(ctx.host),
+    (agent, signal, channelId) =>
+      readyOwnerReads(ctx.agents.relay(agent.key), agent, signal, channelId),
   );
   // Failed turns' notices link to where Codex signs in.
   runtime.explain = (notice) =>
@@ -187,6 +193,19 @@ export const apply: PluginModule["apply"] = (ctx) => {
     description:
       "Codex on this computer, using its native coding tools and your account.",
     defaults: () => ({ config: { ...defaults } }),
+    settingsProposal: {
+      adapterModelAndEffort: true,
+      compactAt: true,
+      voice: true,
+      apps: true,
+      resolveRecommended: async () => {
+        await recommendationReady();
+        if (!candidatesFor(TYPE_ID).length) return null;
+        if (providerController.recommended() === undefined)
+          await providerController.check();
+        return providerController.recommended() ?? null;
+      },
+    },
     readModelSettings: (saved, context) =>
       providerController.readModelSettings(saved, context),
     Create,
@@ -209,6 +228,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     adopt: (carry, saved) => ({
       ...saved,
       instructions: carry.instructions ?? saved.instructions,
+      scope: carry.sessionScope ?? saved.scope,
       // Codex runs only in an absolute or home workspace.
       workspace:
         carry.workspace && validWorkspace(carry.workspace)
@@ -216,14 +236,15 @@ export const apply: PluginModule["apply"] = (ctx) => {
           : saved.workspace,
     }),
     carry: (saved) => {
-      const { instructions, workspace } = config(saved);
+      const { instructions, workspace, scope } = config(saved);
       return {
         ...(instructions.trim() && { instructions }),
         ...(workspace !== defaults.workspace && { workspace }),
+        ...(scope !== defaults.scope && { sessionScope: scope }),
       };
     },
     describeMigration: (saved) => {
-      const { model, effort, scope, voice } = config(saved);
+      const { model, effort, voice, apps } = config(saved);
       return [
         { id: "model", label: "Model", isOverride: Boolean(model.trim()) },
         {
@@ -232,12 +253,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
           isOverride: Boolean(effort),
         },
         { id: "voice", label: "Voice", isOverride: Boolean(voice) },
-        {
-          id: "sessions",
-          label: "Sessions",
-          isOverride: scope !== defaults.scope,
-          unchangedKey: scope,
-        },
+        // Another harness has no place for it, and Codex starts it off.
+        { id: "apps", label: "Codex apps and plugins", isOverride: !!apps },
       ];
     },
     migrationWarning: "Any commands Codex left running will stop.",
@@ -270,10 +287,11 @@ export const apply: PluginModule["apply"] = (ctx) => {
         );
         return runtime
           .conversations(key)
-          .map(({ key, channelId, root, at }) => {
+          .map(({ key, channelId, root, community, at }) => {
             const status = views.get(key);
             return {
               channelId,
+              ...(community ? { community } : {}),
               ...(root && { root }),
               ...(at !== undefined && { at }),
               ...(status && { status }),

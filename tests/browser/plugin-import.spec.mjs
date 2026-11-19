@@ -330,6 +330,105 @@ async function nativeImports(
   }, input);
 }
 
+// Scrolling must not change the pixels behind the fixed review title.
+test("scrolling a long update review keeps its heading readable", async ({
+  page,
+  app,
+}, info) => {
+  await page.setViewportSize({ width: 1230, height: 820 });
+  await page.clock.install();
+  await nativeImports(
+    page,
+    [
+      {
+        path: "dist",
+        revision: "one",
+        manifest: {
+          id: "example.counter",
+          name: "Counter playground",
+          apiVersion: 1,
+        },
+      },
+    ],
+    {
+      warnings: Array.from(
+        { length: 32 },
+        (_, i) =>
+          `dist: Optional asset ${i + 1} could not be read from the plugin folder`,
+      ),
+    },
+  );
+  await openPlugins(page, app.origin);
+  await button(page, "Add").click();
+  await page.getByLabel("Git or GitHub repository").fill("example/plugins");
+  await button(page, "Find plugins").click();
+  await button(page, "Install plugin").click();
+  await expectOnlySettings(page);
+  await button(page, "View Counter playground details").click();
+  await page.evaluate(() => {
+    window.importCategory = "productivity";
+  });
+  await button(page, "Check for updates").click();
+  await button(page, "Update").click();
+  const review = page.getByRole("dialog", {
+    name: "Update Counter playground",
+    exact: true,
+  });
+  await expect(
+    review
+      .getByRole("region", { name: "Skipped folders" })
+      .getByRole("listitem"),
+  ).toHaveCount(32);
+  await settleDialogMotion(review);
+  const heading = review.locator(".buzz-dialog-heading");
+  const before = await heading.screenshot();
+  await review.screenshot({
+    path: info.outputPath("update-review-before.png"),
+  });
+  await review.hover();
+  await page.mouse.wheel(0, 210);
+  await expect
+    .poll(() => review.evaluate((node) => node.scrollTop))
+    .toBeGreaterThan(100);
+  const after = await heading.screenshot();
+  await review.screenshot({
+    path: info.outputPath("update-review-scrolled.png"),
+  });
+  expect(after.equals(before)).toBe(true);
+  const material = review.locator(
+    ".buzz-dialog-header > .buzz-dialog-bar-material",
+  );
+  const bounds = await material.boundingBox();
+  expect(bounds).not.toBeNull();
+  const clip = {
+    x: bounds.x + 4,
+    y: bounds.y + bounds.height - 3,
+    width: 20,
+    height: 2,
+  };
+  const body = review.locator(":scope > .buzz-dialog-content");
+  for (const colorScheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme });
+    await body.evaluate((node) => {
+      node.style.background = "rgb(255, 0, 0)";
+    });
+    const red = await page.screenshot({ clip });
+    await body.evaluate((node) => {
+      node.style.background = "rgb(0, 0, 255)";
+    });
+    const blue = await page.screenshot({ clip });
+    expect(
+      blue.equals(red),
+      `${colorScheme} header gutter fades into its body`,
+    ).toBe(false);
+    await body.evaluate((node) => {
+      node.style.removeProperty("background");
+    });
+  }
+  await review.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(review).toHaveCount(0);
+});
+
 test("browser omits native import acquisition controls", async ({
   page,
   app,
@@ -2097,16 +2196,17 @@ test("a Git-installed plugin reviews its URL self-update and survives requester 
     .poll(() => page.evaluate(() => typeof window.requestMigration))
     .toBe("function");
   await page.evaluate(() => window.requestMigration());
-  const review = page.getByRole("dialog", {
-    name: "Update Artifact",
-    exact: true,
-  });
-  await expect(review).toContainText(
-    "This update switches this plugin from Git to a packaged download.",
-  );
-  await expect(review).toContainText(artifactUrl);
-  await review.getByRole("button", { name: "Update", exact: true }).click();
-  await expect(review).toBeHidden();
+  const migrationReview = page
+    .getByRole("dialog", { name: "Update Artifact", exact: true })
+    .filter({
+      hasText:
+        "This update switches this plugin from Git to a packaged download.",
+    });
+  await expect(migrationReview).toContainText(artifactUrl);
+  await migrationReview
+    .getByRole("button", { name: "Update", exact: true })
+    .click();
+  await expect(migrationReview).toBeHidden();
   await expect
     .poll(() => page.evaluate(() => window.migrationOutcome))
     .toBe("updated");
@@ -2125,7 +2225,11 @@ test("a Git-installed plugin reviews its URL self-update and survives requester 
       window.importCalls.filter(({ command }) => command === "plugin_change"),
     ),
   ).toEqual([]);
-  expect(await importCalls(page)).toEqual([
+  // Startup may check the installed Git source before this URL migration.
+  const migrationCalls = (await importCalls(page)).filter(
+    ({ command, args }) => command !== "plugin_import_git" || !args?.checkOnly,
+  );
+  expect(migrationCalls).toEqual([
     {
       command: "plugin_import_url",
       args: { url: artifactUrl, sha256: artifactSha },
@@ -2250,6 +2354,86 @@ test("a failed update check stays on its Settings row, and Check again clears it
   await expect(again).toHaveCount(0);
   await expect(notice).toHaveCount(0);
   await expect(page.getByText("Update Standup Notes")).toHaveCount(0);
+});
+
+test("a policy's automatic install is noted once and labelled in Settings", async ({
+  page,
+  app,
+}, info) => {
+  await page.addInitScript(
+    ({ policy, plugin }) => {
+      window.managedPolicy = policy;
+      window.installedPlugins = [plugin];
+    },
+    {
+      policy: {
+        status: "ready",
+        path: "/fixture/managed-plugins.json",
+        source: "Example Org",
+        problems: [],
+        plugins: [
+          {
+            id: "example.artifact",
+            url: artifactUrl,
+            sha256: artifactSha,
+            install: "automatic",
+            update: "automatic",
+          },
+        ],
+        automatic: [
+          {
+            id: "example.artifact",
+            name: "Artifact",
+            revision: artifactSha,
+            action: "installed",
+          },
+        ],
+      },
+      plugin: {
+        manifest: artifactPlugin[0].manifest,
+        source: "external",
+        enabled: true,
+        revision: artifactSha,
+        previous: null,
+        reloadable: true,
+        error: null,
+        updateSource: { url: artifactUrl },
+      },
+    },
+  );
+  await nativeImports(page, artifactPlugin, { warnings: [] });
+  await page.setViewportSize({ width: 1100, height: 800 });
+  for (const mode of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: mode });
+    await page.goto(app.origin);
+    const notice = page.getByText("Example Org installed Artifact", {
+      exact: true,
+    });
+    await expect(notice).toBeVisible();
+    await page.screenshot({
+      path: info.outputPath(`automatic-notice-${mode}.png`),
+    });
+    await button(page, "Dismiss automatic plugin changes").click();
+    await expect(notice).toBeHidden();
+    await openSettings(page);
+    await selectSettingsSection(page, "Manage plugins");
+    const label = "Managed by Example Org · updates automatically";
+    const row = button(page, "View Artifact details");
+    await expect(row.getByText(label, { exact: true })).toBeVisible();
+    await page.screenshot({
+      path: info.outputPath(`automatic-managed-row-${mode}.png`),
+    });
+    await row.click();
+    const details = page.getByRole("complementary", {
+      name: "Artifact details",
+    });
+    await expect(details.getByText(label, { exact: true })).toBeVisible();
+    await animationsSettled(details, { subtree: true });
+    await page.screenshot({
+      path: info.outputPath(`automatic-managed-details-${mode}.png`),
+    });
+    await closeSettings(page);
+  }
 });
 
 // Browser-only boundary: an external blob module uses the host React tree,

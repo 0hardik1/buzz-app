@@ -600,7 +600,7 @@ describe("Markdown profile mentions", () => {
     const html = render("**@Mic Smith**, _@Mic_! @Other @Missing @Microscopic");
     expect(html).toContain("<strong><button");
     expect(html).toContain('aria-label="View Mic Smith profile"');
-    expect(html).toContain("</svg>M</span>ic Smith</button></strong>");
+    expect(html).toContain("</svg></span>M</span>ic Smith</button></strong>");
     // The raw helper conservatively treats trailing underscore as a name suffix.
     expect(html.match(/<button/g)).toHaveLength(1);
     expect(html).toContain("<em>@Mic</em>");
@@ -617,7 +617,9 @@ describe("Markdown profile mentions", () => {
       extensions,
     });
     expect(html).toContain(`aria-label="View ${name} profile"`);
-    expect(html).toContain(`</svg>M</span>${name.slice(1)}</button></strong>`);
+    expect(html).toContain(
+      `</svg></span>M</span>${name.slice(1)}</button></strong>`,
+    );
     expect(html).not.toContain("<em>");
     expect(html).not.toContain("<img");
   });
@@ -967,6 +969,27 @@ describe("Markdown inline extensions", () => {
     );
   });
 
+  it.each([
+    ["let me check example.com", "https://example.com"],
+    ["**builderlab.xyz/a.**", "https://builderlab.xyz/a"],
+    [
+      "see www.example.com and docs.rs.io",
+      "http://www.example.com/",
+      "https://docs.rs.io",
+    ],
+  ])("links a scheme-less host as authored: %s", (content, ...hrefs) => {
+    const html = render(content);
+    expect([...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1])).toEqual(
+      hrefs,
+    );
+    expect(html.replace(/<[^>]*>/g, "")).toBe(content.replaceAll("**", ""));
+  });
+
+  it("leaves scheme-less hosts in code and file names as text", () => {
+    const html = render("`example.com` and main.rs");
+    expect(html).not.toContain("href=");
+  });
+
   it("keeps emoji-only sizing and readable fallback when media or extensions are unavailable", () => {
     const options = { emoji: [party], extensions, largeEmoji: true };
     const html = render(":party_parrot:", {
@@ -1071,6 +1094,7 @@ it("renders tagged agent library names and profile names with the same agent ico
     const html = render(`@${name} can you also join`, options);
     expect(html).toContain('data-mention-kind="agent"');
     expect(html).toContain(`aria-label="View ${name} profile"`);
+    expect(html).toContain('role="img" aria-label="agent @"');
     expect(html).toContain(
       renderToStaticMarkup(<RobotIcon className={referenceStyles.icon} />),
     );
