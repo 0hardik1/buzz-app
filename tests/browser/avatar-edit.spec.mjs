@@ -799,3 +799,33 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
     /^https:\/\/relay.example.test\/media\/.*#buzz-anim=https%3A%2F%2Frelay.example.test%2Fmedia%2F/,
   );
 });
+
+test("human avatars play on hover and return to their poster, respecting reduced motion", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/tests/fixtures/profile-settings.html");
+  const avatar = page.getByRole("img", {
+    name: "Hover playback sample",
+    exact: true,
+  });
+  const image = avatar.locator("img");
+  await expect(image).toHaveAttribute("src", /still\.png$/);
+  await page
+    .getByRole("button", { name: "Hover playback button", exact: true })
+    .hover();
+  await expect(image).toHaveAttribute("src", /animated\.png$/);
+  await expect(image).toHaveAttribute("data-loaded", "true");
+  await page.getByRole("heading").hover();
+  await expect(image).toHaveAttribute("src", /still\.png$/);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page
+    .getByRole("button", { name: "Hover playback button", exact: true })
+    .hover();
+  // Pointer entry and the media change have both been handled before checking.
+  await expect(image).toHaveAttribute("src", /still\.png$/);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect(image).toHaveAttribute("src", /animated\.png$/);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(image).toHaveAttribute("src", /still\.png$/);
+});

@@ -136,8 +136,9 @@ In a Codex agent’s settings, open **Huddle voice** in the **Settings** tab to 
   shown; do not invent a setup sequence.
 - Human profile avatars offer **Image** and **Animated**. In the avatar editor,
   choose **Animated → Start camera → Record**, review the recording, then choose
-  **Use animated avatar** and save the profile. Camera access is required. Open
-  the person's profile to play or pause their animation. Existing emoji avatars
+  **Use animated avatar** and save the profile. Camera access is required. Hover a person’s avatar
+  in profiles, messages or lists to play it until the pointer leaves; hover playback respects
+  reduced-motion settings. Existing emoji avatars
   remain visible; agent avatar editors still offer emoji.
 - The **public key** identifies someone and is safe to share. Pasting
   someone's `npub` (with or without `nostr:`) or hex key finds them in New

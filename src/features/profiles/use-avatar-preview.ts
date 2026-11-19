@@ -13,7 +13,9 @@ export function useAvatarPreview(
   thumbnailMedia?: (url: string, size: "small") => string | undefined,
 ) {
   const source = thumbnailMedia
-    ? avatarMedia(value, thumbnailMedia)
+    ? avatarMedia(value, (url, requestedSize) =>
+        requestedSize ? thumbnailMedia(url, requestedSize) : undefined,
+      )
     : avatarPreview(value, community, size);
   const destination =
     !thumbnailMedia && source?.startsWith("/api/relay/") && community

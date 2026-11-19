@@ -1,4 +1,3 @@
-import { HumanProfileAvatar } from "../../features/profiles/HumanProfileAvatar";
 import { historyPresentation } from "../../features/agents/history-presentation";
 import {
   profileHistoryActive,
@@ -620,27 +619,17 @@ function ProfileDetails({
         <div className={`${hero.hero} ${hero.panelHero}`}>
           <ProfileBackdrop src={picture} />
           <div className={styles.portrait}>
-            {!displayAgent ? (
-              <HumanProfileAvatar
-                key={profile?.picture ?? ""}
-                picture={profile?.picture}
-                media={session.media}
-                name={name}
-                status={presence === "unknown" ? undefined : presence}
-              />
-            ) : (
-              <AgentAvatar
-                session={session}
-                agentPubkey={pubkey}
-                channelId={context?.channelId}
-                src={picture}
-                alt={`${name} avatar`}
-                fallback={name}
-                size="fill"
-                shape={displayAgent ? "squircle" : "circle"}
-                statusBadge={presence === "unknown" ? undefined : presence}
-              />
-            )}
+            <AgentAvatar
+              session={session}
+              agentPubkey={pubkey}
+              channelId={context?.channelId}
+              src={picture}
+              alt={`${name} avatar`}
+              fallback={name}
+              size="fill"
+              shape={displayAgent ? "squircle" : "circle"}
+              statusBadge={presence === "unknown" ? undefined : presence}
+            />
           </div>
           <div className={styles.identity}>
             <h2 className="text-body-lg">

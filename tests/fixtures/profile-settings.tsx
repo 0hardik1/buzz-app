@@ -1,3 +1,7 @@
+import { IconButton } from "../../src/shared/design-system/ui/IconButton";
+import { AgentAvatarArtworkProvider } from "../../src/features/agents/AgentAvatarArtworkProvider";
+import { Avatar } from "../../src/shared/design-system/ui/Avatar";
+import { avatarMedia } from "../../src/shared/avatar-source";
 import { AvatarEditor } from "../../src/features/profiles/AvatarEditor";
 import { finalizeEvent, getPublicKey } from "nostr-tools";
 import { Context } from "@deepseek-ai/cordis";
@@ -143,6 +147,23 @@ function Fixture() {
       data-buzz-ui=""
       className="mx-auto max-w-4xl space-y-4 p-4 text-body text-primary"
     >
+      <AgentAvatarArtworkProvider>
+        <IconButton
+          aria-label="Hover playback button"
+          variant="avatar"
+          icon={
+            <Avatar
+              alt="Hover playback sample"
+              fallback="Person"
+              src={avatarMedia(
+                "https://example.org/poster.png#buzz-anim=https%3A%2F%2Fexample.org%2Fanimation.png",
+                (_url, size) =>
+                  `/tests/fixtures/attachment-media/${size ? "still.png" : "animated.png"}`,
+              )}
+            />
+          }
+        />
+      </AgentAvatarArtworkProvider>
       <header className="space-y-3 rounded-xl bg-panel p-4">
         <ProfileButton
           communities={communities}

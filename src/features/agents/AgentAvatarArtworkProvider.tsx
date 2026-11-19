@@ -1,5 +1,9 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { AvatarArtworkContext } from "../../shared/design-system/ui/Avatar";
+import {
+  HoverAvatarArtwork,
+  hoverAvatarSources,
+} from "../profiles/HoverAvatarArtwork";
 import { agentAvatars } from "./avatar-packs";
 
 const packsBySource = new Map(
@@ -8,7 +12,16 @@ const packsBySource = new Map(
     [avatar.preview, avatar] as const,
   ]),
 );
-function renderArtwork(src: string) {
+function renderArtwork(
+  src: string,
+  options: Omit<
+    ComponentProps<typeof HoverAvatarArtwork>,
+    "poster" | "animation"
+  >,
+) {
+  const animated = hoverAvatarSources(src);
+  if (animated)
+    return <HoverAvatarArtwork key={src} {...animated} {...options} />;
   const avatar = packsBySource.get(src);
   return avatar ? (
     <img
@@ -20,7 +33,7 @@ function renderArtwork(src: string) {
   ) : null;
 }
 
-/** Shared avatars stay static; the Agents page opts into animated artwork directly. */
+/** Human recordings play on hover; bundled agent artwork keeps its static portrait. */
 export function AgentAvatarArtworkProvider({
   children,
 }: {

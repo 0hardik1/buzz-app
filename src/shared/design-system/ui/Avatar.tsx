@@ -9,11 +9,20 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 
 /** The host may supply artwork for recognized sources; unknown images keep normal loading. */
 export const AvatarArtworkContext = createContext<
-  ((src: string) => ReactNode) | null
+  | ((
+      src: string,
+      options: {
+        root: RefObject<HTMLSpanElement | null>;
+        fallback: ReactNode;
+        loading: "eager" | "lazy" | undefined;
+      },
+    ) => ReactNode)
+  | null
 >(null);
 
 type AvatarSize = "tiny" | "compact" | "small" | "default" | "large" | "fill";
@@ -38,7 +47,7 @@ function rememberAvatar(src: string) {
 const RETRY_DELAYS_MS = [2_000, 10_000, 30_000];
 const failedAvatars = new Map<string, Set<() => void>>();
 
-function AvatarArtwork({
+export function AvatarArtwork({
   src,
   fallback,
   loading,
@@ -146,9 +155,12 @@ export function Avatar({
   loading?: "eager" | "lazy";
 }) {
   const renderArtwork = useContext(AvatarArtworkContext);
-  const artwork = src ? renderArtwork?.(src) : undefined;
+  const root = useRef<HTMLSpanElement>(null);
   const initial = Array.from(fallback.trim())[0]?.toUpperCase() || "?";
   const content = fallbackContent ?? initial;
+  const artwork = src
+    ? renderArtwork?.(src, { root, fallback: content, loading })
+    : undefined;
   return (
     <span
       className="buzz-avatar-status"
@@ -157,6 +169,7 @@ export function Avatar({
       data-status={statusBadge}
     >
       <BaseAvatar.Root
+        ref={root}
         data-buzz-ui=""
         className="buzz-avatar"
         data-size={size}
