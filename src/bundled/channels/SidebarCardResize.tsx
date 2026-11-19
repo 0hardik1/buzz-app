@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { readView, subscribeView, writeView } from "../../shared/view-state";
+import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import styles from "./Channels.module.css";
 
 const heightsKey = "sidebar:card-heights";
@@ -131,98 +132,112 @@ export function SidebarCardResize({
       )}
       {/* Only a card with more than one row has anything to hide. */}
       {count > 1 && (
-        <hr
-          ref={handle}
-          className={styles.cardResize}
-          aria-label={`Resize ${label}`}
-          aria-orientation="horizontal"
-          aria-valuenow={height === ALL_ROWS ? undefined : height}
-          tabIndex={0}
-          onDoubleClick={onToggle}
-          onKeyDown={(event) => {
-            const rows = list.current;
-            if (!rows || event.altKey || event.ctrlKey || event.metaKey) return;
-            // Step one whole row from wherever the list ends now.
-            const ends = stops(rows);
-            const [first, last] = [ends[0], ends.at(-1)];
-            const current = rows.offsetHeight;
-            if (first === undefined || last === undefined) return;
-            if (event.key === "ArrowUp")
-              onResize(ends.filter((end) => end < current - 1).at(-1) ?? first);
-            else if (event.key === "ArrowDown") {
-              const next = ends.find((end) => end > current + 1) ?? last;
-              onResize(next === last ? ALL_ROWS : next);
-            } else return;
-            event.preventDefault();
-          }}
-          onPointerDown={(event) => {
-            const rows = list.current;
-            if (event.button !== 0 || stop.current || !rows) return;
-            event.preventDefault();
-            const { pointerId, clientY: startY } = event;
-            const start = rows.offsetHeight;
-            const ends = stops(rows);
-            const [min = 0] = ends;
-            const max = ends.at(-1) ?? start;
-            // Rows sliding under the pointer must not take hover mid-drag. The
-            // grip stays hit-testable, so a double-click still lands on it.
-            const surface = rows.closest("nav") ?? rows;
-            const grip = event.currentTarget;
-            let next = start;
-            let frame: number | undefined;
-            // Preview on the element; the saved height changes on release.
-            const move = (event: PointerEvent) => {
-              if (event.pointerId !== pointerId) return;
+        <Tooltip
+          side="bottom"
+          closeOnClick={false}
+          content={
+            height === ALL_ROWS
+              ? "Drag to resize · Double-click to show less"
+              : "Drag to resize · Double-click to show all"
+          }
+        >
+          <hr
+            ref={handle}
+            className={styles.cardResize}
+            aria-label={`Resize ${label}`}
+            aria-orientation="horizontal"
+            aria-valuenow={height === ALL_ROWS ? undefined : height}
+            tabIndex={0}
+            onDoubleClick={onToggle}
+            onKeyDown={(event) => {
+              const rows = list.current;
+              if (!rows || event.altKey || event.ctrlKey || event.metaKey)
+                return;
+              // Step one whole row from wherever the list ends now.
+              const ends = stops(rows);
+              const [first, last] = [ends[0], ends.at(-1)];
+              const current = rows.offsetHeight;
+              if (first === undefined || last === undefined) return;
+              if (event.key === "ArrowUp")
+                onResize(
+                  ends.filter((end) => end < current - 1).at(-1) ?? first,
+                );
+              else if (event.key === "ArrowDown") {
+                const next = ends.find((end) => end > current + 1) ?? last;
+                onResize(next === last ? ALL_ROWS : next);
+              } else return;
               event.preventDefault();
-              next = Math.min(
-                max,
-                Math.max(min, start + event.clientY - startY),
-              );
-              frame ??= requestAnimationFrame(() => {
-                frame = undefined;
-                rows.style.maxHeight = `${next}px`;
-              });
-            };
-            const finish = (event: Event) => {
-              if ("pointerId" in event && event.pointerId !== pointerId) return;
-              stop.current?.();
-              // Released, the list glides onto the nearest whole row. Dragged
-              // to the bottom, it keeps showing every row as new ones arrive.
-              // A click without a drag (half of a double-click) changes nothing.
-              if (event.type !== "pointerup" || next === start)
-                return clip(rows, height);
-              const settled = nearest(rows, next);
-              const target = settled >= max ? ALL_ROWS : settled;
-              if (target === height) clip(rows, height);
-              else onResize(target);
-            };
-            stop.current = () => {
-              stop.current = undefined;
-              if (frame !== undefined) cancelAnimationFrame(frame);
-              window.removeEventListener("pointermove", move);
-              window.removeEventListener("pointerup", finish);
-              window.removeEventListener("pointercancel", finish);
-              window.removeEventListener("blur", finish);
-              handle.current?.removeAttribute("data-resizing");
-              rows.removeAttribute("data-resizing");
-              document.documentElement.style.removeProperty("cursor");
-              document.body.style.removeProperty("user-select");
-              surface.style.removeProperty("pointer-events");
-              grip.style.removeProperty("pointer-events");
-            };
-            window.addEventListener("pointermove", move);
-            window.addEventListener("pointerup", finish);
-            window.addEventListener("pointercancel", finish);
-            window.addEventListener("blur", finish);
-            event.currentTarget.setAttribute("data-resizing", "");
-            rows.setAttribute("data-resizing", "");
-            rows.style.maxHeight = `${start}px`;
-            document.documentElement.style.cursor = "ns-resize";
-            document.body.style.userSelect = "none";
-            surface.style.pointerEvents = "none";
-            grip.style.pointerEvents = "auto";
-          }}
-        />
+            }}
+            onPointerDown={(event) => {
+              const rows = list.current;
+              if (event.button !== 0 || stop.current || !rows) return;
+              event.preventDefault();
+              const { pointerId, clientY: startY } = event;
+              const start = rows.offsetHeight;
+              const ends = stops(rows);
+              const [min = 0] = ends;
+              const max = ends.at(-1) ?? start;
+              // Rows sliding under the pointer must not take hover mid-drag. The
+              // grip stays hit-testable, so a double-click still lands on it.
+              const surface = rows.closest("nav") ?? rows;
+              const grip = event.currentTarget;
+              let next = start;
+              let frame: number | undefined;
+              // Preview on the element; the saved height changes on release.
+              const move = (event: PointerEvent) => {
+                if (event.pointerId !== pointerId) return;
+                event.preventDefault();
+                next = Math.min(
+                  max,
+                  Math.max(min, start + event.clientY - startY),
+                );
+                frame ??= requestAnimationFrame(() => {
+                  frame = undefined;
+                  rows.style.maxHeight = `${next}px`;
+                });
+              };
+              const finish = (event: Event) => {
+                if ("pointerId" in event && event.pointerId !== pointerId)
+                  return;
+                stop.current?.();
+                // Released, the list glides onto the nearest whole row. Dragged
+                // to the bottom, it keeps showing every row as new ones arrive.
+                // A click without a drag (half of a double-click) changes nothing.
+                if (event.type !== "pointerup" || next === start)
+                  return clip(rows, height);
+                const settled = nearest(rows, next);
+                const target = settled >= max ? ALL_ROWS : settled;
+                if (target === height) clip(rows, height);
+                else onResize(target);
+              };
+              stop.current = () => {
+                stop.current = undefined;
+                if (frame !== undefined) cancelAnimationFrame(frame);
+                window.removeEventListener("pointermove", move);
+                window.removeEventListener("pointerup", finish);
+                window.removeEventListener("pointercancel", finish);
+                window.removeEventListener("blur", finish);
+                handle.current?.removeAttribute("data-resizing");
+                rows.removeAttribute("data-resizing");
+                document.documentElement.style.removeProperty("cursor");
+                document.body.style.removeProperty("user-select");
+                surface.style.removeProperty("pointer-events");
+                grip.style.removeProperty("pointer-events");
+              };
+              window.addEventListener("pointermove", move);
+              window.addEventListener("pointerup", finish);
+              window.addEventListener("pointercancel", finish);
+              window.addEventListener("blur", finish);
+              event.currentTarget.setAttribute("data-resizing", "");
+              rows.setAttribute("data-resizing", "");
+              rows.style.maxHeight = `${start}px`;
+              document.documentElement.style.cursor = "ns-resize";
+              document.body.style.userSelect = "none";
+              surface.style.pointerEvents = "none";
+              grip.style.pointerEvents = "auto";
+            }}
+          />
+        </Tooltip>
       )}
     </>
   );

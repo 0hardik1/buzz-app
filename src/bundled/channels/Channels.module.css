@@ -1097,7 +1097,8 @@ html[data-keyboard-navigation]
   padding: 0;
   border: 0;
   background: transparent;
-  cursor: ns-resize;
+  /* A hand says it can be clicked; the resize cursor takes over on press. */
+  cursor: pointer;
   touch-action: none;
 }
 .cardResize::after {
