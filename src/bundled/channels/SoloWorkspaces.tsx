@@ -937,9 +937,9 @@ export function SoloWorkspaces({
               );
               return (
                 project && (
-                  <div className={channelStyles.channelDragOverlay}>
+                  <span className={channelStyles.sectionTitle}>
                     {project.name}
-                  </div>
+                  </span>
                 )
               );
             }

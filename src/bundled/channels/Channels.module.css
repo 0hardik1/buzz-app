@@ -380,6 +380,16 @@
 [data-sidebar-cards] [data-drop-shift] {
   translate: 0 var(--space-2);
 }
+/* A moved card's header, drawn as a collapsed card around the header's own
+   box (the overlay takes the header's size); it lifts with the panel shadow. */
+.cardDragOverlay {
+  block-size: calc(100% + 2 * var(--space-1));
+  margin: calc(-1 * var(--space-1));
+  cursor: grabbing;
+}
+.cardDragHeader {
+  padding: var(--space-1);
+}
 .cardDropLine {
   position: fixed;
   z-index: 1;

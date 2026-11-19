@@ -1807,7 +1807,7 @@ export function ChannelInventory({
             const title = section?.title ?? contribution?.title;
             if (!title) return null;
             return (
-              <div className={styles.channelDragOverlay}>
+              <>
                 {section?.icon ? (
                   <SidebarGroupIcon icon={section.icon} session={queries} />
                 ) : contribution?.icon ? (
@@ -1818,8 +1818,8 @@ export function ChannelInventory({
                     {contribution.icon}
                   </ContributionBoundary>
                 ) : null}
-                <span>{title}</span>
-              </div>
+                <span className={styles.sectionTitle}>{title}</span>
+              </>
             );
           }
           const channel = sidebarChannels.find((channel) => channel.id === id);

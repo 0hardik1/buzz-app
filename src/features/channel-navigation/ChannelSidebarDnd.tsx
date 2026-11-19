@@ -27,6 +27,8 @@ import { frame, motion, useReducedMotion } from "motion/react";
 import { SidebarSection } from "../../bundled/channels/SidebarSection";
 import type { SidebarRowKind } from "../../bundled/channels/sidebar-sections";
 import { PlusIcon } from "../../shared/design-system/icons";
+import { NavigationSectionHeading } from "../../shared/design-system/ui/NavigationSection";
+import { Panel } from "../../shared/design-system/ui/Panel";
 import styles from "../../bundled/channels/Channels.module.css";
 
 const Writable = createContext(false);
@@ -159,7 +161,11 @@ export function ChannelSidebarDnd({
       {createPortal(
         // The optimistic move relocates the row, so nothing remains to settle back onto.
         <DragOverlay dropAnimation={null}>
-          {dragging ? overlay(dragging.id, dragging.group) : null}
+          {dragging?.group ? (
+            <CardDragHeader>{overlay(dragging.id, true)}</CardDragHeader>
+          ) : dragging ? (
+            overlay(dragging.id, false)
+          ) : null}
         </DragOverlay>,
         document.body,
       )}
@@ -182,9 +188,9 @@ const headerOf = (id: string) =>
   );
 
 /**
- * The dragged card folds to its header while every other card keeps its
- * state. The grabbed header stays where it was under the pointer, and the
- * drop targets re-measure once the card has folded. A cancelled
+ * Cards keep their size while one is dragged. If anything does shift when the
+ * drag starts, the grabbed header stays where it was under the pointer and
+ * the drop targets re-measure. A cancelled
  * drag restores the scroll position; a drop keeps the moved card in view.
  */
 function CollapsedDragAnchor() {
@@ -240,6 +246,28 @@ function CollapsedDragAnchor() {
       );
   }, [id, measureDroppableContainers]);
   return null;
+}
+
+/**
+ * What follows the pointer while a card moves: its header alone, drawn as a
+ * collapsed card. The card itself stays where it was, full size and faded.
+ */
+function CardDragHeader({ children }: { children: ReactNode }) {
+  return (
+    <div className={styles.cardDragOverlay}>
+      <Panel as="div">
+        <div className={styles.cardDragHeader}>
+          <NavigationSectionHeading disclosure>
+            <details>
+              <summary tabIndex={-1}>
+                <span className={styles.sectionLabel}>{children}</span>
+              </summary>
+            </details>
+          </NavigationSectionHeading>
+        </div>
+      </Panel>
+    </div>
+  );
 }
 
 /** How far an element's CSS translate moves it down right now. */
@@ -528,8 +556,6 @@ export function DroppableSidebarSection({
   });
   const group = !!active?.data.current?.group;
   const from = active?.data.current?.groupIndex;
-  // The moved card shows only its header; every other card stays as it was.
-  const collapsed = group && active?.id === section.sectionKey;
   return (
     <>
       {createSectionTarget && (
@@ -539,7 +565,6 @@ export function DroppableSidebarSection({
       )}
       <SidebarSection
         {...section}
-        open={section.open && !collapsed}
         dropRef={setNodeRef}
         dropTarget={
           !group &&
