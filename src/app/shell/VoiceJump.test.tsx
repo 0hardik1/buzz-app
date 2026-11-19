@@ -52,7 +52,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("../../features/search/voice-dictation", () => ({
   prepareVoice: () => {},
-  useVoiceSearchAvailable: (enabled: boolean) => enabled,
+  useVoiceSearchBackend: (enabled: boolean) => (enabled ? "realtime" : null),
   useVoiceDictation: (callbacks: typeof dictationHandlers.current) => {
     dictationHandlers.current = callbacks;
     return {

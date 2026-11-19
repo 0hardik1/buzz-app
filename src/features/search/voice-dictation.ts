@@ -1,9 +1,7 @@
-// Voice jump's speech-to-text, on device: native code records the
-// microphone and transcribes it with Apple's speech recognition, biased
-// toward names the caller expects (`voice_search.rs`). The transcript so far
-// arrives each time it changes. A short pause in speech is reported while
-// listening goes on; a long one, or a second press, ends the utterance, and
-// native code then sends its final transcript.
+// Voice jump's speech-to-text: audio goes to OpenAI Realtime over WebRTC
+// by default, or to the Mac's on-device recognizer when explicitly selected.
+// Both report a short pause while listening goes on. A long pause or a
+// second press ends the utterance.
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -14,7 +12,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * stops. So 600 ms waits out fluent speech and reports a pause about 0.8 s
  * after the last word. A hesitation of 400 ms or more mid-phrase can still
  * report one early. */
-export const PAUSE_MS = 600;
+const APPLE_PAUSE_MS = 600;
+const REALTIME_PAUSE_MS = 800;
 /** Speech that stops producing text this long has ended. */
 const END_MS = 3_000;
 /** Nothing heard this long after starting ends the attempt. */
@@ -23,28 +22,31 @@ const SILENCE_MS = 8_000;
  * was heard so far. Native code usually sends it within 100 ms. */
 const FINAL_MS = 1_000;
 
-/** Loads the speech model before it's needed; native code keeps it loaded,
- * so calling this often is cheap. */
+/** Prepares the selected recognizer (hosted key or Apple speech model). */
 export function prepareVoice() {
   void invoke("voice_search_prepare").catch(() => {});
 }
 
-let available: Promise<boolean> | undefined;
-/** Whether this device can transcribe speech, asked of native code once. */
-export function useVoiceSearchAvailable(enabled: boolean) {
-  const [value, setValue] = useState(false);
+export type VoiceBackend = "realtime" | "apple";
+
+let backend: Promise<VoiceBackend | null> | undefined;
+/** The selected recognizer, asked of native code once. */
+export function useVoiceSearchBackend(enabled: boolean) {
+  const [value, setValue] = useState<VoiceBackend | null>(null);
   useEffect(() => {
     if (!enabled) return;
     let current = true;
-    available ??= invoke<boolean>("voice_search_available").catch(() => false);
-    void available.then((next) => {
+    backend ??= invoke<VoiceBackend | null>("voice_search_backend").catch(
+      () => null,
+    );
+    void backend.then((next) => {
       if (current) setValue(next);
     });
     return () => {
       current = false;
     };
   }, [enabled]);
-  return enabled && value;
+  return enabled ? value : null;
 }
 
 /** `downloading`: the speech model is being fetched, the first time only. */
@@ -61,12 +63,39 @@ type VoiceEvent =
   | { kind: "downloading" }
   | { kind: "denied"; message: string };
 
+const DELTA = "conversation.item.input_audio_transcription.delta";
+const COMPLETED = "conversation.item.input_audio_transcription.completed";
+
+type RealtimeEvent = {
+  type?: string;
+  delta?: string;
+  transcript?: string;
+  error?: { message?: string };
+};
+
+/** Appends one realtime event's text; a completed event repeats its segment. */
+function mergeTranscript(current: string, event: RealtimeEvent) {
+  if (event.type === DELTA) return current + (event.delta ?? "");
+  if (event.type === COMPLETED) {
+    const segment = (event.transcript ?? "").trim();
+    if (
+      !segment ||
+      current.trim().toLowerCase().endsWith(segment.toLowerCase())
+    )
+      return current;
+    return `${current.trimEnd()} ${segment}`.trimStart();
+  }
+  return current;
+}
+
 export function useVoiceDictation({
+  backend,
   onText,
   onPause,
   onEnd,
   onError,
 }: {
+  backend: VoiceBackend | null;
   /** The transcript so far, each time it changes. */
   onText: (text: string) => void;
   /** The transcript so far, once speech pauses briefly; listening goes on. */
@@ -88,95 +117,168 @@ export function useVoiceDictation({
   const cancel = useCallback(() => run.current?.cancel(), []);
   useEffect(() => cancel, [cancel]);
 
-  /** Starts listening; `hints` are names and words to expect. */
-  const start = useCallback(async (hints: readonly string[] = []) => {
-    if (run.current) return;
-    let session: number | undefined;
-    let text = "";
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let pause: ReturnType<typeof setTimeout> | undefined;
-    let ending = false;
-    let ended = false;
-    const close = (report: boolean, heard = text) => {
-      if (ended) return;
-      ended = true;
-      clearTimeout(timer);
-      clearTimeout(pause);
-      run.current = undefined;
-      setState("idle");
-      if (report && heard.trim()) callbacks.current.onEnd(heard.trim());
-    };
-    const finish = () => {
-      if (ended || ending) return;
-      ending = true;
-      clearTimeout(pause);
-      if (session !== undefined)
-        void invoke("voice_search_finish", { session }).catch(() => {});
-      // The final transcript ends it; this reports what was heard if it
-      // doesn't come.
-      clearTimeout(timer);
-      timer = setTimeout(() => close(true), FINAL_MS);
-    };
-    const abandon = () => {
-      if (ended) return;
-      if (session !== undefined)
-        void invoke("voice_search_cancel", { session }).catch(() => {});
-      close(false);
-    };
-    const wait = (ms: number) => {
-      clearTimeout(timer);
-      timer = setTimeout(finish, ms);
-    };
-    const onEvent = new Channel<VoiceEvent>((event) => {
-      if (ended) return;
-      if (event.kind === "error" || event.kind === "denied") {
-        callbacks.current.onError?.(
-          event.message,
-          event.kind === "denied" ? "denied" : "failed",
-        );
-        return close(false);
-      }
-      if (event.kind === "downloading") {
-        if (!ending) setState("downloading");
-        return;
-      }
-      if (event.kind === "ended") return close(true, event.text || text);
-      if (event.kind === "listening") {
+  /** Starts listening; only Apple uses the hints. */
+  const start = useCallback(
+    async (hints: readonly string[] = []) => {
+      if (run.current || !backend) return;
+      let session: number | undefined;
+      let stream: MediaStream | undefined;
+      let peer: RTCPeerConnection | undefined;
+      let text = "";
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let pause: ReturnType<typeof setTimeout> | undefined;
+      let ending = false;
+      let ended = false;
+      const close = (report: boolean, heard = text) => {
+        if (ended) return;
+        ended = true;
+        clearTimeout(timer);
+        clearTimeout(pause);
+        peer?.close();
+        for (const track of stream?.getTracks() ?? []) track.stop();
+        run.current = undefined;
+        setState("idle");
+        if (report && heard.trim()) callbacks.current.onEnd(heard.trim());
+      };
+      const finish = () => {
+        if (ended || ending) return;
+        if (backend === "realtime") return close(true);
+        ending = true;
+        clearTimeout(pause);
+        if (session !== undefined)
+          void invoke("voice_search_finish", { session }).catch(() => {});
+        // Apple sends a final transcript; report what was heard if it doesn't.
+        clearTimeout(timer);
+        timer = setTimeout(() => close(true), FINAL_MS);
+      };
+      const abandon = () => {
+        if (ended) return;
+        if (session !== undefined)
+          void invoke("voice_search_cancel", { session }).catch(() => {});
+        close(false);
+      };
+      const wait = (ms: number) => {
+        clearTimeout(timer);
+        timer = setTimeout(finish, ms);
+      };
+      const listening = () => {
         setState("listening");
-        if (!ending) wait(SILENCE_MS);
-        return;
-      }
-      if (event.text === text) return;
-      text = event.text;
-      callbacks.current.onText(text.trim());
-      if (ending) return;
-      clearTimeout(pause);
-      pause = setTimeout(
-        () => callbacks.current.onPause?.(text.trim()),
-        PAUSE_MS,
-      );
-      wait(END_MS);
-    });
-    run.current = { stop: finish, cancel: abandon };
-    setState("starting");
-    try {
-      session = await invoke<number>("voice_search_start", {
-        hints,
-        onEvent,
-      });
-    } catch (error) {
-      if (!ended)
-        callbacks.current.onError?.(
-          typeof error === "string" ? error : "Voice search failed",
-          "failed",
+        if (!ending && !text) wait(SILENCE_MS);
+      };
+      const heard = (next: string) => {
+        if (next === text) return;
+        text = next;
+        callbacks.current.onText(text.trim());
+        if (ending || ended) return;
+        clearTimeout(pause);
+        pause = setTimeout(
+          () => callbacks.current.onPause?.(text.trim()),
+          backend === "apple" ? APPLE_PAUSE_MS : REALTIME_PAUSE_MS,
         );
-      return close(false);
-    }
-    // Stopped or cancelled before native code answered.
-    if (ended) void invoke("voice_search_cancel", { session }).catch(() => {});
-    else if (ending)
-      void invoke("voice_search_finish", { session }).catch(() => {});
-  }, []);
+        wait(END_MS);
+      };
+      const fail = (message: string, failure: DictationFailure = "failed") => {
+        if (ended) return;
+        callbacks.current.onError?.(message, failure);
+        close(false);
+      };
+      run.current = { stop: finish, cancel: abandon };
+      setState("starting");
+      try {
+        if (backend === "apple") {
+          const onEvent = new Channel<VoiceEvent>((event) => {
+            if (ended) return;
+            if (event.kind === "error" || event.kind === "denied")
+              return fail(
+                event.message,
+                event.kind === "denied" ? "denied" : "failed",
+              );
+            if (event.kind === "downloading") {
+              if (!ending) setState("downloading");
+              return;
+            }
+            if (event.kind === "ended") return close(true, event.text || text);
+            if (event.kind === "listening") return listening();
+            heard(event.text);
+          });
+          session = await invoke<number>("voice_search_start", {
+            hints,
+            onEvent,
+          });
+          // Stopped or cancelled before native code answered.
+          if (ended)
+            void invoke("voice_search_cancel", { session }).catch(() => {});
+          else if (ending)
+            void invoke("voice_search_finish", { session }).catch(() => {});
+          return;
+        }
+
+        // The offer needs no microphone: asking for it and connecting run
+        // side by side. The key and SDP exchange stay native.
+        peer = new RTCPeerConnection();
+        const sender = peer.addTransceiver("audio").sender;
+        const channel = peer.createDataChannel("oai-events");
+        channel.addEventListener("message", (message) => {
+          if (ended) return;
+          let event: RealtimeEvent;
+          try {
+            event = JSON.parse(String(message.data));
+          } catch {
+            return;
+          }
+          if (!event || typeof event !== "object") return;
+          if (event.type === "error")
+            return fail(event.error?.message ?? "Voice search failed");
+          heard(mergeTranscript(text, event));
+        });
+        const offer = await peer.createOffer();
+        if (ended) return;
+        await peer.setLocalDescription(offer);
+        if (ended) return;
+        const microphone = navigator.mediaDevices
+          .getUserMedia({
+            audio: {
+              autoGainControl: true,
+              echoCancellation: true,
+              noiseSuppression: true,
+            },
+          })
+          .then((media) => {
+            stream = media;
+            // Stopped meanwhile: release the microphone at once.
+            if (ended) for (const track of media.getTracks()) track.stop();
+            return media;
+          });
+        const [media, answer] = await Promise.all([
+          microphone,
+          invoke<string>("voice_search_connect", { offer: offer.sdp ?? "" }),
+        ]);
+        if (ended) return;
+        await sender.replaceTrack(media.getAudioTracks()[0] ?? null);
+        if (ended) return;
+        await peer.setRemoteDescription({ type: "answer", sdp: answer });
+        if (!ended) listening();
+      } catch (error) {
+        const exception =
+          error instanceof Error || error instanceof DOMException;
+        if (exception && error.name === "NotAllowedError") {
+          fail(
+            "Allow Buzz to use your microphone to search by voice.",
+            "denied",
+          );
+        } else {
+          fail(
+            exception
+              ? error.message
+              : typeof error === "string"
+                ? error
+                : "Voice search failed",
+          );
+        }
+      }
+    },
+    [backend],
+  );
 
   return { state, start, stop, cancel };
 }
