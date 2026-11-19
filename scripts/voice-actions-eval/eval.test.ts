@@ -2,7 +2,7 @@
 // expected answer is reachable, so a miss in a live run is Jev's, not a typo.
 import { describe, expect, it } from "vitest";
 import { checkRequest } from "../../src/features/decisions/service";
-import { ACTIONS, ENTITIES, PLACES, hover } from "./catalog";
+import { ACTIONS, ENTITIES, PLACES, hover, UNOFFERED } from "./catalog";
 import { CASES } from "./cases";
 import { FINAL, HERE } from "./cases-final";
 import { REALSTT } from "./cases-realstt";
@@ -49,7 +49,10 @@ describe("voice actions eval", () => {
           PLACES.map((p) => p.key),
           c.id,
         ).toContain(e.navigate);
-      if ("action" in e) {
+      // A case asking for an action the app doesn't offer expects none.
+      if ("action" in e && UNOFFERED.has(e.action))
+        expect(ACTIONS.map((a) => a.id)).not.toContain(e.action);
+      else if ("action" in e) {
         const offered = matchActionBindings(ACTIONS, hovered, ENTITIES).map(
           (b) => b.action.id,
         );
@@ -72,7 +75,7 @@ describe("voice actions eval", () => {
     }
   });
 
-  it("binds a hovered thing as owner, as target, and both for one type", () => {
+  it("binds a hovered thing as owner and as target", () => {
     const options = (spec: string) =>
       matchActionBindings(ACTIONS, hover(spec), ENTITIES).map(
         (b) => `${b.action.id}:${b.hoveredRole}`,
@@ -81,8 +84,6 @@ describe("voice actions eval", () => {
       expect.arrayContaining([
         "channel.star:owner",
         "channel.move_to_section:owner",
-        "channel.move_next_to:owner",
-        "channel.move_next_to:target",
       ]),
     );
     expect(options("section:Work")).toContain("channel.move_to_section:target");

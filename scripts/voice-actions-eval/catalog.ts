@@ -127,12 +127,6 @@ export const ACTIONS: readonly VoiceActionSpec[] = [
             bound,
           }),
   },
-  a(
-    "channel.move_next_to",
-    "channel",
-    "channel",
-    (o, t) => `Move ${o} next to ${t} in the sidebar`,
-  ),
   a("channel.mute", "channel", undefined, (o) => `Mute ${o}`),
   a("channel.mark_read", "channel", undefined, (o) => `Mark ${o} as read`),
   a("channel.leave", "channel", undefined, (o) => `Leave ${o}`, "confirm"),
@@ -170,13 +164,6 @@ export const ACTIONS: readonly VoiceActionSpec[] = [
     undefined,
     (o) => `Collapse the ${o} section`,
   ),
-  a(
-    "section.delete",
-    "section",
-    undefined,
-    (o) => `Delete the ${o} section`,
-    "confirm",
-  ),
   // Messages and threads (drone01's forward + drone03).
   a(
     "message.forward_to_person",
@@ -195,7 +182,6 @@ export const ACTIONS: readonly VoiceActionSpec[] = [
   // The real quick message and thread actions (react, reply, follow,
   // unfollow, copy link, mark unread), with their own sentences.
   ...quickMessageVoiceActions,
-  a("message.delete", "message", undefined, (o) => `Delete ${o}`, "confirm"),
   // People.
   a("person.profile", "person", undefined, (o) => `Open ${o}'s profile`),
   a("person.dm", "person", undefined, (o) => `Send ${o} a direct message`),
@@ -265,6 +251,15 @@ export const ACTIONS: readonly VoiceActionSpec[] = [
     true,
   ),
 ];
+
+/** Actions some cases ask for that the app doesn't offer: exact sidebar
+ * positions and deletions are left out of voice on purpose. Those cases
+ * expect no action (options or nothing), never some other one. */
+export const UNOFFERED: ReadonlySet<string> = new Set([
+  "channel.move_next_to",
+  "section.delete",
+  "message.delete",
+]);
 
 export const CONFIRM = new Set(
   ACTIONS.filter((x) => x.confirm === "confirm").map((x) => x.id),
