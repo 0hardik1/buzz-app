@@ -4286,10 +4286,8 @@ export function createChannelStore(
         void fetchProfiles(state.snapshot.rows.slice(-12));
     }
   });
-  /** Verified traffic shares the same fold as reads and local intent. Window bounds remain read-owned.
-   * A window's own catch-up pages pass `ownPages`: they move its floor
-   * themselves, so rows below the old floor are theirs to add. */
-  function accept(events: readonly RelayEvent[], ownPages = false) {
+  /** Verified traffic shares the same fold as reads and local intent. Window bounds remain read-owned. */
+  function accept(events: readonly RelayEvent[]) {
     if (disposed || !transport) return;
     const generation = epoch;
     const changedChannels = new Set(
@@ -4328,30 +4326,6 @@ export function createChannelStore(
       if (disposed || generation !== epoch) return;
       if (!authorized(state.channelId)) continue;
       const ids = new Set(state.events.map((event) => event.id));
-      const below = new Set<string>();
-      const floor = state.floor;
-      if (!ownPages && state.snapshot.hasMore && floor !== undefined) {
-        for (const event of events)
-          if (
-            channelRowKind(event.kind) &&
-            event.created_at < floor &&
-            !ids.has(event.id) &&
-            event.tags.some(
-              ([name, id]) => name === "h" && id === state.channelId,
-            )
-          )
-            below.add(event.id);
-        for (let hop = 0; hop < 2 && below.size; hop++)
-          for (const event of events) {
-            if (channelRowKind(event.kind) || below.has(event.id)) continue;
-            const targets = event.tags.filter(([name]) => name === "e");
-            if (
-              targets.length &&
-              targets.every(([, id]) => below.has(id ?? ""))
-            )
-              below.add(event.id);
-          }
-      }
       const incomingIds = new Set(ids);
       const incoming: RelayEvent[] = [];
       let changed = true;
@@ -4360,7 +4334,6 @@ export function createChannelStore(
         for (const event of events) {
           if (
             incomingIds.has(event.id) ||
-            below.has(event.id) ||
             !(
               channelRowKind(event.kind) ||
               [40003, 5, 9005, 7, 39005].includes(event.kind)
@@ -4803,7 +4776,7 @@ export function createChannelStore(
         } else void fillNotices(retained, true);
         retained.restored = false;
         retained.readAt = head.readAt;
-        accept(head.events, true);
+        accept(head.events);
         page = head;
         const reached = (last: Page) =>
           !last.hasMore ||
@@ -4824,7 +4797,7 @@ export function createChannelStore(
           ).page;
           if (!valid())
             throw new DOMException("Stale live catch-up", "AbortError");
-          accept(page.events, true);
+          accept(page.events);
           contiguous = reached(page);
         }
         if (!valid())
