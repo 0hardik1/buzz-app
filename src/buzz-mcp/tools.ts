@@ -781,6 +781,13 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
     const channel = tag(target, "h");
     if (!channel) throw new Error(`${id} is not a channel message.`);
     const content = required(args, "text");
+    // The replacement keeps the message's audience, so it meets that
+    // audience's length limit as a send would.
+    const audience = tag(target, "audience");
+    checkLength(
+      audience === "agents" || audience === "details" ? audience : "everyone",
+      content,
+    );
     if (!tools.client.effectiveEdit)
       throw new Error("This host cannot obtain effective edit state.");
     const effective = await tools.client.effectiveEdit(id, channel);
