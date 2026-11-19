@@ -8,10 +8,12 @@ import { createServer } from "vite";
 import { expect, it } from "vitest";
 import { relayBrokerPlugin } from "./relay-broker.mjs";
 
-it("loads the broker's Vite config without native-compatibility warnings", () => {
-  // A fresh Node process exercises real config imports, not Vitest's resolver.
-  // Loading and resolving config never invoke configureServer, so they cannot
-  // read the Keychain, open a server, or contact a relay.
+// A fresh Node process exercises real config imports, not Vitest's resolver.
+// Loading and resolving config never invoke configureServer, so they cannot
+// read the Keychain, open a server, or contact a relay. Each load re-bundles
+// vite.config.ts with the broker graph it imports (~85 modules), so the cases
+// are split across processes to stay well inside the timeout on loaded runners.
+function loadConfigCases(cases) {
   const result = spawnSync(
     process.execPath,
     [
@@ -29,6 +31,40 @@ it("loads the broker's Vite config without native-compatibility warnings", () =>
           const cwd = process.cwd();
           try {
             process.chdir(directory);
+${cases}
+          } finally {
+            process.chdir(cwd);
+            rmSync(directory, { recursive: true, force: true });
+          }
+        `,
+    ],
+    {
+      cwd: fileURLToPath(new URL("../", import.meta.url)),
+      env: {
+        // Keep local Buzz credentials out of the config subprocess.
+        ...Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([key]) => !key.startsWith("BUZZ_"),
+          ),
+        ),
+        BUZZ_DEV_VIEWER: "a".repeat(64),
+        BUZZ_RELAY_URL: "",
+        BUZZ_COMMUNITY_ALIASES: "",
+        VITE_CONFIG_NATIVE_IGNORE_WARNING: "",
+      },
+      encoding: "utf8",
+      timeout: 30_000,
+    },
+  );
+  expect(result.error).toBeUndefined();
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.stderr).not.toContain("configLoader: 'native'");
+}
+
+for (const [name, cases] of [
+  [
+    "resolves loopback hosts, signer loading and notification settings",
+    `
             const loaded = await loadConfigFromFile(
               { command: 'serve', mode: 'development' }, configFile,
             );
@@ -82,6 +118,11 @@ it("loads the broker's Vite config without native-compatibility warnings", () =>
                 JSON.stringify(command === 'serve' ? '1' : '0'),
               );
             }
+`,
+  ],
+  [
+    "derives the open relay and packaged community defaults",
+    `
             // BUZZ_DEV_OPEN_RELAY exposes the canonical default relay to a live dev
             // server only when set to exactly "1"; builds and other values see "".
             process.env.BUZZ_RELAY_URL = 'wss://Relay.example.com/';
@@ -142,6 +183,11 @@ it("loads the broker's Vite config without native-compatibility warnings", () =>
               );
             }
             delete process.env.BUZZ_DEFAULT_COMMUNITY_URL;
+`,
+  ],
+  [
+    "validates packaged Databricks, gateway, mobile and recommended settings",
+    `
             // A packaged Databricks workspace reaches goose verbatim; invalid hosts
             // fail the build without echoing credentials.
             for (const [command, host, expected] of [
@@ -257,6 +303,11 @@ it("loads the broker's Vite config without native-compatibility warnings", () =>
               error => String(error).includes('BUZZ_RECOMMENDED_AGENT[1].model') && !String(error).includes('secret'),
             );
             delete process.env.BUZZ_RECOMMENDED_AGENT;
+`,
+  ],
+  [
+    "derives Builderlab and Apps control-plane origins from shared inputs",
+    `
             // A fresh checkout uses production for both dev and packaged frontends.
             // Explicit empty values retain the deployment opt-out.
             for (const local of ['', 'BUZZ_BUILDERLAB_URL=']) {
@@ -320,6 +371,11 @@ it("loads the broker's Vite config without native-compatibility warnings", () =>
             delete process.env.BUZZ_BUILDERLAB_APPS_CONTROL_PLANE;
             writeFileSync('.env.local', '');
             writeFileSync('.env.production', '');
+`,
+  ],
+  [
+    "validates the first-run account seed and open-relay requirements",
+    `
             // The first-run account seed reaches only a dev server, and a
             // malformed value fails at configuration time without being echoed.
             for (const command of ['serve', 'build']) {
@@ -374,34 +430,13 @@ it("loads the broker's Vite config without native-compatibility warnings", () =>
               loadConfigFromFile({ command: 'serve', mode: 'development' }, configFile),
               /BUZZ_DEV_OPEN_RELAY=1 requires BUZZ_RELAY_URL/,
             );
-          } finally {
-            process.chdir(cwd);
-            rmSync(directory, { recursive: true, force: true });
-          }
-        `,
-    ],
-    {
-      cwd: fileURLToPath(new URL("../", import.meta.url)),
-      env: {
-        // Keep local Buzz credentials out of the config subprocess.
-        ...Object.fromEntries(
-          Object.entries(process.env).filter(
-            ([key]) => !key.startsWith("BUZZ_"),
-          ),
-        ),
-        BUZZ_DEV_VIEWER: "a".repeat(64),
-        BUZZ_RELAY_URL: "",
-        BUZZ_COMMUNITY_ALIASES: "",
-        VITE_CONFIG_NATIVE_IGNORE_WARNING: "",
-      },
-      encoding: "utf8",
-      timeout: 30_000,
-    },
-  );
-  expect(result.error).toBeUndefined();
-  expect(result.status, result.stderr).toBe(0);
-  expect(result.stderr).not.toContain("configLoader: 'native'");
-}, 35_000);
+`,
+  ],
+]) {
+  it(`loads the broker's Vite config without native-compatibility warnings: ${name}`, () => {
+    loadConfigCases(cases);
+  }, 35_000);
+}
 
 it("refuses exposed Vite servers before reading identity and serves the broker on loopback", async () => {
   const directory = mkdtempSync(join(tmpdir(), "buzz-broker-listener-"));
