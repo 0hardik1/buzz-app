@@ -5,8 +5,7 @@
   gap: var(--space-4);
   font-family: var(--font-sans);
 }
-.controls,
-.author {
+.controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -26,21 +25,6 @@
   line-height: var(--text-body-sm--line-height);
   letter-spacing: var(--text-body-sm--letter-spacing);
   font-weight: var(--text-body-sm--font-weight);
-}
-.comment {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-}
-.comment + .comment {
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--border-standard);
-}
-.content {
-  display: grid;
-  gap: var(--space-2);
-  min-width: 0;
-  flex: 1;
 }
 .reply {
   justify-self: start;

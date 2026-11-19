@@ -45,6 +45,9 @@ it("returns a write receipt independently of refresh and supports replies", asyn
   ).toBe("sent");
   const threads = await api.loadThreads(fixturePull);
   expect(threads.items[0]?.comments[0]?.author).toBe("example-reviewer");
+  expect(threads.items[0]?.comments[0]?.avatarUrl).toBe(
+    "./design-system/assets/avatar.png",
+  );
   expect(
     (await api.reply(snapshot, 1, "Reply", "reply-operation")).status,
   ).toBe("sent");

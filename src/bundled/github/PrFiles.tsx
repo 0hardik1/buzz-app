@@ -16,6 +16,7 @@ import {
   type DiffLine,
 } from "../diffs/DiffViewer";
 import { parsePatch } from "../diffs/parse";
+import { GitHubComment } from "./GitHubComment";
 import { InlineCommentForm } from "./InlineCommentForm";
 import type { InlineDeliveryStore } from "./inline-delivery";
 import {
@@ -445,34 +446,26 @@ export function PrFiles({
         setThreadError(readable(failure).message);
     }
   }
-  function threadView(thread: Thread) {
+  function threadView(thread: Thread, inline = false) {
     return (
       <section
         key={thread.id}
         className={styles.thread}
         aria-label={`Comments on ${thread.path}`}
       >
-        <p>
-          {thread.path} ·{" "}
-          {thread.outdated
-            ? "Outdated"
-            : thread.line === null
-              ? "Not on a displayed line"
-              : `${thread.side === "LEFT" ? "Old" : "New"} line ${thread.line}`}
-          {thread.resolved ? " · Resolved" : ""}
-        </p>
+        {!inline && (
+          <p>
+            {thread.path} ·{" "}
+            {thread.outdated
+              ? "Outdated"
+              : thread.line === null
+                ? "Not on a displayed line"
+                : `${thread.side === "LEFT" ? "Old" : "New"} line ${thread.line}`}
+            {thread.resolved ? " · Resolved" : ""}
+          </p>
+        )}
         {thread.comments.map((comment) => (
-          <article key={comment.id}>
-            <a
-              href={comment.url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-link"
-            >
-              {comment.author}
-            </a>
-            <p className={styles.body}>{comment.body}</p>
-          </article>
+          <GitHubComment key={comment.id} comment={comment} />
         ))}
         {!thread.commentsComplete && (
           <Button size="sm" onClick={() => void more(thread)}>
@@ -534,7 +527,7 @@ export function PrFiles({
   }
   for (const thread of threads)
     if (mapped(thread) && thread.line !== null)
-      annotate({ ...thread, line: thread.line }, threadView(thread));
+      annotate({ ...thread, line: thread.line }, threadView(thread, true));
   for (const composer of composers)
     if (targetMapped(composer)) annotate(composer.target, form(composer));
   if (choice?.lines[0])
@@ -651,7 +644,9 @@ export function PrFiles({
         {parts?.length === 0 && <p>No file changes.</p>}
       </LoadingRegion>
       <LoadingRegion pending={commentsLoading} label="Loading comments…">
-        {threads.filter((thread) => !mapped(thread)).map(threadView)}
+        {threads
+          .filter((thread) => !mapped(thread))
+          .map((thread) => threadView(thread))}
       </LoadingRegion>
     </div>
   );

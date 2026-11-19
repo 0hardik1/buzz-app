@@ -618,7 +618,7 @@ function ObjectPanel({
           />
         </div>
       )}
-      {files && changesShown && (
+      {files && (comments || changesShown) && (
         <div hidden={!showChanges}>
           {comments ? (
             <PrFiles

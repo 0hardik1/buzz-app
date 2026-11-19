@@ -33,6 +33,7 @@ export type Comment = Readonly<{
   databaseId: number;
   body: string;
   author: string;
+  avatarUrl?: string | undefined;
   url: string;
   createdAt: string;
   commit: string | null;
@@ -141,7 +142,7 @@ type RestComment = {
   node_id: string;
   id: number;
   body: string;
-  user: { login: string } | null;
+  user: { login: string; avatar_url?: string } | null;
   html_url: string;
   created_at: string;
   commit_id: string | null;
@@ -157,15 +158,16 @@ const commentOf = (value: RestComment): Comment => ({
   databaseId: value.id,
   body: value.body,
   author: value.user?.login ?? "deleted user",
+  avatarUrl: value.user?.avatar_url,
   url: value.html_url,
   createdAt: value.created_at,
   commit: value.commit_id,
   originalCommit: value.original_commit_id,
 });
 const commentFields =
-  "id databaseId body author { login } url createdAt commit { oid } originalCommit { oid }";
+  "id databaseId body author { login avatarUrl } url createdAt commit { oid } originalCommit { oid }";
 type GraphComment = Omit<Comment, "author" | "commit" | "originalCommit"> & {
-  author: { login: string } | null;
+  author: { login: string; avatarUrl?: string } | null;
   commit: { oid: string } | null;
   originalCommit: { oid: string } | null;
 };
@@ -182,6 +184,7 @@ const pageOf = <T>(connection: Connection<T>): Page<T> => ({
 const graphComment = (comment: GraphComment): Comment => ({
   ...comment,
   author: comment.author?.login ?? "deleted user",
+  avatarUrl: comment.author?.avatarUrl,
   commit: comment.commit?.oid ?? null,
   originalCommit: comment.originalCommit?.oid ?? null,
 });

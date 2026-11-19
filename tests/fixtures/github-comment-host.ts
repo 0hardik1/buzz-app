@@ -59,7 +59,7 @@ export function githubCommentHost() {
     id: row.node_id,
     databaseId: row.id,
     body: row.body,
-    author: row.user,
+    author: { ...row.user, avatarUrl: "./design-system/assets/avatar.png" },
     url: row.html_url,
     createdAt: row.created_at,
     commit: { oid: row.commit_id },

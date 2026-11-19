@@ -516,3 +516,37 @@ test("gutter and keyboard share verified patch coordinates across layouts", asyn
     await file.press("Escape");
   }
 });
+
+test("preloads diff and threads from Summary without tab-triggered reads", async ({
+  page,
+}) => {
+  await page.goto(
+    `${fixtures.origin}/tests/fixtures/github-inline-comments.html?summary`,
+  );
+  await expect(
+    page.getByRole("tab", { name: "Summary", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.inlineFixture.state.calls.some(
+          (call) =>
+            call.id === "graphql" &&
+            String(call.input.query).includes("reviewThreads(first:100"),
+        ),
+      ),
+    )
+    .toBe(true);
+  await expect(page.locator("diffs-container")).toHaveCount(1);
+  await expect(page.locator("diffs-container")).toBeHidden();
+  const reads = await page.evaluate(
+    () => window.inlineFixture.state.calls.length,
+  );
+  await page.getByRole("tab", { name: /^Changes/ }).click();
+  await expect(
+    page.getByRole("region", { name: "src/example.ts", exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => window.inlineFixture.state.calls.length),
+  ).toBe(reads);
+});

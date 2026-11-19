@@ -27,7 +27,10 @@ const gh = gitHubCli(fixture.host);
 const diff = gitHubDiff(fixture.host);
 const url = "https://github.com/example-org/sample/pull/1";
 const memory = createPanelMemory();
-memory.setView(url, "changes");
+memory.setView(
+  url,
+  new URLSearchParams(location.search).has("summary") ? "summary" : "changes",
+);
 const modes = [
   "success",
   "denied",

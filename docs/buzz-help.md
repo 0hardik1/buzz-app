@@ -1822,7 +1822,7 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   pull request opens, from any channel. Submitting clears it. If the pull
   request merges or closes first, **Submit review** goes away once you close
   it. **Changes** and **Submit review** need the desktop app with `gh` signed
-  in. The loaded Changes view stays mounted when switching tabs; reloading the
+  in. Diff and comments begin loading when Summary opens. The loaded Changes view stays mounted when switching tabs; reloading the
   window or turning the GitHub plugin off and on forgets all of this. Supported code files in
   **Changes** use syntax highlighting, including Kotlin, even for small changes
   deep in large files. Oversized, unsupported or unparseable patches remain
@@ -1835,6 +1835,7 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   Closed and merged PRs also offer commenting;
   GitHub checks whether the submission is allowed. Raw or unmapped patches cannot
   accept new line comments.
+  Comments render Markdown with author avatars and separated replies.
   Several inline composers can stay open at once; opening another line keeps
   existing text. Unsent text is local to the panel; cancel, refresh, leaving
   Changes or closing the panel discards it. After a PR changes, select the line

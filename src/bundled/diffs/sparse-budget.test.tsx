@@ -118,3 +118,29 @@ it("leaves only a line over the length budget unhighlighted", async () => {
   expect(long?.querySelector(tokens)).toBeNull();
   expect(screen.queryByRole("region", { name: "Raw diff" })).toBeNull();
 });
+
+it("keeps ordinary new files over the token budget structured and commentable", async () => {
+  const content =
+    "diff --git a/sample.kt b/sample.kt\nnew file mode 100644\n--- /dev/null\n+++ b/sample.kt\n@@ -0,0 +1,386 @@\n" +
+    Array.from(
+      { length: 386 },
+      (_, index) => `+val example${index} = "a moderately sized test value"\n`,
+    ).join("");
+  const onAvailabilityChange = vi.fn();
+  const { container } = render(
+    <DiffViewer
+      content={content}
+      files={parsePatch(content)}
+      comments={{ annotations: [], onSelect: vi.fn(), onAvailabilityChange }}
+    />,
+  );
+  await vi.waitFor(() => {
+    const root = container.querySelector("diffs-container")?.shadowRoot;
+    expect(root?.querySelector('pre [data-line="386"]')).toBeTruthy();
+  });
+  expect(screen.queryByRole("region", { name: "Raw diff" })).toBeNull();
+  expect(onAvailabilityChange).toHaveBeenCalledWith("sample.kt", true);
+  expect(pierre.preloadHighlighter).toHaveBeenCalledWith(
+    expect.objectContaining({ langs: ["text"] }),
+  );
+});

@@ -1,9 +1,8 @@
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
-import { Avatar } from "../../src/shared/design-system/ui/Avatar";
+import { GitHubComment } from "../../src/bundled/github/GitHubComment";
 import { Button } from "../../src/shared/design-system/ui/Button";
 import { InlineCommentForm } from "../../src/bundled/github/InlineCommentForm";
-import { GitHubBody } from "../../src/bundled/github/GitHubBody";
 import { DiffViewer } from "../../src/bundled/diffs/DiffViewer";
 import { parsePatch } from "../../src/bundled/diffs/parse";
 import { fixturePatch } from "./github-comment-host";
@@ -47,29 +46,20 @@ function Thread({
   return (
     <section className={styles.thread} aria-label={label}>
       {[...comments, ...localReplies].map((comment, index) => (
-        <article
-          className={styles.comment}
+        <GitHubComment
           key={comment.id ?? `${comment.author}:${comment.body}`}
-        >
-          <Avatar
-            src={comment.avatar}
-            alt=""
-            fallback={comment.author}
-            size="small"
-            loading="eager"
-          />
-          <div className={styles.content}>
-            <div className={styles.author}>
-              <a
-                className="text-link"
-                href={`${pull}#discussion_r${index + 1}`}
-              >
-                {comment.author}
-              </a>
-            </div>
-            <GitHubBody body={comment.body} url={pull} />
-          </div>
-        </article>
+          comment={{
+            id: comment.id ?? String(index),
+            databaseId: index + 1,
+            author: comment.author,
+            avatarUrl: comment.avatar,
+            body: comment.body,
+            url: `${pull}#discussion_r${index + 1}`,
+            createdAt: "2026-01-01T00:00:00Z",
+            commit: null,
+            originalCommit: null,
+          }}
+        />
       ))}
       {replying && (
         <InlineCommentForm
@@ -114,8 +104,8 @@ function Preview() {
     >
       <h1 className="text-title">PR comments · design workbench</h1>
       <p className="text-body">
-        Synthetic comments; no GitHub requests. The proposed comment layout is
-        only on this page.
+        Synthetic comments; no GitHub requests. The comment renderer is shared
+        with the PR view.
       </p>
       <div className={styles.controls}>
         <Button
