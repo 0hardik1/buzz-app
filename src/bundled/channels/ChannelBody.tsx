@@ -5,6 +5,7 @@ import { MessageLoading } from "../../features/messages/MessageLoading";
 import { DetailsSheet } from "../../features/messages/DetailsSheet";
 import {
   InlineThreadIntro,
+  type InlineThreadIntroStep,
   IntroSpotlight,
   inlineThreadIntroSeen,
   markInlineThreadIntroSeen,
@@ -103,6 +104,8 @@ export const ChannelBody = memo(function ChannelBody({
   const [threads, setThreads] = useState<Thread[]>([]);
   // The inline thread that explains itself, until the reader is done with it.
   const [introThread, setIntroThread] = useState<number>();
+  const [introStep, setIntroStep] = useState<InlineThreadIntroStep>(1);
+  const [introAnchor, setIntroAnchor] = useState<HTMLElement | null>(null);
   const addThread = useCallback(
     (thread: Omit<Thread, "id" | "trigger" | "open">) => {
       const next = {
@@ -112,7 +115,10 @@ export const ChannelBody = memo(function ChannelBody({
         trigger: { current: trigger.current },
       };
       setThreads((items) => [...items.filter((item) => item.promoted), next]);
-      if (!inlineThreadIntroSeen()) setIntroThread(next.id);
+      if (!inlineThreadIntroSeen()) {
+        setIntroThread(next.id);
+        setIntroStep(1);
+      }
     },
     [],
   );
@@ -283,7 +289,12 @@ export const ChannelBody = memo(function ChannelBody({
     <>
       {timeline}
       {presented && introducing && (
-        <InlineThreadIntro onDone={() => setIntroThread(undefined)} />
+        <InlineThreadIntro
+          step={introStep}
+          anchor={introAnchor}
+          onNext={() => setIntroStep(2)}
+          onDone={() => setIntroThread(undefined)}
+        />
       )}
       {presented &&
         threads
@@ -291,7 +302,10 @@ export const ChannelBody = memo(function ChannelBody({
           .map((thread) => (
             <DetailsSheet
               key={thread.id}
-              promoteSpotlight={introducing && thread.id === introThread}
+              spotlight={
+                introducing && thread.id === introThread ? introStep : undefined
+              }
+              onSpotlightAnchor={setIntroAnchor}
               onPromoted={() => {
                 if (thread.id === introThread) markInlineThreadIntroSeen();
                 setThreads((items) =>
@@ -319,10 +333,22 @@ export const ChannelBody = memo(function ChannelBody({
               headerActions={
                 !tabHost && (
                   <IntroSpotlight
-                    active={introducing && thread.id === introThread}
+                    shape="ring"
+                    active={
+                      introducing &&
+                      thread.id === introThread &&
+                      introStep === 2
+                    }
+                    anchorRef={setIntroAnchor}
                   >
                     <IconButton
                       aria-label="Open thread in tab"
+                      // The intro step names it while it points here.
+                      title={
+                        introducing && thread.id === introThread
+                          ? undefined
+                          : "Open thread in tab"
+                      }
                       variant="glass"
                       shape="round"
                       size="compact"
