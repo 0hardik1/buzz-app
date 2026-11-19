@@ -171,6 +171,8 @@ export type ChannelMessage = Readonly<{
   }>;
   /** Current body came from a replacement edit; original recipients do not bind its prose. */
   edited?: true;
+  /** The edit supplying the current body; absent when unedited. */
+  editId?: string;
   /** Offsets in `content` where attachment removal joined once-separate text; a
    * bound name never spans one. */
   attachmentSeams?: readonly number[];
@@ -280,6 +282,9 @@ export type ChannelReference =
        * open; `looking` while that lookup is queued or in flight. */
       readable?: false;
       looking?: true;
+      /** A completed lookup admitted no readable channel. Absent before the
+       * first answer or after access/cache reset; retained during rechecks. */
+      answered?: true;
     }>;
 /** Reads are side-effect-free; snapshots retain identity until their value changes.
  * Commands are idempotent requests; the store decides whether network work is needed. */
@@ -392,6 +397,11 @@ export interface ChannelQueries {
   ): void;
   /** Drops a started chat the relay did not confirm. */
   abandon?(channelId: string): void;
+  /** Reads every listed channel's newest activity, as an activity sort or
+   * filter does, until the returned release; `list().activityStatus` and
+   * each channel's `activityKnown` report progress. Absent when the session
+   * reads no activity. */
+  demandActivity?(): () => void;
   subscribeList(listener: () => void): () => void;
   window(channelId: string): ChannelWindow;
   subscribeWindow(channelId: string, listener: () => void): () => void;

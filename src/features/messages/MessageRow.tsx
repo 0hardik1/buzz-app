@@ -104,7 +104,6 @@ import styles from "./Messages.module.css";
 import { LinkPreviews } from "./LinkPreviews";
 import { previewLinks } from "./preview-links";
 import { usesLargeEmojiPresentation } from "./emoji-size";
-import { separateChatCards } from "./chat-cards";
 import { MessageReactionControls, MessageReactions } from "./MessageReactions";
 
 import {
@@ -505,19 +504,11 @@ function MessageRowContent({
   const timeReply =
     shown.diff || bodyContent != null
       ? undefined
-      : parseMediaTimeReply(shown.content);
-  const sourceRow = timeReply
-    ? { ...shown, content: timeReply.content }
-    : shown;
-  const { caption: displayRow, cards: chatCards } = useMemo(
-    () =>
-      bodyContent != null
-        ? { caption: sourceRow, cards: [] }
-        : separateChatCards(sourceRow, directory.channels),
-    [sourceRow, directory.channels, bodyContent],
-  );
-  const cardsOnly =
-    chatCards.length > 0 && !displayRow.content.trim() && !timeReply;
+      : parseMediaTimeReply(row.forward?.note ?? shown.content);
+  const displayRow =
+    timeReply && !row.forward
+      ? { ...shown, content: timeReply.content }
+      : shown;
   const attachmentOnly =
     !row.content.trim() &&
     !row.diff &&
@@ -688,7 +679,7 @@ function MessageRowContent({
   // A message renderer may draw some attachments itself. Its claims count only
   // while its card is mounted, and they return to the host list while its
   // fallback shows. A remounted card starts healthy and claims again.
-  const bodyShown = !attachmentOnly && !cardsOnly;
+  const bodyShown = !attachmentOnly;
   const messageRenderer = useMessageRenderer(extensions?.messages, row);
   const [failedRenderer, setFailedRenderer] = useState<MessageRenderer>();
   const claims =
@@ -998,11 +989,12 @@ function MessageRowContent({
     [row.forward, row.attachments],
   );
   const { edited: _forwardEdited, ...forwardDisplayRow } = displayRow;
+  const forwardNote = timeReply?.content ?? row.forward?.note;
   const body =
     bodyContent ??
     (row.forward ? (
       <>
-        {row.forward.note && (
+        {forwardNote && (
           <MessageMarkdown
             directory={directory}
             session={references}
@@ -1010,7 +1002,7 @@ function MessageRowContent({
             row={{
               ...displayRow,
               content: projectMarkdownAttachments(
-                row.forward.note,
+                forwardNote,
                 new Set(row.attachments.map(({ url }) => url)),
               ).content,
               attachmentSeams: [],
@@ -1416,12 +1408,7 @@ function MessageRowContent({
     );
   };
   const reactionsInBubble =
-    !attachmentOnly &&
-    !cardsOnly &&
-    !row.huddle &&
-    !shownRow &&
-    !emojiOnly &&
-    !row.diff;
+    !attachmentOnly && !row.huddle && !shownRow && !emojiOnly && !row.diff;
   // A plugin card keeps reactions in its bubble, so its mark goes above them.
   const editedInBubble = !editedInBody && reactionsInBubble;
   const reactionContent =
@@ -1501,10 +1488,7 @@ function MessageRowContent({
             ? ""
             : undefined
         }
-        data-own={
-          (!attachmentOnly && !cardsOnly && !row.huddle && ownBubble) ||
-          undefined
-        }
+        data-own={(!attachmentOnly && !row.huddle && ownBubble) || undefined}
       >
         {!renderMessage && <span className={styles.messageGutter} />}
 
@@ -1513,8 +1497,7 @@ function MessageRowContent({
           <div
             className={styles.messageContent}
             data-bubble={
-              (!attachmentOnly && !cardsOnly && !row.huddle && !shownRow) ||
-              undefined
+              (!attachmentOnly && !row.huddle && !shownRow) || undefined
             }
           >
             {/* A live append must not remove the reader's current focus target. */}
@@ -1537,12 +1520,17 @@ function MessageRowContent({
                 !row.huddle &&
                 !renderMessage &&
                 messageActions()}
-              {/* Screen-reader text stays out of selections: the clipboard carries
-                what the reader saw, so a continuation copies without a byline. */}
+              {/* A selection holding the whole byline copies it as one line,
+                name then time (selection-copy.ts). A grouped row's byline is
+                otherwise screen-reader text that stays out of selections. */}
               <div
                 className={
                   stackPrevious ? "sr-only select-none" : styles.byline
                 }
+                data-copy-author={
+                  row.workflowOwnerId && workflowOwnerName ? "Workflow" : name
+                }
+                data-copy-time={showTime ? row.createdAt : undefined}
               >
                 {row.workflowOwnerId && workflowOwnerName ? (
                   <WorkflowByline
@@ -1670,32 +1658,6 @@ function MessageRowContent({
               }
               attachments={attachmentGroups.length > 0}
             >
-              {chatCards.length > 0 && (
-                <div
-                  className={styles.messageAttachments}
-                  data-solo-cards
-                  data-message-action-anchor
-                >
-                  {chatCards.map((card) => (
-                    <MessageMarkdown
-                      key={card.start}
-                      directory={directory}
-                      session={references}
-                      scope={scope}
-                      row={{
-                        ...shown,
-                        content: card.content,
-                        attachmentSeams: [],
-                      }}
-                      extensions={extensions}
-                      media={media}
-                      onOpenLink={openLink}
-                      canOpenLink={canOpenLink}
-                      participantProfiles={participantProfiles}
-                    />
-                  ))}
-                </div>
-              )}
               {bodyShown && (
                 <div
                   className={

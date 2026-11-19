@@ -1,3 +1,4 @@
+import type { PreviewMentions } from "../messages/PreviewText";
 import type { ChannelSummary } from "./contracts";
 import type { ReadTarget } from "./read-state-model";
 
@@ -34,6 +35,8 @@ export type InboxItem = Readonly<{
   preview: string;
   /** The message the preview shows, which may be outside `messageIds`. */
   previewMessageId?: string;
+  /** The preview message's body and signed mentions, which its chips bind. */
+  previewMentions: PreviewMentions;
   createdAt: number;
   mentioned: boolean;
   /** Verified group members with time and viewer-mention classification. */
