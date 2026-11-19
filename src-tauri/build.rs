@@ -405,7 +405,7 @@ fn compile_voice_search() {
     // Linking may resolve the runtime to the toolchain's back-deployment
     // copies, which load through @rpath; macOS 12 and later have them here.
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
-    for framework in ["AVFoundation", "Speech"] {
+    for framework in ["AppKit", "AVFoundation", "Speech"] {
         println!("cargo:rustc-link-lib=framework={framework}");
     }
 }

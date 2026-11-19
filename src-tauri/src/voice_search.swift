@@ -10,6 +10,7 @@
 // session number the caller chose: listening, the transcript so far each time
 // it changes, the final transcript once it ends, or an error. After ended or
 // error, the session sends nothing more.
+import AppKit
 import AVFoundation
 import Foundation
 import Speech
@@ -568,6 +569,26 @@ private final class LegacyRecognition: Recognition, @unchecked Sendable {
     }
 }
 
+/// The hints worth giving the recognizer: names of several words and words it
+/// may not know (not in the spelling dictionary, or with digits). A lone
+/// ordinary word is left out. The recognizer already knows it, and such hints
+/// can pull other words toward them: "star" and "general" together turned
+/// "star this channel" into "Star this general".
+@MainActor
+private func usefulHints(_ hints: [String]) -> [String] {
+    let checker = NSSpellChecker.shared
+    return hints.filter { hint in
+        let words = hint.split { !$0.isLetter && !$0.isNumber }
+        guard words.count == 1, let word = words.first, word.allSatisfy(\.isLetter) else {
+            return !words.isEmpty
+        }
+        let misspelled = checker.checkSpelling(
+            of: String(word), startingAt: 0, language: "en", wrap: false,
+            inSpellDocumentWithTag: 0, wordCount: nil)
+        return misspelled.location != NSNotFound
+    }
+}
+
 // MARK: C interface
 
 /// Whether this Mac can transcribe on device.
@@ -597,6 +618,7 @@ public func buzzVoiceStart(_ session: UInt64, _ hints: UnsafePointer<CChar>?, _ 
     Current.shared.begin(session)
     Task {
         do {
+            let hints = await usefulHints(hints)
             try await microphoneAccess()
             guard Current.shared.isCurrent(session) else { return reporter.close() }
             #if compiler(>=6.2)
