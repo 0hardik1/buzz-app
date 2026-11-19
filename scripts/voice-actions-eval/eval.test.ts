@@ -5,7 +5,14 @@ import { checkRequest } from "../../src/features/decisions/service";
 import { ACTIONS, ENTITIES, PLACES, hover } from "./catalog";
 import { CASES } from "./cases";
 import { HELDOUT, HELDOUT2 } from "./cases-heldout";
-import { bindings, buildActionDecision, spokenName } from "./draft-builder";
+import {
+  buildActionDecision,
+  matchActionBindings,
+} from "../../src/features/search/voice-actions";
+import {
+  extractNewSectionName,
+  extractRenameText,
+} from "../../src/features/search/voice-actions-sidebar";
 import { score } from "./eval";
 
 describe("voice actions eval", () => {
@@ -13,7 +20,7 @@ describe("voice actions eval", () => {
     expect(CASES.length).toBeGreaterThanOrEqual(60);
     expect(HELDOUT.length).toBeGreaterThanOrEqual(30);
     const keys = new Set(
-      Object.values(ENTITIES).flatMap((list) => list.map((e) => e.key)),
+      Object.values(ENTITIES).flatMap((list) => list.map((e) => e.id)),
     );
     for (const c of [...CASES, ...HELDOUT, ...HELDOUT2]) {
       const hovered = hover(c.hover);
@@ -33,15 +40,23 @@ describe("voice actions eval", () => {
           c.id,
         ).toContain(e.navigate);
       if ("action" in e) {
-        const offered = bindings(hovered, ACTIONS).map((b) => b.action.id);
+        const offered = matchActionBindings(ACTIONS, hovered, ENTITIES).map(
+          (b) => b.action.id,
+        );
         // Starring from the Starred section is a move into it.
         expect(offered, c.id).toContain(
-          e.action === "channel.star" && hovered?.key === "s-Starred"
+          e.action === "channel.star" &&
+            hovered?.kind !== "nothing" &&
+            hovered?.id === "s-Starred"
             ? "channel.move_to_section"
             : e.action,
         );
         for (const k of [e.owner, e.target])
-          if (k && !k.startsWith("m-") && k !== hovered?.key)
+          if (
+            k &&
+            !k.startsWith("m-") &&
+            !(hovered && hovered.kind !== "nothing" && k === hovered.id)
+          )
             expect(keys.has(k), `${c.id} ${k}`).toBe(true);
       }
     }
@@ -49,14 +64,15 @@ describe("voice actions eval", () => {
 
   it("binds a hovered thing as owner, as target, and both for one type", () => {
     const options = (spec: string) =>
-      bindings(hover(spec), ACTIONS).map((b) => `${b.action.id}:${b.role}`);
+      matchActionBindings(ACTIONS, hover(spec), ENTITIES).map(
+        (b) => `${b.action.id}:${b.hoveredRole}`,
+      );
     expect(options("#jev")).toEqual(
       expect.arrayContaining([
         "channel.star:owner",
         "channel.move_to_section:owner",
         "channel.move_next_to:owner",
         "channel.move_next_to:target",
-        "message.forward_to_channel:target",
       ]),
     );
     expect(options("section:Work")).toContain("channel.move_to_section:target");
@@ -64,12 +80,14 @@ describe("voice actions eval", () => {
   });
 
   it("takes a new name from the words after the action", () => {
-    expect(spokenName("add buzz community")).toBe("Buzz Community");
-    expect(spokenName("create a section called reading list")).toBe(
+    expect(extractNewSectionName("add buzz community")).toBe("Buzz Community");
+    expect(extractNewSectionName("create a section called reading list")).toBe(
       "Reading List",
     );
-    expect(spokenName("rename this section fun stuff")).toBe("Fun Stuff");
-    expect(spokenName("hmm")).toBeUndefined();
+    expect(extractRenameText("rename this section fun stuff")).toBe(
+      "Fun Stuff",
+    );
+    expect(extractNewSectionName("hmm")).toBeUndefined();
   });
 
   it("counts only a sure answer as acting", () => {

@@ -43,9 +43,16 @@ type PersonVariant = Readonly<{
 }>;
 
 /** The action on a hovered person, on a hovered agent, and, with neither
- * hovered, on someone named aloud ("message drone01"). Exactly one of the
- * three binds for any hover. */
-function personAction(id: string, variant: PersonVariant): AppVoiceAction[] {
+ * hovered, on someone named aloud without an existing DM ("message Jonas").
+ * People with an open DM go through navigate ("open my DM with Arjun") so
+ * the two paths never compete. */
+function personAction(
+  id: string,
+  variant: PersonVariant & {
+    namedFilterSlot?: AppVoiceAction["filterSlot"];
+    namedDescribe?: () => string;
+  },
+): AppVoiceAction[] {
   const person = ({ owner, target }: Parameters<AppVoiceAction["run"]>[0]) =>
     owner?.kind === "person" || owner?.kind === "agent" ? owner : target;
   const run: AppVoiceAction["run"] = (invocation, env) => {
@@ -77,7 +84,10 @@ function personAction(id: string, variant: PersonVariant): AppVoiceAction[] {
       whenHovered: NOT_PERSON,
       confirm: "none",
       available,
-      describe: () => variant.describe(undefined),
+      ...(variant.namedFilterSlot
+        ? { filterSlot: variant.namedFilterSlot }
+        : {}),
+      describe: () => variant.namedDescribe?.() ?? variant.describe(undefined),
       summary,
       run,
     });
@@ -179,6 +189,10 @@ export const peopleVoiceActions: readonly AppVoiceAction[] = [
   ...personAction("person.message", {
     describe: (name) =>
       `Send a direct message to ${name ?? "someone"} (open our DM)`,
+    namedDescribe: () =>
+      "Start a new message draft with someone (no existing DM yet)",
+    namedFilterSlot: (slot, entity) =>
+      slot === "person" ? entity.meta?.hasDm !== true : true,
     summary: (name) => `Message ${name}`,
     run: async (ctx, person, env) => {
       const pubkey = pubkeyOf(person);

@@ -9,7 +9,8 @@ import type {
   DecisionRequest,
   Decisions,
 } from "../decisions/service";
-import { nameWords, soundsLike } from "./sounds-like";
+import { nameWords } from "./sounds-like";
+import { heardAs } from "./heard-as";
 import type { VoiceSlotKind, VoiceThing } from "./voice-context";
 import {
   buildPlaceQuestion,
@@ -518,7 +519,7 @@ export function buildActionDecision(
       options,
     };
     slotStateTables[slot] = list.map((item, idx) => {
-      const heard = soundsLike(spoken, item.soundsLikeName ?? item.label);
+      const heard = heardAs(spoken, item.soundsLikeName ?? item.label);
       return {
         option: labels[idx],
         ...(item.detail ? { detail: item.detail } : {}),
@@ -701,10 +702,7 @@ export function buildActionDecision(
         const picked = pickEntity() ?? fallbackFromPlace();
         if (!picked) return { ok: false };
         slotProb = picked.prob;
-        if (
-          binding.hoveredRole === "target" ||
-          binding.hoveredRole === "none"
-        ) {
+        if (binding.hoveredRole === "target") {
           owner = picked.entity;
         } else {
           target = picked.entity;
@@ -909,12 +907,7 @@ export function holdsActionLead(
     return { fire: false, lead: undefined };
   }
   const resolvedSlot =
-    outcome.binding.hoveredRole === "owner"
-      ? outcome.target
-      : outcome.binding.hoveredRole === "target" ||
-          outcome.binding.hoveredRole === "none"
-        ? outcome.owner
-        : undefined;
+    outcome.binding.hoveredRole === "target" ? outcome.owner : outcome.target;
   const slotKey = `${outcome.actionId}:${resolvedSlot?.id ?? ""}`;
   const pool = resolvedSlot ? (entities[resolvedSlot.kind] ?? []) : [];
   if (!resolvedSlot || !extendableEntity(resolvedSlot, pool)) {

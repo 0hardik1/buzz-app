@@ -80,7 +80,7 @@ const changeMute = async (
 };
 
 const frontierSync = (ctx: VoiceActionContext) =>
-  ctx.session.unread.sync().capability === "frontier-sync";
+  ctx.session.unread?.sync?.().capability === "frontier-sync";
 
 /** As the row menu decides between Mark as read and Mark as unread. */
 export function channelHasUnread(
@@ -93,7 +93,7 @@ export function channelHasUnread(
 
 const lifecycle = (ctx: VoiceActionContext, bound: VoiceEntity | undefined) => {
   const channel = channelOf(ctx.session, bound);
-  if (!channel || !ctx.session.channelLifecycle.available) return undefined;
+  if (!channel || !ctx.session.channelLifecycle?.available) return undefined;
   // Owner-agent evidence is left false: the confirm dialog rechecks it all.
   const offer = lifecycleOffer(channel, ctx.session.viewer ?? "", false);
   return offer && { channel, offer };

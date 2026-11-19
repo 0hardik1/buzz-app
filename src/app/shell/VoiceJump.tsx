@@ -657,7 +657,7 @@ export function VoiceJumpBody({
     if (
       binding.missingSlot &&
       binding.missingSlot !== "text" &&
-      !(binding.hoveredRole === "owner" ? candidate.target : candidate.owner)
+      !(binding.hoveredRole === "target" ? candidate.owner : candidate.target)
     ) {
       return [];
     }

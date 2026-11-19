@@ -8,9 +8,13 @@ import {
 import type { AppVoiceAction, VoiceActionContext } from "./voice-actions-app";
 import { channelVoiceActions } from "./voice-actions-channel";
 import { messageVoiceActions } from "./voice-actions-message";
+import { peopleVoiceActions } from "./voice-actions-people";
+import { sidebarVoiceActions } from "./voice-actions-sidebar";
 
 export const VOICE_ACTIONS: readonly AppVoiceAction[] = [
   ...channelVoiceActions,
+  ...sidebarVoiceActions,
+  ...peopleVoiceActions,
   ...messageVoiceActions,
 ];
 
