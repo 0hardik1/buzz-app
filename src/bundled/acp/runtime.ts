@@ -422,8 +422,9 @@ export class AcpRuntime {
     const key =
       entry.sessions.route((pinned) => keyOf(pinned.config.scope, place))
         ?.key ?? keyOf(entry.config.scope, place).key;
+    // Only a Solo chat has no threads; a channel-level wake may reply in one.
     const context: Context = topLevel
-      ? { channel, topLevel }
+      ? { channel, ...(solo ? { topLevel } : {}) }
       : place.whole
         ? { channel }
         : key === channel

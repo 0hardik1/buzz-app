@@ -535,6 +535,40 @@ describe("AcpRuntime", () => {
     fake.harnesses[0]?.turns[0]?.finish();
   });
 
+  it("lets a channel-level wake reply in a thread", async () => {
+    const config = await confirmed();
+    const { fake, runtime, sync, workingUntil, published, agent } = setup({
+      hold: true,
+    });
+    sync(config);
+    const thread = message("7", "a thread");
+    Object.assign(agent, { query: vi.fn(async () => [thread]) });
+    await runtime.run({
+      trigger: {
+        type: "attention",
+        id: "e".repeat(64),
+        channel,
+        topLevel: true,
+        text: "The watched PR merged.",
+        at: 200_000,
+      },
+      channelId: channel,
+      agent,
+      config,
+      signal: new AbortController().signal,
+      workingUntil,
+    } as unknown as Delivery);
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+    const [harness] = fake.harnesses;
+    await harness?.mcp(harness.turns[0]?.sessionId ?? "", "tools/call", {
+      name: "send",
+      arguments: { text: "merged", audience: "everyone", reply: thread.id },
+    });
+    const sent = published.find((item) => item.content === "merged");
+    expect(sent?.tags).toContainEqual(["e", thread.id, "", "reply"]);
+    harness?.turns[0]?.finish();
+  });
+
   it("drops an addressed wake with no conversation to go to", async () => {
     const config = await confirmed();
     const { fake, runtime, sync, workingUntil } = setup();
