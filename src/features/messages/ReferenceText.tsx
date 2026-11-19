@@ -41,6 +41,7 @@ export function MentionLabel({
                 src={avatar}
                 alt=""
                 fallback={label}
+                fallbackContent={<Icon aria-hidden="true" />}
                 size="fill"
                 shape={agent ? "squircle" : "circle"}
               />
