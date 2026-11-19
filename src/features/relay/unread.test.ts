@@ -7721,6 +7721,27 @@ it("reading one Inbox row clears only that row's marks, not other marks in its c
   expect(h.journal()?.state.frontiers.room).toBe(frontier);
 });
 
+it("a dwell in a public channel the viewer has not joined reads its mentions among ordinary rows", async () => {
+  const h = setup();
+  h.emit([
+    roster(h.relay, "lobby", [h.alice.pubkey], 10),
+    metadata(h.relay, "lobby", "lobby", 10, [["t", "stream"], ["public"]]),
+  ]);
+  const before = message(h.alice, "lobby", "plain before", 19);
+  const mention = message(h.alice, "lobby", "mention", 20, [
+    ["p", h.viewer.pubkey],
+  ]);
+  const after = message(h.alice, "lobby", "plain after", 21);
+  h.emit([before, mention, after]);
+  expect(h.session.unread.attention("lobby", mention.id).unread).toBe(true);
+  const lease = h.session.unread.reading("lobby");
+  // Only its mentions are retained, so ordinary rows are not evidence.
+  await expect(lease.catchUp(after.id)).rejects.toThrow();
+  await lease.observe([before.id, mention.id, after.id]);
+  expect(h.session.unread.attention("lobby", mention.id).unread).toBe(false);
+  lease.dispose();
+});
+
 it("a reading lease is fenced by a synced mark unread another window saved", async () => {
   const h = setup();
   h.grant("room");

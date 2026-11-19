@@ -811,14 +811,16 @@ export function createRelaySession(
       )
     ) {
       // Mentions of the viewer reach public channels it has not joined. Read
-      // the metadata of those this session does not know, or knows as unlisted,
-      // non-public or unconfirmed: the relay just listed them, so that is stale.
+      // the metadata of those this session does not know, or knows as archived,
+      // unlisted, non-public or unconfirmed: the relay just listed them, so that
+      // may be stale.
       const stale = (id: string) => {
         const known = channels.queries.get?.(id);
         return (
           !known ||
           (!known.members?.includes(transport?.viewer ?? "") &&
-            (!!known.unlisted ||
+            (!!known.archived ||
+              !!known.unlisted ||
               known.visibility !== "public" ||
               !!known.cached ||
               !!known.metadataCached ||

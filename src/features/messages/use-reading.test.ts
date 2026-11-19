@@ -675,6 +675,24 @@ it("bottom dwell catches up through the newest row, including a tall clipped row
   for (const call of h.reading.mock.calls)
     expect(call).toEqual(["room", "thread", {}]);
 });
+it("a failed bottom catch-up still observes the visible rows", async () => {
+  const h = setup({ latestMessageId: "bottom" });
+  h.setRows([row("mention", 0, 100), row("bottom", 100, 200)]);
+  h.mutation();
+  vi.advanceTimersToNextFrame();
+  // Outside a channel only its mentions are retained, so the bottom row may not be.
+  for (const lease of h.leases)
+    lease.catchUp.mockRejectedValue(new Error("not retained"));
+  await vi.advanceTimersByTimeAsync(300);
+  expect(h.dwelled()?.catchUp).toHaveBeenCalledExactlyOnceWith(
+    "bottom",
+    undefined,
+  );
+  expect(h.dwelled()?.observe).toHaveBeenCalledExactlyOnceWith([
+    "mention",
+    "bottom",
+  ]);
+});
 it("a broadcast reply as the bottom row earns dwell but catches up through the top-level post", async () => {
   const h = setup({ latestMessageId: "broadcast", catchUpMessageId: "top" });
   // The cut-off row is scrolled out of view; only the bottom row is shown.

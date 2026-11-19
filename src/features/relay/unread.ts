@@ -3325,7 +3325,12 @@ export function createUnread({
               channelId,
               messageId: id,
             };
-            const event = requireMessage(target, id);
+            let event: RelayEvent;
+            try {
+              event = requireMessage(target, id);
+            } catch {
+              continue; // Outside a channel, only its mentions are evidence.
+            }
             indexEvidence();
             const entry = byId.get(id);
             const state = reads.state();

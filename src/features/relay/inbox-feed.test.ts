@@ -1862,22 +1862,28 @@ it.each(["edit", "deletion"] as const)(
     );
   },
 );
-it("addressed history re-reads a known outside channel's stale unlisted metadata, then lists the mention", async () => {
-  const h = setup();
-  h.admit([h.viewer.pubkey]);
-  outside(h, "lobby", [...PUBLIC_STREAM, ["unlisted"]]);
-  expect(h.session.channels.get?.("lobby")?.unlisted).toBe(true);
-  // The relay lists the channel to a read that does not name it, so it was relisted.
-  const mention = mentionIn(h, "lobby", "relisted mention", 20);
-  const work = h.session.inboxFeed.ensure();
-  (await take(h, 9)).resolve([mention]);
-  (await take(h, 39000)).resolve([
-    metadata(h.relay, "lobby", "lobby", 30, PUBLIC_STREAM),
-  ]);
-  await work;
-  expect(h.session.channels.get?.("lobby")?.unlisted).toBeUndefined();
-  expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
-});
+it.each([
+  ["unlisted", ["unlisted"]],
+  ["archived", ["archived", "true"]],
+] as const)(
+  "addressed history re-reads a known outside channel's stale %s metadata, then lists the mention",
+  async (state, tag) => {
+    const h = setup();
+    h.admit([h.viewer.pubkey]);
+    outside(h, "lobby", [...PUBLIC_STREAM, [...tag]]);
+    expect(h.session.channels.get?.("lobby")?.[state]).toBe(true);
+    // The relay serves a mention the session's metadata would hide.
+    const mention = mentionIn(h, "lobby", "current mention", 20);
+    const work = h.session.inboxFeed.ensure();
+    (await take(h, 9)).resolve([mention]);
+    (await take(h, 39000)).resolve([
+      metadata(h.relay, "lobby", "lobby", 30, PUBLIC_STREAM),
+    ]);
+    await work;
+    expect(h.session.channels.get?.("lobby")?.[state]).toBeUndefined();
+    expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
+  },
+);
 it("a deep outside edit chain with repeated targets settles without walking each path", () => {
   const h = setup();
   h.admit([h.viewer.pubkey]);

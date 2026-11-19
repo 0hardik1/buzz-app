@@ -333,7 +333,10 @@ export function useReading({
           }
           const through = caughtUp ? catchUpId() : undefined;
           void (async () => {
-            if (through) await observed.catchUp(through, rootId);
+            // Outside a channel the bottom row may not be retained; the
+            // visible rows still count.
+            if (through)
+              await observed.catchUp(through, rootId).catch(() => {});
             await observed.observe(remained);
           })()
             .catch(() => {})
