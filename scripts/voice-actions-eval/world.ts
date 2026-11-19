@@ -91,6 +91,12 @@ const BASE_CHANNELS: readonly Channel[] = [
   ch("honey-dev", "Honey agent development"),
   ch("standup", "Daily async standup", { section: "Work" }),
   ch("demo-day", "Friday demos"),
+  // Used only by the second held-out set: names with digits and hyphens.
+  ch("q3-okrs", "Quarterly objectives"),
+  ch("ux-research", "User research findings"),
+  ch("sre-alerts", "Paging alerts for SRE"),
+  ch("release-1-7", "The 1.7 release train"),
+  ch("web-perf", "Web performance budgets"),
 ];
 
 /** Sidebar sections the user made; `Starred` is the built-in one. */
@@ -125,6 +131,10 @@ const BASE_PEOPLE: readonly Person[] = [
   { id: "p-alex", name: "Alex Chen" },
   { id: "p-sam", name: "Sam Rivera" },
   { id: "p-kenji", name: "Kenji" },
+  // Second held-out set only.
+  { id: "p-mei", name: "Mei Lin" },
+  { id: "p-omar", name: "Omar" },
+  { id: "p-scout2", name: "scout2", agent: true, dm: true },
 ];
 
 // VOICE_EVAL_SCALE=1 grows the workspace toward the app's caps (200 places,
