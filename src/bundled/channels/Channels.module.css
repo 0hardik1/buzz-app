@@ -1083,6 +1083,12 @@ html[data-keyboard-navigation]
 .cardRows:not([data-resizing]) {
   transition: max-height var(--duration-fast) var(--easing-enter);
 }
+/* Where View all will go, at the end of a full card's fifty rows. */
+.cardMore {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-subtle);
+}
 /* The grip sits in the card's bottom edge and appears on hover. */
 .cardResize {
   position: relative;

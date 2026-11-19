@@ -15,9 +15,14 @@ beforeEach(() => {
 });
 
 function Card({ rows }: { rows: number }) {
-  const [height, resize] = useSidebarCardHeight("scope", "group:work");
+  const [height, resize, toggle] = useSidebarCardHeight("scope", "group:work");
   return (
-    <SidebarCardResize label="Work" height={height} onResize={resize}>
+    <SidebarCardResize
+      label="Work"
+      height={height}
+      onResize={resize}
+      onToggle={toggle}
+    >
       {Array.from({ length: rows }, (_, index) => `Row ${index}`).map((row) => (
         <div key={row} data-card-row="">
           {row}
@@ -66,7 +71,7 @@ it("follows the pointer, settles on a whole row, and remembers it", () => {
   ).toBe(`${3 * ROW}px`);
 });
 
-it("steps a row with the keyboard and goes back to the default on double-click", () => {
+it("steps a row with the keyboard, and double-click toggles full and back", () => {
   render(<Card rows={5} />);
   const list = layOut();
   const grip = screen.getByLabelText("Resize Work");
@@ -74,6 +79,8 @@ it("steps a row with the keyboard and goes back to the default on double-click",
   expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
   fireEvent.doubleClick(grip);
   expect(list.style.maxHeight).toBe("");
+  fireEvent.doubleClick(grip);
+  expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
 });
 
 /** Lay rows out before the first render, so the default clip can measure. */
@@ -96,20 +103,24 @@ function layOutAhead() {
   };
 }
 
-it("shows the first ten rows until dragged, and every row once dragged to the bottom", () => {
+it("shows ten rows until changed, full stops at fifty, and full toggles back to ten", () => {
   const restore = layOutAhead();
   try {
-    render(<Card rows={12} />);
+    render(<Card rows={60} />);
     const list = document.querySelector<HTMLElement>("[data-card-row]")
       ?.parentElement as HTMLElement;
     expect(list.style.maxHeight).toBe(`${10 * ROW}px`);
+    expect(screen.queryByText("View all coming soon")).toBeNull();
     const grip = screen.getByLabelText("Resize Work");
     fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 320 });
-    fireEvent.pointerMove(window, { pointerId: 1, clientY: 900 });
-    fireEvent.pointerUp(window, { pointerId: 1, clientY: 900 });
-    expect(list.style.maxHeight).toBe("");
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: 9000 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientY: 9000 });
+    expect(list.style.maxHeight).toBe(`${50 * ROW}px`);
+    expect(screen.getByText("View all coming soon")).toBeInTheDocument();
+    // Full with nothing to go back to returns to the first ten rows.
     fireEvent.doubleClick(grip);
     expect(list.style.maxHeight).toBe(`${10 * ROW}px`);
+    expect(screen.queryByText("View all coming soon")).toBeNull();
   } finally {
     restore();
   }

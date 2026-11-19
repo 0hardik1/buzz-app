@@ -584,9 +584,14 @@ function ResizableRows({
   label: string;
   children: ReactNode;
 }) {
-  const [height, resize] = useSidebarCardHeight(scope, card);
+  const [height, resize, toggle] = useSidebarCardHeight(scope, card);
   return (
-    <SidebarCardResize label={label} height={height} onResize={resize}>
+    <SidebarCardResize
+      label={label}
+      height={height}
+      onResize={resize}
+      onToggle={toggle}
+    >
       {children}
     </SidebarCardResize>
   );

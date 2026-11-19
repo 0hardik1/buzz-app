@@ -10,13 +10,17 @@ import { readView, subscribeView, writeView } from "../../shared/view-state";
 import styles from "./Channels.module.css";
 
 const heightsKey = "sidebar:card-heights";
+/** Each full card's height from before it went full, for double-click back. */
+const restoreKey = "sidebar:card-restore";
 /** Rows a card shows until its grip is dragged. */
 const DEFAULT_ROWS = 10;
-/** The saved height of a card dragged open to show every row. */
+/** The most rows a card shows; the rest wait for View all. */
+const MAX_ROWS = 50;
+/** The saved height of a card opened full. */
 const ALL_ROWS = Number.MAX_SAFE_INTEGER;
 
-function savedHeights(scope: string): Record<string, number> {
-  const saved = readView<unknown>(scope, heightsKey, {});
+function savedHeights(scope: string, key: string): Record<string, number> {
+  const saved = readView<unknown>(scope, key, {});
   return saved && typeof saved === "object" && !Array.isArray(saved)
     ? Object.fromEntries(
         Object.entries(saved).filter(
@@ -27,48 +31,64 @@ function savedHeights(scope: string): Record<string, number> {
     : {};
 }
 
-/** A card's list height where its grip was left, remembered on this device. */
+/**
+ * A card's height, remembered on this device: where its grip was left, or
+ * full. Dragging sets it. Toggling switches between full and the height from
+ * before full, which is the first ten rows when there was none.
+ */
 export function useSidebarCardHeight(scope: string, card: string) {
   const height = useSyncExternalStore(
     (change) => subscribeView(scope, change),
-    () => savedHeights(scope)[card],
+    () => savedHeights(scope, heightsKey)[card],
   );
-  const resize = (next: number | undefined) => {
-    const { [card]: _, ...rest } = savedHeights(scope);
+  const save = (key: string, next: number | undefined) => {
+    const { [card]: _, ...rest } = savedHeights(scope, key);
     writeView(
       scope,
-      heightsKey,
+      key,
       next === undefined ? rest : { ...rest, [card]: next },
     );
   };
-  return [height, resize] as const;
+  const resize = (next: number | undefined) => {
+    save(restoreKey, undefined);
+    save(heightsKey, next);
+  };
+  const toggle = () => {
+    const back = savedHeights(scope, restoreKey)[card];
+    save(restoreKey, height === ALL_ROWS ? undefined : height);
+    save(heightsKey, height === ALL_ROWS ? back : ALL_ROWS);
+  };
+  return [height, resize, toggle] as const;
 }
 
 /**
  * A card's rows and the grip on its bottom edge. The rows show the first ten
- * until the grip is dragged, then clip to wherever it is left. The drag
- * follows the pointer exactly, then settles onto the nearest whole row on
- * release. Rows are the descendants marked `data-card-row`.
+ * until the grip is dragged, then clip to wherever it is left; full shows up
+ * to fifty. The drag follows the pointer exactly, then settles onto the
+ * nearest whole row on release; the bottom stop is full. Double-click toggles
+ * full. Rows are the descendants marked `data-card-row`.
  */
 export function SidebarCardResize({
   label,
   height,
   onResize,
+  onToggle,
   children,
 }: {
   label: string;
-  /** Pixels, ALL_ROWS for every row, or undefined for the first ten. */
+  /** Pixels, ALL_ROWS for full, or undefined for the first ten. */
   height: number | undefined;
-  /** A new height, or undefined to go back to the first ten rows. */
-  onResize(height: number | undefined): void;
+  /** A height the grip settled on, ALL_ROWS at its bottom stop. */
+  onResize(height: number): void;
+  /** Switch between full and the height from before full. */
+  onToggle(): void;
   children: ReactNode;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const handle = useRef<HTMLHRElement>(null);
   const stop = useRef<() => void>(undefined);
   useEffect(() => () => stop.current?.(), []);
-  // Only a card with more than one row has anything to hide.
-  const [resizable, setResizable] = useState(false);
+  const [count, setCount] = useState(0);
   const saved = useRef(height);
   // Apply the saved height before paint, and again whenever rows come, go or
   // first get a size (a card opened after starting closed).
@@ -80,7 +100,7 @@ export function SidebarCardResize({
     const rows = list.current;
     if (!rows) return;
     const update = () => {
-      setResizable(rows.querySelectorAll("[data-card-row]").length > 1);
+      setCount(rows.querySelectorAll("[data-card-row]").length);
       if (!stop.current) clip(rows, saved.current);
     };
     update();
@@ -104,7 +124,13 @@ export function SidebarCardResize({
       <div ref={list} className={styles.cardRows}>
         {children}
       </div>
-      {resizable && (
+      {height === ALL_ROWS && count > MAX_ROWS && (
+        <p className={`${styles.cardMore} text-caption`}>
+          View all coming soon
+        </p>
+      )}
+      {/* Only a card with more than one row has anything to hide. */}
+      {count > 1 && (
         <hr
           ref={handle}
           className={styles.cardResize}
@@ -112,18 +138,17 @@ export function SidebarCardResize({
           aria-orientation="horizontal"
           aria-valuenow={height === ALL_ROWS ? undefined : height}
           tabIndex={0}
-          onDoubleClick={() => onResize(undefined)}
+          onDoubleClick={onToggle}
           onKeyDown={(event) => {
             const rows = list.current;
             if (!rows || event.altKey || event.ctrlKey || event.metaKey) return;
             // Step one whole row from wherever the list ends now.
             const ends = stops(rows);
+            const [first, last] = [ends[0], ends.at(-1)];
             const current = rows.offsetHeight;
-            const last = ends.at(-1);
+            if (first === undefined || last === undefined) return;
             if (event.key === "ArrowUp")
-              onResize(
-                ends.filter((end) => end < current - 1).at(-1) ?? ends[0],
-              );
+              onResize(ends.filter((end) => end < current - 1).at(-1) ?? first);
             else if (event.key === "ArrowDown") {
               const next = ends.find((end) => end > current + 1) ?? last;
               onResize(next === last ? ALL_ROWS : next);
@@ -197,22 +222,23 @@ export function SidebarCardResize({
   );
 }
 
-/** Clip the list to a saved height, or to its first ten rows when unset. */
+/** Clip the list to a saved height: ten rows when unset, fifty when full. */
 function clip(list: HTMLElement, height: number | undefined) {
-  let limit = height === ALL_ROWS ? undefined : height;
-  if (height === undefined) {
+  let limit = height;
+  if (height === undefined || height === ALL_ROWS) {
+    const rows = height === undefined ? DEFAULT_ROWS : MAX_ROWS;
     const ends = stops(list);
-    limit = ends.length > DEFAULT_ROWS ? ends[DEFAULT_ROWS - 1] : undefined;
+    limit = ends.length >= rows ? ends[rows - 1] : undefined;
   }
   // A hidden card has no layout, so every stop is zero; it clips once shown.
   list.style.maxHeight = limit ? `${limit}px` : "";
 }
 
-/** Where the list ends after each row, from the first to the last. */
+/** Where the list ends after each of its first fifty rows. */
 function stops(list: HTMLElement) {
   const top = list.getBoundingClientRect().top - list.scrollTop;
   const rows = [...list.querySelectorAll<HTMLElement>("[data-card-row]")];
-  return rows.map((_, index) => {
+  return rows.slice(0, MAX_ROWS).map((_, index) => {
     const after = rows[index + 1];
     return Math.round(
       after ? after.getBoundingClientRect().top - top : list.scrollHeight,
