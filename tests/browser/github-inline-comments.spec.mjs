@@ -5,6 +5,7 @@ let fixtures;
 test.beforeAll(async () => {
   fixtures = await previewFixtures([
     "tests/fixtures/github-inline-comments.html",
+    "tests/fixtures/github-comment-affordance.html",
   ]);
 });
 test.afterAll(() => fixtures?.close());
@@ -102,9 +103,62 @@ for (const layout of ["Unified", "Split"]) {
     await expect(file.getByRole("status")).toBeEmpty();
     await line(page);
     await field.fill("Discard when leaving Changes");
+    const originalOperation = await field.evaluate(
+      (node) => node.form.dataset.operation,
+    );
+    const original = page.locator(
+      `form[data-operation="${originalOperation}"]`,
+    );
+    const otherFile = page.getByRole("region", {
+      name: "src/second.ts",
+      exact: true,
+    });
+    await otherFile
+      .locator('[data-column-number="7"][data-line-type="change-addition"]')
+      .hover();
+    await page.getByRole("button", { name: "Comment on hovered line" }).click();
+    await otherFile
+      .getByRole("textbox", { name: "Comment", exact: true })
+      .fill("Independent second comment");
+    await expect(original.getByRole("textbox")).toHaveValue(
+      "Discard when leaving Changes",
+    );
+    await page
+      .locator(
+        'diffs-container [data-column-number="5000"][data-line-type="change-deletion"]',
+      )
+      .hover();
+    await page.getByRole("button", { name: "Comment on hovered line" }).click();
+    await expect(original.getByRole("textbox")).toBeFocused();
+    await expect(
+      page.getByRole("textbox", { name: "Comment", exact: true }),
+    ).toHaveCount(2);
+    await otherFile
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
+    await expect(original.getByRole("textbox")).toHaveValue(
+      "Discard when leaving Changes",
+    );
+    await page
+      .locator("diffs-container")
+      .first()
+      .evaluate((node) => {
+        window.savedDiffNode = node;
+      });
+    const readsBeforeTab = await page.evaluate(
+      () => window.inlineFixture.state.calls.length,
+    );
     await page.getByRole("tab", { name: "Summary", exact: true }).click();
     await page.getByRole("tab", { name: /^Changes/ }).click();
-    if (layout === "Split") await select(page, "Diff layout", "Split");
+    expect(
+      await page
+        .locator("diffs-container")
+        .first()
+        .evaluate((node) => window.savedDiffNode === node),
+    ).toBe(true);
+    expect(
+      await page.evaluate(() => window.inlineFixture.state.calls.length),
+    ).toBe(readsBeforeTab);
     await expect(page.locator("diffs-container pre").first()).toHaveAttribute(
       "data-diff-type",
       layout === "Split" ? "split" : "single",
@@ -413,4 +467,52 @@ test("checks unknown delivery even after snapshot refresh fails", async ({
     page.getByRole("button", { name: "Check delivery" }),
   ).toHaveCount(0);
   expect(await posts(page)).toBe(1);
+});
+
+// Native gutter placement and inertness on expanded rows require Pierre's shadow DOM.
+test("gutter and keyboard share verified patch coordinates across layouts", async ({
+  page,
+}) => {
+  await page.goto(
+    `${fixtures.origin}/tests/fixtures/github-comment-affordance.html`,
+  );
+  const file = page.getByRole("region", {
+    name: "src/example.ts",
+    exact: true,
+  });
+  for (const layout of ["single", "split"]) {
+    if (layout === "split")
+      await page.getByRole("button", { name: "Toggle layout" }).click();
+    await expect(file.locator("pre")).toHaveAttribute("data-diff-type", layout);
+    const outside = file
+      .locator('[data-column-number="4999"][data-line-type="context"]')
+      .last();
+    await outside.hover();
+    await expect(
+      page.getByRole("button", { name: "Comment on hovered line" }),
+    ).toHaveCount(0);
+    await file
+      .locator('[data-column-number="5001"][data-line-type="change-addition"]')
+      .hover();
+    await page.getByRole("button", { name: "Comment on hovered line" }).click();
+    await expect(page.getByLabel("Selected coordinates")).toHaveText(
+      '[{"side":"additions","lineNumber":5001}]',
+    );
+    await outside.hover();
+    await expect(
+      page.getByRole("button", { name: "Comment on hovered line" }),
+    ).toHaveCount(0);
+    await file
+      .locator('[data-column-number="5002"][data-line-type="context"]')
+      .last()
+      .hover();
+    await page.getByRole("button", { name: "Comment on hovered line" }).click();
+    await expect(page.getByLabel("Selected coordinates")).toHaveText(
+      '[{"side":"deletions","lineNumber":5001},{"side":"additions","lineNumber":5002}]',
+    );
+    await file.focus();
+    await file.press("ArrowDown");
+    await expect(file.getByRole("status")).toHaveText("Old line 5000");
+    await file.press("Escape");
+  }
 });

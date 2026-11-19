@@ -8,6 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { useEffect } from "react";
 import type { DiffComments } from "../diffs/DiffViewer";
 import { PrFiles } from "./PrFiles";
 import { createInlineDelivery } from "./inline-delivery";
@@ -19,22 +20,47 @@ import {
 
 afterEach(cleanup);
 
-// Keep thread rows outside the renderer: this test exercises async panel ownership.
+// Exercise panel ownership while the browser suite covers Pierre's portals.
 vi.mock("../diffs/DiffViewer", () => ({
-  DiffViewer: ({ comments }: { comments?: DiffComments }) => (
-    <button
-      type="button"
-      onClick={() =>
-        comments?.onSelect(
-          "src/example.ts",
-          [{ side: "additions", lineNumber: 5001 }],
-          () => {},
-        )
-      }
-    >
-      Select line
-    </button>
-  ),
+  DiffViewer: ({ comments }: { comments?: DiffComments }) => {
+    useEffect(() => {
+      comments?.onAvailabilityChange?.("src/example.ts", true);
+      return () => comments?.onAvailabilityChange?.("src/example.ts", false);
+    }, [comments?.onAvailabilityChange]);
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() =>
+            comments?.onSelect(
+              "src/example.ts",
+              [{ side: "additions", lineNumber: 5001 }],
+              () => {},
+            )
+          }
+        >
+          Select line
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            comments?.onSelect(
+              "src/example.ts",
+              [{ side: "deletions", lineNumber: 5000 }],
+              () => {},
+            )
+          }
+        >
+          Select other line
+        </button>
+        {comments?.annotations.map((annotation) => (
+          <div key={`${annotation.side}:${annotation.lineNumber}`}>
+            {annotation.content}
+          </div>
+        ))}
+      </>
+    );
+  },
 }));
 
 it("discards a reply page that completes after a new snapshot replaces its owner", async () => {
@@ -289,4 +315,64 @@ it("keeps a reconciled thread when the older initial read completes later", asyn
     await act(async () => release(empty));
   }
   expect(screen.getByText("Confirmed while loading")).toBeTruthy();
+});
+
+it.each(["success", "timeout"] as const)(
+  "isolates a reply and a new composer through %s delivery",
+  async (mode) => {
+    const { panel, open, state } = await setupComposer();
+    render(panel());
+    const reply = await open();
+    fireEvent.change(reply, { target: { value: "Reply to send" } });
+    fireEvent.click(screen.getByRole("button", { name: "Select other line" }));
+    const other = screen
+      .getAllByRole("textbox")
+      .find((input) => input !== reply);
+    if (!other) throw new Error("Missing second composer");
+    fireEvent.change(other, { target: { value: "Keep the other comment" } });
+    state.mode = mode;
+    const replyForm = reply.closest("form");
+    if (!replyForm) throw new Error("Missing reply form");
+    fireEvent.submit(replyForm);
+    if (mode === "timeout") {
+      await screen.findByRole("button", { name: "Check delivery" });
+      const independent = other.closest("form");
+      if (!independent) throw new Error("Missing independent form");
+      fireEvent.submit(independent);
+      expect(
+        state.calls.filter((call) => call.args[0] === "POST"),
+      ).toHaveLength(2);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Check delivery" }),
+      );
+    }
+    await waitFor(() => expect(reply.isConnected).toBe(false));
+    expect(other).toHaveProperty("value", "Keep the other comment");
+    expect(state.comments.map((comment) => comment.body)).toEqual([
+      "Existing thread",
+      "Reply to send",
+    ]);
+    const otherForm = other.closest("form");
+    if (!otherForm) throw new Error("Missing independent form");
+    state.mode = "success";
+    fireEvent.submit(otherForm);
+    await screen.findByText("Keep the other comment");
+    expect(state.calls.filter((call) => call.args[0] === "POST")).toHaveLength(
+      3,
+    );
+  },
+);
+
+it("discards composers on tab leave while retaining its verified snapshot", async () => {
+  const { panel, open, state } = await setupComposer();
+  const view = render(panel());
+  const input = await open();
+  fireEvent.change(input, { target: { value: "Discard on leave" } });
+  const reads = state.calls.length;
+  view.rerender(<PrFiles {...panel().props} active={false} />);
+  await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+  view.rerender(<PrFiles {...panel().props} active />);
+  expect(state.calls).toHaveLength(reads);
+  await open();
+  expect(screen.getByRole("textbox")).toHaveProperty("value", "");
 });

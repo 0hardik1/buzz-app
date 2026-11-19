@@ -6,6 +6,8 @@ import styles from "./InlineComments.module.css";
 
 export function InlineCommentForm({
   body,
+  operation,
+  focusRequest = 0,
   busy,
   blocked,
   notice,
@@ -14,6 +16,8 @@ export function InlineCommentForm({
   onCancel,
 }: {
   body: string;
+  operation?: string;
+  focusRequest?: number;
   busy: boolean;
   blocked: boolean;
   notice?: string | undefined;
@@ -23,11 +27,13 @@ export function InlineCommentForm({
 }) {
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
+    void focusRequest;
     input.current?.focus();
-  }, []);
+  }, [focusRequest]);
   return (
     <form
       className={styles.comment}
+      data-operation={operation}
       onSubmit={(event) => {
         event.preventDefault();
         if (!busy && !blocked && body.trim()) onSubmit();

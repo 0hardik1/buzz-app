@@ -31,7 +31,17 @@ import { readable } from "./object";
 import styles from "./InlineComments.module.css";
 
 type InlineTarget = Anchor & { viewer: string; replyTo?: number | undefined };
-type Composer = { body: string; target: InlineTarget; operation: string };
+type Composer = {
+  body: string;
+  target: InlineTarget;
+  operation: string;
+  focusRequest: number;
+  restoreFocus(): void;
+};
+const composerKey = (target: InlineTarget) =>
+  target.replyTo
+    ? `reply:${target.replyTo}`
+    : rowKey(target.path, target.side, target.line);
 
 const rowKey = (path: string, side: string, line: number) =>
   JSON.stringify([path, side, line]);
@@ -41,15 +51,26 @@ export function PrFiles({
   head,
   base,
   delivery,
+  active = true,
 }: {
   api: PrComments;
   pull: PullRef;
   head: string;
   base: string;
   delivery: InlineDeliveryStore;
+  active?: boolean;
 }) {
   const status = useSyncExternalStore(delivery.subscribe, delivery.get);
-  const [composer, setComposer] = useState<Composer>();
+  const [composers, setComposers] = useState<Composer[]>([]);
+  const composersRef = useRef(composers);
+  composersRef.current = composers;
+  const pendingOperation = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!active) {
+      setComposers([]);
+      setChoice(undefined);
+    }
+  }, [active]);
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const snapshotRef = useRef<Snapshot | undefined>(undefined);
   const threadVersion = useRef(0);
@@ -60,12 +81,19 @@ export function PrFiles({
   const [loading, setLoading] = useState(true);
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [layout, setLayout] = useState<"unified" | "split">("unified");
-  const [choice, setChoice] = useState<{ path: string; lines: DiffLine[] }>();
+  const [choice, setChoice] = useState<{
+    path: string;
+    lines: DiffLine[];
+    restoreFocus(): void;
+  }>();
   const [available, setAvailable] = useState<ReadonlySet<string>>(new Set());
-  const returnFocus = useRef<() => void>(() => {});
   const refreshButton = useRef<HTMLButtonElement>(null);
-  const restoreFocus = () => {
-    returnFocus.current();
+  const sideButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (choice) sideButton.current?.focus();
+  }, [choice]);
+  const restoreFocus = (composer: Composer) => {
+    composer.restoreFocus();
     if (document.activeElement === document.body)
       refreshButton.current?.focus();
   };
@@ -115,7 +143,7 @@ export function PrFiles({
     setSnapshot(undefined);
     setAvailable(new Set());
     setChoice(undefined);
-    setComposer(undefined);
+    setComposers([]);
     setLoading(true);
     setCommentsLoading(true);
     setError(undefined);
@@ -162,12 +190,11 @@ export function PrFiles({
         .map((content) => ({ content, files: parsePatch(content) })),
     [snapshot],
   );
-  const stale =
-    !!composer &&
-    (!snapshot ||
-      composer.target.head !== snapshot.head ||
-      composer.target.base !== snapshot.base ||
-      composer.target.viewer !== snapshot.viewer);
+  const stale = (composer: Composer) =>
+    !snapshot ||
+    composer.target.head !== snapshot.head ||
+    composer.target.base !== snapshot.base ||
+    composer.target.viewer !== snapshot.viewer;
   const mapped = (thread: Thread) =>
     !!snapshot &&
     !loading &&
@@ -180,34 +207,57 @@ export function PrFiles({
       head: snapshot.head,
       base: snapshot.base,
     });
-  const targetMapped =
-    !!composer &&
-    !stale &&
+  const targetMapped = (composer: Composer) =>
+    !stale(composer) &&
     !loading &&
     available.has(composer.target.path) &&
     !!snapshot &&
     anchorInSnapshot(snapshot, composer.target);
-  function choose(path: string, line: DiffLine, replyTo?: number) {
-    if (!snapshot || status.busy || status.unknown || loading) return;
-    setComposer({
-      body: "",
-      operation: crypto.randomUUID(),
-      target: {
-        path,
-        side: line.side === "deletions" ? "LEFT" : "RIGHT",
-        line: line.lineNumber,
-        head: snapshot.head,
-        base: snapshot.base,
-        viewer: snapshot.viewer,
-        replyTo,
-      },
+  function choose(
+    path: string,
+    line: DiffLine,
+    returnFocus: () => void,
+    replyTo?: number,
+  ) {
+    if (!snapshot || loading || !active) return;
+    const target: InlineTarget = {
+      path,
+      side: line.side === "deletions" ? "LEFT" : "RIGHT",
+      line: line.lineNumber,
+      head: snapshot.head,
+      base: snapshot.base,
+      viewer: snapshot.viewer,
+      replyTo,
+    };
+    setComposers((previous) => {
+      const existing = previous.find(
+        (entry) => composerKey(entry.target) === composerKey(target),
+      );
+      return existing
+        ? previous.map((entry) =>
+            entry === existing
+              ? { ...entry, focusRequest: entry.focusRequest + 1 }
+              : entry,
+          )
+        : [
+            ...previous,
+            {
+              body: "",
+              operation: crypto.randomUUID(),
+              target,
+              focusRequest: 0,
+              restoreFocus: returnFocus,
+            },
+          ];
     });
-    delivery.update({ error: undefined, sentUrl: undefined });
+    if (!status.busy && !status.unknown)
+      delivery.update({ error: undefined, sentUrl: undefined });
     setChoice(undefined);
   }
   async function applyResult(
     result: WriteResult,
     current: Snapshot | undefined,
+    composer?: Composer,
   ) {
     if (result.status === "sent") {
       delivery.update({
@@ -217,9 +267,14 @@ export function PrFiles({
         error: undefined,
         sentUrl: result.comment.url,
       });
-      if (alive.current) {
-        setComposer(undefined);
-        restoreFocus();
+      if (alive.current && composer) {
+        const focused =
+          document.activeElement?.closest("form")?.dataset.operation ===
+          composer.operation;
+        setComposers((previous) =>
+          previous.filter((entry) => entry.operation !== composer.operation),
+        );
+        if (focused && active) restoreFocus(composer);
       }
       if (!current || !alive.current || snapshotRef.current !== current) return;
       const version = ++threadVersion.current;
@@ -266,23 +321,28 @@ export function PrFiles({
       if (alive.current) setRevision((previous) => previous + 1);
     } else delivery.update({ busy: false, error: result.error.message });
   }
-  async function submit() {
+  async function submit(composer: Composer) {
     if (
       !snapshot ||
-      !composer?.body.trim() ||
-      stale ||
+      !composer.body.trim() ||
+      !composersRef.current.some(
+        (entry) => entry.operation === composer.operation,
+      ) ||
+      stale(composer) ||
+      !active ||
       loading ||
-      (!targetMapped && !composer?.target.replyTo)
+      (!targetMapped(composer) && !composer.target.replyTo)
     )
       return;
     if (!delivery.begin()) return;
     const { target, body, operation } = composer;
+    pendingOperation.current = operation;
     try {
       const result =
         target.replyTo === undefined
           ? await api.create(snapshot, target, body, operation)
           : await api.reply(snapshot, target.replyTo, body, operation);
-      await applyResult(result, snapshot);
+      await applyResult(result, snapshot, composer);
     } catch (failure) {
       // An unexpected rejection cannot establish whether a mutation happened.
       delivery.update({
@@ -296,31 +356,48 @@ export function PrFiles({
     if (!status.attempt || status.busy) return;
     delivery.update({ busy: true });
     try {
-      await applyResult(await api.reconcile(status.attempt), snapshot);
+      await applyResult(
+        await api.reconcile(status.attempt),
+        snapshot,
+        composers.find((entry) => entry.operation === pendingOperation.current),
+      );
     } catch (failure) {
       delivery.update({ busy: false, error: readable(failure).message });
     }
   }
-  const form = (
+  const form = (composer: Composer) => (
     <InlineCommentForm
-      body={composer?.body ?? ""}
+      key={composer.operation}
+      operation={composer.operation}
+      focusRequest={composer.focusRequest}
+      body={composer.body}
       busy={status.busy}
       blocked={
-        !!stale ||
+        stale(composer) ||
         loading ||
         status.unknown ||
         !snapshot ||
-        (!targetMapped && !composer?.target.replyTo)
+        (!targetMapped(composer) && !composer.target.replyTo)
       }
-      notice={stale ? "Select a line again in the latest diff." : undefined}
+      notice={
+        stale(composer) ? "Select a line again in the latest diff." : undefined
+      }
       onChange={(body) => {
         if (!delivery.get().busy && !delivery.get().unknown)
-          setComposer((current) => current && { ...current, body });
+          setComposers((previous) =>
+            previous.map((entry) =>
+              entry.operation === composer.operation
+                ? { ...entry, body }
+                : entry,
+            ),
+          );
       }}
-      onSubmit={() => void submit()}
+      onSubmit={() => void submit(composer)}
       onCancel={() => {
-        setComposer(undefined);
-        restoreFocus();
+        setComposers((previous) =>
+          previous.filter((entry) => entry.operation !== composer.operation),
+        );
+        restoreFocus(composer);
       }}
     />
   );
@@ -413,13 +490,13 @@ export function PrFiles({
           }
           onClick={(event) => {
             const button = event.currentTarget;
-            returnFocus.current = () => button.focus();
             choose(
               thread.path,
               {
                 side: thread.side === "LEFT" ? "deletions" : "additions",
                 lineNumber: thread.line ?? 0,
               },
+              () => button.focus(),
               thread.rootCommentId,
             );
           }}
@@ -458,8 +535,32 @@ export function PrFiles({
   for (const thread of threads)
     if (mapped(thread) && thread.line !== null)
       annotate({ ...thread, line: thread.line }, threadView(thread));
-  if (composer && targetMapped)
-    annotate(composer.target, <div key="composer">{form}</div>);
+  for (const composer of composers)
+    if (targetMapped(composer)) annotate(composer.target, form(composer));
+  if (choice?.lines[0])
+    annotate(
+      {
+        path: choice.path,
+        side: choice.lines[0].side === "deletions" ? "LEFT" : "RIGHT",
+        line: choice.lines[0].lineNumber,
+      },
+      <section
+        key="side-choice"
+        className={styles.comment}
+        aria-label="Choose comment side"
+      >
+        {choice.lines.map((line) => (
+          <Button
+            ref={line === choice.lines[0] ? sideButton : undefined}
+            key={line.side}
+            size="sm"
+            onClick={() => choose(choice.path, line, choice.restoreFocus)}
+          >
+            {line.side === "deletions" ? "Old" : "New"} line {line.lineNumber}
+          </Button>
+        ))}
+      </section>,
+    );
   const comments: DiffComments = {
     annotations: [...annotations.values()],
     onAvailabilityChange: availability,
@@ -471,9 +572,8 @@ export function PrFiles({
         loading
       )
         return;
-      returnFocus.current = restoreFocus;
-      if (lines.length === 1 && lines[0]) choose(path, lines[0]);
-      else setChoice({ path, lines });
+      if (lines.length === 1 && lines[0]) choose(path, lines[0], restoreFocus);
+      else setChoice({ path, lines, restoreFocus });
     },
   };
   return (
@@ -505,19 +605,6 @@ export function PrFiles({
           }
         />
       </div>
-      {choice && (
-        <section className={styles.actions} aria-label="Choose comment side">
-          {choice.lines.map((line) => (
-            <Button
-              key={line.side}
-              size="sm"
-              onClick={() => choose(choice.path, line)}
-            >
-              {line.side === "deletions" ? "Old" : "New"} line {line.lineNumber}
-            </Button>
-          ))}
-        </section>
-      )}
       {status.sentUrl && (
         <p role="status">
           Comment sent.{" "}
@@ -548,7 +635,7 @@ export function PrFiles({
           </Button>
         </div>
       )}
-      {composer && !targetMapped && form}
+      {composers.filter((composer) => !targetMapped(composer)).map(form)}
       {error && <p role="alert">{error}</p>}
       {threadError && <p role="alert">{threadError}</p>}
       <LoadingRegion pending={loading} label="Loading GitHub changes…">

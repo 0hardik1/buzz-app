@@ -19,32 +19,14 @@ import { bundledLanguages } from "./grammars";
 import { gitPatch, type FileData } from "./parse";
 import styles from "./Diffs.module.css";
 
-export type DiffLine = { side: "deletions" | "additions"; lineNumber: number };
+import { commentLines, commentableLine, type DiffLine } from "./comment-lines";
+export { commentLines, type DiffLine } from "./comment-lines";
 export type DiffComments = {
   readOnly?: boolean;
   onAvailabilityChange?(path: string, available: boolean): void;
   annotations: (DiffLine & { path: string; content: ReactNode })[];
   onSelect(path: string, lines: DiffLine[], restoreFocus: () => void): void;
 };
-
-/** Context retains both coordinates so selecting it never guesses a side. */
-export function commentLines(file: FileData): DiffLine[][] {
-  return file.hunks.flatMap((hunk) =>
-    hunk.changes.map((change): DiffLine[] =>
-      change.type === "normal"
-        ? [
-            { side: "deletions", lineNumber: change.oldLineNumber },
-            { side: "additions", lineNumber: change.newLineNumber },
-          ]
-        : [
-            {
-              side: change.type === "delete" ? "deletions" : "additions",
-              lineNumber: change.lineNumber,
-            },
-          ],
-    ),
-  );
-}
 
 const theme = { light: "pierre-light", dark: "pierre-dark" } as const;
 
@@ -65,6 +47,7 @@ function languageFor(file: FileData, name: string) {
 const languages = (files: FileDiffMetadata[]) => [
   ...new Set(files.map((file) => file.lang ?? "text")),
 ];
+
 
 function RawDiff({ content }: { content: string }) {
   return (
@@ -257,11 +240,13 @@ function PierreFile({
           entry.side === line.side && entry.lineNumber === line.lineNumber,
       ),
     );
-    if (candidates)
+    if (candidates) {
+      setKeyboardLine(undefined);
       comments?.onSelect(path, candidates, () => {
         setKeyboardLine(undefined);
         element.focus();
       });
+    }
   };
   const annotations: DiffLineAnnotation<ReactNode>[] =
     comments?.annotations
@@ -356,12 +341,23 @@ function PierreFile({
           diffStyle: viewType,
           diffIndicators: "bars",
           enableGutterUtility: !!comments && !comments.readOnly,
-          onLineEnter: ({ numberElement }) => {
+          onLineEnter: ({ numberElement, lineNumber, annotationSide }) => {
+            setKeyboardLine(undefined);
             const root = numberElement.getRootNode();
-            if (root instanceof ShadowRoot)
-              root
-                .querySelector("[data-utility-button]")
-                ?.setAttribute("aria-label", "Comment on hovered line");
+            if (root instanceof ShadowRoot) {
+              const button = root.querySelector<HTMLButtonElement>(
+                "[data-utility-button]",
+              );
+              if (button) {
+                const valid =
+                  !!source &&
+                  commentableLine(source, { side: annotationSide, lineNumber });
+                button.disabled = !valid;
+                button.hidden = !valid;
+                button.style.display = valid ? "" : "none";
+                button.setAttribute("aria-label", "Comment on hovered line");
+              }
+            }
           },
           ...(comments && !comments.readOnly
             ? {

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { commentLines } from "./DiffViewer";
+import { commentLines, commentableLine } from "./comment-lines";
 import { parsePatch } from "./parse";
 
 it("preserves both context coordinates after insertions in a renamed file", () => {
@@ -18,6 +18,21 @@ rename to new.ts
   expect(files).toHaveLength(1);
   const file = files?.[0];
   if (!file) throw new Error("Missing parsed fixture");
+  expect(commentableLine(file, { side: "deletions", lineNumber: 4999 })).toBe(
+    false,
+  );
+  expect(commentableLine(file, { side: "additions", lineNumber: 4999 })).toBe(
+    false,
+  );
+  expect(commentableLine(file, { side: "deletions", lineNumber: 5001 })).toBe(
+    true,
+  );
+  expect(commentableLine(file, { side: "additions", lineNumber: 5002 })).toBe(
+    true,
+  );
+  expect(commentableLine(file, { side: "deletions", lineNumber: 5002 })).toBe(
+    false,
+  );
   expect(commentLines(file)).toEqual([
     [{ side: "deletions", lineNumber: 5000 }],
     [{ side: "additions", lineNumber: 5000 }],

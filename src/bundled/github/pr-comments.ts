@@ -1,3 +1,4 @@
+import { commentableLine } from "../diffs/comment-lines";
 import type { Host } from "../../features/host/service";
 import {
   gitHubCli,
@@ -204,17 +205,10 @@ export function anchorInSnapshot(snapshot: Snapshot, anchor: Anchor): boolean {
   );
   return (
     !!file &&
-    !file.isBinary &&
-    file.hunks.some((hunk) =>
-      hunk.changes.some((change) =>
-        change.type === "normal"
-          ? (anchor.side === "LEFT"
-              ? change.oldLineNumber
-              : change.newLineNumber) === anchor.line
-          : (change.type === "delete" ? "LEFT" : "RIGHT") === anchor.side &&
-            change.lineNumber === anchor.line,
-      ),
-    )
+    commentableLine(file, {
+      side: anchor.side === "LEFT" ? "deletions" : "additions",
+      lineNumber: anchor.line,
+    })
   );
 }
 

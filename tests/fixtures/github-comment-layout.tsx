@@ -1,0 +1,189 @@
+import { createRoot } from "react-dom/client";
+import { useState } from "react";
+import { Avatar } from "../../src/shared/design-system/ui/Avatar";
+import { Button } from "../../src/shared/design-system/ui/Button";
+import { InlineCommentForm } from "../../src/bundled/github/InlineCommentForm";
+import { GitHubBody } from "../../src/bundled/github/GitHubBody";
+import { DiffViewer } from "../../src/bundled/diffs/DiffViewer";
+import { parsePatch } from "../../src/bundled/diffs/parse";
+import { fixturePatch } from "./github-comment-host";
+import "@fontsource-variable/inter/wght.css";
+import "../../src/shared/styles/globals.css";
+import styles from "./github-comment-layout.module.css";
+
+const pull = "https://github.com/example-org/sample/pull/1";
+const sample: {
+  id?: string;
+  author: string;
+  avatar: string | undefined;
+  body: string;
+}[] = [
+  {
+    author: "alex",
+    avatar: "./design-system/assets/avatar.png",
+    body: "Could we give this value a more descriptive name?",
+  },
+  {
+    author: "sam",
+    avatar: undefined,
+    body: "Good catch. I’ll rename it to `isAvailable`.\n\nThe behavior stays the same:\n- Existing records remain available.\n- New records use the updated check.\n\n```ts\nconst isAvailable = record.active && !record.archived;\n```\n\nSee the [implementation notes](https://example.org/notes) for details.",
+  },
+  {
+    author: "alex",
+    avatar: "./design-system/assets/avatar.png",
+    body: "That reads much better, thanks! **Looks good.**",
+  },
+];
+function Thread({
+  comments,
+  label,
+}: {
+  comments: typeof sample;
+  label: string;
+}) {
+  const [replying, setReplying] = useState(false);
+  const [body, setBody] = useState("");
+  const [localReplies, setLocalReplies] = useState<typeof sample>([]);
+  return (
+    <section className={styles.thread} aria-label={label}>
+      {[...comments, ...localReplies].map((comment, index) => (
+        <article
+          className={styles.comment}
+          key={comment.id ?? `${comment.author}:${comment.body}`}
+        >
+          <Avatar
+            src={comment.avatar}
+            alt=""
+            fallback={comment.author}
+            size="small"
+            loading="eager"
+          />
+          <div className={styles.content}>
+            <div className={styles.author}>
+              <a
+                className="text-link"
+                href={`${pull}#discussion_r${index + 1}`}
+              >
+                {comment.author}
+              </a>
+            </div>
+            <GitHubBody body={comment.body} url={pull} />
+          </div>
+        </article>
+      ))}
+      {replying && (
+        <InlineCommentForm
+          body={body}
+          busy={false}
+          blocked={false}
+          onChange={setBody}
+          onCancel={() => {
+            setReplying(false);
+            setBody("");
+          }}
+          onSubmit={() => {
+            setLocalReplies((previous) => [
+              ...previous,
+              {
+                id: crypto.randomUUID(),
+                author: "you",
+                avatar: undefined,
+                body,
+              },
+            ]);
+            setReplying(false);
+            setBody("");
+          }}
+        />
+      )}
+      <div className={styles.reply}>
+        <Button size="sm" onClick={() => setReplying(true)}>
+          Reply
+        </Button>
+      </div>
+    </section>
+  );
+}
+function Preview() {
+  const [dark, setDark] = useState(false);
+  const [narrow, setNarrow] = useState(false);
+  return (
+    <main
+      className={styles.page}
+      style={{ maxWidth: narrow ? "480px" : "1100px" }}
+    >
+      <h1 className="text-title">PR comments · design workbench</h1>
+      <p className="text-body">
+        Synthetic comments; no GitHub requests. The proposed comment layout is
+        only on this page.
+      </p>
+      <div className={styles.controls}>
+        <Button
+          size="sm"
+          onClick={() => {
+            document.documentElement.dataset.colorMode = dark
+              ? "light"
+              : "dark";
+            setDark(!dark);
+          }}
+        >
+          {dark ? "Light theme" : "Dark theme"}
+        </Button>
+        <Button size="sm" onClick={() => setNarrow(!narrow)}>
+          {narrow ? "Wide layout" : "Narrow layout"}
+        </Button>
+      </div>
+      <DiffViewer
+        content={fixturePatch}
+        files={parsePatch(fixturePatch)}
+        comments={{
+          readOnly: true,
+          onSelect() {},
+          annotations: [
+            {
+              path: "src/example.ts",
+              side: "additions",
+              lineNumber: 5000,
+              content: (
+                <Thread label="Discussion with replies" comments={sample} />
+              ),
+            },
+            {
+              path: "src/example.ts",
+              side: "additions",
+              lineNumber: 5001,
+              content: (
+                <Thread
+                  label="Separate discussion"
+                  comments={[
+                    {
+                      author: "taylor",
+                      avatar: "./missing-avatar.png",
+                      body: "One separate thought: could this check return early?",
+                    },
+                  ]}
+                />
+              ),
+            },
+          ],
+        }}
+      />
+      <section className={styles.unmapped} aria-label="Outdated comments">
+        <p className="text-body-sm">src/previous.ts · Old line 42 · Outdated</p>
+        <Thread
+          label="Outdated discussion"
+          comments={[
+            {
+              author: "sam",
+              avatar: undefined,
+              body: "This feedback refers to an earlier version of the file.",
+            },
+          ]}
+        />
+      </section>
+    </main>
+  );
+}
+const root = document.getElementById("root");
+if (!root) throw new Error("Missing root");
+createRoot(root).render(<Preview />);

@@ -7,6 +7,7 @@ import { Tabs } from "../../shared/design-system/ui/Tabs";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -449,6 +450,12 @@ function ObjectPanel({
   const [view, setView] = useState(
     () => memory.get(reference.url, channelId).view ?? "summary",
   );
+  const contentScroll = useRef<HTMLDivElement>(null);
+  const viewScroll = useRef<Record<string, number>>({});
+  useLayoutEffect(() => {
+    if (contentScroll.current)
+      contentScroll.current.scrollTop = viewScroll.current[view] ?? 0;
+  }, [view]);
   // Files changed stays mounted once shown, so going back to it doesn't read
   // the diff again.
   const [changesShown, setChangesShown] = useState(view === "changes");
@@ -517,6 +524,7 @@ function ObjectPanel({
     // biome-ignore lint/a11y/useKeyWithClickEvents: Command-click is a pointer gesture on a link, which keeps its own keyboard behavior.
     <div
       className={styles.root}
+      ref={contentScroll}
       onClick={(event) => {
         const opening = openCommandClickInBrowser(event);
         if (!opening) return;
@@ -602,6 +610,7 @@ function ObjectPanel({
               },
             ]}
             onValueChange={(next) => {
+              viewScroll.current[view] = contentScroll.current?.scrollTop ?? 0;
               memory.setView(reference.url, next, channelId);
               setView(next);
               if (next === "changes") setChangesShown(true);
@@ -612,18 +621,17 @@ function ObjectPanel({
       {files && changesShown && (
         <div hidden={!showChanges}>
           {comments ? (
-            showChanges && (
-              <PrFiles
-                api={comments}
-                pull={{
-                  repository: files.repository,
-                  number: Number(reference.label.slice(1)),
-                }}
-                head={files.head}
-                base={files.base}
-                delivery={memory.delivery(reference.url)}
-              />
-            )
+            <PrFiles
+              active={showChanges}
+              api={comments}
+              pull={{
+                repository: files.repository,
+                number: Number(reference.label.slice(1)),
+              }}
+              head={files.head}
+              base={files.base}
+              delivery={memory.delivery(reference.url)}
+            />
           ) : (
             <PullFiles
               key={`${files.base}...${files.head}:${files.merged}`}
