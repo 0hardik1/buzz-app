@@ -1,5 +1,6 @@
 //! Installation and settings never execute plugin code. Both desktop and CLI use this crate.
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use cap_fs_ext::DirExt as _;
 use nostr::{
     event::{Event, EventBuilder, FinalizeEvent, Kind, Tag},
     key::{Keys, SecretKey},
@@ -1726,9 +1727,19 @@ fn prepare_reload_artifact(source: &InstallSource) -> Result<Release> {
     {
         return Err("Reload source root must be a regular folder".into());
     }
-    let directory = cap_std::fs::Dir::open_ambient_dir(&source.root, cap_std::ambient_authority())
-        .map_err(err)?;
-    imports::read_package(&directory, &relative)
+    let mut directory =
+        cap_std::fs::Dir::open_ambient_dir(&source.root, cap_std::ambient_authority())
+            .map_err(err)?;
+    for part in relative.iter() {
+        directory = directory.open_dir_nofollow(part).map_err(err)?;
+    }
+    imports::read_package(&directory, Path::new(".")).map_err(|reason| {
+        if relative.as_os_str().is_empty() {
+            reason
+        } else {
+            format!("{}: {reason}", relative.display())
+        }
+    })
 }
 fn validate_candidate_path(path: &str) -> Result<PathBuf> {
     // Recorded paths are lossless folder identities; spaces are part of valid names.
