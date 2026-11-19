@@ -1064,3 +1064,63 @@ html[data-keyboard-navigation]
   min-height: 0;
   min-width: 0;
 }
+
+/* A card shows every row until its grip is moved, and clips the rest; dragging
+   down reveals them. Its own formatting context keeps the last row's margin
+   inside the full height. */
+.cardRows {
+  display: flow-root;
+  overflow: hidden;
+}
+/* Releases and key steps settle onto a whole row; the drag itself follows the
+   pointer exactly. */
+.cardRows:not([data-resizing]) {
+  transition: max-height var(--duration-fast) var(--easing-enter);
+}
+/* The grip sits in the card's bottom edge and appears on hover. */
+.cardResize {
+  position: relative;
+  height: var(--space-2);
+  margin: 0 0 calc(-1 * var(--space-1));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.cardResize::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3.5rem;
+  height: 0.1875rem;
+  border-radius: var(--radius-pill);
+  background: var(--border-focus);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scaleX(calc(40 / 56));
+  transition:
+    opacity var(--duration-fast) var(--easing-state),
+    transform var(--duration-fast) var(--easing-enter);
+}
+@media (hover: hover) and (pointer: fine) {
+  .cardResize:hover::after {
+    opacity: 1;
+    transform: translate(-50%, -50%) scaleX(1);
+  }
+}
+.cardResize:focus-visible::after,
+.cardResize[data-resizing]::after {
+  opacity: 1;
+  transform: translate(-50%, -50%) scaleX(1);
+}
+.cardResize:focus-visible {
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cardRows:not([data-resizing]),
+  .cardResize::after {
+    transition: none;
+  }
+}

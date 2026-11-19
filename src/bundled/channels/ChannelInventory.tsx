@@ -1949,6 +1949,7 @@ export function ChannelInventory({
                             />
                           ) : null
                         }
+                        heightScope={scope}
                         removalFocus={() =>
                           sidebar.list.current?.querySelector<HTMLButtonElement>(
                             '[data-sidebar-section="channels"] button',

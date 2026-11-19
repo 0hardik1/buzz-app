@@ -50,6 +50,7 @@ import type { SidebarFilter } from "./useSidebarFilters";
 import { SidebarGroupIcon } from "./SidebarGroupIcon";
 import { SidebarStarIcon } from "./SidebarStarIcon";
 import { ChannelSidebarMenuItem } from "./ChannelSidebarMenuItem";
+import { SidebarCardResize, useSidebarCardHeight } from "./SidebarCardResize";
 import styles from "./Channels.module.css";
 
 export function SidebarSection({
@@ -78,6 +79,7 @@ export function SidebarSection({
   menuActions,
   channelCount,
   removalFocus,
+  heightScope,
   children,
 }: {
   sectionKey: string;
@@ -99,6 +101,8 @@ export function SidebarSection({
   /** Keep the disclosure affordance visible instead of revealing it on hover. */
   channelCount?: number | undefined;
   removalFocus?: (() => HTMLElement | null | undefined) | undefined;
+  /** Where a card remembers the height its grip was left at; omit to fit. */
+  heightScope?: string | undefined;
   createChannel?:
     | { available: boolean; open: (trigger: HTMLButtonElement) => void }
     | undefined;
@@ -545,8 +549,33 @@ export function SidebarSection({
         inert={!open}
         hidden={!open}
       >
-        <div>{children}</div>
+        {heightScope ? (
+          <ResizableRows scope={heightScope} card={sectionKey} label={title}>
+            {children}
+          </ResizableRows>
+        ) : (
+          <div>{children}</div>
+        )}
       </div>
     </div>
+  );
+}
+
+function ResizableRows({
+  scope,
+  card,
+  label,
+  children,
+}: {
+  scope: string;
+  card: string;
+  label: string;
+  children: ReactNode;
+}) {
+  const [height, resize] = useSidebarCardHeight(scope, card);
+  return (
+    <SidebarCardResize label={label} height={height} onResize={resize}>
+      {children}
+    </SidebarCardResize>
   );
 }
