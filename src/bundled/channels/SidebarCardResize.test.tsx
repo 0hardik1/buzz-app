@@ -77,6 +77,12 @@ it("steps a row with the keyboard, and double-click toggles full and back", () =
   const grip = screen.getByLabelText("Resize Work");
   fireEvent.keyDown(grip, { key: "ArrowUp" });
   expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
+  // A double-click's own clicks press and release without moving.
+  for (const _ of [1, 2]) {
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 128 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientY: 128 });
+  }
+  expect(grip.style.pointerEvents).toBe("");
   fireEvent.doubleClick(grip);
   expect(list.style.maxHeight).toBe("");
   fireEvent.doubleClick(grip);

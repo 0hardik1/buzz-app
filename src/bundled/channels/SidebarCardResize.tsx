@@ -164,8 +164,10 @@ export function SidebarCardResize({
             const ends = stops(rows);
             const [min = 0] = ends;
             const max = ends.at(-1) ?? start;
-            // Rows sliding under the pointer must not take hover mid-drag.
+            // Rows sliding under the pointer must not take hover mid-drag. The
+            // grip stays hit-testable, so a double-click still lands on it.
             const surface = rows.closest("nav") ?? rows;
+            const grip = event.currentTarget;
             let next = start;
             let frame: number | undefined;
             // Preview on the element; the saved height changes on release.
@@ -186,7 +188,9 @@ export function SidebarCardResize({
               stop.current?.();
               // Released, the list glides onto the nearest whole row. Dragged
               // to the bottom, it keeps showing every row as new ones arrive.
-              if (event.type !== "pointerup") return clip(rows, height);
+              // A click without a drag (half of a double-click) changes nothing.
+              if (event.type !== "pointerup" || next === start)
+                return clip(rows, height);
               const settled = nearest(rows, next);
               const target = settled >= max ? ALL_ROWS : settled;
               if (target === height) clip(rows, height);
@@ -204,6 +208,7 @@ export function SidebarCardResize({
               document.documentElement.style.removeProperty("cursor");
               document.body.style.removeProperty("user-select");
               surface.style.removeProperty("pointer-events");
+              grip.style.removeProperty("pointer-events");
             };
             window.addEventListener("pointermove", move);
             window.addEventListener("pointerup", finish);
@@ -215,6 +220,7 @@ export function SidebarCardResize({
             document.documentElement.style.cursor = "ns-resize";
             document.body.style.userSelect = "none";
             surface.style.pointerEvents = "none";
+            grip.style.pointerEvents = "auto";
           }}
         />
       )}
