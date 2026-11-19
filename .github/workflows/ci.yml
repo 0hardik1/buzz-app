@@ -88,13 +88,18 @@ jobs:
         uses: DataDog/datadog-workload-identity-federation-github-action/intake@08e47f7c6f805efc5eef19953e33c523915acd85
         with:
           org_uuid: ${{ vars.DD_ORG_UUID }}
-      - uses: DataDog/junit-upload-github-action@cdbf0b0acda1005e45c4a11d445bf3dde78e796f # v4.1.0
-        with:
-          api_key: ${{ steps.datadog.outputs.api_key }}
-          files: reports
-          service: buzz-app
-          env: ci
-          extra-args: --skip-git-metadata-upload
+      - name: Upload JUnit reports
+        env:
+          DATADOG_API_KEY: ${{ steps.datadog.outputs.api_key }}
+        # The container receives public run metadata and the intake key. OIDC stays on the runner.
+        run: |
+          docker run --rm --cap-drop=ALL --security-opt=no-new-privileges \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/reports,dst=/reports,readonly" \
+            -e DATADOG_API_KEY -e DD_ENV=ci \
+            -e GITHUB_ACTIONS -e GITHUB_SERVER_URL -e GITHUB_REPOSITORY -e GITHUB_REF -e GITHUB_SHA \
+            -e GITHUB_WORKFLOW -e GITHUB_JOB -e GITHUB_RUN_ID -e GITHUB_RUN_NUMBER -e GITHUB_RUN_ATTEMPT \
+            datadog/ci:v5.27.0@sha256:180e7683402a1faabdb134b5132cc46d60e101d619c7ed7df55296345f5cc5e2 \
+            junit upload --auto-discovery --service buzz-app --skip-git-metadata-upload /reports
 
   agent_protection:
     if: github.event_name != 'workflow_dispatch'
