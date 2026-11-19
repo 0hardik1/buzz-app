@@ -154,7 +154,7 @@ it("arms Nightly review at 03:00 where the device is, so its first wake is the n
     const timer = change.attention?.["watch/bestie-dream"] as TimerWatch;
     expect(timer).toMatchObject({
       interest_id: "bestie-dream",
-      prompt: "Nightly review wake",
+      prompt: "Dreaming wake",
       interval_secs: 86_400,
       channel: DM,
     });

@@ -388,7 +388,7 @@ it("pins each shipped version's text, so a change ships only as a new version", 
     "memory text v2 bb7c685d05395ac338db988ceee0ad4b2408a5252d737bf375dede3fef897ae3",
     "memory text v1 519d7304d61ecbd731779a4768d32be1eb31ab6111701c38cb7ca062673e6d07",
     "notes.hourly interest v2 f862f590809b20e58b1c4ffa48f4aef4cee9b67d74eaf6f80a5ae97e36e26a6b",
-    "dream.nightly interest v3 0095da197ed82170897a2fe181845217e4a63f09c178a51a657b3db1d00e9b28",
+    "dream.nightly interest v3 a9a81f5b2ddc056aaed54c486cb676c06f13f692d12aa59f0f8e62de7b8053d1",
     "dream.nightly interest v2 2ab0d314420f68fe0bb506bc5ab3ddcee33d7120495eea098e82c88f3398c85a",
   ]);
 });

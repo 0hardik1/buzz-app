@@ -267,7 +267,7 @@ export async function restartFeature(
 }
 
 /** Replaces the hourly check-in of an earlier version, which keeps its steps
- * in the instructions, with Hourly notes and Nightly review. If it was on,
+ * in the instructions, with Hourly notes and Dreaming. If it was on,
  * with memory, they are turned on in the DM its timer was delivered to. The
  * old Interest and timer are taken away in the same Attention change, before
  * the new ones are added, so it saves whole or not at all, and an agent at

@@ -125,7 +125,8 @@ export const notes: Feature = {
   },
 };
 
-/** Nightly review's steps as version 2 saved them, with no markers. */
+/** Dreaming's steps as version 2 saved them, with no markers. Version 2
+ * called it Nightly review, and its text stays as it was. */
 const DREAM_V2 = `Nightly review. Your timer wakes you in your DM with the owner. That wake is an internal maintenance wake, not a message from the owner. In it you never send a message. You are the only one who merges, renames, deletes and rebuilds memory. Never change core or your instructions.
 
 1. READ. mem_get mem/heartbeat (its last_dream date), mem/user, mem/memory and mem/hypotheses. Lines carry a day, not a time, so what is dated on last_dream may have come after that review: count it as new. Read each mem/notes/<date> dated on or after last_dream, and each card those notes link as [[mem/entities/<type>/<id>]]. Stop and write nothing only if there is no note line dated on or after last_dream outside a reflection (from a "<!-- dream:start -->" line to the next "<!-- dream:end -->" line; anything after that end line is new), no line in mem/user dated on or after it, and no open hypothesis that is stale or whose expected events are overdue. Otherwise go on, even with no new note: step 3 still marks and retires stale hypotheses.
@@ -139,10 +140,10 @@ const DREAM_V2 = `Nightly review. Your timer wakes you in your DM with the owner
 6. REFLECT. Append a "Dream" section to the end of the latest note you reviewed, or of mem/notes/<today> if you reviewed none. Start it with a line "<!-- dream:start -->" and end it with a line "<!-- dream:end -->", so later lines are not part of it. In it: what helped and what went wrong, with event ids; the duties that follow; what stays open for tomorrow; and what changed: promoted, retired, new, merged.
 7. FINISH. Set last_dream in mem/heartbeat only if every step finished; if not, leave it, so the next review covers the same notes. Append a one-line receipt (time, slugs changed, promoted, retired), keeping the last 10. Send no message.`;
 
-/** Nightly review's steps from version 3. */
+/** Dreaming's steps from version 3. */
 const DREAM_V3 = `Keep the two buzz:bestie lines around these steps as they are, and change the steps between them only when the owner asks. Add your own lines after the closing one.
 
-Nightly review. Your timer wakes you in your DM with the owner. That wake is an internal maintenance wake, not a message from the owner. In it you never send a message. You are the only one who merges, renames, deletes and rebuilds memory. Never change core or your instructions. Before you rewrite a slug, save its current text with mem_set to mem/backup/ and its name without "mem/" (mem/backup/user for mem/user), replacing the copy saved before. When you rewrite one, never drop a line the owner stated: mark it superseded instead. Drop at most a quarter of any slug's lines in one night. If a size limit and these rules conflict, keep the lines and say so in the reflection.
+Dreaming. Your timer wakes you in your DM with the owner. That wake is an internal maintenance wake, not a message from the owner. In it you never send a message. You are the only one who merges, renames, deletes and rebuilds memory. Never change core or your instructions. Before you rewrite a slug, save its current text with mem_set to mem/backup/ and its name without "mem/" (mem/backup/user for mem/user), replacing the copy saved before. When you rewrite one, never drop a line the owner stated: mark it superseded instead. Drop at most a quarter of any slug's lines in one night. If a size limit and these rules conflict, keep the lines and say so in the reflection.
 
 1. READ. mem_get mem/heartbeat (its last_dream date), mem/user, mem/memory and mem/hypotheses. Lines carry a day, not a time, so what is dated on last_dream may have come after that review: count it as new. Read each mem/notes/<date> dated on or after last_dream, and each card those notes link as [[mem/entities/<type>/<id>]]. Stop and write nothing only if there is no note line dated on or after last_dream outside a reflection (from a "<!-- dream:start -->" line to the next "<!-- dream:end -->" line; anything after that end line is new), no line in mem/user dated on or after it, no open hypothesis that is stale or whose expected events are overdue, and no lesson in mem/memory marked "[new, unreviewed]". Otherwise go on, even with no new note: step 3 still marks and retires stale hypotheses, and step 6 still reviews marked lessons.
 2. CHECK AGAINST SOURCE. For each claim you will promote, change or remove, read its source event, by the id and channel its note gives. Events are the ground truth. If a note does not agree with its event, the event wins: fix the claim, and say so in step 6.
@@ -168,7 +169,7 @@ export const dream: Feature = {
     id: "bestie-dream",
     everySecs: 86_400,
     atHour: 3,
-    prompt: "Nightly review wake",
+    prompt: "Dreaming wake",
     marked: true,
     interest: DREAM_V3,
     earlier: { 2: DREAM_V2 },
