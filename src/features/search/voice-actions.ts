@@ -610,6 +610,8 @@ export function buildActionDecision(
           if (
             directEntity &&
             directProb >= threshold &&
+            // The hovered thing fills the other slot, never this one too.
+            directEntity.id !== binding.bound?.id &&
             (!binding.action.filterSlot ||
               binding.action.filterSlot(
                 binding.missingSlot as EntitySlotKind,
@@ -761,53 +763,55 @@ export function buildActionDecision(
       actionAnswer.confidence ??
       0;
 
-    if (actionAnswer.choice === ACTION_NAVIGATE_OPTION) {
-      if (placeResolved.outcome === "found") {
-        const autoNav =
-          actionProb >= Math.max(threshold, VOICE_ACTION_AUTO_THRESHOLD) &&
-          placeResolved.probability >= threshold;
-        const placeOverride =
-          placeResolved.probability >=
-          Math.max(threshold, NAVIGATE_OVERRIDE_PLACE_THRESHOLD);
-        if (autoNav || placeOverride) {
-          return {
-            kind: "navigate",
-            place: placeResolved.place,
-            probability: placeResolved.probability,
-            actionCandidates,
-            placeCandidates,
-          };
-        }
-      }
-      return { kind: "none", actionCandidates, placeCandidates };
-    }
-
-    const bindingIdx = actionLabels.indexOf(actionAnswer.choice);
-    const binding = bindingIdx >= 0 ? bindings[bindingIdx] : undefined;
+    // Single 3-step decision rule:
+    // 1. Act if the top choice is >= 0.7 (or >= 0.5 when confirm-gated) and
+    //    isn't navigating to the thing a top-two action would act on.
+    // 2. Otherwise, navigate if navigate is in the top two, the place is >= 0.8,
+    //    and it isn't the thing the rival action would act on.
+    // 3. Otherwise, show the options.
+    const rivalAction = actionCandidates
+      .slice(0, 2)
+      .find((candidate) => candidate.kind === "action");
+    const placeIsActionObject =
+      placeResolved.outcome === "found" &&
+      [rivalAction?.owner, rivalAction?.target].some(
+        (entity) =>
+          !!entity &&
+          entity.id ===
+            (placeResolved.place.kind === "thread"
+              ? placeResolved.place.rootId
+              : placeResolved.place.channelId),
+      );
     const navigateInTopTwo = actionCandidates
       .slice(0, 2)
       .some((candidate) => candidate.kind === "navigate");
-    const tryNavigateOverride = (): ResolvedAction | undefined => {
-      if (
-        navigateInTopTwo &&
-        placeResolved.outcome === "found" &&
-        placeResolved.probability >=
-          Math.max(threshold, NAVIGATE_OVERRIDE_PLACE_THRESHOLD)
-      ) {
-        return {
-          kind: "navigate",
-          place: placeResolved.place,
-          probability: placeResolved.probability,
-          actionCandidates,
-          placeCandidates,
-        };
+    const autoThreshold = Math.max(threshold, VOICE_ACTION_AUTO_THRESHOLD);
+
+    const tryNavigate = (): ResolvedAction | undefined => {
+      if (placeResolved.outcome !== "found" || placeIsActionObject) {
+        return undefined;
       }
-      return undefined;
+      const step1 =
+        actionAnswer.choice === ACTION_NAVIGATE_OPTION &&
+        actionProb >= autoThreshold &&
+        placeResolved.probability >= threshold;
+      const step2 =
+        navigateInTopTwo &&
+        placeResolved.probability >=
+          Math.max(threshold, NAVIGATE_OVERRIDE_PLACE_THRESHOLD);
+      if (!step1 && !step2) return undefined;
+      return {
+        kind: "navigate",
+        place: placeResolved.place,
+        probability: placeResolved.probability,
+        actionCandidates,
+        placeCandidates,
+      };
     };
 
-    if (!binding) {
+    if (actionAnswer.choice === ACTION_NAVIGATE_OPTION) {
       return (
-        tryNavigateOverride() ?? {
+        tryNavigate() ?? {
           kind: "none",
           actionCandidates,
           placeCandidates,
@@ -815,19 +819,25 @@ export function buildActionDecision(
       );
     }
 
-    // Single 3-step decision rule:
-    // 1. Auto-run (confirm === "none") only when actionProb >= 0.7 (and slot matches).
-    //    Confirm-gated actions prompt when >= threshold (0.5).
-    // 2. Otherwise, navigate if navigate is in top two and place >= 0.8.
-    // 3. Otherwise, show top options (`kind: "none"` with candidates).
+    const bindingIdx = actionLabels.indexOf(actionAnswer.choice);
+    const binding = bindingIdx >= 0 ? bindings[bindingIdx] : undefined;
+
+    if (!binding) {
+      return (
+        tryNavigate() ?? {
+          kind: "none",
+          actionCandidates,
+          placeCandidates,
+        }
+      );
+    }
+
     const requiredActionProb =
-      binding.action.confirm === "none"
-        ? Math.max(threshold, VOICE_ACTION_AUTO_THRESHOLD)
-        : threshold;
+      binding.action.confirm === "none" ? autoThreshold : threshold;
 
     if (actionProb < requiredActionProb) {
       return (
-        tryNavigateOverride() ?? {
+        tryNavigate() ?? {
           kind: "none",
           actionCandidates,
           placeCandidates,
@@ -838,7 +848,7 @@ export function buildActionDecision(
     const slots = resolveBindingSlots(binding);
     if (!slots.ok) {
       return (
-        tryNavigateOverride() ?? {
+        tryNavigate() ?? {
           kind: "none",
           actionCandidates,
           placeCandidates,
