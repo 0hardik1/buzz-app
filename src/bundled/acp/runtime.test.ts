@@ -1,3 +1,4 @@
+import { RESUMED_PROMPT } from "../../buzz-mcp/prompt";
 // ACP agents' turns, end to end against a fake plain-ACP harness.
 import { describe, expect, it, vi } from "vitest";
 import { modelCache, picks } from "./models";
@@ -532,6 +533,32 @@ describe("AcpRuntime", () => {
     expect(runtime.sessions(self).map((view) => view.key)).toEqual([
       `${channel}/${root}`,
     ]);
+    fake.harnesses[0]?.turns[0]?.finish();
+  });
+
+  it("carries on a resumed mention, with its thread past the request", async () => {
+    const config = await confirmed();
+    const mention = message("1", "@Opal ship it");
+    const later = message("2", "Also bump the version.", "b".repeat(64));
+    later.tags.push(["e", mention.id, "", "root"]);
+    const elsewhere = message(
+      "3",
+      "Unrelated top-level chatter.",
+      "b".repeat(64),
+    );
+    const { fake, sync, deliver } = setup(
+      {},
+      { read: async () => [mention, later, elsewhere] },
+    );
+    sync(config);
+    await deliver(mention, config, undefined, {
+      trigger: { type: "mention", event: mention, resumed: true },
+    } as unknown as Partial<Delivery>).run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+    const text = fake.harnesses[0]?.turns[0]?.text ?? "";
+    expect(text).toContain(RESUMED_PROMPT);
+    expect(text).toContain("Also bump the version.");
+    expect(text).not.toContain("Unrelated top-level chatter.");
     fake.harnesses[0]?.turns[0]?.finish();
   });
 

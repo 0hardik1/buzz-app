@@ -63,6 +63,7 @@ import {
   turnPrompt,
 } from "../claude-code/prompt";
 import { digest } from "../../features/agent-harness/acp/agent-sessions";
+import { RESUMED_PROMPT } from "../../buzz-mcp/prompt";
 import { standalonePrompt } from "../goose/runtime";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
 import { ownerReads } from "../../features/agents/reads";
@@ -376,6 +377,8 @@ export class AcpRuntime {
     // code, and the agent's own handoff comes from a turn already acting
     // for the owner.
     const wake = trigger.type !== "mention" ? trigger : undefined;
+    // Interrupted by a reload or quit: it carries on, past its request.
+    const resumed = trigger.type === "mention" && !!trigger.resumed;
     // The harness runs commands as you; mentions need owner or delegated
     // authority.
     if (trigger.type === "mention") {
@@ -468,25 +471,25 @@ export class AcpRuntime {
           from,
           unpaid,
           solo,
+          resumed,
         );
         const wakePrompt = wake
           ? ((await wakeText?.()) ?? wake.text)
           : undefined;
         notes = [...notes, ...(agent.notes?.(channel, noteRoot) ?? [])];
+        const prompt = turnPrompt({
+          ...turn,
+          agent: agent.pubkey,
+          channelLevel: topLevel && !solo,
+          ...(wake ? { wake: { ...wake, text: wakePrompt ?? wake.text } } : {}),
+        });
         return {
           text: this.review(
             entry,
             channel,
             noteRoot,
             notes,
-            turnPrompt({
-              ...turn,
-              agent: agent.pubkey,
-              channelLevel: topLevel && !solo,
-              ...(wake
-                ? { wake: { ...wake, text: wakePrompt ?? wake.text } }
-                : {}),
-            }),
+            resumed ? `${prompt}\n\n${RESUMED_PROMPT}` : prompt,
           ),
           // Only what the prompt shows counts as seen.
           through: cover(from, [...turn.context.slice(-CONTEXT_LIMIT), event]),
@@ -667,6 +670,7 @@ export class AcpRuntime {
     from: Mark,
     owed: readonly string[] = [],
     solo = topLevel,
+    resumed = false,
   ) {
     const snapshot = this.relay(self)?.snapshot();
     const session = snapshot?.status === "ready" ? snapshot.session : undefined;
@@ -695,13 +699,14 @@ export class AcpRuntime {
         )
       : Promise.resolve(undefined);
     let earlier: readonly EventData[] = [];
-    const window = thread || dm || topLevel;
+    // A resumed turn reads its request's thread, replies past it included.
+    const inThread = (thread || (resumed && !dm)) && !topLevel;
+    const window = inThread || dm || topLevel;
     const inRoot = (item: EventData) =>
       item.id === rootId ||
       item.tags.some(([name, value]) => name === "e" && value === rootId);
     if (session && (window || owed.length))
       try {
-        const inThread = thread && !topLevel;
         const events = await session.read(
           [
             ...(!window
@@ -745,7 +750,7 @@ export class AcpRuntime {
                 ? scope !== "thread" || inRoot(item)
                 : !inThread || inRoot(item)) &&
               item.id !== event.id &&
-              item.created_at <= event.created_at,
+              (resumed || item.created_at <= event.created_at),
           )
           .sort((a, b) => a.created_at - b.created_at);
       } catch (error) {
