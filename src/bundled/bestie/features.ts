@@ -159,7 +159,7 @@ Nightly review. Your timer wakes you in your DM with the owner. That wake is an 
  * are the Interest's instructions. It never sends a message. */
 export const dream: Feature = {
   id: "dream.nightly",
-  title: "Nightly review",
+  title: "Dreaming",
   description:
     "Around 3 AM Bestie tidies its memory: it checks its notes against the messages, sorts what it knows and writes a short reflection. It never messages you. It needs only Remembers you. Runs while Buzz is open and the Watching plugin is on, and uses your tokens. Turning it off deletes its steps, with any changes to them.",
   version: 3,
