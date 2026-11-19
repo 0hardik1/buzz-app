@@ -1814,6 +1814,113 @@ it("archiving a public stream the viewer has not joined removes its mention from
   outside(h, "lobby", [...PUBLIC_STREAM, ["archived", "true"]], undefined, 30);
   expect(h.session.channels.get?.("lobby")?.archived).toBe(true);
   expect(rows(h)).toEqual([]);
-  outside(h, "lobby", PUBLIC_STREAM, undefined, 40);
+});
+it.each([
+  ["archived", ["archived", "true"]],
+  ["unlisted", ["unlisted"]],
+] as const)(
+  "a mention hidden while its outside channel is %s returns only from a fresh read",
+  async (_, tag) => {
+    const h = setup();
+    h.admit([h.viewer.pubkey]);
+    outside(h, "lobby", PUBLIC_STREAM);
+    const mention = mentionIn(h, "lobby", "OLD BODY", 20);
+    h.live.receive([mention], liveIn("lobby"));
+    expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
+    outside(h, "lobby", [...PUBLIC_STREAM, [...tag]], undefined, 30);
+    expect(rows(h)).toEqual([]);
+    // No read reaches a hidden channel's edits or deletions, so restoring it
+    // cannot reveal the retained body.
+    outside(h, "lobby", PUBLIC_STREAM, undefined, 40);
+    expect(rows(h)).toEqual([]);
+    const work = h.session.inboxFeed.ensure();
+    (await take(h, 9)).resolve([mention]);
+    await work;
+    expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
+  },
+);
+it.each(["edit", "deletion"] as const)(
+  "an outside channel's %s read before its mention in one batch still applies",
+  (operation) => {
+    const h = setup();
+    h.admit([h.viewer.pubkey]);
+    outside(h, "lobby", PUBLIC_STREAM);
+    const mention = mentionIn(h, "lobby", "OLD BODY", 20);
+    const update = signed(h.alice, {
+      kind: operation === "edit" ? 40003 : 5,
+      created_at: 21,
+      content: operation === "edit" ? "CURRENT BODY" : "",
+      tags: [
+        ["h", "lobby"],
+        ["e", mention.id],
+      ],
+    });
+    // Newest first, as the relay returns a read.
+    h.live.receive([update, mention], liveIn("lobby"));
+    expect(rows(h).map((row) => row.preview)).toEqual(
+      operation === "edit" ? ["CURRENT BODY"] : [],
+    );
+  },
+);
+it("addressed history re-reads a known outside channel's stale unlisted metadata, then lists the mention", async () => {
+  const h = setup();
+  h.admit([h.viewer.pubkey]);
+  outside(h, "lobby", [...PUBLIC_STREAM, ["unlisted"]]);
+  expect(h.session.channels.get?.("lobby")?.unlisted).toBe(true);
+  // The relay lists the channel to a read that does not name it, so it was relisted.
+  const mention = mentionIn(h, "lobby", "relisted mention", 20);
+  const work = h.session.inboxFeed.ensure();
+  (await take(h, 9)).resolve([mention]);
+  (await take(h, 39000)).resolve([
+    metadata(h.relay, "lobby", "lobby", 30, PUBLIC_STREAM),
+  ]);
+  await work;
+  expect(h.session.channels.get?.("lobby")?.unlisted).toBeUndefined();
   expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
+});
+it("a deep outside edit chain with repeated targets settles without walking each path", () => {
+  const h = setup();
+  h.admit([h.viewer.pubkey]);
+  outside(h, "lobby", PUBLIC_STREAM);
+  const mention = mentionIn(h, "lobby", "OLD BODY", 20);
+  const chain = [mention];
+  for (let index = 0; index < 24; index++) {
+    const previous = chain[chain.length - 1]?.id ?? "";
+    chain.push(
+      signed(h.alice, {
+        kind: 40003,
+        created_at: 21 + index,
+        content: `EDIT ${index}`,
+        tags: [
+          ["h", "lobby"],
+          ["e", previous],
+          ["e", previous],
+        ],
+      }),
+    );
+  }
+  const started = performance.now();
+  h.live.receive([...chain].reverse(), liveIn("lobby"));
+  expect(performance.now() - started).toBeLessThan(2000);
+  expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
+});
+it("hiding an outside channel during a running repair runs the repair again", async () => {
+  const h = setup();
+  h.admit([h.viewer.pubkey]);
+  outside(h, "lobby", PUBLIC_STREAM);
+  const mention = mentionIn(h, "lobby", "outside mention", 20);
+  h.live.receive([mention], liveIn("lobby"));
+  const roomReads = () =>
+    h.query.mock.calls.filter(([filters]) =>
+      filters[0]?.["#h"]?.includes("room"),
+    ).length;
+  const work = h.session.unread.refresh();
+  await vi.waitFor(() => expect(roomReads()).toBe(1));
+  // Dropping the hidden channel's mentions abandons the running repair.
+  outside(h, "lobby", [...PUBLIC_STREAM, ["archived", "true"]], undefined, 30);
+  expect(rows(h)).toEqual([]);
+  for (const call of h.calls.splice(0)) call.pending.resolve([]);
+  await vi.waitFor(() => expect(roomReads()).toBe(2));
+  for (const call of h.calls.splice(0)) call.pending.resolve([]);
+  await work;
 });

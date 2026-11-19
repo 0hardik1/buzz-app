@@ -534,11 +534,25 @@ export function createUnread({
         (channel) =>
           channel.id === id && !channel.cached && member(channel.members),
       ) || outside(id);
-  /** Outside a channel, only its mentions of the viewer are evidence. */
-  const outsideEvidence = (event: RelayEvent) =>
-    contentKind(event)
-      ? mentionsViewer(event)
-      : event.tags.every(([name, id]) => name !== "e" || events.has(id ?? ""));
+  /** Outside a channel, only its mentions of the viewer are evidence. A batch
+   * read newest first carries an edit or deletion before its target; `decided`
+   * keeps shared targets from being walked once per path. */
+  const outsideEvidence = (
+    event: RelayEvent,
+    incoming: ReadonlyMap<string, RelayEvent>,
+    decided: Map<string, boolean>,
+  ): boolean => {
+    if (contentKind(event)) return mentionsViewer(event);
+    const known = decided.get(event.id);
+    if (known !== undefined) return known;
+    const result = event.tags.every(([name, id = ""]) => {
+      if (name !== "e" || events.has(id)) return true;
+      const target = incoming.get(id);
+      return !!target && outsideEvidence(target, incoming, decided);
+    });
+    decided.set(event.id, result);
+    return result;
+  };
   const keyFor = (target: ReadTarget) =>
     `${target.channelId}:${targetKey(target)}`;
   /** Counted evidence, or a fetched parent/root kept only for structure. */
@@ -1864,6 +1878,19 @@ export function createUnread({
       ),
     );
     const nextOutside = outsideEligibility(nextTypes);
+    // A hidden outside channel's edits and deletions are not read, so signed
+    // ineligibility drops its mentions; a later read lists them afresh.
+    const delisted = [...nextOutside].some(([id, eligible]) => {
+      const channel = channels.get?.(id);
+      return (
+        !eligible &&
+        !!channel &&
+        !channel.members?.includes(viewer) &&
+        !channel.cached &&
+        !channel.metadataCached &&
+        !channel.metadataPending
+      );
+    });
     for (const [id, eligible] of nextOutside)
       if (outsideChannels.get(id) !== eligible) changed.add(id);
     outsideChannels = nextOutside;
@@ -1878,7 +1905,14 @@ export function createUnread({
     const archiveChanged = nextArchived !== archivedKey;
     archivedKey = nextArchived;
     if (next === accessKey) {
-      if (changed.size || archiveChanged) publish(changed);
+      if (delisted) {
+        // purge() abandons a running repair, so it must run again.
+        if (refresh) {
+          sampled = false;
+          repairAgain = true;
+        }
+        purge();
+      } else if (changed.size || archiveChanged) publish(changed);
     } else {
       accessKey = next;
       // An initial observation made against a display-only roster still owes
@@ -2402,6 +2436,7 @@ export function createUnread({
     const changed = new Set<string>();
     const incoming = new Map(batch.map((event) => [event.id, event]));
     const owners = channelOwnership((id) => incoming.get(id) ?? events.get(id));
+    const decided = new Map<string, boolean>();
     for (const event of batch) {
       if (
         ![9, 40002, 40008, 40003, 5, 9005].includes(event.kind) ||
@@ -2412,7 +2447,8 @@ export function createUnread({
       if (
         !channels ||
         [...channels].some((channel) => !allowed(channel)) ||
-        ([...channels].some(outside) && !outsideEvidence(event))
+        ([...channels].some(outside) &&
+          !outsideEvidence(event, incoming, decided))
       )
         continue;
       const size = new TextEncoder().encode(JSON.stringify(event)).byteLength;

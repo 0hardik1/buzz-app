@@ -781,15 +781,26 @@ export function createRelaySession(
       )
     ) {
       // Mentions of the viewer reach public channels it has not joined. Read
-      // the metadata of those this session does not know, so visibility decides.
+      // the metadata of those this session does not know, or knows as unlisted,
+      // non-public or unconfirmed: the relay just listed them, so that is stale.
+      const stale = (id: string) => {
+        const known = channels.queries.get?.(id);
+        return (
+          !known ||
+          (!known.members?.includes(transport?.viewer ?? "") &&
+            (!!known.unlisted ||
+              known.visibility !== "public" ||
+              !!known.cached ||
+              !!known.metadataCached ||
+              !!known.metadataPending))
+        );
+      };
       const unknown = [
         ...new Set(
           events.flatMap((event) => {
             const tags = event.tags.filter(([name]) => name === "h");
             const id = tags.length === 1 ? tags[0]?.[1] : undefined;
-            return chat(event.kind) && id && !channels.queries.get?.(id)
-              ? [id]
-              : [];
+            return chat(event.kind) && id && stale(id) ? [id] : [];
           }),
         ),
       ];
