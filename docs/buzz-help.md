@@ -1503,8 +1503,7 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   can bring that file count under the limit.
 - On desktop, plugins can support update checks and set them on or off by default.
   Use **Check for updates automatically** in the plugin's actions menu to change
-  this choice. Buzz saves your choice across updates and restarts. Plugins without
-  update support keep their existing manual import flow. Buzz checks saved folder sources and eligible Git sources silently at startup and once per hour while the app is visible. Saved-folder checks work offline; automatic Git checks wait for a connection. Checks do not
+  this choice. Buzz saves your choice across updates and restarts. Git plugins without update support can still be updated manually. Buzz checks saved folder sources and eligible Git sources silently at startup and once per hour while the app is visible. Saved-folder checks work offline; automatic Git checks wait for a connection. Checks do not
   install or reload plugins. A notice offers **Update and reload**, or **Review permissions** when access increases; either opens the update review. Even when access is unchanged, choose **Update** in that review to install and reload the candidate.
   Click the notice body to open that plugin’s update checkbox in Manage plugins.
   Its Update, Later, and Dismiss controls keep their own actions.
