@@ -222,6 +222,336 @@ const community = [
   }),
 ];
 
+const outside = "d".repeat(64);
+const literalCases = [
+  ...[alice, outside].flatMap((key) => {
+    const uri = `nostr:${npubEncode(key)}`;
+    return [uri, `\`${uri}\``, `\`\`\`text\n${uri}\n\`\`\``];
+  }),
+  "@Alice Smith @Bob",
+  "@Unknown",
+  "@Twin",
+];
+const literalCommunity = [
+  ...community,
+  ...(
+    [
+      [alice, "Alice Smith"],
+      [bob, "Bob"],
+    ] as const
+  ).map(([pubkey, name]) =>
+    event({
+      kind: 0,
+      pubkey,
+      created_at: 101,
+      content: JSON.stringify({ display_name: "Twin", name }),
+    }),
+  ),
+];
+
+it.each(["send", "reply_in_subthread"])(
+  "%s preserves literal bodies without deriving recipients",
+  async (name) => {
+    for (const body of literalCases) {
+      const { client, published } = fake(literalCommunity);
+      const text = `  é e\u0301 🧪\r\n${body}\n\t `;
+      await callTool(client, { channel: "chan", root }, name, {
+        parent: nested,
+        reply: nested,
+        text,
+        infer_mentions: false,
+        mentions: [],
+        audience: "agents",
+        request: root,
+        final: true,
+      });
+      expect(published).toEqual([
+        {
+          kind: 9,
+          content: text,
+          tags: [
+            ["h", "chan"],
+            ...(name === "send"
+              ? [["e", root, "", "reply"]]
+              : [
+                  ["e", root, "", "root"],
+                  ["e", nested, "", "reply"],
+                ]),
+            ["audience", "agents"],
+            ["buzz:request", root],
+          ],
+        },
+      ]);
+      expect(new TextEncoder().encode(published[0]?.content)).toEqual(
+        new TextEncoder().encode(text),
+      );
+    }
+  },
+);
+
+it.each(["send", "reply_in_subthread"])(
+  "%s retains default and explicit-true inference",
+  async (name) => {
+    for (const option of [{}, { infer_mentions: true }]) {
+      for (const body of [
+        `nostr:${npubEncode(alice)}`,
+        `\`nostr:${npubEncode(alice)}\``,
+        `\`\`\`\nnostr:${npubEncode(alice)}\n\`\`\``,
+        "@Alice Smith",
+      ]) {
+        const { client, published } = fake(community);
+        await callTool(client, { channel: "chan", root }, name, {
+          parent: root,
+          audience: "everyone",
+          text: body,
+          ...option,
+        });
+        expect(published[0]?.tags.filter(([tag]) => tag === "p")).toEqual([
+          ["p", alice],
+        ]);
+      }
+      for (const [body, error] of [
+        [`nostr:${npubEncode(outside)}`, "Not in this channel"],
+        ["@Unknown", "No single channel member"],
+        ["@Twin", "(ambiguous)"],
+      ]) {
+        const { client, published } = fake(literalCommunity);
+        await expect(
+          callTool(client, { channel: "chan", root }, name, {
+            parent: root,
+            audience: "everyone",
+            text: body,
+            ...option,
+          }),
+        ).rejects.toThrow(error);
+        expect(published).toEqual([]);
+      }
+      const { client, published } = fake(community);
+      await callTool(client, { channel: "chan", root }, name, {
+        parent: root,
+        audience: "everyone",
+        text: "`@Unknown`\n```\n@Bob\n```",
+        ...option,
+      });
+      expect(published[0]?.tags.filter(([tag]) => tag === "p")).toEqual([]);
+    }
+  },
+);
+
+it.each(["send", "reply_in_subthread"])(
+  "%s keeps explicit recipients deliberate with inference off",
+  async (name) => {
+    const { client, published } = fake(community);
+    const text = `@Alice Smith @Unknown nostr:${npubEncode(outside)}`;
+    await callTool(client, { channel: "chan", root }, name, {
+      parent: root,
+      audience: "everyone",
+      text,
+      infer_mentions: false,
+      mentions: [bob, npubEncode(bob)],
+    });
+    expect(published[0]?.content).toBe(text);
+    expect(published[0]?.tags.filter(([tag]) => tag === "p")).toEqual([
+      ["p", bob],
+    ]);
+    for (const key of [outside, "not-a-key", me]) {
+      await expect(
+        callTool(client, { channel: "chan", root }, name, {
+          parent: root,
+          audience: "everyone",
+          text,
+          infer_mentions: false,
+          mentions: [key],
+        }),
+      ).rejects.toThrow(
+        key === outside
+          ? "Not in this channel"
+          : key === me
+            ? "self_handoff"
+            : /pubkey|npub/i,
+      );
+    }
+    expect(published).toHaveLength(1);
+  },
+);
+
+it.each(["send", "reply_in_subthread"])(
+  "%s retains explicit recipient bounds and attachment handling",
+  async (name) => {
+    const keys = Array.from({ length: 51 }, (_, index) =>
+      (index + 1).toString(16).padStart(64, "0"),
+    );
+    const { client, published } = fake([
+      event({
+        kind: 39002,
+        tags: [["d", "chan"], ...keys.map((key) => ["p", key, "", "member"])],
+      }),
+    ]);
+    await callTool(client, { channel: "chan", root }, name, {
+      parent: root,
+      audience: "everyone",
+      text: "@Unknown",
+      infer_mentions: false,
+      mentions: keys,
+      files: ["shot.png"],
+    });
+    expect(published[0]?.tags.filter(([tag]) => tag === "p")).toEqual(
+      keys.slice(0, 50).map((key) => ["p", key]),
+    );
+    expect(published[0]?.content).toBe(
+      "@Unknown\n![shot.png](<https://relay/media/x.png>)",
+    );
+    expect(client.read).toHaveBeenCalledExactlyOnceWith("shot.png");
+    expect(client.upload).toHaveBeenCalledExactlyOnceWith(PNG, "image/png");
+    expect(published[0]?.tags).toContainEqual(
+      expect.arrayContaining(["imeta", "url https://relay/media/x.png"]),
+    );
+  },
+);
+
+it.each(["send", "reply_in_subthread"])(
+  "%s validates inference before ordinary and protected file I/O",
+  async (name) => {
+    for (const value of [null, "false", 0, 1, [], {}, undefined]) {
+      for (const protectedSession of [false, true]) {
+        const { client, published } = fake(community);
+        if (protectedSession) client.protect = vi.fn(async () => {});
+        const args = {
+          parent: root,
+          audience: "everyone",
+          path: "body.md",
+          files: ["shot.png"],
+          infer_mentions: value,
+        };
+        // Protected path-only capture precedes post; attachments have a separate existing refusal.
+        if (protectedSession) args.files = [];
+        await expect(
+          callSessionTool(client, { channel: "chan", root }, name, args),
+        ).rejects.toThrow("infer_mentions must be a boolean");
+        expect(client.read).not.toHaveBeenCalled();
+        expect(client.upload).not.toHaveBeenCalled();
+        expect(published).toEqual([]);
+      }
+    }
+  },
+);
+
+it.each(["send", "reply_in_subthread"])(
+  "%s preserves exact file text and protected captured text with inference off",
+  async (name) => {
+    for (const protectedSession of [false, true]) {
+      const { client, published } = fake(community);
+      const text = `  é e\u0301 🧪\r\n@Unknown \`nostr:${npubEncode(outside)}\`\n `;
+      let source = text;
+      client.read = vi.fn(async () => new TextEncoder().encode(source));
+      const entered = gate<void>();
+      const approval = gate<void>();
+      if (protectedSession)
+        client.protect = vi.fn(async (action) => {
+          if (action.kind !== "tool") return;
+          entered.resolve(undefined);
+          await approval.promise;
+        });
+      const args = {
+        parent: root,
+        audience: "everyone",
+        path: "body.md",
+        text: "ignored",
+        infer_mentions: false,
+      };
+      const result = callSessionTool(
+        client,
+        { channel: "chan", root },
+        name,
+        args,
+      );
+      try {
+        if (protectedSession) {
+          await entered.promise;
+          expect(client.protect).toHaveBeenCalledWith(
+            expect.objectContaining({
+              kind: "tool",
+              content: {
+                title: name,
+                arguments: {
+                  parent: root,
+                  audience: "everyone",
+                  text,
+                  infer_mentions: false,
+                },
+              },
+            }),
+          );
+          expect(published).toEqual([]);
+          source = "changed file";
+          args.infer_mentions = true;
+          approval.resolve(undefined);
+        }
+        await result;
+        expect(client.read).toHaveBeenCalledExactlyOnceWith("body.md");
+        expect(published[0]?.content).toBe(text);
+        expect(new TextEncoder().encode(published[0]?.content)).toEqual(
+          new TextEncoder().encode(text),
+        );
+        expect(published[0]?.tags.filter(([tag]) => tag === "p")).toEqual([]);
+      } finally {
+        approval.resolve(undefined);
+        await result.catch(() => undefined);
+      }
+    }
+  },
+);
+
+it("lists inference on both core/session/RPC schemas and passes it through RPC dispatch", async () => {
+  const { client, published } = fake(community);
+  const listed = await respond(client, {}, { id: 1, method: "tools/list" });
+  for (const name of ["send", "reply_in_subthread"]) {
+    for (const tools of [
+      TOOLS,
+      sessionTools(),
+      (listed as { result: { tools: typeof TOOLS } }).result.tools,
+    ]) {
+      expect(
+        tools.find((tool) => tool.name === name)?.inputSchema,
+      ).toMatchObject({
+        properties: { infer_mentions: { type: "boolean", default: true } },
+      });
+      expect(
+        tools.find((tool) => tool.name === name)?.inputSchema.required,
+      ).not.toContain("infer_mentions");
+    }
+    const result = await respond(
+      client,
+      { channel: "chan", root },
+      {
+        id: 2,
+        method: "tools/call",
+        params: {
+          name,
+          arguments: {
+            parent: root,
+            audience: "everyone",
+            text: "@Unknown",
+            infer_mentions: false,
+          },
+        },
+      },
+    );
+    expect(result).toMatchObject({
+      result: { content: [{ text: expect.stringMatching(/^sent /) }] },
+    });
+  }
+  expect(
+    published.map(({ content, tags }) => [
+      content,
+      tags.filter(([tag]) => tag === "p"),
+    ]),
+  ).toEqual([
+    ["@Unknown", []],
+    ["@Unknown", []],
+  ]);
+});
+
 it.each([
   ["send", { audience: "everyone" }, "text"],
   ["reply_in_subthread", { audience: "everyone", parent: root }, "text"],
