@@ -1457,7 +1457,6 @@ function ChannelWorkspace({
   };
   type OpenMedia = {
     id: number;
-    promoted?: boolean;
     trigger: { current: HTMLElement | null };
     channelId: string;
     channelName: string;
@@ -1478,9 +1477,7 @@ function ChannelWorkspace({
       !current?.archived &&
       mediaReviewForDestination(review, current?.id, navigation?.entryId),
   );
-  const showingMediaReview = showingMediaReviews.find(
-    (review) => !review.promoted,
-  );
+  const showingMediaReview = showingMediaReviews[0];
   useEffect(() => {
     if (mediaReviews.length !== showingMediaReviews.length)
       setMediaReviews(showingMediaReviews);
@@ -1996,10 +1993,7 @@ function ChannelWorkspace({
         opening,
         ...(navigation ? { entryId: navigation.entryId } : {}),
       };
-      setMediaReviews((items) => [
-        ...items.filter((item) => item.promoted),
-        next,
-      ]);
+      setMediaReviews([next]);
     },
     [],
   );
@@ -3099,13 +3093,6 @@ function ChannelWorkspace({
               extensions={extensions}
               onOpenLink={openLink}
               restoreFocus={review.trigger}
-              onPromoted={() =>
-                setMediaReviews((items) =>
-                  items.map((item) =>
-                    item.id === review.id ? { ...item, promoted: true } : item,
-                  ),
-                )
-              }
               close={() =>
                 setMediaReviews((items) =>
                   items.filter((item) => item.id !== review.id),

@@ -48,6 +48,7 @@ it("keeps a reader's edited state through promotion, releases it on close, and r
           return {
             release: () => setTab(undefined),
             close: () => next.close(),
+            select: () => {},
           };
         }}
       >
@@ -118,6 +119,7 @@ it("closes the other readers over its composer when one opens as a tab", async (
           return {
             release: () => setTab(undefined),
             close: () => next.close(),
+            select: () => {},
           };
         }}
       >

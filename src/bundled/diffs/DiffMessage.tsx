@@ -3,7 +3,7 @@ import {
   overlayHostFor,
   type ComposerOverlayHost,
 } from "../../features/messages/composer-overlay";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChannelMessage } from "../../features/relay/contracts";
 import { safeMessageUrl } from "../../features/relay/message-content";
 import { ArrowsOutIcon } from "../../shared/design-system/icons";
@@ -14,8 +14,20 @@ import { DiffViewer } from "./DiffViewer";
 import { parsePatch } from "./parse";
 import styles from "./Diffs.module.css";
 
-export function DiffMessage({ message }: { message: ChannelMessage }) {
+export function DiffMessage({
+  message,
+  keepMounted,
+}: {
+  message: ChannelMessage;
+  keepMounted?: (() => () => void) | undefined;
+}) {
   const [open, setOpen] = useState(false);
+  // The reader lives in this row, in a tab too: keep the row while it is open.
+  const [retained, setRetained] = useState(false);
+  useEffect(() => {
+    if (retained) return keepMounted?.();
+  }, [retained, keepMounted]);
+  const [showRequest, setShowRequest] = useState(0);
   const [host, setHost] = useState<ComposerOverlayHost | null>(null);
   const [viewType, setViewType] = useState<"unified" | "split">("unified");
   const expand = useRef<HTMLButtonElement>(null);
@@ -90,8 +102,10 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
             icon={<ArrowsOutIcon size={16} aria-hidden="true" />}
             onClick={() => {
               setViewType("unified");
+              setRetained(true);
               setHost(overlayHostFor(expand.current));
               setOpen(true);
+              setShowRequest((value) => value + 1);
             }}
           />
         </header>
@@ -112,6 +126,8 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
         <DetailsSheet
           open={open}
           onOpenChange={setOpen}
+          onClosed={() => setRetained(false)}
+          showRequest={showRequest}
           host={host}
           title={title}
           readerOnly
@@ -124,6 +140,9 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
         <Dialog
           open={open}
           onOpenChange={setOpen}
+          onOpenChangeComplete={(next) => {
+            if (!next) setRetained(false);
+          }}
           title={title}
           size="expanded"
           closeLabel="Close diff"

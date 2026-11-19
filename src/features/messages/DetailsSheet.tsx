@@ -318,6 +318,8 @@ export function DetailsSheet({
   onClosed,
   onPromoted,
   onOpenAsTab,
+  promotable = true,
+  showRequest,
   focusContent = false,
   onEscapeKey,
   spotlight,
@@ -345,6 +347,10 @@ export function DetailsSheet({
   /** Content with its own tab, such as a thread, opens that tab instead of
    * moving this sheet's body into a new one. */
   onOpenAsTab?: (() => void) | undefined;
+  /** False: no Open as tab, as for media. */
+  promotable?: boolean;
+  /** Each new value shows this reader again: once it is a tab, that tab. */
+  showRequest?: number | undefined;
   /** The content places focus itself, as a thread opened to reply does;
    * otherwise the sheet takes focus. */
   focusContent?: boolean;
@@ -364,6 +370,9 @@ export function DetailsSheet({
   );
   useEffect(() => () => tab.current?.release(), []);
   const handing = useRef(false);
+  useEffect(() => {
+    if (showRequest) tab.current?.select();
+  }, [showRequest]);
   const [contentNode] = useState(() => {
     const node = document.createElement("div");
     node.className = styles.retainedBody ?? "";
@@ -575,7 +584,7 @@ export function DetailsSheet({
                 </div>
                 <div className="buzz-dialog-header-actions">
                   {headerActions}
-                  {(onOpenAsTab || promote) && (
+                  {promotable && (onOpenAsTab || promote) && (
                     <IntroSpotlight
                       shape="ring"
                       active={spotlight === 2}

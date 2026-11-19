@@ -7,9 +7,11 @@ export type DetailTab = {
   close(): void;
 };
 /** The conversation workspace owns promotion; the reader keeps its live
- * content. `release` drops the tab; `close` closes it as its tab's Close does. */
+ * content. `release` drops the tab; `close` closes it as its tab's Close does;
+ * `select` shows it. */
 export const DetailTabContext = createContext<
-  ((tab: DetailTab) => { release(): void; close(): void }) | undefined
+  | ((tab: DetailTab) => { release(): void; close(): void; select(): void })
+  | undefined
 >(undefined);
 
 export function DetailTabSlot({

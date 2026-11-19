@@ -1,5 +1,8 @@
-import { useCallback, type RefObject } from "react";
-import { threadPlacementPreference } from "./thread-preferences";
+import { useCallback, useEffect, useState, type RefObject } from "react";
+import {
+  threadPlacementPreference,
+  useThreadPlacementPreference,
+} from "./thread-preferences";
 
 /** An explicitly marked reader owns its composer and overlay placement. */
 export type ComposerOverlayHost = Readonly<{
@@ -14,6 +17,10 @@ export type MediaReviewOrigin = Readonly<{
   rootId: string;
 }>;
 const hosts = new WeakMap<HTMLElement, ComposerOverlayHost>();
+const hostListeners = new Set<() => void>();
+function hostsChanged() {
+  for (const listener of hostListeners) listener();
+}
 
 /** The renderer marks its reader boundary; styling never chooses ownership.
  * Readers open over their conversation only with the Inline setting; without
@@ -45,9 +52,29 @@ export function registerOverlayComposer(composer: HTMLElement) {
     container: pane,
   };
   hosts.set(pane, host);
+  hostsChanged();
   return () => {
-    if (hosts.get(pane) === host) hosts.delete(pane);
+    if (hosts.get(pane) !== host) return;
+    hosts.delete(pane);
+    hostsChanged();
   };
+}
+
+/** Whether a reader opened from `origin` opens on its conversation's sheet,
+ * as hosts come and go and the placement setting changes. */
+export function useOpensOnSheet(origin: Element | null): boolean {
+  const { placement } = useThreadPlacementPreference();
+  const [onSheet, setOnSheet] = useState(false);
+  useEffect(() => {
+    if (placement !== "inline" || !origin) return setOnSheet(false);
+    const check = () => setOnSheet(!!overlayHostFor(origin));
+    check();
+    hostListeners.add(check);
+    return () => {
+      hostListeners.delete(check);
+    };
+  }, [origin, placement]);
+  return onSheet;
 }
 
 export function useOverlayComposerRef(ref: RefObject<HTMLFormElement | null>) {

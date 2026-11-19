@@ -36,7 +36,7 @@
   background: var(--surface-message-own);
 }
 
-/* Step 2: a ring pulses around the pop-out button. */
+/* Step 2: a ring pulses around the pop-out button a few times, then stays. */
 .spotlight[data-shape="ring"][data-active]::after {
   position: absolute;
   inset: calc(-1 * var(--space-1));
@@ -44,7 +44,7 @@
   border-radius: inherit;
   content: "";
   pointer-events: none;
-  animation: intro-spotlight 1.6s var(--ease-state) infinite;
+  animation: intro-spotlight 1.6s var(--ease-state) 3;
 }
 
 @keyframes intro-spotlight {

@@ -181,6 +181,7 @@ export function useConversationTabs({
         release: () =>
           setDetailTabs((tabs) => tabs.filter((item) => item.id !== tab.id)),
         close: () => closeDetail.current(tab.id),
+        select: () => tabState.select(tab.id),
       };
     },
     [currentId, tabState.select],

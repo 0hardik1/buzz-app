@@ -134,7 +134,6 @@ type MediaReviewFrameProps = {
   sidebar?: ReactNode;
   restoreFocus?: RefObject<HTMLElement | null> | undefined;
   close(): void;
-  onPromoted?: (() => void) | undefined;
 };
 
 function mediaKeyDown(
@@ -208,7 +207,8 @@ export function MediaReviewFrame(
       open={open}
       onOpenChange={setOpen}
       onClosed={props.close}
-      onPromoted={props.onPromoted}
+      // Media stays on its sheet or goes fullscreen; it never becomes a tab.
+      promotable={false}
       host={props.placement.host}
       containsComposer
       height="stable"

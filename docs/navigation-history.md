@@ -47,6 +47,16 @@ other tabs and Close all tabs retire the visits belonging to the closed tabs,
 preserving the kept tab and meaningful underlying channel/message visits.
 Closing an inactive tab must not change the selected content.
 
+### Inline sheets
+
+With the Inline setting, threads, details, diffs, media and link panels open on
+a sheet over their conversation. A sheet is a transient overlay, like a
+popover, not a history entry: opening one from a row records no visit, and
+Back/Forward does not restore it. A visit that opens a sheet, such as a thread
+preview, is retired when the sheet is closed with Close or Escape, so Back never
+shows a sheet that was dismissed. Open as tab makes the content a content tab,
+which then follows the rules above.
+
 ## Keep lifecycle and access guards
 
 The distinction applies after the feature permits an exit. Preserve unsaved-draft

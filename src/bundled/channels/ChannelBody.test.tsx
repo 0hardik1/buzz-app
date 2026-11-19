@@ -126,7 +126,7 @@ it.each(["side", "main"] as const)(
   },
 );
 
-it("reads at the bottom even when a separate thread tab exists", () => {
+it("selects a thread's existing tab instead of reading it inline", () => {
   fixture.update("ready", [{ id: "root" }]);
   const openThread = vi.fn();
   render(
@@ -147,8 +147,8 @@ it("reads at the bottom even when a separate thread tab exists", () => {
   const trigger = screen.getByRole("button", { name: "Open reply" });
   trigger.focus();
   fireEvent.click(trigger);
-  expect(openThread).not.toHaveBeenCalled();
-  expect(screen.getByRole("textbox", { name: "Thread draft" })).toBeVisible();
+  expect(openThread).toHaveBeenCalledWith("root", "root", undefined);
+  expect(screen.queryByRole("dialog", { name: "Thread" })).toBeNull();
 });
 
 it("introduces the first inline thread once in two steps: replying here, then its tab button and inline switch", async () => {
@@ -192,7 +192,7 @@ it("introduces the first inline thread once in two steps: replying here, then it
     name: "Open in a tab anytime",
   });
   expect(second).toHaveTextContent("2 of 2");
-  const popOut = screen.getByRole("button", { name: "Open thread in tab" });
+  const popOut = screen.getByRole("button", { name: "Open as tab" });
   expect(popOut.parentElement).toHaveAttribute("data-active");
 
   // Turning inline off applies to later threads; the step stays to undo it.
@@ -209,9 +209,7 @@ it("introduces the first inline thread once in two steps: replying here, then it
   );
   // Once done, the button names itself on hover again.
   expect(
-    screen
-      .getByRole("button", { name: "Open thread in tab" })
-      .closest("[data-shape]"),
+    screen.getByRole("button", { name: "Open as tab" }).closest("[data-shape]"),
   ).not.toHaveAttribute("data-active");
 
   fireEvent.click(screen.getByRole("button", { name: "Close thread" }));

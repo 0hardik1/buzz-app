@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ArrowRightIcon } from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
 import {
@@ -52,8 +52,25 @@ export function InlineThreadIntro({
   onDone(): void;
 }) {
   const { placement } = useThreadPlacementPreference();
+  // Next hands focus to step 2 once it mounts at its anchor.
+  const focusStep = useRef(false);
   const done = () => {
     markInlineThreadIntroSeen();
+    // Focus would fall to the page with the tip: give it to the thread's
+    // reply editor, or else to Open as tab.
+    const sheet = anchor?.closest("[data-details-sheet-surface]");
+    const active = document.activeElement;
+    if (
+      sheet &&
+      (!active ||
+        active === document.body ||
+        active.closest("[data-inline-thread-intro]"))
+    )
+      (
+        sheet.querySelector<HTMLElement>(
+          '[data-message-composer] [role="textbox"]',
+        ) ?? anchor?.querySelector<HTMLElement>("button")
+      )?.focus({ preventScroll: true });
     onDone();
   };
   return (
@@ -84,7 +101,15 @@ export function InlineThreadIntro({
         finalFocus={false}
         data-inline-thread-intro={step}
       >
-        <div className={styles.card}>
+        <div
+          ref={(element) => {
+            if (!element || !focusStep.current) return;
+            focusStep.current = false;
+            element
+              .querySelector<HTMLElement>("button, input")
+              ?.focus({ preventScroll: true });
+          }}
+        >
           <p className={`text-label-sm ${styles.step}`}>{step} of 2</p>
           {step === 1 ? (
             <>
@@ -97,7 +122,10 @@ export function InlineThreadIntro({
                   type="button"
                   size="sm"
                   variant="prominent"
-                  onClick={onNext}
+                  onClick={() => {
+                    focusStep.current = true;
+                    onNext();
+                  }}
                 >
                   Next
                   <ArrowRightIcon size={16} aria-hidden="true" />

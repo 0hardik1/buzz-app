@@ -55,6 +55,7 @@ export function DetailsMessage({
   keepMounted?: (() => () => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
+  const [showRequest, setShowRequest] = useState(0);
   const [retained, setRetained] = useState(false);
   useEffect(() => {
     if (retained) return keepMounted?.();
@@ -79,6 +80,7 @@ export function DetailsMessage({
     setRetained(true);
     setHost(overlayHostFor(clip.current));
     setOpen(true);
+    setShowRequest((value) => value + 1);
   };
   const time = formatItemTimestamp(createdAt, { withTime: true });
   return (
@@ -120,6 +122,7 @@ export function DetailsMessage({
           open={open}
           onOpenChange={setOpen}
           onClosed={() => setRetained(false)}
+          showRequest={showRequest}
           host={host}
           leading={avatar}
           title={author}

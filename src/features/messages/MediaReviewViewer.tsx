@@ -75,7 +75,6 @@ type MediaReviewViewerProps = {
   restoreFocus?: RefObject<HTMLElement | null>;
   onOpenLink(url: string): boolean;
   close(): void;
-  onPromoted?: (() => void) | undefined;
 };
 
 export function MediaReviewViewer(props: MediaReviewViewerProps) {
@@ -293,7 +292,6 @@ function ReviewShell({
   readingAnchor,
   placement,
   close,
-  onPromoted,
   onOpenLink,
   rootId,
   replies = [],
@@ -469,7 +467,6 @@ function ReviewShell({
       commentsMotion={commentsMotion}
       restoreFocus={restoreFocus}
       close={close}
-      onPromoted={onPromoted}
       navigate={mixedGallery ? navigateMedia : undefined}
       actions={
         <>

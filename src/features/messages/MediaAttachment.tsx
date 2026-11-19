@@ -9,6 +9,7 @@ import {
 } from "../../shared/design-system/ui/PanelHeader";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
+  useCallback,
   useLayoutEffect,
   useRef,
   useState,
@@ -29,6 +30,7 @@ import {
   rememberOpeningFrame,
 } from "../relay/media";
 import styles from "./Messages.module.css";
+import { useOpensOnSheet } from "./composer-overlay";
 import { useModalBoundary } from "./useModalBoundary";
 import { useMediaElementSource } from "./use-media-element-source";
 import { MediaContextMenu } from "./MediaContextMenu";
@@ -96,10 +98,23 @@ export function MediaAttachment({
   onOpenReview,
   compact = false,
   overlayCount = 0,
-  label = "Open video fullscreen",
+  label: requestedLabel,
 }: MediaAttachmentProps) {
   const active = useConversationPresentation();
   const corners = useMediaCorners();
+  // With Inline, a review opens on its conversation's sheet, not fullscreen.
+  const [surface, setSurface] = useState<HTMLElement | null>(null);
+  const surfaceRef = useCallback(
+    (element: HTMLElement | null) => {
+      setSurface(element);
+      return corners(element);
+    },
+    [corners],
+  );
+  const inSheet = useOpensOnSheet(onOpenReview ? surface : null);
+  const imageLabel = inSheet ? "Open image" : "Open image fullscreen";
+  const videoLabel = inSheet ? "Open video" : "Open video fullscreen";
+  const label = requestedLabel ?? videoLabel;
   const source = media(attachment.url);
   const preview = attachment.previewUrl
     ? media(attachment.previewUrl)
@@ -171,11 +186,11 @@ export function MediaAttachment({
           onView={() => viewMedia(0)}
         >
           <button
-            ref={corners}
+            ref={surfaceRef}
             className={`${styles.mediaPreview} ${mode === "thread" ? styles.mediaPreviewThread : ""}`}
             style={previewStyle}
             type="button"
-            aria-label="Open image fullscreen"
+            aria-label={imageLabel}
             data-image-preview=""
             data-media-preview=""
             onClick={(event) => {
@@ -421,7 +436,7 @@ export function MediaAttachment({
         onView={() => viewMedia(currentTime)}
       >
         <div
-          ref={corners}
+          ref={surfaceRef}
           className={`${styles.mediaPreview} ${mode === "thread" ? styles.mediaPreviewThread : ""}`}
           data-video-preview=""
           data-media-preview=""
@@ -448,7 +463,7 @@ export function MediaAttachment({
                 size="compact"
                 variant="media"
                 type="button"
-                aria-label="Open video fullscreen"
+                aria-label={videoLabel}
                 onClick={(event) => {
                   prepareReviewEntrance(event);
                   viewMedia(currentTime);

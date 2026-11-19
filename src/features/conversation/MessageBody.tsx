@@ -60,11 +60,13 @@ export function MessageCard({
   message,
   children,
   onFailedChange,
+  keepMounted,
 }: {
   registry: ContributionReader<MessageRenderer>;
   renderer: ReturnType<typeof useMessageRenderer>;
   message: ChannelMessage;
   children: ReactNode;
+  keepMounted?: (() => () => void) | undefined;
   /**
    * Called with true when the fallback replaces `renderer`, and with false when
    * that failed card unmounts: its next mount starts healthy.
@@ -84,7 +86,7 @@ export function MessageCard({
     >
       <WithTargetOpener
         component={renderer.component}
-        props={{ message }}
+        props={{ message, keepMounted }}
         registry={registry}
         entry={renderer}
       />

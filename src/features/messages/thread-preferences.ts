@@ -36,12 +36,18 @@ function subscribe(listener: () => void) {
     window.removeEventListener("storage", storage);
   };
 }
+const hasUnsavedPreference = () => unsavedPreference !== undefined;
 export function useThreadPlacementPreference() {
-  const placement = useSyncExternalStore(subscribe, threadPlacementPreference);
+  const placement = useSyncExternalStore(
+    subscribe,
+    threadPlacementPreference,
+    threadPlacementPreference,
+  );
   // Saving the same active choice changes recovery state, not its placement.
   const unsaved = useSyncExternalStore(
     subscribe,
-    () => unsavedPreference !== undefined,
+    hasUnsavedPreference,
+    hasUnsavedPreference,
   );
   return { placement, unsaved };
 }

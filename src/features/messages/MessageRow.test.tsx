@@ -1754,7 +1754,12 @@ it.each([true, false])(
       fireEvent.click(
         screen.getByRole("button", { name: /^View thread: 23 replies/ }),
       );
-      expect(thread).toHaveBeenCalledWith("root", "root");
+      expect(thread).toHaveBeenCalledWith(
+        "root",
+        "root",
+        undefined,
+        expect.any(HTMLElement),
+      );
       expect(!!screen.queryByRole("button", { name: "Reply" })).toBe(
         startsThreads,
       );
@@ -2071,6 +2076,8 @@ it.each([undefined, "canonical-root"])(
       expect(open).toHaveBeenCalledExactlyOnceWith(
         row.id,
         threadRootId ?? row.id,
+        undefined,
+        expect.any(HTMLElement),
       );
     } finally {
       view.unmount();
@@ -2191,7 +2198,12 @@ it("shows unbadged working-agent avatars and shared dots only while a known agen
     expect(first).toHaveTextContent("View thread");
     expect(first).not.toHaveTextContent("is working");
     fireEvent.click(first);
-    expect(open).toHaveBeenCalledExactlyOnceWith(row.id, row.id);
+    expect(open).toHaveBeenCalledExactlyOnceWith(
+      row.id,
+      row.id,
+      undefined,
+      expect.any(HTMLElement),
+    );
     act(() => {
       entries = [];
       for (const listener of listeners) listener();

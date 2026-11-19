@@ -1761,6 +1761,7 @@ function MessageRowContent({
                       registry={extensions.messages}
                       renderer={messageRenderer}
                       message={row}
+                      keepMounted={keepRowMounted}
                       onFailedChange={(renderer, failed) =>
                         setFailedRenderer((current) =>
                           failed
