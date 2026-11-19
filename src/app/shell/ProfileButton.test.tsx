@@ -605,12 +605,13 @@ it("shows the selected community's current status above the profile avatar", asy
   const user = userEvent.setup();
   const viewer = "a".repeat(64);
   const listeners = new Set<() => void>();
+  const expiresAt = Math.floor(Date.now() / 1000) + 3600;
   let status = {
     userId: viewer,
     text: "On vacation",
     emoji: "✈️",
     updatedAt: 1,
-    expiresAt: 1794546000 as number | undefined,
+    expiresAt: expiresAt as number | undefined,
   };
   let statuses = new Map([[viewer, status]]);
   const subscribe = () => () => {};
@@ -684,7 +685,7 @@ it("shows the selected community's current status above the profile avatar", asy
     ).toHaveTextContent("●");
     expect(preview.querySelector("time")).toHaveAttribute(
       "datetime",
-      new Date(1794546000 * 1000).toISOString(),
+      new Date(expiresAt * 1000).toISOString(),
     );
     expect(preview.querySelector("time")).toHaveTextContent(/^Until /);
     act(() => {

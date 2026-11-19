@@ -311,14 +311,18 @@ export function ProfileButton({
   const openingStatus = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const previewFocusBlocked = useRef(false);
-  useEffect(() => {
-    const deliberateFocus = (event: KeyboardEvent) => {
-      if (event.key === "Tab") previewFocusBlocked.current = false;
-    };
-    window.addEventListener("keydown", deliberateFocus, true);
-    return () => window.removeEventListener("keydown", deliberateFocus, true);
-  }, []);
+  const restoringProfileFocus = useRef(false);
+  const returnProfileFocus = () => {
+    restoringProfileFocus.current = true;
+    // Base UI queues the focus return after resolving finalFocus. Clear the
+    // guard after that microtask, even when there is no focus event.
+    queueMicrotask(() => {
+      queueMicrotask(() => {
+        restoringProfileFocus.current = false;
+      });
+    });
+    return profileTrigger.current ?? false;
+  };
   const previewSession =
     selected && connection.viewer === viewer ? session : undefined;
   const previewStatus = previewSession ? status : undefined;
@@ -358,7 +362,6 @@ export function ProfileButton({
         modal={false}
         open={menuOpen}
         onOpenChange={(open) => {
-          previewFocusBlocked.current = true;
           setMenuOpen(open);
           if (open) {
             setPreviewOpen(false);
@@ -392,12 +395,11 @@ export function ProfileButton({
               open &&
               (menuOpen ||
                 (details.reason === "trigger-focus" &&
-                  previewFocusBlocked.current))
+                  restoringProfileFocus.current))
             ) {
               details.cancel();
               return;
             }
-            if (open) previewFocusBlocked.current = false;
             setPreviewOpen(open);
           }}
           id={previewId}
@@ -467,7 +469,9 @@ export function ProfileButton({
           align="end"
           sideOffset={8}
           aria-labelledby={accountLabel}
-          finalFocus={() => !handoff.current && !openingStatus.current}
+          finalFocus={() =>
+            !handoff.current && !openingStatus.current && returnProfileFocus()
+          }
         >
           <span id={accountLabel} className="sr-only">
             {name}
@@ -718,11 +722,8 @@ export function ProfileButton({
           scope={connection.scope}
           current={statusEditor.editor.current}
           viewer={statusEditor.editor.viewer}
-          close={() => {
-            previewFocusBlocked.current = true;
-            statusEditor.close();
-          }}
-          finalFocus={profileTrigger}
+          close={statusEditor.close}
+          finalFocus={returnProfileFocus}
         />
       )}
     </>
