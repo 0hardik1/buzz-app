@@ -627,7 +627,8 @@ export function buildActionDecision(
             for (let i = 0; i < slotData.labels.length; i++) {
               const candidate = slotData.entities[i];
               const label = slotData.labels[i];
-              if (!candidate || !label) continue;
+              if (!candidate || !label || candidate.id === binding.bound?.id)
+                continue;
               const p = slotAnswer.probabilities[label] ?? 0;
               if (
                 p >= threshold &&
