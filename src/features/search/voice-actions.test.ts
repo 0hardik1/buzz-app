@@ -126,10 +126,12 @@ const hoveredMessage: VoiceThing = {
   label: 'message from Alice: "Rotate the key"',
 };
 
+const m1Actions = [...channelVoiceActions, ...messageVoiceActions];
+
 describe("matchActionBindings", () => {
   it("runs forward lookup on owner and reverse lookup on target", () => {
     const channelBindings = matchActionBindings(
-      VOICE_ACTIONS,
+      m1Actions,
       hoveredChannel,
       entities,
     );
@@ -140,13 +142,21 @@ describe("matchActionBindings", () => {
     ]);
 
     const sectionBindings = matchActionBindings(
-      VOICE_ACTIONS,
+      m1Actions,
       hoveredSection,
       entities,
     );
     expect(
       sectionBindings.map((b) => [b.action.id, b.hoveredRole, b.missingSlot]),
     ).toEqual([["channel.move_to_section", "owner", "channel"]]);
+  });
+
+  it("includes sidebar and people actions in the combined VOICE_ACTIONS registry", () => {
+    const ids = VOICE_ACTIONS.map((a) => a.id);
+    expect(ids).toContain("channel.star");
+    expect(ids).toContain("channel.mute");
+    expect(ids).toContain("person.message");
+    expect(ids).toContain("message.forward_to_person");
   });
 
   it("emits both bindings for same-type ambiguity (owner === target)", () => {
@@ -527,7 +537,7 @@ describe("buildActionDecision & decideVoiceAction", () => {
     const outcome = await decideVoiceAction(decisions, {
       spoken: "design",
       hovered: { kind: "nothing", label: "nothing" },
-      actions: VOICE_ACTIONS,
+      actions: m1Actions,
       entities,
       places,
     });

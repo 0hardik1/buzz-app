@@ -122,7 +122,12 @@ function setup(
         error: undefined,
       }),
     },
-    unread: { inbox: () => ({ items: [] }) },
+    unread: {
+      inbox: () => ({ items: [] }),
+      sync: () => ({ capability: "frontier-sync" }),
+      snapshot: () => ({ manual: "none", observedCount: 0 }),
+    },
+    channelLifecycle: { available: false },
     sidebarPreferences: {
       writable: true,
       starWritable: true,
@@ -168,6 +173,7 @@ function setup(
       forward,
     },
     outbox: {
+      supports: () => false,
       acknowledge,
     },
   };

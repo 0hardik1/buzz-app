@@ -124,7 +124,9 @@ export const channelVoiceActions: readonly AppVoiceAction[] = [
     },
     describe: ({ hoveredRole, bound }) =>
       hoveredRole === "owner"
-        ? `Move or add a channel into ${bound?.label ?? "this section"}`
+        ? bound?.id === "starred"
+          ? "Star a channel (add a channel to Starred / Favorites)"
+          : `Move or add a channel into ${bound?.label ?? "this section"}`
         : `Move ${bound?.label ?? "this channel"} into a sidebar section`,
     summary: ({ owner, target }) =>
       `Move ${target?.label ?? "channel"} to ${owner?.label ?? "section"}`,

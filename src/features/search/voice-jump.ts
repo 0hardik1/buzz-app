@@ -10,7 +10,8 @@ import type {
 import type { ChannelSummary, ChannelWindow } from "../relay/contracts";
 import type { InboxItem } from "../relay/inbox";
 import { messagePreviewText } from "../conversation/message-preview-text";
-import { nameWords, soundsLike } from "./sounds-like";
+import { nameWords } from "./sounds-like";
+import { heardAs } from "./heard-as";
 
 /** Goes to the likeliest place at or above this probability. */
 export const VOICE_JUMP_THRESHOLD = 0.5;
@@ -231,7 +232,7 @@ export function buildPlaceQuestion(
   const statePlaces = places.map(
     ({ kind, name, in: where, about, first, recent }, index) => {
       // A thread's name is its message; only real names are heard.
-      const heard = kind === "thread" ? [] : soundsLike(spoken, name);
+      const heard = kind === "thread" ? [] : heardAs(spoken, name);
       return {
         option: labels[index],
         kind,

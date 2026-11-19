@@ -12,7 +12,10 @@ import { ACTIONS, CONFIRM, ENTITIES, PLACES, hover } from "./catalog";
 import { PEOPLE } from "./world";
 import { CASES, type Case, type Category, type Expected } from "./cases";
 import { HELDOUT, HELDOUT2 } from "./cases-heldout";
-import { buildActionDecision, type ResolvedAction } from "./draft-builder";
+import {
+  buildActionDecision,
+  type ResolvedAction,
+} from "../../src/features/search/voice-actions";
 
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 /** `jev::MODEL` in src-tauri/src/jev.rs. */
@@ -104,28 +107,57 @@ const DM_PLACE = new Map(
   ]),
 );
 
+type ScoredOutcome =
+  | {
+      kind: "action";
+      actionId: string;
+      owner?: string | undefined;
+      target?: string | undefined;
+      text?: string | undefined;
+      probability: number;
+    }
+  | { kind: "navigate"; place: string; probability: number }
+  | { kind: "none"; probability: number };
+
 /** A move into Starred is starring, as the sidebar's own menu does it.
  * Messaging someone with a DM open is going to that DM. */
-function normalize(got: ResolvedAction): ResolvedAction {
-  if (got.kind === "action" && got.actionId.startsWith("person.dm")) {
-    const place = DM_PLACE.get(got.owner ?? got.target ?? "");
+function normalize(got: ResolvedAction): ScoredOutcome {
+  if (got.kind === "none") return { kind: "none", probability: 0 };
+  if (got.kind === "navigate") {
+    return {
+      kind: "navigate",
+      place: got.place.key,
+      probability: got.probability,
+    };
+  }
+  const ownerId = got.owner?.id;
+  const targetId = got.target?.id;
+  if (got.actionId.startsWith("person.dm")) {
+    const place = DM_PLACE.get(ownerId ?? targetId ?? "");
     if (place) return { kind: "navigate", place, probability: got.probability };
   }
-  if (
-    got.kind === "action" &&
-    got.actionId === "channel.move_to_section" &&
-    got.target === "s-Starred"
-  ) {
-    const { target: _, ...rest } = got;
-    return { ...rest, actionId: "channel.star" };
+  if (got.actionId === "channel.move_to_section" && targetId === "s-Starred") {
+    return {
+      kind: "action",
+      actionId: "channel.star",
+      ...(ownerId ? { owner: ownerId } : {}),
+      probability: got.probability,
+    };
   }
-  return got;
+  return {
+    kind: "action",
+    actionId: got.actionId,
+    ...(ownerId ? { owner: ownerId } : {}),
+    ...(targetId ? { target: targetId } : {}),
+    ...(got.text !== undefined ? { text: got.text } : {}),
+    probability: got.probability,
+  };
 }
 
 const same = (a?: string, b?: string) =>
   (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
 
-export function score(expect: Expected, got: ResolvedAction) {
+export function score(expect: Expected, got: ScoredOutcome) {
   const acted = got.kind !== "none" && got.probability >= THRESHOLD;
   if ("none" in expect) {
     const correct = !acted;
@@ -149,7 +181,7 @@ export function score(expect: Expected, got: ResolvedAction) {
   return { correct, intentCorrect, acted };
 }
 
-const describe = (got: ResolvedAction) =>
+const describe = (got: ScoredOutcome) =>
   got.kind === "action"
     ? `${got.actionId}(${[got.owner, got.target, got.text && JSON.stringify(got.text)].filter(Boolean).join(", ")})`
     : got.kind === "navigate"
@@ -214,7 +246,7 @@ export async function runCase(decide: Decide, c: Case): Promise<CaseResult> {
   };
   try {
     const { answers, ms } = await decide(request);
-    const got = normalize(resolve(answers, 0));
+    const got = normalize(resolve(answers));
     const s = score(c.expect, got);
     const action = answers.action;
     const topActions =

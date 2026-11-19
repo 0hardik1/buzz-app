@@ -165,6 +165,14 @@ export function sessionVoiceEntities(
   ];
 
   // 3. People & messageable agents (ordered by DM recency, then members, then directory).
+  const dmPeople = new Set<string>();
+  for (const ch of visibleChannels) {
+    const peer =
+      ch.channelType === "dm" && ch.participants?.length === 1
+        ? ch.participants[0]
+        : undefined;
+    if (peer) dmPeople.add(peer);
+  }
   const seenPeople = new Set<string>();
   const personEntities: VoiceEntity[] = [];
   const agentChoices = session.agentChoices.snapshot().identities;
@@ -186,7 +194,7 @@ export function sessionVoiceEntities(
       label: name,
       detail: isAgent ? "Agent" : "Person",
       soundsLikeName: name,
-      meta: { pubkey, name, isAgent },
+      meta: { pubkey, name, isAgent, hasDm: dmPeople.has(pubkey) },
     });
   };
 
