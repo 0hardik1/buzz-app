@@ -184,6 +184,7 @@ export class AcpRuntime {
   >();
   private readonly lists = new Map<string, readonly Conversation[]>();
   private generations = 0;
+  private readonly retiring = new Map<string, Promise<void>>();
 
   constructor(
     private readonly host: Host,
@@ -318,7 +319,27 @@ export class AcpRuntime {
   }
   private stop(entry: Entry) {
     entry.sessions.dispose();
-    entry.harness.stop();
+    void entry.harness.stop().catch(() => undefined);
+  }
+  /** Stops the agent's sessions, then its processes, and resolves once they
+   * have; its next turn starts afresh. Killing a process also ends a session
+   * whose close it never acknowledged. A second call joins the first. */
+  retire(agent: AgentKey): Promise<void> {
+    const entry = this.agents.get(agent);
+    if (!entry) return this.retiring.get(agent) ?? Promise.resolve();
+    this.agents.delete(agent);
+    this.notify();
+    const retiring = entry.sessions
+      .shutdown()
+      .catch((error: unknown) =>
+        console.warn("ACP agent's sessions didn't all close", error),
+      )
+      .then(() => entry.harness.stop())
+      .finally(() => {
+        if (this.retiring.get(agent) === retiring) this.retiring.delete(agent);
+      });
+    this.retiring.set(agent, retiring);
+    return retiring;
   }
 
   async run({

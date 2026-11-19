@@ -34,5 +34,7 @@ it("tells the host each agent's session scope", () => {
 it("registers without protection support, saying why a protected agent doesn't run", () => {
   const type = registered();
   expect(type?.protection).toBeUndefined();
+  // So its protection can still be changed, and its type.
+  expect(type?.retire).toBeTypeOf("function");
   expect(type?.protectionUnavailable).toBe(PROTECTION_UNAVAILABLE);
 });

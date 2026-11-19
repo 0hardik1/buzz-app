@@ -160,7 +160,7 @@ export class HarnessProcess {
     for (const [id, slot] of this.slots)
       if (id !== current && slot.holds === 0) {
         this.slots.delete(id);
-        end(slot);
+        void end(slot).catch(() => undefined);
       }
   }
 
@@ -238,22 +238,28 @@ export class HarnessProcess {
   private readonly disposed = new AbortController();
 
   /** Stops every process, failing every session in them; a start in progress
-   * is cancelled and its process killed. Nothing starts after it. */
-  stop() {
+   * is cancelled and its process killed. Nothing starts after it. Resolves
+   * once each started process has exited. */
+  async stop() {
     this.stopped = true;
     this.disposed.abort(new Error("The harness was stopped"));
-    for (const slot of this.slots.values()) end(slot);
+    const ending = [...this.slots.values()].map(end);
     this.slots.clear();
+    await Promise.all(ending);
   }
 }
 
-/** Cancels `slot`'s start, or kills its process. */
-function end(slot: Slot) {
+/** Cancels `slot`'s start, or kills its process; resolves once it has
+ * exited. */
+async function end(slot: Slot) {
   const ready = slot.ready;
   slot.ready = undefined;
   slot.starting?.abort(new Error("The harness was stopped"));
   slot.starting = undefined;
-  void ready?.then((acp) => acp.kill()).catch(() => undefined);
+  const acp = await ready?.catch(() => undefined);
+  if (!acp) return;
+  await acp.kill();
+  await acp.exited;
 }
 
 /** Starts the confirmed harness once, the way a run does but opening no

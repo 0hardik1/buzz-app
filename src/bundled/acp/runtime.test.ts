@@ -1601,6 +1601,28 @@ describe("AcpRuntime", () => {
     expect(two?.sessionId).not.toBe(one?.sessionId);
   });
 
+  it("retires an agent once its sessions and processes have stopped", async () => {
+    const config = await confirmed();
+    const { fake, deliver, sync, runtime } = setup({
+      hold: true,
+      holdExit: true,
+    });
+    sync(config);
+    await deliver(message("1", "@Opal one"), config).run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+    let retired = false;
+    const retiring = runtime.retire(self).then(() => (retired = true));
+    // Joined, not finished early, by a second call.
+    void runtime.retire(self).then(() => expect(retired).toBe(true));
+    await vi.waitFor(() => expect(fake.harnesses[0]?.killed).toBe(true));
+    await flush(50);
+    // Its process hasn't exited yet.
+    expect(retired).toBe(false);
+    fake.harnesses[0]?.exit();
+    await retiring;
+    expect(runtime.sessions(self)).toEqual([]);
+  });
+
   it("acts with a standalone turn's own handle after a mention arrives", async () => {
     const config = await confirmed();
     const { fake, deliver, sync, runtime, agent } = setup({ hold: true });

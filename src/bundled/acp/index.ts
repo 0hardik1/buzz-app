@@ -70,6 +70,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
       "Any harness that speaks the Agent Client Protocol, from a preset or a command you confirm.",
     defaults: () => ({ config: DEFAULT_CONFIG }),
     protectionUnavailable: PROTECTION_UNAVAILABLE,
+    retire: (key) => runtime.retire(key),
     Create,
     CreateModel,
     // Only the preset, model, effort and scope: command, args, env and
