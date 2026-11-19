@@ -48,7 +48,10 @@ import {
   useSoloDraftProjects,
 } from "../../features/solo/draft-projects";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
-import { workspaceSectionOrder } from "../../features/relay/sidebar-preferences";
+import {
+  SIDEBAR_PAGES_SECTION,
+  workspaceSectionOrder,
+} from "../../features/relay/sidebar-preferences";
 import type { RelayData } from "../../features/relay/service";
 import type { Agents } from "../../features/agents/service";
 import type { RelaySession } from "../../features/relay/session";
@@ -200,6 +203,7 @@ export function ChannelInventory({
   sidebarRows: contributedRows,
   chatIcons,
   chatMenus,
+  pages,
   render,
 }: {
   relay: RelayData;
@@ -220,6 +224,8 @@ export function ChannelInventory({
   sidebarRows?: SidebarRows | undefined;
   chatIcons?: ContributionReader<ChatIcon> | undefined;
   chatMenus?: ContributionReader<ChatMenu> | undefined;
+  /** Sidebar-placed pages, shown as one orderable Plugins section. */
+  pages?: ReactNode;
   render(inventory: Inventory): ReactNode;
 }) {
   const registeredSections = useSyncExternalStore(
@@ -464,6 +470,7 @@ export function ChannelInventory({
         return next;
       });
   }, []);
+  const hasPages = !!pages;
   const sections = useMemo(
     () =>
       startup.ready
@@ -474,9 +481,11 @@ export function ChannelInventory({
             chatsOnly,
             new Set<string>(JSON.parse(activeDraftSections)),
             regions.managed,
+            hasPages,
           )
         : [],
     [
+      hasPages,
       startup.ready,
       sidebarChannels,
       preferences.data,
@@ -1832,8 +1841,25 @@ export function ChannelInventory({
               defaultPosition: index,
               element: (
                 <TeamSidebarSection
-                  render={() => {
-                    return (
+                  render={() =>
+                    section.key === SIDEBAR_PAGES_SECTION ? (
+                      <DroppableSidebarSection
+                        key={section.key}
+                        groupIndex={groupIds.indexOf(section.key)}
+                        // A section drop target that accepts no rows.
+                        disabled={false}
+                        accepts={[]}
+                        reorderable={orderWritable}
+                        move={sectionMove(section.key)}
+                        sectionKey={section.key}
+                        title={section.title}
+                        hideMoreActions={!orderWritable}
+                        open={!sidebar.collapsed.includes(section.key)}
+                        onToggle={(open) => sidebar.toggle(section.key, open)}
+                      >
+                        {pages}
+                      </DroppableSidebarSection>
+                    ) : (
                       <DroppableSidebarSection
                         key={section.key}
                         createSectionTarget={
@@ -2160,8 +2186,8 @@ export function ChannelInventory({
                           ]}
                         </ChannelSidebarRows>
                       </DroppableSidebarSection>
-                    );
-                  }}
+                    )
+                  }
                 />
               ),
             })),
@@ -2222,6 +2248,8 @@ export function ChannelInventory({
     ),
     content: (
       <>
+        {/* Pages stay reachable until their orderable section can render. */}
+        {!startup.ready && pages}
         {!startup.ready && (
           <p className={styles.empty} role="status">
             Loading your sidebar…

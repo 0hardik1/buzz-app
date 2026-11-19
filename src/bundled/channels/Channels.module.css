@@ -322,13 +322,7 @@
   /* The top holds the grab dots, clear of the title and the round corner. */
   padding: var(--space-3) var(--space-1) var(--space-1);
   --affordance-panel-hover: var(--affordance-sidebar-hover);
-}
-[data-sidebar-cards] .channelSection + .channelSection,
-[data-sidebar-cards]
-  [data-sidebar-slot]:has(> .channelSection)
-  ~ [data-sidebar-slot]
-  > .channelSection:first-child {
-  margin-top: var(--space-1h);
+  --sidebar-section-gap: var(--space-1h);
 }
 /* The hidden new-workspace slot already holds the gap above the next card. */
 [data-sidebar-cards] .createSectionSlot + .channelSection {

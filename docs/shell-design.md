@@ -120,8 +120,8 @@ semantic tokens, UI authoring rules and the local component reference.
   No required launch marker depends on that absent context. Settings retains its
   existing modal presentation; migrating it to a replacement context is deferred.
   Page buttons use shared navigation rows and focus the main region on selection.
-  When pinned page rows run out of vertical space, their area scrolls so the
-  conversation list stays reachable.
+  Page rows sit in the sidebar's Plugins card and scroll with the rest of the
+  sidebar.
   At widths up to 650px, Messages and pages with a sidebar contribution collapse
   navigation behind the header’s Show navigation button to preserve readable
   content at 200% text size. The 220px disclosure overlays content, supports

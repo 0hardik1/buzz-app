@@ -219,7 +219,8 @@
    gap from the window's edge and from the conversation. */
 /* The shell already keeps a panel gap on both sides of the sidebar. */
 .cards .sidebar {
-  padding-inline: 0;
+  --sidebar-padding-inline: 0px;
+  --sidebar-padding-end: 0px;
 }
 /* Cards scroll without a visible scrollbar. */
 .cards .sidebar .channelList {
@@ -229,7 +230,4 @@
 }
 .cards .sidebar .channelList::-webkit-scrollbar {
   display: none;
-}
-.cards .channelListFrame {
-  width: 100%;
 }

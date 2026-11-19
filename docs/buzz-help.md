@@ -1044,11 +1044,9 @@ and are asked to sign in again in Buzz.
   name in the header to open membership management. Other header actions remain
   on the right. Compact avatars sit before the name on the left; Solo chats show
   the included agents.
-- **App navigation**: use the left dock to switch apps. Bestie is first,
-  followed by Messages and the other apps. Activity and other enabled sidebar
-  pages stay at the top of the Messages sidebar while you scroll conversations.
-  Scroll the pinned area if the window is too short to show every page.
-  Community and profile controls sit at the bottom of the dock. Search stays
+- **App navigation**: apps and sidebar pages such as Activity are rows in the
+  sidebar's **Plugins** card, which you can move like any other card.
+  Community and profile controls sit at the right of the top bar. Search stays
   wide in the top bar.
   Messages shows your workspaces, Favorites and unfiled conversations together.
   Other apps can provide their own sidebar. Pages listed in the Messages
