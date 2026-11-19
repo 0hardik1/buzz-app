@@ -227,8 +227,10 @@ describe("quick message voice actions", () => {
     expect(unread.available("message.mark_unread", unread.message)).toBe(false);
   });
 
-  it("none ask first: each is reversible and sends nothing", () => {
+  it("asks first only for a reaction, which everyone sees", () => {
     for (const each of quickMessageVoiceActions)
-      expect(each.confirm).toBe("none");
+      expect(each.confirm, each.id).toBe(
+        each.id === "message.react" ? "confirm" : "none",
+      );
   });
 });
