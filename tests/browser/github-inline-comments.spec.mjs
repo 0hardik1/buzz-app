@@ -91,6 +91,11 @@ for (const layout of ["Unified", "Split"]) {
     await field.fill("Discard when leaving Changes");
     await page.getByRole("tab", { name: "Summary", exact: true }).click();
     await page.getByRole("tab", { name: /^Changes/ }).click();
+    if (layout === "Split") await select(page, "Diff layout", "Split");
+    await expect(page.locator("diffs-container pre").first()).toHaveAttribute(
+      "data-diff-type",
+      layout === "Split" ? "split" : "single",
+    );
     await expect(field).toHaveCount(0);
     await page
       .locator(
