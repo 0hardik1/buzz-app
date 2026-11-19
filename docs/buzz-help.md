@@ -1919,7 +1919,11 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   “Runs in” names its execution conversation; its instructions can specify a
   different place to report. Turning the plugin on does not grant new access.
   An event watch hears the channels its agent may read, including public channels
-  the agent has not joined. A watch's delivery channel must be one the agent is
+  the agent has not joined. If a channel's history read fails, other watched
+  channels can still catch up. Buzz retries the failed read while it stays open.
+  Repeated errors increase the wait between attempts, up to about five minutes.
+  The watch keeps trying until you pause or remove it.
+  A watch's delivery channel must be one the agent is
   a member of; the relay decides where the agent may post. When an agent creates or enables a watch, adds listening channels or changes its delivery channel, it needs confirmed access. Removing or reordering an explicit listening list remains available without rechecking unchanged channels. Edits to active event watches and timer rearms remain available while an unchanged channel is unreachable or waiting for confirmation. An agent's write to an enabled source starts a new run and requires confirmed destination membership. On macOS and Linux,
   watched commands stop when their Buzz process exits.
   During a handoff between Buzz builds, the new copy waits for the previous
