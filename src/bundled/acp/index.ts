@@ -137,5 +137,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
     run: (delivery) => runtime.run(delivery),
     runOnce: (turn) => runtime.runOnce(turn),
     timeoutMs: HANDOVER_MS,
+    // Reloading or quitting the app stops its turns; each resumed one is
+    // delivered again, and a message its session already saw is not re-sent.
+    resumes: true,
   });
 };
