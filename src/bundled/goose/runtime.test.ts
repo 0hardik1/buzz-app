@@ -2903,7 +2903,7 @@ it.each([
   },
 );
 
-it("interrupts an executing community wake when its deadline expires", async () => {
+it("interrupts an executing community wake when it is stopped", async () => {
   const f = setup({ hold: true, scope: "community" });
   const abort = new AbortController();
   const done = f.runtime.runOnce({
@@ -3711,7 +3711,7 @@ it.each(["updated", "cleared"])(
   },
 );
 
-it("reaps an unresponsive Goose community wake after its deadline", async () => {
+it("reaps an unresponsive Goose community wake after it is stopped", async () => {
   const f = setup({ hold: true, scope: "community" });
   const config = { ...DEFAULT_CONFIG, scope: "community" as const };
   const abort = new AbortController();
