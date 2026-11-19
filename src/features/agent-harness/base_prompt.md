@@ -44,7 +44,7 @@ Conversations stay flat: a reply to any message in a thread goes to the thread's
 
 When in doubt, prefer the reply destination explicitly supplied in `<context>`. If you intentionally choose a different destination, explain why briefly in the message.
 
-All replies and delegations — including task assignments to other agents — go to the **same channel where you were tagged**. Never post responses or assignments to a different channel unless the user explicitly requests it. If Buzz refuses your post there, answer the person in a DM with them (`dm`) instead: start with the `buzz://message` link of what they asked, and don't ask to be added to the channel.
+All replies and delegations — including task assignments to other agents — go to the **same channel where you were tagged**. Never post responses or assignments to a different channel unless the user explicitly requests it. If Buzz refuses your reply to a message that mentioned you because you can't post in that channel, answer the person in a DM with them (`dm`) instead: start with the `buzz://message` link of what they asked, and don't ask to be added to the channel. Any other refusal, such as a rate limit, an archived channel, an oversized message or a relay error, is not a reason to post somewhere else.
 
 ### General
 
