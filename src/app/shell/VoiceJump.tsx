@@ -49,6 +49,7 @@ import {
   pickPlace,
   VOICE_JUMP_THRESHOLD,
   type VoiceJump as JumpResult,
+  voiceHints,
 } from "../../features/search/voice-jump";
 import type { AppServices } from "../services";
 import { HOST_SHORTCUT_ORDER } from "../shortcuts";
@@ -107,11 +108,7 @@ export function VoiceJump({
       },
     });
   }, [available, services]);
-  const close = useCallback(() => {
-    setOpen(false);
-    // The next opening starts with a key already fetched.
-    prepareVoice();
-  }, []);
+  const close = useCallback(() => setOpen(false), []);
   // The hint follows the person's rebind, as Search's does.
   const { overrides } = useSyncExternalStore(
     services?.shortcutBindings?.subscribe ?? noSubscribe,
@@ -339,11 +336,14 @@ function VoiceJumpBody({
   const { start, stop, cancel } = dictation;
   const listen = useCallback(() => {
     restart();
+    // Recognition expects the names it may hear, so they're read up front.
+    const places = jumpPlaces(sources(session, resolveName));
+    run.current.places = places;
     setCandidates([]);
     setText("");
     setPhase({ kind: "listening" });
-    void start();
-  }, [restart, start]);
+    void start(voiceHints(places));
+  }, [restart, start, session, resolveName]);
   // Listening starts as the box opens.
   // biome-ignore lint/correctness/useExhaustiveDependencies: Once per opening.
   useEffect(() => {

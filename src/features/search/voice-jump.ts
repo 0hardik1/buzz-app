@@ -161,6 +161,46 @@ export function jumpPlaces(sources: JumpSources): JumpPlace[] {
   return [...detailed, ...recentThreads].slice(0, MAX_PLACES);
 }
 
+/** Words for actions said by voice, which speech recognition may otherwise
+ * hear as other words. */
+const ACTION_WORDS = [
+  "star",
+  "unstar",
+  "move",
+  "forward",
+  "react",
+  "follow",
+  "unfollow",
+  "pin",
+  "mark as read",
+  "section",
+  "favorites",
+];
+/** Apple's Speech headers ask for no more than 100 contextual strings. */
+const MAX_HINTS = 100;
+
+/** What speech recognition should expect to hear: the names of the places
+ * here and the people in their DMs, most recent first, then action words.
+ * A `#buzz-security` is also hinted as "buzz security", as it is said. */
+export function voiceHints(places: readonly JumpPlace[]): string[] {
+  const hints = new Map<string, string>();
+  const add = (hint: string) => {
+    const clean = hint.replace(/\s+/g, " ").trim();
+    const key = clean.toLowerCase();
+    if (clean && !hints.has(key)) hints.set(key, clean);
+  };
+  for (const place of places) {
+    if (place.kind === "thread") continue;
+    const names = place.kind === "dm" ? place.name.split(", ") : [place.name];
+    for (const name of names) {
+      add(name);
+      add(name.replace(/[-_]+/g, " "));
+    }
+  }
+  const names = [...hints.values()].slice(0, MAX_HINTS - ACTION_WORDS.length);
+  return [...names, ...ACTION_WORDS];
+}
+
 /** A place Jev gave a real share of its probability, with its option label. */
 export type JumpCandidate = Readonly<{
   place: JumpPlace;
