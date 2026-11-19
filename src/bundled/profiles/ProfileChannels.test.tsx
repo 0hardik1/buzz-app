@@ -113,9 +113,7 @@ it("shows only exact verified visible memberships, handles partial lists and ope
     scope: { viewer, communityOrigin: "https://relay.example.test" },
   });
   f.update({ status: "ready", channels: [] });
-  expect(
-    screen.getByText(/They aren’t in any channel that can be shown here/),
-  ).toBeTruthy();
+  expect(screen.getByText("No channels found.")).toBeTruthy();
 });
 
 it("does not invent a route, and retries failed discovery without claiming a complete empty result", () => {
@@ -225,9 +223,7 @@ it("qualifies ready empty results when only matching unclassified memberships ex
   expect(
     screen.getByText(/No matching channels with a known visible type/),
   ).toBeTruthy();
-  expect(
-    screen.queryByText(/They aren’t in any channel that can be shown here/),
-  ).toBeNull();
+  expect(screen.queryByText("No channels found.")).toBeNull();
   f.update({
     status: "ready",
     coverage: "partial",
@@ -236,9 +232,7 @@ it("qualifies ready empty results when only matching unclassified memberships ex
   expect(
     screen.getByText(/More channels may exist outside the loaded list/),
   ).toBeTruthy();
-  expect(
-    screen.queryByText(/They aren’t in any channel that can be shown here/),
-  ).toBeNull();
+  expect(screen.queryByText("No channels found.")).toBeNull();
 });
 
 it("does not classify hidden, archived or DM memberships in a ready empty list", () => {
@@ -261,9 +255,7 @@ it("does not classify hidden, archived or DM memberships in a ready empty list",
     ],
   });
   expect(screen.queryByText(/unclassified and omitted/)).toBeNull();
-  expect(
-    screen.getByText(/They aren’t in any channel that can be shown here/),
-  ).toBeTruthy();
+  expect(screen.getByText("No channels found.")).toBeTruthy();
   expect(
     screen.queryByText(/No matching channels with a known visible type/),
   ).toBeNull();
@@ -286,12 +278,10 @@ it("does not show a metadata caveat for another identity's unclassified roster",
     channels: [{ id: "unknown", name: "Unknown", members: [viewer] }],
   });
   expect(screen.queryByText(/unclassified and omitted/)).toBeNull();
-  expect(
-    screen.getByText(/They aren’t in any channel that can be shown here/),
-  ).toBeTruthy();
+  expect(screen.getByText("No channels found.")).toBeTruthy();
 });
 
-it("addresses the viewer on their own profile without claiming they are in no channels at all", () => {
+it("shows the same empty sentence on the viewer's own profile", () => {
   const f = fixture();
   render(
     <ProfileChannels
@@ -310,8 +300,6 @@ it("addresses the viewer on their own profile without claiming they are in no ch
       { id: "other", name: "Other", channelType: "stream", members: [person] },
     ],
   });
-  expect(
-    screen.getByText("You aren’t in any channel that can be shown here."),
-  ).toBeTruthy();
-  expect(screen.queryByText(/They aren’t/)).toBeNull();
+  expect(screen.getByText("No channels found.")).toBeTruthy();
+  expect(screen.queryByText(/(You|They) aren’t/)).toBeNull();
 });
