@@ -2,7 +2,9 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
+import type { ChannelSummary } from "../relay/contracts";
 import {
+  joinOffer,
   type UnheardAgent,
   type UnheardChoice,
   type UnheardOffer,
@@ -156,4 +158,50 @@ it("adds your agent from outside the channel in place of Invite", async () => {
     screen.getByRole("button", { name: "Add to channel and send" }),
   );
   await expect(choice).resolves.toBe("joined");
+});
+
+it("neither re-adds nor sends to an agent the fresh roster shows was removed", async () => {
+  const viewer = "f".repeat(64);
+  // The roles shown when the dialog opened, then the fresh read on confirm:
+  // someone removed Pollen meanwhile.
+  let roles: Record<string, string> = {
+    [viewer]: "owner",
+    [pollen.pubkey]: "guest",
+  };
+  const run = vi.fn(async () => {});
+  const join = joinOffer(
+    {
+      viewer,
+      memberAdministration: {
+        refresh: vi.fn(async () => {
+          roles = { [viewer]: "owner" };
+        }),
+        snapshot: () => ({
+          status: "ready",
+          authority: { canManage: true, roles },
+        }),
+        run,
+      },
+    } as unknown as Parameters<typeof joinOffer>[0],
+    { id: "foo-3", name: "foo-3" } as ChannelSummary,
+    pollen,
+  );
+  if (!join) throw new Error("No join offer");
+  let settled: UnheardChoice | "pending" = "pending";
+  const choice = open({ join }).then((value) => {
+    settled = value;
+    return value;
+  });
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Make member and send" }),
+  );
+  // The change refuses, so the dialog stays open and the composer never
+  // gets "joined": nothing sends, and the draft is kept.
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Membership or permissions changed. Refresh members and roles before trying again. Your draft is kept.",
+  );
+  expect(run).not.toHaveBeenCalled();
+  expect(settled).toBe("pending");
+  await userEvent.keyboard("{Escape}");
+  await expect(choice).resolves.toBeNull();
 });

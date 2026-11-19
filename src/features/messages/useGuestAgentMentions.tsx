@@ -170,6 +170,8 @@ function describe({ agents, channel, solo, join }: UnheardOffer) {
 
 const unconfirmed =
   "This change may have taken effect. Open Members to check it before you send again.";
+const rosterChanged =
+  "Membership or permissions changed. Refresh members and roles before trying again.";
 
 /** How the viewer can let their own `agent` post in `channel`, or nothing
  * when they can't. Someone else's agent is its owner's call, so it gets
@@ -212,14 +214,17 @@ export function joinOffer(
       },
       channel.id,
       agent.pubkey,
-      (role) =>
-        role === undefined
-          ? { role: "member", expectedRole: "absent" }
-          : role === "guest" || role === "unknown"
-            ? // Authorization refuses an unknown role; it is never guessed.
-              { role: "member", expectedRole: role }
-            : // Any other role can already post here.
-              undefined,
+      (role) => {
+        // Removed since the dialog opened: re-adding would undo that, and
+        // nothing changing would read as confirmed and send. Throwing
+        // instead keeps the dialog open and the draft unsent.
+        if (role === undefined) throw new Error(rosterChanged);
+        return role === "guest" || role === "unknown"
+          ? // Authorization refuses an unknown role; it is never guessed.
+            { role: "member", expectedRole: role }
+          : // Any other role can already post here.
+            undefined;
+      },
     );
     if (result.status !== "confirmed")
       throw new Error(
