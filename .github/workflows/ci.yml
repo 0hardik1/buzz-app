@@ -335,17 +335,9 @@ jobs:
     env:
       HOME: /root
       BUZZ_BROWSER_FIXTURE_DIR: target/ci-browser-fixture
-    # Playwright sizes file-level shards by test count, not duration, so costly
-    # files can share one. Each engine gets enough shards to keep its slowest
-    # well inside this deadline on slower runners, setup included: eighteen for
-    # WebKit, which runs slower, and eleven for Chromium. Size a count from
-    # recent runs' per-test durations and `playwright test --list --shard=K/N`.
-    # WebKit at fourteen: the slowest shard's summed test time reached 25
-    # minutes (two workers, about 15 minutes of job time) and hit this deadline
-    # with every test passing. Chromium at nine: the slowest shard summed 20.5
-    # minutes, a 12.3-minute median job, and slower runners hit this deadline
-    # with every test passing; at eleven it sums 17.8 minutes, a projected
-    # 10.5-minute job.
+    # Keep eleven Chromium and eighteen WebKit shards, with two workers each.
+    # Relative test-count weights below balance the observed fixture-group costs.
+    # New tests still enter Playwright's normal discovery and sharding.
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -361,8 +353,12 @@ jobs:
           - { engine: chromium, shard: 17 }
           - { engine: chromium, shard: 18 }
         include:
-          - { engine: chromium, shards: 11 }
-          - { engine: webkit, shards: 18 }
+          - engine: chromium
+            shards: 11
+            weights: "115:111:116:106:131:157:138:89:80:175:161"
+          - engine: webkit
+            shards: 18
+            weights: "45:70:70:58:58:50:60:69:97:133:74:57:71:61:60:129:140:73"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -388,8 +384,11 @@ jobs:
           test -x buzzodz
       # CI required enforces measurement success. --no-deps avoids repeating
       # measurements here; the matrix covers both engines on separate runners.
+      # Playwright 1.63 supports relative test-count weights for --shard.
+      # Preserve fixture groups; give slow sections fewer tests. See contributing.md.
       - name: Functional journeys
         env:
+          PWTEST_SHARD_WEIGHTS: ${{ matrix.weights }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
         run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})" -- ./bin/pnpm test:browser:ci --project ${{ matrix.engine }} --no-deps --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,json
       - name: Browser evidence

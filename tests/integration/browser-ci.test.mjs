@@ -40,7 +40,8 @@ const browserJobs = () => {
     include = [],
   } = parse(workflow).jobs.browser.strategy.matrix;
   return engine.flatMap((name) => {
-    const { shards } = include.find((entry) => entry.engine === name) ?? {};
+    const { shards, weights } =
+      include.find((entry) => entry.engine === name) ?? {};
     assert.ok(Number.isInteger(shards), `${name} must declare its shard total`);
     const selected = shard.filter(
       (n) =>
@@ -51,7 +52,7 @@ const browserJobs = () => {
       Array.from({ length: shards }, (_, i) => i + 1),
       `${name} must run shards 1..${shards}`,
     );
-    return selected.map((n) => ({ engine: name, shard: n, shards }));
+    return selected.map((n) => ({ engine: name, shard: n, shards, weights }));
   });
 };
 
@@ -89,10 +90,20 @@ test("Linux shards and macOS recording discover every CI functional test/project
     /^ {8}run: .+ -- (\.\/bin\/pnpm test:browser:ci .+)$/m,
   )?.[1];
   assert.ok(command, "functional invocation must exist");
-  const discover = (args) => {
-    const report = JSON.parse(
-      run("pnpm", ["--silent", ...args, "--list", "--reporter=json"]),
+  const discover = (args, weights = "") => {
+    const result = spawnSync(
+      "pnpm",
+      ["--silent", ...args, "--list", "--reporter=json"],
+      {
+        encoding: "utf8",
+        timeout: 180_000,
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, PWTEST_SHARD_WEIGHTS: weights },
+      },
     );
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
     assert.deepEqual(report.errors, []);
     const collect = (suites) =>
       suites.flatMap((suite) => [
@@ -121,15 +132,21 @@ test("Linux shards and macOS recording discover every CI functional test/project
   ]);
   assert.ok(expected.length > 0);
   const actual = [];
-  for (const { engine, shard, shards } of browserJobs()) {
+  const functional = parse(workflow).jobs.browser.steps.find(
+    (step) => step.name === "Functional journeys",
+  );
+  assert.equal(functional.env.PWTEST_SHARD_WEIGHTS, `\${{ matrix.weights }}`);
+  for (const { engine, shard, shards, weights } of browserJobs()) {
+    assert.equal(weights.split(":").length, shards);
     // Exercise the actual workflow command, including its shard denominator.
     const expanded = command
       .replaceAll(/\$\{\{ matrix\.engine \}\}/g, engine)
       .replaceAll(/\$\{\{ matrix\.shard \}\}/g, shard)
       .replaceAll(/\$\{\{ matrix\.shards \}\}/g, shards);
-    const selected = discover(
-      expanded.replace(/^\.\/bin\/pnpm /, "").split(/\s+/),
-    );
+    const args = expanded.replace(/^\.\/bin\/pnpm /, "").split(/\s+/);
+    const selected = discover(args, weights);
+    // The pinned Playwright must honor the weights, including after upgrades.
+    if (shard === 1) assert.notDeepEqual(selected, discover(args));
     assert.ok(selected.length > 0, `${engine}/${shard} must select tests`);
     assert.ok(selected.every((id) => id.startsWith(`${engine}:`)));
     actual.push(...selected);
