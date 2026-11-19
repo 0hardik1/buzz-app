@@ -13,7 +13,13 @@ import {
   placeOptions,
   type JumpPlace,
 } from "../../src/features/search/voice-jump";
+import { heardAs } from "../../src/features/search/heard-as";
 import { soundsLike } from "../../src/features/search/sounds-like";
+
+/** VOICE_EVAL_HEARD_AS=0 hints entities with plain `soundsLike`, as before
+ * `heardAs`, for an A/B. */
+const entityHints =
+  process.env.VOICE_EVAL_HEARD_AS === "0" ? soundsLike : heardAs;
 
 export type SlotKind =
   | "channel"
@@ -250,7 +256,7 @@ export function buildActionDecision(input: BuildInput): {
     };
     state[slot] = entities.map((e) => {
       const heard =
-        slot === "emoji" ? [] : soundsLike(spoken, e.option.replace(/^#/, ""));
+        slot === "emoji" ? [] : entityHints(spoken, e.option.replace(/^#/, ""));
       return {
         option: e.option,
         ...(e.kind ? { kind: e.kind } : {}),
