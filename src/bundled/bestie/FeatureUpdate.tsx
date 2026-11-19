@@ -146,38 +146,28 @@ export function FeatureUpdate({
         touched();
       }
     });
-  // The latest change Undo can take back joins whichever row shows, so the
-  // version and its Undo read on one line.
-  const receipt =
-    state.state !== "ahead" && last?.status === "applied" ? last : undefined;
-  const undo = receipt && (
-    <Button
-      variant="outline"
-      disabled={saving}
-      title={`Puts back the text from before ${date(receipt.at)}`}
-      onClick={() => void apply({ action: "undo", receipt })}
-    >
-      Undo
-    </Button>
-  );
-  /** One line: what the steps are now, then its actions, Undo first. */
-  const status = (title: string, action?: ReactNode) => (
-    <PreferenceRow
-      title={title}
-      trailing={
-        action || undo ? (
-          <div className="flex flex-wrap gap-2">
-            {undo}
-            {action}
-          </div>
-        ) : undefined
-      }
-    />
+  /** One line: what the steps are now, and its one action. */
+  const status = (title: string, action: ReactNode) => (
+    <PreferenceRow title={title} trailing={action} />
   );
   const hide = (later: boolean) => {
     receipts.hide(feature.id, latest, later);
     touched();
   };
+  // An offer kept as is or put off reads as one line until Review shows it
+  // again.
+  const put = status(
+    `Version ${latest} of ${feature.title} is available`,
+    <Button
+      variant="outline"
+      onClick={() => {
+        receipts.show(feature.id);
+        touched();
+      }}
+    >
+      Review
+    </Button>,
+  );
   const offer = (
     title: string,
     subtitle: string | undefined,
@@ -186,18 +176,7 @@ export function FeatureUpdate({
     later: boolean,
   ) =>
     hidden ? (
-      status(
-        `Version ${latest} of ${feature.title} is available`,
-        <Button
-          variant="outline"
-          onClick={() => {
-            receipts.show(feature.id);
-            touched();
-          }}
-        >
-          Review
-        </Button>,
-      )
+      put
     ) : (
       // An offer's text is the owner's reason to choose, so its actions go
       // below it: beside it, two or three buttons would leave the title and
@@ -224,7 +203,6 @@ export function FeatureUpdate({
               Update
             </Button>
           )}
-          {undo}
         </div>
       </fieldset>
     );
@@ -260,15 +238,21 @@ export function FeatureUpdate({
       />
     );
   // Steps set up by hand, or whose start or end line changed, read as one
-  // status line under the switch; its dialog says what Review keeps. Keep as
-  // is would leave the same line with Review, so they have none.
+  // line under the switch with Review. Its dialog says what Review keeps,
+  // and has Keep as is.
   else if (state.state === "untracked" || state.state === "edited-markers")
-    row = status(
-      `${state.state === "untracked" ? "Customized" : "Start or end line changed"} · version ${latest} available`,
-      <Button variant="outline" disabled={saving} onClick={() => view("adopt")}>
-        Review
-      </Button>,
-    );
+    row = hidden
+      ? put
+      : status(
+          `${state.state === "untracked" ? "Customized" : "Start or end line changed"} · version ${latest} available`,
+          <Button
+            variant="outline"
+            disabled={saving}
+            onClick={() => view("adopt")}
+          >
+            Review
+          </Button>,
+        );
   else if (state.state === "stock-old")
     row = offer(
       `Version ${latest} of ${feature.title} is ready`,
@@ -297,13 +281,24 @@ export function FeatureUpdate({
       </Button>,
     );
   const accepted = acceptedVersion(receipts, feature, live);
-  // With no row to join, Undo gets one of its own: the version, when it was
-  // saved, and Undo.
+  // An Undo's own Undo would apply the version an offer above already
+  // leads to, so the offer is the one way there.
   const saved =
-    row !== null || state.state === "ahead" ? null : receipt ? (
-      status(
-        `${receipt.to === "untracked" ? "Your text" : `Version ${receipt.to.slice(1)}`} · saved ${date(receipt.at)}`,
-      )
+    state.state === "ahead" ? null : last?.status === "applied" &&
+      !(last.action === "undo" && row !== null) ? (
+      <PreferenceRow
+        title={`Saved ${last.to === "untracked" ? "your earlier text" : `version ${last.to.slice(1)}`} · ${date(last.at)}`}
+        subtitle="The text before is kept on this device."
+        trailing={
+          <Button
+            variant="outline"
+            disabled={saving}
+            onClick={() => void apply({ action: "undo", receipt: last })}
+          >
+            Undo
+          </Button>
+        }
+      />
     ) : state.state === "current" && !accepted ? (
       <PreferenceRow
         title={`${feature.title} is version ${latest}`}
@@ -419,23 +414,39 @@ export function FeatureUpdate({
       description={`${notes.join(" ")} Its schedule doesn't change. The current text is kept on this device, and Undo puts it back.`}
       preventClose={saving}
       actions={
-        open.kind === "adopt"
-          ? take(`Use version ${latest}`, { action: "adopt", text: result })
-          : open.kind === "restore"
-            ? take(`Restore version ${latest}`, { action: "restore" })
-            : take(
-                open.kind === "compare"
-                  ? `Take version ${latest}`
-                  : `Update to version ${latest}`,
-                { action: "update" },
-              )
+        open.kind === "adopt" ? (
+          <>
+            {/* Its row has one action, Review, so keeping the steps as they
+                are is chosen here: the offer stays hidden until a newer
+                version. */}
+            <Button
+              disabled={saving}
+              onClick={() => {
+                hide(false);
+                close();
+              }}
+            >
+              Keep as is
+            </Button>
+            {take(`Use version ${latest}`, { action: "adopt", text: result })}
+          </>
+        ) : open.kind === "restore" ? (
+          take(`Restore version ${latest}`, { action: "restore" })
+        ) : (
+          take(
+            open.kind === "compare"
+              ? `Take version ${latest}`
+              : `Update to version ${latest}`,
+            { action: "update" },
+          )
+        )
       }
     >
       {plan && (
         <section className="grid gap-2">
           <p>
             {shownState.state === "edited-markers"
-              ? "Its start or end line was changed. Review puts its steps back between their lines."
+              ? `Its start or end line was changed. Version ${latest} puts its steps back between their lines.`
               : `Closest to version ${plan.closest}.`}
           </p>
           {additions.length > 0 && (
