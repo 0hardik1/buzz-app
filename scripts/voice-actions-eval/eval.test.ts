@@ -5,6 +5,7 @@ import { checkRequest } from "../../src/features/decisions/service";
 import { ACTIONS, ENTITIES, PLACES, hover } from "./catalog";
 import { CASES } from "./cases";
 import { FINAL, HERE } from "./cases-final";
+import { REALSTT } from "./cases-realstt";
 import { HELDOUT, HELDOUT2, HELDOUT3 } from "./cases-heldout";
 import {
   buildActionDecision,
@@ -30,6 +31,7 @@ describe("voice actions eval", () => {
       ...HELDOUT3,
       ...FINAL,
       ...HERE,
+      ...REALSTT,
     ]) {
       const hovered = hover(c.hover);
       const { request } = buildActionDecision({

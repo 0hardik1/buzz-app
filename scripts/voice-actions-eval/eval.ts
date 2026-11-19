@@ -12,6 +12,7 @@ import { ACTIONS, CONFIRM, ENTITIES, PLACES, hover } from "./catalog";
 import { PEOPLE } from "./world";
 import { CASES, type Case, type Category, type Expected } from "./cases";
 import { FINAL, HERE } from "./cases-final";
+import { REALSTT } from "./cases-realstt";
 import { HELDOUT, HELDOUT2, HELDOUT3 } from "./cases-heldout";
 import {
   buildActionDecision,
@@ -38,6 +39,7 @@ export const ALL_CASES: readonly Case[] = [
   ...HELDOUT3,
   ...FINAL,
   ...HERE,
+  ...REALSTT,
 ];
 
 export const typesafe =
@@ -389,9 +391,11 @@ export async function main(
             ? FINAL
             : options.set === "here"
               ? HERE
-              : options.set === "all"
-                ? ALL_CASES
-                : CASES;
+              : options.set === "realstt"
+                ? REALSTT
+                : options.set === "all"
+                  ? ALL_CASES
+                  : CASES;
   const cases = set.filter(
     (c) =>
       !options.filter ||
