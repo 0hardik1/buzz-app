@@ -166,6 +166,34 @@ describe("HarnessProcess", () => {
     expect(fake.harnesses[0]?.killed).toBe(true);
   });
 
+  it("stops only once a reaped and a cancelled-while-starting process have exited", async () => {
+    const reaped = fakeHarness({ holdExit: true });
+    const cancelled = fakeHarness({ silent: ["initialize"], holdExit: true });
+    let spawned = 0;
+    const spawn: typeof reaped.spawn = (id, o) =>
+      (spawned++ === 0 ? reaped : cancelled).spawn(id, o);
+    const launch = await confirmed();
+    let current = { id: 1, launch };
+    const harness = new HarnessProcess(spawn, reaped.serve, () => current);
+    await harness.get();
+    current = { id: 2, launch };
+    harness.reap();
+    const starting = harness.get().catch(() => undefined);
+    await vi.waitFor(() => expect(cancelled.harnesses).toHaveLength(1));
+    let stopped = false;
+    const stopping = harness.stop().then(() => (stopped = true));
+    await starting;
+    await flush();
+    expect(reaped.harnesses[0]?.killed).toBe(true);
+    expect(cancelled.harnesses[0]?.killed).toBe(true);
+    expect(stopped).toBe(false);
+    reaped.harnesses[0]?.exit();
+    await flush();
+    expect(stopped).toBe(false);
+    cancelled.harnesses[0]?.exit();
+    await stopping;
+  });
+
   it("restarts the current process within its tries", async () => {
     const fake = fakeHarness();
     const g = { id: 1, launch: await confirmed() };

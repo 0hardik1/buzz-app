@@ -59,7 +59,11 @@ export function hooks(presetId: string, { command }: Launch): AcpHooks {
 export async function start(
   spawn: Spawn,
   stored: unknown,
-  options: Readonly<{ serve?: ServeMcp; signal?: AbortSignal }> = {},
+  options: Readonly<{
+    serve?: ServeMcp;
+    signal?: AbortSignal;
+    onProcess?: (acp: AcpProcess) => void;
+  }> = {},
 ) {
   const snapshot = config(stored);
   const found = await launch(snapshot);
@@ -93,6 +97,9 @@ type Slot = {
  * by holding it, and it stops once its last hold goes. */
 export class HarnessProcess {
   private readonly slots = new Map<number, Slot>();
+  /** Every started process until it exits, whatever its slot: one being
+   * reaped, restarted or cancelled mid-start still runs until then. */
+  private readonly running = new Set<AcpProcess>();
   private restarting: Promise<Settled> | undefined;
   private stopped = false;
   constructor(
@@ -127,6 +134,10 @@ export class HarnessProcess {
     const ready = start(this.spawn, slot.launch, {
       serve: this.serve,
       signal: starting.signal,
+      onProcess: (acp) => {
+        this.running.add(acp);
+        void acp.exited.then(() => this.running.delete(acp));
+      },
     });
     const forget = () => {
       if (slot.ready !== ready) return;
@@ -239,13 +250,19 @@ export class HarnessProcess {
 
   /** Stops every process, failing every session in them; a start in progress
    * is cancelled and its process killed. Nothing starts after it. Resolves
-   * once each started process has exited. */
+   * once every started process has exited, old generations' included. */
   async stop() {
     this.stopped = true;
     this.disposed.abort(new Error("The harness was stopped"));
     const ending = [...this.slots.values()].map(end);
     this.slots.clear();
-    await Promise.all(ending);
+    await Promise.all([
+      ...ending,
+      ...[...this.running].map(async (acp) => {
+        await acp.kill().catch(() => undefined);
+        await acp.exited;
+      }),
+    ]);
   }
 }
 
