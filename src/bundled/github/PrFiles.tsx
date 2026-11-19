@@ -35,7 +35,6 @@ import styles from "./InlineComments.module.css";
 
 type InlineTarget = Anchor & { viewer: string; replyTo?: number | undefined };
 type Composer = {
-  body: string;
   target: InlineTarget;
   operation: string;
   focusRequest: number;
@@ -199,65 +198,70 @@ export function PrFiles({
     composer.target.head !== snapshot.head ||
     composer.target.base !== snapshot.base ||
     composer.target.viewer !== snapshot.viewer;
-  const mapped = (thread: Thread) =>
-    !!snapshot &&
-    !loading &&
-    !thread.outdated &&
-    thread.line !== null &&
-    available.has(thread.path) &&
-    anchorInSnapshot(snapshot, {
-      ...thread,
-      line: thread.line,
-      head: snapshot.head,
-      base: snapshot.base,
-    });
+  const mapped = useCallback(
+    (thread: Thread) =>
+      !!snapshot &&
+      !loading &&
+      !thread.outdated &&
+      thread.line !== null &&
+      available.has(thread.path) &&
+      anchorInSnapshot(snapshot, {
+        ...thread,
+        line: thread.line,
+        head: snapshot.head,
+        base: snapshot.base,
+      }),
+    [snapshot, loading, available],
+  );
   const targetMapped = (composer: Composer) =>
     !stale(composer) &&
     !loading &&
     available.has(composer.target.path) &&
     !!snapshot &&
     anchorInSnapshot(snapshot, composer.target);
-  function choose(
-    path: string,
-    line: DiffLine,
-    returnFocus: () => void,
-    replyTo?: number,
-  ) {
-    if (!snapshot || loading || !active) return;
-    const target: InlineTarget = {
-      path,
-      side: line.side === "deletions" ? "LEFT" : "RIGHT",
-      line: line.lineNumber,
-      head: snapshot.head,
-      base: snapshot.base,
-      viewer: snapshot.viewer,
-      replyTo,
-    };
-    setComposers((previous) => {
-      const existing = previous.find(
-        (entry) => composerKey(entry.target) === composerKey(target),
-      );
-      return existing
-        ? previous.map((entry) =>
-            entry === existing
-              ? { ...entry, focusRequest: entry.focusRequest + 1 }
-              : entry,
-          )
-        : [
-            ...previous,
-            {
-              body: "",
-              operation: crypto.randomUUID(),
-              target,
-              focusRequest: 0,
-              restoreFocus: returnFocus,
-            },
-          ];
-    });
-    if (!status.busy && !status.unknown)
-      delivery.update({ error: undefined, sentUrl: undefined });
-    setChoice(undefined);
-  }
+  const choose = useCallback(
+    function choose(
+      path: string,
+      line: DiffLine,
+      returnFocus: () => void,
+      replyTo?: number,
+    ) {
+      if (!snapshot || loading || !active) return;
+      const target: InlineTarget = {
+        path,
+        side: line.side === "deletions" ? "LEFT" : "RIGHT",
+        line: line.lineNumber,
+        head: snapshot.head,
+        base: snapshot.base,
+        viewer: snapshot.viewer,
+        replyTo,
+      };
+      setComposers((previous) => {
+        const existing = previous.find(
+          (entry) => composerKey(entry.target) === composerKey(target),
+        );
+        return existing
+          ? previous.map((entry) =>
+              entry === existing
+                ? { ...entry, focusRequest: entry.focusRequest + 1 }
+                : entry,
+            )
+          : [
+              ...previous,
+              {
+                operation: crypto.randomUUID(),
+                target,
+                focusRequest: 0,
+                restoreFocus: returnFocus,
+              },
+            ];
+      });
+      if (!status.busy && !status.unknown)
+        delivery.update({ error: undefined, sentUrl: undefined });
+      setChoice(undefined);
+    },
+    [snapshot, loading, active, status.busy, status.unknown, delivery],
+  );
   async function applyResult(
     result: WriteResult,
     current: Snapshot | undefined,
@@ -325,10 +329,10 @@ export function PrFiles({
       if (alive.current) setRevision((previous) => previous + 1);
     } else delivery.update({ busy: false, error: result.error.message });
   }
-  async function submit(composer: Composer) {
+  async function submit(composer: Composer, body: string) {
     if (
       !snapshot ||
-      !composer.body.trim() ||
+      !body.trim() ||
       !composersRef.current.some(
         (entry) => entry.operation === composer.operation,
       ) ||
@@ -339,7 +343,7 @@ export function PrFiles({
     )
       return;
     if (!delivery.begin()) return;
-    const { target, body, operation } = composer;
+    const { target, operation } = composer;
     pendingOperation.current = operation;
     try {
       const result =
@@ -374,7 +378,6 @@ export function PrFiles({
       key={composer.operation}
       operation={composer.operation}
       focusRequest={composer.focusRequest}
-      body={composer.body}
       busy={status.busy}
       blocked={
         stale(composer) ||
@@ -386,17 +389,7 @@ export function PrFiles({
       notice={
         stale(composer) ? "Select a line again in the latest diff." : undefined
       }
-      onChange={(body) => {
-        if (!delivery.get().busy && !delivery.get().unknown)
-          setComposers((previous) =>
-            previous.map((entry) =>
-              entry.operation === composer.operation
-                ? { ...entry, body }
-                : entry,
-            ),
-          );
-      }}
-      onSubmit={() => void submit(composer)}
+      onSubmit={(body) => void submit(composer, body)}
       onCancel={() => {
         setComposers((previous) =>
           previous.filter((entry) => entry.operation !== composer.operation),
@@ -405,113 +398,128 @@ export function PrFiles({
       }}
     />
   );
-  async function more(thread: Thread) {
-    if (!thread.commentsCursor || !snapshot) return;
-    const current = snapshot;
-    try {
-      const page = await api.loadComments(thread.id, thread.commentsCursor);
-      // Re-read the owning thread's snapshot before attaching another page.
-      const rows = await readThreads(current);
-      const owning = rows.find((row) => row.id === thread.id);
-      if (
-        !owning ||
-        owning.path !== thread.path ||
-        owning.side !== thread.side ||
-        owning.rootCommentId !== thread.rootCommentId ||
-        owning.commentsCursor !== thread.commentsCursor ||
-        owning.line !== thread.line ||
-        owning.outdated !== thread.outdated
-      )
-        throw new Error("Thread changed; refresh changes.");
-      if (alive.current && snapshotRef.current === current)
-        setThreads((previous) =>
-          previous.map((row) =>
-            row.id === thread.id && row.commentsCursor === thread.commentsCursor
-              ? {
-                  ...row,
-                  comments: [
-                    ...row.comments,
-                    ...page.items.filter(
-                      (comment) =>
-                        !row.comments.some(
-                          (existing) => existing.id === comment.id,
-                        ),
-                    ),
-                  ],
-                  commentsComplete: !page.nextCursor,
-                  commentsCursor: page.nextCursor,
-                }
-              : row,
-          ),
-        );
-    } catch (failure) {
-      if (alive.current && snapshotRef.current === current)
-        setThreadError(readable(failure).message);
-    }
-  }
-  function threadView(thread: Thread, inline = false) {
-    return (
-      <section
-        key={thread.id}
-        className={styles.thread}
-        aria-label={`Comments on ${thread.path}`}
-      >
-        {!inline && (
-          <p>
-            {thread.path} ·{" "}
-            {thread.outdated
-              ? "Outdated"
-              : thread.line === null
-                ? "Not on a displayed line"
-                : `${thread.side === "LEFT" ? "Old" : "New"} line ${thread.line}`}
-            {thread.resolved ? " · Resolved" : ""}
-          </p>
-        )}
-        {thread.comments.map((comment) => (
-          <GitHubComment key={comment.id} comment={comment}>
-            {api.reactions && snapshot && (
-              <GitHubReactions
-                api={api.reactions}
-                snapshot={snapshot}
-                comment={comment}
-              />
-            )}
-          </GitHubComment>
-        ))}
-        <div className={styles.actions}>
-          {!thread.commentsComplete && (
-            <Button size="sm" onClick={() => void more(thread)}>
-              Load more replies
-            </Button>
+  const more = useCallback(
+    async (thread: Thread) => {
+      if (!thread.commentsCursor || !snapshot) return;
+      const current = snapshot;
+      try {
+        const page = await api.loadComments(thread.id, thread.commentsCursor);
+        // Re-read the owning thread's snapshot before attaching another page.
+        const rows = await readThreads(current);
+        const owning = rows.find((row) => row.id === thread.id);
+        if (
+          !owning ||
+          owning.path !== thread.path ||
+          owning.side !== thread.side ||
+          owning.rootCommentId !== thread.rootCommentId ||
+          owning.commentsCursor !== thread.commentsCursor ||
+          owning.line !== thread.line ||
+          owning.outdated !== thread.outdated
+        )
+          throw new Error("Thread changed; refresh changes.");
+        if (alive.current && snapshotRef.current === current)
+          setThreads((previous) =>
+            previous.map((row) =>
+              row.id === thread.id &&
+              row.commentsCursor === thread.commentsCursor
+                ? {
+                    ...row,
+                    comments: [
+                      ...row.comments,
+                      ...page.items.filter(
+                        (comment) =>
+                          !row.comments.some(
+                            (existing) => existing.id === comment.id,
+                          ),
+                      ),
+                    ],
+                    commentsComplete: !page.nextCursor,
+                    commentsCursor: page.nextCursor,
+                  }
+                : row,
+            ),
+          );
+      } catch (failure) {
+        if (alive.current && snapshotRef.current === current)
+          setThreadError(readable(failure).message);
+      }
+    },
+    [snapshot, api, readThreads],
+  );
+  const threadView = useCallback(
+    (thread: Thread, inline = false) => {
+      return (
+        <section
+          key={thread.id}
+          className={styles.thread}
+          aria-label={`Comments on ${thread.path}`}
+        >
+          {!inline && (
+            <p>
+              {thread.path} ·{" "}
+              {thread.outdated
+                ? "Outdated"
+                : thread.line === null
+                  ? "Not on a displayed line"
+                  : `${thread.side === "LEFT" ? "Old" : "New"} line ${thread.line}`}
+              {thread.resolved ? " · Resolved" : ""}
+            </p>
           )}
-          <Button
-            size="sm"
-            disabled={
-              !snapshot ||
-              loading ||
-              status.busy ||
-              status.unknown ||
-              !thread.rootCommentId
-            }
-            onClick={(event) => {
-              const button = event.currentTarget;
-              choose(
-                thread.path,
-                {
-                  side: thread.side === "LEFT" ? "deletions" : "additions",
-                  lineNumber: thread.line ?? 0,
-                },
-                () => button.focus(),
-                thread.rootCommentId,
-              );
-            }}
-          >
-            Reply
-          </Button>
-        </div>
-      </section>
-    );
-  }
+          {thread.comments.map((comment) => (
+            <GitHubComment key={comment.id} comment={comment}>
+              {api.reactions && snapshot && (
+                <GitHubReactions
+                  api={api.reactions}
+                  snapshot={snapshot}
+                  comment={comment}
+                />
+              )}
+            </GitHubComment>
+          ))}
+          <div className={styles.actions}>
+            {!thread.commentsComplete && (
+              <Button size="sm" onClick={() => void more(thread)}>
+                Load more replies
+              </Button>
+            )}
+            <Button
+              size="sm"
+              disabled={
+                !snapshot ||
+                loading ||
+                status.busy ||
+                status.unknown ||
+                !thread.rootCommentId
+              }
+              onClick={(event) => {
+                const button = event.currentTarget;
+                choose(
+                  thread.path,
+                  {
+                    side: thread.side === "LEFT" ? "deletions" : "additions",
+                    lineNumber: thread.line ?? 0,
+                  },
+                  () => button.focus(),
+                  thread.rootCommentId,
+                );
+              }}
+            >
+              Reply
+            </Button>
+          </div>
+        </section>
+      );
+    },
+    [api, snapshot, loading, status.busy, status.unknown, choose, more],
+  );
+  const renderedThreads = useMemo(
+    () =>
+      threads.map((thread) => {
+        const inline = mapped(thread);
+        return { thread, inline, content: threadView(thread, inline) };
+      }),
+    [threads, mapped, threadView],
+  );
   const annotations = new Map<
     string,
     {
@@ -538,9 +546,9 @@ export function PrFiles({
     }
     row.content.push(content);
   }
-  for (const thread of threads)
-    if (mapped(thread) && thread.line !== null)
-      annotate({ ...thread, line: thread.line }, threadView(thread, true));
+  for (const { thread, inline, content } of renderedThreads)
+    if (inline && thread.line !== null)
+      annotate({ ...thread, line: thread.line }, content);
   for (const composer of composers)
     if (targetMapped(composer)) annotate(composer.target, form(composer));
   if (choice?.lines[0])
@@ -567,10 +575,8 @@ export function PrFiles({
         ))}
       </section>,
     );
-  const comments: DiffComments = {
-    annotations: [...annotations.values()],
-    onAvailabilityChange: availability,
-    onSelect(path, lines, restoreFocus) {
+  const onSelect = useCallback<DiffComments["onSelect"]>(
+    (path, lines, restoreFocus) => {
       if (
         !snapshot?.files.some((file) => file.path === path) ||
         status.busy ||
@@ -581,6 +587,12 @@ export function PrFiles({
       if (lines.length === 1 && lines[0]) choose(path, lines[0], restoreFocus);
       else setChoice({ path, lines, restoreFocus });
     },
+    [snapshot, status.busy, status.unknown, loading, choose],
+  );
+  const comments: DiffComments = {
+    annotations: [...annotations.values()],
+    onAvailabilityChange: availability,
+    onSelect,
   };
   return (
     <div className={styles.files}>
@@ -665,9 +677,9 @@ export function PrFiles({
         {parts?.length === 0 && <p>No file changes.</p>}
       </LoadingRegion>
       <LoadingRegion pending={commentsLoading} label="Loading comments…">
-        {threads
-          .filter((thread) => !mapped(thread))
-          .map((thread) => threadView(thread))}
+        {renderedThreads
+          .filter((entry) => !entry.inline)
+          .map((entry) => entry.content)}
       </LoadingRegion>
     </div>
   );

@@ -105,7 +105,6 @@ function Thread({
   label: string;
 }) {
   const [replying, setReplying] = useState(false);
-  const [body, setBody] = useState("");
   const [localReplies, setLocalReplies] = useState<typeof sample>([]);
   return (
     <section className={styles.thread} aria-label={label}>
@@ -134,15 +133,12 @@ function Thread({
       })}
       {replying && (
         <InlineCommentForm
-          body={body}
           busy={false}
           blocked={false}
-          onChange={setBody}
           onCancel={() => {
             setReplying(false);
-            setBody("");
           }}
-          onSubmit={() => {
+          onSubmit={(body) => {
             setLocalReplies((previous) => [
               ...previous,
               {
@@ -153,7 +149,6 @@ function Thread({
               },
             ]);
             setReplying(false);
-            setBody("");
           }}
         />
       )}

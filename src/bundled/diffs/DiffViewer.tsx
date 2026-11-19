@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useCallback,
   useRef,
   useMemo,
   useState,
@@ -12,6 +13,7 @@ import {
   parsePatchFiles,
   preloadHighlighter,
   type FileDiffMetadata,
+  type FileDiffOptions,
   type DiffLineAnnotation,
 } from "@pierre/diffs";
 import { FileDiff as ReactFileDiff } from "@pierre/diffs/react";
@@ -170,6 +172,7 @@ function ParsedDiff({
     });
     return () => observer.disconnect();
   }, []);
+  const handleFailure = useCallback(() => setFailed(true), []);
   if (!parsed || failed || !ready) return <RawDiff content={content} />;
   return (
     <div className={styles.viewer}>
@@ -186,7 +189,7 @@ function ParsedDiff({
             filePath === file.name &&
             file.type === "change"
           }
-          onFailure={() => setFailed(true)}
+          onFailure={handleFailure}
           themeType={themeType}
           viewType={viewType}
         />
@@ -232,21 +235,25 @@ function PierreFile({
     ),
   );
   const path = file.name;
-  const select = (line: DiffLine, element: HTMLElement) => {
-    const candidates = rows.find((row) =>
-      row.some(
-        (entry) =>
-          entry.side === line.side && entry.lineNumber === line.lineNumber,
-      ),
-    );
-    if (candidates) {
-      setKeyboardLine(undefined);
-      comments?.onSelect(path, candidates, () => {
+  const onSelect = comments?.onSelect;
+  const select = useCallback(
+    (line: DiffLine, element: HTMLElement) => {
+      const candidates = rows.find((row) =>
+        row.some(
+          (entry) =>
+            entry.side === line.side && entry.lineNumber === line.lineNumber,
+        ),
+      );
+      if (candidates) {
         setKeyboardLine(undefined);
-        element.focus();
-      });
-    }
-  };
+        onSelect?.(path, candidates, () => {
+          setKeyboardLine(undefined);
+          element.focus();
+        });
+      }
+    },
+    [rows, path, onSelect],
+  );
   const annotations: DiffLineAnnotation<ReactNode>[] =
     comments?.annotations
       .filter(
@@ -262,6 +269,77 @@ function PierreFile({
         lineNumber,
         metadata: content,
       })) ?? [];
+  const canComment = !!comments && !comments.readOnly;
+  const options = useMemo<FileDiffOptions<ReactNode, undefined>>(
+    () => ({
+      theme,
+      themeType,
+      diffStyle: viewType,
+      diffIndicators: "bars",
+      enableGutterUtility: canComment,
+      onLineEnter: ({ numberElement, lineNumber, annotationSide }) => {
+        setKeyboardLine(undefined);
+        const root = numberElement.getRootNode();
+        if (root instanceof ShadowRoot) {
+          const button = root.querySelector<HTMLButtonElement>(
+            "[data-utility-button]",
+          );
+          if (button) {
+            const valid =
+              !!source &&
+              commentableLine(source, { side: annotationSide, lineNumber });
+            button.disabled = !valid;
+            button.hidden = !valid;
+            button.style.display = valid ? "" : "none";
+            button.setAttribute("aria-label", "Comment on hovered line");
+          }
+        }
+      },
+      ...(canComment
+        ? {
+            onGutterUtilityClick: (range: {
+              start: number;
+              side?: "deletions" | "additions";
+            }) => {
+              if (!range.side || !section.current) return;
+              setKeyboardLine(undefined);
+              select(
+                { side: range.side, lineNumber: range.start },
+                section.current,
+              );
+            },
+          }
+        : {}),
+      disableFileHeader: hideHeader,
+      overflow: "scroll",
+      tokenizeMaxLineLength: 2_000,
+      onPostRender: (node) => {
+        if (node.shadowRoot?.querySelector("[data-error-wrapper]")) onFailure();
+        const utility = node.shadowRoot?.querySelector("[data-utility-button]");
+        utility?.setAttribute("aria-label", "Comment on hovered line");
+        // Split code columns own their horizontal scrollports.
+        const columns = node.shadowRoot?.querySelectorAll("code") ?? [];
+        for (const [index, code] of Array.from(columns).entries()) {
+          code.tabIndex = 0;
+          code.setAttribute("role", "region");
+          code.setAttribute(
+            "aria-label",
+            `${file.name} ${viewType === "split" ? (index === 0 ? "old code" : "new code") : "code"}`,
+          );
+        }
+      },
+    }),
+    [
+      themeType,
+      viewType,
+      canComment,
+      source,
+      select,
+      hideHeader,
+      onFailure,
+      file.name,
+    ],
+  );
   return (
     <section
       ref={section}
@@ -334,67 +412,7 @@ function PierreFile({
         }
         lineAnnotations={annotations}
         renderAnnotation={(annotation) => annotation.metadata}
-        options={{
-          theme,
-          themeType,
-          diffStyle: viewType,
-          diffIndicators: "bars",
-          enableGutterUtility: !!comments && !comments.readOnly,
-          onLineEnter: ({ numberElement, lineNumber, annotationSide }) => {
-            setKeyboardLine(undefined);
-            const root = numberElement.getRootNode();
-            if (root instanceof ShadowRoot) {
-              const button = root.querySelector<HTMLButtonElement>(
-                "[data-utility-button]",
-              );
-              if (button) {
-                const valid =
-                  !!source &&
-                  commentableLine(source, { side: annotationSide, lineNumber });
-                button.disabled = !valid;
-                button.hidden = !valid;
-                button.style.display = valid ? "" : "none";
-                button.setAttribute("aria-label", "Comment on hovered line");
-              }
-            }
-          },
-          ...(comments && !comments.readOnly
-            ? {
-                onGutterUtilityClick: (range: {
-                  start: number;
-                  side?: "deletions" | "additions";
-                }) => {
-                  if (!range.side || !section.current) return;
-                  setKeyboardLine(undefined);
-                  select(
-                    { side: range.side, lineNumber: range.start },
-                    section.current,
-                  );
-                },
-              }
-            : {}),
-          disableFileHeader: hideHeader,
-          overflow: "scroll",
-          tokenizeMaxLineLength: 2_000,
-          onPostRender: (node) => {
-            if (node.shadowRoot?.querySelector("[data-error-wrapper]"))
-              onFailure();
-            const utility = node.shadowRoot?.querySelector(
-              "[data-utility-button]",
-            );
-            utility?.setAttribute("aria-label", "Comment on hovered line");
-            // Split code columns own their horizontal scrollports.
-            const columns = node.shadowRoot?.querySelectorAll("code") ?? [];
-            for (const [index, code] of Array.from(columns).entries()) {
-              code.tabIndex = 0;
-              code.setAttribute("role", "region");
-              code.setAttribute(
-                "aria-label",
-                `${file.name} ${viewType === "split" ? (index === 0 ? "old code" : "new code") : "code"}`,
-              );
-            }
-          },
-        }}
+        options={options}
       />
     </section>
   );

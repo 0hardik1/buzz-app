@@ -1,17 +1,16 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from "@testing-library/react";
-import { expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
 import { InlineCommentForm } from "./InlineCommentForm";
+
+afterEach(cleanup);
 
 it("focuses its labelled field and delegates Escape dismissal", () => {
   const onCancel = vi.fn();
-  const onChange = vi.fn();
   render(
     <InlineCommentForm
-      body="Unsent comment"
       busy={false}
       blocked={false}
-      onChange={onChange}
       onSubmit={vi.fn()}
       onCancel={onCancel}
     />,
@@ -20,26 +19,34 @@ it("focuses its labelled field and delegates Escape dismissal", () => {
   expect(document.activeElement).toBe(field);
   fireEvent.keyDown(field, { key: "Escape" });
   expect(onCancel).toHaveBeenCalledOnce();
-  expect(onChange).not.toHaveBeenCalled();
 });
 
 it.each(["busy", "blocked"] as const)(
   "blocks form submission while %s",
   (state) => {
     const onSubmit = vi.fn();
-    const { container } = render(
+    const onCancel = vi.fn();
+    const view = (blocked: boolean) => (
       <InlineCommentForm
-        body="Keep me"
-        busy={state === "busy"}
-        blocked={state === "blocked"}
-        onChange={vi.fn()}
+        busy={blocked && state === "busy"}
+        blocked={blocked && state === "blocked"}
         onSubmit={onSubmit}
-        onCancel={vi.fn()}
-      />,
+        onCancel={onCancel}
+      />
     );
+    const { container, rerender } = render(view(false));
+    const field = screen.getByRole("textbox", { name: "Comment" });
+    fireEvent.change(field, { target: { value: "Keep me" } });
+    rerender(view(true));
+    expect(field).toHaveProperty("value", "Keep me");
+    fireEvent.change(field, { target: { value: "Blocked edit" } });
+    expect(field).toHaveProperty("value", "Keep me");
     const form = container.querySelector("form");
     if (!form) throw new Error("Missing form");
     fireEvent.submit(form);
     expect(onSubmit).not.toHaveBeenCalled();
+    rerender(view(false));
+    fireEvent.submit(form);
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith("Keep me");
   },
 );

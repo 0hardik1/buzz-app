@@ -20,9 +20,23 @@ import {
 
 afterEach(cleanup);
 
+const diffRender = vi.hoisted(() => vi.fn());
+const commentRender = vi.hoisted(() => vi.fn());
+vi.mock("./GitHubComment", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./GitHubComment")>();
+  return {
+    ...actual,
+    GitHubComment: (props: Parameters<typeof actual.GitHubComment>[0]) => {
+      commentRender();
+      return <actual.GitHubComment {...props} />;
+    },
+  };
+});
+
 // Exercise panel ownership while the browser suite covers Pierre's portals.
 vi.mock("../diffs/DiffViewer", () => ({
   DiffViewer: ({ comments }: { comments?: DiffComments }) => {
+    diffRender();
     useEffect(() => {
       comments?.onAvailabilityChange?.("src/example.ts", true);
       return () => comments?.onAvailabilityChange?.("src/example.ts", false);
@@ -166,6 +180,34 @@ async function setupComposer() {
   };
   return { ...fixture, panel, open, delivery };
 }
+it("edits a comment without updating the diff and submits the current text", async () => {
+  const { panel, open, state } = await setupComposer();
+  render(panel());
+  const input = await open();
+  const renders = diffRender.mock.calls.length;
+  const calls = state.calls.length;
+  for (const value of ["a", "ab", "abc"])
+    fireEvent.change(input, { target: { value } });
+  expect(input).toHaveProperty("value", "abc");
+  expect(diffRender.mock.calls.length).toBe(renders);
+  expect(state.calls).toHaveLength(calls);
+  fireEvent.click(screen.getByRole("button", { name: "Post to GitHub" }));
+  await screen.findByRole("link", { name: "View on GitHub" });
+  expect(state.comments.at(-1)?.body).toBe("abc");
+});
+
+it("opens and cancels an editor without rendering existing comments again", async () => {
+  const { panel, open } = await setupComposer();
+  render(panel());
+  await screen.findByText("Existing thread");
+  const renders = commentRender.mock.calls.length;
+  await open();
+  expect(commentRender.mock.calls.length).toBe(renders);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(commentRender.mock.calls.length).toBe(renders);
+});
+
 it.each(["Cancel", "Escape", "refresh", "unmount"])(
   "discards unsent text on %s and reopens empty",
   async (action) => {

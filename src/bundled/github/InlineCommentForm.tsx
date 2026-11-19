@@ -1,30 +1,27 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Field } from "../../shared/design-system/ui/Field";
 import { Textarea } from "../../shared/design-system/ui/Textarea";
 import styles from "./InlineComments.module.css";
 
 export function InlineCommentForm({
-  body,
   operation,
   focusRequest = 0,
   busy,
   blocked,
   notice,
-  onChange,
   onSubmit,
   onCancel,
 }: {
-  body: string;
   operation?: string;
   focusRequest?: number;
   busy: boolean;
   blocked: boolean;
   notice?: string | undefined;
-  onChange(body: string): void;
-  onSubmit(): void;
+  onSubmit(body: string): void;
   onCancel(): void;
 }) {
+  const [body, setBody] = useState("");
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     void focusRequest;
@@ -36,7 +33,7 @@ export function InlineCommentForm({
       data-operation={operation}
       onSubmit={(event) => {
         event.preventDefault();
-        if (!busy && !blocked && body.trim()) onSubmit();
+        if (!busy && !blocked && body.trim()) onSubmit(body);
       }}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
@@ -53,7 +50,9 @@ export function InlineCommentForm({
           value={body}
           disabled={busy}
           readOnly={blocked}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => {
+            if (!busy && !blocked) setBody(event.target.value);
+          }}
         />
       </Field>
       {notice && <p role="status">{notice}</p>}
