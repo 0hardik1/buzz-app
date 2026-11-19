@@ -265,6 +265,8 @@ test("image review hides the update failure notice until the viewer closes", asy
       await page.screenshot({ path: info.outputPath("viewer-copy-error.png") });
     await expect(notice).toBeHidden();
     await expect(host.getByText(title, { exact: true })).toHaveCount(0);
+    // Shared toast dismissal is revealed by hovering the card on desktop.
+    await feedback.hover();
     await feedback
       .getByRole("button", { name: "Dismiss notification" })
       .click();
