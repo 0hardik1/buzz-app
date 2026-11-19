@@ -43,6 +43,9 @@
 
 .sheet {
   @apply floating-surface;
+  /* The sheet is raised; its received bubbles take the raised bubble step. */
+  --surface-message: var(--surface-message-raised);
+  --surface-message-hover: var(--surface-message-raised-hover);
   /* Medium dialog insets, reduced at narrow widths as dialogs are. */
   --dialog-padding: var(--space-8);
   --sheet-gap: var(--space-2);
