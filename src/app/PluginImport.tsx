@@ -1015,6 +1015,7 @@ export function PluginImport({
           variant="subtle"
           size="sm"
           disabled={blocked || checking}
+          focusableWhenDisabled
           onClick={() => checkSavedSource()}
         >
           Check for updates

@@ -2001,7 +2001,7 @@ it("uses the live enabled state after checking a saved Git update", async () => 
   fireEvent.click(check);
   try {
     await waitFor(() => expect(git).toHaveBeenCalledOnce());
-    expect(check).toBeDisabled();
+    expect(check).toHaveAttribute("aria-disabled", "true");
   } finally {
     await act(async () => finish(rememberedPreview));
   }

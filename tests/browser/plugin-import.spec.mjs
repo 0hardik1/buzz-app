@@ -2127,8 +2127,19 @@ test("a background Git update refreshes an already open details pane", async ({
     name: "Refresh example details",
     exact: true,
   });
-  await button(page, "Check for updates").click();
+  await page.evaluate(() => {
+    window.heldGitCheck = new Promise((resolve) => {
+      window.releaseGitCheck = resolve;
+    });
+  });
+  const check = pane.getByRole("button", { name: "Check for updates" });
+  await check.focus();
+  await page.keyboard.press("Enter");
+  await expect(check).toBeDisabled();
+  await expect(check).toBeFocused();
+  await page.evaluate(() => window.releaseGitCheck());
   await expect(pane.getByText("Up to date", { exact: true })).toBeVisible();
+  await expect(check).toBeFocused();
   await page.evaluate(() => {
     window.importCategory = "productivity";
     window.dispatchEvent(new Event("focus"));
