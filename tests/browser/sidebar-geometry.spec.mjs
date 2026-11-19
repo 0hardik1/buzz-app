@@ -244,6 +244,23 @@ test("the Drafts & sent row shares channel rows' columns and inset without movin
         trailing: 0,
         end: 0,
       });
+    await expect
+      .poll(() =>
+        drafts.evaluate((row) => {
+          const starred = document.querySelector(
+            '[data-sidebar-section="starred"]',
+          );
+          if (!starred) return undefined;
+          const gap =
+            starred.getBoundingClientRect().top -
+            row.getBoundingClientRect().bottom;
+          const rem = parseFloat(
+            getComputedStyle(document.documentElement).fontSize,
+          );
+          return Math.round((gap / rem) * 64) / 64;
+        }),
+      )
+      .toBe(1);
     await create.focus();
     await expect
       .poll(() => create.evaluate(controlsAgainstHeading))
@@ -256,6 +273,28 @@ test("the Drafts & sent row shares channel rows' columns and inset without movin
         .toBeGreaterThanOrEqual(0);
     }
   }
+  // A short viewport makes the conversation list scroll without a large roster.
+  await page.setViewportSize({ width: 900, height: 300 });
+  const activity = rows.first();
+  await expect(activity).toHaveAccessibleName(/^Activity/);
+  const list = page.getByRole("navigation", {
+    name: "Subscribed channels",
+    exact: true,
+  });
+  const positions = () =>
+    Promise.all(
+      [activity, drafts].map((row) =>
+        row.evaluate((element) => element.getBoundingClientRect().top),
+      ),
+    );
+  const before = await positions();
+  await list.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect
+    .poll(() => list.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  await expect.poll(positions).toEqual(before);
 });
 
 // The case above only exercises the scrollbar gutter where the engine happens

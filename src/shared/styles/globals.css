@@ -294,8 +294,7 @@
   .shell-pages {
     @apply flex min-w-0 flex-col gap-1;
   }
-  /* In the sidebar's Plugins section, page rows sit in the scrolling channel
-     list, which clips an offset ring; draw it inside the row instead. */
+  /* Page navigation can sit in a clipping sidebar. Keep its focus ring inside each row. */
   html[data-keyboard-navigation] .shell-pages .navigation-item:focus-visible {
     outline-offset: -2px;
   }
