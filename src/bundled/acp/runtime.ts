@@ -447,6 +447,7 @@ export class AcpRuntime {
     const noteRoot = key === channel ? undefined : context.root;
     // Plugins' notes, taken once the prompt is built; back if never sent.
     let notes: readonly string[] = [];
+    let sent = false;
     const done = entry.sessions.deliver(key, "", event.created_at, {
       // Built when it is sent, from what the session has definitely seen.
       build: async (from, pinned) => {
@@ -470,7 +471,7 @@ export class AcpRuntime {
         const wakePrompt = wake
           ? ((await wakeText?.()) ?? wake.text)
           : undefined;
-        notes = agent.notes?.(channel, noteRoot) ?? [];
+        notes = [...notes, ...(agent.notes?.(channel, noteRoot) ?? [])];
         return {
           text: this.review(
             entry,
@@ -503,6 +504,9 @@ export class AcpRuntime {
       ...(step ? { step } : {}),
       ...(acknowledged ? { acknowledged } : {}),
       ...(superseded ? { superseded } : {}),
+      accepted: () => {
+        sent = true;
+      },
     });
     // The whole error reaches the turn's local activity through `done`.
     workingUntil(done);
@@ -510,7 +514,7 @@ export class AcpRuntime {
     this.notify();
     void done
       .then((result) => {
-        if (result.undelivered && notes.length)
+        if (!sent && notes.length)
           agent.restoreNotes?.(channel, notes, noteRoot);
         signedIn(entry, generation, result);
         // Of the messages one turn answered, only one has its error. A

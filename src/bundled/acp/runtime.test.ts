@@ -440,6 +440,25 @@ describe("AcpRuntime", () => {
     },
   );
 
+  it("gives plugin notes back when its turn is stopped while its prompt is built", async () => {
+    const config = await confirmed();
+    const { fake, deliver, sync, agent } = setup();
+    sync(config);
+    const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
+    const taken = ["<note>Ticket ABC-1 is open.</note>"];
+    const notes = vi.fn(() => {
+      void interruptible.mock.calls[0]?.[0]();
+      return taken;
+    });
+    const restoreNotes = vi.fn();
+    Object.assign(agent, { notes, restoreNotes });
+    const mention = message("1", "@Opal hi");
+    await deliver(mention, config, undefined, { interruptible }).run;
+    await vi.waitFor(() => expect(restoreNotes).toHaveBeenCalledTimes(1));
+    expect(restoreNotes).toHaveBeenCalledWith(channel, taken, mention.id);
+    expect(fake.harnesses[0]?.turns ?? []).toHaveLength(0);
+  });
+
   it("sends the instructions as ACP's appended system prompt when advertised", async () => {
     const config = await confirmed();
     const { fake, deliver, sync } = setup({
