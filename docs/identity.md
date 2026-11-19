@@ -1224,11 +1224,12 @@ its debug/release namespace before deleting the human key or opening a WebView.
 only, never copied over, replaced or deleted. With the installed build's
 [settings](configuration.md), it lists the same servers, so each server's account
 key names the same item. Until the debug build first saves a server's item, it
-reads that item, and its refusal markers, from the release namespace. Every
-save goes to the debug namespace: the first copies the whole release item there
-(session and grants, nothing mixed in from an older debug item), and its account
-index, written before the save, makes the debug copy the only one read from then
-on, even once it is empty. So a sign-out in `me` clears only the debug copy,
+reads that item from the release namespace, honoring either namespace's
+refusal markers. Every save goes to the debug namespace: the first copies the
+whole release item there (session and grants, nothing mixed in from an older
+debug item), and its account index, written before the save, makes the debug
+copy the only one read from then on, even once it is empty. A first save that
+fails without writing removes that index again. So a sign-out in `me` clears only the debug copy,
 the next launch stays signed out, and a browser sign-in or agent enrollment
 there stays in the debug namespace. Signing out of a session the release item
 still holds does not end it at the server, so the installed app stays signed in.
