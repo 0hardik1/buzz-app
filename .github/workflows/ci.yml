@@ -375,8 +375,8 @@ jobs:
       HOME: /root
       BUZZ_BROWSER_FIXTURE_DIR: target/ci-browser-fixture
     # Keep eleven Chromium and eighteen WebKit shards, with two workers each.
-    # Relative test-count weights below balance the observed fixture-group costs.
-    # New tests still enter Playwright's normal discovery and sharding.
+    # Give shards with slower tests fewer tests, based on previous CI runs.
+    # Playwright still finds and includes new tests automatically.
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -423,8 +423,8 @@ jobs:
           test -x buzzodz
       # CI required enforces measurement success. --no-deps avoids repeating
       # measurements here; the matrix covers both engines on separate runners.
-      # Playwright 1.63 supports relative test-count weights for --shard.
-      # Preserve fixture groups; give slow sections fewer tests. See contributing.md.
+      # Each weight controls one shard's share of the tests.
+      # Playwright still controls which tests stay together. See contributing.md.
       - name: Functional journeys
         env:
           PWTEST_SHARD_WEIGHTS: ${{ matrix.weights }}

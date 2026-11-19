@@ -138,14 +138,14 @@ test("Linux shards and macOS recording discover every CI functional test/project
   assert.equal(functional.env.PWTEST_SHARD_WEIGHTS, `\${{ matrix.weights }}`);
   for (const { engine, shard, shards, weights } of browserJobs()) {
     assert.equal(weights.split(":").length, shards);
-    // Exercise the actual workflow command, including its shard denominator.
+    // Run the same command and shard count as CI.
     const expanded = command
       .replaceAll(/\$\{\{ matrix\.engine \}\}/g, engine)
       .replaceAll(/\$\{\{ matrix\.shard \}\}/g, shard)
       .replaceAll(/\$\{\{ matrix\.shards \}\}/g, shards);
     const args = expanded.replace(/^\.\/bin\/pnpm /, "").split(/\s+/);
     const selected = discover(args, weights);
-    // The pinned Playwright must honor the weights, including after upgrades.
+    // Check that the weights change the split, including after Playwright upgrades.
     if (shard === 1) assert.notDeepEqual(selected, discover(args));
     assert.ok(selected.length > 0, `${engine}/${shard} must select tests`);
     assert.ok(selected.every((id) => id.startsWith(`${engine}:`)));
