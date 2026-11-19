@@ -147,6 +147,7 @@ it("reports a failure without ending on words", async () => {
   );
   expect(onError).toHaveBeenCalledWith(
     "Allow Buzz to use your microphone to search by voice.",
+    "failed",
   );
   expect(onEnd).not.toHaveBeenCalled();
   expect(hook.result.current.state).toBe("idle");
@@ -163,6 +164,32 @@ it("ends a listen that hears nothing", async () => {
   act(() => vi.advanceTimersByTime(8_000));
   expect(calls("voice_search_finish")).toHaveLength(1);
   act(() => send({ kind: "ended", text: "" }));
+  expect(onEnd).not.toHaveBeenCalled();
+  expect(hook.result.current.state).toBe("idle");
+});
+
+it("shows a first-use model download, then listens", async () => {
+  const { hook } = dictation();
+  await act(async () => {
+    const started = hook.result.current.start();
+    answer(8);
+    await started;
+  });
+  act(() => send({ kind: "downloading" }));
+  expect(hook.result.current.state).toBe("downloading");
+  act(() => send({ kind: "listening" }));
+  expect(hook.result.current.state).toBe("listening");
+});
+
+it("reports denied access apart from other failures", async () => {
+  const { hook, onEnd, onError } = dictation();
+  await act(async () => {
+    const started = hook.result.current.start();
+    answer(9);
+    await started;
+  });
+  act(() => send({ kind: "denied", message: "Turn on the microphone." }));
+  expect(onError).toHaveBeenCalledWith("Turn on the microphone.", "denied");
   expect(onEnd).not.toHaveBeenCalled();
   expect(hook.result.current.state).toBe("idle");
 });

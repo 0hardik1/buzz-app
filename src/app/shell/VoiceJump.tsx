@@ -121,6 +121,9 @@ export function VoiceJump({
   const available = !!decisions && (voiceAvailable || import.meta.env.DEV);
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState<VoiceThing>(NOTHING);
+  // Once access is denied, the box stops starting the microphone by itself
+  // for the rest of this session and says where to allow it.
+  const [denied, setDenied] = useState<string>();
   const input = useRef<HTMLElement>(null);
   const opened = useRef<string | undefined>(undefined);
   // The shortcut pressed while open hands off to the open box.
@@ -231,6 +234,8 @@ export function VoiceJump({
             services={services}
             decisions={decisions}
             voiceAvailable={voiceAvailable}
+            denied={denied}
+            onAccess={setDenied}
             initialHovered={hovered}
             input={input}
             again={again}
@@ -250,6 +255,8 @@ export function VoiceJumpBody({
   services,
   decisions,
   voiceAvailable = true,
+  denied,
+  onAccess,
   initialHovered = NOTHING,
   input,
   again,
@@ -259,6 +266,10 @@ export function VoiceJumpBody({
   services: VoiceJumpServices;
   decisions: Decisions;
   voiceAvailable?: boolean | undefined;
+  /** Why microphone or speech access was denied this session, if it was. */
+  denied?: string | undefined;
+  /** Records a denial's message, or clears it once listening works. */
+  onAccess?: ((denied: string | undefined) => void) | undefined;
   initialHovered?: VoiceThing | undefined;
   input: RefObject<HTMLElement | null>;
   again: { current: (() => void) | undefined };
@@ -630,7 +641,10 @@ export function VoiceJumpBody({
     },
     onPause: (spoken) => settle(spoken),
     onEnd: (spoken) => submitRef.current(spoken),
-    onError: (message) => setPhase({ kind: "failed", message }),
+    onError: (message, failure) => {
+      if (failure === "denied") onAccess?.(message);
+      setPhase({ kind: "failed", message });
+    },
   });
   const { start, stop, cancel } = dictation;
 
@@ -649,10 +663,14 @@ export function VoiceJumpBody({
   // Listening starts as the box opens when speech recognition is available.
   // biome-ignore lint/correctness/useExhaustiveDependencies: Once per opening.
   useEffect(() => {
-    if (voiceAvailable) listen();
+    if (voiceAvailable && !denied) listen();
   }, []);
 
   const listening = dictation.state !== "idle";
+  // Listening started, so access was allowed after all.
+  useEffect(() => {
+    if (dictation.state === "listening" && denied) onAccess?.(undefined);
+  }, [dictation.state, denied, onAccess]);
   useEffect(() => {
     if (!voiceAvailable) return;
     again.current = () => (listening ? stop() : listen());
@@ -725,6 +743,8 @@ export function VoiceJumpBody({
       <ShimmerText>Finding it…</ShimmerText>
     ) : phase.kind === "failed" ? (
       phase.message
+    ) : dictation.state === "downloading" ? (
+      <ShimmerText>Downloading speech model…</ShimmerText>
     ) : dictation.state === "starting" ? (
       <ShimmerText>Starting the microphone…</ShimmerText>
     ) : listening ? (
@@ -733,6 +753,8 @@ export function VoiceJumpBody({
       ) : (
         <ShimmerText>Listening. Say where to go.</ShimmerText>
       )
+    ) : denied ? (
+      denied
     ) : voiceAvailable ? (
       "Press Enter to go, or the microphone to speak again."
     ) : (
@@ -780,7 +802,10 @@ export function VoiceJumpBody({
               aria-label={listening ? "Stop listening" : "Speak again"}
               aria-pressed={listening}
               title={listening ? "Stop listening" : "Speak again"}
-              loading={dictation.state === "starting"}
+              loading={
+                dictation.state === "starting" ||
+                dictation.state === "downloading"
+              }
               icon={<MicrophoneIcon size={16} aria-hidden="true" />}
               onClick={() => {
                 if (listening) stop();

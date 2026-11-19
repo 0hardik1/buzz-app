@@ -700,7 +700,10 @@ and are asked to sign in again in Buzz.
   a box with the microphone already on, and what you say appears in it as you
   speak. Speech is recognized on the Mac itself, with no account or key; the
   first time, macOS asks to let Buzz use the microphone, and before macOS 26
-  also speech recognition. Buzz picks among
+  also speech recognition. The first use may also download the speech model,
+  which the box says while it happens. If you turn access down, the box stops
+  starting the microphone by itself (press it to try again) and says where to allow
+  it (System Settings → Privacy & Security); typing still works. Buzz picks among
   the channels, DMs, agent chats and threads it already has loaded, by name
   and recent messages, and lists the likeliest as you talk. It opens a match
   as soon as it is sure, or when you pause. If nothing is a likely match after

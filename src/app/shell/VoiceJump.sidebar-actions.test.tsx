@@ -25,8 +25,11 @@ const dictation = vi.hoisted(() => ({
         onText: (next: string) => void;
         onPause: (spoken: string) => void;
         onEnd: (spoken: string) => void;
+        onError?: (message: string, failure: "denied" | "failed") => void;
       }
     | undefined,
+  state: "idle" as "idle" | "starting" | "downloading" | "listening",
+  start: vi.fn(async (_hints?: readonly string[]) => {}),
 }));
 const forgetFocus = vi.hoisted(() => vi.fn());
 vi.mock("../../features/search/voice-context", async (importOriginal) => {
@@ -54,8 +57,8 @@ vi.mock("../../features/search/voice-dictation", () => ({
   useVoiceDictation: (callbacks: typeof dictation.current) => {
     dictation.current = callbacks;
     return {
-      state: "idle" as const,
-      start: async () => {},
+      state: dictation.state,
+      start: dictation.start,
       stop: () => {},
       cancel: () => {},
     };
@@ -63,6 +66,7 @@ vi.mock("../../features/search/voice-dictation", () => ({
 }));
 
 afterEach(() => {
+  dictation.state = "idle";
   cleanup();
   document.body.innerHTML = "";
   vi.clearAllMocks();
@@ -471,5 +475,49 @@ describe("voice box review checks", () => {
     act(() => dictation.current?.onEnd("mute this"));
     await closed();
     expect(forgetFocus).toHaveBeenCalled();
+  });
+});
+
+describe("voice box speech status", () => {
+  it("says when the speech model is downloading", async () => {
+    dictation.state = "downloading";
+    const h = setup(answering({}));
+    await h.open();
+    expect(screen.getByText("Downloading speech model…")).toBeVisible();
+  });
+
+  it("stops starting the mic by itself after access is denied", async () => {
+    const h = setup(answering({}));
+    await h.open();
+    expect(dictation.start).toHaveBeenCalledOnce();
+    const denied =
+      "Buzz can't use the microphone. Turn it on in System Settings → Privacy & Security → Microphone.";
+    act(() => dictation.current?.onError?.(denied, "denied"));
+    const user = userEvent.setup();
+    await user.keyboard("{Escape}");
+    await closed();
+    // The next opening leaves the mic off and says where to allow it.
+    await h.open();
+    expect(dictation.start).toHaveBeenCalledOnce();
+    expect(screen.getByText(denied)).toBeVisible();
+    // Typing still works, and the mic button still tries again.
+    await user.click(screen.getByRole("button", { name: "Speak again" }));
+    expect(dictation.start).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps starting the mic after other failures", async () => {
+    const h = setup(answering({}));
+    await h.open();
+    act(() =>
+      dictation.current?.onError?.(
+        "Voice search stopped unexpectedly.",
+        "failed",
+      ),
+    );
+    const user = userEvent.setup();
+    await user.keyboard("{Escape}");
+    await closed();
+    await h.open();
+    expect(dictation.start).toHaveBeenCalledTimes(2);
   });
 });
