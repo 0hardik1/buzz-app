@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { checkRequest } from "../../src/features/decisions/service";
 import { ACTIONS, ENTITIES, PLACES, hover } from "./catalog";
 import { CASES } from "./cases";
-import { HELDOUT, HELDOUT2 } from "./cases-heldout";
+import { HELDOUT, HELDOUT2, HELDOUT3 } from "./cases-heldout";
 import {
   buildActionDecision,
   matchActionBindings,
@@ -22,7 +22,7 @@ describe("voice actions eval", () => {
     const keys = new Set(
       Object.values(ENTITIES).flatMap((list) => list.map((e) => e.id)),
     );
-    for (const c of [...CASES, ...HELDOUT, ...HELDOUT2]) {
+    for (const c of [...CASES, ...HELDOUT, ...HELDOUT2, ...HELDOUT3]) {
       const hovered = hover(c.hover);
       const { request } = buildActionDecision({
         spoken: c.spoken,
