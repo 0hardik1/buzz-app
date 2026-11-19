@@ -60,6 +60,8 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   // A cancelled drag shows its landing edge, then leaves everything unchanged.
   await pull(page, "laptop", "work");
   await expect(laptop).toHaveAttribute("data-section-dragging");
+  // Only the moved card folds; an open neighbour stays open.
+  await expect(work.locator("details")).toHaveAttribute("open");
   await expect(page.locator('[class*="channelDragOverlay"]')).toHaveCSS(
     "translate",
     "none",

@@ -130,7 +130,7 @@ export function ChannelSidebarDnd({
     <DndContext
       sensors={sensors}
       collisionDetection={sidebarCollisions}
-      // Collapsed cards rarely need it; when they do, start early and move fast.
+      // Open cards can run past the edge: start early and move fast.
       autoScroll={{ threshold: { x: 0, y: 0.15 }, acceleration: 20 }}
       // The sidebar's own status is its loading notice; drag announcements live outside it.
       accessibility={{ container: document.body }}
@@ -181,9 +181,9 @@ const headerOf = (id: string) =>
   );
 
 /**
- * Cards collapse to their headers while one is dragged, so every target fits
- * on screen. The grabbed card's header stays where it was under the pointer,
- * and the drop targets re-measure once the cards have closed up. A cancelled
+ * The dragged card folds to its header while every other card keeps its
+ * state. The grabbed header stays where it was under the pointer, and the
+ * drop targets re-measure once the card has folded. A cancelled
  * drag restores the scroll position; a drop keeps the moved card in view.
  */
 function CollapsedDragAnchor() {
@@ -439,9 +439,8 @@ export function DroppableSidebarSection({
   });
   const group = !!active?.data.current?.group;
   const from = active?.data.current?.groupIndex;
-  // Every card shows only its header while a card is being moved.
-  const collapsed =
-    group && (active?.data.current?.groupDomain ?? "channels") === groupDomain;
+  // The moved card shows only its header; every other card stays as it was.
+  const collapsed = group && active?.id === section.sectionKey;
   return (
     <>
       {createSectionTarget && (
