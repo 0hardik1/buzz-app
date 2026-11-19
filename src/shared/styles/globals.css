@@ -312,6 +312,12 @@
   .shell-navigation-content {
     display: contents;
   }
+  /* The sidebar is on the window's tint, not a panel: its quiet fills are the
+     header's backdrop fills. Selection stays the sidebar's accent. */
+  .shell-navigation {
+    --affordance-sidebar-hover: var(--affordance-backdrop-hover);
+    --affordance-panel-hover: var(--affordance-backdrop-hover);
+  }
   /* A single fr track animates from the sidebar's real extent (not a larger
      ceiling) to zero, so movement starts on the first frame. */
   .shell-navigation[data-sidebar-collapsible] {
@@ -387,8 +393,9 @@
   .shell-sidebar,
   .shell-sidebar-default {
     @apply flex min-h-0 shrink-0;
-    /* Sidebar and conversation are regions of the same joined surface. */
-    margin-inline-end: 0;
+    /* The sidebar sits on the window's tint, a panel gap from the
+       conversation's card. */
+    margin-inline-end: var(--space-panel-gap);
     /* Coupled to the sidebar's persisted pixel width and resize limits. */
     width: 260px;
     min-width: 220px;
@@ -495,6 +502,9 @@
     .shell-navigation[data-expanded="true"] {
       @apply absolute inset-y-0 left-0 z-20 flex;
       max-width: calc(100% - 1rem);
+      /* The open drawer covers the conversation with the window's tint. */
+      background-color: var(--bg-app);
+      box-shadow: var(--shadow-panel);
     }
     .shell-navigation .shell-sidebar,
     .shell-navigation .shell-sidebar-default {
@@ -555,8 +565,8 @@
   }
   /* Header controls and the app dock keep the solid shell color beneath them
      and their focus rings, so their ink and fills keep the pairing they were
-     designed for. Resize grips sit on the joined pane surface, which is
-     already opaque. */
+     designed for. The sidebar, also on the tint, gets the same color as a
+     rounded surface; the conversation's card is already opaque. */
   .shell-background > .shell-backdrop ~ .shell-header > *,
   .shell-background
     > .shell-backdrop
@@ -565,6 +575,12 @@
     border-radius: var(--radius-pill);
     background: var(--bg-app);
     box-shadow: 0 0 0 var(--space-2) var(--bg-app);
+  }
+  .shell-background
+    > .shell-backdrop
+    ~ :where(.shell-workspace :is(.shell-sidebar, .shell-sidebar-default)) {
+    border-radius: var(--radius-container);
+    background: var(--bg-app);
   }
 }
 
@@ -634,16 +650,6 @@
 @layer components {
   .shell-navigation[data-sidebar-collapsible] {
     position: relative;
-  }
-  .shell-navigation[data-sidebar-collapsible]::after {
-    content: "";
-    position: absolute;
-    inset-block: 0;
-    inset-inline-end: 0;
-    width: 1px;
-    background: var(--border-standard);
-    opacity: 1;
-    pointer-events: none;
   }
   /* Keep the retained navigation out of layout and keyboard traversal on apps
      without a sidebar, including after a narrow drawer was open. This must

@@ -765,9 +765,9 @@ The shell uses a vertical `Tabs variant="dock"` rail on the left, ordered
 Bestie, Inbox, then the normal app order. Wide search stays centered in the top
 bar and fills the available space between controls at compact widths. Creation
 sits beside the sidebar scope filters; Cmd/Ctrl+N opens it only where the app
-has a creation sidebar. The sidebar and detail pane share one joined surface; the
-resize seam is a persistent `border-standard` hairline. Layout and overflow
-remain shell-owned.
+has a creation sidebar. The sidebar sits on the window's tint, a panel gap from
+the detail pane's own `Panel`, with no hairline between them; its quiet fills
+are the backdrop fills the header uses. Layout and overflow remain shell-owned.
 
 Use `Tabs variant="capsule"` for outlined filters with no filled track and a
 wrapping trailing action, as in Hosted Communities. `Header align="end"`
