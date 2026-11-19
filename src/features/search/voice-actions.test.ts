@@ -266,11 +266,11 @@ describe("buildActionDecision & decideVoiceAction", () => {
     });
   });
 
-  it("ignores hover and navigates when Jev chooses navigate", () => {
+  it("ignores hover and navigates when Jev chooses navigate (requires 0.7 or place >= 0.8 when actions offered)", () => {
     const built = buildActionDecision({
       spoken: "take me to design",
       hovered: hoveredChannel,
-      actions: channelVoiceActions.slice(0, 0 + 1),
+      actions: channelVoiceActions.slice(0, 1),
       entities,
       places,
     });
@@ -293,6 +293,24 @@ describe("buildActionDecision & decideVoiceAction", () => {
       place: { channelId: "design" },
       probability: 0.92,
     });
+
+    // When actions were offered and navigate is 0.6 (< 0.7) with place 0.65 (< 0.8), show options instead.
+    const uncertainNav = built.resolve({
+      action: {
+        type: "choice",
+        choice: ACTION_NAVIGATE_OPTION,
+        confidence: 0.6,
+        probabilities: { [ACTION_NAVIGATE_OPTION]: 0.6, none: 0.4 },
+      },
+      place: {
+        type: "choice",
+        choice: "#design",
+        confidence: 0.65,
+        probabilities: { "#design": 0.65 },
+      },
+    });
+    expect(uncertainNav.kind).toBe("none");
+    expect(uncertainNav.placeCandidates).toHaveLength(1);
   });
 
   it("applies the 3-step auto-run rule: >=0.7 acts, navigate in top-2 with place >=0.8 navigates, else shows options", () => {

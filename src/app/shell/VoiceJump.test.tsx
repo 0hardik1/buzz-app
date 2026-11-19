@@ -131,6 +131,7 @@ function setup(
     sidebarPreferences: {
       writable: true,
       starWritable: true,
+      sectionCreationWritable: true,
       ensure: async () => {},
       setStar,
       assign,
@@ -408,7 +409,7 @@ describe("VoiceJump contextual voice actions", () => {
     expect(h.forward).not.toHaveBeenCalled();
     expect(h.openDm).not.toHaveBeenCalled();
 
-    // Pause presents the confirm chip.
+    // Pause presents the confirm chip WITHOUT stopping the mic, so later speech can replace it.
     act(() => {
       dictationHandlers.current?.onPause("send this to Alex");
     });
@@ -419,12 +420,27 @@ describe("VoiceJump contextual voice actions", () => {
     expect(confirmRegion).toHaveTextContent(
       'Forward message from Alice: "Please review this" to Alex',
     );
+    expect(dictationHandlers.cancel).not.toHaveBeenCalled();
     expect(h.forward).not.toHaveBeenCalled();
 
-    // Pressing Enter executes the forward.
+    // Later words arriving replace the confirm chip back to listening.
+    act(() => {
+      dictationHandlers.current?.onText("send this to Alex in general");
+    });
+    expect(
+      screen.queryByRole("region", { name: "Confirm voice action" }),
+    ).not.toBeInTheDocument();
+
+    act(() => {
+      dictationHandlers.current?.onPause("send this to Alex");
+    });
+    await screen.findByRole("region", { name: "Confirm voice action" });
+
+    // Pressing Enter stops the mic and executes the forward currently on screen.
     const user = userEvent.setup();
     await user.keyboard("{Enter}");
 
+    expect(dictationHandlers.cancel).toHaveBeenCalled();
     await waitFor(() => expect(h.forward).toHaveBeenCalledOnce());
     expect(h.openDm).toHaveBeenCalledWith([alexPk], expect.any(AbortSignal));
   });
@@ -562,6 +578,39 @@ describe("VoiceJump contextual voice actions", () => {
 
     await user.click(option);
     await waitFor(() => expect(h.setStar).toHaveBeenCalledWith("sec", true));
+  });
+
+  it("asks for the section's name instead of a generic empty message when a free-text action has no name", async () => {
+    const h = setup(async () => ({
+      outcome: "answered",
+      backend: "test",
+      model: "jev",
+      answers: {
+        action: {
+          type: "choice",
+          choice: "Create a new sidebar section",
+          confidence: 0.94,
+          probabilities: {
+            "Create a new sidebar section": 0.94,
+          },
+        },
+        place: {
+          type: "choice",
+          choice: "none",
+          confidence: 0.95,
+          probabilities: { none: 0.95 },
+        },
+      },
+    }));
+
+    h.triggerShortcut();
+    act(() => {
+      dictationHandlers.current?.onEnd("create a section");
+    });
+
+    expect(
+      await screen.findByText("Say the section's name"),
+    ).toBeInTheDocument();
   });
 
   it("ignores hover and navigates when Jev picks navigate", async () => {

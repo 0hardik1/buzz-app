@@ -546,7 +546,6 @@ export function VoiceJumpBody({
             : VOICE_ACTION_THRESHOLD;
         if (result.probability < needed) return;
         if (result.binding.action.confirm === "confirm") {
-          cancel();
           setPhase({ kind: "confirm", resolved: result, spoken: said });
         } else {
           void runActionRef.current(result, said);
@@ -751,6 +750,7 @@ export function VoiceJumpBody({
           if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
           event.preventDefault();
           if (phase.kind === "confirm") {
+            cancel();
             void runActionRef.current(phase.resolved, phase.spoken);
             return;
           }
@@ -817,9 +817,10 @@ export function VoiceJumpBody({
             <Button
               size="sm"
               variant="prominent"
-              onClick={() =>
-                void runActionRef.current(phase.resolved, phase.spoken)
-              }
+              onClick={() => {
+                cancel();
+                void runActionRef.current(phase.resolved, phase.spoken);
+              }}
             >
               Confirm <KeyboardShortcut text="Enter" label="Enter" />
             </Button>
@@ -831,11 +832,17 @@ export function VoiceJumpBody({
         <EmptyState
           frame="none"
           icon={<MicrophoneIcon size={20} />}
-          title="Didn't find anything"
+          title={
+            actionCandidates[0]?.binding?.missingSlot === "text"
+              ? "Say the section's name"
+              : "Didn't find anything"
+          }
           description={
-            phase.text
-              ? `Nothing matched “${phase.text}”. Try an action name or a channel, person or chat.`
-              : "Didn't catch that. Try saying an action or a channel, person or chat name."
+            actionCandidates[0]?.binding?.missingSlot === "text"
+              ? "Try saying the name you want to use, for example “create a section called Work”."
+              : phase.text
+                ? `Nothing matched “${phase.text}”. Try an action name or a channel, person or chat.`
+                : "Didn't catch that. Try saying an action or a channel, person or chat name."
           }
           action={
             <Button size="sm" variant="subtle" onClick={listen}>
@@ -849,7 +856,9 @@ export function VoiceJumpBody({
             // Close but not sure enough: the nearest actions/places stay to choose.
             <div className={styles.notice}>
               <p className={styles.status} aria-live="polite">
-                Not sure enough to act automatically. Closest options:
+                {actionCandidates[0]?.binding?.missingSlot === "text"
+                  ? "Say the section's name, or pick an option:"
+                  : "Not sure enough to act automatically. Closest options:"}
               </p>
               <Button size="sm" variant="subtle" onClick={listen}>
                 Try again

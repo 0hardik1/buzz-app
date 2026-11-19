@@ -315,14 +315,22 @@ export function summarize(results: readonly CaseResult[]) {
   return [...groups].map(([category, rs]) => {
     const ok = rs.filter((r) => !r.error);
     const ms = ok.map((r) => r.ms);
+    const right = rs.filter((r) => r.correct).length;
+    const silentWrong = rs.filter(
+      (r) => r.misfire && !r.misfireConfirmed,
+    ).length;
+    const safe = rs.filter(
+      (r) => !r.correct && !r.error && (!r.misfire || r.misfireConfirmed),
+    ).length;
     return {
       category,
       cases: rs.length,
       errors: rs.length - ok.length,
-      correct: rs.filter((r) => r.correct).length,
+      right,
+      safe,
+      silentWrong,
       intentCorrect: rs.filter((r) => r.intentCorrect).length,
       misfires: rs.filter((r) => r.misfire).length,
-      silentMisfires: rs.filter((r) => r.misfire && !r.misfireConfirmed).length,
       p50: Math.round(percentile(ms, 50)),
       p95: Math.round(percentile(ms, 95)),
     };

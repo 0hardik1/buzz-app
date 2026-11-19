@@ -217,12 +217,8 @@ export const ACTIONS: readonly VoiceActionSpec[] = [
   named(
     "person.dm.named",
     "person",
-    "Start a new message draft with someone (no existing DM yet)",
+    "Send someone a direct message",
     NOT_PERSON,
-    {
-      filterSlot: (slot, entity) =>
-        slot === "person" ? entity.meta?.hasDm !== true : true,
-    },
   ),
   named("person.profile.named", "person", "Show someone's profile", NOT_PERSON),
   a(
@@ -285,7 +281,6 @@ export const ENTITIES: VoiceSlotEntities = {
     label: p.name,
     soundsLikeName: p.name,
     detail: p.agent ? "agent" : "person",
-    meta: { hasDm: Boolean(p.dm) },
   })),
   emoji: Object.entries(EMOJI).map(([name, glyph]) => ({
     kind: "emoji",
