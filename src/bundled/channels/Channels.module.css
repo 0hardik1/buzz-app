@@ -1124,3 +1124,40 @@ html[data-keyboard-navigation]
     transition: none;
   }
 }
+
+/* Grab dots centred on a movable card's top edge, shown on hover and while
+   the card moves. */
+.sectionGrabber {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: calc(-1 * var(--space-1));
+  inset-inline-start: 50%;
+  display: flex;
+  padding-inline: var(--space-2);
+  color: var(--text-subtle);
+  cursor: grab;
+  opacity: 0;
+  touch-action: none;
+  transform: translateX(-50%);
+  transition: opacity var(--duration-fast) var(--easing-state);
+}
+.sectionGrabber:active {
+  cursor: grabbing;
+}
+@media (hover: hover) and (pointer: fine) {
+  .channelSection:hover > .sectionGrabber {
+    opacity: 0.6;
+  }
+  .channelSection > .sectionGrabber:hover {
+    opacity: 1;
+  }
+}
+.channelSection[data-section-dragging] > .sectionGrabber {
+  opacity: 1;
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sectionGrabber {
+    transition: none;
+  }
+}

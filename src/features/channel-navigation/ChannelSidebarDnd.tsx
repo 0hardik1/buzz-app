@@ -15,6 +15,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useState,
   useRef,
   type ComponentProps,
@@ -32,7 +33,7 @@ const Writable = createContext(false);
 const CREATE_SECTION = "create-section";
 
 // Group gaps target the neighbour whose insertion edge lies in that same gap.
-const sidebarCollisions: CollisionDetection = (args) => {
+export const sidebarCollisions: CollisionDetection = (args) => {
   const domain = args.active.data.current?.groupDomain ?? "channels";
   if (!args.active.data.current?.group)
     return pointerWithin({
@@ -51,9 +52,27 @@ const sidebarCollisions: CollisionDetection = (args) => {
         (data.current?.groupDomain ?? "channels") === domain,
     )
     .sort((a, b) => a.data.current?.groupIndex - b.data.current?.groupIndex);
-  const hits = pointerWithin({ ...args, droppableContainers: groups });
-  if (hits.length) return hits;
   const pointer = args.pointerCoordinates;
+  const hit = pointerWithin({ ...args, droppableContainers: groups })[0];
+  if (hit) {
+    // The pointer's half of the card decides the side, so a tall card's
+    // insertion line is the edge nearest the pointer. A drop reports the
+    // neighbour whose index puts the moved card on that side.
+    const index = groups.findIndex(({ id }) => id === hit.id);
+    const rect = args.droppableRects.get(hit.id);
+    const from = args.active.data.current.groupIndex;
+    const to = groups[index]?.data.current?.groupIndex;
+    if (!pointer || !rect || from === undefined || to === undefined)
+      return [hit];
+    const above = pointer.y < rect.top + rect.height / 2;
+    const neighbour =
+      above && from < to
+        ? groups[index - 1]
+        : !above && from > to
+          ? groups[index + 1]
+          : groups[index];
+    return [{ id: (neighbour ?? groups[index])?.id ?? hit.id }];
+  }
   if (!pointer) return [];
   for (let index = 1; index < groups.length; index++) {
     const above = groups[index - 1];
@@ -111,6 +130,8 @@ export function ChannelSidebarDnd({
     <DndContext
       sensors={sensors}
       collisionDetection={sidebarCollisions}
+      // Collapsed cards rarely need it; when they do, start early and move fast.
+      autoScroll={{ threshold: { x: 0, y: 0.15 }, acceleration: 20 }}
       // The sidebar's own status is its loading notice; drag announcements live outside it.
       accessibility={{ container: document.body }}
       onDragStart={({ active }) =>
@@ -133,6 +154,7 @@ export function ChannelSidebarDnd({
       }}
     >
       <Writable.Provider value={writable}>{children}</Writable.Provider>
+      <CollapsedDragAnchor />
       {createPortal(
         // The optimistic move relocates the row, so nothing remains to settle back onto.
         <DragOverlay dropAnimation={null}>
@@ -142,6 +164,81 @@ export function ChannelSidebarDnd({
       )}
     </DndContext>
   );
+}
+
+/** The scrolling ancestor that holds the sidebar's cards. */
+function scroller(node: HTMLElement) {
+  for (let el = node.parentElement; el; el = el.parentElement) {
+    const { overflowY } = getComputedStyle(el);
+    if (overflowY === "auto" || overflowY === "scroll") return el;
+  }
+  return undefined;
+}
+
+const headerOf = (id: string) =>
+  document.querySelector<HTMLElement>(
+    `[data-sidebar-section="${CSS.escape(id)}"] summary`,
+  );
+
+/**
+ * Cards collapse to their headers while one is dragged, so every target fits
+ * on screen. The grabbed card's header stays where it was under the pointer,
+ * and the drop targets re-measure once the cards have closed up. A cancelled
+ * drag restores the scroll position; a drop keeps the moved card in view.
+ */
+function CollapsedDragAnchor() {
+  const { active, measureDroppableContainers } = useDndContext();
+  const id = active?.data.current?.group ? String(active.id) : undefined;
+  const start = useRef<{
+    top: number;
+    scrollTop: number;
+    id: string;
+    pinned?: true;
+  }>(undefined);
+  const cancelled = useRef(false);
+  useDndMonitor({
+    onDragStart: ({ active }) => {
+      cancelled.current = false;
+      const header = active.data.current?.group
+        ? headerOf(String(active.id))
+        : null;
+      const list = header && scroller(header);
+      start.current =
+        header && list
+          ? {
+              id: String(active.id),
+              top: header.getBoundingClientRect().top,
+              scrollTop: list.scrollTop,
+            }
+          : undefined;
+    },
+    onDragCancel: () => {
+      cancelled.current = true;
+    },
+  });
+  useLayoutEffect(() => {
+    const saved = start.current;
+    if (!saved) return;
+    const header = headerOf(saved.id);
+    const list = header && scroller(header);
+    if (!header || !list) return;
+    if (id) {
+      // Pin once; afterwards auto-scroll owns the position.
+      if (saved.pinned) return;
+      saved.pinned = true;
+      list.scrollTop += header.getBoundingClientRect().top - saved.top;
+      measureDroppableContainers([]);
+      return;
+    }
+    start.current = undefined;
+    if (cancelled.current) list.scrollTop = saved.scrollTop;
+    // The saved order may render a frame later; reveal the moved card then.
+    else
+      requestAnimationFrame(() =>
+        headerOf(saved.id)?.scrollIntoView({ block: "nearest" }),
+      );
+  }, [id, measureDroppableContainers]);
+  return null;
 }
 
 function CreateSectionDropTarget({ available }: { available: boolean }) {
@@ -342,6 +439,9 @@ export function DroppableSidebarSection({
   });
   const group = !!active?.data.current?.group;
   const from = active?.data.current?.groupIndex;
+  // Every card shows only its header while a card is being moved.
+  const collapsed =
+    group && (active?.data.current?.groupDomain ?? "channels") === groupDomain;
   return (
     <>
       {createSectionTarget && (
@@ -351,6 +451,7 @@ export function DroppableSidebarSection({
       )}
       <SidebarSection
         {...section}
+        open={section.open && !collapsed}
         dropRef={setNodeRef}
         dropTarget={
           !group &&
