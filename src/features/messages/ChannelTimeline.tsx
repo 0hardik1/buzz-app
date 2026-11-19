@@ -1312,6 +1312,7 @@ function Timeline({
         (row) =>
           !row.membership &&
           !row.huddle &&
+          !row.forum &&
           !row.threadRootId &&
           !row.replyParentId,
       )

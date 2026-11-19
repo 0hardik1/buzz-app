@@ -167,9 +167,7 @@ it.each(
     );
     if (position === "forum last" && rootKind !== 45001)
       expect(
-        journal?.state.frontiers[
-          thread ? `thread-activity:${root.id}` : "activity:room"
-        ],
+        journal?.state.frontiers[thread ? `thread:${root.id}` : "room"],
       ).toBe(chat.created_at);
     // The change must not make forum IDs admissible unread evidence.
     const lease = unread.reading("room", thread ? root.id : undefined);

@@ -3861,37 +3861,46 @@ async function arriveWhileAway(
   return { rows: next, added };
 }
 
-it("ignores forum timestamps when placing the divider after returning to chat", async () => {
-  const { h, mounted, read } = await settledReader();
-  try {
-    const forum = h.row(
-      signed(h.peer, {
-        kind: 45001,
-        content: "Future forum row",
-        created_at: 20,
-        tags: [["h", "c"]],
-      }),
-      "c",
-      { forum: true },
-    );
-    h.unknownIds.add(forum.id);
-    h.publish();
-    mounted.rerender(h.tree("c", [read, forum]));
-    await h.dwell();
-    setDocumentActive(false);
-    await arriveWhileAway(
-      h,
-      mounted,
-      [read, forum],
-      [{ content: "Chat while away", at: 11 }],
-    );
-    setDocumentActive(true);
-    expect(precedes(divider(), screen.getByText("Chat while away"))).toBe(true);
-  } finally {
-    mounted.unmount();
-    vi.useRealTimers();
-  }
-});
+it.each([45001, 45003])(
+  "ignores kind %s for catch-up and the divider after returning to chat",
+  async (kind) => {
+    const { h, mounted, read } = await settledReader();
+    try {
+      const forum = h.row(
+        signed(h.peer, {
+          kind,
+          content: "Future forum row",
+          created_at: 20,
+          tags: [["h", "c"]],
+        }),
+        "c",
+        { forum: true },
+      );
+      h.unknownIds.add(forum.id);
+      h.publish();
+      mounted.rerender(h.tree("c", [read, forum]));
+      await h.dwell();
+      expect(h.catchUp).toHaveBeenCalledWith(read.id, undefined);
+      expect(h.catchUp).not.toHaveBeenCalledWith(forum.id, undefined);
+      for (const [ids] of h.observe.mock.calls)
+        expect(ids).not.toContain(forum.id);
+      setDocumentActive(false);
+      await arriveWhileAway(
+        h,
+        mounted,
+        [read, forum],
+        [{ content: "Chat while away", at: 11 }],
+      );
+      setDocumentActive(true);
+      expect(precedes(divider(), screen.getByText("Chat while away"))).toBe(
+        true,
+      );
+    } finally {
+      mounted.unmount();
+      vi.useRealTimers();
+    }
+  },
+);
 
 it("places the line above the first arrival when attention returns to a visit that settled with none, before reading it", async () => {
   const { h, mounted, read } = await settledReader();
