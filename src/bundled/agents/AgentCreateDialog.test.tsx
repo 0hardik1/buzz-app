@@ -2468,6 +2468,94 @@ describe("Recommended setup", () => {
     );
   });
 
+  it("keeps the avatar and the agent in one community when it moves during the readiness check", async () => {
+    motion.reduced = true;
+    HTMLImageElement.prototype.decode = () => Promise.resolve();
+    // Ready when the dialog opens; Save's own check is held when asked.
+    let held: ((ready: boolean) => void) | undefined;
+    let holdNext = false;
+    const checked = harness("codex", "Codex", () => {
+      if (!holdNext) return true;
+      holdNext = false;
+      return new Promise<boolean>((resolve) => (held = resolve));
+    });
+    const sources: readonly RegisteredAgentAvatarSource[] = [
+      Object.freeze({
+        id: "faces",
+        key: "buzz.faces/faces",
+        pluginId: "buzz.faces",
+        revision: "bundled",
+        title: "Faces",
+        icon: <svg />,
+        component: ({ choose }) => (
+          <button
+            type="button"
+            onClick={() => choose(new Blob(["png"], { type: "image/png" }))}
+          >
+            Red face
+          </button>
+        ),
+      }),
+    ];
+    const agents = {
+      subscribe: () => () => {},
+      avatarSources: () => sources,
+      create: vi.fn(async () => made),
+    } as unknown as Agents & { create: ReturnType<typeof vi.fn> };
+    const dialog = (community: string) => (
+      <AgentCreateDialog
+        agents={agents}
+        types={[checked]}
+        community={community}
+        onCreated={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    const view = render(dialog("https://a.example"));
+    const form = screen.getByRole("dialog", { name: "Create agent" });
+    const user = userEvent.setup();
+    await user.type(within(form).getByLabelText("Name"), "Nova");
+    await user.click(within(form).getByRole("tab", { name: "Faces" }));
+    await user.click(
+      await within(form).findByRole("button", { name: "Red face" }),
+    );
+    await waitFor(() => expect(createButton()).toBeEnabled());
+    holdNext = true;
+    await user.click(createButton());
+    await waitFor(() => expect(held).toBeDefined());
+    // A to B while readiness is checked: nothing uploads, nothing is written.
+    view.rerender(dialog("https://b.example"));
+    await act(async () => held?.(true));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The community changed while saving.",
+    );
+    expect(uploadAvatar).not.toHaveBeenCalled();
+    expect(agents.create).not.toHaveBeenCalled();
+    // Back in A, Save again; B and back to A during the upload keeps both in A.
+    view.rerender(dialog("https://a.example"));
+    let land: (url: string) => void = () => {};
+    vi.mocked(uploadAvatar).mockImplementationOnce(
+      () => new Promise<string>((resolve) => (land = resolve)),
+    );
+    await waitFor(() => expect(createButton()).toBeEnabled());
+    await user.click(createButton());
+    await waitFor(() => expect(uploadAvatar).toHaveBeenCalledOnce());
+    view.rerender(dialog("https://b.example"));
+    view.rerender(dialog("https://a.example"));
+    await act(async () => land("https://images.example/face"));
+    await waitFor(() =>
+      expect(agents.create).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          picture: "https://images.example/face",
+          community: "https://a.example",
+        }),
+      ),
+    );
+    expect(vi.mocked(uploadAvatar).mock.calls[0]?.[1]).toBe(
+      "https://a.example",
+    );
+  });
+
   it("lets the owner choose manually while the pick is still running, even with one harness", async () => {
     let finish = (_ready: boolean) => {};
     const slow = harness(

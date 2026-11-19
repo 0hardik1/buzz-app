@@ -146,6 +146,8 @@ const sourceTab = (key: string) => `source:${key}`;
 // the shared avatar parser's inline cap: 512 KiB of base64 text.
 const maxPickBytes = 380 * 1024;
 const pickError = "Choose a PNG, JPEG, GIF or WebP image under 380 KiB.";
+/** How long Save waits for a source's newest pick to arrive and decode. */
+export const PICK_WAIT_MS = 8_000;
 const sourceImage = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.*)$/;
 const dataUrl = (image: Blob) =>
   new Promise<string>((resolve, reject) => {
@@ -209,7 +211,9 @@ export function AgentAvatarPicker({
   liveSources?: () => readonly RegisteredAgentAvatarSource[];
   onChange(selection: AvatarSelection): void;
   onBusyChange(busy: boolean): void;
-  avatarRef: Ref<{ prepare(): Promise<string> }>;
+  /** `prepare` uploads to the community Save captured, never the one shown
+   * now, so the avatar and the agent can't land in different communities. */
+  avatarRef: Ref<{ prepare(destination: string | undefined): Promise<string> }>;
 }) {
   const surfaceCorners = useMediaCorners();
   const filmCorners = useMediaCorners();
@@ -230,9 +234,21 @@ export function AgentAvatarPicker({
     sourcePicks.current.set(pick.entry, pick);
   const latest = useRef(selection);
   latest.current = selection;
-  // Only the newest pick may land: a new pick, a tab change or Save start
-  // retires every pick still decoding.
+  // Only the newest pick may land: a new pick, a tab change or the end of
+  // Save's wait retires every pick still on its way.
   const pickToken = useRef(0);
+  // The newest pick still on its way, which Save waits for. Its promise
+  // never rejects: it settles with the pick, or with why it can't be used.
+  const landing = useRef<
+    | {
+        entry: RegisteredAgentAvatarSource;
+        token: number;
+        done: Promise<SourceSelection | Error | undefined>;
+      }
+    | undefined
+  >(undefined);
+  // While Save waits, a failed pick is Save's error, shown once by its owner.
+  const saveWaiting = useRef(false);
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
   const live = () => (liveSources ?? (() => sourcesRef.current))();
@@ -473,6 +489,9 @@ export function AgentAvatarPicker({
   useEffect(
     () => () => {
       pending.current?.abort();
+      // A pick that arrives after the picker closes changes nothing.
+      pickToken.current += 1;
+      landing.current = undefined;
       if (kept.current) URL.revokeObjectURL(kept.current.url);
     },
     [],
@@ -480,11 +499,42 @@ export function AgentAvatarPicker({
   const shown = local?.picture === picture ? local?.url : undefined;
   const cropping = shown && !local?.fixed ? shown : undefined;
   useImperativeHandle(avatarRef, () => ({
-    async prepare() {
+    async prepare(destination) {
       const image = cropImage.current;
       const request = new AbortController();
       pending.current = request;
       try {
+        // Save is for the pick last made, so a pick still on its way is
+        // waited for, briefly; one that fails or never comes refuses Save.
+        for (
+          let waiting = landing.current;
+          waiting &&
+          waiting.token === pickToken.current &&
+          live().includes(waiting.entry);
+          waiting = landing.current
+        ) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          saveWaiting.current = true;
+          const outcome = await Promise.race([
+            waiting.done,
+            new Promise<"late">((resolve) => {
+              timer = setTimeout(() => resolve("late"), PICK_WAIT_MS);
+            }),
+          ]).finally(() => {
+            clearTimeout(timer);
+            saveWaiting.current = false;
+          });
+          request.signal.throwIfAborted();
+          if (outcome === "late") {
+            pickToken.current += 1;
+            if (landing.current === waiting) landing.current = undefined;
+            throw new Error(
+              `${waiting.entry.title} didn't finish this avatar. Choose it again, then save.`,
+            );
+          }
+          if (outcome instanceof Error) throw outcome;
+        }
+        const selection = latest.current;
         // Default framing keeps the original upload.
         if (cropping)
           await image?.decode().catch(() => {
@@ -504,11 +554,11 @@ export function AgentAvatarPicker({
         if (selection.kind === "source") {
           if (!selection.file)
             throw new Error(`Choose an avatar in ${selection.entry.title}.`);
-          if (selection.attempt && selection.attempt.community !== community)
+          if (selection.attempt && selection.attempt.community !== destination)
             throw new Error(
               "This avatar's upload started in another community. Switch back to it to try again, or choose another avatar.",
             );
-          if (!community)
+          if (!destination)
             throw new Error("Select a community to use this avatar.");
           let attempt = selection.attempt;
           if (!attempt) {
@@ -517,7 +567,7 @@ export function AgentAvatarPicker({
               file: selection.file,
               picture: selection.picture,
               ...(selection.seed === undefined ? {} : { seed: selection.seed }),
-              community,
+              community: destination,
             });
             const held = { ...selection, attempt };
             keepPick(held);
@@ -543,11 +593,11 @@ export function AgentAvatarPicker({
               ? () => croppedAvatar(image, crop)
               : undefined;
         if (!paint) return selection.kind === "emoji" ? "" : selection.picture;
-        if (!community)
+        if (!destination)
           throw new Error("Select a community to use an emoji avatar.");
         const file = await paint();
         request.signal.throwIfAborted();
-        return await uploadAvatar(file, community, request.signal);
+        return await uploadAvatar(file, destination, request.signal);
       } finally {
         if (pending.current === request) pending.current = null;
       }
@@ -626,35 +676,46 @@ export function AgentAvatarPicker({
         return;
       }
       const token = ++pickToken.current;
-      // A pick lands only if it is still the newest, its contribution is
-      // live in the registry, and no Save has started since.
+      // A pick lands only if it is still the newest and its contribution is
+      // live in the registry. Save waits for it, then retires what follows.
       const current = () =>
-        token === pickToken.current &&
-        active() &&
-        live().includes(entry) &&
-        !lockedRef.current;
-      void sourcePicture(image).then(
-        ({ picture, file }) => {
-          const now = latest.current;
-          if (!current() || now.kind !== "source" || now.entry !== entry)
-            return;
-          const next: SourceSelection = {
-            kind: "source",
-            entry,
-            picture,
-            file,
-            ...(seed === undefined ? {} : { seed }),
-            previous: now.previous,
-          };
-          keepPick(next);
-          setError("");
-          onChange(next);
-        },
-        (reason) => {
-          if (current())
-            setError(reason instanceof Error ? reason.message : String(reason));
-        },
-      );
+        token === pickToken.current && active() && live().includes(entry);
+      const done: Promise<SourceSelection | Error | undefined> =
+        Promise.resolve(image)
+          .then(sourcePicture)
+          .then(
+            ({ picture, file }) => {
+              const now = latest.current;
+              if (!current() || now.kind !== "source" || now.entry !== entry)
+                return undefined;
+              const next: SourceSelection = {
+                kind: "source",
+                entry,
+                picture,
+                file,
+                ...(seed === undefined ? {} : { seed }),
+                previous: now.previous,
+              };
+              keepPick(next);
+              // Save may read it before the next render.
+              latest.current = next;
+              setError("");
+              onChange(next);
+              return next;
+            },
+            (reason: unknown) => {
+              // A retired pick's failure is dropped; it never reaches Save.
+              if (!current()) return undefined;
+              const failed =
+                reason instanceof Error ? reason : new Error(pickError);
+              if (!saveWaiting.current) setError(failed.message);
+              return failed;
+            },
+          )
+          .finally(() => {
+            if (landing.current?.done === done) landing.current = undefined;
+          });
+      landing.current = { entry, token, done };
     };
   const emojiPan = useAvatarPan(
     crop,

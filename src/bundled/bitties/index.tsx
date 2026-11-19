@@ -53,23 +53,16 @@ export const Bitties: AgentAvatarSource["component"] = ({
   const named = bittySeed(name);
   const current = pinned ?? named;
   const [variant, setVariant] = useState(0);
-  const [failed, setFailed] = useState(false);
   const strip = useRef<HTMLFieldSetElement>(null);
-  // Encoding is async: only the newest request may reach `choose`.
-  const request = useRef(0);
-  const send = (next: string, pin: boolean) => {
-    const token = ++request.current;
-    void bittyFile(next).then(
-      (file) => {
-        if (token !== request.current) return;
-        setFailed(false);
-        choose(file, `${pin ? pinning : following}${next}`);
-      },
-      () => {
-        if (token === request.current) setFailed(true);
-      },
+  // The encode goes to the host at once, so a Save started before it ends
+  // waits for this Bitty; the host keeps only the newest pick.
+  const send = (next: string, pin: boolean) =>
+    choose(
+      bittyFile(next).catch(() => {
+        throw new Error("Couldn't draw this Bitty. Try another.");
+      }),
+      `${pin ? pinning : following}${next}`,
     );
-  };
   const sendRef = useRef(send);
   sendRef.current = send;
   // An unpinned Bitty follows the name, including after a Save unlocks.
@@ -150,11 +143,6 @@ export const Bitties: AgentAvatarSource["component"] = ({
           );
         })}
       </fieldset>
-      {failed && (
-        <p role="alert" className="m-0 text-body-sm text-danger">
-          Couldn't draw this Bitty. Try another.
-        </p>
-      )}
     </div>
   );
 };

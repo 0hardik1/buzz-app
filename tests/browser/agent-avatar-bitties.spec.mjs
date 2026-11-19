@@ -93,3 +93,62 @@ test("keeps the tab, its strip and the picker inside a narrow window", async ({
     path: test.info().outputPath("bitties-narrow.png"),
   });
 });
+
+test("saves the Bitty picked just before Save, after its encode finishes", async ({
+  page,
+}) => {
+  await page.goto("/tests/fixtures/agent-avatar-picker.html?bitties");
+  await page.getByRole("tab", { name: "Bitties", exact: true }).click();
+  await expect(selectedSource(page)).toHaveAttribute(
+    "src",
+    /^data:image\/png;base64,/,
+  );
+  const original = await selectedSource(page).getAttribute("src");
+  // Hold the next 480 px encode, so Save starts before the new preview.
+  await page.evaluate(() => {
+    const toBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (callback, ...args) {
+      if (this.width !== 480) return toBlob.call(this, callback, ...args);
+      window.heldBitty = this.toDataURL();
+      window.releaseBitty = () => toBlob.call(this, callback, ...args);
+    };
+  });
+  await page.getByRole("button", { name: "Bitty 3", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => page.evaluate(() => typeof window.releaseBitty))
+    .toBe("function");
+  const held = await page.evaluate(() => window.heldBitty);
+  expect(held).not.toBe(original);
+  await page.getByRole("button", { name: "Save" }).click();
+  // Save waits for the held Bitty rather than saving the one shown.
+  await page.evaluate(() => window.releaseBitty());
+  const saved = page.getByRole("img", { name: "Saved avatar" });
+  await expect(saved).toBeVisible();
+  const same = await saved.evaluate(
+    async (image, [held, original]) => {
+      const load = async (src) => {
+        const other = new Image();
+        other.src = src;
+        await other.decode();
+        return other;
+      };
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 480;
+      const context = canvas.getContext("2d");
+      const sample = (input) => {
+        context.clearRect(0, 0, 480, 480);
+        context.drawImage(input, 0, 0, 480, 480);
+        return canvas.toDataURL();
+      };
+      const savedPixels = sample(image);
+      return {
+        held: savedPixels === sample(await load(held)),
+        original: savedPixels === sample(await load(original)),
+      };
+    },
+    [held, original],
+  );
+  expect(same).toEqual({ held: true, original: false });
+});

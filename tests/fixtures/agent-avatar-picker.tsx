@@ -54,7 +54,9 @@ function Fixture() {
     picture: randomAgentAvatar().url,
   }));
   const [saved, setSaved] = useState<string>();
-  const avatarRef = useRef<{ prepare(): Promise<string> }>(null);
+  const avatarRef = useRef<{
+    prepare(destination: string | undefined): Promise<string>;
+  }>(null);
   return (
     <main data-buzz-ui="" className="mx-auto max-w-sm space-y-4 p-4">
       <AgentAvatarPicker
@@ -69,7 +71,7 @@ function Fixture() {
       />
       <Button
         onClick={async () => {
-          const picture = (await avatarRef.current?.prepare()) ?? "";
+          const picture = (await avatarRef.current?.prepare(community)) ?? "";
           const file = media.display(picture);
           setSaved(file ? URL.createObjectURL(file) : picture);
         }}

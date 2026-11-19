@@ -471,8 +471,10 @@ export type AgentAvatarSource = Readonly<{
     seed: string | undefined;
     disabled: boolean;
     /** A PNG, JPEG, GIF or WebP as a Blob or `data:` URL, plus an optional
-     * seed the host hands back. Ignored once the tab is gone. */
-    choose(image: Blob | string, seed?: string): void;
+     * seed the host hands back. Ignored once the tab is gone. Pass a promise
+     * for an image still being made: Save waits a few seconds for the newest
+     * pick, and refuses with its error if it rejects or never settles. */
+    choose(image: Blob | string | Promise<Blob | string>, seed?: string): void;
   }>;
 }>;
 export type RegisteredAgentAvatarSource = Contribution<AgentAvatarSource>;

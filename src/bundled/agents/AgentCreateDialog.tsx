@@ -381,7 +381,9 @@ export function AgentCreateDialog({
   const [error, setError] = useState("");
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [configurationReady, setConfigurationReady] = useState(false);
-  const avatarRef = useRef<{ prepare(): Promise<string> }>(null);
+  const avatarRef = useRef<{
+    prepare(destination: string | undefined): Promise<string>;
+  }>(null);
   const avatarSources = useAvatarSources(agents);
   const liveCommunity = useRef(community);
   liveCommunity.current = community;
@@ -521,7 +523,11 @@ export function AgentCreateDialog({
         setPending(false);
         return;
       }
-      const prepared = await avatarRef.current?.prepare();
+      // The check above can outlast a community switch; nothing uploads then.
+      if (liveCommunity.current !== scope) throw communityChanged();
+      // The upload goes to `scope` itself, so a switch away and back during
+      // it can't split the avatar from the agent.
+      const prepared = await avatarRef.current?.prepare(scope);
       if (liveCommunity.current !== scope) throw communityChanged();
       const picture =
         prepared ??

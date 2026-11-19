@@ -1070,11 +1070,14 @@ Unicode compatibility forms, surrounding space and repeated space normalized;
 `choose(image, seed?)` hands back a PNG, JPEG, GIF or WebP `Blob` or base64
 `data:` URL of at most 380 KiB that this browser can decode (the most an avatar
 preview shows inline), plus an optional seed of 1 to 256 characters that comes
-back as `seed`. Only the newest pick counts. The host owns the rest: it keeps
+back as `seed`. A source still making its image passes a promise of one, so a
+Save started meanwhile waits for it. Only the newest pick counts. The host owns the rest: it keeps
 the validated file and its preview, uploads the file to the agent's community
 on Save and stores the uploaded URL, so a saved avatar is an ordinary image
-that stays when the plugin is off or gone. Save never calls the source, and a
-pick still decoding when Save starts is dropped. A pick belongs to the exact registration that made it: when
+that stays when the plugin is off or gone. Save never calls the source. It
+waits up to 8 seconds for the newest pick to arrive and decode, then saves it;
+a pick that rejects, fails validation or does not arrive in time refuses that
+Save with a message, and the user can pick again. A pick belongs to the exact registration that made it: when
 a source is turned off, removed or replaced (even under the same id), its tab
 goes and the choice beneath returns, so an unchanged avatar stays unchanged.
 The one exception is a Save that has started: its file, preview and community

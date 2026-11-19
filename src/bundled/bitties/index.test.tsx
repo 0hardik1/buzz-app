@@ -32,9 +32,14 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-/** Mounts Bitties as the picker does: `seed` is what it last chose. */
+/** Mounts Bitties as the picker does: `seed` is what it last chose, and
+ * only the newest pick lands. */
 function mount(initial: { name: string; disabled?: boolean }) {
   const choices: { file: string; seed: string | undefined }[] = [];
+  // Every call, as made: the seed, before the encode has finished.
+  const calls: (string | undefined)[] = [];
+  const failures: string[] = [];
+  let newest = 0;
   let rename: (name: string) => void = () => {};
   let lock: (disabled: boolean) => void = () => {};
   function Host() {
@@ -50,10 +55,17 @@ function mount(initial: { name: string; disabled?: boolean }) {
         disabled={disabled}
         choose={(image, next) => {
           if (disabled) return;
-          void (image as Blob).text().then((file) => {
-            choices.push({ file, seed: next });
-            setSeed(next);
-          });
+          calls.push(next);
+          const token = ++newest;
+          void Promise.resolve(image).then(
+            async (blob) => {
+              const file = await (blob as Blob).text();
+              if (token !== newest) return;
+              choices.push({ file, seed: next });
+              setSeed(next);
+            },
+            (reason: Error) => failures.push(reason.message),
+          );
         }}
       />
     );
@@ -61,6 +73,8 @@ function mount(initial: { name: string; disabled?: boolean }) {
   render(<Host />);
   return {
     choices,
+    calls,
+    failures,
     rename: (name: string) => act(() => rename(name)),
     lock: (disabled: boolean) => act(() => lock(disabled)),
   };
@@ -118,9 +132,15 @@ it("chooses the name's Bitty and follows the name until pinned", async () => {
   );
 });
 
-it("lets only the newest encoding reach choose", async () => {
+it("hands each Bitty to choose as its encode starts", async () => {
+  // So a Save started before an encode ends waits for that Bitty.
   const host = mount({ name: "A" });
+  expect(host.calls).toEqual([`name:${bittySeed("A")}`]);
   host.rename("Ab");
+  expect(host.calls).toEqual([
+    `name:${bittySeed("A")}`,
+    `name:${bittySeed("Ab")}`,
+  ]);
   await finish(bittySeed("Ab"));
   await finish(bittySeed("A"));
   await waitFor(() => expect(host.choices).toHaveLength(1));
@@ -188,11 +208,11 @@ it("waits while disabled and follows the name once enabled", async () => {
   );
 });
 
-it("says so when a Bitty can't be drawn", async () => {
+it("rejects its pick with its own message when a Bitty can't be drawn", async () => {
   failing.add(bittySeed("Ada"));
   const host = mount({ name: "Ada" });
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Couldn't draw this Bitty. Try another.",
+  await waitFor(() =>
+    expect(host.failures).toEqual(["Couldn't draw this Bitty. Try another."]),
   );
   expect(host.choices).toEqual([]);
 });

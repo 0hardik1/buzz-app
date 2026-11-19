@@ -14,7 +14,11 @@ import type {
 } from "../../features/agents/service";
 import { uploadAvatar } from "../../features/profiles/avatar-upload";
 import { AgentIdentityDialog } from "./AgentIdentityDialog";
-import { AgentAvatarPicker, type AvatarSelection } from "./AgentAvatarPicker";
+import {
+  AgentAvatarPicker,
+  type AvatarSelection,
+  PICK_WAIT_MS,
+} from "./AgentAvatarPicker";
 
 vi.mock("../../features/profiles/avatar-upload", async (actual) => ({
   ...(await actual<typeof import("../../features/profiles/avatar-upload")>()),
@@ -246,27 +250,69 @@ it("lets only the newest pick land, whatever order decodes finish in", async () 
   expect(await file?.text()).toBe("blue");
 });
 
-it("never lets a pick from before Save replace the draft after Save fails", async () => {
+it("saves a pick made just before Save once it has decoded", async () => {
   const { user, save, agents } = setup();
-  vi.mocked(uploadAvatar)
-    .mockRejectedValueOnce(new Error("Upload failed"))
-    .mockResolvedValueOnce("https://images.example/face");
+  vi.mocked(uploadAvatar).mockResolvedValue("https://images.example/face");
   await user.click(screen.getByRole("tab", { name: "Faces" }));
   await user.click(screen.getByRole("button", { name: /Red face/ }));
   await screen.findByRole("button", { name: "Red face red" });
+  // Blue is picked, and Save starts before its preview has updated.
   const waiting = holdDecodes();
   await user.click(screen.getByRole("button", { name: "Blue face" }));
   await waitFor(() => expect(waiting).toHaveLength(1));
   await user.click(save());
-  expect(await screen.findByRole("alert")).toHaveTextContent("Upload failed");
-  await act(async () => waiting[0]?.release());
   await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(uploadAvatar).not.toHaveBeenCalled();
   hold = undefined;
+  await act(async () => waiting[0]?.release());
+  await waitFor(() => expect(agents.save).toHaveBeenCalled());
+  const [file] = vi.mocked(uploadAvatar).mock.calls[0] ?? [];
+  expect(await file?.text()).toBe("blue");
+});
+
+it("waits for a source's pick still being made, and drops the ones it replaced", async () => {
+  const { user, save, agents, choose } = setup();
+  vi.mocked(uploadAvatar).mockResolvedValue("https://images.example/face");
+  await user.click(screen.getByRole("tab", { name: "Faces" }));
+  await user.click(screen.getByRole("button", { name: /Red face/ }));
+  await screen.findByRole("button", { name: "Red face red" });
+  let failOld: (reason: Error) => void = () => {};
+  let finish: (image: Blob) => void = () => {};
+  choose(new Promise<Blob>((_, reject) => (failOld = reject)), "old");
+  choose(new Promise<Blob>((resolve) => (finish = resolve)), "green");
+  await user.click(save());
+  await act(async () => failOld(new Error("old pick failed")));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(uploadAvatar).not.toHaveBeenCalled();
+  // A replaced pick's failure says nothing and doesn't stop Save.
+  expect(screen.queryByText("old pick failed")).not.toBeInTheDocument();
+  await act(async () => finish(png("green")));
+  await waitFor(() => expect(agents.save).toHaveBeenCalled());
+  const [file] = vi.mocked(uploadAvatar).mock.calls[0] ?? [];
+  expect(await file?.text()).toBe("green");
+});
+
+it("refuses Save when the newest pick fails, then saves the next pick", async () => {
+  const { user, save, agents, choose } = setup();
+  vi.mocked(uploadAvatar).mockResolvedValue("https://images.example/face");
+  await user.click(screen.getByRole("tab", { name: "Faces" }));
+  await user.click(screen.getByRole("button", { name: /Red face/ }));
+  await screen.findByRole("button", { name: "Red face red" });
+  let fail: (reason: Error) => void = () => {};
+  choose(new Promise<Blob>((_, reject) => (fail = reject)), "broken");
+  await user.click(save());
+  await act(async () => fail(new Error("Couldn't draw this face.")));
+  // Save's refusal says why, once.
+  await waitFor(() =>
+    expect(screen.getAllByText("Couldn't draw this face.")).toHaveLength(1),
+  );
+  expect(uploadAvatar).not.toHaveBeenCalled();
+  expect(agents.save).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Blue face" }));
   await user.click(save());
   await waitFor(() => expect(agents.save).toHaveBeenCalled());
-  const files = vi.mocked(uploadAvatar).mock.calls.map(([file]) => file);
-  expect(await files[0]?.text()).toBe("red");
-  expect(await files[1]?.text()).toBe("red");
+  const [file] = vi.mocked(uploadAvatar).mock.calls[0] ?? [];
+  expect(await file?.text()).toBe("blue");
 });
 
 it("rejects a pick the avatar previews could not show", async () => {
@@ -298,7 +344,9 @@ it("retries a failed upload only in the community it started in", async () => {
     ),
   });
   const sources = [source];
-  const avatarRef = createRef<{ prepare(): Promise<string> }>();
+  const avatarRef = createRef<{
+    prepare(destination: string | undefined): Promise<string>;
+  }>();
   function Harness({ community }: { community: string }) {
     const [selection, setSelection] = useState<AvatarSelection>({
       kind: "image",
@@ -327,20 +375,26 @@ it("retries a failed upload only in the community it started in", async () => {
   await user.click(screen.getByRole("tab", { name: "Faces" }));
   await user.click(screen.getByRole("button", { name: "Red face" }));
   expect(await screen.findByText("picked")).toBeInTheDocument();
-  const prepare = () => {
+  const prepare = (destination: string) => () => {
     const ref = avatarRef.current;
     if (!ref) throw new Error("no picker");
-    return ref.prepare();
+    return ref.prepare(destination);
   };
-  await expect(act(prepare)).rejects.toThrow("Upload failed");
+  await expect(act(prepare("https://a.example"))).rejects.toThrow(
+    "Upload failed",
+  );
   expect(uploadAvatar).toHaveBeenCalledOnce();
   // The community changes before the retry: Save refuses, uploads nothing.
   view.rerender(<Harness community="https://b.example" />);
-  await expect(act(prepare)).rejects.toThrow(/another community/);
+  await expect(act(prepare("https://b.example"))).rejects.toThrow(
+    /another community/,
+  );
   expect(uploadAvatar).toHaveBeenCalledOnce();
   // Back in the first community, the retry sends the same bytes there.
   view.rerender(<Harness community="https://a.example" />);
-  await expect(act(prepare)).resolves.toBe("https://images.example/face");
+  await expect(act(prepare("https://a.example"))).resolves.toBe(
+    "https://images.example/face",
+  );
   const [first, second] = vi.mocked(uploadAvatar).mock.calls;
   expect(second?.[1]).toBe("https://a.example");
   expect(first?.[1]).toBe("https://a.example");
@@ -401,4 +455,101 @@ it("keeps the attempt's preview when its source goes during the upload", async (
       picture: "https://images.example/face",
     }),
   );
+});
+
+/** A picker with one source whose picks the test makes, and Save's handle. */
+function pickerHarness() {
+  let choose: Choose = () => {};
+  const source: RegisteredAgentAvatarSource = Object.freeze({
+    id: "faces",
+    key: "buzz.faces/faces",
+    pluginId: "buzz.faces",
+    revision: "bundled",
+    title: "Faces",
+    icon: <svg />,
+    component: (props) => {
+      choose = props.choose;
+      return null;
+    },
+  });
+  const sources = [source];
+  const avatarRef = createRef<{
+    prepare(destination: string | undefined): Promise<string>;
+  }>();
+  function Harness({ community }: { community: string }) {
+    const [selection, setSelection] = useState<AvatarSelection>({
+      kind: "image",
+      picture,
+    });
+    return (
+      <>
+        <output>
+          {selection.kind === "source" && selection.file ? "picked" : ""}
+        </output>
+        <AgentAvatarPicker
+          name="Ada"
+          selection={selection}
+          disabled={false}
+          community={community}
+          sources={sources}
+          onChange={setSelection}
+          onBusyChange={() => {}}
+          avatarRef={avatarRef}
+        />
+      </>
+    );
+  }
+  const prepare = (destination: string) => {
+    const ref = avatarRef.current;
+    if (!ref) throw new Error("no picker");
+    return ref.prepare(destination);
+  };
+  return {
+    Harness,
+    prepare,
+    choose: (...args: Parameters<Choose>) => choose(...args),
+  };
+}
+
+it("refuses Save, without hanging, when a pick never arrives", async () => {
+  vi.mocked(uploadAvatar).mockResolvedValue("https://images.example/face");
+  const { Harness, prepare, choose } = pickerHarness();
+  render(<Harness community="https://a.example" />);
+  await userEvent.click(screen.getByRole("tab", { name: "Faces" }));
+  act(() => choose(png("red"), "red"));
+  expect(await screen.findByText("picked")).toBeInTheDocument();
+  vi.useFakeTimers();
+  try {
+    act(() => choose(new Promise<Blob>(() => {}), "stuck"));
+    const saving = prepare("https://a.example");
+    const refused = expect(saving).rejects.toThrow(
+      "Faces didn't finish this avatar. Choose it again, then save.",
+    );
+    await act(() => vi.advanceTimersByTimeAsync(PICK_WAIT_MS));
+    await refused;
+  } finally {
+    vi.useRealTimers();
+  }
+  expect(uploadAvatar).not.toHaveBeenCalled();
+  // The stuck pick is retired; the next one saves.
+  act(() => choose(png("blue"), "blue"));
+  await waitFor(async () =>
+    expect(await act(() => prepare("https://a.example"))).toBe(
+      "https://images.example/face",
+    ),
+  );
+  const [file] = vi.mocked(uploadAvatar).mock.calls[0] ?? [];
+  expect(await file?.text()).toBe("blue");
+});
+
+it("uploads to the community Save names, not the one the picker shows", async () => {
+  vi.mocked(uploadAvatar).mockResolvedValue("https://images.example/face");
+  const { Harness, prepare, choose } = pickerHarness();
+  const view = render(<Harness community="https://a.example" />);
+  await userEvent.click(screen.getByRole("tab", { name: "Faces" }));
+  act(() => choose(png("red"), "red"));
+  expect(await screen.findByText("picked")).toBeInTheDocument();
+  view.rerender(<Harness community="https://b.example" />);
+  await act(() => prepare("https://a.example"));
+  expect(vi.mocked(uploadAvatar).mock.calls[0]?.[1]).toBe("https://a.example");
 });

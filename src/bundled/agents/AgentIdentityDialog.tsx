@@ -46,7 +46,9 @@ export function AgentIdentityDialog({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [avatarBusy, setAvatarBusy] = useState(false);
-  const avatarRef = useRef<{ prepare(): Promise<string> }>(null);
+  const avatarRef = useRef<{
+    prepare(destination: string | undefined): Promise<string>;
+  }>(null);
   const avatar = effectiveAvatar(draft, avatarSources);
   const { zoom, x, y } = (avatar.kind === "image" && avatar.crop) || uncropped;
   const changed =
@@ -62,7 +64,7 @@ export function AgentIdentityDialog({
     setPending(true);
     setError("");
     try {
-      const picture = await picker.prepare();
+      const picture = await picker.prepare(agent.relay);
       await agents.save(agent.key, { picture: picture || null });
       onClose();
     } catch (reason) {
