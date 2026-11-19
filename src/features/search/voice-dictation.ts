@@ -1,32 +1,36 @@
-// Voice jump's speech-to-text: the microphone streams to an OpenAI Realtime
-// transcription session over WebRTC, and its transcript arrives as text
-// deltas on a data channel. Native code answers the offer
-// (`voice_search_connect`) with a key it fetched ahead of time
-// (`voice_search_prepare`), so the key stays out of the webview and
-// listening starts after one round trip. A short pause in speech is
-// reported while listening goes on; a long one, or a second press, ends the
-// utterance.
-import { invoke } from "@tauri-apps/api/core";
+// Voice jump's speech-to-text, on device: native code records the
+// microphone and transcribes it with Apple's speech recognition, biased
+// toward names the caller expects (`voice_search.rs`). The transcript so far
+// arrives each time it changes. A short pause in speech is reported while
+// listening goes on; a long one, or a second press, ends the utterance, and
+// native code then sends its final transcript.
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const DELTA = "conversation.item.input_audio_transcription.delta";
-const COMPLETED = "conversation.item.input_audio_transcription.completed";
 /** Speech that stops producing text this long has paused: reported, but
- * listening goes on. */
-const PAUSE_MS = 800;
+ * listening goes on. On-device recognition revises its words about every
+ * 200–300 ms while someone speaks; across 20 fluent phrases its longest gap
+ * mid-phrase was about 500 ms, and its words settle about 200 ms after speech
+ * stops. So 600 ms waits out fluent speech and reports a pause about 0.8 s
+ * after the last word. A hesitation of 400 ms or more mid-phrase can still
+ * report one early. */
+export const PAUSE_MS = 600;
 /** Speech that stops producing text this long has ended. */
 const END_MS = 3_000;
 /** Nothing heard this long after starting ends the attempt. */
 const SILENCE_MS = 8_000;
+/** How long an ending waits for the final transcript before reporting what
+ * was heard so far. Native code usually sends it within 100 ms. */
+const FINAL_MS = 1_000;
 
-/** Fetches the transcription key before it's needed. Native code keeps one
- * until shortly before it expires, so calling this often is cheap. */
+/** Loads the speech model before it's needed; native code keeps it loaded,
+ * so calling this often is cheap. */
 export function prepareVoice() {
   void invoke("voice_search_prepare").catch(() => {});
 }
 
 let available: Promise<boolean> | undefined;
-/** Whether this build can transcribe speech, asked of native code once. */
+/** Whether this device can transcribe speech, asked of native code once. */
 export function useVoiceSearchAvailable(enabled: boolean) {
   const [value, setValue] = useState(false);
   useEffect(() => {
@@ -45,27 +49,11 @@ export function useVoiceSearchAvailable(enabled: boolean) {
 
 export type DictationState = "idle" | "starting" | "listening";
 
-type RealtimeEvent = {
-  type?: string;
-  delta?: string;
-  transcript?: string;
-  error?: { message?: string };
-};
-
-/** Appends one realtime event's text; a completed event repeats its segment. */
-export function mergeTranscript(current: string, event: RealtimeEvent) {
-  if (event.type === DELTA) return current + (event.delta ?? "");
-  if (event.type === COMPLETED) {
-    const segment = (event.transcript ?? "").trim();
-    if (
-      !segment ||
-      current.trim().toLowerCase().endsWith(segment.toLowerCase())
-    )
-      return current;
-    return `${current.trimEnd()} ${segment}`.trimStart();
-  }
-  return current;
-}
+type VoiceEvent =
+  | { kind: "listening" }
+  | { kind: "text"; text: string }
+  | { kind: "ended"; text: string }
+  | { kind: "error"; message: string };
 
 export function useVoiceDictation({
   onText,
@@ -73,7 +61,7 @@ export function useVoiceDictation({
   onEnd,
   onError,
 }: {
-  /** The transcript so far, each time it grows. */
+  /** The transcript so far, each time it changes. */
   onText: (text: string) => void;
   /** The transcript so far, once speech pauses briefly; listening goes on. */
   onPause?: (text: string) => void;
@@ -94,103 +82,86 @@ export function useVoiceDictation({
   const cancel = useCallback(() => run.current?.cancel(), []);
   useEffect(() => cancel, [cancel]);
 
-  const start = useCallback(async () => {
+  /** Starts listening; `hints` are names and words to expect. */
+  const start = useCallback(async (hints: readonly string[] = []) => {
     if (run.current) return;
-    let stream: MediaStream | undefined;
-    let peer: RTCPeerConnection | undefined;
+    let session: number | undefined;
     let text = "";
     let timer: ReturnType<typeof setTimeout> | undefined;
     let pause: ReturnType<typeof setTimeout> | undefined;
+    let ending = false;
     let ended = false;
-    const finish = (report: boolean) => {
+    const close = (report: boolean, heard = text) => {
       if (ended) return;
       ended = true;
       clearTimeout(timer);
       clearTimeout(pause);
-      peer?.close();
-      for (const track of stream?.getTracks() ?? []) track.stop();
       run.current = undefined;
       setState("idle");
-      if (report && text.trim()) callbacks.current.onEnd(text.trim());
+      if (report && heard.trim()) callbacks.current.onEnd(heard.trim());
+    };
+    const finish = () => {
+      if (ended || ending) return;
+      ending = true;
+      clearTimeout(pause);
+      if (session !== undefined)
+        void invoke("voice_search_finish", { session }).catch(() => {});
+      // The final transcript ends it; this reports what was heard if it
+      // doesn't come.
+      clearTimeout(timer);
+      timer = setTimeout(() => close(true), FINAL_MS);
+    };
+    const abandon = () => {
+      if (ended) return;
+      if (session !== undefined)
+        void invoke("voice_search_cancel", { session }).catch(() => {});
+      close(false);
     };
     const wait = (ms: number) => {
       clearTimeout(timer);
-      timer = setTimeout(() => finish(true), ms);
+      timer = setTimeout(finish, ms);
     };
-    run.current = { stop: () => finish(true), cancel: () => finish(false) };
+    const onEvent = new Channel<VoiceEvent>((event) => {
+      if (ended) return;
+      if (event.kind === "error") {
+        callbacks.current.onError?.(event.message);
+        return close(false);
+      }
+      if (event.kind === "ended") return close(true, event.text || text);
+      if (event.kind === "listening") {
+        setState("listening");
+        if (!ending) wait(SILENCE_MS);
+        return;
+      }
+      if (event.text === text) return;
+      text = event.text;
+      callbacks.current.onText(text.trim());
+      if (ending) return;
+      clearTimeout(pause);
+      pause = setTimeout(
+        () => callbacks.current.onPause?.(text.trim()),
+        PAUSE_MS,
+      );
+      wait(END_MS);
+    });
+    run.current = { stop: finish, cancel: abandon };
     setState("starting");
     try {
-      // The offer needs no microphone: asking for it and connecting run
-      // side by side, and the track joins once both are done.
-      peer = new RTCPeerConnection();
-      const sender = peer.addTransceiver("audio").sender;
-      const channel = peer.createDataChannel("oai-events");
-      channel.addEventListener("message", (message) => {
-        let event: RealtimeEvent;
-        try {
-          event = JSON.parse(String(message.data));
-        } catch {
-          return;
-        }
-        if (event.type === "error") {
-          callbacks.current.onError?.(
-            event.error?.message ?? "Voice search failed",
-          );
-          finish(false);
-          return;
-        }
-        const next = mergeTranscript(text, event);
-        if (next === text) return;
-        text = next;
-        callbacks.current.onText(text.trim());
-        clearTimeout(pause);
-        pause = setTimeout(
-          () => callbacks.current.onPause?.(text.trim()),
-          PAUSE_MS,
-        );
-        wait(END_MS);
+      session = await invoke<number>("voice_search_start", {
+        hints,
+        onEvent,
       });
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      const microphone = navigator.mediaDevices
-        .getUserMedia({
-          audio: {
-            autoGainControl: true,
-            echoCancellation: true,
-            noiseSuppression: true,
-          },
-        })
-        .then((media) => {
-          stream = media;
-          // Stopped meanwhile: release the microphone at once.
-          if (ended) for (const track of media.getTracks()) track.stop();
-          return media;
-        });
-      const [media, answer] = await Promise.all([
-        microphone,
-        invoke<string>("voice_search_connect", { offer: offer.sdp ?? "" }),
-      ]);
-      if (ended) return;
-      await sender.replaceTrack(media.getAudioTracks()[0] ?? null);
-      await peer.setRemoteDescription({ type: "answer", sdp: answer });
-      if (ended) return;
-      setState("listening");
-      wait(SILENCE_MS);
     } catch (error) {
-      if (!ended) {
-        const name = error instanceof Error ? error.name : "";
+      if (!ended)
         callbacks.current.onError?.(
-          name === "NotAllowedError"
-            ? "Allow Buzz to use your microphone to search by voice."
-            : error instanceof Error
-              ? error.message
-              : typeof error === "string"
-                ? error
-                : "Voice search failed",
+          typeof error === "string" ? error : "Voice search failed",
         );
-      }
-      finish(false);
+      return close(false);
     }
+    // Stopped or cancelled before native code answered.
+    if (ended) void invoke("voice_search_cancel", { session }).catch(() => {});
+    else if (ending)
+      void invoke("voice_search_finish", { session }).catch(() => {});
   }, []);
 
   return { state, start, stop, cancel };

@@ -52,6 +52,7 @@ import {
   jumpPlaces,
   type LiveLead,
   VOICE_JUMP_THRESHOLD,
+  voiceHints,
 } from "../../features/search/voice-jump";
 import {
   captureVoiceThing,
@@ -185,10 +186,7 @@ export function VoiceJump({
     // Focus moved by the box itself, and returned on close, isn't the
     // person's: a resting pointer still decides the next hover.
     pointerRef.current?.forgetFocus();
-    // The next opening starts with a key already fetched.
-    if (voiceAvailable) prepareVoice();
-  }, [voiceAvailable]);
-
+  }, []);
   // The hint follows the person's rebind, as Search's does.
   const { overrides } = useSyncExternalStore(
     services?.shortcutBindings?.subscribe ?? noSubscribe,
@@ -638,12 +636,15 @@ export function VoiceJumpBody({
 
   const listen = useCallback(() => {
     restart();
+    // Recognition expects the names it may hear, so they're read up front.
+    const places = jumpPlaces(sources(session, resolveName));
+    run.current.places = places;
     setCandidates([]);
     setActionCandidates([]);
     setText("");
     setPhase({ kind: "listening" });
-    void start();
-  }, [restart, start]);
+    void start(voiceHints(places));
+  }, [restart, start, session, resolveName]);
 
   // Listening starts as the box opens when speech recognition is available.
   // biome-ignore lint/correctness/useExhaustiveDependencies: Once per opening.

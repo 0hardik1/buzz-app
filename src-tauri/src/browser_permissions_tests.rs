@@ -212,6 +212,11 @@ fn native_command_permissions_isolate_webviews() {
         "app_agent_state_load",
         "app_agent_state_set",
         "decide",
+        "voice_search_available",
+        "voice_search_prepare",
+        "voice_search_start",
+        "voice_search_finish",
+        "voice_search_cancel",
         "title_bar_double_click",
         "notification_show",
         #[cfg(target_os = "macos")]

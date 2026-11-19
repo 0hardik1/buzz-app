@@ -184,7 +184,9 @@
     "allow-decide",
     "allow-voice-search-available",
     "allow-voice-search-prepare",
-    "allow-voice-search-connect",
+    "allow-voice-search-start",
+    "allow-voice-search-finish",
+    "allow-voice-search-cancel",
 
     "allow-title-bar-double-click",
     "allow-notification-show",
