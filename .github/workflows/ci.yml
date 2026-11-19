@@ -1,20 +1,36 @@
 name: CI
 
+# Temporary measurement branch; not a production workflow change.
+run-name: CI followup ${{ inputs.configuration }} / ${{ inputs.rust_cache }} / ${{ inputs.repetition }} / seed=${{ inputs.seed }}
+
 on:
-  # Manual dispatch runs only Windows; automatic checks include macOS recording.
   workflow_dispatch:
-  # Sunday's preview (release.yml) calls this to rebuild main's caches.
-  workflow_call:
-  pull_request:
-  push:
-    branches: [main]
+    inputs:
+      configuration:
+        description: Full CI configuration to measure
+        required: true
+        type: choice
+        options: [baseline, perf, cache]
+      rust_cache:
+        description: Native Rust archive state (fixture cache stays warm)
+        required: true
+        type: choice
+        options: [warm, cold]
+      seed:
+        description: Seed branch-scoped native cache only (not a timed trial)
+        type: boolean
+        default: false
+      repetition:
+        description: Repetition identifier
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-followup-${{ github.run_id }}
+  cancel-in-progress: false
 
 env:
   CI: "true"
@@ -22,7 +38,7 @@ env:
 
 jobs:
   javascript_checks:
-    if: github.event_name != 'workflow_dispatch'
+    if: inputs.seed == false && github.event_name == 'workflow_dispatch'
     name: JavaScript checks
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -30,6 +46,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
       - uses: ./.github/actions/setup
       - name: Lint and types
         run: ./bin/pnpm check
@@ -38,7 +55,7 @@ jobs:
         run: ./bin/pnpm exec vite build
 
   javascript:
-    if: github.event_name != 'workflow_dispatch'
+    if: inputs.seed == false && github.event_name == 'workflow_dispatch'
     name: JavaScript (${{ matrix.shard }}/8)
     runs-on: ubuntu-24.04
     # Vitest shards by path hash and equal file count, not duration, so slow
@@ -54,6 +71,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
       - uses: ./.github/actions/setup
       - name: Vitest shard
         env:
@@ -69,7 +87,7 @@ jobs:
           retention-days: 7
 
   agent_protection:
-    if: github.event_name != 'workflow_dispatch'
+    if: inputs.seed == false && github.event_name == 'workflow_dispatch'
     name: Protected agents (macOS)
     runs-on: macos-15
     # Native pinned runtime builds add cold compilation to the kernel fixtures.
@@ -78,6 +96,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
       - uses: ./.github/actions/setup
       - name: Install pinned Pi test dependencies
         run: |
@@ -91,7 +110,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: agent-protection
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: false
       - name: Install exact protected Claude fixture
         run: ./bin/node scripts/install-protected-claude-test.mjs
       - name: Native Claude protection boundary
@@ -113,15 +132,14 @@ jobs:
           retention-days: 7
 
   native:
-    if: github.event_name != 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     name: Rust and tool integration
     # Use the PR author so a human rerunning a bot PR keeps standard runners.
     # Fork-owned workflows also retain runners they can access.
     runs-on: &linux_16core_or_standard >-
       ${{ fromJSON(
         github.repository == 'block/buzz-app' &&
-        github.event_name == 'pull_request' &&
-        github.event.pull_request.user.type == 'User' &&
+        inputs.configuration != '' &&
         '{"group":"buzz-runners","labels":"buzz-ubuntu-x64-16core"}' ||
         '"ubuntu-24.04"'
       ) }}
@@ -132,6 +150,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
       - uses: ./.github/actions/setup
       - name: Tauri system libraries
         run: |
@@ -141,10 +160,44 @@ jobs:
           sudo sed -i '\|^http://azure\.archive\.ubuntu\.com/ubuntu/|d' /etc/apt/apt-mirrors.txt
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y dbus-daemon libwebkit2gtk-4.1-dev build-essential libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install isolated pinned Rust toolchain
+        if: inputs.configuration == 'cache'
+        # rust-cache hashes every installed toolchain. The hosted image's unused
+        # stable compiler must not split caches for our pinned compiler.
+        run: |
+          export RUSTUP_HOME="$RUNNER_TEMP/buzz-rustup"
+          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
+          ./bin/rustup toolchain install
+          ./bin/rustup default "$(./bin/rustup show active-toolchain | cut -d ' ' -f1)"
+      - name: Restore fixed Rust archive
+        if: inputs.seed
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
+          path: |
+            ${{ env.CARGO_HOME }}/bin
+            ${{ env.CARGO_HOME }}/.crates.toml
+            ${{ env.CARGO_HOME }}/.crates2.json
+            ${{ env.CARGO_HOME }}/registry
+            ${{ env.CARGO_HOME }}/git
+            ${{ github.workspace }}/target
+          key: v0-rust-native-native-Linux-x64-ade52a28-c6a55a1b
+          fail-on-cache-miss: true
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        id: native_cache
+        with:
+          prefix-key: followup-trial-20261119-v1
+          shared-key: native
           key: native
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ inputs.seed }}
+          lookup-only: ${{ !inputs.seed && inputs.rust_cache == 'cold' }}
+      - name: Verify exact native cache hit
+        if: inputs.seed == false && inputs.rust_cache == 'warm'
+        env:
+          CACHE_HIT: ${{ steps.native_cache.outputs.cache-hit }}
+        run: test "$CACHE_HIT" = true && test -d target
+      - name: Verify cold native build starts without target artifacts
+        if: inputs.seed == false && inputs.rust_cache == 'cold'
+        run: test ! -d target
       - name: Dependency policy
         run: ./bin/cargo-deny --locked check
       - name: Rust formatting
@@ -181,7 +234,7 @@ jobs:
         run: ./bin/node --test tests/integration/*.test.mjs
 
   windows-native:
-    if: github.event_name == 'workflow_dispatch'
+    if: false
     name: Windows native validation
     runs-on: windows-2025
     timeout-minutes: 20
@@ -189,6 +242,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
       # Hermit does not run on Windows. Use the same repository Rust pin with
       # the hosted runner's standard rustup, not a second floating toolchain.
       - name: Select pinned Rust
@@ -202,14 +256,14 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: windows-native
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: false
       - name: Native lint including Windows backend
         run: cargo clippy -p Buzz -p buzz-agent-controller -p buzz-credential-store -p buzz-mesh-compute --locked --all-targets -- -D warnings
       - name: All native package tests
         run: cargo test -p Buzz -p buzz-agent-controller -p buzz-credential-store -p buzz-mesh-compute --locked --no-fail-fast
 
   measurements:
-    if: github.event_name != 'workflow_dispatch'
+    if: inputs.seed == false && github.event_name == 'workflow_dispatch'
     name: Browser measurements
     runs-on: ubuntu-24.04
     # Match package.json's Playwright version and pin immutable browser/OS layers.
@@ -226,6 +280,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -246,16 +301,15 @@ jobs:
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser-classic-scrollbars/ci-report.json
         run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser-classic-scrollbars/ci-report.json evidence=test-results/browser-classic-scrollbars/ci-timing.json title="Browser classic scrollbars" -- ./bin/pnpm test:browser:ci --project chromium-classic-scrollbars --no-deps --reporter=list,json
-      # Exercise the actual perf harness once per case; timing comparisons stay
-      # separate. Keep its Chromium workload serial with the measurements above.
-      - name: Perf suite smoke check
-        run: ./bin/pnpm perf --scenario all --repeat 1 --cpu 4
       # The 100,000-channel broker scale check asserts wall-clock time: about
       # 20 s of single-threaded CPU inside a 30 s budget. A shared Vitest
       # shard's two workers timed it out under load, so it runs alone here on
       # the isolated runner with the same budget; the shards skip it. A title
       # filter that matches nothing is a green run of zero tests, so require
       # the one pass.
+      - name: Perf suite smoke check
+        if: inputs.configuration != 'perf'
+        run: ./bin/pnpm perf --scenario all --repeat 1 --cpu 4
       - name: Broker scale check
         env:
           BUZZ_BROKER_SCALE: "true"
@@ -274,14 +328,49 @@ jobs:
             test-results/broker-scale
           retention-days: 7
 
+  perf_smoke:
+    if: inputs.seed == false && github.event_name == 'workflow_dispatch' && inputs.configuration == 'perf'
+    name: Perf suite smoke check
+    runs-on: ubuntu-24.04
+    # Keep the perf harness isolated from browser measurements and other work.
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --init --ipc=host
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOME: /root
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
+      - name: Trust this container workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: ./.github/actions/setup
+        with:
+          browsers: "true"
+          browser-engine: chromium
+      # Exercise every case once, serially, with the existing CPU slowdown.
+      - name: Perf suite smoke check
+        run: ./bin/pnpm perf --scenario all --repeat 1 --cpu 4
+      - name: Perf evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: perf-smoke
+          path: test-results/perf
+          retention-days: 7
+
   browser_fixture:
-    if: github.event_name != 'workflow_dispatch'
+    if: inputs.seed == false && github.event_name == 'workflow_dispatch'
     name: Native browser fixture
     runs-on: &linux_8core_or_standard >-
       ${{ fromJSON(
         github.repository == 'block/buzz-app' &&
-        github.event_name == 'pull_request' &&
-        github.event.pull_request.user.type == 'User' &&
+        inputs.configuration != '' &&
         '{"group":"buzz-runners","labels":"buzz-ubuntu-x64-8core"}' ||
         '"ubuntu-24.04"'
       ) }}
@@ -292,11 +381,25 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
       - uses: ./.github/actions/setup
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: browser-fixture
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: false
+          lookup-only: true
+      - name: Restore fixed Rust archive
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.CARGO_HOME }}/bin
+            ${{ env.CARGO_HOME }}/.crates.toml
+            ${{ env.CARGO_HOME }}/.crates2.json
+            ${{ env.CARGO_HOME }}/registry
+            ${{ env.CARGO_HOME }}/git
+            ${{ github.workspace }}/target
+          key: v0-rust-browser-fixture-browser_fixture-Linux-x64-ade52a28-c6a55a1b
+          fail-on-cache-miss: true
       - name: Build native browser fixture
         timeout-minutes: 8
         run: ./bin/cargo build --locked -p buzzodz-plugins --example fixture-bridge --bin buzzodz --target-dir target/browser-fixture
@@ -319,7 +422,7 @@ jobs:
           retention-days: 7
 
   browser:
-    if: github.event_name != 'workflow_dispatch'
+    if: inputs.seed == false && github.event_name == 'workflow_dispatch'
     name: Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})
     # Measurements stay isolated on their own runner, not on our critical path.
     # CI required still requires their success independently of these jobs.
@@ -367,6 +470,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -401,7 +505,7 @@ jobs:
           retention-days: 7
 
   media_recorder:
-    if: github.event_name != 'workflow_dispatch'
+    if: inputs.seed == false && github.event_name == 'workflow_dispatch'
     name: WebKit recording (macOS)
     # Playwright disables ENABLE_MEDIA_RECORDER in its GTK/WPE builds.
     # Keep the real recorder and every assertion on the supported WebKit host.
@@ -411,6 +515,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
       - uses: ./.github/actions/setup
       - name: Install pinned WebKit
         run: ./bin/pnpm exec playwright install webkit
@@ -443,6 +548,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
           # The merge commit's first parent is the base branch tip, so this
           # diff is exactly the pull request's change without a full clone.
           fetch-depth: 2
@@ -465,6 +571,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
       - uses: ./.github/actions/setup
       - name: Repeat changed Vitest tests
         env:
@@ -508,6 +615,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: b404f2212df9465aa45ffb0aac390a9d0df52ec5
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
@@ -542,9 +650,9 @@ jobs:
           retention-days: 7
 
   required:
-    name: ${{ github.event_name == 'workflow_dispatch' && 'Automatic CI (not requested)' || 'CI required' }}
-    if: always() && github.event_name != 'workflow_dispatch'
-    needs: [javascript_checks, javascript, native, measurements, browser_fixture, browser, media_recorder, agent_protection]
+    name: CI required
+    if: always() && !inputs.seed && github.event_name == 'workflow_dispatch'
+    needs: [javascript_checks, javascript, native, measurements, perf_smoke, browser_fixture, browser, media_recorder, agent_protection]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -554,6 +662,8 @@ jobs:
           JAVASCRIPT: ${{ needs.javascript.result }}
           NATIVE: ${{ needs.native.result }}
           MEASUREMENTS: ${{ needs.measurements.result }}
+          PERF_SMOKE: ${{ needs.perf_smoke.result }}
+          CONFIGURATION: ${{ inputs.configuration }}
           FIXTURE: ${{ needs.browser_fixture.result }}
           BROWSER: ${{ needs.browser.result }}
           MEDIA_RECORDER: ${{ needs.media_recorder.result }}
@@ -562,3 +672,8 @@ jobs:
           for result in "$JAVASCRIPT_CHECKS" "$JAVASCRIPT" "$NATIVE" "$MEASUREMENTS" "$FIXTURE" "$BROWSER" "$MEDIA_RECORDER" "$AGENT_PROTECTION"; do
             test "$result" = success || exit 1
           done
+          if [ "$CONFIGURATION" = perf ]; then
+            test "$PERF_SMOKE" = success
+          else
+            test "$PERF_SMOKE" = skipped
+          fi
