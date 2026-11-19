@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import test from "node:test";
 import { parse } from "yaml";
 import { imageEngines } from "../../scripts/check-browser-image.mjs";
@@ -136,7 +137,9 @@ test("Linux shards and macOS recording discover every CI functional test/project
     (step) => step.name === "Functional journeys",
   );
   assert.equal(functional.env.PWTEST_SHARD_WEIGHTS, `\${{ matrix.weights }}`);
-  for (const { engine, shard, shards, weights } of browserJobs()) {
+  const jobs = browserJobs();
+  const changedEngines = new Set();
+  for (const { engine, shard, shards, weights } of jobs) {
     assert.equal(weights.split(":").length, shards);
     // Run the same command and shard count as CI.
     const expanded = command
@@ -145,12 +148,24 @@ test("Linux shards and macOS recording discover every CI functional test/project
       .replaceAll(/\$\{\{ matrix\.shards \}\}/g, shards);
     const args = expanded.replace(/^\.\/bin\/pnpm /, "").split(/\s+/);
     const selected = discover(args, weights);
-    // Check that the weights change the split, including after Playwright upgrades.
-    if (shard === 1) assert.notDeepEqual(selected, discover(args));
+    // Some shards can keep the same tests. Find a changed shard for each engine
+    // so this still catches Playwright ignoring the weights after an upgrade.
+    if (
+      !changedEngines.has(engine) &&
+      !isDeepStrictEqual(selected, discover(args))
+    ) {
+      changedEngines.add(engine);
+    }
     assert.ok(selected.length > 0, `${engine}/${shard} must select tests`);
     assert.ok(selected.every((id) => id.startsWith(`${engine}:`)));
     actual.push(...selected);
     t.diagnostic(`${engine}/${shard}: ${selected.length} functional tests`);
+  }
+  for (const engine of new Set(jobs.map((entry) => entry.engine))) {
+    assert.ok(
+      changedEngines.has(engine),
+      `${engine} weights must change the split`,
+    );
   }
   const recording = parse(workflow).jobs.media_recorder.steps.find(
     (step) => step.name === "Recording journeys",
