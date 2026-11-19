@@ -633,6 +633,8 @@ export function ChannelInventory({
   const pendingCreate = useRef<ChannelSummary | undefined>(undefined);
   const [creatingSection, setCreatingSection] = useState(false);
   const createSectionTrigger = useRef<HTMLButtonElement>(null);
+  // The workspace whose name is being edited in its card header.
+  const [namingWorkspace, setNamingWorkspace] = useState<string>();
   const [creatingFor, setCreatingFor] = useState<{
     channel: ChannelSummary;
     surface?: ChannelMenuSurface;
@@ -1769,15 +1771,35 @@ export function ChannelInventory({
         writable={placementWritable}
         onCreateSection={(channelId) => {
           const channel = sidebarChannels.find(({ id }) => id === channelId);
-          // Finish releasing the pointer before giving the modal its focus.
+          // Finish releasing the pointer before the new name takes focus.
           requestAnimationFrame(() => {
             if (
-              mounted.current &&
-              channel &&
-              !prepareSoloMove(queries, channelId) &&
-              queries.sidebarPreferences.sectionCreationWritable
+              !mounted.current ||
+              !channel ||
+              prepareSoloMove(queries, channelId) ||
+              !queries.sidebarPreferences.sectionCreationWritable
             )
-              setCreatingFor({ channel, position: "first" });
+              return;
+            // A drop makes the workspace at once and opens its name in place;
+            // a failed save falls back to the dialog, which shows why.
+            const id = crypto.randomUUID();
+            preferences
+              .createAndAssign(channelId, {
+                id,
+                name: "Untitled workspace",
+                position: "first",
+              })
+              .then(
+                () => {
+                  if (!mounted.current) return;
+                  sidebar.toggle(`group:${id}`, true);
+                  setNamingWorkspace(`group:${id}`);
+                },
+                () => {
+                  if (mounted.current)
+                    setCreatingFor({ channel, position: "first" });
+                },
+              );
           });
         }}
         onMove={(channelId, sectionKey) => {
@@ -1884,6 +1906,32 @@ export function ChannelInventory({
                         open={
                           !sidebar.collapsed.includes(section.key) ||
                           renamingSection === section.key
+                        }
+                        rename={
+                          preferences.sectionRenameWritable &&
+                          section.key.startsWith("group:")
+                            ? {
+                                editing: namingWorkspace === section.key,
+                                start: () => setNamingWorkspace(section.key),
+                                save: (name) =>
+                                  preferences.renameSection(
+                                    section.key.slice("group:".length),
+                                    name,
+                                    section.title,
+                                  ),
+                                stop: (focus) => {
+                                  setNamingWorkspace(undefined);
+                                  if (focus)
+                                    requestAnimationFrame(() =>
+                                      sidebar.list.current
+                                        ?.querySelector<HTMLElement>(
+                                          `[data-sidebar-section="${CSS.escape(section.key)}"] summary`,
+                                        )
+                                        ?.focus({ preventScroll: true }),
+                                    );
+                                },
+                              }
+                            : undefined
                         }
                         onToggle={(open) =>
                           sidebar.toggle(

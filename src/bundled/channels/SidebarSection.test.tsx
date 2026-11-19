@@ -535,3 +535,90 @@ it("keeps the actions menu closed after it is hidden and shown again", async () 
   rerender(section(false));
   expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 });
+
+function RenamableSection({
+  save,
+  toggle,
+}: {
+  save(name: string): Promise<unknown>;
+  toggle(open: boolean): void;
+}) {
+  const [title, setTitle] = useState("Untitled workspace");
+  const [editing, setEditing] = useState(false);
+  return (
+    <SidebarSection
+      sectionKey="group:new"
+      title={title}
+      open
+      onToggle={toggle}
+      rename={{
+        editing,
+        start: () => setEditing(true),
+        save: async (name) => {
+          await save(name);
+          setTitle(name);
+        },
+        stop: () => setEditing(false),
+      }}
+    >
+      <button type="button">General</button>
+    </SidebarSection>
+  );
+}
+
+it("renames a workspace in place on double-click without toggling it", async () => {
+  const user = userEvent.setup();
+  const save = vi.fn(async () => {});
+  const toggle = vi.fn();
+  render(<RenamableSection save={save} toggle={toggle} />);
+  await user.dblClick(screen.getByLabelText("Untitled workspace"));
+  const input = screen.getByRole("textbox", { name: "Workspace name" });
+  expect(input).toHaveFocus();
+  await user.keyboard("Design{Enter}");
+  expect(save).toHaveBeenCalledExactlyOnceWith("Design");
+  expect(await screen.findByLabelText("Design")).toBeInTheDocument();
+  await new Promise((done) => setTimeout(done, 300));
+  expect(toggle).not.toHaveBeenCalled();
+});
+
+it("cancels a rename on Escape or an unchanged name", async () => {
+  const user = userEvent.setup();
+  const save = vi.fn(async () => {});
+  render(<RenamableSection save={save} toggle={vi.fn()} />);
+  await user.dblClick(screen.getByLabelText("Untitled workspace"));
+  await user.keyboard("Design{Escape}");
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  await user.dblClick(screen.getByLabelText("Untitled workspace"));
+  await user.keyboard("{Enter}");
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  expect(save).not.toHaveBeenCalled();
+});
+
+it("keeps the name open with the reason when saving fails", async () => {
+  const user = userEvent.setup();
+  const save = vi.fn(async () => {
+    throw new Error("Sidebar edits are not available offline.");
+  });
+  render(<RenamableSection save={save} toggle={vi.fn()} />);
+  await user.dblClick(screen.getByLabelText("Untitled workspace"));
+  await user.keyboard("Design{Enter}");
+  expect(
+    await screen.findByText("Sidebar edits are not available offline."),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Workspace name" })).toHaveValue(
+    "Design",
+  );
+});
+
+it("toggles a renamable workspace on a single click after a beat, and at once from the keyboard", async () => {
+  const user = userEvent.setup();
+  const toggle = vi.fn();
+  render(<RenamableSection save={vi.fn()} toggle={toggle} />);
+  const summary = screen.getByLabelText("Untitled workspace");
+  await user.click(summary);
+  expect(toggle).not.toHaveBeenCalled();
+  await waitFor(() => expect(toggle).toHaveBeenCalledExactlyOnceWith(false));
+  // Keyboard activation is a click with no click count.
+  fireEvent.click(summary, { detail: 0 });
+  expect(toggle).toHaveBeenCalledTimes(2);
+});

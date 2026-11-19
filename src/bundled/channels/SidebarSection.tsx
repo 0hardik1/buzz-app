@@ -1,6 +1,7 @@
 import { SidebarActiveDialog, activeWindowLabel } from "./SidebarActiveDialog";
 import { FadingLabel } from "./FadingLabel";
 import {
+  useEffect,
   useId,
   useRef,
   useState,
@@ -42,6 +43,8 @@ import {
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
+import { Field } from "../../shared/design-system/ui/Field";
+import { Input } from "../../shared/design-system/ui/Input";
 import { NavigationSectionHeading } from "../../shared/design-system/ui/NavigationSection";
 import type { RelaySession } from "../../features/relay/session";
 import type { ChannelSummary } from "../../features/relay/contracts";
@@ -80,6 +83,7 @@ export function SidebarSection({
   channelCount,
   removalFocus,
   heightScope,
+  rename,
   children,
 }: {
   sectionKey: string;
@@ -144,6 +148,20 @@ export function SidebarSection({
       }
     | undefined;
   dragging?: boolean;
+  /**
+   * Renaming the card in place: double-click its header to start. A card that
+   * can be renamed waits a beat before a click collapses it, so the clicks of
+   * a double-click leave it where it is.
+   */
+  rename?:
+    | {
+        editing: boolean;
+        start(): void;
+        save(name: string): Promise<unknown>;
+        /** `focus` when the edit ended with focus still in it. */
+        stop(focus: boolean): void;
+      }
+    | undefined;
   /** Single-pointer and keyboard reordering; an absent direction is disabled. */
   move?:
     | { up?: (() => void) | undefined; down?: (() => void) | undefined }
@@ -157,6 +175,8 @@ export function SidebarSection({
   // The menu unmounts while hidden, so it must not reopen when shown again.
   if (hideMoreActions && menuOpen) setMenuOpen(false);
   const [removeOpen, setRemoveOpen] = useState(false);
+  const pendingToggle = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(pendingToggle.current), []);
   const [activeOpen, setActiveOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
@@ -510,37 +530,62 @@ export function SidebarSection({
           </>
         }
       >
-        <details open={open}>
-          {/* biome-ignore lint/a11y/noStaticElementInteractions: summary has native keyboard activation. */}
-          <summary
-            ref={dragHandle?.ref}
-            tabIndex={0}
-            {...dragHandle?.listeners}
-            aria-label={title}
-            aria-controls={id}
-            onClick={(event) => {
-              event.preventDefault();
-              onToggle(!open);
-            }}
-          >
-            <span className={styles.sectionLabel}>
-              {sectionKey === "starred" ? (
-                <SidebarStarIcon />
-              ) : typeof icon === "string" && session ? (
-                <SidebarGroupIcon icon={icon} session={session} />
-              ) : (
-                icon
-              )}
-              <FadingLabel className={styles.sectionTitle}>{title}</FadingLabel>
-            </span>
-            <span
-              className={`${styles.sidebarIcon} ${styles.sectionChevron}`}
-              data-navigation-reveal=""
+        {rename?.editing ? (
+          <SectionNameEditor
+            title={title}
+            save={rename.save}
+            stop={rename.stop}
+          />
+        ) : (
+          <details open={open}>
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: summary has native keyboard activation. */}
+            <summary
+              ref={dragHandle?.ref}
+              tabIndex={0}
+              {...dragHandle?.listeners}
+              aria-label={title}
+              aria-controls={id}
+              onClick={(event) => {
+                event.preventDefault();
+                clearTimeout(pendingToggle.current);
+                // Keyboard activation has no click count and toggles at once.
+                if (!rename || event.detail === 0) onToggle(!open);
+                else if (event.detail === 1)
+                  pendingToggle.current = setTimeout(
+                    () => onToggle(!open),
+                    DOUBLE_CLICK_MS,
+                  );
+              }}
+              onDoubleClick={
+                rename &&
+                ((event) => {
+                  event.preventDefault();
+                  clearTimeout(pendingToggle.current);
+                  rename.start();
+                })
+              }
             >
-              <CaretDownIcon strokeWidth={2.5} size={15} />
-            </span>
-          </summary>
-        </details>
+              <span className={styles.sectionLabel}>
+                {sectionKey === "starred" ? (
+                  <SidebarStarIcon />
+                ) : typeof icon === "string" && session ? (
+                  <SidebarGroupIcon icon={icon} session={session} />
+                ) : (
+                  icon
+                )}
+                <FadingLabel className={styles.sectionTitle}>
+                  {title}
+                </FadingLabel>
+              </span>
+              <span
+                className={`${styles.sidebarIcon} ${styles.sectionChevron}`}
+                data-navigation-reveal=""
+              >
+                <CaretDownIcon strokeWidth={2.5} size={15} />
+              </span>
+            </summary>
+          </details>
+        )}
       </NavigationSectionHeading>
       {headerNotice}
       <div
@@ -582,5 +627,82 @@ function ResizableRows({
     >
       {children}
     </SidebarCardResize>
+  );
+}
+
+/** How long a click on a renamable header waits for a second click. */
+const DOUBLE_CLICK_MS = 220;
+
+/**
+ * The card's name, edited in place. Enter or leaving the field saves a
+ * changed name; Escape keeps the old one. A failed save stays open with the
+ * reason, so nothing typed is lost.
+ */
+function SectionNameEditor({
+  title,
+  save,
+  stop,
+}: {
+  title: string;
+  save(name: string): Promise<unknown>;
+  stop(focus: boolean): void;
+}) {
+  const form = useRef<HTMLFormElement>(null);
+  const [name, setName] = useState(title);
+  const [error, setError] = useState("");
+  const saving = useRef(false);
+  // Escape or a save ends the edit; the blur that follows must not save again.
+  const done = useRef(false);
+  const end = () => {
+    done.current = true;
+    stop(!!form.current?.contains(document.activeElement));
+  };
+  const finish = async (keep: boolean) => {
+    const next = name.trim();
+    if (saving.current || done.current) return;
+    if (!keep || !next || next === title) return end();
+    saving.current = true;
+    setError("");
+    try {
+      await save(next);
+      end();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      saving.current = false;
+    }
+  };
+  return (
+    <form
+      ref={form}
+      className={styles.sectionNameEditor}
+      aria-label={`Rename ${title}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void finish(true);
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          void finish(false);
+        }
+      }}
+    >
+      <Field
+        label="Workspace name"
+        labelVisibility="hidden"
+        error={error || undefined}
+      >
+        <Input
+          controlSize="sm"
+          value={name}
+          autoFocus
+          onFocus={(event) => event.currentTarget.select()}
+          onChange={(event) => setName(event.currentTarget.value)}
+          onBlur={() => void finish(true)}
+        />
+      </Field>
+    </form>
   );
 }

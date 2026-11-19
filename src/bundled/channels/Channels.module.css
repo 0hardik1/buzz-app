@@ -438,6 +438,10 @@ body:has([data-create-section-drop][data-drop-target]) .channelDragOverlay {
   align-items: center;
   min-width: 0;
 }
+.sectionNameEditor {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .sectionTitle {
   display: block;
   min-width: 0;

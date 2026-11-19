@@ -464,16 +464,6 @@ async function startDrag(page, locator) {
   return pointer;
 }
 
-async function dropOnCreate(page) {
-  await revealCreate(page);
-  const target = page.locator("[data-create-section-drop]");
-  // Bring the actual target into view before releasing; at enlarged text its
-  // lower edge can sit outside the narrow sidebar's scrollport.
-  await target.hover();
-  await expect(page.locator('[class*="channelDragOverlay"]')).toBeHidden();
-  await page.mouse.up();
-}
-
 async function revealCreate(page) {
   const trigger = page.locator("[data-create-section-trigger]");
   const box = await trigger.boundingBox();
@@ -492,7 +482,7 @@ async function revealCreate(page) {
     .toBe("auto");
 }
 
-test("only the top channel-section boundary reveals creation, latches, cancels and saves first", async ({
+test("only the top channel-section boundary reveals creation, latches, cancels and names in place first", async ({
   page,
   app,
 }, testInfo) => {
@@ -596,28 +586,14 @@ test("only the top channel-section boundary reveals creation, latches, cancels a
   await page.mouse.move(gap.x + gap.width / 2, gap.y + gap.height / 2);
   await expect(target).toHaveAttribute("data-drop-target", "true");
   await page.mouse.up();
-  const dialog = page.getByRole("dialog", { name: "Move to new workspace" });
-  const field = dialog.getByRole("textbox", { name: "Name" });
+  // The drop makes "Untitled workspace" first, with its name open to edit.
+  const field = page.getByRole("textbox", { name: "Workspace name" });
   await expect(field).toBeFocused();
-  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(row).toBeFocused();
-  expect(app.report.sidebarPublications ?? []).toHaveLength(0);
-  await startDrag(page, row);
-  await dropOnCreate(page);
-  await expect(field).toBeFocused();
-  await dialog.evaluate(async (element) => {
-    await Promise.allSettled(
-      element.getAnimations().map((animation) => animation.finished),
-    );
-  });
-  await expect(field).toBeFocused();
-  await dialog.getByRole("button", { name: "Choose section emoji" }).click();
-  await page.getByRole("searchbox", { name: "Search emoji" }).fill("bus");
-  await page.getByRole("button", { name: "🚌", exact: true }).click();
+  await expect(field).toHaveValue("Untitled workspace");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await field.fill("Release");
-  await expect(field).toHaveValue("Release");
-  await dialog.getByRole("button", { name: "Create and move" }).click();
-  await expect(dialog).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(field).toHaveCount(0);
   const section = page
     .locator("[data-sidebar-section]")
     .filter({ has: page.locator("summary").filter({ hasText: /Release/ }) });
@@ -628,13 +604,18 @@ test("only the top channel-section boundary reveals creation, latches, cancels a
   await expect(ordered).toHaveCount(2);
   await expect(ordered.nth(0)).toHaveAccessibleName("Release");
   await expect(ordered.nth(1)).toHaveAccessibleName("Work");
-  await expect(moved).toBeFocused();
-  await expect.poll(() => app.report.sidebarPublications?.length ?? 0).toBe(2);
-  const { blob } = app.report.sidebarPublications.find(
-    ({ coordinate }) => coordinate === "channel-workspaces",
-  );
-  const saved = blob.sections.find(({ name }) => name === "Release");
-  expect(saved?.icon).toBe("🚌");
+  await expect(
+    page.locator('[data-sidebar-section^="group:"] summary').first(),
+  ).toBeFocused();
+  await expect
+    .poll(() =>
+      (app.report.sidebarPublications ?? []).some(
+        ({ coordinate, blob }) =>
+          coordinate === "channel-workspaces" &&
+          blob.sections.some(({ name }) => name === "Release"),
+      ),
+    )
+    .toBe(true);
   await page.reload();
   await openPage(page, "Messages");
   await expect(moved).toBeVisible();
@@ -744,9 +725,11 @@ test.describe("without saved sections", () => {
     await target.hover();
     await expect(page.locator('[class*="channelDragOverlay"]')).toBeHidden();
     await page.mouse.up();
-    const dialog = page.getByRole("dialog", { name: "Move to new workspace" });
-    await expect(dialog.getByRole("textbox", { name: "Name" })).toBeFocused();
-    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-    expect(app.report.sidebarPublications ?? []).toHaveLength(0);
+    const field = page.getByRole("textbox", { name: "Workspace name" });
+    await expect(field).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(
+      page.locator('[data-sidebar-section^="group:"] summary'),
+    ).toHaveAccessibleName("Untitled workspace");
   });
 });
