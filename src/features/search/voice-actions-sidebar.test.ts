@@ -416,18 +416,49 @@ describe("spoken names", () => {
   it.each([
     ["move this into a new section called Voice", "Voice"],
     ["put it in a new section named Launch prep.", "Launch prep"],
-    ["new section for agents", "agents"],
-    ["add buzz community", "buzz community"],
+    ["new section for agents", "Agents"],
+    ["add buzz community", "Buzz Community"],
     ["create a section called “Work”", "Work"],
+    ["create a section called reading list", "Reading List"],
+    ["make a new section for hackathon", "Hackathon"],
+    ["new section customers", "Customers"],
+    ["create a section named experiments", "Experiments"],
+    ["add a section called q4 planning", "Q4 Planning"],
+    ["make me a section named launch week", "Launch Week"],
+    ["please start a new section called writing", "Writing"],
+    ["move this to a new section voice", "Voice"],
   ])("new section from %j", (spoken, name) => {
     expect(extractNewSectionName(spoken)).toBe(name);
   });
 
   it.each([
+    "create a section",
+    "make a new section",
+    "move this into a new section",
+  ])("no name in %j", (spoken) => {
+    expect(extractNewSectionName(spoken)).toBeUndefined();
+  });
+
+  it.each([
     ["rename this to Launch", "Launch"],
+    ["rename this one to bots", "Bots"],
     ["call it Ops", "Ops"],
     ["rename Work as Weekend", "Weekend"],
+    ["rename this to someday", "Someday"],
+    ["rename this section fun stuff", "Fun Stuff"],
+    ["rename this to back to school", "Back To School"],
+    ["could you rename it to Q4 Launch?", "Q4 Launch"],
   ])("rename from %j", (spoken, name) => {
     expect(extractRenameText(spoken)).toBe(name);
+  });
+
+  it("asks before applying any name taken from the transcript", () => {
+    const named = sidebarVoiceActions.filter(({ target }) => target === "text");
+    expect(named.map(({ id }) => id).sort()).toEqual([
+      "channel.move_to_new_section",
+      "section.create",
+      "section.rename",
+    ]);
+    for (const action of named) expect(action.confirm).toBe("confirm");
   });
 });

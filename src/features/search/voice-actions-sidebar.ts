@@ -9,7 +9,7 @@ import type { ChannelSummary } from "../relay/contracts";
 import type { SidebarFilterMode } from "../relay/sidebar-preferences";
 import type { SidebarSortMode } from "../relay/sidebar-sort";
 import type { RelaySession } from "../relay/session";
-import { extractFreeText, type VoiceEntity } from "./voice-actions";
+import type { VoiceEntity } from "./voice-actions";
 import type {
   AppVoiceAction,
   VoiceActionContext,
@@ -209,7 +209,8 @@ export const channelRowVoiceActions: readonly AppVoiceAction[] = [
     id: "channel.move_to_new_section",
     owner: "channel",
     target: "text",
-    confirm: "none",
+    // The name comes from the transcript: always shown before it applies.
+    confirm: "confirm",
     available: (ctx, { bound }) => {
       const prefs = ctx.session.sidebarPreferences;
       return (
@@ -448,34 +449,76 @@ const collapseAction = (id: string, open: boolean) =>
     true,
   );
 
-/** "rename this to Launch", "call it Launch", "rename Work as Launch". */
+// Names said aloud, extracted by rule: Jev picks among options and can't
+// write text. Every action using these confirms, showing the name first.
+const POLITE =
+  /^(?:(?:please|ok(?:ay)?|hey|so|um+|uh+)[,\s]+)*(?:(?:can|could|would)\s+you\s+)?/i;
+/** Words that only point at the section being named, never part of it. */
+const POINTER =
+  /^(?:(?:the|this|that|it|my)\s+)?(?:(?:one|section|group|folder|sidebar\s+section)\s+)?/i;
+const NAMES_IT = /\b(?:to|as|called|named|into)\s+(.+)$/i;
+
+const said = (spoken: string) =>
+  spoken
+    .trim()
+    .replace(/[.!?]+$/, "")
+    .replace(/\s+/g, " ")
+    .replace(POLITE, "");
+
+/** "rename this to Launch", "rename this one to bots", "call it Ops",
+ * "rename Work as Weekend", "rename this section fun stuff". */
 export function extractRenameText(spoken: string): string | undefined {
-  const match = /\b(?:to|as|called|named)\s+(.+)$/i.exec(
-    spoken.trim().replace(/[.!?]+$/, ""),
-  );
-  const name = match?.[1] ?? extractFreeText(spoken);
-  return clean(name);
+  const text = said(spoken);
+  const verb =
+    /^(?:rename|re-?name|call|name|retitle|change\s+(?:the\s+)?name\s+(?:of\s+)?)\s*/i;
+  if (!verb.test(text)) {
+    // No rename verb: only an explicit "to X" / "called X" names it.
+    return sectionName(NAMES_IT.exec(text)?.[1]);
+  }
+  const rest = text.replace(verb, "");
+  const named = NAMES_IT.exec(rest)?.[1];
+  // "rename this section fun stuff": drop what points at the section.
+  return sectionName(named ?? rest.replace(POINTER, ""));
 }
 
-/** "move this into a new section called Voice", "new section Voice",
- * "add buzz community". */
+/** "move this into a new section called Voice", "make a new section for
+ * hackathon", "new section customers", "add buzz community". */
 export function extractNewSectionName(spoken: string): string | undefined {
-  const said = spoken.trim().replace(/[.!?]+$/, "");
-  const named = /\b(?:called|named)\s+(.+)$/i.exec(said)?.[1];
-  const after =
-    /\bnew\s+(?:sidebar\s+)?(?:section|group|folder)\s+(?:for\s+)?(.+)$/i.exec(
-      said,
+  const text = said(spoken);
+  const named = /\b(?:called|named|titled)\s+(.+)$/i.exec(text)?.[1];
+  if (named) return sectionName(named);
+  const kind = "(?:section|group|folder)";
+  const afterKind = new RegExp(
+    `\\b(?:new\\s+)?(?:sidebar\\s+)?${kind}\\s+(?:for\\s+|of\\s+)?(.+)$`,
+    "i",
+  ).exec(text)?.[1];
+  if (afterKind) return sectionName(afterKind);
+  // "add buzz community": the verb and its article, then the name.
+  const bare =
+    /^(?:add|create|make|start|new)(?:\s+me)?\s+(?:(?:a|an|the)\s+)?(?:new\s+)?(.+)$/i.exec(
+      text,
     )?.[1];
-  return clean(named ?? after ?? extractFreeText(said));
+  // "create a section" names nothing.
+  return bare && !new RegExp(`^(?:sidebar\\s+)?${kind}$`, "i").test(bare)
+    ? sectionName(bare)
+    : undefined;
 }
 
-const clean = (name: string | undefined) => {
-  const trimmed = name
-    ?.replace(/^["'“”]+|["'“”]+$/g, "")
+/** Trims quotes and spacing; an all-lowercase transcript gets title case,
+ * as a typed section name would ("q4 planning" → "Q4 Planning"). */
+export function sectionName(raw: string | undefined) {
+  const name = raw
+    ?.replace(/^["'“”‘’]+|["'“”‘’]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  return trimmed || undefined;
-};
+  if (!name) return undefined;
+  return name === name.toLowerCase()
+    ? name.replace(
+        /(^|\s)(\p{L})/gu,
+        (_, space, letter) => `${space}${letter.toUpperCase()}`,
+      )
+    : name;
+}
 
 export const sectionVoiceActions: readonly AppVoiceAction[] = [
   {
@@ -484,7 +527,8 @@ export const sectionVoiceActions: readonly AppVoiceAction[] = [
     target: "text",
     // A hovered channel offers "move it into a new section" instead.
     whenHovered: NOT_CHANNEL,
-    confirm: "none",
+    // The name comes from the transcript: always shown before it applies.
+    confirm: "confirm",
     available: (ctx) => {
       const prefs = ctx.session.sidebarPreferences;
       return prefs.sectionCreationWritable && !!prefs.snapshot().data;
@@ -506,7 +550,8 @@ export const sectionVoiceActions: readonly AppVoiceAction[] = [
     id: "section.rename",
     owner: "section",
     target: "text",
-    confirm: "none",
+    // The name comes from the transcript: always shown before it applies.
+    confirm: "confirm",
     available: (ctx, { hoveredRole, bound }) =>
       hoveredRole === "owner" &&
       !!bound?.id.startsWith("group:") &&
