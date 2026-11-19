@@ -1185,6 +1185,31 @@ describe("shutdown after a pinned session is retired or not resumed", () => {
     },
   );
 
+  it("keeps no retired session in memory when its harness can't close", async () => {
+    const harness = fakeHarness({
+      capabilities: {
+        mcpCapabilities: { http: true },
+        sessionCapabilities: { resume: {} },
+      },
+    });
+    const { sessions, settings } = pinnedSessions(harness);
+    for (const [turn, key] of ["a", "b", "c"].entries()) {
+      settings.localKey = key;
+      sessions.reconfigure();
+      await sessions.deliver("chat", key, turn + 1, { build: build(turn + 1) });
+    }
+    settings.localKey = "d";
+    sessions.reconfigure();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const unclosed = (
+      sessions as unknown as { unclosed: Map<unknown, unknown> }
+    ).unclosed;
+    // One failure for the process, not one session per close.
+    expect([...unclosed.values()]).toHaveLength(1);
+    expect([...unclosed.values()][0]).toBeInstanceOf(Error);
+    await expect(sessions.shutdown()).rejects.toThrow("cannot acknowledge");
+  });
+
   it("closes a busy retired session at once, releasing its hold once", async () => {
     const harness = fakeHarness({
       hold: true,
