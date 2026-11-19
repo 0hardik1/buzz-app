@@ -288,8 +288,10 @@ export class AgentSessions<S = unknown> {
   private onceCount = 0;
   /** Sessions opening, which `shutdown` waits for. */
   private readonly opens = new Set<Promise<Live>>();
-  /** Sessions closed or closing, until a close of each is acknowledged. */
+  /** Sessions whose close is in flight. */
   private readonly closing = new Set<Live>();
+  /** Sessions whose close failed while their process lives on. */
+  private readonly unclosed = new Set<Live>();
   /** Conversations whose session is opening, and the turn it opened for. */
   /** Messages waiting, in arrival order, for a turn ahead to free their
    * conversation's session. Stop clears them. */
@@ -782,7 +784,7 @@ export class AgentSessions<S = unknown> {
     this.dispose();
     await Promise.allSettled(this.opens);
     const closed = await Promise.allSettled(
-      [...this.closing].map((live) => this.strict(live)),
+      [...this.closing, ...this.unclosed].map((live) => this.strict(live)),
     );
     this.options.onChange?.();
     const failed = closed.find((result) => result.status === "rejected");
@@ -1315,10 +1317,19 @@ export class AgentSessions<S = unknown> {
    * have acknowledged it. */
   private strict(live: Live) {
     this.closing.add(live);
-    return live.process.close(live.session, true).then(() => {
-      this.closing.delete(live);
-      this.stopReplaced();
-    });
+    this.unclosed.delete(live);
+    return live.process.close(live.session, true).then(
+      () => {
+        this.closing.delete(live);
+        this.stopReplaced();
+      },
+      (error: unknown) => {
+        // No close is coming now, so it no longer blocks resuming it.
+        this.closing.delete(live);
+        this.unclosed.add(live);
+        throw error;
+      },
+    );
   }
   /** Makes the latest ask's `process` the current one; an earlier ask's
    * that finished late is replaced, and stops once no session is in it. */
@@ -1338,11 +1349,13 @@ export class AgentSessions<S = unknown> {
     void process.exited.then(() => {
       this.replaced.delete(process);
       if (this.process === process) this.process = undefined;
+      for (const set of [this.closing, this.unclosed])
+        for (const live of set) if (live.process === process) set.delete(live);
       for (const [key, live] of this.live)
         if (live.process === process) this.drop(key, live);
     });
   }
-  /** Whether session `id` is retired or closing, and not yet closed. */
+  /** Whether session `id` is retired, or its close is in flight. */
   private closes(id: string) {
     const held = [...this.retired.values()].flatMap((set) => [...set]);
     return [...held, ...this.closing].some(
@@ -1351,9 +1364,12 @@ export class AgentSessions<S = unknown> {
   }
   /** Whether a session is in `process`, or closing in it. */
   private used(process: AcpProcess) {
-    return [...this.live.values(), ...this.once.values(), ...this.closing].some(
-      (live) => live?.process === process,
-    );
+    return [
+      ...this.live.values(),
+      ...this.once.values(),
+      ...this.closing,
+      ...this.unclosed,
+    ].some((live) => live?.process === process);
   }
   /** Stops each replaced process that no session is in or opening in. */
   private stopReplaced() {
