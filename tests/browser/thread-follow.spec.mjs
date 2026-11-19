@@ -51,15 +51,12 @@ test("Follow thread makes a peer thread's replies unread across reload, and Unfo
   await choose(own, "Unfollow thread");
   // Follow choices become observable after the asynchronous durable save.
   // Reload only after that boundary, not merely after the menu click.
-  await expect
-    .poll(() =>
-      page.evaluate(
-        (id) =>
-          window.fixtureRelay.snapshot().session.unread.following("alpha", id),
-        own.id,
-      ),
-    )
-    .toBe(false);
+  await hoverMessage(row(own));
+  await row(own).getByRole("button", { name: "More message actions" }).click();
+  await expect(
+    page.getByRole("menuitem", { name: "Follow thread", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.reload();
   await expect(thread(peer)).toHaveAccessibleName("View thread: 23 replies");
   await settle(page);
