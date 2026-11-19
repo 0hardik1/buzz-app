@@ -245,10 +245,12 @@ export type ChannelTimelineProps = {
   navigation?: PageNavigation | undefined;
   /** After an exact visit reveals and focuses its row. */
   onRevealed?(messageId: string, signal: AbortSignal): void;
+  /** `origin`: the row it was opened from, which names its reader. */
   onOpenThread?(
     messageId: string,
     threadRootId: string,
     intent?: "reply",
+    origin?: Element | null,
   ): void;
   onOpenMediaReview?(
     messageId: string,

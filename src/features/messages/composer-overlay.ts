@@ -65,6 +65,27 @@ export function useOverlayComposerRef(ref: RefObject<HTMLFormElement | null>) {
   );
 }
 
+/** Resolves once no composer within `root` is sending, or `root` leaves the
+ * page: unmounting a composer cancels its send. */
+export function composerSettled(root: HTMLElement): Promise<void> {
+  const busy = () =>
+    root.isConnected &&
+    !!root.querySelector('[data-message-composer][aria-busy="true"]');
+  if (!busy()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const observer = new MutationObserver(() => {
+      if (busy()) return;
+      observer.disconnect();
+      resolve();
+    });
+    observer.observe(root.ownerDocument.body, {
+      subtree: true,
+      childList: true,
+      attributeFilter: ["aria-busy"],
+    });
+  });
+}
+
 /** Accepted local sends dismiss an agent details reader attached to this editor. */
 export const COMPOSER_SENT = "message-composer-sent";
 /** A reader opened as a tab closes the others over its composer; the event's

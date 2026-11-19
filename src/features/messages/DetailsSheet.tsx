@@ -10,6 +10,7 @@ import {
   COMPOSER_PROMOTED,
   COMPOSER_SENT,
   type ComposerOverlayHost,
+  composerSettled,
 } from "./composer-overlay";
 import { Dialog as BaseDialog } from "@base-ui/react/dialog";
 import {
@@ -316,6 +317,9 @@ export function DetailsSheet({
   headerActions,
   onClosed,
   onPromoted,
+  onOpenAsTab,
+  focusContent = false,
+  onEscapeKey,
   spotlight,
   onSpotlightAnchor,
 }: {
@@ -338,6 +342,14 @@ export function DetailsSheet({
   headerActions?: ReactNode;
   onClosed?: () => void;
   onPromoted?: (() => void) | undefined;
+  /** Content with its own tab, such as a thread, opens that tab instead of
+   * moving this sheet's body into a new one. */
+  onOpenAsTab?: (() => void) | undefined;
+  /** The content places focus itself, as a thread opened to reply does;
+   * otherwise the sheet takes focus. */
+  focusContent?: boolean;
+  /** Returns true when it handled Escape, keeping the sheet open. */
+  onEscapeKey?: (() => boolean) | undefined;
   /** The intro step pointing into this sheet: 1 its title, 2 Open as tab. */
   spotlight?: InlineThreadIntroStep | undefined;
   /** Receives the element the current intro step points at. */
@@ -347,8 +359,11 @@ export function DetailsSheet({
   const promote = useContext(DetailTabContext);
   const tabId = useId();
   const [promoted, setPromoted] = useState(false);
-  const releaseTab = useRef<(() => void) | undefined>(undefined);
-  useEffect(() => () => releaseTab.current?.(), []);
+  const tab = useRef<ReturnType<NonNullable<typeof promote>> | undefined>(
+    undefined,
+  );
+  useEffect(() => () => tab.current?.release(), []);
+  const handing = useRef(false);
   const [contentNode] = useState(() => {
     const node = document.createElement("div");
     node.className = styles.retainedBody ?? "";
@@ -419,13 +434,44 @@ export function DetailsSheet({
   }, [composer, open, promoted, onOpenChange, tabId]);
   return (
     <>
-      {mounted && attached && createPortal(children, contentNode)}
+      {mounted &&
+        attached &&
+        createPortal(
+          // React events from the moved body still bubble through this sheet's
+          // owner, not the tab that shows it: Escape closes that tab here.
+          // biome-ignore lint/a11y/noStaticElementInteractions: Escape from the promoted body closes its tab, as in the tab host.
+          <div
+            className={styles.retainedContent}
+            onKeyDown={(event) => {
+              if (
+                promoted &&
+                event.key === "Escape" &&
+                // Shift+Escape is Mark all as read, not a dismissal.
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing &&
+                event.nativeEvent.keyCode !== 229 &&
+                !event.defaultPrevented &&
+                event.currentTarget.contains(event.target as Node)
+              ) {
+                event.stopPropagation();
+                tab.current?.close();
+              }
+            }}
+          >
+            {children}
+          </div>,
+          contentNode,
+        )}
       <BaseDialog.Root
         open={open && !promoted}
         // Expansion belongs to this pane; the rest of the app stays interactive.
         modal={false}
         onOpenChange={(next, details) => {
           if (!next) {
+            if (details.reason === "escape-key" && onEscapeKey?.()) {
+              details.cancel();
+              return;
+            }
             const target =
               details.event instanceof FocusEvent
                 ? details.event.relatedTarget
@@ -489,11 +535,10 @@ export function DetailsSheet({
             data-reader-only={readerOnly || undefined}
             data-height={height}
             style={style}
-            // A sheet without its own composer takes focus itself: its first
-            // header action would show a focus tooltip that the first Escape
-            // closes instead of the sheet. Thread and media sheets keep their
-            // own focus placement.
-            initialFocus={containsComposer ? undefined : popup}
+            // The sheet takes focus itself: its first header action would show
+            // a focus tooltip that the first Escape closes instead of the
+            // sheet. A reply opening leaves focus for its reply editor.
+            initialFocus={focusContent ? false : popup}
             finalFocus={promoted ? false : returnFocus}
           >
             <div className={styles.content}>
@@ -530,7 +575,7 @@ export function DetailsSheet({
                 </div>
                 <div className="buzz-dialog-header-actions">
                   {headerActions}
-                  {promote && (
+                  {(onOpenAsTab || promote) && (
                     <IntroSpotlight
                       shape="ring"
                       active={spotlight === 2}
@@ -549,6 +594,18 @@ export function DetailsSheet({
                           <ArrowSquareOutIcon size={16} aria-hidden="true" />
                         }
                         onClick={() => {
+                          if (onOpenAsTab) {
+                            // Its tab mounts a new composer: let a send finish.
+                            const sheet = popup.current;
+                            if (!sheet || handing.current) return;
+                            handing.current = true;
+                            void composerSettled(sheet).then(() => {
+                              handing.current = false;
+                              if (sheet.isConnected) onOpenAsTab();
+                            });
+                            return;
+                          }
+                          if (!promote) return;
                           setPromoted(true);
                           onPromoted?.();
                           composer.dispatchEvent(
@@ -556,16 +613,17 @@ export function DetailsSheet({
                               detail: tabId,
                             }),
                           );
-                          releaseTab.current = promote({
+                          tab.current = promote({
                             id: tabId,
                             title:
                               typeof title === "string" ? title : "Details",
                             node: contentNode,
                             close: () => {
-                              releaseTab.current?.();
-                              releaseTab.current = undefined;
+                              tab.current?.release();
+                              tab.current = undefined;
                               setPromoted(false);
                               setMounted(false);
+                              setAttached(false);
                               onOpenChange(false);
                               onClosed?.();
                             },

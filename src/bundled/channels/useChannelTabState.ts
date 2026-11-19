@@ -37,6 +37,9 @@ export type ConversationTab =
       channelId: string;
       messageId: string;
       replyRequest?: number | undefined;
+      /** The nested reply its reply request targets, as a thread handed over
+       * from its inline sheet carries it. */
+      replyParent?: string | undefined;
       /** Each new value focuses the reply box, keeping its target. */
       focusRequest?: number | undefined;
       /** Each new value reveals `messageId` again; set only by openings at it. */
@@ -194,6 +197,7 @@ function withThread(
   attention = false,
   relocate = false,
   unreadSince?: number,
+  replyParent?: string,
 ): State {
   const existing = threadTab(state.tabs, channelId, rootId);
   const baseId = `thread:${channelId}:${rootId}`;
@@ -217,6 +221,12 @@ function withThread(
         ? (prior?.replyRequest ?? 0) + 1
         : intent === "select" || intent === "reveal" || intent === "focus"
           ? prior?.replyRequest
+          : undefined,
+    replyParent:
+      intent === "reply"
+        ? replyParent
+        : intent === "select" || intent === "reveal" || intent === "focus"
+          ? prior?.replyParent
           : undefined,
     // Ordinary user openings resume typing too. Passive restoration and tabs
     // opened by an agent do not claim focus.
@@ -641,6 +651,7 @@ export function useChannelTabState(
       intent?: ThreadIntent,
       pane: TabPane = threadTabPane(),
       unreadSince?: number,
+      replyParent?: string,
     ) =>
       update((state) =>
         withThread(
@@ -653,6 +664,7 @@ export function useChannelTabState(
           true,
           false,
           unreadSince,
+          replyParent,
         ),
       ),
     [update],

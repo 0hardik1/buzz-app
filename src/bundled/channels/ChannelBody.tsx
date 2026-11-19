@@ -1,12 +1,8 @@
-import { DetailTabContext } from "../../features/messages/DetailTabContext";
-import { ArrowSquareOutIcon } from "../../shared/design-system/icons";
-import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { MessageLoading } from "../../features/messages/MessageLoading";
 import { DetailsSheet } from "../../features/messages/DetailsSheet";
 import {
   InlineThreadIntro,
   type InlineThreadIntroStep,
-  IntroSpotlight,
   inlineThreadIntroSeen,
   markInlineThreadIntroSeen,
 } from "../../features/messages/InlineThreadIntro";
@@ -19,7 +15,6 @@ import {
   memo,
   type ReactNode,
   useCallback,
-  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -31,6 +26,7 @@ import {
   ConversationThread,
   useConversation,
 } from "../../features/conversation/Conversation";
+import type { ThreadHandoff } from "../../features/messages/ThreadPanel";
 import type { ChannelTimelineProps } from "../../features/messages/ChannelTimeline";
 import type { PageNavigation } from "../../features/navigation/service";
 import { useChannelWindow } from "../../features/relay/react";
@@ -51,7 +47,9 @@ export const ChannelBody = memo(function ChannelBody({
   marksRead,
   holding,
   onOpenThread,
+  hasThreadTab,
   threadRequest,
+  onCloseThreadRequest,
   navigation,
   onContentReady,
 }: {
@@ -69,8 +67,15 @@ export const ChannelBody = memo(function ChannelBody({
   marksRead?: boolean | undefined;
   /** Show the loading notice instead of the list, as while a message is sought. */
   holding?: boolean | undefined;
+  /** Opens the thread's tab. A thread handed over from its sheet asks it to
+   * reveal the reply it was read at, or to reply to its reply target. */
   onOpenThread?:
-    | ((messageId: string, threadRootId: string, intent?: "reply") => void)
+    | ((
+        messageId: string,
+        threadRootId: string,
+        intent?: "reply" | "reveal",
+        replyParent?: string,
+      ) => void)
     | undefined;
   /** Whether a thread already has a tab, which it selects instead of reading
    * inline. */
@@ -78,6 +83,9 @@ export const ChannelBody = memo(function ChannelBody({
   /** A visit to a thread read inline: once the timeline reveals its root, the
    * thread opens over the conversation. */
   threadRequest?: Readonly<{ rootId: string; signal: AbortSignal }> | undefined;
+  /** Close or Escape dismissed the thread a request opened: retire its visit,
+   * so Back never shows a sheet again. Inline sheets are not history entries. */
+  onCloseThreadRequest?: ((signal: AbortSignal) => void) | undefined;
 }) {
   // The owner's Solo chat is a chat-style timeline that loads history on scroll.
   const {
@@ -86,7 +94,6 @@ export const ChannelBody = memo(function ChannelBody({
     ownSoloConversation: solo,
   } = useConversation();
   const presented = useConversationPresentation();
-  const tabHost = useContext(DetailTabContext);
   const trigger = useRef<HTMLElement | null>(null);
   type Thread = {
     messageId: string;
@@ -95,10 +102,12 @@ export const ChannelBody = memo(function ChannelBody({
     host: ComposerOverlayHost;
     revealSelected: boolean;
     replyRequest?: number;
-    promoted?: boolean;
+    /** The visit that opened it, retired when it is dismissed. */
+    request?: AbortSignal;
     open: boolean;
     id: number;
     trigger: { current: HTMLElement | null };
+    handoff: { current: (() => ThreadHandoff) | undefined };
   };
   const sequence = useRef(0);
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -107,14 +116,15 @@ export const ChannelBody = memo(function ChannelBody({
   const [introStep, setIntroStep] = useState<InlineThreadIntroStep>(1);
   const [introAnchor, setIntroAnchor] = useState<HTMLElement | null>(null);
   const addThread = useCallback(
-    (thread: Omit<Thread, "id" | "trigger" | "open">) => {
+    (thread: Omit<Thread, "id" | "trigger" | "open" | "handoff">) => {
       const next = {
         ...thread,
         open: true,
         id: ++sequence.current,
         trigger: { current: trigger.current },
+        handoff: { current: undefined },
       };
-      setThreads((items) => [...items.filter((item) => item.promoted), next]);
+      setThreads([next]);
       if (!inlineThreadIntroSeen()) {
         setIntroThread(next.id);
         setIntroStep(1);
@@ -128,10 +138,21 @@ export const ChannelBody = memo(function ChannelBody({
     );
   }, [presented, channelId]);
   // Stable, so memoized message rows keep their props across window updates.
+  // The row it opens from names its reader: on macOS a click moves no focus.
+  // A thread with a tab selects that tab instead.
   const openThread = useCallback(
-    (messageId: string, rootId: string, intent?: "reply") => {
-      const opener = document.activeElement;
-      const host = overlayHostFor(opener);
+    (
+      messageId: string,
+      rootId: string,
+      intent?: "reply",
+      origin?: Element | null,
+    ) => {
+      const focused = document.activeElement;
+      const opener =
+        origin && !(focused && origin.contains(focused)) ? origin : focused;
+      const host = hasThreadTab?.(channelId, rootId)
+        ? null
+        : overlayHostFor(origin ?? focused);
       if (!host) {
         onOpenThread?.(messageId, rootId, intent);
         return;
@@ -146,7 +167,7 @@ export const ChannelBody = memo(function ChannelBody({
         ...(intent === "reply" ? { replyRequest: 1 } : {}),
       });
     },
-    [channelId, onOpenThread, addThread],
+    [channelId, onOpenThread, hasThreadTab, addThread],
   );
   const request = useRef(threadRequest);
   useLayoutEffect(() => {
@@ -180,6 +201,7 @@ export const ChannelBody = memo(function ChannelBody({
         channelId,
         host,
         revealSelected: false,
+        request: signal,
       });
     },
     [channelId, onOpenThread, addThread],
@@ -282,9 +304,12 @@ export const ChannelBody = memo(function ChannelBody({
     (thread) =>
       thread.id === introThread &&
       thread.open &&
-      !thread.promoted &&
       thread.channelId === channelId,
   );
+  const finishIntro = () => {
+    markInlineThreadIntroSeen();
+    setIntroThread(undefined);
+  };
   return (
     <>
       {timeline}
@@ -299,84 +324,76 @@ export const ChannelBody = memo(function ChannelBody({
       {presented &&
         threads
           .filter((thread) => thread.channelId === channelId)
-          .map((thread) => (
-            <DetailsSheet
-              key={thread.id}
-              spotlight={
-                introducing && thread.id === introThread ? introStep : undefined
-              }
-              onSpotlightAnchor={setIntroAnchor}
-              onPromoted={() => {
-                if (thread.id === introThread) markInlineThreadIntroSeen();
-                setThreads((items) =>
-                  items.map((item) =>
-                    item.id === thread.id ? { ...item, promoted: true } : item,
-                  ),
-                );
-              }}
-              open={thread.open}
-              onOpenChange={(open) =>
-                setThreads((items) =>
-                  items.map((item) =>
-                    item.id === thread.id ? { ...item, open } : item,
-                  ),
-                )
-              }
-              onClosed={() =>
-                setThreads((items) =>
-                  items.filter((item) => item.id !== thread.id),
-                )
-              }
-              host={thread.host}
-              containsComposer
-              title="Thread"
-              headerActions={
-                !tabHost && (
-                  <IntroSpotlight
-                    shape="ring"
-                    active={
-                      introducing &&
-                      thread.id === introThread &&
-                      introStep === 2
-                    }
-                    anchorRef={setIntroAnchor}
-                  >
-                    <IconButton
-                      aria-label="Open thread in tab"
-                      // The intro step names it while it points here.
-                      title={
-                        introducing && thread.id === introThread
-                          ? undefined
-                          : "Open thread in tab"
-                      }
-                      variant="glass"
-                      shape="round"
-                      size="compact"
-                      icon={<ArrowSquareOutIcon size={16} aria-hidden="true" />}
-                      onClick={() => {
-                        if (thread.id === introThread)
-                          markInlineThreadIntroSeen();
-                        onOpenThread?.(thread.messageId, thread.rootId);
+          .map((thread) => {
+            const intro = introducing && thread.id === introThread;
+            return (
+              <DetailsSheet
+                key={thread.id}
+                spotlight={intro ? introStep : undefined}
+                onSpotlightAnchor={setIntroAnchor}
+                // The first Escape finishes the intro; the next closes.
+                onEscapeKey={() => {
+                  if (!intro) return false;
+                  finishIntro();
+                  return true;
+                }}
+                {...(onOpenThread
+                  ? {
+                      // The thread moves into its own tab, at the reply it was
+                      // read at and with its reply target.
+                      onOpenAsTab: () => {
+                        if (intro) finishIntro();
+                        const { anchor, replyParent } =
+                          thread.handoff.current?.() ?? {};
                         setThreads((items) =>
                           items.filter((item) => item.id !== thread.id),
                         );
-                      }}
-                    />
-                  </IntroSpotlight>
-                )
-              }
-              closeLabel="Close thread"
-              finalFocus={thread.trigger}
-            >
-              <ConversationThread
-                messageId={thread.messageId}
-                replyRequest={thread.replyRequest}
-                revealSelected={thread.revealSelected}
-                initialScroll="latest"
-                virtualizeReplies
-              />
-            </DetailsSheet>
-          ))}
+                        if (replyParent)
+                          onOpenThread(
+                            replyParent,
+                            thread.rootId,
+                            "reply",
+                            replyParent,
+                          );
+                        else if (anchor)
+                          onOpenThread(anchor, thread.rootId, "reveal");
+                        else onOpenThread(thread.messageId, thread.rootId);
+                      },
+                    }
+                  : {})}
+                open={thread.open}
+                onOpenChange={(open) => {
+                  if (!open && thread.request)
+                    onCloseThreadRequest?.(thread.request);
+                  setThreads((items) =>
+                    items.map((item) =>
+                      item.id === thread.id ? { ...item, open } : item,
+                    ),
+                  );
+                }}
+                onClosed={() =>
+                  setThreads((items) =>
+                    items.filter((item) => item.id !== thread.id),
+                  )
+                }
+                host={thread.host}
+                containsComposer
+                focusContent={thread.replyRequest !== undefined}
+                title="Thread"
+                closeLabel="Close thread"
+                finalFocus={thread.trigger}
+              >
+                <ConversationThread
+                  messageId={thread.messageId}
+                  replyRequest={thread.replyRequest}
+                  revealSelected={thread.revealSelected}
+                  handoff={thread.handoff}
+                  initialScroll="latest"
+                  virtualizeReplies
+                />
+              </DetailsSheet>
+            );
+          })}
     </>
   );
 });

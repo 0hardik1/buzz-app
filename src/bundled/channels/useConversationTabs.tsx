@@ -168,6 +168,8 @@ export function useConversationTabs({
   const [detailTabs, setDetailTabs] = useState<
     (DetailTab & { channelId: string | undefined })[]
   >([]);
+  // Closing a detail tab from its content does what its tab's Close does.
+  const closeDetail = useRef<(id: string) => void>(() => {});
   const promoteDetail = useCallback(
     (tab: DetailTab) => {
       setDetailTabs((tabs) => [
@@ -175,8 +177,11 @@ export function useConversationTabs({
         { ...tab, channelId: currentId },
       ]);
       tabState.select(tab.id);
-      return () =>
-        setDetailTabs((tabs) => tabs.filter((item) => item.id !== tab.id));
+      return {
+        release: () =>
+          setDetailTabs((tabs) => tabs.filter((item) => item.id !== tab.id)),
+        close: () => closeDetail.current(tab.id),
+      };
     },
     [currentId, tabState.select],
   );
@@ -640,6 +645,10 @@ export function useConversationTabs({
       else focusSplit.current = true;
     }
   };
+  closeDetail.current = (id) => {
+    detailTabs.find((tab) => tab.id === id)?.close();
+    afterClose(id);
+  };
   const closeConversationTab = (id: string) => {
     const closing = tabState.tabs.find((tab) => tab.id === id);
     const wasActive =
@@ -755,6 +764,7 @@ export function useConversationTabs({
     rootId: string,
     intent?: "reply" | "reveal" | "focus",
     unreadSince?: number,
+    replyParent?: string,
   ) => {
     if (!currentVisit()) return;
     // Flat sessions keep their side-only host; channels support both panes.
@@ -765,6 +775,7 @@ export function useConversationTabs({
       intent,
       threadPane ?? (mainPane ? undefined : "side"),
       unreadSince,
+      replyParent,
     );
     if (
       opening.current &&
@@ -976,8 +987,15 @@ export function useConversationTabs({
               openConversationLink(target.id, url, origin)
             }
             canOpenLink={canOpenLink}
-            openThread={(id, root, intent) =>
-              openConversationThread(target.id, id, root, intent)
+            openThread={(id, root, intent, replyParent) =>
+              openConversationThread(
+                target.id,
+                id,
+                root,
+                intent,
+                undefined,
+                replyParent,
+              )
             }
             close={() => closeConversationTab(tab.id)}
             parent={parentOf(tab, target)}
@@ -1209,8 +1227,15 @@ export function useConversationTabs({
                 openConversationLink(target.id, url, origin)
               }
               canOpenLink={canOpenLink}
-              openThread={(id, root, intent) =>
-                openConversationThread(target.id, id, root, intent)
+              openThread={(id, root, intent, replyParent) =>
+                openConversationThread(
+                  target.id,
+                  id,
+                  root,
+                  intent,
+                  undefined,
+                  replyParent,
+                )
               }
               close={() => closeConversationTab(tab.id)}
               parent={parentOf(tab, target)}
@@ -1228,10 +1253,7 @@ export function useConversationTabs({
         id: tab.id,
         label: tab.title,
         move: undefined,
-        close: () => {
-          tab.close();
-          afterClose(tab.id);
-        },
+        close: () => closeDetail.current(tab.id),
         content: <DetailTabSlot node={tab.node} />,
       })),
     ],

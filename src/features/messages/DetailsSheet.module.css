@@ -303,6 +303,10 @@ html[data-keyboard-navigation]
   min-height: 0;
   overflow: auto;
 }
+.retainedContent {
+  /* Only a key handler: the body lays out its content directly. */
+  display: contents;
+}
 .sheet[data-height="content"][data-contained-composer] .retainedBody {
   flex: 0 1 auto;
 }

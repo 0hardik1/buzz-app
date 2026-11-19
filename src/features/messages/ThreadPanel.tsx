@@ -73,6 +73,11 @@ import { useKnownAgentPubkeys } from "../agents/use-known";
 import { JumpToLatestButton } from "./JumpToLatestButton";
 import { correctScrollTop } from "./scroll-correction";
 
+export type ThreadHandoff = Readonly<{
+  anchor?: string | undefined;
+  replyParent?: string | undefined;
+}>;
+
 export type ThreadPanelProps = {
   intro?: ReactNode;
   extensions?: ConversationExtensions | undefined;
@@ -95,6 +100,12 @@ export type ThreadPanelProps = {
   /** Retry a failed routed opening with fresh navigation authority. */
   onRetryNavigation?: (() => void) | undefined;
   replyRequest?: number | undefined;
+  /** With replyRequest: the nested reply it targets, as a reader handed over
+   * to a tab carries it. */
+  replyParent?: string | undefined;
+  /** Filled with what a tab taking over this reader carries: the reply it
+   * reads at, unless it follows the latest, and its reply target. */
+  handoff?: { current: (() => ThreadHandoff) | undefined } | undefined;
   /** Each new value focuses the reply box, keeping its target. */
   focusRequest?: number | undefined;
   /** A saved draft carries its cancellable target through a delayed root read. */
@@ -449,6 +460,8 @@ function OwnedThreadPanel({
   soloConversation,
   disabled,
   replyRequest,
+  replyParent,
+  handoff,
   focusRequest,
   autoFocus,
   active = true,
@@ -528,6 +541,8 @@ function OwnedThreadPanel({
       navigation={navigation}
       messageId={messageId}
       replyRequest={replyRequest}
+      replyParent={replyParent}
+      handoff={handoff}
       focusRequest={focusRequest}
       autoFocus={autoFocus}
       active={active}
@@ -563,6 +578,8 @@ function ThreadMessages({
   soloConversation,
   disabled,
   replyRequest,
+  replyParent: requestedReplyParent,
+  handoff,
   focusRequest,
   autoFocus,
   active,
@@ -599,6 +616,8 @@ function ThreadMessages({
   messageId: string;
   view: ThreadView;
   replyRequest?: number | undefined;
+  replyParent?: string | undefined;
+  handoff?: ThreadPanelProps["handoff"];
   focusRequest?: number | undefined;
   autoFocus?: ThreadPanelProps["autoFocus"];
   active?: boolean | undefined;
@@ -1296,9 +1315,27 @@ function ThreadMessages({
     setReplyParent((current) => (current === id ? undefined : id));
     setReplyFocus((value) => value + 1);
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the target belongs to its request, which alone asks again.
   useEffect(() => {
-    if (replyRequest) focusReply();
+    if (!replyRequest) return;
+    if (requestedReplyParent) {
+      setReplyParent(requestedReplyParent);
+      setReplyFocus((value) => value + 1);
+    } else focusReply();
   }, [replyRequest, focusReply]);
+  useLayoutEffect(() => {
+    if (!handoff) return;
+    handoff.current = () => {
+      captureResizePosition();
+      const anchor = follow.current
+        ? undefined
+        : resizePosition.current?.anchor?.element.dataset.messageId;
+      return { anchor, replyParent };
+    };
+    return () => {
+      handoff.current = undefined;
+    };
+  });
   useEffect(() => {
     if (focusRequest) setReplyFocus((value) => value + 1);
   }, [focusRequest]);
@@ -1360,7 +1397,9 @@ function ThreadMessages({
       seconds: number,
       _hasComments?: boolean,
       attachments?: ChannelMessage["attachments"],
+      opening?: MediaReviewOrigin,
     ) => {
+      // A row names the reader it was opened from; a timecode, this one.
       if (rootId)
         onOpenMediaReview?.(
           _rowId,
@@ -1368,7 +1407,10 @@ function ThreadMessages({
           seconds,
           hasMediaComments,
           attachments,
-          { host: overlayHostFor(document.activeElement), rootId },
+          {
+            host: opening ? opening.host : overlayHostFor(scroller.current),
+            rootId,
+          },
         );
     },
     [rootId, onOpenMediaReview, hasMediaComments],

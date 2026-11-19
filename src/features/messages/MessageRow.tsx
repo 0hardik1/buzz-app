@@ -160,8 +160,14 @@ export type MessageRowProps = {
   retry: ((id: string) => void) | undefined;
   /** Pins this row in a virtualized list; returns the release. */
   keepMounted?: ((messageId: string) => () => void) | undefined;
+  /** `origin`: the row it was opened from, which names its reader. */
   onOpenThread?:
-    | ((messageId: string, threadRootId: string, intent?: "reply") => void)
+    | ((
+        messageId: string,
+        threadRootId: string,
+        intent?: "reply",
+        origin?: Element | null,
+      ) => void)
     | undefined;
   onReply?: ((messageId: string) => void) | undefined;
   /** False: existing threads open, but the row offers none to start or reply in. */
@@ -898,7 +904,7 @@ function MessageRowContent({
                                   row.threadRootId !== row.id),
                               row.attachments,
                               {
-                                host: overlayHostFor(document.activeElement),
+                                host: overlayHostFor(rowRef.current),
                                 rootId: row.threadRootId ?? row.id,
                               },
                             ),
@@ -956,7 +962,7 @@ function MessageRowContent({
                                 row.threadRootId !== row.id),
                             row.attachments,
                             {
-                              host: overlayHostFor(document.activeElement),
+                              host: overlayHostFor(rowRef.current),
                               rootId: row.threadRootId ?? row.id,
                             },
                           ),
@@ -1221,6 +1227,7 @@ function MessageRowContent({
                 row.threadRootId ?? row.id,
                 row.threadRootId ?? row.id,
                 "reply",
+                rowRef.current,
               )
           : undefined)
       }
@@ -1405,7 +1412,12 @@ function MessageRowContent({
             }
             onClick={(event) => {
               event.currentTarget.focus();
-              onOpenThread(row.id, row.threadRootId ?? row.id);
+              onOpenThread(
+                row.id,
+                row.threadRootId ?? row.id,
+                undefined,
+                rowRef.current,
+              );
             }}
           >
             <ReplySummary

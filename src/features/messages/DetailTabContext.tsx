@@ -6,9 +6,10 @@ export type DetailTab = {
   node: HTMLElement;
   close(): void;
 };
-/** The conversation workspace owns promotion; the reader keeps its live content. */
+/** The conversation workspace owns promotion; the reader keeps its live
+ * content. `release` drops the tab; `close` closes it as its tab's Close does. */
 export const DetailTabContext = createContext<
-  ((tab: DetailTab) => () => void) | undefined
+  ((tab: DetailTab) => { release(): void; close(): void }) | undefined
 >(undefined);
 
 export function DetailTabSlot({

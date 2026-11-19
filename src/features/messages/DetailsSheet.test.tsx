@@ -45,7 +45,10 @@ it("keeps a reader's edited state through promotion, releases it on close, and r
       <DetailTabContext
         value={(next) => {
           setTab(next);
-          return () => setTab(undefined);
+          return {
+            release: () => setTab(undefined),
+            close: () => next.close(),
+          };
         }}
       >
         <button type="button" onClick={() => setOpen(true)}>
@@ -112,7 +115,10 @@ it("closes the other readers over its composer when one opens as a tab", async (
       <DetailTabContext
         value={(next) => {
           setTab(next);
-          return () => setTab(undefined);
+          return {
+            release: () => setTab(undefined),
+            close: () => next.close(),
+          };
         }}
       >
         <DetailsSheet

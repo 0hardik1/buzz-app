@@ -1095,12 +1095,17 @@ function ChannelWorkspace({
     !tabState.hasThreadTab(currentId, requestedMessage);
   // The root can sit above the loaded history, as an older thread with new
   // replies does: wait for verified rows and read older pages to find it.
+  // Each visit decides afresh: the window may have changed since the last.
+  const visits = useRef(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new navigation is a new visit.
+  const visitRequest = useMemo(() => ++visits.current, [navigation]);
   const inlineRoot = useMessageOpening(
     queries.channels,
     currentId ?? "",
     inlineThreadVisit && !cached && !current?.cached
       ? requestedMessage
       : undefined,
+    visitRequest,
   );
   useEffect(() => {
     if (
@@ -1186,6 +1191,26 @@ function ChannelWorkspace({
         ? { rootId: requestedMessage, signal: inlineThreadSignal }
         : undefined,
     [inlineThreadSignal, requestedMessage],
+  );
+  // An inline sheet is an overlay, not a history entry: dismissing the thread
+  // a visit opened retires that visit, back to its conversation.
+  const closeInlineThread = useCallback(
+    (signal: AbortSignal) => {
+      if (
+        !navigator ||
+        navigation?.signal !== signal ||
+        navigation.target.kind !== "conversation" ||
+        navigator.snapshot().entry.id !== navigation.entryId
+      )
+        return;
+      const {
+        messageId: _message,
+        threadRootId: _root,
+        ...target
+      } = navigation.target;
+      navigator.dismiss([navigation.entryId], target);
+    },
+    [navigator, navigation],
   );
   // The route addresses a thread; its tab owns presentation, the route only
   // selects it and supplies the reveal request.
@@ -1848,7 +1873,8 @@ function ChannelWorkspace({
       channelId: string,
       messageId: string,
       threadRootId: string,
-      intent?: "reply",
+      intent?: "reply" | "reveal",
+      replyParent?: string,
     ) => {
       setSettings(undefined);
       threadTrigger.current =
@@ -1867,6 +1893,8 @@ function ChannelWorkspace({
         threadRootId,
         intent,
         threadPane,
+        undefined,
+        replyParent,
       );
       const target = navigator?.snapshot().entry.target;
       if (
@@ -1903,9 +1931,20 @@ function ChannelWorkspace({
     ],
   );
   const openThread = useCallback(
-    (messageId: string, threadRootId: string, intent?: "reply") => {
+    (
+      messageId: string,
+      threadRootId: string,
+      intent?: "reply" | "reveal",
+      replyParent?: string,
+    ) => {
       if (currentId)
-        openChannelThread(currentId, messageId, threadRootId, intent);
+        openChannelThread(
+          currentId,
+          messageId,
+          threadRootId,
+          intent,
+          replyParent,
+        );
     },
     [currentId, openChannelThread],
   );
@@ -2444,6 +2483,7 @@ function ChannelWorkspace({
             onOpenThread={openThread}
             hasThreadTab={tabState.hasThreadTab}
             threadRequest={inlineThreadRequest}
+            onCloseThreadRequest={closeInlineThread}
             revealMessageId={
               sent?.channelId === current.id ? sent.id : undefined
             }

@@ -3566,6 +3566,7 @@ function Composer({
         data-composer-surface=""
         // Details readers grow out of the composer beneath their message.
         data-message-composer=""
+        aria-busy={sending || undefined}
         data-chat-presentation={chatPresentation || undefined}
         data-file-drag={dragging || undefined}
         data-editing={!!editing.target || undefined}
