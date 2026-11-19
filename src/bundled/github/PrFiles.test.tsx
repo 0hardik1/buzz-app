@@ -153,6 +153,49 @@ it("discards a reply page that completes after a new snapshot replaces its owner
   ).toBeTruthy();
 });
 
+it("loads all three reply pages without confusing ownership with pagination", async () => {
+  const fixture = githubCommentHost();
+  const api = createPrComments(fixture.host);
+  if (!api) throw new Error("Missing adapter");
+  const snapshot = await api.loadSnapshot(fixturePull);
+  await api.create(
+    snapshot,
+    { ...snapshot, path: "src/example.ts", side: "RIGHT", line: 5001 },
+    "Comment 1",
+    "seed",
+  );
+  const root = fixture.state.comments[0];
+  if (!root) throw new Error("Missing root");
+  for (let id = 2; id <= 201; id++)
+    fixture.state.comments.push({
+      ...root,
+      id,
+      node_id: `comment-${id}`,
+      body: `Comment ${id}`,
+      in_reply_to_id: root.id,
+    });
+  render(
+    <PrFiles
+      api={api}
+      pull={fixturePull}
+      head={snapshot.head}
+      base={snapshot.base}
+      delivery={createInlineDelivery()}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Load more replies" }),
+  );
+  await screen.findByText("Comment 200");
+  fireEvent.click(screen.getByRole("button", { name: "Load more replies" }));
+  await screen.findByText("Comment 201");
+  expect(
+    screen.queryByRole("button", { name: "Load more replies" }),
+  ).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText("Comment 1")).toBeTruthy();
+});
+
 async function setupComposer() {
   const fixture = githubCommentHost();
   const api = createPrComments(fixture.host);

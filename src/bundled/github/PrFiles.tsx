@@ -62,6 +62,8 @@ export function PrFiles({
   delivery: InlineDeliveryStore;
   active?: boolean;
 }) {
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const status = useSyncExternalStore(delivery.subscribe, delivery.get);
   const [composers, setComposers] = useState<Composer[]>([]);
   const composersRef = useRef(composers);
@@ -215,7 +217,7 @@ export function PrFiles({
       returnFocus: () => void,
       replyTo?: number,
     ) {
-      if (!snapshot || loading || !active) return;
+      if (!snapshot || loading || !activeRef.current) return;
       const target: InlineTarget = {
         path,
         side: line.side === "deletions" ? "LEFT" : "RIGHT",
@@ -248,7 +250,7 @@ export function PrFiles({
       if (!status.busy && !status.unknown)
         delivery.update({ error: undefined, sentUrl: undefined });
     },
-    [snapshot, loading, active, status.busy, status.unknown, delivery],
+    [snapshot, loading, status.busy, status.unknown, delivery],
   );
   async function applyResult(
     result: WriteResult,
@@ -400,7 +402,6 @@ export function PrFiles({
           owning.path !== thread.path ||
           owning.side !== thread.side ||
           owning.rootCommentId !== thread.rootCommentId ||
-          owning.commentsCursor !== thread.commentsCursor ||
           owning.line !== thread.line ||
           owning.outdated !== thread.outdated
         )

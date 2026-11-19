@@ -1,4 +1,5 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import * as patchParser from "../diffs/parse";
 import { createPrComments, anchorInSnapshot } from "./pr-comments";
 import {
   fixturePull,
@@ -38,6 +39,23 @@ it("loads the PR endpoint with verified SHAs and canonical renamed path", async 
     "repos/example-org/sample/pulls/1",
   ]);
 });
+it("indexes patch coordinates once per snapshot and invalidates on replacement", async () => {
+  const { snapshot, anchor } = await setup();
+  const parse = vi.spyOn(patchParser, "parsePatch");
+  try {
+    expect(anchorInSnapshot(snapshot, anchor)).toBe(true);
+    const reads = parse.mock.calls.length;
+    expect(reads).toBeGreaterThan(0);
+    for (let index = 0; index < 100; index++)
+      expect(anchorInSnapshot(snapshot, anchor)).toBe(true);
+    expect(parse).toHaveBeenCalledTimes(reads);
+    expect(anchorInSnapshot({ ...snapshot, diff: "" }, anchor)).toBe(false);
+    expect(parse.mock.calls.length).toBeGreaterThan(reads);
+  } finally {
+    parse.mockRestore();
+  }
+});
+
 it("returns a write receipt independently of refresh and supports replies", async () => {
   const { api, snapshot, anchor, state } = await setup();
   expect(

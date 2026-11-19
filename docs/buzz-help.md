@@ -1835,6 +1835,7 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   lines use Old. Comments post immediately with your signed-in
   `gh` account. Verified changes are interactive while comments continue loading.
   Focus a diff file and use Up/Down then Enter to comment with the keyboard.
+  The selected line scrolls into view.
   Closed and merged PRs also offer commenting;
   GitHub checks whether the submission is allowed. Raw or unmapped patches cannot
   accept new line comments.

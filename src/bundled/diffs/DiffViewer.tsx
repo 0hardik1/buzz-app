@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useCallback,
   useRef,
   useMemo,
@@ -265,7 +266,7 @@ function PierreFile({
     },
     [rows, path, onSelect, viewType],
   );
-  const annotations: DiffLineAnnotation<ReactNode>[] =
+  const annotationContent = new Map(
     comments?.annotations
       .filter(
         (entry) =>
@@ -275,13 +276,33 @@ function PierreFile({
               line.side === entry.side && line.lineNumber === entry.lineNumber,
           ),
       )
-      .map(({ side, lineNumber, content }) => ({
-        side,
-        lineNumber,
-        metadata: content,
-      })) ?? [];
+      .map((entry) => [`${entry.side}:${entry.lineNumber}`, entry.content]),
+  );
+  // Pierre rebuilds code when the slot array changes. React owns slot content.
+  const annotationCoordinates = JSON.stringify([...annotationContent.keys()]);
+  const annotations = useMemo<DiffLineAnnotation<string>[]>(
+    () =>
+      (JSON.parse(annotationCoordinates) as string[]).map((key) => {
+        const [side, number] = key.split(":");
+        return {
+          side: side as DiffLine["side"],
+          lineNumber: Number(number),
+          metadata: key,
+        };
+      }),
+    [annotationCoordinates],
+  );
+  useLayoutEffect(() => {
+    if (!keyboardTarget) return;
+    section.current
+      ?.querySelector("diffs-container")
+      ?.shadowRoot?.querySelector<HTMLElement>(
+        "[data-line][data-selected-line]",
+      )
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [keyboardTarget]);
   const canComment = !!comments && !comments.readOnly;
-  const options = useMemo<FileDiffOptions<ReactNode, undefined>>(
+  const options = useMemo<FileDiffOptions<string, undefined>>(
     () => ({
       theme,
       themeType,
@@ -289,7 +310,6 @@ function PierreFile({
       diffIndicators: "bars",
       enableGutterUtility: canComment,
       onLineEnter: ({ numberElement, lineNumber, annotationSide }) => {
-        setKeyboardLine(undefined);
         const root = numberElement.getRootNode();
         if (root instanceof ShadowRoot) {
           const button = root.querySelector<HTMLButtonElement>(
@@ -420,7 +440,9 @@ function PierreFile({
             : null
         }
         lineAnnotations={annotations}
-        renderAnnotation={(annotation) => annotation.metadata}
+        renderAnnotation={(annotation) =>
+          annotationContent.get(annotation.metadata)
+        }
         options={options}
       />
     </section>

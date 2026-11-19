@@ -4,7 +4,7 @@ import {
   type ReactionGroup,
   type PrReactions,
 } from "./pr-reactions";
-import { commentableLine } from "../diffs/comment-lines";
+import { commentLines } from "../diffs/comment-lines";
 import type { Host } from "../../features/host/service";
 import {
   gitHubCli,
@@ -201,6 +201,8 @@ const graphComment = (comment: GraphComment): Comment => ({
   originalCommit: comment.originalCommit?.oid ?? null,
 });
 
+const snapshotLines = new WeakMap<Snapshot, Map<string, Set<string>>>();
+
 export function anchorInSnapshot(snapshot: Snapshot, anchor: Anchor): boolean {
   if (
     anchor.head !== snapshot.head ||
@@ -210,21 +212,31 @@ export function anchorInSnapshot(snapshot: Snapshot, anchor: Anchor): boolean {
     !snapshot.files.some((file) => file.path === anchor.path)
   )
     return false;
-  const files = snapshot.diff
-    .split(/^(?=diff --git )/m)
-    .flatMap((part) => parsePatch(part) ?? []);
-  const file = files.find(
-    (file) =>
-      (file.newPath === "/dev/null" ? file.oldPath : file.newPath) ===
-      anchor.path,
-  );
-  return (
-    !!file &&
-    commentableLine(file, {
-      side: anchor.side === "LEFT" ? "deletions" : "additions",
-      lineNumber: anchor.line,
-    })
-  );
+  let paths = snapshotLines.get(snapshot);
+  if (!paths) {
+    paths = new Map();
+    for (const part of snapshot.diff.split(/^(?=diff --git )/m)) {
+      for (const file of parsePatch(part) ?? []) {
+        const path = file.newPath === "/dev/null" ? file.oldPath : file.newPath;
+        if (paths.has(path)) continue;
+        paths.set(
+          path,
+          new Set(
+            file.isBinary
+              ? []
+              : commentLines(file)
+                  .flat()
+                  .map(
+                    (line) =>
+                      `${line.side === "deletions" ? "LEFT" : "RIGHT"}:${line.lineNumber}`,
+                  ),
+          ),
+        );
+      }
+    }
+    snapshotLines.set(snapshot, paths);
+  }
+  return paths.get(anchor.path)?.has(`${anchor.side}:${anchor.line}`) ?? false;
 }
 
 /** One instance owns delivery attempts for the plugin session, across panel remounts. */

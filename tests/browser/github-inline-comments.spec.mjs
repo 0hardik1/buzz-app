@@ -613,3 +613,122 @@ test("comment reaction picker adds and removes server-owned counts", async ({
   ).toBe(2);
   expect(await posts(page)).toBe(1);
 });
+
+test("opening one composer preserves code in 49 other commented files", async ({
+  page,
+}, testInfo) => {
+  await open(page);
+  await page.evaluate(() => {
+    const state = window.inlineFixture.state;
+    state.patch = "";
+    state.files = [];
+    state.comments = [];
+    for (let index = 0; index < 50; index++) {
+      const path = `src/file-${index}.ts`;
+      state.files.push({ filename: path });
+      state.patch +=
+        `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,150 +1,150 @@\n` +
+        "-const before = false;\n+const after = true;\n" +
+        Array.from(
+          { length: 149 },
+          (_, line) => ` const value${line} = ${line};\n`,
+        ).join("");
+      state.comments.push({
+        id: index + 1,
+        node_id: `comment-${index}`,
+        body: `Thread ${index}`,
+        user: { login: "example-reviewer" },
+        html_url: "https://github.com/example-org/sample/pull/1",
+        created_at: "2026-01-01T00:00:00Z",
+        commit_id: state.head,
+        original_commit_id: state.head,
+        path,
+        side: "RIGHT",
+        line: 1,
+        original_line: 1,
+      });
+    }
+  });
+  await page.getByRole("button", { name: "Refresh changes" }).click();
+  await expect(page.getByText("Thread 49", { exact: true })).toBeAttached();
+  await expect(page.getByText("Loading comments…")).toHaveCount(0);
+  await page.evaluate(() => {
+    window.savedCodeNodes = [
+      ...document.querySelectorAll("diffs-container"),
+    ].map((node) => node.shadowRoot.querySelector("[data-line]"));
+    if (
+      window.savedCodeNodes.length !== 50 ||
+      window.savedCodeNodes.some((node) => !node)
+    )
+      throw new Error("Incomplete render");
+  });
+  const file = page.getByRole("region", { name: "src/file-0.ts", exact: true });
+  await file.focus();
+  await file.press("ArrowDown");
+  const start = performance.now();
+  await file.press("Enter");
+  await expect(
+    file.getByRole("textbox", { name: "Comment", exact: true }),
+  ).toBeFocused();
+  const retained = await page.evaluate(() =>
+    window.savedCodeNodes.slice(1).every((node) => node.isConnected),
+  );
+  expect(retained).toBe(true);
+  await testInfo.attach("composer-open-local-timing", {
+    body: JSON.stringify({
+      milliseconds: performance.now() - start,
+      files: 50,
+    }),
+    contentType: "application/json",
+  });
+  await file.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(
+    await page.evaluate(() =>
+      window.savedCodeNodes.slice(1).every((node) => node.isConnected),
+    ),
+  ).toBe(true);
+  await page.getByRole("tab", { name: "Summary" }).click();
+  await expect(file).toBeHidden();
+  await page.getByRole("tab", { name: /Changes/ }).click();
+  await expect(file).toBeVisible();
+  await expect(page.getByText("Thread 49", { exact: true })).toBeAttached();
+  expect(
+    await page.evaluate(() =>
+      window.savedCodeNodes.slice(1).every((node) => node.isConnected),
+    ),
+  ).toBe(true);
+});
+
+test("keyboard line selection stays visible without moving file focus", async ({
+  page,
+}) => {
+  await open(page);
+  await page.evaluate(() => {
+    const state = window.inlineFixture.state;
+    state.patch =
+      "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -1,120 +1,120 @@\n" +
+      Array.from(
+        { length: 120 },
+        (_, line) => ` const value${line} = ${line};\n`,
+      ).join("");
+  });
+  await page.getByRole("button", { name: "Refresh changes" }).click();
+  const file = page.getByRole("region", {
+    name: "src/example.ts",
+    exact: true,
+  });
+  await expect(file.locator("[data-line]")).toHaveCount(120);
+  await file.focus();
+  for (let index = 0; index < 60; index++) await file.press("ArrowDown");
+  await expect(file.getByRole("status")).toHaveText("New line 60");
+  await expect(file.locator("[data-line][data-selected-line]")).toBeInViewport({
+    ratio: 1,
+  });
+  await expect(file).toBeFocused();
+  for (let index = 0; index < 59; index++) await file.press("ArrowUp");
+  await expect(file.getByRole("status")).toHaveText("New line 1");
+  await expect(file.locator("[data-line][data-selected-line]")).toBeInViewport({
+    ratio: 1,
+  });
+  await expect(file).toBeFocused();
+});
