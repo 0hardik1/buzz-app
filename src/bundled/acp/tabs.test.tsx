@@ -11,6 +11,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
+import { setClockPreference } from "../../shared/clock-preference";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Agent, AgentViewProps } from "../../features/agents/service";
 import { approve, approved, type Config, DEFAULT_CONFIG } from "./config";
@@ -455,6 +456,32 @@ it("lists conversations and says when the harness can't replay them", async () =
     screen.getByText("This harness can't replay its transcripts."),
   ).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Transcript" })).toBeNull();
+});
+
+it("shows history times on the owner's clock", () => {
+  const at = new Date(2026, 0, 2, 15, 4, 5).getTime();
+  const rows: Conversation[] = [
+    { key: "c1/r1", channelId: "c1", root: "r1", at, replayable: false },
+  ];
+  const { HistoryTab } = createTabs({
+    check: vi.fn(),
+    cache: modelCache(localStorage),
+    runtime: fakeRuntime({ conversations: () => rows }),
+  });
+  try {
+    setClockPreference({ hourCycle: "h23", seconds: false });
+    render(
+      <HistoryTab
+        agent={{ key: "p1", pubkey: "p1", config: start } as Agent<Config>}
+        save={async () => {}}
+      />,
+    );
+    expect(screen.getByText(/15:04/)).toBeInTheDocument();
+    act(() => setClockPreference({ hourCycle: "h12" }));
+    expect(screen.getByText(/3:04\sPM/)).toBeInTheDocument();
+  } finally {
+    setClockPreference({ hourCycle: "system", seconds: false });
+  }
 });
 
 it("mounts Settings and History on the real runtime, which React calls unbound", () => {

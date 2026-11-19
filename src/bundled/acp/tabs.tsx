@@ -18,6 +18,8 @@ import type {
   AgentViewProps,
 } from "../../features/agents/service";
 import { PanelSubview } from "../../features/panels/PanelSubview";
+import { useClockFormat } from "../../shared/clock-preference";
+import { formatItemTimestamp } from "../../shared/datetime";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Field } from "../../shared/design-system/ui/Field";
@@ -719,6 +721,7 @@ export function createTabs({
     close,
     openConversation,
   }: AgentViewProps<Config>) {
+    useClockFormat();
     const rows = useSyncExternalStore(runtime.subscribe, () =>
       runtime.conversations(agent.key),
     );
@@ -789,7 +792,7 @@ export function createTabs({
                   <span className="grow">
                     {label(row)}
                     {row.status ? ` · ${row.status}` : ""} ·{" "}
-                    {new Date(row.at).toLocaleString()}
+                    {formatItemTimestamp(row.at / 1000, { withTime: true })}
                   </span>
                   {replays !== false && row.replayable && (
                     <Button
