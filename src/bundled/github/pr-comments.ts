@@ -319,7 +319,10 @@ export function createPrComments(
     const existing = keys.get(key);
     if (existing) {
       const attempt = attempts.get(existing);
-      if (attempt) return attempt.result;
+      if (attempt) {
+        operations.set(operationKey, existing);
+        return attempt.result;
+      }
     }
     const id = crypto.randomUUID();
     // Register before the first await so other panels share the same operation.

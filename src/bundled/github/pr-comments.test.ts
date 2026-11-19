@@ -261,3 +261,32 @@ it("normalizes inaccessible PR/thread GraphQL reads", async () => {
     kind: "forbidden",
   });
 });
+it("retains receipts for coalesced operation aliases while allowing a fresh draft", async () => {
+  const { api, snapshot, anchor, state } = await setup();
+  state.mode = "hold";
+  let posted: () => void = () => {};
+  const started = new Promise<void>((resolve) => {
+    posted = resolve;
+  });
+  state.onCall = (call) => {
+    if (call.args[0] === "POST") posted();
+  };
+  const first = api.create(snapshot, anchor, "Same", "operation-A");
+  await started;
+  const alias = api.create(snapshot, anchor, "Same", "operation-B");
+  state.release();
+  const receipt = await first;
+  expect(await alias).toEqual(receipt);
+  expect(await api.create(snapshot, anchor, "Same", "operation-A")).toEqual(
+    receipt,
+  );
+  expect(await api.create(snapshot, anchor, "Same", "operation-B")).toEqual(
+    receipt,
+  );
+  expect(state.comments).toHaveLength(1);
+  state.mode = "success";
+  expect(
+    (await api.create(snapshot, anchor, "Same", "operation-C")).status,
+  ).toBe("sent");
+  expect(state.comments).toHaveLength(2);
+});
