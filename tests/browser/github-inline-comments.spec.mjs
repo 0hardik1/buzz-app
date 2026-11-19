@@ -245,6 +245,9 @@ for (const layout of ["Unified", "Split"]) {
     });
     await page.reload();
     await expect(
+      page.getByRole("combobox", { name: "Diff layout" }),
+    ).toHaveText(layout);
+    await expect(
       page.getByText("Synthetic inline feedback", { exact: true }),
     ).toBeVisible();
     await expect(
@@ -576,7 +579,7 @@ test("comment reaction picker adds and removes server-owned counts", async ({
       return !!button && !!thread && button.width < thread.width / 2;
     })
     .toBe(true);
-  await comment.getByRole("button", { name: "Add reaction" }).click();
+  await comment.getByRole("button", { name: "React" }).click();
   await expect(
     page.getByRole("button", { name: "Heart", exact: true }),
   ).toHaveText("❤️");

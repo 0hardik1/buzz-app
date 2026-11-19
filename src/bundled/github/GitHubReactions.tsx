@@ -25,7 +25,32 @@ export function GitHubReactions({
   const [open, setOpen] = useState(false);
   const state = useSyncExternalStore(api.subscribe, () => api.get(comment.id));
   const current = state?.viewer === snapshot.viewer ? state : undefined;
-  const groups = current?.groups ?? comment.reactions ?? [];
+  const known = current?.groups ?? comment.reactions ?? [];
+  const desired = current?.phase === "pending" ? current.desired : undefined;
+  const groups = desired
+    ? (Object.keys(reactionNames) as ReactionContent[]).map((content) => {
+        const group = known.find((group) => group.content === content) ?? {
+          content,
+          viewerHasReacted: false,
+          users: { totalCount: 0 },
+        };
+        if (
+          content !== desired.content ||
+          group.viewerHasReacted === desired.reacted
+        )
+          return group;
+        return {
+          ...group,
+          viewerHasReacted: desired.reacted,
+          users: {
+            totalCount: Math.max(
+              0,
+              group.users.totalCount + (desired.reacted ? 1 : -1),
+            ),
+          },
+        };
+      })
+    : known;
   const blocked = state?.phase === "pending" || state?.phase === "unknown";
   const update = (content: ReactionContent) =>
     void api.update(snapshot, comment, {
@@ -47,6 +72,7 @@ export function GitHubReactions({
               variant="outline"
               disabled={blocked}
               aria-label={`${reactionNames[group.content]?.[1] ?? group.content}, ${group.users.totalCount}`}
+              aria-busy={current?.phase === "pending"}
               aria-pressed={group.viewerHasReacted}
               onClick={() => update(group.content)}
             >
@@ -56,12 +82,12 @@ export function GitHubReactions({
         <PopoverRoot open={open} onOpenChange={setOpen}>
           <PopoverTrigger
             render={
-              <Button size="sm" variant="ghost" disabled={blocked}>
-                Add reaction
+              <Button size="xs" variant="ghost" disabled={blocked}>
+                React
               </Button>
             }
           >
-            Add reaction
+            React
           </PopoverTrigger>
           <PopoverPopup size="compact" aria-label="Choose reaction">
             <div className={styles.reactionPicker}>
@@ -91,9 +117,6 @@ export function GitHubReactions({
             </div>
           </PopoverPopup>
         </PopoverRoot>
-        {state?.phase === "pending" && (
-          <span role="status">Updating reactions…</span>
-        )}
         {state?.phase === "unknown" && (
           <Button size="sm" onClick={() => void api.update(snapshot, comment)}>
             Check reactions

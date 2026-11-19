@@ -78,7 +78,9 @@ it("announces server counts and selection while isolating unknown delivery acros
     ),
   );
   expect(heart().hasAttribute("disabled")).toBe(true);
-  expect(heart().getAttribute("aria-label")).toBe("Heart, 3");
+  expect(heart().getAttribute("aria-label")).toBe("Heart, 4");
+  expect(heart().getAttribute("aria-busy")).toBe("true");
+  expect(screen.queryByText("Updating reactions…")).toBeNull();
   await act(async () => {
     release();
   });
@@ -122,4 +124,29 @@ it("updates visible counts after an authoritative comment read", async () => {
     ),
   );
   expect(screen.getByRole("button", { name: "Heart, 7" })).toBeTruthy();
+});
+
+it("shows a reaction immediately and rolls it back on a preflight failure", async () => {
+  let fail: (error: Error) => void = () => {};
+  const gh = vi.fn(
+    () =>
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      }),
+  );
+  const api = createPrReactions(gh as GitHubCli);
+  render(<GitHubReactions api={api} snapshot={snapshot} comment={comment} />);
+  fireEvent.click(screen.getByRole("button", { name: "Heart, 3" }));
+  expect(
+    screen
+      .getByRole("button", { name: "Heart, 4" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  await act(async () => {
+    fail(new Error("Account unavailable"));
+  });
+  expect(
+    screen.getByRole("button", { name: "Heart, 3" }).hasAttribute("disabled"),
+  ).toBe(false);
+  expect(screen.getByText("Account unavailable")).toBeTruthy();
 });
