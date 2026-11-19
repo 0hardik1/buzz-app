@@ -2610,6 +2610,27 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn saved_folder_updates_require_the_original_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let source = plugin(root.path(), "dist", "example.checked");
+        let home = tempfile::tempdir().unwrap();
+        let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
+        let pending = prepare_folder(root.path()).unwrap();
+        pending
+            .install(&manager, &pending.preview.token, "dist")
+            .unwrap();
+        assert!(check_saved_folder(&manager, "example.checked").is_ok());
+
+        let moved = root.path().join("moved");
+        fs::rename(&source, &moved).unwrap();
+        std::os::unix::fs::symlink(&moved, &source).unwrap();
+
+        assert!(check_saved_folder(&manager, "example.checked").is_err());
+        assert!(prepare_saved_folder(&manager, "example.checked").is_err());
+    }
+
     #[test]
     fn saved_folder_update_preview_ignores_siblings_and_installs_captured_bytes() {
         let root = tempfile::tempdir().unwrap();
