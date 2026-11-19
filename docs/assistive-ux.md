@@ -35,9 +35,16 @@ assistance does not duplicate that state or grant access.
 
 ## Relay and local memory
 
-Facts belong to **identity + community**, independent of channel and device.
-Signing into the same identity and community on another device retrieves them.
-Different communities do not automatically share progress.
+Facts belong to the **identity**: learned in any community counts in every
+community, independent of channel and device. The app holds one community
+session at a time, so there is no cross-community read. Instead this device
+remembers each learned fact per identity (`buzz-assistive-learned.v1:`), and
+eligibility reads that memory at once, before and without the community read.
+When a community's progress loads, its facts join that memory and any learned
+fact it lacks is published to it through the ordinary pending path. Communities
+someone opens therefore converge on all of their facts, and a new device learns
+them from whichever community it opens first. Communities they never open
+receive nothing.
 
 Each outcome has its own kind-30078 addressable event, so concurrent devices cannot
 replace unrelated progress or overwrite completion with a stale seen fact. Every
@@ -77,13 +84,13 @@ extra author-only relay policy. Ordinary sign-out preserves local and remote
 progress. Sign-out-and-erase clears app/WebView data **on this device**; it cannot
 erase synchronized relay facts, which can return after signing in. Community cache
 clear invalidates reads without resetting progress. Local-only v1 dismissals are
-not automatically exported into communities; that older draft never had a product
-consumer, and no migration/silent community fan-out is added.
+not exported into communities; that older draft never had a product consumer.
 
 ## Verification and remaining integration
 
 Tests exercise the real browser-host encryption/signature codec through independent
-progress owners, offline pending restore, identity/community isolation, outcomes,
+progress owners, offline pending restore, identity isolation, cross-community
+learning, outcomes,
 peer-window refresh, cancellation and recovery. Shared known-key vectors establish
 native/browser coordinate parity. Native IPC tests exercise purpose admission,
 foreign/schema/tag rejection and refusal through generic write routes. Broker HTTP

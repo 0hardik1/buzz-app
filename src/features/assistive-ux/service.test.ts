@@ -135,20 +135,39 @@ it("keeps concurrent outcomes independent and updates a live subscriber", async 
   expect(changed).toHaveBeenCalled();
 });
 
-it("isolates identity and community and keeps failures unknown instead of first-run", async () => {
+it("isolates identity and keeps failures unknown instead of first-run", async () => {
   const a = device();
   await a.capability.record(id, "dismissed");
   await a.capability.refresh();
-  for (const other of [
-    device("https://other.test"),
-    device("https://community.test", generateSecretKey()),
-  ]) {
-    await other.capability.refresh();
-    expect(other.capability.eligibility(id, facts)).toBe("eligible");
-    other.offline(true);
-    await other.capability.refresh();
-    expect(other.capability.eligibility(id, facts)).toBe("unknown");
-  }
+  const other = device("https://community.test", generateSecretKey());
+  await other.capability.refresh();
+  expect(other.capability.eligibility(id, facts)).toBe("eligible");
+  other.offline(true);
+  await other.capability.refresh();
+  expect(other.capability.eligibility(id, facts)).toBe("unknown");
+});
+
+it("counts what was learned in one community in every other, and gives it to them", async () => {
+  const a = device();
+  await a.capability.record(id, "dismissed");
+  await a.capability.refresh();
+  const b = device("https://other.test");
+  b.offline(true);
+  b.capability.ensure();
+  // Device memory answers before, and without, the other community's read.
+  expect(b.capability.eligibility(id, facts)).toBe("ineligible");
+  b.offline(false);
+  await b.capability.refresh();
+  expect(b.capability.snapshot()).toMatchObject({
+    status: "ready",
+    pending: 0,
+  });
+  expect(relay.size).toBe(2);
+  // A new device that opens only the other community still knows.
+  localStorage.clear();
+  const fresh = device("https://other.test");
+  await fresh.capability.refresh();
+  expect(fresh.capability.eligibility(id, facts)).toBe("ineligible");
 });
 
 it("reports unsaved intent, honors it in memory, and fences retired handles", async () => {

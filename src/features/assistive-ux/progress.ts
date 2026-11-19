@@ -33,8 +33,13 @@ type Stored = {
   event?: RelayEvent;
 };
 const PREFIX = "buzz-assistive-progress.v1:";
+/** What this identity learned in any community, kept on this device. */
+const LEARNED_PREFIX = "buzz-assistive-learned.v1:";
 
-/** Independent add-only facts. The community session owns transport and lifetime. */
+/** Independent add-only facts. The community session owns transport and lifetime.
+ * A fact learned in any community counts in every community: this device
+ * remembers it per identity, and each opened community is given the facts it
+ * lacks, so a new device learns them from whichever community it opens first. */
 export function createAssistiveProgress({
   host,
   reader,
@@ -50,7 +55,9 @@ export function createAssistiveProgress({
 }) {
   const page = typeof window === "undefined" ? undefined : window;
   const prefix = `${PREFIX}${JSON.stringify([community, viewer])}:`;
+  const learnedPrefix = `${LEARNED_PREFIX}${JSON.stringify(viewer)}:`;
   const entries = new Map<string, Stored>();
+  const learned = new Set<string>();
   const unsaved = new Set<string>();
   const listeners = new Set<() => void>();
   let state: ProgressSnapshot = {
@@ -70,7 +77,15 @@ export function createAssistiveProgress({
     state = Object.freeze({
       status,
       facts: Object.freeze(
-        [...entries.values()].map((row) => Object.freeze(row.fact)),
+        [
+          ...[...entries.values()].map((row) => row.fact),
+          ...[...learned]
+            .filter((key) => !entries.has(key))
+            .map((key) => {
+              const [id, outcome] = key.split(":");
+              return parseFact({ id, outcome });
+            }),
+        ].map((fact) => Object.freeze(fact)),
       ),
       pending: [...entries.values()].filter((row) => row.pending).length,
       error,
@@ -84,6 +99,10 @@ export function createAssistiveProgress({
       for (const outcome of OUTCOMES) {
         const fact = { id, outcome };
         const key = factKey(fact);
+        const known = localStorage.getItem(`${learnedPrefix}${key}`);
+        if (known !== null && known !== "1")
+          throw new Error("Saved assistive progress is invalid");
+        if (known) learned.add(key);
         const raw = localStorage.getItem(`${prefix}${key}`);
         if (!raw) continue;
         const row: Stored = JSON.parse(raw);
@@ -105,6 +124,12 @@ export function createAssistiveProgress({
       throw new Error("Assistive progress could not be saved on this device");
     entries.set(key, row);
     unsaved.delete(key);
+    learn(key);
+  }
+  function learn(key: string) {
+    if (learned.has(key)) return;
+    localStorage.setItem(`${learnedPrefix}${key}`, "1");
+    learned.add(key);
   }
   async function verify(
     events: readonly RelayEvent[],
@@ -180,6 +205,12 @@ export function createAssistiveProgress({
         save({ version: 1, fact, pending: false });
       }
     }
+    // Give this community what was learned elsewhere, through the same pending path.
+    for (const key of learned)
+      if (!entries.has(key)) {
+        const [id, outcome] = key.split(":");
+        save({ version: 1, fact: parseFact({ id, outcome }), pending: true });
+      }
     for (const row of [...entries.values()]) {
       workSignal.throwIfAborted();
       if (!row.pending) continue;
@@ -260,7 +291,9 @@ export function createAssistiveProgress({
     try {
       if (
         event.storageArea !== localStorage ||
-        (event.key !== null && !event.key.startsWith(prefix))
+        (event.key !== null &&
+          !event.key.startsWith(prefix) &&
+          !event.key.startsWith(learnedPrefix))
       )
         return;
       restore();
@@ -281,7 +314,15 @@ export function createAssistiveProgress({
       };
     },
     ensure() {
-      if (!requested) void refresh();
+      if (requested) return;
+      // Device memory answers at once; the community read follows.
+      try {
+        restore();
+        notify();
+      } catch {
+        // synchronize() reports the same storage failure.
+      }
+      void refresh();
     },
     refresh,
     eligibility<Id extends AssistiveExperienceId>(
@@ -295,7 +336,7 @@ export function createAssistiveProgress({
       if (
         definition.retired(
           new Set(
-            state.facts
+            state.facts // Includes what was learned in other communities.
               .filter((fact) => fact.id === id)
               .map((fact) => fact.outcome),
           ),
