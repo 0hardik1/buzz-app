@@ -1,9 +1,9 @@
 // Quick voice actions on the hovered message or thread: react, reply, follow
 // or unfollow, copy a link, mark unread. Each calls the operation the
 // message's own toolbar or menu calls, and is offered only when that control
-// would be (`MessageActionBar`, `MessageManagement`). All are reversible and
-// send nothing on the person's behalf, so none asks first; the auto-run rule
-// still holds an unsure answer back as options.
+// would be (`MessageActionBar`, `MessageManagement`). A reaction asks first:
+// everyone in the conversation sees it. The rest are private and reversible,
+// so they run on their own when the auto-run rule is sure.
 import { writeClipboardText } from "../../shared/clipboard";
 import { messageCopyLink } from "../messages/message-copy";
 import type { ChannelSummary } from "../relay/contracts";
@@ -77,7 +77,7 @@ export const quickMessageVoiceActions: readonly AppVoiceAction[] = [
     id: "message.react",
     owner: "message",
     target: "emoji",
-    confirm: "none",
+    confirm: "confirm",
     available: (ctx, { bound }) => joined(channelOf(ctx, bound)),
     describe: ({ bound }) =>
       `React to ${bound?.label ?? "this message"} with an emoji`,
