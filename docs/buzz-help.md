@@ -560,7 +560,10 @@ and are asked to sign in again in Buzz.
   your agent `Claude Code` outside it, `@Claude Code` mentions Claude. Pick
   `Claude Code` from the list to mention it: in a channel, sending then asks
   whether to add it; in a Solo chat, sending adds it without asking. Typing a
-  name alone does not guarantee a notification. Selecting someone outside the
+  name alone does not guarantee a notification. Picking a channel member from
+  the **@** list while editing your message notifies them once, like a new
+  mention; people the message already mentioned are not notified again, and
+  people outside the channel are named but not notified. Selecting someone outside the
   channel does not grant access; inviting them requires an explicit decision
   from someone with permission.
 - **Workspaces** can hold any mix of chats, channels, forums and DMs. Use **Move to…**
