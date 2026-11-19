@@ -17,6 +17,7 @@ import {
   holdsActionLead,
   matchActionBindings,
   type VoiceActionSpec,
+  type VoiceEntity,
   type VoiceSlotEntities,
 } from "./voice-actions";
 import {
@@ -1018,6 +1019,71 @@ describe("the place an action would act on", () => {
         probabilities: { "#buzz-security": 0.8 },
       },
     });
+    expect(resolved.kind).toBe("none");
+  });
+});
+
+describe("filling a slot the same type as the hovered thing", () => {
+  // A made-up same-type action whose filter rejects the direct pick, so the
+  // fallback search over the other options runs.
+  const moveNextTo: VoiceActionSpec = {
+    id: "channel.move_next_to",
+    owner: "channel",
+    target: "channel",
+    confirm: "none",
+    filterSlot: (slot, entity) =>
+      slot !== "channel" || entity.meta?.channelType !== "forum",
+    describe: ({ bound }) => `Move ${bound?.label} next to another channel`,
+  };
+  const forum: VoiceEntity = {
+    kind: "channel",
+    id: "forum",
+    label: "#help-forum",
+    meta: { channelType: "forum", name: "help-forum" },
+  };
+
+  it("never fills the other slot with the hovered thing itself", () => {
+    const sameType = {
+      ...entities,
+      channel: [...(entities.channel ?? []), forum],
+    };
+    const bindings = matchActionBindings(
+      [moveNextTo],
+      hoveredChannel,
+      sameType,
+    ).filter((binding) => binding.hoveredRole === "owner");
+    const built = buildActionDecision({
+      spoken: "move this next to the help forum",
+      hovered: hoveredChannel,
+      actions: [moveNextTo],
+      entities: sameType,
+      places: [],
+      bindings,
+    });
+    const question = built.request?.questions.action;
+    const option =
+      question?.type === "choice"
+        ? Object.keys(question.options).find((key) => key.startsWith("Move"))
+        : undefined;
+    if (!option) throw new Error("No move option");
+    const resolved = built.resolve(
+      {
+        action: {
+          type: "choice",
+          choice: option,
+          confidence: 0.95,
+          probabilities: { [option]: 0.95 },
+        },
+        // The forum fails the filter; the hovered channel is the runner-up.
+        channel: {
+          type: "choice",
+          choice: "#help-forum",
+          confidence: 0.6,
+          probabilities: { "#help-forum": 0.6, "#buzz-security": 0.35 },
+        },
+      },
+      0.3,
+    );
     expect(resolved.kind).toBe("none");
   });
 });

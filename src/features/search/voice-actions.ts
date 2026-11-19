@@ -632,6 +632,7 @@ export function buildActionDecision(
               const p = slotAnswer.probabilities[label] ?? 0;
               if (
                 p >= threshold &&
+                candidate.id !== binding.bound?.id &&
                 binding.action.filterSlot(
                   binding.missingSlot as EntitySlotKind,
                   candidate,
