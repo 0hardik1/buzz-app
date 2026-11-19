@@ -801,16 +801,6 @@ add setup time; normal warm hooks use the pinned tools already installed.
 `.github/workflows/ci.yml` runs on every PR and push to `main`, without path filters
 that could omit newly added tests. It splits the CI-selected `scan` coverage
 across cached, parallel jobs rather than running the entire recipe several times.
-
-For PRs authored by GitHub `User` accounts in `block/buzz-app`, Rust and tool
-integration, the native browser fixture, and browser journeys use the
-`buzz-runners` group's `buzz-ubuntu-x64-8core` runner (8 CPUs, 32 GB RAM). Routing
-uses the PR author's account type, including on reruns. GitHub `Bot`
-accounts (such as Renovate) use standard runners; service accounts with type
-`User` still qualify for the dedicated pool. Non-PR runs and workflows running in
-fork repositories keep standard Ubuntu runners for those jobs. Other lanes keep
-their existing runners; shard counts and test coverage are the same.
-
 [Three documented WebKit cases remain local-only](browser-testing.md#ci-coverage-and-local-only-webkit-checks);
 the complete correctness suite still runs with `pnpm test` / `just scan`:
 
