@@ -264,6 +264,7 @@ function ScopedSidebar({
                       <props.Frame
                         scope={scope}
                         resizable
+                        cards
                         label="Sidebar"
                         header={header}
                         footer={footer}

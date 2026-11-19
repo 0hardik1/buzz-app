@@ -174,6 +174,7 @@ export function SidebarSection({
     <div
       ref={dropRef}
       className={styles.channelSection}
+      data-sidebar-card=""
       data-sidebar-section={sectionKey}
       data-drop-target={dropTarget || undefined}
       data-drop-edge={dropEdge}

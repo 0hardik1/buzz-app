@@ -312,12 +312,6 @@
   .shell-navigation-content {
     display: contents;
   }
-  /* The sidebar is on the window's tint, not a panel: its quiet fills are the
-     header's backdrop fills. Selection stays the sidebar's accent. */
-  .shell-navigation {
-    --affordance-sidebar-hover: var(--affordance-backdrop-hover);
-    --affordance-panel-hover: var(--affordance-backdrop-hover);
-  }
   /* A single fr track animates from the sidebar's real extent (not a larger
      ceiling) to zero, so movement starts on the first frame. */
   .shell-navigation[data-sidebar-collapsible] {

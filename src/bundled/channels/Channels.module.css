@@ -314,6 +314,24 @@
   }
 }
 [data-channel-dragging],
+/* On the tint, a section is its own card (its surface is Panel's). Cards keep
+   their content height, let drop lines into the gap, and sit a panel gap apart. */
+[data-sidebar-cards] .channelSection[data-sidebar-card] {
+  height: auto;
+  overflow: visible;
+  padding: var(--space-1);
+  --affordance-panel-hover: var(--affordance-sidebar-hover);
+}
+[data-sidebar-cards] .channelSection + .channelSection,
+[data-sidebar-cards]
+  [data-sidebar-slot]:has(> .channelSection)
+  ~ [data-sidebar-slot]
+  > .channelSection:first-child {
+  margin-top: var(--space-panel-gap);
+}
+[data-sidebar-cards] .channelSection[data-sidebar-card][data-drop-target] {
+  border-radius: var(--radius-container);
+}
 .channelSection[data-section-dragging] {
   opacity: 0.3;
 }

@@ -585,6 +585,7 @@ export function SoloWorkspaces({
         }
         key={project.id}
         className={`${styles.project} ${channelStyles.channelSection}`}
+        data-sidebar-card=""
         data-project={project.id ? "" : undefined}
         open={!collapsed.includes(project.id) || renamingProject === project.id}
         onOpenChange={(open) =>

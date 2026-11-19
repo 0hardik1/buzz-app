@@ -1025,7 +1025,8 @@
      `:where()` keeps the vendor selector at zero specificity, so a Panel
      variant can still override it without an escalation. */
   .panel,
-  :where(.bento-workspace .dv-groupview) {
+  :where(.bento-workspace .dv-groupview),
+  :where([data-sidebar-cards] [data-sidebar-card]) {
     @apply interaction-panel;
     width: 100%;
     height: 100%;
