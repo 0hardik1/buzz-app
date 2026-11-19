@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { BASE_PROMPT, basePromptFor, LEAN_BASE_PROMPT } from "./base-prompt";
+import { composeBase } from "./sections/compose";
 
 const key = "buzz-agents-lean-base-prompt.v1";
+const facts = { scope: "thread" } as const;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -10,19 +11,19 @@ afterEach(() => {
 });
 
 it.each([null, "off", "", "true", "invalid", "on"])(
-  "uses lean only for an explicit saved on (stored=%s)",
+  "defaults to lean unless explicitly disabled (stored=%s)",
   (stored) => {
     if (stored !== null) localStorage.setItem(key, stored);
-    expect(basePromptFor()).toBe(
-      stored === "on" ? LEAN_BASE_PROMPT : BASE_PROMPT,
+    expect(composeBase(facts).text).toBe(
+      composeBase(facts, stored !== "off").text,
     );
     expect(localStorage.getItem(key)).toBe(stored);
   },
 );
 
-it("keeps full guidance when storage cannot be read", () => {
+it("keeps the lean default when storage cannot be read", () => {
   vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
     throw new Error("storage unavailable");
   });
-  expect(basePromptFor()).toBe(BASE_PROMPT);
+  expect(composeBase(facts).text).toBe(composeBase(facts, true).text);
 });

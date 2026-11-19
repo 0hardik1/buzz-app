@@ -1,14 +1,13 @@
-import { expect, it, beforeEach } from "vitest";
-import {
-  LEAN_BASE_PROMPT,
-  MENTION_PROMPT,
-} from "../../features/agent-harness/base-prompt";
-import type { EventData } from "../../features/relay/events";
-import { developerInstructions, turnInput } from "./prompt";
+import { beforeEach } from "vitest";
 import { setLeanBasePromptPreference } from "../../features/agent-harness/lean-base-prompt-preference";
 
-// These tests pin the full base prompt.
+// These tests pin the full guidance unless a case explicitly enables lean.
 beforeEach(() => setLeanBasePromptPreference(false));
+
+import { expect, it } from "vitest";
+import { MENTION_PROMPT } from "../../features/agent-harness/base-prompt";
+import type { EventData } from "../../features/relay/events";
+import { developerInstructions, sessionPlace, turnInput } from "./prompt";
 
 const event = {
   id: "1".repeat(64),
@@ -22,10 +21,10 @@ const event = {
 const conversation = { channelId: "chan", name: "general", root: event.id };
 
 it("permits the runtime's agent CLI provider without credential or owner fallback", () => {
-  const instructions = developerInstructions({
-    name: "Codex",
-    pubkey: "b".repeat(64),
-  });
+  const instructions = developerInstructions(
+    { name: "Codex", pubkey: "b".repeat(64) },
+    "thread",
+  );
   expect(instructions).toContain("Prefer these tools for Buzz operations.");
   expect(instructions).toContain("You may use the buzz CLI");
   expect(instructions).toContain("agent-specific BUZZ_CREDENTIAL_PROVIDER");
@@ -58,42 +57,40 @@ it("tells a turn a mention starts what it owes the mention, and a wake's turn no
   expect(woken).not.toContain("<mention>");
   expect(woken).not.toContain("MUST reply");
   // What a mention is owed is no longer in every turn's prompt.
-  const instructions = developerInstructions({
-    name: "Codex",
-    pubkey: "b".repeat(64),
-  });
+  const instructions = developerInstructions(
+    { name: "Codex", pubkey: "b".repeat(64) },
+    "thread",
+  );
   expect(instructions).not.toContain("MUST reply");
   expect(instructions).not.toContain("MUST publish");
 });
 
 it("names the agent's workspace for a thread in a conversation folder", () => {
   const agent = { name: "Codex", pubkey: "b".repeat(64) };
-  const own = developerInstructions(agent, "/home/me/.buzz");
+  const own = developerInstructions(agent, "thread", "/home/me/.buzz");
   expect(own).toContain(
     "Your persistent workspace is at `/home/me/.buzz`, not in your working directory",
   );
   expect(own).toContain("do not create them in your working directory");
-  expect(developerInstructions(agent)).toContain(
+  expect(developerInstructions(agent, "thread")).toContain(
     "Your persistent workspace is in your working directory:",
   );
 });
 
-it("builds Codex developer instructions with the lean contract enabled", () => {
-  setLeanBasePromptPreference(true);
-  try {
-    const prompt = developerInstructions({
-      name: "Codex",
-      pubkey: "b".repeat(64),
-    });
-    expect(prompt).toContain(LEAN_BASE_PROMPT);
-    expect(prompt).not.toContain("## Engineering Discipline");
-    expect(
-      developerInstructions(
-        { name: "Codex", pubkey: "b".repeat(64) },
-        "/workspace",
-      ),
-    ).toContain("Your workspace is `/workspace`");
-  } finally {
-    setLeanBasePromptPreference(false);
-  }
+it("tells a Codex agent that it is one of several sessions", () => {
+  const agent = { name: "Codex", pubkey: "b".repeat(64) };
+  expect(developerInstructions(agent, "thread")).toContain(
+    "## Session Model\n\nYou are one session of your agent identity",
+  );
+  expect(developerInstructions(agent, "channel")).toContain(
+    "## Session Model\n\nYou are one per-channel session of your agent identity",
+  );
+  expect(
+    developerInstructions(agent, "thread", undefined, "conversation"),
+  ).toContain("This session is one whole conversation");
+});
+
+it("calls a conversation without a root a whole conversation", () => {
+  expect(sessionPlace({ root: "a".repeat(64) })).toBe("thread");
+  expect(sessionPlace({})).toBe("conversation");
 });

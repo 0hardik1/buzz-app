@@ -6,14 +6,14 @@ const changedEvent = "buzz-agents-lean-base-prompt-changed";
 let unsavedPreference: boolean | undefined;
 
 /** Device-local choice to give agents the lean base prompt: the Buzz
- * required contract without the optional guidance. Off by default.
+ * required contract without the optional guidance. On by default.
  * Claude/Codex keep it until a new session; Goose/Pi refresh it on the next turn. */
 export function leanBasePromptPreference(): boolean {
   if (unsavedPreference !== undefined) return unsavedPreference;
   try {
-    return localStorage.getItem(preferenceKey) === "on";
+    return localStorage.getItem(preferenceKey) !== "off";
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -52,7 +52,7 @@ export function setLeanBasePromptPreference(enabled: boolean): string | null {
 export const leanBasePromptSetting: DeviceSetting = {
   key: "agents.lean_base_prompt",
   description:
-    "Device-wide for all agents; any connected agent with settings access can change it. Off (default) includes full guidance; on gives only the required Buzz contract. Claude/Codex need a new session; Goose/Pi apply it next turn.",
+    "Device-wide for all agents; any connected agent with settings access can change it. On (default) omits optional workflow guidance; off includes full guidance. Claude/Codex need a new session; Goose/Pi apply it next turn.",
   schema: { type: "boolean" },
   read: () => ({
     value: leanBasePromptPreference(),

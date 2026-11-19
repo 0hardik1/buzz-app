@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { InboxReaction } from "../../features/relay/inbox-reactions";
 import { groupReactions } from "../../features/relay/fold";
 import { useReactionEmoji } from "../../features/messages/reaction-emoji";
@@ -13,6 +13,7 @@ import type { InboxFeedSnapshot } from "../../features/relay/inbox-feed";
 import type { RelaySession } from "../../features/relay/session";
 import { workflowLabel } from "../../features/relay/workflow-attribution";
 import { messagePreview } from "../../features/notifications/content";
+import { ByteLru } from "../../features/relay/budget";
 import { avatarMedia } from "../../shared/avatar-source";
 import { LightningIcon, SmileyIcon } from "../../shared/design-system/icons";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
@@ -22,12 +23,27 @@ import { dmLabel } from "./dm-label";
 import styles from "./Inbox.module.css";
 import rowStyles from "../../features/messages/MessageListRow.module.css";
 import { MessageListRow } from "../../features/messages/MessageListRow";
+import { PreviewText } from "../../features/messages/PreviewText";
 
 type ResolveName = (
   key: string,
   fallback: string,
   candidates?: readonly string[],
 ) => string;
+
+/** Row previews by message text, least recently used dropped first. Each
+ * preview parses Markdown, and every filter change or live event renders all
+ * rows again, remounting rows a filter hid. The budget counts the source
+ * text, which is the key. */
+const previews = new ByteLru<string>(500, 1024 * 1024);
+const rowPreview = (content: string) => {
+  let text = previews.get(content);
+  if (text === undefined) {
+    text = messagePreview(content);
+    previews.set(content, text, content.length);
+  }
+  return text;
+};
 
 export const hasUnread = (item: InboxItem) =>
   item.unreadCount > 0 || item.manual;
@@ -83,7 +99,7 @@ export const rowProfileIds = (
 export function InboxRowButton({
   item,
   identity: { sender, context, profile },
-  media,
+  session,
   feed,
   time,
   previewId,
@@ -91,7 +107,7 @@ export function InboxRowButton({
 }: {
   item: InboxItem;
   identity: ReturnType<typeof rowIdentity>;
-  media: RelaySession["media"];
+  session: RelaySession;
   feed: InboxFeedSnapshot;
   time: ReactNode;
   previewId?: string | undefined;
@@ -116,7 +132,7 @@ export function InboxRowButton({
           src={
             item.workflowOwnerId
               ? undefined
-              : avatarMedia(profile?.picture, media)
+              : avatarMedia(profile?.picture, session.media)
           }
           shape={
             item.workflowOwnerId || profile?.isAgent ? "squircle" : "circle"
@@ -133,8 +149,17 @@ export function InboxRowButton({
       unread={unread}
       previewId={previewId}
       preview={
-        incompletePreview(feed, [item.previewMessageId, ...item.messageIds]) ??
-        messagePreview(item.preview)
+        incompletePreview(feed, [
+          item.previewMessageId,
+          ...item.messageIds,
+        ]) ?? (
+          <PreviewText
+            text={rowPreview(item.preview)}
+            mentions={item.previewMentions}
+            session={session}
+            channelId={item.channelId}
+          />
+        )
       }
     />
   );
@@ -158,6 +183,9 @@ export function ReactionRowButton({
   channel: ChannelSummary | undefined;
 } & Pick<ComponentProps<typeof NavigationItem>, "selected" | "onClick">) {
   const reactionName = useReactionName();
+  // Its name reads the preview as shown, with mention chips' labels.
+  const nameId = useId();
+  const previewId = `${nameId}-preview`;
   const authors = [...new Set(item.events.map((event) => event.pubkey))];
   const names = authors
     .slice(0, authors.length === 3 ? 3 : 2)
@@ -182,7 +210,7 @@ export function ReactionRowButton({
         ? channelText(channel)
         : "Conversation";
   const reactions = groupReactions(item.events);
-  const preview = messagePreview(item.message.content);
+  const preview = rowPreview(item.message.content);
   const emojiNames = reactions
     .map((reaction) =>
       reaction.emoji
@@ -195,7 +223,7 @@ export function ReactionRowButton({
   return (
     <NavigationItem
       {...props}
-      aria-label={`${sender} reacted with ${emojiNames} to your message: ${preview}`}
+      aria-labelledby={`${nameId} ${previewId}`}
       icon={
         <Avatar
           size="default"
@@ -208,6 +236,9 @@ export function ReactionRowButton({
       trailing={<span className={rowStyles.unreadSlot} aria-hidden="true" />}
       label={
         <span className={rowStyles.content}>
+          <span id={nameId} hidden>
+            {`${sender} reacted with ${emojiNames} to your message:`}
+          </span>
           <span className={rowStyles.heading}>
             <span className={rowStyles.identity}>
               <span className={styles.reactionHeading}>
@@ -241,8 +272,16 @@ export function ReactionRowButton({
               {time}
             </time>
           </span>
-          <span className={`text-body text-subtle ${styles.reactionPreview}`}>
-            {preview}
+          <span
+            id={previewId}
+            className={`text-body text-subtle ${styles.reactionPreview}`}
+          >
+            <PreviewText
+              text={preview}
+              mentions={item.message}
+              session={session}
+              channelId={item.message.channelId}
+            />
           </span>
           <span className={`text-caption ${rowStyles.source}`}>
             in {context}

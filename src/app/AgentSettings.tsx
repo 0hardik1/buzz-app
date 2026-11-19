@@ -81,7 +81,7 @@ export function AgentSettings({
         <SettingsGroup>
           <SwitchPreferenceRow
             label="Use lean base prompt"
-            description="Use only the required Buzz contract for all agents on this device. Turn off to add fuller guidance. Claude Code and Codex need a new session; Goose and Pi apply changes next turn. Agents with settings access can also change this."
+            description="Omit optional workflow guidance for all agents on this device. On by default; turn off for full guidance. Claude Code and Codex need a new session; Goose and Pi apply changes next turn. Agents with settings access can also change this."
             checked={leanBasePrompt}
             onCheckedChange={changeLeanBasePrompt}
           />

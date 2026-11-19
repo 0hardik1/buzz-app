@@ -1,22 +1,20 @@
-import { expect, it, beforeEach } from "vitest";
+import { beforeEach } from "vitest";
+import { setLeanBasePromptPreference } from "../../features/agent-harness/lean-base-prompt-preference";
+
+// These tests pin the full guidance unless a case explicitly enables lean.
+beforeEach(() => setLeanBasePromptPreference(false));
+
+import { expect, it } from "vitest";
 import { quoted } from "../../features/agent-harness/turn-records";
 import type { ConversationWake } from "../../features/agents/service";
 import type { EventData } from "../../features/relay/events";
-import { BUZZ_PROMPT } from "../../buzz-mcp/prompt";
-import {
-  LEAN_BASE_PROMPT,
-  mentionSection,
-} from "../../features/agent-harness/base-prompt";
+import { mentionSection } from "../../features/agent-harness/base-prompt";
 import threadHandoff from "./session_handoff_thread.md?raw";
 import {
   promptMessage,
   promptSections,
 } from "../../features/agents/activity-transcript";
 import { steerPrompt, systemPrompt, turnPrompt } from "./prompt";
-import { setLeanBasePromptPreference } from "../../features/agent-harness/lean-base-prompt-preference";
-
-// These tests pin the full base prompt.
-beforeEach(() => setLeanBasePromptPreference(false));
 
 const alice = "a".repeat(64);
 const bob = "b".repeat(64);
@@ -195,7 +193,8 @@ it("builds the harness system prompt with instructions and core memory", () => {
     memory: "I am Claude.",
   });
   expect(prompt).toMatch(/^<base>\n/);
-  expect(prompt).toContain(BUZZ_PROMPT);
+  expect(prompt).toContain("## Audience");
+  expect(prompt).toContain("## Product help");
   expect(prompt).toContain("## Session Model");
   expect(prompt).toContain(
     "<workspace>\nCurrent working directory: ~/.buzz\n</workspace>",
@@ -520,7 +519,7 @@ it("keeps a wake's text from forging an event record", () => {
 
 it("always includes the Buzz tools' guidance, and leaves attention's to its tools", () => {
   const prompt = systemPrompt({ scope: "thread", cwd: "/w" });
-  expect(prompt).toContain(BUZZ_PROMPT);
+  expect(prompt).toContain("## Audience");
   expect(prompt).not.toContain("## Attention");
 });
 
@@ -563,27 +562,58 @@ it("tells a turn a mention starts what it owes the mention, and a wake's turn no
   expect(system).not.toContain("belongs to a different session of you");
 });
 
-it("builds the real harness system prompt with the lean contract enabled", () => {
-  setLeanBasePromptPreference(true);
-  try {
-    const prompt = systemPrompt({
-      scope: "thread",
-      cwd: "/w",
-      instructions: "Be terse.",
-      memory: "A note.",
-    });
-    expect(prompt).toContain(LEAN_BASE_PROMPT);
-    expect(prompt).not.toContain("## Engineering Discipline");
-    expect(prompt).toContain("<agent-instructions>\nBe terse.");
-    expect(prompt).toContain("<core-memory>\nA note.");
-    expect(
-      systemPrompt({
-        scope: "thread",
-        cwd: "/project",
-        workspace: "/workspace",
+it("keeps each context message's meaningful tags, not its bookkeeping", () => {
+  const tags = [
+    ["p", bob],
+    ["q", "1".repeat(64)],
+    ["buzz:request", "1".repeat(64)],
+  ];
+  const signature = "8".repeat(128);
+  const prompt = turnPrompt({
+    agent,
+    event: event("3", "now"),
+    channel: { id: "chan" },
+    scope: "channel",
+    topLevel: true,
+    context: [
+      event("2", "earlier", {
+        tags: [
+          ["h", "chan"],
+          ["auth", bob, "kind=9", signature],
+          ["client-id", "c1"],
+          ...tags,
+          ["ms", "5"],
+        ],
       }),
-    ).toContain("Your workspace is `/workspace`");
-  } finally {
-    setLeanBasePromptPreference(false);
-  }
+    ],
+    total: 2,
+  });
+  expect(prompt).toContain(
+    `"content":"earlier","tags":${JSON.stringify(tags)}`,
+  );
+  expect(prompt).not.toContain(signature);
+});
+
+it("bounds each context message's content and tags together", () => {
+  const content = "y".repeat(3900);
+  const prompt = turnPrompt({
+    agent,
+    event: event("3", "now"),
+    channel: { id: "chan" },
+    scope: "channel",
+    topLevel: true,
+    context: [
+      event("2", content, {
+        tags: [
+          ["p", bob],
+          ["t", "x".repeat(100)],
+          ["t", "release"],
+        ],
+      }),
+    ],
+    total: 2,
+  });
+  expect(prompt).toContain(
+    `"content":"${content}","tags":[["p","${bob}"],["t","release"]],"tags_omitted":true}`,
+  );
 });
