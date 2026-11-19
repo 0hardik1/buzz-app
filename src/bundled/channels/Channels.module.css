@@ -276,7 +276,8 @@
 [data-sidebar-cards] .channelSection[data-sidebar-card] {
   height: auto;
   overflow: visible;
-  padding: var(--space-1);
+  /* Titles and rows start 16px in, clear of the card's round corners. */
+  padding: var(--space-1) var(--space-2);
   --affordance-panel-hover: var(--affordance-sidebar-hover);
 }
 /* Every card, Favorites included, sits the same gap from the one before it. */
@@ -334,11 +335,11 @@
    box (the overlay takes the header's size); it lifts with the panel shadow. */
 .cardDragOverlay {
   block-size: calc(100% + 2 * var(--space-1));
-  margin: calc(-1 * var(--space-1));
+  margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2));
   cursor: grabbing;
 }
 .cardDragHeader {
-  padding: var(--space-1);
+  padding: var(--space-1) var(--space-2);
 }
 .cardDropLine {
   position: fixed;
