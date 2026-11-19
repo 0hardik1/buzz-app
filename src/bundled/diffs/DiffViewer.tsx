@@ -21,7 +21,12 @@ import { bundledLanguages } from "./grammars";
 import { gitPatch, type FileData } from "./parse";
 import styles from "./Diffs.module.css";
 
-import { commentLines, commentableLine, type DiffLine } from "./comment-lines";
+import {
+  commentLines,
+  commentLineForView,
+  commentableLine,
+  type DiffLine,
+} from "./comment-lines";
 export { commentLines, type DiffLine } from "./comment-lines";
 export type DiffComments = {
   readOnly?: boolean;
@@ -234,6 +239,10 @@ function PierreFile({
         line.lineNumber === keyboardLine.lineNumber,
     ),
   );
+  const keyboardTarget =
+    keyboardRow && keyboardLine
+      ? commentLineForView(keyboardRow, keyboardLine.side, viewType)
+      : undefined;
   const path = file.name;
   const onSelect = comments?.onSelect;
   const select = useCallback(
@@ -244,15 +253,17 @@ function PierreFile({
             entry.side === line.side && entry.lineNumber === line.lineNumber,
         ),
       );
-      if (candidates) {
+      const target =
+        candidates && commentLineForView(candidates, line.side, viewType);
+      if (target) {
         setKeyboardLine(undefined);
-        onSelect?.(path, candidates, () => {
+        onSelect?.(path, [target], () => {
           setKeyboardLine(undefined);
           element.focus();
         });
       }
     },
-    [rows, path, onSelect],
+    [rows, path, onSelect, viewType],
   );
   const annotations: DiffLineAnnotation<ReactNode>[] =
     comments?.annotations
@@ -392,21 +403,19 @@ function PierreFile({
       )}
       {comments && !comments.readOnly && (
         <span className="sr-only" role="status">
-          {keyboardRow?.length === 2
-            ? `Context: Old line ${keyboardRow[0]?.lineNumber} or New line ${keyboardRow[1]?.lineNumber}. Press Enter to choose a side.`
-            : keyboardLine
-              ? `${keyboardLine.side === "deletions" ? "Old" : "New"} line ${keyboardLine.lineNumber}`
-              : ""}
+          {keyboardTarget
+            ? `${keyboardTarget.side === "deletions" ? "Old" : "New"} line ${keyboardTarget.lineNumber}`
+            : ""}
         </span>
       )}
       <ReactFileDiff
         fileDiff={file}
         selectedLines={
-          keyboardLine
+          keyboardTarget
             ? {
-                start: keyboardLine.lineNumber,
-                end: keyboardLine.lineNumber,
-                side: keyboardLine.side,
+                start: keyboardTarget.lineNumber,
+                end: keyboardTarget.lineNumber,
+                side: keyboardTarget.side,
               }
             : null
         }

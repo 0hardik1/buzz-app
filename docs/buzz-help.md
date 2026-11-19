@@ -1831,7 +1831,8 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   readable without syntax colors. Added and deleted lines use colored bars.
 - In GitHub **Changes**, use the line gutter to
   post a single-line comment, or **Reply** in an existing thread. Context lines
-  require an explicit old/new side. Comments post immediately with your signed-in
+  use New in Unified view and the selected side in Split view; deletion-only
+  lines use Old. Comments post immediately with your signed-in
   `gh` account. Verified changes are interactive while comments continue loading.
   Focus a diff file and use Up/Down then Enter to comment with the keyboard.
   Closed and merged PRs also offer commenting;

@@ -70,7 +70,6 @@ export function PrFiles({
   useEffect(() => {
     if (!active) {
       setComposers([]);
-      setChoice(undefined);
     }
   }, [active]);
   const [snapshot, setSnapshot] = useState<Snapshot>();
@@ -84,17 +83,8 @@ export function PrFiles({
   const [commentsLoading, setCommentsLoading] = useState(true);
   const layout = useDiffLayout();
   const [layoutError, setLayoutError] = useState(false);
-  const [choice, setChoice] = useState<{
-    path: string;
-    lines: DiffLine[];
-    restoreFocus(): void;
-  }>();
   const [available, setAvailable] = useState<ReadonlySet<string>>(new Set());
   const refreshButton = useRef<HTMLButtonElement>(null);
-  const sideButton = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (choice) sideButton.current?.focus();
-  }, [choice]);
   const restoreFocus = (composer: Composer) => {
     composer.restoreFocus();
     if (document.activeElement === document.body)
@@ -145,7 +135,6 @@ export function PrFiles({
     snapshotRef.current = undefined;
     setSnapshot(undefined);
     setAvailable(new Set());
-    setChoice(undefined);
     setComposers([]);
     setLoading(true);
     setCommentsLoading(true);
@@ -258,7 +247,6 @@ export function PrFiles({
       });
       if (!status.busy && !status.unknown)
         delivery.update({ error: undefined, sentUrl: undefined });
-      setChoice(undefined);
     },
     [snapshot, loading, active, status.busy, status.unknown, delivery],
   );
@@ -551,30 +539,6 @@ export function PrFiles({
       annotate({ ...thread, line: thread.line }, content);
   for (const composer of composers)
     if (targetMapped(composer)) annotate(composer.target, form(composer));
-  if (choice?.lines[0])
-    annotate(
-      {
-        path: choice.path,
-        side: choice.lines[0].side === "deletions" ? "LEFT" : "RIGHT",
-        line: choice.lines[0].lineNumber,
-      },
-      <section
-        key="side-choice"
-        className={styles.comment}
-        aria-label="Choose comment side"
-      >
-        {choice.lines.map((line) => (
-          <Button
-            ref={line === choice.lines[0] ? sideButton : undefined}
-            key={line.side}
-            size="sm"
-            onClick={() => choose(choice.path, line, choice.restoreFocus)}
-          >
-            {line.side === "deletions" ? "Old" : "New"} line {line.lineNumber}
-          </Button>
-        ))}
-      </section>,
-    );
   const onSelect = useCallback<DiffComments["onSelect"]>(
     (path, lines, restoreFocus) => {
       if (
@@ -585,7 +549,6 @@ export function PrFiles({
       )
         return;
       if (lines.length === 1 && lines[0]) choose(path, lines[0], restoreFocus);
-      else setChoice({ path, lines, restoreFocus });
     },
     [snapshot, status.busy, status.unknown, loading, choose],
   );

@@ -90,7 +90,7 @@ for (const layout of ["Unified", "Split"]) {
     await file.focus();
     for (let index = 0; index < 4; index++) await file.press("ArrowDown");
     await expect(file.getByRole("status")).toHaveText(
-      "Context: Old line 5001 or New line 5002. Press Enter to choose a side.",
+      layout === "Split" ? "Old line 5001" : "New line 5002",
     );
     await file.press("Escape");
     await expect(file.getByRole("status")).toBeEmpty();
@@ -359,27 +359,40 @@ test("holds dispatch while duplicate submission gestures produce one POST", asyn
   await expect(page.getByText("Only once", { exact: true })).toBeVisible();
   expect(await posts(page)).toBe(1);
 });
-test("context hover requires an explicit old/new choice", async ({ page }) => {
-  await open(page);
-  await page
-    .locator(
-      'diffs-container [data-column-number="5002"][data-line-type="context"]',
-    )
-    .hover();
-  await page.getByRole("button", { name: "Comment on hovered line" }).click();
-  await expect(page.getByRole("textbox", { name: "Comment" })).toHaveCount(0);
-  await page
-    .getByRole("button", { name: "Old line 5001", exact: true })
-    .click();
-  await page
-    .getByRole("textbox", { name: "Comment", exact: true })
-    .fill("Context side");
-  await page.getByRole("button", { name: "Post to GitHub" }).click();
-  await expect(page.getByText("Context side", { exact: true })).toBeVisible();
-  expect(
-    await page.evaluate(() => window.inlineFixture.state.comments[0]),
-  ).toMatchObject({ side: "LEFT", line: 5001 });
-});
+for (const [layout, column, side, coordinate] of [
+  ["Unified", "additions", "RIGHT", 5002],
+  ["Split", "deletions", "LEFT", 5001],
+  ["Split", "additions", "RIGHT", 5002],
+]) {
+  test(`context hover selects ${side} directly in ${layout}`, async ({
+    page,
+  }) => {
+    await open(page);
+    if (layout === "Split") await select(page, "Diff layout", "Split");
+    const file = page.getByRole("region", {
+      name: "src/example.ts",
+      exact: true,
+    });
+    await file
+      .locator(
+        `code[data-${layout === "Split" ? column : "unified"}] [data-column-number="${coordinate}"][data-line-type="context"]`,
+      )
+      .last()
+      .hover();
+    await page.getByRole("button", { name: "Comment on hovered line" }).click();
+    const input = page.getByRole("textbox", { name: "Comment", exact: true });
+    await expect(input).toBeFocused();
+    await expect(
+      page.getByRole("region", { name: "Choose comment side" }),
+    ).toHaveCount(0);
+    await input.fill("Context side");
+    await page.getByRole("button", { name: "Post to GitHub" }).click();
+    await expect(page.getByText("Context side", { exact: true })).toBeVisible();
+    expect(
+      await page.evaluate(() => window.inlineFixture.state.comments[0]),
+    ).toMatchObject({ side, line: coordinate });
+  });
+}
 test("refresh into raw fallback discards composer and removes posting authority", async ({
   page,
 }) => {
@@ -511,7 +524,7 @@ test("gutter and keyboard share verified patch coordinates across layouts", asyn
       .hover();
     await page.getByRole("button", { name: "Comment on hovered line" }).click();
     await expect(page.getByLabel("Selected coordinates")).toHaveText(
-      '[{"side":"deletions","lineNumber":5001},{"side":"additions","lineNumber":5002}]',
+      '[{"side":"additions","lineNumber":5002}]',
     );
     await file.focus();
     await file.press("ArrowDown");

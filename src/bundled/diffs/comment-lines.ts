@@ -1,6 +1,6 @@
 import type { FileData } from "./parse";
 export type DiffLine = { side: "deletions" | "additions"; lineNumber: number };
-/** Context retains both coordinates so selecting it never guesses a side. */
+/** Retains both coordinates for layout-specific comment placement. */
 export function commentLines(file: FileData): DiffLine[][] {
   return file.hunks.flatMap((hunk) =>
     hunk.changes.map((change): DiffLine[] =>
@@ -17,6 +17,18 @@ export function commentLines(file: FileData): DiffLine[][] {
           ],
     ),
   );
+}
+
+export function commentLineForView(
+  row: readonly DiffLine[],
+  side: DiffLine["side"],
+  layout: "unified" | "split",
+): DiffLine | undefined {
+  if (layout === "unified") {
+    const addition = row.find((line) => line.side === "additions");
+    if (addition) return addition;
+  }
+  return row.find((line) => line.side === side);
 }
 
 export function commentableLine(file: FileData, line: DiffLine): boolean {
