@@ -11,7 +11,7 @@ import {
 import { ACTIONS, CONFIRM, ENTITIES, PLACES, hover } from "./catalog";
 import { PEOPLE } from "./world";
 import { CASES, type Case, type Category, type Expected } from "./cases";
-import { HELDOUT } from "./cases-heldout";
+import { HELDOUT, HELDOUT2 } from "./cases-heldout";
 import { buildActionDecision, type ResolvedAction } from "./draft-builder";
 
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
@@ -305,9 +305,11 @@ export async function main(
   const set =
     options.set === "heldout"
       ? HELDOUT
-      : options.set === "all"
-        ? [...CASES, ...HELDOUT]
-        : CASES;
+      : options.set === "heldout2"
+        ? HELDOUT2
+        : options.set === "all"
+          ? [...CASES, ...HELDOUT, ...HELDOUT2]
+          : CASES;
   const cases = set.filter(
     (c) =>
       !options.filter ||

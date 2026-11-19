@@ -256,3 +256,86 @@ export const HELDOUT: readonly Case[] = ROWS.map(
     expect,
   }),
 );
+
+// Second held-out set: written after `heardAs` was built against the
+// failures in the first, on new names with digits and hyphens, so it scores
+// that helper out of sample (`--set heldout2`).
+const ROWS2: Row[] = [
+  [
+    "stt",
+    "message:m-deploy",
+    "forward this to the q three okrs channel",
+    act("message.forward_to_channel", "m-deploy", "c-q3-okrs"),
+  ],
+  ["navigate", null, "take me to ux research", go("channel:c-ux-research")],
+  ["forward", "#sre-alerts", "mute this", act("channel.mute", "c-sre-alerts")],
+  [
+    "reverse",
+    "section:Oncall",
+    "move s r e alerts in here",
+    act("channel.move_to_section", "c-sre-alerts", "s-Oncall"),
+  ],
+  [
+    "stt",
+    "message:m-lunch",
+    "send this to scout two",
+    act("message.forward_to_person", "m-lunch", "p-scout2"),
+  ],
+  ["stt", null, "go to release one seven", go("channel:c-release-1-7")],
+  [
+    "ambiguity",
+    "#web-perf",
+    "move this next to the release one point seven channel",
+    act("channel.move_next_to", "c-web-perf", "c-release-1-7"),
+  ],
+  [
+    "reverse",
+    "person:Mei Lin",
+    "add her to ux research",
+    act("channel.add_member", "c-ux-research", "p-mei"),
+  ],
+  [
+    "forward",
+    "message:m-deploy",
+    "share with omar",
+    act("message.forward_to_person", "m-deploy", "p-omar"),
+  ],
+  ["forward", "#ux-research", "pin this", act("channel.star", "c-ux-research")],
+  [
+    "stt",
+    "message:m-deploy",
+    "forward to web perf",
+    act("message.forward_to_channel", "m-deploy", "c-web-perf"),
+  ],
+  // scout2 has a chat open, so messaging it is going there.
+  ["forward", "person:scout2", "message this agent", go("chat:d-scout2")],
+  [
+    "reverse",
+    "section:Later",
+    "put web perf here",
+    act("channel.move_to_section", "c-web-perf", "s-Later"),
+  ],
+  [
+    "ambiguity",
+    "#release-1-7",
+    "move sre alerts next to this",
+    act("channel.move_next_to", "c-sre-alerts", "c-release-1-7"),
+  ],
+  ["stt", null, "open my chat with scout to", go("chat:d-scout2")],
+  [
+    "forward",
+    "message:m-lunch",
+    "react with thumbs up",
+    act("message.react", "m-lunch", "e-thumbs up"),
+  ],
+];
+
+export const HELDOUT2: readonly Case[] = ROWS2.map(
+  ([category, hover, spoken, expect], i) => ({
+    id: `heldout2-${category}-${String(i + 1).padStart(3, "0")}`,
+    category,
+    hover,
+    spoken,
+    expect,
+  }),
+);
