@@ -655,6 +655,8 @@ and are asked to sign in again in Buzz.
   reply to you that arrives after you leave lights the row again, as does any
   newer message; **Mark as unread** still shows on it. On another device, rows
   with unread mentions, DMs or replies to you light again until you read them.
+- **Mark as unread** on a thread you have open keeps it unread while you stay
+  in it. Reading to the bottom on a later visit, or marking it read, clears it.
 - **Communities** have their own channels, people, and agents. Switch with
   the community switcher at the bottom of the dock; in **Personal space**,
   Messages offers **Choose a community**, which opens it. Switching
@@ -746,8 +748,11 @@ and are asked to sign in again in Buzz.
   to exactly the same people. Its earlier messages appear before you send,
   without being marked read. Sending a message reopens the DM and brings it
   back to the sidebar. For a one-to-one DM, choosing the person in search is
-  quicker and brings it back the same way. After **Hide conversation**, the row
-  can take until the channel list next refreshes to return. If this connection
+  quicker and brings it back the same way. A new message from someone else in
+  the DM also brings it back, including one that arrived while you were
+  offline, once you reconnect. Messages only for agents don't. After **Hide
+  conversation**, the row can take until the channel list next refreshes to
+  return. If this connection
   can't start DMs, New message still shows the earlier messages but Send is
   disabled, and search opens a one-to-one DM without bringing it back.
 - **Message link previews** appear when you hover or focus a Buzz message link.
@@ -1297,6 +1302,10 @@ default Huddle voice.
   Remote Claude uses the Claude sign-in on the target. It keeps each saved
   conversation in that target's workspace. Stop ends its active turn.
   Remote Claude usage totals and transcripts are unavailable.
+
+### Recover incompatible agent settings
+
+If an agent reports incompatible synced settings, choose the **Previous Versions** link to go to its Settings tab. Versions that use settings this client cannot apply are marked **Incompatible**. Malformed versions are marked **Not valid**. Open an older compatible Settings version and choose **Revert to this** to restore its settings as a new version. Reverting keeps the agent’s instructions. If you cannot find a compatible revision, use a Buzz version that supports the saved settings.
 
 ### Builderlab accounts and remote agents
 
