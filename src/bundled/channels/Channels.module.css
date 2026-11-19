@@ -325,6 +325,13 @@
    same gap from the one before it. */
 [data-sidebar-cards] .channelSection {
   --sidebar-section-gap: var(--space-panel-gap);
+  /* A landing gap opens smoothly. */
+  transition: margin var(--duration-fast) var(--easing-state);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-sidebar-cards] .channelSection {
+    transition: none;
+  }
 }
 /* The hidden new-workspace slot already holds the gap above the next card. */
 [data-sidebar-cards] .createSectionSlot + .channelSection {
@@ -358,12 +365,17 @@
   bottom: calc(var(--space-2) * -1);
   transform: translateY(50%);
 }
-/* Between cards the gap is half as tall. */
-[data-sidebar-cards] .channelSection[data-drop-edge="before"]::before {
-  top: calc(var(--space-1) * -1);
+/* Between cards the landing gap opens a little so the line has room above
+   and below; the line is a short, round bar centred in it. */
+[data-sidebar-cards] .channelSection[data-drop-edge="before"] {
+  margin-top: calc(var(--sidebar-section-gap) + var(--space-2));
 }
-[data-sidebar-cards] .channelSection[data-drop-edge="after"]::before {
-  bottom: calc(var(--space-1) * -1);
+[data-sidebar-cards] .channelSection[data-drop-edge="after"] {
+  margin-bottom: var(--space-2);
+}
+[data-sidebar-cards] .channelSection[data-drop-edge]::before {
+  inset-inline: var(--space-3);
+  height: var(--space-1);
 }
 .channelDragOverlay {
   display: flex;
