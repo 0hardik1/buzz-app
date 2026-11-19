@@ -2843,6 +2843,101 @@ it("never offers a Solo ask for a draft that carries a forwarded message", async
   expect(blankDraft(JSON.stringify({ text: "" }))).toBe(true);
 });
 
+it("brings your agent from another community in through its prompt, never a Solo ask", async () => {
+  const honey = keypair();
+  const snapshot = { status: "ready", agents: [] };
+  const types: readonly unknown[] = [];
+  const join = vi.fn(async () => ({ agent: {} as never, notes: [] }));
+  const agents = {
+    find: () => undefined,
+    joinable: () => [
+      {
+        key: honey.pubkey,
+        pubkey: honey.pubkey,
+        name: "Honey",
+        relay: "wss://oss.example.com",
+      },
+    ],
+    join,
+    sessionState: () => "unavailable" as const,
+    subscribe: () => () => {},
+    snapshot: () => snapshot,
+    types: () => types,
+  } as unknown as Agents;
+  const tools: readonly Contribution<ComposerTool>[] = [
+    {
+      id: "fixture",
+      key: "test/fixture",
+      pluginId: "test",
+      revision: "1",
+      title: "Fixture tools",
+      component: (props: ComposerToolProps) => (
+        <button
+          type="button"
+          onClick={() =>
+            props.insertMention({ pubkey: honey.pubkey, name: "Honey" })
+          }
+        >
+          Mention Honey
+        </button>
+      ),
+    },
+  ];
+  const h = await mountUploadComposer({
+    agents,
+    soloChats: true,
+    profiles: (viewer) => [
+      eventDto(
+        signed(honey, {
+          kind: 0,
+          created_at: 1700000000,
+          content: JSON.stringify({ name: "Honey", bot: true }),
+          tags: [
+            [
+              "auth",
+              viewer.pubkey,
+              "",
+              bytesToHex(
+                schnorr.sign(
+                  new Uint8Array(
+                    createHash("sha256")
+                      .update(`nostr:agent-auth:${honey.pubkey}:`)
+                      .digest(),
+                  ),
+                  viewer.secret,
+                ),
+              ),
+            ],
+          ],
+        }),
+      ),
+    ],
+    extensions: {
+      tools: { snapshot: () => tools, subscribe: () => () => {} },
+      inline: { snapshot: () => [], subscribe: () => () => {} },
+    },
+  });
+  await act(() =>
+    h.owner.session.profiles.ensure([honey.pubkey], "background"),
+  );
+  await waitFor(() =>
+    expect(h.owner.session.profiles.owner?.(honey.pubkey)).toBeDefined(),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Mention Honey" }));
+  await userEvent.type(h.input(), "is launch Thursday?");
+  await waitFor(() => expect(h.send()).toBeEnabled());
+  fireEvent.click(h.send());
+  // Its own prompt sets it up in this community; a Solo chat here could
+  // never reach it.
+  expect(await screen.findByRole("dialog")).toHaveTextContent(
+    "Bring Honey into",
+  );
+  expect(
+    screen.queryByRole("button", { name: "Ask in a Solo chat" }),
+  ).toBeNull();
+  expect(h.sign.mock.calls.some(([event]) => event.kind === 9007)).toBe(false);
+});
+
 it.each(["cleanup", "restore"] as const)(
   "retains a failed attachment send until %s storage recovers",
   async (phase) => {

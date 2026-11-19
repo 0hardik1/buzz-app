@@ -3029,19 +3029,21 @@ function Composer({
           const [agent] = agentsHere;
           const single =
             agentsHere.length === 1 && captured.recipients.length === 1;
-          const solo =
-            single &&
-            !!agent?.own &&
-            !capturedAttachments.length &&
-            !captured.forward &&
-            !!relaySession?.channelWrites.available;
           // Your agent from another community joins through §7's bring
-          // prompt instead, which also sets it up here.
+          // prompt instead, which also sets it up here; until then no Solo
+          // chat here could reach it.
           const elsewhere =
             !!agent &&
             (agents?.joinable() ?? []).some(
               (item) => item.pubkey === agent.pubkey,
             );
+          const solo =
+            single &&
+            !!agent?.own &&
+            !elsewhere &&
+            !capturedAttachments.length &&
+            !captured.forward &&
+            !!relaySession?.channelWrites.available;
           const join =
             single &&
             agent?.own &&
