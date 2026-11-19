@@ -708,6 +708,20 @@ jobs:
           echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
           ./bin/rustup toolchain install
           ./bin/rustup default "$(./bin/rustup show active-toolchain | cut -d ' ' -f1)"
+      - name: Match the baseline seed compiler inventory
+        if: matrix.variant == 'baseline'
+        run: |
+          ./bin/rustup toolchain install 1.98.1 --profile minimal --no-self-update
+          ./bin/rustup toolchain install 1.99.1 --profile minimal --no-self-update
+          ./bin/rustup default 1.98.1
+          ./bin/rustup toolchain list | cut -d ' ' -f1 > "$RUNNER_TEMP/probe-inventory.txt"
+          while IFS= read -r toolchain; do
+            case "$toolchain" in
+              1.98.1-*|1.99.1-*) ;;
+              *) ./bin/rustup toolchain uninstall "$toolchain" ;;
+            esac
+          done < "$RUNNER_TEMP/probe-inventory.txt"
+          ./bin/rustup toolchain list
       - name: Record pinned compiler
         run: |
           ./bin/rustc -Vv > "$RUNNER_TEMP/probe-compiler-before.txt"
