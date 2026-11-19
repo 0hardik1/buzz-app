@@ -224,6 +224,9 @@ function isOwnReadStateFilter(filter: ReadFilter, viewer: string | undefined) {
 
 /** Kinds whose `p` tags notify: messages, and edits that add mentions. */
 const addressing = (kind: number) => kind === 9 || kind === 40003;
+const incomingKind = (event: RelayEvent, viewer: string | undefined) =>
+  [9, 40002, 40008].includes(event.kind) ||
+  (event.kind === 40003 && !!viewer && hasTag(event, "p", viewer));
 
 /** Compose once per relay/viewer. Plugins get one interface; the host owns disposal. */
 export function createRelaySession(
@@ -936,7 +939,7 @@ export function createRelaySession(
         for (const event of visible) {
           const previous = recent.peek(event.id);
           // Replay can precede a fresh live copy. Keep alert receipt separate from content receipt.
-          const incoming = [9, 40002, 40008].includes(event.kind)
+          const incoming = incomingKind(event, transport?.viewer)
             ? incomingPhase === "live" || previous?.incoming === "live"
               ? "live"
               : previous?.incoming === "replay" ||
@@ -3891,12 +3894,7 @@ export function createRelaySession(
                   ([name]) => name === "h",
                 );
                 return (
-                  (event.kind === 9 ||
-                    event.kind === 40002 ||
-                    event.kind === 40008 ||
-                    // An edit that newly mentions the viewer alerts as its message.
-                    (event.kind === 40003 &&
-                      hasTag(event, "p", transport.viewer))) &&
+                  incomingKind(event, transport.viewer) &&
                   event.pubkey !== transport.viewer &&
                   destinations.length === 1 &&
                   destinations[0]?.[1] === provenance.channelId &&
@@ -4003,15 +4001,30 @@ export function createRelaySession(
             event.kind === 40002 ? objectBody(event.content) : undefined;
           const content =
             typeof body?.content === "string" ? body.content : event.content;
-          const messageId =
-            event.kind === 40003
-              ? event.tags.find(([name]) => name === "e")?.[1]
-              : event.id;
-          if (!messageId) return [];
+          let original = event;
+          if (event.kind === 40003) {
+            const target = event.tags.find(([name]) => name === "e")?.[1];
+            if (!target) return [];
+            const edited =
+              recent.peek(target)?.event ??
+              retainedEvent(target) ??
+              unread.event(target);
+            if (
+              !edited ||
+              ![9, 40002].includes(edited.kind) ||
+              messageAuthor(edited, transport.archiveAuthority) !==
+                event.pubkey ||
+              hasTag(edited, "p", transport.viewer) ||
+              agentAudience(edited)
+            )
+              return [];
+            original = edited;
+          }
           return [
             Object.freeze({
               channelId: provenance.channelId as string,
-              messageId,
+              messageId: original.id,
+              ...(event.kind === 40003 ? { editMention: true as const } : {}),
               createdAt: event.created_at,
               authorId: event.pubkey,
               workflowOwnerId: workflowOwner(event, transport.archiveAuthority),
