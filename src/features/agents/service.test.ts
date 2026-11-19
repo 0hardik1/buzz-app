@@ -1746,6 +1746,23 @@ describe("a conversation folder", () => {
     );
   });
 
+  it("allows a conversation folder when only a community session exists", async () => {
+    const list = vi.fn((): readonly AgentSession[] => [
+      { channelId: channel, community: true } as AgentSession,
+    ]);
+    const f = await ready({
+      conversationFolders: true,
+      sessions: { list, subscribe: () => () => {} },
+    });
+    await expect(
+      f.plugin.agents.assignConversationFolder(
+        f.agent.key,
+        { channelId: channel },
+        "~/work",
+      ),
+    ).resolves.toBe("/home/me/work");
+  });
+
   it("is refused for a conversation that already has a session", async () => {
     const list = vi.fn((): readonly AgentSession[] => [thread]);
     const f = await ready({
