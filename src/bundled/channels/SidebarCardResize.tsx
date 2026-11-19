@@ -245,7 +245,7 @@ export function SidebarCardResize({
               event.currentTarget.setAttribute("data-resizing", "");
               rows.setAttribute("data-resizing", "");
               rows.style.maxHeight = `${start}px`;
-              document.documentElement.style.cursor = "ns-resize";
+              document.documentElement.style.cursor = "grabbing";
               document.body.style.userSelect = "none";
               surface.style.pointerEvents = "none";
               grip.style.pointerEvents = "auto";

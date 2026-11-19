@@ -1097,9 +1097,12 @@ html[data-keyboard-navigation]
   padding: 0;
   border: 0;
   background: transparent;
-  /* A hand says it can be clicked; the resize cursor takes over on press. */
-  cursor: pointer;
+  /* An open hand at rest, a closed one while dragging, like the card grab. */
+  cursor: grab;
   touch-action: none;
+}
+.cardResize[data-resizing] {
+  cursor: grabbing;
 }
 .cardResize::after {
   position: absolute;
