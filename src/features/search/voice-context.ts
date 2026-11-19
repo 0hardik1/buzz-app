@@ -4,6 +4,7 @@
 // `data-community-id`) before the VoiceJump modal mounts and steals focus.
 import { messagePreviewText } from "../conversation/message-preview-text";
 import { sortParticipantNames } from "../identity-names/participant-order";
+import { isBuzzLink } from "../navigation/buzz-links";
 import type { ChannelSummary } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
 
@@ -531,4 +532,78 @@ export function captureVoiceThing({
     ...(activeChannelName ? { activeChannelName } : {}),
     label: "nothing",
   };
+}
+
+const MIDDLE_CLICK_EXCLUDED_SELECTOR =
+  'input, textarea, select, [role="textbox"], [contenteditable]:not([contenteditable="false"]), iframe, webview, section[aria-label="Browser"], [data-closable]';
+
+function isBuzzLinkAnchor(element: Element): boolean {
+  if (!element.matches("a[href]")) return false;
+  const href = element.getAttribute("href") ?? "";
+  return isBuzzLink(href) || element.hasAttribute("data-panel-target");
+}
+
+/** Elements in a middle-click event's path, innermost first. */
+export function middleClickElements(event: MouseEvent): Element[] {
+  const path =
+    typeof event.composedPath === "function" ? event.composedPath() : [];
+  const elements = path.filter(
+    (node): node is Element => node instanceof Element,
+  );
+  if (elements.length > 0) return elements;
+  if (event.target instanceof Element) return [event.target];
+  if (event.target instanceof Node && event.target.parentElement) {
+    return [event.target.parentElement];
+  }
+  return [];
+}
+
+/** Middle-clicks on closable tabs, Buzz links, text fields, and embedded web
+ * pages keep their own behavior rather than driving voice. */
+export function isMiddleClickExcluded(
+  event: MouseEvent,
+  elements: readonly Element[] = middleClickElements(event),
+): boolean {
+  for (const element of elements) {
+    if (
+      (element as HTMLElement).isContentEditable ||
+      element.matches(MIDDLE_CLICK_EXCLUDED_SELECTOR) ||
+      isBuzzLinkAnchor(element)
+    ) {
+      return true;
+    }
+  }
+  const target = elements[0];
+  if (!target) return true;
+  if (target.closest(MIDDLE_CLICK_EXCLUDED_SELECTOR)) return true;
+  const anchor = target.closest("a[href]");
+  return !!anchor && isBuzzLinkAnchor(anchor);
+}
+
+/** Captures the typed UI target from a directly clicked DOM element, or
+ * `undefined` when the element is not something voice can target. */
+export function captureVoiceThingFromElement(
+  element: Element | null | undefined,
+  {
+    session,
+    resolveName,
+    activeChannelId,
+  }: {
+    session?: RelaySession | undefined;
+    resolveName?:
+      | ((
+          pubkey: string,
+          fallback: string,
+          among?: readonly string[],
+        ) => string)
+      | undefined;
+    activeChannelId?: string | undefined;
+  } = {},
+): VoiceThing | undefined {
+  if (!element) return undefined;
+  return captureFromElement(element, {
+    session,
+    resolveName,
+    activeChannelId,
+  });
 }

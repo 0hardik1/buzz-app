@@ -56,6 +56,9 @@ import {
 } from "../../features/search/voice-jump";
 import {
   captureVoiceThing,
+  captureVoiceThingFromElement,
+  isMiddleClickExcluded,
+  middleClickElements,
   trackPointerPosition,
   type VoiceThing,
 } from "../../features/search/voice-context";
@@ -120,6 +123,8 @@ export function VoiceJump({
   const voiceAvailable = useVoiceSearchAvailable(!!decisions && isTauri());
   const available = !!decisions && (voiceAvailable || import.meta.env.DEV);
   const [open, setOpen] = useState(false);
+  const openRef = useRef(open);
+  openRef.current = open;
   const [hovered, setHovered] = useState<VoiceThing>(NOTHING);
   // Once access is denied, the box stops starting the microphone by itself
   // for the rest of this session and says where to allow it.
@@ -128,6 +133,8 @@ export function VoiceJump({
   const opened = useRef<string | undefined>(undefined);
   // The shortcut pressed while open hands off to the open box.
   const again = useRef<(() => void) | undefined>(undefined);
+  // Middle-click while listening stops early without restarting when idle.
+  const stopEarly = useRef<(() => void) | undefined>(undefined);
 
   const relay = useSyncExternalStore(
     services?.communities.relay.subscribe ?? noSubscribe,
@@ -184,6 +191,37 @@ export function VoiceJump({
     });
   }, [available, services, captureHovered]);
 
+  useEffect(() => {
+    if (!available || !services) return;
+    const onAuxClick = (event: MouseEvent) => {
+      if (event.button !== 1 || event.defaultPrevented) return;
+      const elements = middleClickElements(event);
+      if (isMiddleClickExcluded(event, elements)) return;
+      if (stopEarly.current) {
+        event.preventDefault();
+        stopEarly.current();
+        return;
+      }
+      if (openRef.current) return;
+      const currentRelay = services.communities.relay.snapshot();
+      const target = services.navigation.snapshot().entry.target;
+      const activeChannelId =
+        target.kind === "conversation" ? target.channelId : undefined;
+      const captured = captureVoiceThingFromElement(elements[0], {
+        session: currentRelay.session,
+        resolveName,
+        activeChannelId,
+      });
+      if (!captured) return;
+      event.preventDefault();
+      opened.current = undefined;
+      setHovered(captured);
+      setOpen(true);
+    };
+    window.addEventListener("auxclick", onAuxClick);
+    return () => window.removeEventListener("auxclick", onAuxClick);
+  }, [available, services, resolveName]);
+
   const close = useCallback(() => {
     setOpen(false);
     // Focus moved by the box itself, and returned on close, isn't the
@@ -239,6 +277,7 @@ export function VoiceJump({
             initialHovered={hovered}
             input={input}
             again={again}
+            stopEarly={stopEarly}
             go={(place) => {
               opened.current = place.channelId;
               close();
@@ -260,6 +299,7 @@ export function VoiceJumpBody({
   initialHovered = NOTHING,
   input,
   again,
+  stopEarly,
   go,
   onDone,
 }: {
@@ -273,6 +313,7 @@ export function VoiceJumpBody({
   initialHovered?: VoiceThing | undefined;
   input: RefObject<HTMLElement | null>;
   again: { current: (() => void) | undefined };
+  stopEarly?: { current: (() => void) | undefined } | undefined;
   go: (place: JumpPlace) => void;
   onDone: () => void;
 }) {
@@ -674,10 +715,12 @@ export function VoiceJumpBody({
   useEffect(() => {
     if (!voiceAvailable) return;
     again.current = () => (listening ? stop() : listen());
+    if (stopEarly) stopEarly.current = listening ? stop : undefined;
     return () => {
       again.current = undefined;
+      if (stopEarly) stopEarly.current = undefined;
     };
-  }, [again, listening, stop, listen, voiceAvailable]);
+  }, [again, stopEarly, listening, stop, listen, voiceAvailable]);
 
   const runnableActions = actionCandidates.flatMap((candidate) => {
     if (candidate.kind !== "action" || !candidate.binding) return [];
