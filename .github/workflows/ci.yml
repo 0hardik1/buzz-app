@@ -41,9 +41,6 @@ jobs:
     if: github.event_name != 'workflow_dispatch'
     name: JavaScript (${{ matrix.shard }}/8)
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      id-token: write
     # Vitest shards by path hash and equal file count, not duration, so slow
     # files can share one. At six, 5/6 held the live-continuity model and
     # ChannelMembersDialog suites and reached this deadline; seven still
@@ -58,40 +55,11 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-      # The intake mapping must also restrict issuance to this workflow on main pushes.
-      # Reporting is best effort: a failed or stalled exchange leaves the key empty,
-      # and Vitest then runs without the tracer.
-      - name: Get Datadog intake key via OIDC
-        id: datadog
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DD_ORG_UUID != ''
-        continue-on-error: true
-        timeout-minutes: 1
-        uses: DataDog/datadog-workload-identity-federation-github-action/intake@08e47f7c6f805efc5eef19953e33c523915acd85
-        with:
-          org_uuid: ${{ vars.DD_ORG_UUID }}
-          site: datadoghq.com
       - name: Vitest shard
         env:
           # Bound contention between suites that sign and verify large fixtures.
           BUZZ_TEST_WORKERS: "2"
-          DD_API_KEY: ${{ steps.datadog.outputs.api_key }}
-          DD_CIVISIBILITY_AGENTLESS_ENABLED: ${{ steps.datadog.outputs.api_key != '' }}
-          DD_SITE: datadoghq.com
-          DD_SERVICE: buzz-app
-          DD_ENV: ci
-          DD_TEST_SESSION_NAME: vitest
-          # CI owns test selection and retries. Datadog only reports results.
-          DD_CIVISIBILITY_ITR_ENABLED: "false"
-          DD_CIVISIBILITY_FLAKY_RETRY_ENABLED: "false"
-          DD_CIVISIBILITY_EARLY_FLAKE_DETECTION_ENABLED: "false"
-          DD_TEST_MANAGEMENT_ENABLED: "false"
-          DD_TEST_FAILED_TEST_REPLAY_ENABLED: "false"
-          # Skip the Git history upload; it fetches a month of history in the coordinator.
-          DD_CIVISIBILITY_GIT_UPLOAD_ENABLED: "false"
-          # Report from the Vitest coordinator so fixture subprocesses can run outside the checkout.
-          DD_EXPERIMENTAL_TEST_OPT_VITEST_NO_WORKER_INIT: "true"
-          NODE_OPTIONS: ${{ steps.datadog.outputs.api_key != '' && '--import dd-trace/register.js -r dd-trace/ci/init' || '' }}
-        run: ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/ci/vitest.json evidence=test-results/ci/vitest-timing.json title="Vitest shard ${{ matrix.shard }}/8" -- ./bin/pnpm exec vitest run --shard=${{ matrix.shard }}/8 --reporter=default --reporter=json --outputFile=test-results/ci/vitest.json
+        run: ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/ci/vitest.json evidence=test-results/ci/vitest-timing.json title="Vitest shard ${{ matrix.shard }}/8" -- ./bin/pnpm exec vitest run --shard=${{ matrix.shard }}/8 --reporter=default --reporter=json --reporter=junit --outputFile.json=test-results/ci/vitest.json --outputFile.junit=test-results/ci/vitest.xml
       - name: Vitest timing evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -99,6 +67,34 @@ jobs:
           name: vitest-timing-${{ matrix.shard }}
           path: test-results/ci
           retention-days: 7
+
+  datadog_tests:
+    name: Report Vitest results to Datadog
+    needs: javascript
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DD_ORG_UUID != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: vitest-timing-*
+          path: reports
+      - name: Get Datadog intake key via OIDC
+        id: datadog
+        uses: DataDog/datadog-workload-identity-federation-github-action/intake@08e47f7c6f805efc5eef19953e33c523915acd85
+        with:
+          org_uuid: ${{ vars.DD_ORG_UUID }}
+      - uses: DataDog/junit-upload-github-action@cdbf0b0acda1005e45c4a11d445bf3dde78e796f # v4.1.0
+        with:
+          api_key: ${{ steps.datadog.outputs.api_key }}
+          files: reports
+          service: buzz-app
+          env: ci
+          extra-args: --skip-git-metadata-upload
 
   agent_protection:
     if: github.event_name != 'workflow_dispatch'
