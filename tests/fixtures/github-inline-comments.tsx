@@ -73,6 +73,9 @@ function Fixture() {
           flexWrap: "wrap",
           gap: "8px",
           alignItems: "center",
+          maxHeight: "25dvh",
+          overflowY: "auto",
+          flexShrink: 0,
         }}
       >
         <strong>STUB MODE — no GitHub requests</strong>
