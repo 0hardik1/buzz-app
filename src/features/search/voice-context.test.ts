@@ -305,15 +305,58 @@ describe("captureVoiceThing", () => {
     });
   });
 
-  it("tracks pointermove coordinates passively", () => {
+  it("tracks pointermove and focusin timestamps and clears inside on documentElement mouseleave", () => {
     const tracker = trackPointerPosition(window);
     expect(tracker.current().inside).toBe(false);
     window.dispatchEvent(
       new MouseEvent("pointermove", { clientX: 120, clientY: 240 }),
     );
-    expect(tracker.current()).toEqual({ x: 120, y: 240, inside: true });
-    window.dispatchEvent(new Event("blur"));
+    const afterMove = tracker.current();
+    expect(afterMove).toMatchObject({ x: 120, y: 240, inside: true });
+    expect((afterMove.pointerAt ?? 0) > (afterMove.focusAt ?? 0)).toBe(true);
+
+    const btn = document.createElement("button");
+    document.body.append(btn);
+    btn.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    const afterFocus = tracker.current();
+    expect((afterFocus.focusAt ?? 0) > (afterFocus.pointerAt ?? 0)).toBe(true);
+
+    document.documentElement.dispatchEvent(new MouseEvent("mouseleave"));
     expect(tracker.current().inside).toBe(false);
     tracker.stop();
+  });
+
+  it("prefers activeElement over stale pointer when focus moved more recently", () => {
+    const session = makeSession({
+      channels: [
+        { id: "c1", name: "general", channelType: "stream" } as ChannelSummary,
+      ],
+    });
+    document.body.innerHTML = `
+      <div data-message-id="m1" data-channel-timeline="c1"><p id="msg">Hi</p></div>
+      <textarea id="composer"></textarea>
+    `;
+    document.elementsFromPoint = vi.fn(() => [byId("msg")]);
+    const composer = byId("composer");
+    composer.focus();
+
+    expect(
+      captureVoiceThing({
+        pointer: {
+          x: 10,
+          y: 10,
+          inside: true,
+          pointerAt: 1,
+          focusAt: 2,
+        },
+        session,
+        activeChannelId: "c1",
+      }),
+    ).toEqual({
+      kind: "nothing",
+      activeChannelId: "c1",
+      activeChannelName: "general",
+      label: "nothing",
+    });
   });
 });

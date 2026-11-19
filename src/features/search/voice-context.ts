@@ -83,6 +83,8 @@ export type PointerSnapshot = Readonly<{
   x: number;
   y: number;
   inside: boolean;
+  pointerAt?: number | undefined;
+  focusAt?: number | undefined;
 }>;
 
 const PREVIEW_LIMIT = 80;
@@ -96,21 +98,47 @@ function clipPreview(text: string): string {
     : line;
 }
 
-/** Tracks the latest pointer coordinates passively so shortcut handlers can
- * inspect what the pointer is hovering before any modal mounts. */
+/** Tracks the latest pointer coordinates and focus changes passively so
+ * shortcut handlers know which moved last before any modal mounts. */
 export function trackPointerPosition(
   target: Window | undefined = typeof window !== "undefined"
     ? window
     : undefined,
 ): { current: () => PointerSnapshot; stop: () => void } {
-  let state: PointerSnapshot = { x: 0, y: 0, inside: false };
+  let seq = 0;
+  let state: PointerSnapshot = {
+    x: 0,
+    y: 0,
+    inside: false,
+    pointerAt: 0,
+    focusAt: 0,
+  };
   if (!target) return { current: () => state, stop: () => {} };
   const onMove = (event: PointerEvent | MouseEvent) => {
-    state = { x: event.clientX, y: event.clientY, inside: true };
+    state = {
+      ...state,
+      x: event.clientX,
+      y: event.clientY,
+      inside: true,
+      pointerAt: ++seq,
+    };
   };
   const onLeave = () => {
     state = { ...state, inside: false };
   };
+  const onFocus = (event: FocusEvent) => {
+    const doc = target.document;
+    if (
+      event.target === target ||
+      event.target === doc ||
+      event.target === doc?.body ||
+      event.target === doc?.documentElement
+    ) {
+      return;
+    }
+    state = { ...state, focusAt: ++seq };
+  };
+  const docEl = target.document?.documentElement;
   target.addEventListener("pointermove", onMove, {
     passive: true,
     capture: true,
@@ -120,14 +148,19 @@ export function trackPointerPosition(
     capture: true,
   });
   target.addEventListener("blur", onLeave, { passive: true });
-  target.document?.addEventListener("pointerleave", onLeave, { passive: true });
+  target.addEventListener("focusin", onFocus, {
+    passive: true,
+    capture: true,
+  });
+  docEl?.addEventListener("mouseleave", onLeave, { passive: true });
   return {
     current: () => state,
     stop: () => {
       target.removeEventListener("pointermove", onMove, { capture: true });
       target.removeEventListener("pointerdown", onMove, { capture: true });
       target.removeEventListener("blur", onLeave);
-      target.document?.removeEventListener("pointerleave", onLeave);
+      target.removeEventListener("focusin", onFocus, { capture: true });
+      docEl?.removeEventListener("mouseleave", onLeave);
     },
   };
 }
@@ -441,15 +474,21 @@ export function captureVoiceThing({
   activeChannelId?: string | undefined;
 }): VoiceThing {
   const candidates: Element[] = [];
-  if (doc && pointer?.inside && typeof doc.elementsFromPoint === "function") {
-    candidates.push(...doc.elementsFromPoint(pointer.x, pointer.y));
-  }
-  if (
+  const active =
     doc?.activeElement &&
     doc.activeElement !== doc.body &&
     doc.activeElement !== doc.documentElement
-  ) {
-    candidates.push(doc.activeElement);
+      ? doc.activeElement
+      : undefined;
+  const focusMoreRecent = (pointer?.focusAt ?? 0) > (pointer?.pointerAt ?? 0);
+
+  if (focusMoreRecent) {
+    if (active) candidates.push(active);
+  } else {
+    if (doc && pointer?.inside && typeof doc.elementsFromPoint === "function") {
+      candidates.push(...doc.elementsFromPoint(pointer.x, pointer.y));
+    }
+    if (active) candidates.push(active);
   }
   for (const element of candidates) {
     const captured = captureFromElement(element, {

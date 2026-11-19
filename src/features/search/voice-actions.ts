@@ -762,14 +762,22 @@ export function buildActionDecision(
       0;
 
     if (actionAnswer.choice === ACTION_NAVIGATE_OPTION) {
-      if (actionProb >= threshold && placeResolved.outcome === "found") {
-        return {
-          kind: "navigate",
-          place: placeResolved.place,
-          probability: placeResolved.probability,
-          actionCandidates,
-          placeCandidates,
-        };
+      if (placeResolved.outcome === "found") {
+        const autoNav =
+          actionProb >= Math.max(threshold, VOICE_ACTION_AUTO_THRESHOLD) &&
+          placeResolved.probability >= threshold;
+        const placeOverride =
+          placeResolved.probability >=
+          Math.max(threshold, NAVIGATE_OVERRIDE_PLACE_THRESHOLD);
+        if (autoNav || placeOverride) {
+          return {
+            kind: "navigate",
+            place: placeResolved.place,
+            probability: placeResolved.probability,
+            actionCandidates,
+            placeCandidates,
+          };
+        }
       }
       return { kind: "none", actionCandidates, placeCandidates };
     }
