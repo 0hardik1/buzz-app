@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { Popover } from "@base-ui/react/popover";
 import { useEffect, useLayoutEffect, useId, useRef, useState } from "react";
@@ -28,6 +29,12 @@ import {
 import { useAvatarPreview } from "./use-avatar-preview";
 import { AvatarCustomColor } from "./AvatarCustomColor";
 import type { EmojiSearchSelection } from "../../bundled/emoji/emoji-mart";
+
+const AnimatedAvatarCapture = lazy(() =>
+  import("./AnimatedAvatarCapture").then((module) => ({
+    default: module.AnimatedAvatarCapture,
+  })),
+);
 
 type Props = {
   triggerStyle?: "dotted-squircle";
@@ -550,7 +557,9 @@ function AvatarDraft({
     };
   }, [footer]);
   const [picture, setPicture] = useState(value);
-  const [mode, setMode] = useState<"image" | "emoji" | "background">("image");
+  const [mode, setMode] = useState<
+    "image" | "emoji" | "background" | "animated"
+  >("image");
   const [emoji, setEmoji] = useState("😀");
   const [color, setColor] = useState("#FFF4CC");
   // The slider is relative to the default size, so 100% never crops a circle.
@@ -567,7 +576,7 @@ function AvatarDraft({
   useEffect(() => {
     onPreview({
       picture,
-      ...(mode !== "image"
+      ...(mode === "emoji" || mode === "background"
         ? {
             emoji,
             color,
@@ -673,7 +682,15 @@ function AvatarDraft({
   );
 
   const renderPanel = (tab: string) =>
-    tab === "image" ? (
+    tab === "animated" && personal ? (
+      <Suspense fallback={<p role="status">Loading camera…</p>}>
+        <AnimatedAvatarCapture
+          community={community}
+          disabled={disabled}
+          onApply={done}
+        />
+      </Suspense>
+    ) : tab === "image" ? (
       <div
         className={styles.imagePanel}
         data-surface={inlinePicker ? "panel" : undefined}
@@ -826,11 +843,18 @@ function AvatarDraft({
           value={mode}
           label="Avatar source"
           variant="panel"
-          items={[
-            { value: "image", label: "Image" },
-            { value: "emoji", label: "Emoji" },
-            { value: "background", label: "Background" },
-          ]}
+          items={
+            personal
+              ? [
+                  { value: "image", label: "Image" },
+                  { value: "animated", label: "Animated" },
+                ]
+              : [
+                  { value: "image", label: "Image" },
+                  { value: "emoji", label: "Emoji" },
+                  { value: "background", label: "Background" },
+                ]
+          }
           onValueChange={(next) => {
             if (!busy && !disabled) {
               setMode(next);
@@ -852,11 +876,11 @@ function AvatarDraft({
         )}
         {!community && (
           <p className="text-body-sm text-subtle">
-            Select a community to upload an image or emoji. Your local default
-            can use a public HTTPS image URL.
+            Select a community to upload an avatar. Your local default can use a
+            public HTTPS image URL.
           </p>
         )}
-        {!(mode === "background" && customColorOpen) && (
+        {mode !== "animated" && !(mode === "background" && customColorOpen) && (
           <div ref={setFooter} className={styles.footer}>
             {/* A short popup scrolls beneath its actions; inline, they sit in flow. */}
             {!inlinePicker && <ScrollEdgeMaterial edge="bottom" />}

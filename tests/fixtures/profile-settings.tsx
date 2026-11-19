@@ -1,3 +1,4 @@
+import { AvatarEditor } from "../../src/features/profiles/AvatarEditor";
 import { finalizeEvent, getPublicKey } from "nostr-tools";
 import { Context } from "@deepseek-ai/cordis";
 import { createCommunities } from "../../src/features/communities/service";
@@ -135,6 +136,8 @@ Object.assign(window, { avatarProfileFixture: { profiles, communities } });
 function Fixture() {
   useKeyboardFocusVisibility();
   const [human, setHuman] = useState(false);
+  const [agent, setAgent] = useState(false);
+  const [agentPicture, setAgentPicture] = useState("");
   return (
     <main
       data-buzz-ui=""
@@ -157,6 +160,23 @@ function Fixture() {
           {human ? "Close human profile" : "Edit human profile"}
         </Button>
       </header>
+      <Button
+        onClick={() => {
+          setHuman(false);
+          setAgent(true);
+        }}
+      >
+        Edit agent avatar
+      </Button>
+      {agent && (
+        <AvatarEditor
+          value={agentPicture}
+          name="Fixture agent"
+          shape="squircle"
+          community="https://relay.example.test"
+          onChange={setAgentPicture}
+        />
+      )}
       {human && (
         <section className="rounded-xl bg-surface-panel p-6">
           <ProfileSettings

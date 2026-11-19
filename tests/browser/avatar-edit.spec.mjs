@@ -147,7 +147,7 @@ test("avatar custom spectrum supports dragging, keyboard hue and return focus", 
 }) => {
   await page.goto("/tests/fixtures/profile-settings.html");
   await page
-    .getByRole("button", { name: "Edit human profile", exact: true })
+    .getByRole("button", { name: "Edit agent avatar", exact: true })
     .click();
   await page.getByRole("button", { name: "Edit avatar", exact: true }).click();
   await page.getByRole("tab", { name: "Background", exact: true }).click();
@@ -266,7 +266,7 @@ test("emoji picker load failure fits above the footer and retries on reopen", as
   );
   await page.goto("/tests/fixtures/profile-settings.html");
   await page
-    .getByRole("button", { name: "Edit human profile", exact: true })
+    .getByRole("button", { name: "Edit agent avatar", exact: true })
     .click();
   await page.getByRole("button", { name: "Edit avatar", exact: true }).click();
   await page.getByRole("tab", { name: "Emoji", exact: true }).click();
@@ -323,7 +323,7 @@ test("a short avatar popup keeps Done in view on the Emoji tab", async ({
   await page.route("**/api/relay/**", (route) => route.abort());
   await page.goto("/tests/fixtures/profile-settings.html");
   await page
-    .getByRole("button", { name: "Edit human profile", exact: true })
+    .getByRole("button", { name: "Edit agent avatar", exact: true })
     .click();
   await page.getByRole("button", { name: "Edit avatar", exact: true }).click();
   await page.getByRole("tab", { name: "Emoji", exact: true }).click();
@@ -382,7 +382,7 @@ test("a wrapped avatar footer at enlarged text still clears focused controls", a
     document.documentElement.style.fontSize = "200%";
   });
   await page
-    .getByRole("button", { name: "Edit human profile", exact: true })
+    .getByRole("button", { name: "Edit agent avatar", exact: true })
     .click();
   await page.getByRole("button", { name: "Edit avatar", exact: true }).click();
   await page.getByRole("tab", { name: "Emoji", exact: true }).click();
@@ -409,7 +409,7 @@ test("custom color and footer resize together without reversing direction", asyn
   await page.setViewportSize({ width: 900, height: 720 });
   await page.goto("/tests/fixtures/profile-settings.html");
   await page
-    .getByRole("button", { name: "Edit human profile", exact: true })
+    .getByRole("button", { name: "Edit agent avatar", exact: true })
     .click();
   await page.getByRole("button", { name: "Edit avatar", exact: true }).click();
   await page.getByRole("tab", { name: "Background", exact: true }).click();
@@ -554,11 +554,9 @@ test("avatar picker previews pointer selections and respects reduced motion", as
 }) => {
   await page.goto("/tests/fixtures/profile-settings.html");
   await page
-    .getByRole("button", { name: "Edit human profile", exact: true })
+    .getByRole("button", { name: "Edit agent avatar", exact: true })
     .click();
-  await page
-    .getByRole("heading", { name: "Profile", exact: true })
-    .evaluate((element) => element.scrollIntoView({ block: "start" }));
+
   await page.getByRole("button", { name: "Edit avatar", exact: true }).click();
   await page.getByRole("tab", { name: "Emoji", exact: true }).click();
   const search = page.getByRole("searchbox", { name: "Search emoji" });
@@ -648,15 +646,18 @@ test("an unsaved onboarding avatar draft survives an outside press, and closing 
   await expect(dialog).toHaveCount(0);
   await expect(add).toBeFocused();
 
-  // A picked emoji is a draft too, even before any URL exists.
+  // Human onboarding has Animated rather than emoji creation.
   await add.click();
-  await page.getByRole("tab", { name: "Emoji", exact: true }).click();
   await expect(
-    page.getByRole("searchbox", { name: "Search emoji" }),
+    page.getByRole("tab", { name: "Emoji", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("tab", { name: "Animated", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Start camera", exact: true }),
   ).toBeVisible();
-  await heading.click();
-  await expect(dialog).toBeVisible();
-  await page.getByRole("tab", { name: "Emoji", exact: true }).press("Escape");
+  await page
+    .getByRole("tab", { name: "Animated", exact: true })
+    .press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(add).toBeFocused();
 
@@ -690,4 +691,111 @@ test("the onboarding display name keeps nickname autofill without spellcheck", a
   const name = page.getByLabel("Display name", { exact: true });
   await expect(name).toHaveAttribute("spellcheck", "false");
   await expect(name).toHaveAttribute("autocomplete", "nickname");
+});
+
+test("human avatar choices restore Animated and recover from camera denial", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: async () => {
+          throw new DOMException("Camera permission denied", "NotAllowedError");
+        },
+      },
+    });
+  });
+  await page.goto("/tests/fixtures/profile-settings.html");
+  await page
+    .getByRole("button", { name: "Edit human profile", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Edit avatar", exact: true }).click();
+  await expect(
+    page.getByRole("tab", { name: "Emoji", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("tab", { name: "Background", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("tab", { name: "Animated", exact: true }).click();
+  await page.getByRole("button", { name: "Start camera", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Camera permission denied",
+  );
+  await expect(
+    page.getByRole("button", { name: "Start camera", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("tab", { name: "Image", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Drop or browse", exact: true }),
+  ).toBeVisible();
+});
+
+// Real canvas/APNG encoding and the two-file upload/publication boundary need a browser.
+// Only the camera's input frames are synthetic; no device permission is claimed here.
+test("human animation encodes, uploads both assets and saves a mobile-compatible profile", async ({
+  page,
+}) => {
+  await page.route(
+    "**/src/features/profiles/animated-avatar-capture.ts",
+    (route) =>
+      route.fulfill({
+        contentType: "text/javascript",
+        body: `export * from '/src/features/profiles/animated-avatar-capture.ts?capture-fixture';
+      export async function openAvatarCamera() { return { getTracks: () => [{ stop() {} }] }; }
+      export async function listAvatarCameras() { return []; }
+      export function preloadAvatarSegmenter() {}
+      export async function recordAnimatedAvatarFrames() {
+        return { backgroundRemoved: true, frames: [0, 1, 2].map(index => {
+          const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
+          const context = canvas.getContext('2d'); context.fillStyle = ['red', 'green', 'blue'][index];
+          context.fillRect(70 + index * 10, 30, 90, 180);
+          return context.getImageData(0, 0, 256, 256);
+        }) };
+      }`,
+      }),
+  );
+  await page.addInitScript(() => {
+    Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
+      configurable: true,
+      set() {},
+      get() {
+        return null;
+      },
+    });
+    HTMLMediaElement.prototype.play = async () => {};
+    Object.defineProperty(HTMLVideoElement.prototype, "videoWidth", {
+      configurable: true,
+      get: () => 256,
+    });
+    Object.defineProperty(HTMLVideoElement.prototype, "videoHeight", {
+      configurable: true,
+      get: () => 256,
+    });
+  });
+  await page.goto("/tests/fixtures/profile-settings.html");
+  await page
+    .getByRole("button", { name: "Edit human profile", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Edit avatar", exact: true }).click();
+  await page.getByRole("tab", { name: "Animated", exact: true }).click();
+  await page.getByRole("button", { name: "Start camera", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Record 3 seconds", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Use animated avatar", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByText("Profile updated", { exact: true }).waitFor();
+  const picture = await page.evaluate(
+    () =>
+      JSON.parse(
+        window.avatarProfileFixture.profiles.get("https://relay.example.test")
+          .content,
+      ).picture,
+  );
+  expect(picture).toMatch(
+    /^https:\/\/relay.example.test\/media\/.*#buzz-anim=https%3A%2F%2Frelay.example.test%2Fmedia%2F/,
+  );
 });
