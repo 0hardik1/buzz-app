@@ -4779,7 +4779,9 @@ function Composer({
                     !value.forward &&
                     !chatCards?.length &&
                     ((!!submission && !submission.allowAttachmentOnly) ||
-                      (!attachments.items.length && !gifs?.length)) &&
+                      (editing.target
+                      ? !editing.attachments.length
+                      : !attachments.items.length && !gifs?.length)) &&
                     !(
                       editing.target &&
                       requestDeletion &&
