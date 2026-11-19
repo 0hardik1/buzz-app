@@ -102,6 +102,11 @@ const ROWS: Row[] = [
     "Take me to fast-voice-search-branch",
     go("channel:c-fast-voice-search-branch"),
   ],
+  // Appended, so earlier ids stay put.
+  // drone00's hint run before the ordinary-word filter: hints "star" and
+  // "general" turned "star this channel" into this. They meant the hovered one.
+  ["stt", "#buzz-app", "Star this general", act("channel.star", "c-buzz-app")],
+  ["stt", "#legal", "Star this general", act("channel.star", "c-legal")],
 ];
 
 export const REALSTT: readonly Case[] = ROWS.map(
