@@ -6,8 +6,14 @@ import {
   nip44,
   verifyEvent,
 } from "nostr-tools";
-import { prepareSidebarSort, mutateSidebarSort } from "./sidebar-sort.mjs";
+import {
+  prepareSidebarSort,
+  mutateSidebarSort,
+  prepareSidebarFilter,
+  mutateSidebarFilter,
+} from "./sidebar-sort.mjs";
 import { projectSidebarPreferences } from "../src/features/relay/sidebar-preferences.ts";
+import { editSidebarRecord } from "../src/features/relay/sidebar-registers.ts";
 function harness() {
   const secret = generateSecretKey(),
     viewer = getPublicKey(secret);
@@ -33,6 +39,105 @@ function harness() {
   };
 }
 const intent = { group: "section:work", mode: "recent", sectionIds: ["work"] };
+it.each([undefined, "alpha", "recent"])(
+  "encrypts plugin choices from legacy %s without putting them in legacy sort fields and confirms reloads",
+  async (initialMode) => {
+    const h = harness();
+    const mode = "plugin:example.plugin/rows/reverse";
+    let head = h.encrypt({
+      version: 1,
+      groups: {
+        dms: "recent",
+        ...(initialMode ? { channels: initialMode } : {}),
+      },
+    });
+    const publish = vi.fn(async (event) => {
+      head = event;
+    });
+    const choose = (selected) =>
+      mutateSidebarSort(
+        { group: "channels", mode: selected, sectionIds: [] },
+        h.secret,
+        async () => [head],
+        publish,
+      );
+    expect(await choose(mode)).toEqual({ channels: mode, dms: "recent" });
+    expect(h.decode(head).groups).toEqual({ channels: "alpha", dms: "recent" });
+    expect(h.decode(head).meta.g.channels[2]).toBe("alpha");
+    expect(await choose(mode)).toEqual({ channels: mode, dms: "recent" });
+    expect(publish).toHaveBeenCalledOnce();
+    expect(await choose("alpha")).toEqual({ dms: "recent" });
+    expect(publish).toHaveBeenCalledTimes(2);
+  },
+);
+it.each(["dms", "channels"])(
+  "confirms only the requested plugin sort when an older client changes %s",
+  async (changedGroup) => {
+    const h = harness();
+    const mode = "plugin:example.plugin/rows/reverse";
+    let head = prepareSidebarSort(
+      [],
+      { group: "dms", mode, sectionIds: [] },
+      h.secret,
+      100_000,
+    ).event;
+    const publish = vi.fn(async (event) => {
+      const updated = editSidebarRecord(
+        "channel-sort",
+        h.decode(event),
+        event.created_at,
+        [[["g", changedGroup], "recent"]],
+        event.created_at * 1000 + 1,
+      );
+      head = h.encrypt(updated, { created_at: event.created_at + 1 });
+    });
+    const saved = mutateSidebarSort(
+      { group: "channels", mode, sectionIds: [] },
+      h.secret,
+      async () => [head],
+      publish,
+    );
+    if (changedGroup === "dms")
+      await expect(saved).resolves.toEqual({ channels: mode, dms: "recent" });
+    else await expect(saved).rejects.toThrow("changed on another device");
+    expect(publish).toHaveBeenCalledOnce();
+    expect(
+      projectSidebarPreferences(undefined, undefined, undefined, h.decode(head))
+        .sort,
+    ).toEqual(
+      changedGroup === "dms"
+        ? { channels: mode, dms: "recent" }
+        : { channels: "recent", dms: mode },
+    );
+  },
+);
+it("preserves another device's plugin choice when the writer has a stale section list", async () => {
+  const h = harness();
+  const mode = "plugin:example.plugin/rows/reverse";
+  let head = prepareSidebarSort(
+    [],
+    { group: "section:new", mode, sectionIds: ["new"] },
+    h.secret,
+    100_000,
+  ).event;
+  const saved = h.decode(head).pluginSort;
+  expect(
+    await mutateSidebarSort(
+      { group: "channels", mode: "recent", sectionIds: [] },
+      h.secret,
+      async () => [head],
+      async (event) => {
+        head = event;
+      },
+    ),
+  ).toEqual({ channels: "recent" });
+  const current = h.decode(head);
+  expect(current.pluginSort).toEqual(saved);
+  expect(
+    projectSidebarPreferences(undefined, undefined, undefined, current, ["new"])
+      .sort,
+  ).toEqual({ channels: "recent", "section:new": mode });
+});
 it("mutates only the selected register, imports recognized legacy modes, and encodes alpha as a tombstone", () => {
   const h = harness();
   const blob = {
@@ -267,4 +372,143 @@ it("edits the authoritative metadata, preserves tombstones and confirms projecte
     ),
   ).rejects.toThrow("metadata");
   expect(publish).not.toHaveBeenCalled();
+});
+
+it("stores independent filters, preserves other registers and tombstones All, and rejects untrusted filter heads", async () => {
+  const h = harness();
+  const choice = {
+    group: "section:work",
+    mode: "unreads",
+    sectionIds: ["work"],
+  };
+  const draft = prepareSidebarFilter([], choice, h.secret, 100_000);
+  expect(draft.groups).toEqual({ "section:work": "unreads" });
+  expect(draft.event.tags).toEqual([
+    ["d", "channel-filter"],
+    ["t", "channel-filter"],
+  ]);
+  const other = prepareSidebarFilter(
+    [draft.event],
+    { ...choice, group: "channels", mode: "active" },
+    h.secret,
+  );
+  const reset = prepareSidebarFilter(
+    [other.event],
+    { ...choice, mode: "all" },
+    h.secret,
+  );
+  expect(reset.groups).toEqual({ channels: "active" });
+  expect(h.decode(reset.event).meta.g["section:work"][2]).toBeNull();
+  expect(h.decode(reset.event).meta.g.channels).toEqual(
+    h.decode(other.event).meta.g.channels,
+  );
+  expect(
+    prepareSidebarFilter([reset.event], { ...choice, mode: "all" }, h.secret)
+      .event,
+  ).toBeUndefined();
+  expect(() =>
+    prepareSidebarFilter(
+      [h.encrypt({ version: 1, groups: {} })],
+      choice,
+      h.secret,
+    ),
+  ).toThrow("Invalid sidebar filter head");
+  const invalid = h.encrypt(
+    { version: 1, groups: { channels: "future" } },
+    { tags: [["d", "channel-filter"]] },
+  );
+  expect(() => prepareSidebarFilter([invalid], choice, h.secret)).toThrow(
+    "Invalid sidebar filter mode",
+  );
+  const read = vi.fn(async () => []),
+    publish = vi.fn();
+  await expect(
+    mutateSidebarFilter({ ...choice, mode: "recent" }, h.secret, read, publish),
+  ).rejects.toThrow("Invalid sidebar filter intent");
+  expect(read).not.toHaveBeenCalled();
+  await expect(
+    mutateSidebarFilter(choice, h.secret, read, publish),
+  ).rejects.toThrow("changed on another device");
+  expect(publish).toHaveBeenCalledOnce();
+});
+
+it("atomically confirms custom windows, preserves other sections and clears removed-section durations", async () => {
+  const h = harness();
+  const choice = {
+    group: "channels",
+    mode: "active",
+    sectionIds: ["work"],
+    activeWindowSeconds: 7 * 86400,
+  };
+  const legacy = h.encrypt(
+    {
+      version: 1,
+      groups: { channels: "active", "section:work": "unreads" },
+      activeWindowSeconds: { "section:work": 14 * 86400 },
+    },
+    { tags: [["d", "channel-filter"]] },
+  );
+  const draft = prepareSidebarFilter([legacy], choice, h.secret);
+  expect(h.decode(draft.event)).toMatchObject({
+    groups: { channels: "active", "section:work": "unreads" },
+    activeWindowSeconds: { channels: 7 * 86400, "section:work": 14 * 86400 },
+  });
+  expect(
+    prepareSidebarFilter([draft.event], choice, h.secret).event,
+  ).toBeUndefined();
+  const result = await mutateSidebarFilter(
+    choice,
+    h.secret,
+    vi
+      .fn()
+      .mockResolvedValueOnce([legacy])
+      .mockResolvedValueOnce([draft.event]),
+    vi.fn(),
+  );
+  expect(result.activeWindowSeconds.channels).toBe(7 * 86400);
+  // Same mode with the wrong window must fail readback confirmation.
+  await expect(
+    mutateSidebarFilter(choice, h.secret, async () => [legacy], vi.fn()),
+  ).rejects.toThrow("changed on another device");
+  const reset = prepareSidebarFilter(
+    [draft.event],
+    {
+      ...choice,
+      group: "section:work",
+      mode: "all",
+      activeWindowSeconds: null,
+    },
+    h.secret,
+  );
+  expect(h.decode(reset.event).activeWindowSeconds).toEqual({
+    channels: 7 * 86400,
+  });
+  const restored = prepareSidebarFilter(
+    [draft.event],
+    { ...choice, activeWindowSeconds: 30 * 86400 },
+    h.secret,
+  );
+  expect(h.decode(restored.event).activeWindowSeconds.channels).toBe(
+    30 * 86400,
+  );
+  const read = vi.fn(async () => []);
+  for (const value of [
+    0,
+    -86400,
+    86401,
+    86400.5,
+    366 * 86400,
+    "604800",
+    null,
+  ]) {
+    await expect(
+      mutateSidebarFilter(
+        { ...choice, activeWindowSeconds: value },
+        h.secret,
+        read,
+        vi.fn(),
+      ),
+    ).rejects.toThrow("Invalid sidebar filter intent");
+  }
+  expect(read).not.toHaveBeenCalled();
 });

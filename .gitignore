@@ -22,6 +22,9 @@ coverage/
 .buzz/
 .scratch/
 
+# Left by an interrupted tests/integration/flake-check.test.mjs run.
+tests/fixtures/design-system/flake-selection-*/
+
 # Local deployment settings and credentials never belong in Git.
 .npmrc
 .env
@@ -34,3 +37,8 @@ dist-plugins/
 # Leftover generated v1 runtime resources from older checkouts.
 src-tauri/resources/agent-runtime/*
 dist-buzz-mcp/
+
+# Staged by scripts/build-{goose-acp,agent-command,buzz-cli}.mjs. The directory
+# stays so Tauri always finds its bundled resources.
+src-tauri/resources/bin/*
+!src-tauri/resources/bin/.gitkeep

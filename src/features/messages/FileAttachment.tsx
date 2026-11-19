@@ -1,8 +1,18 @@
+import type { FileCardProps } from "../conversation/contracts";
+import {
+  IconButton,
+  type IconButtonProps,
+} from "../../shared/design-system/ui/IconButton";
+import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import {
   ArrowUpRightIcon,
+  ArrowsClockwiseIcon,
+  CheckIcon,
+  CircleNotchIcon,
   DownloadIcon,
-  FileTextIcon,
 } from "../../shared/design-system/icons/index";
+import { FileTypeIcon } from "./FileTypeIcon";
+import fileIconStyles from "./FileTypeIcon.module.css";
 import type { Attachment } from "../relay/contracts";
 import {
   isNativeMediaSource,
@@ -10,8 +20,8 @@ import {
   safeOpenUrl,
 } from "./attachment-source";
 import styles from "./Messages.module.css";
-import { downloadNativeMedia } from "./native-download";
-import { useState } from "react";
+import { useNativeDownload, type DownloadState } from "./use-native-download";
+import type { ReactNode } from "react";
 
 export function formatFileSize(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -34,42 +44,157 @@ export function FileAttachment({
   attachment,
   source,
   onOpenLink,
-}: {
-  attachment: Attachment;
-  source: string | undefined;
-  onOpenLink(url: string): boolean;
-}) {
-  const [downloadError, setDownloadError] = useState(false);
+  onPreview,
+  typeLabel,
+}: Omit<FileCardProps, "source"> & { source: string | undefined }) {
   const displayName = attachment.name ?? mimeLabel(attachment.mime) ?? "File";
   const nativeSource = source ? isNativeMediaSource(source) : false;
   const proxySource = source ? isProxySource(source) || nativeSource : false;
   const externalSource = !!source && safeOpenUrl(source) && !proxySource;
   if (source && !proxySource && !externalSource)
-    return <UnavailableFileAttachment displayName={displayName} />;
+    return (
+      <UnavailableFileAttachment
+        displayName={displayName}
+        attachment={attachment}
+      />
+    );
 
-  const content = (
+  if (source && proxySource && onPreview) {
+    const renderPreview = (
+      state: DownloadState = "idle",
+      download?: () => Promise<void>,
+    ) => {
+      const action = {
+        "aria-label": `${state === "failed" ? "Retry download" : "Download"} ${displayName}`,
+        title: `Download ${displayName}`,
+        icon:
+          state === "failed" ? (
+            <ArrowsClockwiseIcon aria-hidden="true" />
+          ) : state === "saved" ? (
+            <CheckIcon aria-hidden="true" />
+          ) : (
+            <DownloadIcon aria-hidden="true" />
+          ),
+        shape: "row-end",
+      } satisfies IconButtonProps;
+      return (
+        <div className={styles.filePreviewAttachment}>
+          <div className={styles.filePreviewMain}>
+            <NavigationItem
+              aria-label={`Preview ${displayName}`}
+              icon={
+                <span className={fileIconStyles.slot}>
+                  <FileTypeIcon name={attachment.name} mime={attachment.mime} />
+                </span>
+              }
+              label={
+                <span className={styles.fileAttachmentBody}>
+                  <span
+                    className={styles.fileAttachmentName}
+                    title={displayName}
+                  >
+                    {displayName}
+                  </span>
+                  <span className={styles.fileAttachmentMeta}>
+                    {state === "pending" ? (
+                      "Downloading…"
+                    ) : state === "saved" ? (
+                      "Saved to Downloads"
+                    ) : state === "failed" ? (
+                      "Couldn’t download · Retry"
+                    ) : (
+                      <>
+                        {typeLabel ?? mimeLabel(attachment.mime) ?? "File"}
+                        {attachment.size !== undefined &&
+                          ` · ${formatFileSize(attachment.size)}`}
+                      </>
+                    )}
+                  </span>
+                </span>
+              }
+              onClick={onPreview}
+            />
+          </div>
+          <span className={styles.fileDownloadAction}>
+            {nativeSource ? (
+              <IconButton
+                {...action}
+                loading={state === "pending"}
+                onClick={() => void download?.()}
+              />
+            ) : (
+              <IconButton
+                {...action}
+                nativeButton={false}
+                role="link"
+                render={<a href={source} download={attachment.name ?? ""} />}
+              />
+            )}
+          </span>
+        </div>
+      );
+    };
+    return nativeSource ? (
+      <NativeFileDownload
+        key={JSON.stringify([source, attachment.name])}
+        source={source}
+        name={attachment.name ?? ""}
+        displayName={displayName}
+      >
+        {renderPreview}
+      </NativeFileDownload>
+    ) : (
+      renderPreview()
+    );
+  }
+
+  const content = (state: DownloadState = "idle") => (
     <>
-      <FileTextIcon size={24} aria-hidden="true" />
+      <span className={fileIconStyles.slot}>
+        <FileTypeIcon name={attachment.name} mime={attachment.mime} />
+      </span>
       <span className={styles.fileAttachmentBody}>
         <span className={styles.fileAttachmentName}>{displayName}</span>
         <span className={styles.fileAttachmentMeta}>
-          {source
-            ? attachment.size
-              ? formatFileSize(attachment.size)
-              : proxySource
-                ? "Download file"
-                : "Open file"
-            : "File unavailable"}
+          {state === "pending"
+            ? "Downloading…"
+            : state === "saved"
+              ? "Saved to Downloads"
+              : state === "failed"
+                ? "Couldn’t download · Retry"
+                : source
+                  ? attachment.size
+                    ? formatFileSize(attachment.size)
+                    : proxySource
+                      ? "Download file"
+                      : "Open file"
+                  : "File unavailable"}
         </span>
       </span>
-      {proxySource ? (
+      {state === "pending" ? (
+        <CircleNotchIcon
+          size={20}
+          className="motion-safe:animate-spin"
+          aria-hidden="true"
+        />
+      ) : state === "saved" ? (
+        <CheckIcon size={20} aria-hidden="true" />
+      ) : state === "failed" ? (
+        <ArrowsClockwiseIcon size={20} aria-hidden="true" />
+      ) : proxySource ? (
         <DownloadIcon size={20} aria-hidden="true" />
       ) : (
         <ArrowUpRightIcon size={20} aria-hidden="true" />
       )}
     </>
   );
-  if (!source) return <UnavailableFileAttachment displayName={displayName} />;
+  if (!source)
+    return (
+      <UnavailableFileAttachment
+        displayName={displayName}
+        attachment={attachment}
+      />
+    );
   if (externalSource)
     return (
       <a
@@ -84,28 +209,31 @@ export function FileAttachment({
           if (onOpenLink(source)) event.preventDefault();
         }}
       >
-        {content}
+        {content()}
       </a>
     );
   if (nativeSource)
     return (
-      <>
-        <button
-          type="button"
-          className={styles.fileAttachment}
-          aria-label={`Download ${displayName}`}
-          title={displayName}
-          onClick={() => {
-            setDownloadError(false);
-            void downloadNativeMedia(source, attachment.name ?? "").catch(() =>
-              setDownloadError(true),
-            );
-          }}
-        >
-          {content}
-        </button>
-        {downloadError && <span role="alert">Download failed</span>}
-      </>
+      <NativeFileDownload
+        key={JSON.stringify([source, attachment.name])}
+        source={source}
+        name={attachment.name ?? ""}
+        displayName={displayName}
+      >
+        {(state, download) => (
+          <button
+            type="button"
+            className={styles.fileAttachment}
+            aria-label={`${state === "failed" ? "Retry download" : "Download"} ${displayName}`}
+            aria-disabled={state === "pending"}
+            aria-busy={state === "pending"}
+            title={displayName}
+            onClick={() => void download()}
+          >
+            {content(state)}
+          </button>
+        )}
+      </NativeFileDownload>
     );
   return (
     <a
@@ -115,15 +243,54 @@ export function FileAttachment({
       aria-label={`Download ${displayName}`}
       title={displayName}
     >
-      {content}
+      {content()}
     </a>
   );
 }
 
-function UnavailableFileAttachment({ displayName }: { displayName: string }) {
+/** A source/name change mounts a fresh download lifetime, retiring old results. */
+function NativeFileDownload({
+  source,
+  name,
+  displayName,
+  children,
+}: {
+  source: string;
+  name: string;
+  displayName: string;
+  children(state: DownloadState, download: () => Promise<void>): ReactNode;
+}) {
+  const { state, download } = useNativeDownload(source, name);
+  const announcement =
+    state === "pending"
+      ? `Downloading ${displayName}`
+      : state === "saved"
+        ? `Saved ${displayName} to Downloads`
+        : state === "failed"
+          ? `Couldn’t download ${displayName}. Try again.`
+          : "";
+  return (
+    <>
+      {children(state, download)}
+      <span className="sr-only" role={state === "failed" ? "alert" : "status"}>
+        {announcement}
+      </span>
+    </>
+  );
+}
+
+function UnavailableFileAttachment({
+  displayName,
+  attachment,
+}: {
+  displayName: string;
+  attachment: Attachment;
+}) {
   return (
     <span className={styles.fileAttachment} role="status" title={displayName}>
-      <FileTextIcon size={24} aria-hidden="true" />
+      <span className={fileIconStyles.slot}>
+        <FileTypeIcon name={attachment.name} mime={attachment.mime} />
+      </span>
       <span className={styles.fileAttachmentBody}>
         <span className={styles.fileAttachmentName}>{displayName}</span>
         <span className={styles.fileAttachmentMeta}>File unavailable</span>

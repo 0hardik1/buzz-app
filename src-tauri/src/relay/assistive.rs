@@ -1,5 +1,6 @@
 //! Narrow self-encrypted assistive facts, never an arbitrary app-data codec.
 use super::{origin, request_url, send, RelayResponse, Result, MAX_RESPONSE};
+use crate::federated_identity::FederatedIdentity;
 use crate::identity::{EventTemplate, IdentityHost};
 use hmac::{Hmac, Mac};
 use nostr::{
@@ -156,13 +157,23 @@ pub(crate) async fn relay_assistive_sign(
 #[tauri::command]
 pub(crate) async fn relay_assistive_publish(
     host: tauri::State<'_, IdentityHost>,
+    fi: tauri::State<'_, FederatedIdentity>,
     community: String,
     event: Value,
 ) -> Result<RelayResponse> {
     let url = request_url(&community, "/events", "POST")?;
     decode(host.inner(), community, vec![event.clone()]).await?;
     let body = serde_json::to_string(&event).map_err(|_| "Invalid assistive event")?;
-    send(host.inner(), url, "POST", Some(body), true, MAX_RESPONSE).await
+    send(
+        host.inner(),
+        Some(fi.inner()),
+        url,
+        "POST",
+        Some(body),
+        true,
+        MAX_RESPONSE,
+    )
+    .await
 }
 
 #[cfg(test)]

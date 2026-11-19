@@ -1,5 +1,6 @@
-import { afterEach, expect, it, vi } from "vitest";
-import { createRelaySession } from "./session";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRelaySession, ROSTER_BACKSTOP_INTERVAL } from "./session";
+import { followUpQueue } from "../messages/follow-up-queue";
 import type { LiveCallbacks } from "./live";
 import { ReadError } from "./errors";
 import {
@@ -86,27 +87,6 @@ it("live retry recovers roster catch-up refused after globals established", asyn
     h.owner.session.live.retry();
     await flush();
     expect(h.wire.pending).toHaveLength(0);
-  } finally {
-    h.owner.dispose();
-  }
-});
-it("positive roster control: diagnostic refresh recovers the same refused roster", async () => {
-  const h = setup();
-  try {
-    h.connected();
-    h.live.established();
-    await flush();
-    h.wire
-      .next()
-      .fail(new ReadError("unavailable", "Relay requests paused", 429, 60000));
-    await flush();
-    vi.spyOn(performance, "now").mockReturnValue(performance.now() + 61000);
-    h.owner.session.channels.refreshList?.();
-    await flush();
-    expect(h.wire.pending).toHaveLength(1);
-    h.wire.next().respond([]);
-    await flush();
-    expect(h.owner.session.channels.list().status).toBe("ready");
   } finally {
     h.owner.dispose();
   }
@@ -262,14 +242,16 @@ async function readyRoster(h: ReturnType<typeof setup>) {
   expect(h.owner.session.live.snapshot().roster.state).toBe("verified");
   expect(h.wire.pending).toHaveLength(0);
 }
-function membershipHint(h: ReturnType<typeof setup>, id: string, kind = 44100) {
+function membershipHint(
+  h: ReturnType<typeof setup>,
+  id: string,
+  kind = 44100,
+  extra: string[][] = [],
+) {
   return signed(h.relay, {
     kind,
     content: "",
-    tags: [
-      ["p", h.viewer.pubkey],
-      ["h", id],
-    ],
+    tags: [["p", h.viewer.pubkey], ["h", id], ...extra],
   });
 }
 function exactFilters(h: ReturnType<typeof setup>, ids: string[]) {
@@ -351,6 +333,71 @@ it("a named member-added hint confirms only that channel and preserves verified 
     expect(h.interests).toHaveBeenLastCalledWith(["a"], ["a"]);
     expect(h.owner.session.live.snapshot().roster.state).toBe("verified");
     expect(changes).not.toContain("pending");
+    expect(h.wire.pending).toHaveLength(0);
+  } finally {
+    h.owner.dispose();
+  }
+});
+
+// NIP-CL: a system channel's notices are 44100/44101 with ["t","system"].
+it("a system channel member-added hint admits that channel without listing it", async () => {
+  const h = setup();
+  try {
+    await readyRoster(h);
+    h.live.receive([membershipHint(h, "records", 44100, [["t", "system"]])]);
+    await flush();
+    await flush();
+    expect(h.wire.pending).toHaveLength(1);
+    const exact = h.wire.next();
+    expect(exact.filters).toEqual(exactFilters(h, ["records"]));
+    exact.respond([
+      metadata(h.relay, "records", "Records", undefined, [
+        ["private"],
+        ["hidden"],
+        ["t", "system"],
+      ]),
+      signed(h.relay, {
+        kind: 39002,
+        content: "",
+        tags: [
+          ["d", "records"],
+          ["t", "system"],
+          ["p", h.viewer.pubkey],
+        ],
+      }),
+    ]);
+    await flush();
+    await flush();
+    expect(h.owner.session.channels.get?.("records")).toMatchObject({
+      id: "records",
+      channelType: "system",
+      members: [h.viewer.pubkey],
+    });
+    expect(h.owner.session.channels.list()).toMatchObject({
+      status: "ready",
+      channels: [],
+    });
+    expect(h.owner.session.live.snapshot().roster.state).toBe("verified");
+    expect(h.wire.pending).toHaveLength(0);
+  } finally {
+    h.owner.dispose();
+  }
+});
+
+it("a system channel member-removed hint keeps the full roster refresh", async () => {
+  const h = setup();
+  try {
+    await readyRoster(h);
+    h.live.receive([membershipHint(h, "records", 44101, [["t", "system"]])]);
+    await flush();
+    await flush();
+    expect(h.wire.pending).toHaveLength(1);
+    const full = h.wire.next();
+    expect(full.filters[0]?.kinds).toEqual([39002]);
+    expect(full.filters[0]?.["#d"]).toBeUndefined();
+    expect(full.filters[0]?.consistency).toBe("strong");
+    full.respond([]);
+    await flush();
     expect(h.wire.pending).toHaveLength(0);
   } finally {
     h.owner.dispose();
@@ -653,10 +700,12 @@ it.each([
       expect(h.owner.session.channels.get?.("a")).toBeUndefined();
       expect(h.owner.session.channels.list().status).toBe("ready");
       expect(h.owner.session.live.snapshot().roster.state).toBe("verified");
-      if (reset === "disconnect") {
-        h.connected();
-        h.live.established();
-      } else h.owner.session.channels.refreshList?.();
+      // A continuous reconnect replays no hint and skips the full read, but
+      // the retired confirmation still owes its strong read.
+      if (reset === "cache-clear")
+        h.live.state({ status: "retrying", routes: [] });
+      h.connected();
+      h.live.established(undefined, { route: "membership", continuous: true });
       await flush();
       await recoverRetiredHint(h);
     } finally {
@@ -1493,4 +1542,156 @@ it("disposing from the pending-roster notification blocks subsequent list notifi
   expect(h.owner.session.channels.list()).toBe(disposedList);
   expect(listChanged).not.toHaveBeenCalled();
   expect(h.wire.pending).toHaveLength(0);
+});
+
+it.each(["denied", "membership"])(
+  "retires queued follow-ups after remote %s access loss",
+  async (loss) => {
+    const h = setup();
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const publish = vi.fn(() => "queued-message");
+    try {
+      await readyRoster(h);
+      h.live.receive([roster(h.relay, "a", [h.viewer.pubkey])]);
+      const queue = followUpQueue(h.owner.session);
+      queue.submit({
+        channelId: "a",
+        text: "pending",
+        recipients: [],
+        publish,
+        beforeRelease: () => gate,
+      });
+      expect(queue.snapshot()).toHaveLength(1);
+      if (loss === "denied") h.live.denied("a", "restricted: not a member");
+      else h.live.receive([roster(h.relay, "a", [], 1700000001)]);
+      expect(queue.snapshot()).toEqual([]);
+      resume();
+      await gate;
+      expect(publish).not.toHaveBeenCalled();
+    } finally {
+      resume();
+      h.owner.dispose();
+    }
+  },
+);
+
+describe("recovery tick roster backstop", () => {
+  const start = Date.UTC(2026, 0, 1);
+  const at = (ms: number) => vi.setSystemTime(start + ms);
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    at(0);
+  });
+  afterEach(() => vi.useRealTimers());
+  /** Ticks once and returns the full roster read it started, if any. */
+  async function tick(h: ReturnType<typeof setup>) {
+    h.live.recover?.();
+    await flush();
+    const full = h.wire.pending.filter(
+      (entry) =>
+        entry.filters[0]?.kinds?.[0] === 39002 && !entry.filters[0]?.["#d"],
+    );
+    expect(full.length).toBe(h.wire.pending.length);
+    return full[0];
+  }
+  async function expectBackstopFrom(h: ReturnType<typeof setup>, read: number) {
+    at(read + ROSTER_BACKSTOP_INTERVAL - 1);
+    expect(await tick(h)).toBeUndefined();
+    at(read + ROSTER_BACKSTOP_INTERVAL);
+    const full = await tick(h);
+    expect(full).toBeDefined();
+    h.wire.next().respond([]);
+    await flush();
+    expect(h.owner.session.live.snapshot().roster.state).toBe("verified");
+  }
+
+  it("skips the full read until the window after the last one has passed", async () => {
+    const h = setup();
+    try {
+      await readyRoster(h);
+      await expectBackstopFrom(h, 0);
+      // The tick's own read restarts the window.
+      at(ROSTER_BACKSTOP_INTERVAL + 60_000);
+      expect(await tick(h)).toBeUndefined();
+    } finally {
+      h.owner.dispose();
+    }
+  });
+
+  it("a reconnect's full read restarts the window", async () => {
+    const h = setup();
+    try {
+      await readyRoster(h);
+      at(10 * 60_000);
+      h.live.state({ status: "retrying", routes: [] });
+      h.connected();
+      h.live.established();
+      await flush();
+      h.wire.next().respond([]);
+      await flush();
+      expect(h.wire.pending).toHaveLength(0);
+      await expectBackstopFrom(h, 10 * 60_000);
+    } finally {
+      h.owner.dispose();
+    }
+  });
+
+  it("a removal notice's full read restarts the window", async () => {
+    const h = setup();
+    try {
+      await readyRoster(h);
+      at(10 * 60_000);
+      h.live.receive([membershipHint(h, "b", 44101)]);
+      await flush();
+      const full = h.wire.next();
+      expect(full.filters[0]?.["#d"]).toBeUndefined();
+      full.respond([]);
+      await flush();
+      await expectBackstopFrom(h, 10 * 60_000);
+    } finally {
+      h.owner.dispose();
+    }
+  });
+
+  it("an exact join read does not restart the window", async () => {
+    const h = setup();
+    try {
+      await readyRoster(h);
+      at(10 * 60_000);
+      h.live.receive([membershipHint(h, "a")]);
+      await flush();
+      const exact = h.wire.next();
+      expect(exact.filters).toEqual(exactFilters(h, ["a"]));
+      exact.respond([
+        metadata(h.relay, "a", "Alpha"),
+        roster(h.relay, "a", [h.viewer.pubkey]),
+      ]);
+      await flush();
+      expect(h.owner.session.channels.get?.("a")).toBeDefined();
+      expect(h.wire.pending).toHaveLength(0);
+      await expectBackstopFrom(h, 0);
+    } finally {
+      h.owner.dispose();
+    }
+  });
+
+  it("retries a failed full read on the next tick", async () => {
+    const h = setup();
+    try {
+      await readyRoster(h);
+      at(10 * 60_000);
+      h.live.receive([membershipHint(h, "b", 44101)]);
+      await flush();
+      h.wire.next().fail(new ReadError("unavailable", "Relay unavailable"));
+      await flush();
+      expect(h.owner.session.live.snapshot().roster.state).toBe("error");
+      at(11 * 60_000);
+      expect(await tick(h)).toBeDefined();
+    } finally {
+      h.owner.dispose();
+    }
+  });
 });

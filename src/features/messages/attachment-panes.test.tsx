@@ -1,3 +1,5 @@
+import { createNavigationController } from "../navigation/controller";
+import { createMemoryHistory } from "../navigation/history";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { File as NodeFile } from "node:buffer";
@@ -13,16 +15,16 @@ import {
 } from "@testing-library/react";
 import { StrictMode, useRef, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { SessionsPage } from "../../bundled/sessions/SessionsPage";
+import { ChannelsPage } from "../../bundled/channels/ChannelsPage";
 import type { PageNavigation } from "../navigation/service";
-import { meTarget } from "../../bundled/me/routes";
-import { SESSION_CHANNEL_DESCRIPTION } from "../sessions/metadata";
+import { conversationTarget } from "../channel-navigation/routes";
+import { SOLO_LABEL } from "../solo/labels";
 import { createRelaySession } from "../relay/session";
-import { keypair, message, roster, signed } from "../relay/testing";
+import { bounds, keypair, message, roster, signed } from "../relay/testing";
 import { MessageComposer } from "./MessageComposer";
 import { MediaReviewViewer } from "./MediaReviewViewer";
 import { composerDOMFixture } from "./composer-testing";
-import { useFileDrop } from "./use-file-drop";
+import { useFileDrop, useRejectUnclaimedDrops } from "./use-file-drop";
 
 composerDOMFixture();
 
@@ -85,7 +87,7 @@ async function fixture(archived = false) {
       ["name", "Work"],
       ["t", "stream"],
       ["private"],
-      ["about", SESSION_CHANNEL_DESCRIPTION],
+      ["t", SOLO_LABEL],
       ...(archived ? [["archived", "true"]] : []),
     ],
   });
@@ -112,6 +114,14 @@ async function fixture(archived = false) {
             return [root, comment].filter((event) =>
               filter.ids?.includes(event.id),
             );
+          if (filter.top_level)
+            return [
+              root,
+              bounds(relay, "11111111-1111-4111-8111-111111111111", "head", {
+                has_more: false,
+                next_cursor: null,
+              }),
+            ];
           if (filter.depth_limit)
             return filter.thread_cursor === undefined ||
               filter.thread_cursor < comment.created_at
@@ -147,6 +157,7 @@ async function fixture(archived = false) {
     snapshot: () => snapshot,
     subscribe: () => () => {},
     retry() {},
+    tryAgain() {},
     disconnect() {},
     clearCache: owner.clearCache,
   };
@@ -161,6 +172,7 @@ function OuterComposer({
 }) {
   const ref = useRef<HTMLFormElement>(null);
   useFileDrop(ref, true, attach);
+  useRejectUnclaimedDrops();
   return (
     <div data-attachment-drop-zone="">
       <form ref={ref} aria-label="Other composer" />
@@ -184,28 +196,21 @@ function drop(target: HTMLElement, type: "drop" | "dragOver" = "drop") {
 }
 
 it.each([false, true])(
-  "the production Sessions timeline owns drops and rejects an unavailable composer (archived=%s)",
+  "the production Solo timeline owns drops and rejects an unavailable composer (archived=%s)",
   async (archived) => {
     const h = await fixture(archived);
-    const placement = {
-      ...h.owner.session.mePlacement.snapshot(),
-      status: "ready" as const,
-    };
-    const relaySnapshot = h.relayData.snapshot();
-    const session = {
-      ...relaySnapshot.session,
-      mePlacement: {
-        ...relaySnapshot.session.mePlacement,
-        snapshot: () => placement,
-      },
-    };
-    const snapshot = { ...relaySnapshot, session };
-    const relayData = { ...h.relayData, snapshot: () => snapshot };
+    const relayData = h.relayData;
     const navigation: PageNavigation = {
       entryId: "visit",
-      target: meTarget(h.scope, "11111111-1111-4111-8111-111111111111"),
+      target: conversationTarget(
+        h.scope,
+        "11111111-1111-4111-8111-111111111111",
+      ),
       signal: new AbortController().signal,
+      position: () => undefined,
+      savePosition() {},
       forSession: () => navigation,
+      passThrough: () => () => {},
       complete: () => true,
       resolve: () => true,
     };
@@ -213,12 +218,21 @@ it.each([false, true])(
     render(
       <StrictMode>
         <OuterComposer attach={other}>
-          <SessionsPage
+          <ChannelsPage
+            navigator={
+              createNavigationController(createMemoryHistory()).navigation
+            }
             panels={{
+              ui: {
+                Workspace: () => null,
+                useSplit: vi.fn(),
+              },
               snapshot: () => empty,
               subscribe: () => () => {},
               register() {},
               resolve: () => undefined,
+              requestOpen: () => false,
+              handleOpenRequests: () => () => {},
             }}
             relay={relayData}
             extensions={extensions}
@@ -228,22 +242,31 @@ it.each([false, true])(
       </StrictMode>,
     );
     const timeline = await screen.findByLabelText("Channel message history");
-    const form = screen.getByRole("form", { name: "Send a message to Work" });
-    const button = within(form).getByRole("button", { name: "Attach files" });
-    await waitFor(() =>
-      archived ? expect(button).toBeDisabled() : expect(button).toBeEnabled(),
-    );
+    if (archived) {
+      expect(
+        screen.queryByRole("form", { name: "Send a message to Work" }),
+      ).toBeNull();
+      expect(
+        screen.getByRole("region", { name: "Archived chat" }),
+      ).toHaveTextContent("This chat is archived");
+    } else {
+      const form = screen.getByRole("form", { name: "Send a message to Work" });
+      await waitFor(() =>
+        expect(
+          within(form).getByRole("button", { name: "Attach files" }),
+        ).toBeEnabled(),
+      );
+    }
     expect(timeline.closest("form")).toBeNull();
     const over = drop(timeline, "dragOver");
     expect(over.event.defaultPrevented).toBe(true);
     expect(over.transfer.dropEffect).toBe(archived ? "none" : "copy");
     expect(drop(timeline).event.defaultPrevented).toBe(true);
     if (archived) {
-      expect(
-        within(form).queryByRole("region", { name: "Attachments" }),
-      ).toBeNull();
+      expect(screen.queryByRole("region", { name: "Attachments" })).toBeNull();
       expect(h.upload).not.toHaveBeenCalled();
     } else {
+      const form = screen.getByRole("form", { name: "Send a message to Work" });
       await waitFor(() =>
         expect(
           within(form).getByRole("status", { name: "" }),
@@ -338,7 +361,10 @@ it("announces eager preparation, then background upload after Send, while editor
   const editor = screen.getByRole("textbox");
   editor.focus();
   fireEvent.paste(editor, {
-    clipboardData: { items: [{ kind: "file", getAsFile: () => source }] },
+    clipboardData: {
+      getData: () => "",
+      items: [{ kind: "file", getAsFile: () => source }],
+    },
   });
   const status = screen.getByRole("status", { name: "" });
   expect(status).toHaveAttribute("aria-live", "polite");
@@ -353,14 +379,14 @@ it("announces eager preparation, then background upload after Send, while editor
   // The file leaves the composer; the background pill announces its phases.
   await waitFor(() => expect(status).not.toBeInTheDocument());
   expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
-    "Preparing",
+    /^Preparing upload to Work$/,
   );
   expect(editor).toHaveFocus();
   await act(async () => {
     header.resolve(new ArrayBuffer(0));
   });
   expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
-    /^Uploading$/,
+    /^Uploading to Work$/,
   );
   expect(editor).toHaveFocus();
   await act(async () => {

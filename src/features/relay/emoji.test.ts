@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createEmojiDirectory } from "./emoji-directory";
 import {
   EMOJI_SET,
+  contentEmojiTags,
+  emojiMatches,
   emojiTags,
   referencedEmoji,
   suggestShortcode,
@@ -11,6 +13,7 @@ import {
 import { createRelaySession } from "./session";
 import { foldMessages } from "./fold";
 import { PublishRejected } from "./outbox";
+import { ReadError } from "./errors";
 import {
   flush,
   keypair,
@@ -39,6 +42,7 @@ function set(key = member, time = 1, tags = [["emoji", "party", url]]) {
 const owners: { dispose(): void }[] = [];
 afterEach(() => {
   for (const owner of owners.splice(0)) owner.dispose();
+  vi.restoreAllMocks();
 });
 function session(scope = "a", publishSucceeds = false) {
   const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
@@ -82,6 +86,38 @@ it("normalizes first-wins scheme-agnostic emoji tags and leaves URL fragments ou
     ),
   ).toEqual(["party", "other"]);
 });
+it.each([
+  ["12:25:30:", []],
+  ["12:25:", []],
+  ["12:30:", []],
+  [":25:", ["25"]],
+  [":25::30:", ["25", "30"]],
+  [":25:30:", ["25"]],
+  ["😄:25:", ["25"]],
+  ["12:party:", ["party"]],
+  ["12:-25:", ["-25"]],
+  ["10:30:party:", ["party"]],
+])(
+  "keeps numeric time fragments literal in references, rendering and tags: %s",
+  (text, codes) => {
+    const entries = ["25", "30", "party", "-25"].map((shortcode) => ({
+      shortcode,
+      url: `https://example.org/emoji/${shortcode}.png`,
+    }));
+    expect(
+      [...emojiMatches(text, entries)].map(({ emoji }) => emoji.shortcode),
+    ).toEqual(codes);
+    expect(referencedEmoji(text)).toEqual(codes);
+    expect(contentEmojiTags(text, entries)).toEqual(
+      codes.map((code) => [
+        "emoji",
+        code,
+        `https://example.org/emoji/${code}.png`,
+      ]),
+    );
+  },
+);
+
 it("unions latest complete member sets; empty replacements and ties survive stale reads", async () => {
   const h = session();
   const loading = h.session.emoji.ensure();
@@ -111,7 +147,7 @@ it("unions latest complete member sets; empty replacements and ties survive stal
 it("actual session cold send is draft-safe; A/B sends, replies and signed retries pin original URLs", async () => {
   const a = session("a"),
     b = session("b");
-  expect(() => a.session.messages.send("c", ":party:")).toThrow(/loading/);
+  expect(() => a.session.messages.send("c", ":party:")).toThrow(/isn't ready/);
   expect(a.session.outbox?.snapshot()).toHaveLength(0);
   expect(b.wire.pending).toHaveLength(0);
   const aRead = a.wire.next();
@@ -185,6 +221,7 @@ it("reactions use retained thread targets after shared-cache eviction", () => {
     tags: expect.arrayContaining([
       ["h", "c"],
       ["e", root.id],
+      ["p", root.pubkey],
     ]),
   });
 });
@@ -291,8 +328,12 @@ it("custom emoji reactions are colon-wrapped, bounded, tagged, and retry origina
     h.session.messages.react(root.id, `:${"x".repeat(65)}:`),
   ).toThrow(/long/);
 });
-it("plain sends are immediate and do not acquire a palette; load failure requires explicit retry", async () => {
+it("plain sends do not acquire a palette; a custom send retries a cold failure while passive demand does not", async () => {
   const h = session();
+  const reads = () =>
+    h.query.mock.calls.filter(([filters]) =>
+      filters.some((filter) => filter.kinds?.includes(30030)),
+    ).length;
   expect(h.session.messages.send("c", "hello")).toMatch(/^[0-9a-f]{64}$/);
   expect(h.wire.pending.some((p) => p.filters[0]?.kinds?.includes(30030))).toBe(
     false,
@@ -304,16 +345,118 @@ it("plain sends are immediate and do not acquire a palette; load failure require
   h.wire.next().fail(new Error("offline"));
   await ready;
   expect(h.session.emoji.snapshot().status).toBe("error");
+  // Passive warm-up does not re-read a cold failure.
+  void h.session.emoji.ensure();
+  await flush();
+  expect(h.session.emoji.snapshot().status).toBe("error");
+  expect(reads()).toBe(1);
+  // A refused send starts one retry cycle; repeated sends and demand share it.
   expect(() =>
     h.session.messages.reply("c", "a".repeat(64), ":party:"),
-  ).toThrow(/unavailable/);
-  await h.session.emoji.ensure();
-  expect(h.wire.pending).toHaveLength(0);
-  const retry = h.session.emoji.refresh();
+  ).toThrow(/isn't ready/);
+  expect(h.session.emoji.snapshot().status).toBe("loading");
+  const retry = h.session.emoji.ensure();
+  expect(() => h.session.messages.send("c", ":party:")).toThrow(/isn't ready/);
+  expect(h.session.emoji.ensure()).toBe(retry);
   await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  expect(reads()).toBe(2);
   h.wire.next().respond([set()]);
   await retry;
   expect(h.session.emoji.snapshot().status).toBe("ready");
+  const id = h.session.messages.send("c", ":party:");
+  expect(
+    h.session.outbox?.snapshot().find((item) => item.event.id === id)?.event
+      .tags,
+  ).toContainEqual(["emoji", "party", url]);
+  expect(reads()).toBe(2);
+});
+it("explicit retries jump background traffic that starves the passive catalog load", async () => {
+  vi.useFakeTimers();
+  try {
+    const catalog = (target: ReturnType<typeof session>) =>
+      target.wire.pending.find((p) => p.filters[0]?.kinds?.includes(30030));
+    // Background profile reads hold the background lane, as on channel open.
+    const busy = (target: ReturnType<typeof session>, key: Key) =>
+      void target.session.profiles
+        .ensure([key.pubkey], "background")
+        .catch(() => {});
+    const h = session();
+    busy(h, member);
+    void h.session.emoji.ensure();
+    // The passive load spends its whole deadline queued, never reaching the relay.
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(catalog(h)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.session.emoji.snapshot()).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("Relay read timed out"),
+    });
+    h.wire.pending.splice(0);
+    busy(h, relay);
+    await vi.advanceTimersByTimeAsync(0);
+    // The refused send's retry dispatches despite the busy lane.
+    expect(() => h.session.messages.send("c", ":party:")).toThrow(
+      /isn't ready/,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    catalog(h)?.respond([set()]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.session.emoji.snapshot().status).toBe("ready");
+    const id = h.session.messages.send("c", ":party:");
+    expect(
+      h.session.outbox?.snapshot().find((item) => item.event.id === id)?.event
+        .tags,
+    ).toContainEqual(["emoji", "party", url]);
+    // A retry while the passive load is still queued supersedes it.
+    const queued = session("b");
+    busy(queued, member);
+    void queued.session.emoji.ensure();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(catalog(queued)).toBeUndefined();
+    const retry = queued.session.emoji.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+    catalog(queued)?.respond([set()]);
+    await retry;
+    expect(queued.session.emoji.snapshot().status).toBe("ready");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it("a failed refresh keeps a loaded catalog ready and sendable, with its error until a retry", async () => {
+  const h = session();
+  const ready = h.session.emoji.ensure();
+  h.wire.next().respond([set()]);
+  await ready;
+  const loaded = h.session.emoji.snapshot();
+  const failing = h.session.emoji.refresh();
+  expect(h.session.emoji.snapshot()).toBe(loaded);
+  h.wire.next().fail(new Error("offline"));
+  await failing;
+  expect(h.session.emoji.snapshot()).toMatchObject({
+    status: "ready",
+    error: expect.stringContaining("offline"),
+  });
+  expect(h.session.emoji.snapshot().entries).toBe(loaded.entries);
+  const id = h.session.messages.reply("c", "a".repeat(64), ":party:");
+  expect(
+    h.session.outbox?.snapshot().find((item) => item.event.id === id)?.event
+      .tags,
+  ).toContainEqual(["emoji", "party", url]);
+  // Demand does not re-read a ready catalog; an explicit retry clears the error.
+  await h.session.emoji.ensure();
+  expect(h.wire.pending).toHaveLength(0);
+  const retry = h.session.emoji.refresh();
+  expect(h.session.emoji.snapshot()).toMatchObject({
+    status: "ready",
+    error: undefined,
+  });
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.wire.next().respond([set()]);
+  await retry;
+  expect(h.session.emoji.snapshot()).toMatchObject({
+    status: "ready",
+    error: undefined,
+  });
 });
 it("initial roster cancellation restarts demanded emoji once; clear/dispose fence obsolete results", async () => {
   const h = session();
@@ -351,12 +494,13 @@ it("initial roster cancellation restarts demanded emoji once; clear/dispose fenc
   await flush();
   expect(h.session.emoji.snapshot().entries).toEqual([]);
 });
-it("reconnect repairs a previously requested catalog, without preloading an unused community", async () => {
+it("reconnect repairs a previously requested catalog in place, without preloading an unused community", async () => {
   const h = session(),
     idle = session();
   const ready = h.session.emoji.ensure();
   h.wire.next().respond([set()]);
   await ready;
+  const loaded = h.session.emoji.snapshot();
   for (const target of [h, idle]) {
     target.live.state({ status: "connected", routes: [] });
     target.live.established();
@@ -370,9 +514,60 @@ it("reconnect repairs a previously requested catalog, without preloading an unus
   expect(
     idle.wire.pending.some((p) => p.filters[0]?.kinds?.includes(30030)),
   ).toBe(false);
+  // The repair read publishes nothing while pending, and sends keep their tags.
+  expect(h.session.emoji.snapshot()).toBe(loaded);
+  const id = h.session.messages.send("c", ":party:");
+  expect(
+    h.session.outbox?.snapshot().find((item) => item.event.id === id)?.event
+      .tags,
+  ).toContainEqual(["emoji", "party", url]);
   requests[0]?.respond([set(member, 2, [])]);
   await flush();
   expect(h.session.emoji.snapshot().entries).toEqual([]);
+});
+it("active catalog demand bypasses queued warm-up and recovers a cold failure without reloading ready data", async () => {
+  vi.useFakeTimers();
+  try {
+    const h = session();
+    void h.session.profiles
+      .ensure([member.pubkey], "background")
+      .catch(() => {});
+    void h.session.emoji.ensure();
+    await vi.advanceTimersByTimeAsync(0);
+    const catalog = () =>
+      h.wire.pending.find(
+        (p) => !p.signal?.aborted && p.filters[0]?.kinds?.includes(30030),
+      );
+    expect(catalog()).toBeUndefined();
+    const active = h.session.emoji.ensure("foreground");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(catalog()).toBeDefined();
+    catalog()?.fail(new Error("catalog unavailable"));
+    await active;
+    expect(h.session.emoji.snapshot().status).toBe("error");
+    await h.session.emoji.ensure();
+    expect(h.session.emoji.snapshot().status).toBe("error");
+    const failed = h.session.emoji.snapshot();
+    const failedReads = h.query.mock.calls.length;
+    // Completion providers remount on each edit. A settled foreground failure
+    // retains its recovery action instead of starting another automatic read.
+    await h.session.emoji.ensure("foreground");
+    await h.session.emoji.ensure("foreground");
+    expect(h.query.mock.calls).toHaveLength(failedReads);
+    expect(h.session.emoji.snapshot()).toBe(failed);
+    const retry = h.session.emoji.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+    catalog()?.respond([set()]);
+    await retry;
+    expect(h.session.emoji.snapshot().entries).toEqual([
+      { shortcode: "party", url },
+    ]);
+    const reads = h.query.mock.calls.length;
+    await h.session.emoji.ensure("foreground");
+    expect(h.query.mock.calls).toHaveLength(reads);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 it("exposes read-cap and retained-byte limits rather than evicting replacement evidence", async () => {
   const reader = {
@@ -381,10 +576,13 @@ it("exposes read-cap and retained-byte limits rather than evicting replacement e
   const directory = createEmojiDirectory(reader);
   owners.push(directory);
   await directory.queries.ensure();
+  // A capped read is incomplete, but still resolves the shortcodes it holds.
   expect(directory.queries.snapshot()).toMatchObject({
-    status: "error",
+    status: "ready",
+    entries: [{ shortcode: "party", url }],
     error: expect.stringContaining("incomplete"),
   });
+  expect(directory.tags(":party:")).toEqual([["emoji", "party", url]]);
   directory.accept([
     set(member, 2, [["emoji", "party", "x".repeat(2 * 1024 * 1024)]]),
   ]);
@@ -393,6 +591,11 @@ it("exposes read-cap and retained-byte limits rather than evicting replacement e
     entries: [],
     error: expect.stringContaining("budget"),
   });
+  // Overflow would repeat on every read, so demand and sends leave it to Retry.
+  await directory.queries.ensure();
+  await directory.queries.ensure("foreground");
+  expect(() => directory.tags(":party:")).toThrow(/Retry message preparation/);
+  expect(reader.read).toHaveBeenCalledTimes(1);
   directory.accept([set(member, 1)]);
   expect(directory.queries.snapshot().entries).toEqual([]);
   reader.read.mockResolvedValueOnce([set(member, 3, [])]);
@@ -573,6 +776,137 @@ it("rejects invalid names before any read and maps publish failure to reference 
   await expect(failedRead).rejects.toThrow("Failed to add emoji.");
   expect(h.publish).toHaveBeenCalledTimes(1);
 });
+it("removes only from the fresh own set and preserves another member's colliding emoji", async () => {
+  const h = authoring();
+  const other = set(member, 1);
+  const own = set(viewer, 2, [["emoji", "party", "https://a.test/own.png"]]);
+  const ready = h.emoji.ensure();
+  h.wire.next().respond([other, own]);
+  await ready;
+  const removing = h.emoji.remove?.(":PARTY:");
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  const read = h.ownRead();
+  expect(read.filters).toEqual([
+    { kinds: [30030], "#d": [EMOJI_SET], authors: [viewer.pubkey], limit: 1 },
+  ]);
+  // A newer own set has an entry absent from the initial catalog.
+  read.respond([
+    set(viewer, 3, [
+      ["emoji", "party", "https://a.test/own.png"],
+      ["emoji", "keep", "https://a.test/keep.png"],
+    ]),
+  ]);
+  await removing;
+  const event = h.publish.mock.calls[0]?.[0];
+  expect(event).toMatchObject({
+    kind: 30030,
+    pubkey: viewer.pubkey,
+    content: "",
+  });
+  expect(event?.tags).toEqual([
+    ["d", EMOJI_SET],
+    ["emoji", "keep", "https://a.test/keep.png"],
+  ]);
+  expect(h.emoji.snapshot().entries).toEqual([
+    { shortcode: "keep", url: "https://a.test/keep.png" },
+    { shortcode: "party", url },
+  ]);
+  const last = h.emoji.remove?.("keep");
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.ownRead().respond(event ? [event] : []);
+  await last;
+  const empty = h.publish.mock.calls[1]?.[0];
+  expect(empty?.tags).toEqual([["d", EMOJI_SET]]);
+  const reloaded = authoring();
+  const reread = reloaded.emoji.ensure();
+  reloaded.wire.next().respond(empty ? [other, empty, own] : []);
+  await reread;
+  expect(reloaded.emoji.snapshot().mine).toEqual([]);
+  expect(reloaded.emoji.snapshot().entries).toEqual([
+    { shortcode: "party", url },
+  ]);
+});
+it("does not republish invalid, absent, or other members' names", async () => {
+  const h = authoring();
+  await h.emoji.remove?.("bad name");
+  expect(h.wire.pending).toHaveLength(0);
+  const removing = h.emoji.remove?.("party");
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.ownRead().respond([set(member)]);
+  await removing;
+  expect(h.sign).not.toHaveBeenCalled();
+  expect(h.publish).not.toHaveBeenCalled();
+});
+it("serializes additions and removals despite a stale own-set read", async () => {
+  const h = authoring();
+  const add = h.emoji.add?.("party", url);
+  const remove = h.emoji.remove?.("party");
+  const keep = h.emoji.add?.("keep", "https://a.test/keep.png");
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.ownRead().respond([]);
+  await add;
+  const stale = h.publish.mock.calls[0]?.[0];
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.ownRead().respond([]);
+  await remove;
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.ownRead().respond(stale ? [stale] : []);
+  await keep;
+  expect(h.publish.mock.calls[2]?.[0].tags).toEqual([
+    ["d", EMOJI_SET],
+    ["emoji", "keep", "https://a.test/keep.png"],
+  ]);
+});
+it("keeps the own set after rejected removal and recovers on retry", async () => {
+  const h = authoring();
+  h.publish.mockRejectedValueOnce(new PublishRejected("blocked: no"));
+  const own = set(viewer);
+  const removing = h.emoji.remove?.("party");
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.ownRead().respond([own]);
+  await expect(removing).rejects.toThrow("Failed to remove emoji.");
+  expect(h.emoji.snapshot().mine).toEqual([{ shortcode: "party", url }]);
+  const retry = h.emoji.remove?.("party");
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.ownRead().respond([own]);
+  await retry;
+  expect(h.emoji.snapshot().mine).toEqual([]);
+});
+it("fails removal on read failure, timeout, signer mismatch and disposal", async () => {
+  const h = authoring();
+  const readFailure = h.emoji.remove?.("party");
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.ownRead().fail(new Error("offline"));
+  await expect(readFailure).rejects.toThrow("Failed to remove emoji.");
+  const deadline = new AbortController();
+  const timeout = vi
+    .spyOn(AbortSignal, "timeout")
+    .mockReturnValue(deadline.signal);
+  try {
+    const removing = h.emoji.remove?.("party");
+    await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+    h.ownRead();
+    deadline.abort();
+    await expect(removing).rejects.toThrow("Timed out while removing emoji.");
+  } finally {
+    timeout.mockRestore();
+  }
+  h.sign.mockImplementationOnce(async (template) => signed(member, template));
+  const mismatch = h.emoji.remove?.("party");
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.ownRead().respond([set(viewer)]);
+  await expect(mismatch).rejects.toThrow("Failed to remove emoji.");
+  const running = h.emoji.remove?.("party");
+  const queued = h.emoji.remove?.("party");
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.dispose();
+  await expect(running).rejects.toThrow("Failed to remove emoji.");
+  await expect(queued).rejects.toThrow("Failed to remove emoji.");
+  await expect(h.emoji.remove?.("party")).rejects.toThrow(
+    "Failed to remove emoji.",
+  );
+  expect(h.publish).not.toHaveBeenCalled();
+});
 it("maps an add that outlives its deadline to the reference timeout copy", async () => {
   const deadline = new AbortController();
   const timeout = vi
@@ -621,7 +955,7 @@ it("serializes concurrent adds so a stale own-set read cannot drop an earlier ad
     ["emoji", "two", "https://a.test/2.png"],
   ]);
 });
-it("exposes authoring only with upload and 30030 write capability", async () => {
+it("requires 30030 writing for removal and an uploader for additions", async () => {
   const h = authoring();
   const file = new File(["png"], "party.png", { type: "image/png" });
   await expect(
@@ -629,7 +963,9 @@ it("exposes authoring only with upload and 30030 write capability", async () => 
   ).resolves.toMatchObject({ url: "https://a.test/media/new.png" });
   expect(h.upload).toHaveBeenCalledWith(file, expect.any(AbortSignal));
   expect(authoring([7, 9]).emoji.add).toBeUndefined();
+  expect(authoring([7, 9]).emoji.remove).toBeUndefined();
   expect(authoring([30030]).emoji.add).toBeTypeOf("function");
+  expect(session().session.emoji.remove).toBeTypeOf("function");
   expect(session().session.emoji.add).toBeUndefined();
 });
 it("suggests Desktop's file-first shortcode and admits only canonical own sets", () => {
@@ -689,4 +1025,163 @@ it("suggests Desktop's file-first shortcode and admits only canonical own sets",
     },
   ])
     expect(validEmojiSetTemplate({ ...template, ...patch }, now)).toBe(false);
+});
+const catalogReads = (h: ReturnType<typeof session>) =>
+  h.query.mock.calls.filter(([filters]) => filters[0]?.kinds?.includes(30030))
+    .length;
+const pendingCatalog = (h: ReturnType<typeof session>) => {
+  const index = h.wire.pending.findIndex((p) =>
+    p.filters[0]?.kinds?.includes(30030),
+  );
+  const [read] = index < 0 ? [] : h.wire.pending.splice(index, 1);
+  if (!read) throw new Error("No pending catalog read");
+  return read;
+};
+async function timeOut(h: ReturnType<typeof session>) {
+  pendingCatalog(h).fail(new ReadError("unavailable", "Relay read timed out"));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.session.emoji.snapshot()).toMatchObject({
+    status: "error",
+    transient: true,
+  });
+}
+it("retries a timed-out catalog with one read per growing backoff step until it loads", async () => {
+  vi.useFakeTimers();
+  // The ceiling of each jittered delay.
+  vi.spyOn(Math, "random").mockReturnValue(1);
+  try {
+    const h = session();
+    void h.session.emoji.ensure("foreground");
+    await vi.advanceTimersByTimeAsync(0);
+    let reads = 1;
+    for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
+      await timeOut(h);
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(catalogReads(h)).toBe(reads);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(catalogReads(h)).toBe(++reads);
+      expect(h.session.emoji.snapshot().status).toBe("loading");
+    }
+    // The catalog's retry is its own: session recovery and its notice stay idle.
+    expect(h.session.recovery?.snapshot()).toMatchObject({
+      recovering: false,
+      shown: false,
+    });
+    pendingCatalog(h).respond([set()]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.session.emoji.snapshot()).toMatchObject({
+      status: "ready",
+      entries: [{ shortcode: "party", url }],
+      error: undefined,
+      transient: undefined,
+    });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(catalogReads(h)).toBe(reads);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it("leaves deterministic catalog failures to Retry and stops retrying at close", async () => {
+  vi.useFakeTimers();
+  try {
+    const denied = session("a");
+    void denied.session.emoji.ensure("foreground");
+    await vi.advanceTimersByTimeAsync(0);
+    pendingCatalog(denied).fail(new Error("restricted: not a member"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(denied.session.emoji.snapshot()).toMatchObject({
+      status: "error",
+      transient: undefined,
+    });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(catalogReads(denied)).toBe(1);
+    const closing = session("b");
+    void closing.session.emoji.ensure("foreground");
+    await vi.advanceTimersByTimeAsync(0);
+    await timeOut(closing);
+    closing.dispose();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(catalogReads(closing)).toBe(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it("credential retry leaves an unrequested catalog unread", async () => {
+  const h = session();
+  h.session.recovery?.retryAll();
+  await flush();
+  expect(catalogReads(h)).toBe(0);
+  expect(h.session.emoji.snapshot().status).toBe("idle");
+});
+it("retries a ready catalog's timed-out refresh with growing backoff, keeping its entries", async () => {
+  vi.useFakeTimers();
+  // The ceiling of each jittered delay.
+  vi.spyOn(Math, "random").mockReturnValue(1);
+  try {
+    const h = session();
+    void h.session.emoji.ensure("foreground");
+    await vi.advanceTimersByTimeAsync(0);
+    pendingCatalog(h).respond([set()]);
+    await vi.advanceTimersByTimeAsync(0);
+    const loaded = h.session.emoji.snapshot().entries;
+    void h.session.emoji.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+    let reads = 2;
+    for (const delay of [1_000, 2_000, 4_000]) {
+      pendingCatalog(h).fail(
+        new ReadError("unavailable", "Relay read timed out"),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.session.emoji.snapshot()).toMatchObject({
+        status: "ready",
+        entries: loaded,
+        transient: true,
+      });
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(catalogReads(h)).toBe(reads);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(catalogReads(h)).toBe(++reads);
+    }
+    pendingCatalog(h).respond([set()]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.session.emoji.snapshot()).toMatchObject({
+      status: "ready",
+      error: undefined,
+      transient: undefined,
+    });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(catalogReads(h)).toBe(reads);
+    // A recovered refresh restarts the backoff for the next failure.
+    void h.session.emoji.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+    pendingCatalog(h).fail(
+      new ReadError("unavailable", "Relay read timed out"),
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(catalogReads(h)).toBe(reads + 2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it("jitters each catalog retry within the upper half of its capped delay", async () => {
+  vi.useFakeTimers();
+  const random = vi.spyOn(Math, "random").mockReturnValue(0);
+  try {
+    const h = session();
+    void h.session.emoji.ensure("foreground");
+    await vi.advanceTimersByTimeAsync(0);
+    await timeOut(h);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(catalogReads(h)).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(catalogReads(h)).toBe(2);
+    random.mockReturnValue(0.5);
+    await timeOut(h);
+    await vi.advanceTimersByTimeAsync(1_499);
+    expect(catalogReads(h)).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(catalogReads(h)).toBe(3);
+  } finally {
+    vi.useRealTimers();
+  }
 });

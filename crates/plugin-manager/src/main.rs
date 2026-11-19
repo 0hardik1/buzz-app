@@ -1,5 +1,8 @@
 use buzzodz_plugins::{
-    release_manifest, sign_release_saved, valid_id, Catalog, Manager, Manifest, Result,
+    automatic::Action,
+    managed::{Install, Managed, ManagedSource, ManagedState, Update},
+    pack_release, release_manifest, sign_policy, sign_release_saved, valid_id, Catalog, Manager,
+    Manifest, Result,
 };
 use serde_json::json;
 use std::{
@@ -13,8 +16,15 @@ Commands:
   init DIRECTORY ID NAME   Create a page-plugin source project
   build DIRECTORY          Run the project's pnpm build script
   sign DIST_DIRECTORY       Sign with your saved Buzz human identity
-  install DIRECTORY        Install a built artifact (new plugins start disabled)
+  pack DIST_DIRECTORY FILE  Write the single-file artifact a URL source serves; prints its SHA-256
+  sign-policy FILE         Sign a managed plugin policy with the key in
+                           BUZZ_MANAGED_PLUGINS_SIGNING_KEY; writes FILE.sig
+  install DIRECTORY        Install a plugin (new plugins start disabled)
+  reload ID                Reload a folder plugin, preserving its enabled state
   list                     List installed pages and their enabled state
+  managed [--apply]        Show the managed plugin sources policy and its status;
+                           --apply first installs and updates its automatic entries
+  access [URL]             Show repository access rules and how Git would read URL
   enable ID | disable ID | remove ID | rollback ID
   recover                  Back up settings and reset to bundled defaults
 
@@ -24,6 +34,10 @@ Options:
   --help, -h               Show this help
 
 The desktop and CLI also read BUZZODZ_HOME and BUZZODZ_PROFILE.
+BUZZ_MANAGED_PLUGINS overrides the managed plugin policy file location.
+BUZZ_REPOSITORY_ACCESS overrides the repository access rules file location.
+Set BUZZ_REQUIRE_PLUGIN_SIGNATURES=1 when launching the desktop or CLI to require
+signed plugins. Enforcement is off by default; supplied signatures are always verified.
 Launch the desktop with BUZZODZ_SAFE_MODE=1 to skip external pages.";
 
 fn main() {
@@ -66,7 +80,12 @@ fn run() -> Result<()> {
         }
         ("build", [directory]) => {
             build(Path::new(directory))?;
-            println!("Built {}", Path::new(directory).join("dist").display());
+            let dist = Path::new(directory).join("dist");
+            println!(
+                "Built {}\nNext: buzzodz plugin sign {}",
+                dist.display(),
+                dist.display()
+            );
             return Ok(());
         }
         ("sign", [directory]) => {
@@ -75,6 +94,27 @@ fn run() -> Result<()> {
             return Ok(());
         }
         ("sign", _) => return Err("Usage: buzzodz plugin sign DIST_DIRECTORY".into()),
+        ("pack", [directory, file]) => {
+            let (manifest, bytes, digest) = pack_release(Path::new(directory))?;
+            std::fs::write(file, bytes).map_err(|e| e.to_string())?;
+            println!(
+                "{}",
+                json!({"id": manifest.id, "file": file, "sha256": digest})
+            );
+            return Ok(());
+        }
+        ("pack", _) => return Err("Usage: buzzodz plugin pack DIST_DIRECTORY FILE".into()),
+        ("sign-policy", [file]) => {
+            let key = std::env::var("BUZZ_MANAGED_PLUGINS_SIGNING_KEY")
+                .map_err(|_| "Set BUZZ_MANAGED_PLUGINS_SIGNING_KEY to the signing key")?;
+            let signer = sign_policy(Path::new(file), &key)?;
+            println!(
+                "{}",
+                json!({"signature": format!("{file}.sig"), "signer": signer})
+            );
+            return Ok(());
+        }
+        ("sign-policy", _) => return Err("Usage: buzzodz plugin sign-policy FILE".into()),
         _ => {}
     }
     let manager = Manager::open(home, &profile, false)?;
@@ -98,7 +138,42 @@ fn run() -> Result<()> {
                 installed.publisher.as_deref().unwrap_or("unsigned")
             );
         }
+        ("reload", [id]) => {
+            let before = manager.catalog()?;
+            let after = manager.reload_live(id)?;
+            for (label, catalog) in [
+                ("Previous host access", &before),
+                ("Updated host access", &after),
+            ] {
+                let grants = catalog
+                    .plugins
+                    .iter()
+                    .find(|p| p.manifest.id == *id)
+                    .and_then(|p| p.manifest.host.as_ref());
+                println!(
+                    "{label}: {}",
+                    serde_json::to_string_pretty(&grants).map_err(|e| e.to_string())?
+                );
+            }
+            println!("Reloaded {id} in profile {profile}. The running app picks up changed builds automatically.");
+        }
+        ("reload", _) => return Err("Usage: buzzodz plugin reload ID".into()),
         ("list", []) => print_catalog(&manager.catalog()?)?,
+        ("managed", []) => print_managed(&manager.managed(&manager.catalog()?)),
+        ("managed", [flag]) if flag == "--apply" => {
+            manager.apply_automatic()?;
+            print_managed(&manager.managed(&manager.catalog()?));
+        }
+        ("access", [] | [_]) => {
+            let home = dirs::home_dir().ok_or("Cannot find the home directory")?;
+            print!(
+                "{}",
+                manager
+                    .repository_access()
+                    .describe(rest.first().map(String::as_str), &home)?
+            );
+        }
+        ("access", _) => return Err("Usage: buzzodz plugin access [URL]".into()),
         ("recover", []) => {
             let catalog = manager.recover()?;
             println!("Reset profile {profile} to bundled defaults.\nAny previous settings were backed up in {}.\nExternal artifacts remain available for reinstallation.", catalog.location);
@@ -158,6 +233,76 @@ fn print_catalog(catalog: &Catalog) -> Result<()> {
     }
     Ok(())
 }
+fn print_managed(managed: &Managed) {
+    match managed {
+        Managed::Absent => println!("No managed plugin policy found."),
+        Managed::Invalid { path, reason } => {
+            println!("Policy: {path}\nStatus: unusable\nProblem: {reason}")
+        }
+        Managed::Loading { url } => println!("Policy: {url}\nStatus: not fetched yet"),
+        Managed::Unavailable { url, reason } => {
+            println!("Policy: {url}\nStatus: unavailable\nProblem: {reason}")
+        }
+        Managed::Ready {
+            path,
+            source,
+            plugins,
+            problems,
+            signed,
+            automatic,
+        } => {
+            println!("Policy: {path}\nManaged by: {source}");
+            if *signed {
+                println!("Signed by the build's policy signer: automatic entries apply\n");
+            } else {
+                println!("Not signed by the build's policy signer: entries are recommendations\n");
+            }
+            for change in automatic {
+                let action = match change.action {
+                    Action::Installed => "Installed",
+                    Action::Updated => "Updated",
+                };
+                println!(
+                    "{action} {} ({}) at {}",
+                    change.name, change.id, change.revision
+                );
+            }
+            for entry in plugins {
+                let state = match entry.state {
+                    ManagedState::Missing => "not installed",
+                    ManagedState::Current => "installed, current",
+                    ManagedState::Outdated => "installed, update available",
+                    ManagedState::Other => "installed from another source",
+                };
+                let location = match &entry.plugin.source {
+                    ManagedSource::Git {
+                        repository,
+                        reference,
+                        commit,
+                        path,
+                    } => format!("{repository} {reference} {commit} ({path})"),
+                    ManagedSource::Url { url, sha256 } => format!("{url} (sha256 {sha256})"),
+                };
+                let install = match entry.plugin.install {
+                    Install::Recommend => "",
+                    Install::Automatic => ", installs automatically",
+                    Install::Manual => ", not recommended",
+                };
+                let update = match entry.plugin.update {
+                    Update::Review => "",
+                    Update::Automatic => ", updates automatically",
+                };
+                println!(
+                    "{:<24} {state}{install}{update}\n  {location}",
+                    entry.plugin.id
+                );
+            }
+            for problem in problems {
+                println!("Ignored: {problem}");
+            }
+        }
+    }
+}
 fn read_manifest(directory: &Path) -> Result<Manifest> {
     let manifest: Manifest = serde_json::from_slice(
         &std::fs::read(directory.join("manifest.json")).map_err(|e| e.to_string())?,
@@ -172,6 +317,9 @@ fn init(directory: &Path, id: &str, name: &str) -> Result<()> {
         id: id.into(),
         name: name.into(),
         api_version: 1,
+        description: None,
+        discovery: None,
+        updates: None,
         host: None,
     };
     manifest.validate()?;

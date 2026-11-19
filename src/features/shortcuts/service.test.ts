@@ -11,7 +11,11 @@ function browser(apple = true) {
   let modal = false;
   const host = {
     navigator: { platform: apple ? "MacIntel" : "Linux x86_64" },
-    document: { querySelector: () => (modal ? {} : null) },
+    document: {
+      querySelector: () => (modal ? {} : null),
+      querySelectorAll: () =>
+        modal ? [{ closest: () => null, matches: () => false }] : [],
+    },
     addEventListener: (type: string, fn: (event: KeyboardEvent) => void) =>
       listeners.set(type, fn),
     removeEventListener: (type: string) => listeners.delete(type),
@@ -107,6 +111,31 @@ it.each([true, false])(
     expect(b.listeners.size).toBe(0);
     b.key();
     expect(run).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([true, false])(
+  "matches Control beside Command only on Apple platforms (Apple=%s)",
+  (apple) => {
+    const b = browser(apple),
+      ctx = new Context();
+    ctx.provide("pluginStatus", {
+      isActive: () => true,
+      subscribe: () => () => {},
+    });
+    const service = new ShortcutsService(ctx, b.host),
+      run = vi.fn();
+    service.registerHost({
+      ...shortcut(run),
+      binding: { key: "a", mod: true, ctrl: true },
+    });
+    for (const init of [
+      { ctrlKey: true, metaKey: true },
+      { ctrlKey: !apple, metaKey: apple },
+      { ctrlKey: true, metaKey: false },
+    ])
+      b.key("a", init);
+    expect(run).toHaveBeenCalledTimes(apple ? 1 : 0);
   },
 );
 

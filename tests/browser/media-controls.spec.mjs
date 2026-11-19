@@ -1,6 +1,6 @@
 import { test, expect } from "./source-fixture.mjs";
 
-// Browser-only: inherited legacy colors on the real uploaded-file preview.
+// Browser-only: the file card retains the dark stage surface across host themes.
 test("file previews keep dark stage colors when host appearance changes", async ({
   page,
 }) => {
@@ -31,7 +31,7 @@ test("file previews keep dark stage colors when host appearance changes", async 
       "color",
       mode === "light" ? "rgb(15, 15, 15)" : "rgb(255, 255, 255)",
     );
-    await expect(file).toHaveCSS("background-color", "rgb(35, 35, 35)");
+    await expect(file).toHaveCSS("background-color", "rgb(16, 16, 16)");
     await expect(file).toHaveCSS("color", "rgb(255, 255, 255)");
     await file.hover();
     await expect(file).toHaveCSS("background-color", "rgb(46, 46, 46)");
@@ -134,7 +134,7 @@ for (const kind of ["image", "video"]) {
     );
     const dialog = page.getByRole("dialog");
     const heading = dialog.getByRole("heading", {
-      name: kind === "image" ? "Image" : "Review clip.mp4",
+      name: kind === "image" ? "Photo preview" : "Review clip.mp4",
       exact: true,
     });
     await expect(heading).toBeVisible();
@@ -146,12 +146,8 @@ for (const kind of ["image", "video"]) {
     await expect(heading).toHaveCSS("font-size", "14px");
     const header = heading.locator("xpath=ancestor::header");
     await expect(header.locator(".panel-header-title svg")).toHaveCount(0);
-    expect(
-      await header.evaluate((el) => {
-        const divider = getComputedStyle(el, "::after");
-        return { content: divider.content, height: divider.height };
-      }),
-    ).toEqual({ content: '""', height: "1px" });
+    await expect(header).toHaveCSS("border-bottom-width", "1px");
+    await expect(header).toHaveCSS("border-bottom-style", "solid");
     await expect(
       dialog.getByRole("heading", { name: "Comments" }),
     ).toBeVisible();
@@ -306,7 +302,7 @@ test("narrow video thumbnails keep play clear of the progress controls", async (
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("/tests/fixtures/media-review.html");
   const preview = page.locator("[data-video-preview]");
-  await expect(preview.locator("video")).toHaveCSS("object-fit", "cover");
+  await expect(preview.locator("video")).toHaveCSS("object-fit", "contain");
   await expect(preview).toHaveCSS("clip-path", "none");
   await expect(preview.locator("[data-image-outline]")).toHaveCSS(
     "overflow",

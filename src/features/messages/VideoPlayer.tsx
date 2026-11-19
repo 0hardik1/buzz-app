@@ -1,3 +1,4 @@
+import { useMediaReadRecovery } from "./use-media-read-recovery";
 import { useVideoGestures } from "./use-video-gestures";
 import { useMediaControls } from "./use-media-controls";
 import { useMediaCorners } from "./use-media-corners";
@@ -35,6 +36,8 @@ import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { formatMediaTime } from "./media-timecode";
 import styles from "./VideoPlayer.module.css";
 import { useMediaElementSource } from "./use-media-element-source";
+import { MediaDownloadAction } from "./MediaDownloadAction";
+import { MediaContextMenu } from "./MediaContextMenu";
 
 export type VideoMarker = {
   id: string;
@@ -197,9 +200,7 @@ export function VideoControls({
         {!inline && playButton}
         <PopoverRoot>
           <PopoverTrigger
-            openOnHover
-            delay={100}
-            closeDelay={100}
+            openOnHover="control"
             render={
               <IconButton
                 size="sm"
@@ -364,9 +365,7 @@ export function VideoControls({
         <div className={styles.speed}>
           <MenuRoot modal={false}>
             <MenuTrigger
-              openOnHover
-              delay={100}
-              closeDelay={100}
+              openOnHover="control"
               render={
                 <Button variant="ghost" size="sm">
                   {rate}x
@@ -420,6 +419,8 @@ export function VideoControls({
 
 export function VideoPlayer({
   source,
+  attachmentUrl,
+  downloadName,
   poster,
   videoRef,
   initialTime = 0,
@@ -430,6 +431,9 @@ export function VideoPlayer({
   children,
 }: {
   source: string;
+  attachmentUrl?: string | undefined;
+  /** Supplied only by received-attachment owners, never unsent previews. */
+  downloadName?: string | undefined;
   poster?: string | undefined;
   videoRef: RefObject<HTMLVideoElement | null>;
   initialTime?: number;
@@ -440,82 +444,105 @@ export function VideoPlayer({
   children?: ReactNode;
 }) {
   const stage = useRef<HTMLDivElement>(null);
-  const idle = useMediaControls(stage, source);
+  const [downloadFeedback, setDownloadFeedback] = useState(false);
+  const idle = useMediaControls(stage, source, downloadFeedback);
   const { handlers: gestures, feedback } = useVideoGestures(videoRef, source);
   // Callers render their unavailable state instead of a player when
   // `useMediaElementSource(source).unavailable`.
   const { src: elementSource } = useMediaElementSource(source);
+  const { recover: recoverMedia } = useMediaReadRecovery(
+    elementSource,
+    onError,
+  );
   return (
-    <div
-      ref={stage}
-      className={`${styles.player} dark`}
-      data-color-mode="dark"
-      data-controls-idle={idle || undefined}
+    <MediaContextMenu
+      kind="video"
+      url={attachmentUrl}
+      source={source}
+      name={downloadName}
     >
-      <video
-        ref={videoRef}
-        {...gestures}
-        data-review-media=""
-        src={elementSource}
-        poster={poster}
-        playsInline
-        autoPlay
-        preload="auto"
-        onPlay={(event) => {
-          // A pending play request can settle after dismissal has begun.
-          if (event.currentTarget.closest("[data-review-closing]"))
-            event.currentTarget.pause();
-        }}
-        onLoadedMetadata={(event) => {
-          const element = event.currentTarget;
-          element.currentTime = Math.max(
-            0,
-            Math.min(
-              initialTime,
-              Number.isFinite(element.duration)
-                ? element.duration
-                : initialTime,
-            ),
-          );
-          onTime(element.currentTime);
-        }}
-        onTimeUpdate={(event) => onTime(event.currentTarget.currentTime)}
-        onError={onError}
-      />
-      {feedback && (
-        <div
-          key={feedback.id}
-          className={`${styles.center} ${styles.gestureFeedback}`}
-          data-video-feedback={feedback.kind}
-          data-review-chrome=""
-          aria-hidden="true"
-        >
-          {feedback.kind === "play" ? (
-            <PlayFilledIcon size={24} />
-          ) : feedback.kind === "pause" ? (
-            <PauseFilledIcon size={24} />
-          ) : feedback.kind === "speed" ? (
-            <span>2×</span>
-          ) : (
-            <>
-              {feedback.kind === "forward" ? (
-                <ArrowClockwiseIcon size={36} />
-              ) : (
-                <ArrowCounterClockwiseIcon size={36} />
-              )}
-              <span className={styles.seekAmount}>10</span>
-            </>
-          )}
-        </div>
-      )}
-      <div className={styles.reviewControls} data-review-chrome="">
-        <VideoControls
-          videoRef={videoRef}
-          {...(markers ? { markers } : {})}
-          {...(onMarker ? { onMarker } : {})}
+      <div
+        ref={stage}
+        className={`${styles.player} dark`}
+        data-color-mode="dark"
+        data-controls-idle={idle || undefined}
+        data-controls-revealed={downloadFeedback || undefined}
+      >
+        <video
+          ref={videoRef}
+          {...gestures}
+          data-review-media=""
+          src={elementSource}
+          poster={poster}
+          playsInline
+          autoPlay
+          preload="auto"
+          onPlay={(event) => {
+            // A pending play request can settle after dismissal has begun.
+            if (event.currentTarget.closest("[data-review-closing]"))
+              event.currentTarget.pause();
+          }}
+          onLoadedMetadata={(event) => {
+            const element = event.currentTarget;
+            element.currentTime = Math.max(
+              0,
+              Math.min(
+                initialTime,
+                Number.isFinite(element.duration)
+                  ? element.duration
+                  : initialTime,
+              ),
+            );
+            onTime(element.currentTime);
+          }}
+          onTimeUpdate={(event) => onTime(event.currentTarget.currentTime)}
+          onError={(event) => {
+            if (!recoverMedia(event.currentTarget)) onError();
+          }}
         />
-        {children}
+        {feedback && (
+          <div
+            key={feedback.id}
+            className={`${styles.center} ${styles.gestureFeedback}`}
+            data-video-feedback={feedback.kind}
+            data-review-chrome=""
+            aria-hidden="true"
+          >
+            {feedback.kind === "play" ? (
+              <PlayFilledIcon size={24} />
+            ) : feedback.kind === "pause" ? (
+              <PauseFilledIcon size={24} />
+            ) : feedback.kind === "speed" ? (
+              <span>2×</span>
+            ) : (
+              <>
+                {feedback.kind === "forward" ? (
+                  <ArrowClockwiseIcon size={36} />
+                ) : (
+                  <ArrowCounterClockwiseIcon size={36} />
+                )}
+                <span className={styles.seekAmount}>10</span>
+              </>
+            )}
+          </div>
+        )}
+        <div className={styles.reviewControls} data-review-chrome="">
+          <VideoControls
+            videoRef={videoRef}
+            {...(markers ? { markers } : {})}
+            {...(onMarker ? { onMarker } : {})}
+          />
+          {downloadName !== undefined && (
+            <MediaDownloadAction
+              source={source}
+              name={downloadName}
+              kind="video"
+              onFeedbackVisible={setDownloadFeedback}
+            />
+          )}
+          {children}
+        </div>
       </div>
-    </div>
+    </MediaContextMenu>
   );
 }

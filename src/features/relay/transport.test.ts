@@ -1,7 +1,9 @@
+import { ARTIFACT_KIND } from "../agents/agent-config-artifacts";
 import { assert, afterEach, expect, it, vi } from "vitest";
 import {
   connectBrokerTransport,
   connectSignedTransport,
+  acceptPublish,
   acceptReadStatePublish,
 } from "./transport";
 import {
@@ -98,6 +100,49 @@ it("publishes the unchanged signed event bytes through the host's /events reques
     controller.signal,
   );
 });
+it("sends a message while task artifacts wait for native HTTP capacity", async () => {
+  const started: string[] = [];
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const transport = await connectSignedTransport(
+    hostSigner(key, async (_url, body) => {
+      const event = JSON.parse(body) as { id: string; kind: number };
+      started.push(event.id);
+      if (event.kind === ARTIFACT_KIND) await held;
+      return Response.json({ accepted: true, event_id: event.id });
+    }),
+    "https://publication-priority.test",
+    "relay",
+  );
+  assert.exists(transport.writer);
+  const writer = transport.writer;
+  const signal = new AbortController().signal;
+  const artifacts = Array.from({ length: 5 }, (_, index) =>
+    signed(key, { kind: ARTIFACT_KIND, content: String(index), tags: [] }),
+  );
+  const results = artifacts.map((event) => writer.publish(event, signal));
+  try {
+    const chat = signed(key, {
+      kind: 9,
+      content: "priority message",
+      tags: [["h", "c"]],
+    });
+    await writer.publish(chat, signal);
+    expect(started).toEqual([
+      ...artifacts.slice(0, 4).map((event) => event.id),
+      chat.id,
+    ]);
+    release();
+    await Promise.all(results);
+    expect(started.at(-1)).toBe(artifacts[4]?.id);
+  } finally {
+    release();
+    await Promise.allSettled(results);
+  }
+});
+
 it("distinguishes explicit rejection from invalid or missing delivery receipts", async () => {
   const event = signed(key, { kind: 9, content: "hello", tags: [["h", "c"]] });
   const transport = await connectSignedTransport(
@@ -135,6 +180,120 @@ it("distinguishes explicit rejection from invalid or missing delivery receipts",
   await expect(
     transport.writer.publish(event, new AbortController().signal),
   ).rejects.toBeInstanceOf(PublishRejected);
+});
+const refusal = (status: number, body: unknown) =>
+  acceptPublish(Response.json(body, { status }), "id").catch(
+    (reason: unknown) => reason,
+  );
+it.each([
+  [
+    'invalid: an open channel named "Launch" already exists',
+    'An open channel named "Launch" already exists',
+  ],
+  ["blocked:   you are banned", "You are banned"],
+  ["restricted: not a channel member", "Not a channel member"],
+  ["error: internal failure", "Internal failure"],
+  ["pow: difficulty too low", "Difficulty too low"],
+  ["duplicate: already accepted", "Already accepted"],
+  ["invalid:  ", "Relay rejected the message (400)"],
+  // Prefixes writers match on carry meaning: left as sent.
+  ["conflict: stale prev", "conflict: stale prev"],
+  ["rate-limited: slow down", "rate-limited: slow down"],
+  ["auth-required: sign in", "auth-required: sign in"],
+])(
+  "shows the relay's refusal text without its NIP-01 prefix: %s",
+  async (error, message) => {
+    const result = await refusal(400, { error });
+    expect(result).toBeInstanceOf(PublishRejected);
+    expect(result).toMatchObject({ message, reason: error });
+  },
+);
+it.each([
+  [400, {}],
+  [403, { error: 7 }],
+  [422, { error: "" }],
+  [404, "not an object"],
+  // A gateway or VPN edge can answer these statuses with JSON `{error}`; text
+  // without a NIP-01 prefix is not the relay's, so it is never shown.
+  [403, { error: "Forbidden by proxy" }],
+  [400, { error: "Plain relay text" }],
+  [401, { error: "Relay request failed (401)" }],
+])(
+  "falls back to the status summary when a %s refusal has no relay text: %j",
+  async (status, body) => {
+    const result = await refusal(status, body);
+    expect(result).toBeInstanceOf(PublishRejected);
+    expect(result).toHaveProperty(
+      "message",
+      `Relay rejected the message (${status})`,
+    );
+  },
+);
+it("carries the relay's refusal text through both publish transports", async () => {
+  const error = 'invalid: an open channel named "Launch" already exists';
+  const shown = 'An open channel named "Launch" already exists';
+  const event = signed(key, { kind: 9, content: "hello", tags: [["h", "c"]] });
+  const publishes = async (
+    transport: Awaited<ReturnType<typeof connectSignedTransport>>,
+  ) => {
+    assert.exists(transport.writer);
+    return transport.writer
+      .publish(event, new AbortController().signal)
+      .catch((reason: unknown) => reason);
+  };
+  // Admission reduces an upstream body to a status summary unless the
+  // publish keeps the relay's refusal.
+  const signedTransport = await connectSignedTransport(
+    hostSigner(key),
+    "https://relay.test",
+    "relay",
+  );
+  vi.stubGlobal("fetch", async () => Response.json({ error }, { status: 400 }));
+  expect(await publishes(signedTransport)).toMatchObject({
+    message: shown,
+    reason: error,
+  });
+  // Without relay text, admission's own summary must not replace the
+  // status summary `acceptPublish` shows.
+  for (const [status, body] of [
+    [400, {}],
+    [400, { error: 7 }],
+    [403, { error: "Forbidden by proxy" }],
+  ] as const) {
+    vi.stubGlobal("fetch", async () => Response.json(body, { status }));
+    expect(await publishes(signedTransport)).toHaveProperty(
+      "message",
+      `Relay rejected the message (${status})`,
+    );
+  }
+  // Other statuses stay a status summary, never upstream text.
+  vi.stubGlobal("fetch", async () => Response.json({ error }, { status: 500 }));
+  expect(await publishes(signedTransport)).toHaveProperty(
+    "message",
+    "Relay delivery could not be confirmed (500)",
+  );
+  vi.stubGlobal("fetch", async (url: string) =>
+    url.endsWith("/session")
+      ? Response.json({
+          viewer: key.pubkey,
+          relayAuthor: "relay",
+          writeKinds: [9],
+        })
+      : Response.json({ error }, { status: 400 }),
+  );
+  expect(await publishes(await connectBrokerTransport())).toMatchObject({
+    message: shown,
+    reason: error,
+  });
+});
+it("keeps the conflict refusal and the raw reason for classifying writers", async () => {
+  const conflict = await refusal(409, { error: "invalid: whatever" });
+  expect(conflict).toHaveProperty(
+    "message",
+    "conflict: the relay state changed; reload before writing again",
+  );
+  const refused = await refusal(400, { error: "restricted: nope" });
+  expect(refused).toHaveProperty("reason", "restricted: nope");
 });
 it.each([
   [
@@ -231,6 +390,77 @@ it("the broker advertises and supplies writes through the same connection", asyn
   ]);
 });
 
+it("saves the viewer's config artifacts when the broker admits kind 45010", async () => {
+  const artifact = signed(key, { kind: 45010, content: "{}", tags: [] });
+  const other = signed(keypair(), {
+    kind: 45010,
+    content: "{}",
+    tags: [],
+  });
+  let returned = artifact,
+    refuse = false;
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.endsWith("/session"))
+      return Response.json({
+        viewer: key.pubkey,
+        relayAuthor: "relay",
+        writeKinds: [9, 45010],
+      });
+    if (url.endsWith("/sign")) return Response.json(returned);
+    return Response.json({
+      accepted: !refuse,
+      event_id: artifact.id,
+      message: refuse ? "rate-limited: try later" : "",
+    });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const transport = await connectBrokerTransport();
+  const writer = transport.configArtifacts;
+  assert.exists(writer);
+  const signal = new AbortController().signal;
+  const saved = await writer.sign(
+    { kind: 45010, content: "{}", tags: [], created_at: 1 },
+    signal,
+  );
+  await writer.publish(saved, signal);
+  expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+    "/api/relay/session",
+    "/api/relay/sign",
+    "/api/relay/publish",
+  ]);
+  refuse = true;
+  const refused = await writer
+    .publish(saved, signal)
+    .catch((error: unknown) => error);
+  expect(writer.isNotSent?.(refused)).toBe(true);
+  expect(writer.isNotSent?.(new Error((refused as Error).message))).toBe(false);
+  expect(writer.isNotSent?.(new PublishRejected("denied"))).toBe(false);
+  refuse = false;
+  // Only this viewer's artifacts.
+  await expect(
+    writer.sign({ kind: 9, content: "", tags: [], created_at: 1 }, signal),
+  ).rejects.toThrow("Not an artifact");
+  returned = other;
+  await expect(
+    writer.sign(
+      { kind: 45010, content: "{}", tags: [], created_at: 1 },
+      signal,
+    ),
+  ).rejects.toThrow("Invalid artifact signature");
+  await expect(writer.publish(other, signal)).rejects.toThrow(
+    "Not this viewer's artifact",
+  );
+  // A broker that doesn't admit the kind offers no artifact writer.
+  vi.stubGlobal("fetch", async () =>
+    Response.json({
+      viewer: key.pubkey,
+      relayAuthor: "relay",
+      writeKinds: [9],
+    }),
+  );
+  expect((await connectBrokerTransport()).configArtifacts).toBeUndefined();
+});
+
 it("exposes the relay HTTP base for display, preferring the broker's explicit value", async () => {
   const session = (extra: Record<string, unknown>) => async () =>
     Response.json({ viewer: key.pubkey, relayAuthor: "relay", ...extra });
@@ -277,7 +507,7 @@ it("requests relay thumbnails only for small media", async () => {
   const transport = await connectBrokerTransport();
   const hash = "1".repeat(64);
   const original = `https://relay.test/media/${hash}.png`;
-  const thumbnail = `https://relay.test/media/${hash}.thumb.jpg`;
+  const thumbnail = `https://relay.test/media/${hash}.thumb.webp`;
 
   expect(transport.media(original)).toBe(
     `/api/relay/media?url=${encodeURIComponent(original)}`,
@@ -310,7 +540,7 @@ it("loads the still image of a desktop animated avatar", async () => {
   );
   expect(transport.media(animated, "small")).toBe(
     `/api/relay/media?url=${encodeURIComponent(
-      `https://relay.test/media/${hash}.thumb.jpg`,
+      `https://relay.test/media/${hash}.thumb.webp`,
     )}`,
   );
 });
@@ -606,3 +836,44 @@ it.each(["relay", "https://relay.test"])(
     expect(fetcher).toHaveBeenCalledTimes(before);
   },
 );
+it("searches profile names through the host's signed /profiles/search request", async () => {
+  const profile = signed(key, {
+    kind: 0,
+    content: JSON.stringify({ display_name: "Wes" }),
+    tags: [],
+  });
+  const forged = { ...profile, content: JSON.stringify({ name: "Mallory" }) };
+  let reply: Response = Response.json([profile]);
+  const request = vi.fn(async (_url: string, _body: string) => reply);
+  const transport = await connectSignedTransport(
+    hostSigner(key, request),
+    "https://relay.test",
+    "relay",
+  );
+  assert.exists(transport.searchProfiles);
+  const controller = new AbortController();
+  expect(
+    await transport.searchProfiles(
+      "wes",
+      40,
+      2,
+      controller.signal,
+      "foreground",
+    ),
+  ).toEqual([profile]);
+  expect(request).toHaveBeenCalledExactlyOnceWith(
+    "https://relay.test/profiles/search",
+    JSON.stringify({ query: "wes", limit: 40, page: 2 }),
+    controller.signal,
+  );
+  // An older relay's missing route keeps its status for the NIP-50 fallback.
+  reply = Response.json({ error: "not found" }, { status: 404 });
+  await expect(
+    transport.searchProfiles("wes", 40, 2, controller.signal, "foreground"),
+  ).rejects.toMatchObject({ name: "ReadError", status: 404 });
+  // Signatures are checked like any other read.
+  reply = Response.json([forged]);
+  await expect(
+    transport.searchProfiles("wes", 40, 2, controller.signal, "foreground"),
+  ).rejects.toThrow();
+});

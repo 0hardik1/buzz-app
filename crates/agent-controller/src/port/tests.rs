@@ -61,7 +61,7 @@ fn lists_each_identity_once_preferring_the_harness_copy() {
         stores(dir.path()).harness,
         json!({"version": 1, "agents": [{
             "pubkey": shared.pubkey(), "relayUrl": "wss://relay.example",
-            "name": "Ada", "picture": "data:image/png;base64,AA",
+            "name": "Ada", "picture": "data:image/png;base64,iVBO",
             "credentialId": "ignored-by-list",
         }]}),
     );
@@ -88,15 +88,24 @@ fn lists_each_identity_once_preferring_the_harness_copy() {
         found.agents,
         [
             Portable {
+                connection: SavedConnection {
+                    runtime: "custom".into(),
+                    ..Default::default()
+                },
                 source: PortSource::Harness,
                 pubkey: shared.pubkey().into(),
                 name: "Ada".into(),
-                picture: None,
+                // Kept inline for the import to upload.
+                picture: Some("data:image/png;base64,iVBO".into()),
                 about: None,
                 relay: "wss://relay.example".into(),
                 carry: Carry::default(),
             },
             Portable {
+                connection: SavedConnection {
+                    runtime: "buzz-agent".into(),
+                    ..Default::default()
+                },
                 source: PortSource::Installed,
                 pubkey: old.pubkey().into(),
                 name: "Bea".into(),
@@ -106,6 +115,10 @@ fn lists_each_identity_once_preferring_the_harness_copy() {
                 carry: Carry::default(),
             },
             Portable {
+                connection: SavedConnection {
+                    runtime: "buzz-agent".into(),
+                    ..Default::default()
+                },
                 source: PortSource::Development,
                 pubkey: dev.pubkey().into(),
                 name: "Cy".into(),
@@ -246,7 +259,7 @@ fn takes_the_key_from_the_store_it_was_listed_in() {
     .unwrap();
     let destination = crate::AppAgents::open(dir.path().join("agents/identities.json"));
     let (agent, key) = destination.commit(prepared, &auth, &credentials).unwrap();
-    let reopened = destination.get(&agent.pubkey).unwrap();
+    let reopened = destination.get(&agent.pubkey, &agent.relay).unwrap();
     let profile = reopened.profile_event(&key).unwrap();
     let content: Value = serde_json::from_str(profile["content"].as_str().unwrap()).unwrap();
     assert_eq!(
@@ -271,6 +284,60 @@ fn takes_the_key_from_the_store_it_was_listed_in() {
     assert!(stores
         .take(PortSource::Harness, old.pubkey(), &credentials)
         .is_err());
+}
+
+#[test]
+fn a_harness_copy_whose_key_is_gone_falls_back_to_old_buzzs_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let credentials = Memory::default();
+    let (stale, absent) = (key(), key());
+    write(
+        stores(dir.path()).harness,
+        json!({"agents": [
+            {"pubkey": stale.pubkey(), "relayUrl": "wss://relay.example",
+             "name": "Stale", "credentialId": "gone"},
+            {"pubkey": absent.pubkey(), "relayUrl": "wss://relay.example",
+             "name": "Nowhere", "credentialId": "gone"},
+        ]}),
+    );
+    legacy(
+        dir.path(),
+        LegacySource::Development,
+        json!([{"pubkey": stale.pubkey(), "name": "Working",
+                "private_key_nsec": stale.hex().to_string()}]),
+    );
+    let stores = stores(dir.path());
+    let (agent, key) = stores
+        .take(PortSource::Harness, stale.pubkey(), &credentials)
+        .unwrap();
+    assert_eq!(
+        (agent.source, agent.name.as_str(), key.pubkey()),
+        (PortSource::Development, "Working", stale.pubkey())
+    );
+    // With no copy that has its key, the harness copy's reason stands.
+    assert_eq!(
+        stores
+            .take(PortSource::Harness, absent.pubkey(), &credentials)
+            .err()
+            .as_deref(),
+        Some(KEY_GONE)
+    );
+}
+
+#[test]
+fn reads_only_known_inline_images() {
+    assert_eq!(
+        inline_picture("data:image/png;base64,iVBO"),
+        Some(("image/png", vec![0x89, 0x50, 0x4e]))
+    );
+    for refused in [
+        "data:image/svg+xml;base64,PHN2Zz4=",
+        "data:image/png,raw",
+        "data:image/png;base64,!!",
+        "https://example.test/a.png",
+    ] {
+        assert_eq!(inline_picture(refused), None, "{refused}");
+    }
 }
 
 #[test]
@@ -414,7 +481,9 @@ fn retained_harness_artwork_survives_agents_storage_and_signed_publication() {
         let (agent, _) = crate::AppAgents::open(path.clone())
             .commit(prepared, &auth, &credentials)
             .unwrap();
-        let reopened = crate::AppAgents::open(path).get(&agent.pubkey).unwrap();
+        let reopened = crate::AppAgents::open(path)
+            .get(&agent.pubkey, &agent.relay)
+            .unwrap();
         let event = reopened
             .profile_event(&reopened.read_key(&credentials).unwrap())
             .unwrap();

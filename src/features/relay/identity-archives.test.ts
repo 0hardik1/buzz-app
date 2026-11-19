@@ -14,6 +14,7 @@ import {
 } from "./testing";
 import type { RelayEvent } from "./events";
 import type { LiveCallbacks } from "./live";
+import { archiveHides, UnattestedProfile } from "./identity-archives";
 
 const viewer = keypair(),
   relay = keypair(),
@@ -158,20 +159,42 @@ it.each([
     ],
   ],
 ] as const)(
-  "%s evidence cannot present known active state or retain old contents",
+  "%s evidence cannot present known active state; known archives stay hidden but unconfirmed",
   async (_label, events) => {
     const h = harness();
     await read(h, [snapshot()]);
+    const { readAt } = h.archives.snapshot();
     await read(h, events());
     expect(h.archives.snapshot()).toMatchObject({
       status: "error",
-      archived: [],
+      archived: [target.pubkey],
+      readAt,
     });
     expect(h.archives.snapshot().error).not.toContain("secret");
+    // Visibility keeps the known archive; deletion and confirmation, which
+    // read state(), need a fresh read.
+    expect(archiveHides(h.archives, target.pubkey, viewer.pubkey)).toBe(true);
     expect(h.archives.state(target.pubkey)).toBe("unknown");
     expect(h.archives.state(other.pubkey)).toBe("unknown");
   },
 );
+it("keeps the last known archives while rereading", async () => {
+  const h = harness();
+  await read(h, [snapshot()]);
+  const pending = h.archives.refresh();
+  expect(h.archives.snapshot()).toMatchObject({
+    status: "loading",
+    archived: [target.pubkey],
+    readAt: expect.any(Number),
+  });
+  expect(archiveHides(h.archives, target.pubkey, viewer.pubkey)).toBe(true);
+  expect(h.archives.state(target.pubkey)).toBe("unknown");
+  expect(h.archives.state(other.pubkey)).toBe("unknown");
+  await vi.waitFor(() => expect(h.wire.pending).toHaveLength(1));
+  h.wire.next().respond([snapshot(2, [])]);
+  await pending;
+  expect(h.archives.state(target.pubkey)).toBe("not-archived");
+});
 it("read failures redact payload and remain retryable", async () => {
   const h = harness();
   const pending = h.archives.refresh();
@@ -181,6 +204,18 @@ it("read failures redact payload and remain retryable", async () => {
   expect(h.archives.snapshot().error).not.toContain("secret");
   await read(h, [snapshot()]);
   expect(h.archives.state(target.pubkey)).toBe("archived");
+});
+it("archives no one before the relay's first snapshot, but never rolls back to none", async () => {
+  const h = harness();
+  await read(h, []);
+  expect(h.archives.snapshot().status).toBe("ready");
+  expect(h.archives.state(target.pubkey)).toBe("not-archived");
+  await read(h, [snapshot()]);
+  expect(h.archives.state(target.pubkey)).toBe("archived");
+  await h.clearCache();
+  await read(h, []);
+  expect(h.archives.snapshot().status).toBe("error");
+  expect(h.archives.state(target.pubkey)).toBe("unknown");
 });
 it("rejects rollback across refresh, failure and cache clear; permits the same head and lower-id tie winner", async () => {
   const h = harness();
@@ -202,13 +237,14 @@ it("rejects rollback across refresh, failure and cache clear; permits the same h
   expect(h.archives.snapshot().createdAt).toBe(6);
 });
 it.each(["cache", "disconnect", "access", "dispose"] as const)(
-  "%s invalidation clears known state and fences late results",
+  "%s invalidation fences late results; only a disconnect keeps known state",
   async (action) => {
     const h = harness();
     h.live.state({ status: "connected", routes: [] });
     if (action === "access")
       h.live.receive([roster(relay, "room", [viewer.pubkey], 1)]);
     await read(h, [snapshot()]);
+    const { readAt } = h.archives.snapshot();
     const pending = h.archives.refresh();
     const req = h.wire.next();
     if (action === "cache") await h.clearCache();
@@ -218,13 +254,19 @@ it.each(["cache", "disconnect", "access", "dispose"] as const)(
       h.live.receive([roster(relay, "room", [], 2)]);
     else h.dispose();
     expect(req.signal?.aborted).toBe(true);
+    const kept = action === "disconnect";
+    expect(archiveHides(h.archives, target.pubkey, viewer.pubkey)).toBe(kept);
     expect(h.archives.state(target.pubkey)).toBe("unknown");
     req.respond([snapshot(2)]);
     await pending;
-    expect(h.archives.snapshot().status).toBe(
-      action === "dispose" ? "unavailable" : "idle",
-    );
+    expect(h.archives.snapshot()).toMatchObject({
+      status: action === "dispose" ? "unavailable" : "idle",
+      archived: kept ? [target.pubkey] : [],
+    });
+    expect(h.archives.snapshot().readAt).toBe(kept ? readAt : undefined);
     if (action === "dispose") {
+      // Closing is not lack of support: callers must not read it as "none".
+      expect(h.archives.supported).toBe(true);
       const calls = h.query.mock.calls.length;
       await h.archives.refresh();
       expect(h.query).toHaveBeenCalledTimes(calls);
@@ -391,6 +433,7 @@ it("offers no writer without an archive authority", () => {
   const owner = createRelaySession(transport);
   owners.push(owner);
   expect(owner.session.archives.writable).toBe(false);
+  expect(owner.session.archives.supported).toBe(false);
 });
 it("owner consent ignores kind clauses but enforces request time bounds", async () => {
   const future = Math.floor(Date.now() / 1000) + 3600;
@@ -542,3 +585,171 @@ it.each(["cancel", "cache", "dispose"] as const)(
     }
   },
 );
+it.each(
+  outOfBounds().map(([label, conditions]) => [
+    `a ${label} profile proof`,
+    [attested(target, viewer, [], [authTag(target, viewer, conditions)])],
+  ]) as [string, RelayEvent[]][],
+)(
+  "an owner archives with a proof issued now when there is %s",
+  async (_label, profiles) => {
+    const fixture = archiveRelay(viewer, relay, profiles);
+    const archives = writable(fixture);
+    const issued = authTag(target, viewer);
+    const issue = vi.fn(async () => issued);
+    await archives.request("archive", target.pubkey, undefined, issue);
+    expect(issue).toHaveBeenCalledWith(target.pubkey, expect.any(AbortSignal));
+    expect(fixture.published).toHaveLength(1);
+    expect(fixture.published[0]?.tags).toContainEqual(issued);
+    expect(archives.state(target.pubkey)).toBe("archived");
+  },
+);
+/** Republishes the agent's own profile naming its saved owner, as the app's
+ * forced profile publication does. */
+function attestAs(
+  fixture: ReturnType<typeof archiveRelay>,
+  agent: Key,
+  owner: Key = viewer,
+) {
+  return vi.fn(async (_signal: AbortSignal) => {
+    fixture.publishProfile(
+      signed(agent, {
+        kind: 0,
+        content: JSON.stringify({ name: "Agent", bot: true }),
+        tags: [authTag(agent, owner)],
+        created_at: 1_700_000_001,
+      }),
+    );
+  });
+}
+it("a profile without an owner proof is replaced by the agent's own, naming its owner, then archived with a proof issued now", async () => {
+  const bare = signed(target, {
+    kind: 0,
+    content: JSON.stringify({ name: "Agent", lud16: "a@b" }),
+    tags: [["i", "github:agent", "proof"]],
+  });
+  const fixture = archiveRelay(viewer, relay, [bare]);
+  const archives = writable(fixture);
+  const issued = authTag(target, viewer, "created_at>1");
+  const attest = attestAs(fixture, target);
+  await archives.request(
+    "archive",
+    target.pubkey,
+    undefined,
+    async () => issued,
+    attest,
+  );
+  expect(attest).toHaveBeenCalledWith(expect.any(AbortSignal));
+  expect(fixture.published).toHaveLength(1);
+  expect(fixture.published[0]?.tags).toContainEqual(issued);
+  expect(archives.state(target.pubkey)).toBe("archived");
+});
+it("doesn't archive when the republished profile names another owner", async () => {
+  const fixture = archiveRelay(viewer, relay);
+  await expect(
+    writable(fixture).request(
+      "archive",
+      target.pubkey,
+      undefined,
+      async () => authTag(target, viewer),
+      attestAs(fixture, target, other),
+    ),
+  ).rejects.toThrow(
+    "The relay didn't accept its profile with your owner proof",
+  );
+  expect(fixture.signedBy).toEqual([]);
+});
+it("the relay refuses an issued request proof alone while the profile names no owner", async () => {
+  const fixture = archiveRelay(viewer, relay);
+  const archives = writable(fixture);
+  // Without the identity's key nothing can republish its profile.
+  await expect(
+    archives.request("archive", target.pubkey, undefined, async () =>
+      authTag(target, viewer),
+    ),
+  ).rejects.toBeInstanceOf(UnattestedProfile);
+  expect(fixture.signedBy).toEqual([]);
+  // The fixture enforces the relay's rule, so a request can't hide it.
+  const request = signed(viewer, {
+    kind: 9035,
+    content: "",
+    tags: [["p", target.pubkey], authTag(target, viewer)],
+  });
+  await expect(
+    fixture.transport.identityArchive?.publish(
+      request,
+      new AbortController().signal,
+    ),
+  ).rejects.toThrow("invalid: missing auth tag");
+});
+it("archives nothing when its profile isn't republished, and a retry finishes", async () => {
+  const fixture = archiveRelay(viewer, relay);
+  const archives = writable(fixture);
+  const issue = async () => authTag(target, viewer);
+  await expect(
+    archives.request("archive", target.pubkey, undefined, issue, async () => {
+      throw new Error("The community refused the agent event");
+    }),
+  ).rejects.toThrow("The community refused the agent event");
+  // Published nowhere: a profile the relay never took confirms nothing either.
+  await expect(
+    archives.request(
+      "archive",
+      target.pubkey,
+      undefined,
+      issue,
+      async () => {},
+    ),
+  ).rejects.toThrow(
+    "The relay didn't accept its profile with your owner proof",
+  );
+  expect(fixture.signedBy).toEqual([]);
+  expect(fixture.archived.has(target.pubkey)).toBe(false);
+  await archives.request(
+    "archive",
+    target.pubkey,
+    undefined,
+    issue,
+    attestAs(fixture, target),
+  );
+  expect(archives.state(target.pubkey)).toBe("archived");
+});
+it("refuses an issued proof that names another owner or agent", async () => {
+  for (const issued of [authTag(target, other), authTag(other, viewer)]) {
+    const fixture = archiveRelay(viewer, relay);
+    await expect(
+      writable(fixture).request(
+        "archive",
+        target.pubkey,
+        undefined,
+        async () => issued,
+        attestAs(fixture, target),
+      ),
+    ).rejects.toThrow("The owner proof issued for this identity is invalid");
+    expect(fixture.signedBy).toEqual([]);
+  }
+});
+it("issues no proof when the profile's own or the admin path is usable", async () => {
+  const issue = vi.fn(async () => authTag(target, viewer));
+  const owned = archiveRelay(viewer, relay, [attested(target, viewer)]);
+  await writable(owned).request("archive", target.pubkey, undefined, issue);
+  const admin = archiveRelay(viewer, relay, [], { [viewer.pubkey]: "admin" });
+  await writable(admin).request("archive", target.pubkey, undefined, issue);
+  expect(issue).not.toHaveBeenCalled();
+  expect(admin.published[0]?.tags.some(([name]) => name === "auth")).toBe(
+    false,
+  );
+});
+it("a proof that can't be issued archives nothing", async () => {
+  const fixture = archiveRelay(viewer, relay);
+  await expect(
+    writable(fixture).request(
+      "archive",
+      target.pubkey,
+      undefined,
+      () => Promise.reject(new Error("Set up your identity first")),
+      attestAs(fixture, target),
+    ),
+  ).rejects.toThrow("Set up your identity first");
+  expect(fixture.signedBy).toEqual([]);
+});

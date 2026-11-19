@@ -1,7 +1,6 @@
-# Stock runners must stop before their unsafe partial-staging guard runs.
-# Under lhm, activate Hermit (source bin/activate-hermit) before committing.
-# Temporary gate: reassess before adopting any new upstream release.
-min_version: 2.1.18-buzz.3
+# 2.2.2 is the first release with per-worktree patches and owned backup stashes.
+# Under lhm, activate Hermit to select this runner.
+min_version: 2.2.2
 lefthook: bin/lefthook
 # Without lhm, `bin/lefthook install` writes shims that fail instead of silently
 # skipping when they cannot find Lefthook. lhm users install nothing: lhm merges

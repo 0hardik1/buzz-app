@@ -1,3 +1,4 @@
+import { activityRow } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open, settle, virtuaIdle } from "./timeline.mjs";
 import {
@@ -6,7 +7,7 @@ import {
   readJournal,
 } from "./reading.mjs";
 
-// Browser-only contract: the actual Inbox DM preview joins its native composer
+// Browser-only contract: the actual Inbox DM tab joins its native composer
 // focus to fully visible timeline rows. RTL cannot establish viewport/focus dwell.
 test.use({
   productionBroker: true,
@@ -30,10 +31,10 @@ test("Inbox DM composer focus reads a visible peer arrival after dwell without r
       }),
     )
     .toEqual({ status: "reconciled", completeness: "snapshot" });
-  await page.getByRole("button", { name: "Inbox", exact: true }).click();
-  const inbox = page.getByRole("region", { name: "Inbox", exact: true });
+  await activityRow(page).click();
+  const inbox = page.getByRole("region", { name: "Activity", exact: true });
   const dm = inbox
-    .getByRole("list", { name: "Inbox conversations" })
+    .getByRole("list", { name: "Activity", exact: true })
     .getByRole("listitem")
     .filter({ hasText: "Inbox DM fixture reply" });
   await expect(dm.getByRole("img", { name: "Unread" })).toBeVisible();
@@ -55,15 +56,18 @@ test("Inbox DM composer focus reads a visible peer arrival after dwell without r
   await page.clock.setFixedTime(base);
   await releaseReadingFocus(page);
   await dm.getByRole("button", { name: /^Open / }).click();
-  const detail = inbox.getByRole("region", { name: "Inbox detail" });
+  const detail = inbox.getByRole("region", {
+    name: "Conversation in Alice Fixture",
+    exact: true,
+  });
   const history = detail.getByRole("region", {
     name: "Channel message history",
   });
+  // A DM opens whole, at its latest messages.
   const selectedRow = history.locator(`[data-message-id="${selected.id}"]`);
   await expect(selectedRow).toBeInViewport({ ratio: 1 });
-  await expect(selectedRow).toBeFocused();
-  // Exact reveal acknowledges focus on its next frame. Finish that entry
-  // lifecycle before moving focus to the composer or installing the dwell clock.
+  // Finish the opening frames before moving focus to the composer or
+  // installing the dwell clock.
   await page.evaluate(
     () =>
       new Promise((resolve) =>
@@ -77,8 +81,7 @@ test("Inbox DM composer focus reads a visible peer arrival after dwell without r
   await expect(dm.getByRole("img", { name: "Unread" })).toHaveCount(0);
 
   const filter = inbox.getByRole("button", {
-    name: "Inbox filters",
-    exact: true,
+    name: /^From /,
   });
   await filter.focus();
   await page.clock.install({ time: base });
@@ -103,7 +106,7 @@ test("Inbox DM composer focus reads a visible peer arrival after dwell without r
   await settle(page, history);
   await expect(composer).toBeFocused();
   const dmRow = inbox
-    .getByRole("list", { name: "Inbox conversations" })
+    .getByRole("list", { name: "Activity", exact: true })
     .getByRole("listitem")
     .filter({ hasText: incoming.content });
   await expect(dmRow.getByRole("img", { name: "Unread" })).toBeVisible();

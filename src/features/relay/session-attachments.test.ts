@@ -148,11 +148,11 @@ it("blocks upload and attachment sending after membership loss or session dispos
     h.session.attachments.upload(file, "c", new AbortController().signal),
   ).rejects.toMatchObject({ code: "denied" });
   expect(() => h.session.messages.send("c", "", [], [attachment])).toThrow(
-    /Join/,
+    /write access/,
   );
   expect(upload).not.toHaveBeenCalled();
   h.dispose();
-  expect(() => h.session.messages.send("c", "hello")).toThrow(/Join/);
+  expect(() => h.session.messages.send("c", "hello")).toThrow(/write access/);
 });
 
 it("rejects other-community attachment URLs, invalid roots and genuinely empty messages before enqueue", async () => {
@@ -176,4 +176,64 @@ it("rejects other-community attachment URLs, invalid roots and genuinely empty m
   ).toThrow(/thread root/);
   expect(() => h.session.messages.send("c", " ")).toThrow(/empty/);
   expect(h.sign).not.toHaveBeenCalled();
+});
+
+it.each(["dispose", "clear"])(
+  "uploads for a chat not yet created and still cancels on %s",
+  async (action) => {
+    const ready = setup(async () => attachment);
+    assert.exists(ready.session.attachments?.uploadForNewChat);
+    await expect(
+      ready.session.attachments.uploadForNewChat(
+        file,
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual(attachment);
+
+    let signal!: AbortSignal;
+    let release!: (value: UploadedAttachment) => void;
+    const h = setup(async (_file, supplied) => {
+      signal = supplied;
+      return new Promise<UploadedAttachment>((resolve) => {
+        release = resolve;
+      });
+    });
+    assert.exists(h.session.attachments?.uploadForNewChat);
+    const pending = h.session.attachments.uploadForNewChat(
+      file,
+      new AbortController().signal,
+    );
+    const rejected = expect(pending).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    if (action === "dispose") h.dispose();
+    else await h.clearCache();
+    expect(signal.aborted).toBe(true);
+    release(attachment);
+    await rejected;
+  },
+);
+
+it("forwards an accepted local message again before its relay echo", async () => {
+  const h = setup();
+  await h.membership();
+  const id = h.session.messages.send("c", "Copy this");
+  await vi.waitFor(() => expect(h.publish).toHaveBeenCalledOnce());
+  const { foldMessages } = await import("./fold");
+  const first = h.publish.mock.calls[0]?.[0];
+  assert.exists(first);
+  const row = foldMessages("c", viewer.pubkey, [first])[0];
+  assert.exists(row);
+  expect(row.id).toBe(id);
+  h.session.messages.forward("c", row, "Viewer", "");
+  await vi.waitFor(() => expect(h.publish).toHaveBeenCalledTimes(2));
+  const forwarded = h.publish.mock.calls[1]?.[0];
+  assert.exists(forwarded);
+  const received = foldMessages("c", viewer.pubkey, [forwarded])[0];
+  assert.exists(received);
+  h.session.messages.forward("c", received, "Viewer", "Again");
+  await vi.waitFor(() => expect(h.publish).toHaveBeenCalledTimes(3));
+  expect(
+    h.publish.mock.calls[2]?.[0].tags.filter(([tag]) => tag === "buzz:forward"),
+  ).toHaveLength(1);
 });

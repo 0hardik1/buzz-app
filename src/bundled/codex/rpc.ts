@@ -1,3 +1,4 @@
+import { writeJSON } from "../../features/agent-protection/json-stream";
 import type { Model } from "./config";
 import type {
   HostProcess,
@@ -31,6 +32,17 @@ export type ToolReply = {
   )[];
 };
 
+/** Codex's answer refusing a request, which it therefore did not carry out. */
+export class Refused extends Error {}
+/** No reply arrived before the RPC deadline. */
+export class RequestTimeout extends Error {}
+/** A line over the connection's frame, which closes it. */
+export class Oversized extends Error {
+  constructor() {
+    super("Codex output frame is too large");
+  }
+}
+
 /** One request owner for the JSONL app-server connection. No Node sidecar. */
 export class AppServer {
   private next = 0;
@@ -47,13 +59,24 @@ export class AppServer {
   private buffer = "";
   private stderr = "";
   private listeners = new Set<(message: Wire) => void>();
-  private closing?: Promise<void>;
+  private readonly unconfirmedReleases = new Set<string>();
+  private closing?: Promise<void> | undefined;
+  private gone = false;
+  private opened?: [Spawn, string | undefined, boolean];
 
   constructor(
     private readonly toolCall?: (call: ToolCall) => Promise<ToolReply>,
   ) {}
 
-  async open(spawn: Spawn, cwd?: string) {
+  /** The credential for only this agent's commands, never app-server's own
+   * environment. */
+  toolCredential(agent: Readonly<{ pubkey: string; relay: string }>) {
+    return this.process?.toolCredential?.(agent);
+  }
+
+  async open(spawn: Spawn, cwd?: string, protectedRuntime = false) {
+    if (this.failure) throw this.failure;
+    this.opened = [spawn, cwd, protectedRuntime];
     this.process = await spawn("app-server", {
       ...(cwd ? { cwd } : {}),
       onStdout: (data) => this.read(data),
@@ -61,35 +84,83 @@ export class AppServer {
         this.stderr = (this.stderr + data).slice(-4000);
       },
     });
-    void this.process.exited.then((code) =>
+    void this.process.exited.then((code) => {
+      this.gone = true;
       this.fail(
         new Error(this.stderr.trim() || `Codex exited (${code ?? "signal"})`),
-      ),
-    );
+      );
+    });
     if (this.failure) {
       await this.close();
       throw this.failure;
     }
-    await this.request("initialize", {
-      clientInfo: {
-        name: "buzz_codex_plugin",
-        title: "Buzz Codex",
-        version: "0.1.0",
+    const initialized = await this.request<{ userAgent?: string }>(
+      "initialize",
+      {
+        clientInfo: {
+          name: "buzz_codex_plugin",
+          title: "Buzz Codex",
+          version: "0.1.0",
+        },
+        capabilities: {
+          experimentalApi: true,
+          optOutNotificationMethods: [
+            "item/agentMessage/delta",
+            "item/reasoning/summaryTextDelta",
+            "item/reasoning/textDelta",
+            "item/plan/delta",
+            "item/commandExecution/outputDelta",
+            "item/fileChange/outputDelta",
+          ],
+        },
       },
-      capabilities: {
-        experimentalApi: true,
-        optOutNotificationMethods: [
-          "item/agentMessage/delta",
-          "item/reasoning/summaryTextDelta",
-          "item/reasoning/textDelta",
-          "item/plan/delta",
-          "item/commandExecution/outputDelta",
-          "item/fileChange/outputDelta",
-        ],
-      },
-    });
+    );
+    if (
+      protectedRuntime &&
+      !initialized.userAgent?.includes("buzz-protection-v2")
+    ) {
+      await this.close();
+      throw new Error("This Codex build lacks mandatory security hooks");
+    }
     await this.send({ method: "initialized" });
     return this;
+  }
+  /** Closes this connection and opens a fresh app-server as before. */
+  async reopen() {
+    if (!this.opened) throw new Error("Codex is not connected");
+    const [spawn, cwd, protectedRuntime] = this.opened;
+    await this.close();
+    delete this.process;
+    delete this.failure;
+    this.closing = undefined;
+    this.gone = false;
+    this.buffer = this.stderr = "";
+    this.unconfirmedReleases.clear();
+    return this.open(spawn, cwd, protectedRuntime);
+  }
+  /** Whether the process has exited. */
+  get exited() {
+    return this.gone;
+  }
+  /** A timed-out release may have reached Codex. Wait for a confirmed
+   * unsubscribe before resuming that thread with new instructions. */
+  async releaseThread(threadId: string) {
+    this.unconfirmedReleases.add(threadId);
+    await this.request("thread/unsubscribe", { threadId });
+    this.unconfirmedReleases.delete(threadId);
+  }
+  async confirmThreadReleased(threadId: string) {
+    if (this.unconfirmedReleases.has(threadId))
+      await this.releaseThread(threadId);
+  }
+  /** A separate read distinguishes a silent server from a stuck unsubscribe. */
+  async closeIfUnresponsive() {
+    try {
+      await this.request("account/read");
+    } catch (error) {
+      if (error instanceof RequestTimeout)
+        await this.close("app-server responsiveness check");
+    }
   }
   onMessage(listener: (message: Wire) => void) {
     this.listeners.add(listener);
@@ -104,8 +175,7 @@ export class AppServer {
       this.buffer += data;
       let newline = this.buffer.indexOf("\n");
       while (newline >= 0) {
-        if (newline > 4 * 1024 * 1024)
-          throw new Error("Codex output frame is too large");
+        if (newline > 4 * 1024 * 1024) throw new Oversized();
         const line = this.buffer.slice(0, newline);
         this.buffer = this.buffer.slice(newline + 1);
         newline = this.buffer.indexOf("\n");
@@ -118,7 +188,7 @@ export class AppServer {
         if (waiter) {
           this.pending.delete(message.id as number);
           clearTimeout(waiter.timer);
-          if (message.error) waiter.reject(new Error(message.error.message));
+          if (message.error) waiter.reject(new Refused(message.error.message));
           else waiter.resolve(message.result);
         } else if (message.id != null && message.method) {
           if (message.method === "item/tool/call" && this.toolCall) {
@@ -137,8 +207,7 @@ export class AppServer {
           }).catch((error) => this.fail(error));
         } else this.emit(message);
       }
-      if (this.buffer.length > 4 * 1024 * 1024)
-        throw new Error("Codex output frame is too large");
+      if (this.buffer.length > 4 * 1024 * 1024) throw new Oversized();
     } catch (error) {
       this.fail(error instanceof Error ? error : new Error(String(error)));
       void this.close();
@@ -191,7 +260,7 @@ export class AppServer {
     if (this.failure) return Promise.reject(this.failure);
     if (!this.process)
       return Promise.reject(new Error("Codex is not connected"));
-    return this.process.write(`${JSON.stringify(message)}\n`);
+    return writeJSON(this.process, message);
   }
   request<T = unknown>(method: string, params: unknown = {}): Promise<T> {
     if (this.failure) return Promise.reject(this.failure);
@@ -199,7 +268,7 @@ export class AppServer {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Codex ${method} timed out`));
+        reject(new RequestTimeout(`Codex ${method} timed out`));
       }, 30_000);
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),
@@ -213,12 +282,24 @@ export class AppServer {
       });
     });
   }
-  close(): Promise<void> {
-    this.fail(new Error("Codex connection closed"));
+  close(
+    cleanup?:
+      | "turn interrupt"
+      | "thread unsubscribe"
+      | "background terminal cleanup"
+      | "app-server responsiveness check",
+  ): Promise<void> {
+    this.fail(
+      new Error(
+        cleanup
+          ? `Buzz closed the Codex connection after ${cleanup} failed`
+          : "Codex connection closed",
+      ),
+    );
     if (!this.process) return Promise.resolve();
     if (this.closing) return this.closing;
     const process = this.process;
-    this.closing = (async () => {
+    const closing = (async () => {
       // EOF lets Codex stop its separately grouped background terminals.
       const timer = setTimeout(() => void process.kill(), 3000);
       try {
@@ -228,8 +309,23 @@ export class AppServer {
         clearTimeout(timer);
       }
     })();
-    return this.closing;
+    this.closing = closing;
+    // A close that failed to stop the process is attempted again by the next.
+    void closing.catch(() => {
+      if (this.closing === closing) this.closing = undefined;
+    });
+    return closing;
   }
+}
+
+/** Whether Codex lacks an OpenAI sign-in that its model provider needs. A provider set with
+ * `requires_openai_auth = false` brings its own credentials, so Codex asks for no sign-in. */
+export async function needsSignIn(rpc: AppServer) {
+  const { account, requiresOpenaiAuth } = await rpc.request<{
+    account: unknown;
+    requiresOpenaiAuth?: boolean;
+  }>("account/read");
+  return !account && requiresOpenaiAuth !== false;
 }
 
 export async function listModels(rpc: AppServer) {
@@ -242,4 +338,16 @@ export async function listModels(rpc: AppServer) {
     cursor = page.nextCursor;
   } while (cursor);
   return models;
+}
+
+/** The installed Codex's voice catalog; older releases omit v3. */
+export async function voiceCatalog(rpc: AppServer) {
+  const result = await rpc.request<{
+    voices?: { v3?: string[]; defaultV1?: string };
+  }>("thread/realtime/listVoices");
+  return result.voices;
+}
+
+export async function listVoices(rpc: AppServer) {
+  return (await voiceCatalog(rpc))?.v3;
 }

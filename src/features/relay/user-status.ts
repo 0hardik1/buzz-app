@@ -3,16 +3,26 @@ import { eventDto, type RelayEvent } from "./events";
 import type { RelayReader } from "./reader";
 import type { RelayWriter } from "./transport";
 
-import { USER_STATUS_KIND, validStatusText } from "./user-status-policy";
+import {
+  USER_STATUS_KIND,
+  validStatusEmojiUrl,
+  validStatusText,
+} from "./user-status-policy";
 export { USER_STATUS_KIND, STATUS_TEXT_LIMIT } from "./user-status-policy";
 export type UserStatus = Readonly<{
   userId: string;
   text: string;
   emoji: string;
+  /** Original image URL for a custom `:code:`; older statuses use the catalog. */
+  emojiUrl?: string;
   updatedAt: number;
   expiresAt?: number;
 }>;
 export type StatusInput = Pick<UserStatus, "text" | "emoji" | "expiresAt">;
+/** Unwatched authors whose status stays loaded while the profiles stream is
+ * live, so rows that scroll or switch back into view read nothing again. Live
+ * traffic keeps them current. */
+const IDLE_AUTHORS = 500;
 
 function parse(event: RelayEvent): UserStatus | undefined {
   if (
@@ -22,7 +32,8 @@ function parse(event: RelayEvent): UserStatus | undefined {
     event.tags.some(([key]) => key === "h")
   )
     return;
-  const emoji = event.tags.find(([key]) => key === "emoji")?.[1] ?? "";
+  const [, emoji = "", url = ""] =
+    event.tags.find(([key]) => key === "emoji") ?? [];
   if (!validStatusText(event.content, emoji)) return;
   const expiration = event.tags.find(([key]) => key === "expiration")?.[1];
   const expiresAt = expiration === undefined ? undefined : Number(expiration);
@@ -35,6 +46,9 @@ function parse(event: RelayEvent): UserStatus | undefined {
     userId: event.pubkey,
     text: event.content.trim(),
     emoji: emoji.trim(),
+    ...(validStatusEmojiUrl(emoji.trim(), url.trim())
+      ? { emojiUrl: url.trim() }
+      : {}),
     updatedAt: event.created_at,
     ...(expiresAt === undefined ? {} : { expiresAt }),
   });
@@ -47,6 +61,7 @@ export function createUserStatuses(
   viewer?: string,
   writer?: RelayWriter,
   notify = (listener: () => void) => listener(),
+  emojiTags: (content: string) => string[][] = () => [],
 ) {
   const records = new Map<
     string,
@@ -54,6 +69,10 @@ export function createUserStatuses(
   >();
   const watched = new Map<string, number>();
   const loaded = new Set<string>();
+  /** Unwatched authors still held, oldest first. */
+  const idle = new Set<string>();
+  /** Whether live profiles traffic keeps idle authors current. */
+  let live = false;
   const listeners = new Set<() => void>();
   let snapshot: ReadonlyMap<string, UserStatus> = new Map();
   let controller = new AbortController();
@@ -96,11 +115,13 @@ export function createUserStatuses(
   function accept(events: readonly RelayEvent[]) {
     if (closed) return;
     for (const event of events) {
-      // Live traffic for offscreen people need not grow this session's cache.
+      // Live traffic for offscreen people need not grow this session's cache;
+      // an idle author read without a status still takes its first one.
       if (
         !watched.has(event.pubkey) &&
         event.pubkey !== viewer &&
-        !records.has(event.pubkey)
+        !records.has(event.pubkey) &&
+        !loaded.has(event.pubkey)
       )
         continue;
       const status = parse(event);
@@ -165,6 +186,18 @@ export function createUserStatuses(
       });
     return pending;
   }
+  /** Drops the oldest idle authors beyond `limit`. */
+  function evictIdle(limit: number) {
+    let evicted = false;
+    for (const id of idle) {
+      if (idle.size <= limit) break;
+      idle.delete(id);
+      // Evict the whole coordinate, never only its latest replacement evidence.
+      loaded.delete(id);
+      evicted = records.delete(id) || evicted;
+    }
+    if (evicted) publish();
+  }
   function schedule() {
     if (scheduled || closed || retryTimer !== undefined) return;
     scheduled = true;
@@ -182,7 +215,10 @@ export function createUserStatuses(
   }
   function watch(ids: readonly string[]) {
     const unique = [...new Set(ids)].filter((id) => /^[0-9a-f]{64}$/.test(id));
-    for (const id of unique) watched.set(id, (watched.get(id) ?? 0) + 1);
+    for (const id of unique) {
+      watched.set(id, (watched.get(id) ?? 0) + 1);
+      idle.delete(id);
+    }
     schedule();
     return () => {
       for (const id of unique) {
@@ -190,11 +226,7 @@ export function createUserStatuses(
         if (count) watched.set(id, count);
         else {
           watched.delete(id);
-          // Evict the whole coordinate, never only its latest replacement evidence.
-          if (id !== viewer) {
-            loaded.delete(id);
-            records.delete(id);
-          }
+          if (id !== viewer) idle.add(id);
         }
       }
       if (!watched.size) {
@@ -202,7 +234,7 @@ export function createUserStatuses(
         retryTimer = undefined;
         retryAttempt = 0;
       }
-      publish();
+      evictIdle(live ? IDLE_AUTHORS : 0);
     };
   }
   async function save(input: StatusInput) {
@@ -249,6 +281,19 @@ export function createUserStatuses(
         now,
         (records.get(viewer)?.event.created_at ?? 0) + 1,
       );
+      const previous = records.get(viewer)?.status;
+      let resolved: string | undefined;
+      try {
+        resolved = emojiTags(emoji)[0]?.[2];
+      } catch {
+        // An unready catalog never blocks a status; viewers resolve the code.
+      }
+      // A re-save keeps the URL of a code the catalog cannot resolve now.
+      const url = [
+        resolved,
+        previous?.emoji === emoji ? previous.emojiUrl : undefined,
+      ].find((candidate) => candidate && validStatusEmojiUrl(emoji, candidate));
+      const emojiTag = url ? ["emoji", emoji, url] : ["emoji", emoji];
       if (createdAt > now + 300)
         throw new Error(
           "Your current status is dated too far in the future. Check your devices’ clocks and try again later.",
@@ -259,7 +304,7 @@ export function createUserStatuses(
         content: text,
         tags: [
           ["d", "general"],
-          ...(emoji ? [["emoji", emoji]] : []),
+          ...(emoji ? [emojiTag] : []),
           ...(expiresAt === undefined
             ? []
             : [["expiration", String(expiresAt)]]),
@@ -295,6 +340,7 @@ export function createUserStatuses(
     pending = undefined;
     loaded.clear();
     records.clear();
+    idle.clear();
     publish();
     schedule();
   }
@@ -347,6 +393,20 @@ export function createUserStatuses(
       pending = undefined;
       loaded.clear();
       schedule();
+    },
+    /** A continuous profiles replay delivered every status change since the
+     * last connection heard the relay, so loaded authors stay loaded. Authors
+     * whose read failed or never ran, during the outage too, read again. */
+    resume() {
+      resetRetries();
+      schedule();
+    },
+    /** Whether the profiles stream is live. Without it nothing keeps an idle
+     * author's status current, so idle authors are dropped and read again
+     * when their rows return. */
+    live(next: boolean) {
+      live = next;
+      if (!live) evictIdle(0);
     },
     dispose() {
       closed = true;

@@ -37,6 +37,12 @@ const original = (name: string, about = "Keep this") => ({
   existing: { name, picture: "", about },
   exists: true,
 });
+// Any save into a profile without a `tz` key shares this device's zone.
+const device = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+const published = (name: string) => ({
+  ...original(name).existing,
+  tz: device,
+});
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -53,6 +59,7 @@ function setup(
     status: "ready",
     relayAvailable: true,
     viewer: "a".repeat(64),
+    sync: { known: [], outbox: [] },
     selected,
     memberships: [
       { id: a, name: "Alpha" },
@@ -163,7 +170,7 @@ it("edits the existing selected community without another destination control an
   expect(api.publishProfile).toHaveBeenCalledExactlyOnceWith(
     a,
     { name: "Changed", picture: "", about: "Keep this" },
-    { ...original("Alpha human").existing, website: "https://new.example" },
+    { ...published("Alpha human"), website: "https://new.example" },
   );
   expect(api.inspectProfile).toHaveBeenCalledTimes(3);
   expect(fixture.saveProfile).toHaveBeenCalledWith({
@@ -232,14 +239,14 @@ it("a dispatched save remains bound to A and its late completion cannot clear B'
   expect(api.publishProfile).toHaveBeenCalledExactlyOnceWith(
     a,
     { name: "Changed", picture: "", about: "Keep this" },
-    original("Alpha human").existing,
+    published("Alpha human"),
   );
   save();
   await screen.findByText("Profile updated");
   expect(api.publishProfile).toHaveBeenLastCalledWith(
     b,
     { name: "Beta draft", picture: "", about: "Keep this" },
-    original("Beta human").existing,
+    published("Beta human"),
   );
 });
 
@@ -268,7 +275,8 @@ it("late initial reads cannot replace another community's profile", async () => 
   const late = deferred<ReturnType<typeof original>>();
   vi.mocked(api.inspectProfile).mockReturnValueOnce(late.promise);
   fixture.select(b);
-  expect(screen.getByRole("status")).toHaveTextContent("Loading");
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.getByLabelText("Display name")).toBeDisabled();
   fixture.select(a);
   await screen.findByDisplayValue("Alpha human");
   await act(async () => {
@@ -302,7 +310,8 @@ it("failed initial reads expose Retry and never publish defaults over an unknown
   );
   fixture.select(b);
   await screen.findByText(/Read refused/);
-  expect(screen.queryByLabelText("Display name")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Display name")).toBeDisabled();
+  expect(screen.queryByRole("textbox", { name: "Display name" })).toBeNull();
   expect(api.publishProfile).not.toHaveBeenCalled();
   fireEvent.click(
     screen.getByRole("button", { name: "Retry loading profile" }),
@@ -335,7 +344,7 @@ it("accepted but superseded publication retains the avatar draft for explicit re
       picture: "https://images.example/new.png",
       about: "Keep this",
     },
-    original("Alpha human").existing,
+    published("Alpha human"),
   );
 });
 
@@ -447,7 +456,7 @@ it.each([
     expect(api.publishProfile).toHaveBeenCalledExactlyOnceWith(
       a,
       { name: "Changed", picture, about: "Keep this" },
-      original("Alpha human").existing,
+      published("Alpha human"),
     );
     expect(fixture.saveProfile).toHaveBeenCalledExactlyOnceWith({
       name: "Changed",
@@ -456,6 +465,28 @@ it.each([
     });
   },
 );
+
+it("shows and keeps an emoji avatar saved by Buzz mobile", async () => {
+  // Buzz mobile's emojiAvatarDataUrl("🛹", 0xFFFFB84D).
+  const picture = `data:image/svg+xml,${encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" rx="256" fill="#FFB84D"/><text x="50%" y="56%" dominant-baseline="middle" text-anchor="middle" font-size="258">🛹</text></svg>',
+  )}`;
+  setup(a, "", picture);
+  await editName();
+  expect(
+    screen
+      .getByRole("region", { name: "Profile preview" })
+      .querySelector("img"),
+  ).toHaveAttribute("src", picture);
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  save();
+  await screen.findByText("Profile updated");
+  expect(api.publishProfile).toHaveBeenCalledExactlyOnceWith(
+    a,
+    { name: "Changed", picture, about: "Keep this" },
+    expect.objectContaining({ picture }),
+  );
+});
 
 it.each(["http://images.example/avatar.png", "data:image/png;base64,AA=="])(
   "explains inherited invalid picture %s and recovers after removal",

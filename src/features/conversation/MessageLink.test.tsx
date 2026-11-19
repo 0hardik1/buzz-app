@@ -16,12 +16,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Contribution } from "../../plugins/contributions";
 import type { LinkRenderer } from "./contracts";
 import { MessageLink, resolveLink } from "./MessageLink";
+import { createRelaySession } from "../relay/session";
+import { matchesEvent } from "../relay/projection";
+import { keypair, signed } from "../relay/testing";
+import { SOLO_NAMED_LABEL, SOLO_LABEL } from "../solo/labels";
+import { soloChatLinkMessage } from "../solo/share";
+import { MessageMarkdown } from "../messages/MessageMarkdown";
 import { ConversationPresentation } from "./ConversationPresentation";
 import { LinkThreadTabContext } from "./LinkLabelContext";
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const entry: Contribution<LinkRenderer> = {
@@ -283,6 +290,76 @@ it("preserves ordinary pane interception and modified or middle-click fallback",
   expect(onOpenLink).not.toHaveBeenCalled();
 });
 
+function desktopOpener() {
+  const invoke = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("isTauri", true);
+  vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
+  return invoke;
+}
+
+it.each([
+  "https://github.com/block/buzz-app/pull/1?view=all#discussion_r1",
+  "http://example.com/path?query=yes#section",
+])(
+  "opens desktop Command-click in the browser with the exact URL: %s",
+  (target) => {
+    const invoke = desktopOpener();
+    const { anchor, onOpenLink } = mount(target);
+    const event = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      metaKey: true,
+    });
+    fireEvent(anchor, event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith(
+      "plugin:opener|open_url",
+      {
+        url: target,
+      },
+      undefined,
+    );
+    expect(onOpenLink).not.toHaveBeenCalled();
+  },
+);
+
+it("keeps ordinary desktop clicks in the pane", () => {
+  const invoke = desktopOpener();
+  const { anchor, onOpenLink } = mount();
+  fireEvent.click(anchor);
+  expect(onOpenLink).toHaveBeenCalledExactlyOnceWith(url);
+  expect(invoke).not.toHaveBeenCalled();
+});
+
+it("reports a failed desktop browser open and clears the error on retry", async () => {
+  const invoke = desktopOpener();
+  invoke.mockRejectedValueOnce("Browser unavailable");
+  const { anchor, onOpenLink } = mount();
+  fireEvent.click(anchor, { metaKey: true });
+  expect(
+    await screen.findByText("Couldn’t open the link in your browser."),
+  ).toBeInTheDocument();
+  fireEvent.click(anchor, { metaKey: true });
+  expect(
+    screen.queryByText("Couldn’t open the link in your browser."),
+  ).not.toBeInTheDocument();
+  expect(invoke).toHaveBeenCalledTimes(2);
+  expect(onOpenLink).not.toHaveBeenCalled();
+});
+
+it("does not open a desktop browser from an inactive conversation", () => {
+  const invoke = desktopOpener();
+  const onOpenLink = vi.fn(() => true);
+  render(
+    <ConversationPresentation value={false}>
+      <MessageLink url={url} registry={undefined} onOpenLink={onOpenLink} />
+    </ConversationPresentation>,
+  );
+  fireEvent.click(screen.getByRole("link"), { metaKey: true });
+  expect(invoke).not.toHaveBeenCalled();
+  expect(onOpenLink).not.toHaveBeenCalled();
+});
+
 it("retires an external menu when its retained conversation becomes inactive", async () => {
   const onOpenLink = vi.fn(() => true);
   const tree = (active: boolean) => (
@@ -332,4 +409,158 @@ it("does not present or replay copy feedback completed in an inactive conversati
   expect(screen.queryByText("Link copied")).not.toBeInTheDocument();
   view.rerender(tree(true));
   expect(screen.queryByText("Link copied")).not.toBeInTheDocument();
+});
+
+it("a signed chosen rename repaints the session card without changing authored link bytes or focus", async () => {
+  const id = "11111111-1111-4111-8111-111111111111",
+    viewer = keypair(),
+    relay = keypair();
+  let clock = 100,
+    name = "First prompt",
+    labels: string[][] = [["t", SOLO_LABEL]],
+    about = "";
+  const record = (kind: number, tags: string[][]) =>
+    signed(relay, {
+      kind,
+      created_at: clock,
+      content: "",
+      tags: [["d", id], ...tags],
+    });
+  const events = () => [
+    record(39000, [
+      ["name", name],
+      ["t", "stream"],
+      ...labels,
+      ["private"],
+      ["about", about],
+    ]),
+    record(39001, [["p", viewer.pubkey, "owner"]]),
+    record(39002, [["p", viewer.pubkey, "", "owner"]]),
+  ];
+  const publish = vi.fn(async () => {});
+  const owner = createRelaySession({
+    channelIdentity: true,
+    viewer: viewer.pubkey,
+    relayAuthor: relay.pubkey,
+    media: () => undefined,
+    query: async (filters) =>
+      events().filter((event) =>
+        filters.some((filter) => matchesEvent(event, filter)),
+      ),
+    channelDetails: {
+      sign: async (template) => signed(viewer, template),
+      publish: async (event) => {
+        name = event.tags.find(([key]) => key === "name")?.[1] ?? name;
+        about = event.tags.find(([key]) => key === "about")?.[1] ?? about;
+        labels = event.tags.filter(([key]) => key === "t");
+        clock++;
+      },
+    },
+    writer: {
+      kinds: [9, 9007],
+      sign: async (template) => signed(viewer, template),
+      publish,
+    },
+  });
+  try {
+    owner.session.channels.ensureList();
+    await waitFor(() =>
+      expect(owner.session.channels.list().status).toBe("ready"),
+    );
+    render(
+      <MessageLink
+        session={owner.session}
+        url={`buzz://channel/${id}`}
+        registry={undefined}
+        onOpenLink={() => true}
+      />,
+    );
+    // Raw chat links resolve their current title without acquiring card chrome.
+    const anchor = screen.getByRole("link", {
+      name: "First prompt",
+    });
+    anchor.focus();
+    const base = await owner.session.channelDetails.load(id);
+    await act(async () =>
+      owner.session.channelDetails.save(base, {
+        ...base,
+        name: "Accessible contrast",
+      }),
+    );
+    expect(
+      await screen.findByRole("link", {
+        name: "Accessible contrast",
+      }),
+    ).toBe(anchor);
+    expect(anchor).toHaveFocus();
+    expect(owner.session.channels.list().channels[0]?.labels).toContain(
+      SOLO_NAMED_LABEL,
+    );
+    expect(anchor).toHaveAttribute("data-link-label", "");
+    expect(publish).not.toHaveBeenCalled();
+  } finally {
+    cleanup();
+    owner.dispose();
+  }
+});
+
+it.each(["Session · 12345678", "Session: PR 45 fixes", "Chat: PR 45 fixes"])(
+  "preserves legacy chat labels as ordinary inline links: %s",
+  (label) => {
+    render(
+      <MessageLink
+        url="buzz://channel/12345678"
+        label={label}
+        registry={undefined}
+        onOpenLink={() => true}
+      >
+        {label}
+      </MessageLink>,
+    );
+    const link = screen.getByRole("link", {
+      name: label,
+    });
+    expect(link).toHaveTextContent(label);
+    expect(link.querySelector("svg")).toBeNull();
+    expect(link).not.toHaveAttribute("data-solo-link");
+  },
+);
+
+it("shows escaped chosen names faithfully when only the sent label is available", () => {
+  const name = "PR_45 & <fix> [draft] \\_notes";
+  render(
+    <MessageMarkdown
+      row={{
+        id: "message",
+        channelId: "channel",
+        authorId: "author",
+        content: soloChatLinkMessage("session", name),
+        createdAt: 1,
+        mentions: [],
+        attachments: [],
+        reactions: [],
+        replyCount: 0,
+        participants: [],
+      }}
+      media={() => undefined}
+      onOpenLink={() => true}
+    />,
+  );
+  expect(screen.getByRole("link", { name })).toHaveTextContent(name);
+});
+
+it("lets registered renderers own chat link presentation like other links", () => {
+  const entries = [entry];
+  const registry = { snapshot: () => entries, subscribe: () => () => {} };
+  render(
+    <MessageLink
+      url="buzz://channel/session"
+      label="Chat: Work"
+      registry={registry}
+      onOpenLink={() => true}
+    />,
+  );
+  const link = screen.getByRole("link", { name: "Chat: Work" });
+  expect(link).toHaveTextContent("Link face");
+  expect(link).toHaveClass("link-style");
 });

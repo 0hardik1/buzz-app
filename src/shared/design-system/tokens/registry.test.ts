@@ -100,6 +100,19 @@ describe("token registry — colour namespaces do not collide", () => {
       ),
     ].map(([, suffix = "", role = ""]) => ({ suffix, role }));
 
+  it("keeps paint tokens separate from typography tokens", () => {
+    const typography = readFileSync(
+      new URL("../styles/typography.css", import.meta.url),
+      "utf8",
+    );
+    const names = (source: string) =>
+      [...source.matchAll(/(--text-[\w-]+):/g)].map((match) => match[1]);
+    const sizes = new Set(names(typography));
+    expect(
+      [...new Set(names(DECLARATIONS))].filter((name) => sizes.has(name)),
+    ).toEqual([]);
+  });
+
   it("registers no text or border role under the shared --color-* namespace", () => {
     const shared = registrations("color").filter(
       ({ role }) => role.startsWith("--text-") || role.startsWith("--border-"),
@@ -141,7 +154,7 @@ describe("token registry — colour namespaces do not collide", () => {
   });
 });
 
-// Block UI eff76616, with the product-directed Buzz xsmall override to 12px.
+// The Buzz size ramp, with xsmall sharing the 12px step.
 it("keeps xsmall semantic while sharing the 12px size step", () => {
   const sizes = [12, 14, 16, 18, 20, 24, 28, 32, 36, 44, 56, 72, 96];
   const ramp = TYPE_RAMPS.find((ramp) => ramp.id === "size");

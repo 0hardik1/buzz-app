@@ -1,4 +1,5 @@
 import { Button } from "../../shared/design-system/ui/Button";
+import { ArrowsClockwiseIcon } from "../../shared/design-system/icons";
 import { useEffect, useState } from "react";
 import type { ChannelMessage } from "../relay/contracts";
 import { DELIVERY_GRACE_MS, deliveryFeedback } from "./delivery";
@@ -20,19 +21,42 @@ export function DeliveryNotice({
     const timer = setTimeout(() => setNow(Date.now()), remaining);
     return () => clearTimeout(timer);
   }, [row.createdAt, row.delivery]);
-  const feedback = deliveryFeedback(row, now);
+  // A refused retry explains itself until the delivery changes.
+  const [refusal, setRefusal] = useState<{
+    delivery: ChannelMessage["delivery"];
+    reason: string;
+  }>();
+  const refused =
+    refusal && refusal.delivery === row.delivery ? refusal.reason : undefined;
+  const status = deliveryFeedback(row, now);
+  const feedback = status && refused ? `${status} ${refused}` : status;
   if (!feedback) return null;
+  const canRetry =
+    !refused &&
+    (row.delivery === "failed" || row.delivery === "unknown") &&
+    retry;
   return (
     <div className={styles.delivery}>
-      <span role="status">{feedback}</span>
-      {(row.delivery === "failed" || row.delivery === "unknown") && retry && (
+      <span role="status" className={canRetry ? "sr-only" : undefined}>
+        {feedback}
+      </span>
+      {canRetry && (
         <Button
-          size="sm"
+          size="inline"
           variant="ghost"
-          type="button"
-          onClick={() => retry(row.id)}
+          title={feedback}
+          onClick={() => {
+            try {
+              retry(row.id);
+            } catch (error) {
+              setRefusal({
+                delivery: row.delivery,
+                reason: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }}
         >
-          Retry
+          <ArrowsClockwiseIcon size={12} aria-hidden="true" /> Retry
         </Button>
       )}
     </div>

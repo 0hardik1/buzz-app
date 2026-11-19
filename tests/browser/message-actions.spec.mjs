@@ -1,5 +1,7 @@
+import { hoverMessage } from "./message-actions.mjs";
 import { test, expect } from "./fixture.mjs";
-import { open, settle } from "./timeline.mjs";
+import { frames, open, settle } from "./timeline.mjs";
+import { chooseDefaultSkinTone } from "./skin-tone.mjs";
 
 test.use({
   productionBroker: true,
@@ -7,6 +9,154 @@ test.use({
   readState: true,
   threadUnread: true,
   historyCounts: { alpha: 3, beta: 1 },
+});
+
+// Browser-only: layout clipping can blank both the preview and expanded prose
+// between React states even when the height transition itself runs correctly.
+test("coordination keeps its first line visible throughout expansion and collapse", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const root = app.append("primary", "alpha", "Coordination motion check");
+  const original = page.locator(
+    `[data-channel-timeline] [data-message-id="${root.id}"]`,
+  );
+  await hoverMessage(original);
+  await original.getByRole("button", { name: "Reply", exact: true }).click();
+  const thread = page.getByRole("complementary", {
+    name: "Thread",
+    exact: true,
+  });
+  const event = app.append(
+    "primary",
+    "alpha",
+    "Three café names:\n\n1. Corner Cup: Friendly and local.\n2. Common Grounds: A gathering place.\n3. Porchlight Café: Warm and welcoming.\n\n[Nested destination](https://example.com/context)",
+    true,
+    true,
+    root.id,
+    undefined,
+    [["audience", "agents"]],
+  );
+  await thread.getByRole("button", { name: /^Show activity history:/ }).click();
+  const row = thread.locator(`[data-message-id="${event.id}"]`);
+  const toggle = row.getByRole("button", { name: /Three café names:/ });
+  await expect(toggle).toBeVisible();
+  await settle(page, thread.getByRole("region", { name: "Thread messages" }));
+  const result = await row.evaluate(async (row) => {
+    const button = row.querySelector("button[aria-expanded]");
+    const preview = row.querySelector('[class*="audiencePreview"]');
+    if (!preview) throw new Error("Coordination preview is missing");
+    // Pane entry can move the whole row while the disclosure animates.
+    const textEdge =
+      preview.getBoundingClientRect().left - row.getBoundingClientRect().left;
+    const failures = [];
+    let animated = false;
+    // A busy frame can miss the entire transition. Observe its start before
+    // clicking; frame samples still check clipping and settlement below.
+    const onTransitionStart = (event) => {
+      if (
+        event.target.matches('[class*="audiencePanel"]') &&
+        event.propertyName === "height"
+      )
+        animated = true;
+    };
+    row.addEventListener("transitionstart", onTransitionStart);
+    const sample = (opening) => {
+      const panel = row.querySelector('[class*="audiencePanel"]');
+      const preview = row.querySelector('[class*="audiencePreview"]');
+      const text = panel?.querySelector("p");
+      const panelBox = panel?.getBoundingClientRect();
+      const textBox = text?.getBoundingClientRect();
+      const previewVisible =
+        !!preview && preview.getBoundingClientRect().height > 0;
+      const firstLineVisible =
+        !!textBox &&
+        !!panelBox &&
+        Math.min(textBox.bottom, panelBox.bottom) -
+          Math.max(textBox.top, panelBox.top) >=
+          Number.parseFloat(getComputedStyle(text).lineHeight) / 2;
+      if (!previewVisible && !firstLineVisible)
+        failures.push(opening ? "opening" : "closing");
+      if (
+        textBox &&
+        Math.abs(textBox.left - row.getBoundingClientRect().left - textEdge) >
+          0.5
+      )
+        failures.push(
+          opening ? "opening shifted text" : "closing shifted text",
+        );
+      const running = panel
+        ?.getAnimations()
+        .some((animation) => animation.playState === "running");
+      return { panel, running };
+    };
+    try {
+      for (const opening of [true, false]) {
+        const start = performance.now();
+        button.click();
+        await new Promise((resolve, reject) => {
+          let settled = 0;
+          const tick = () => {
+            const { panel, running } = sample(opening);
+            settled = (
+              opening
+                ? panel &&
+                  !panel.hasAttribute("data-starting-style") &&
+                  !running
+                : !panel
+            )
+              ? settled + 1
+              : 0;
+            if (settled >= 2) resolve();
+            else if (performance.now() - start > 5000)
+              reject(new Error("Coordination transition did not settle"));
+            else requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+      }
+    } finally {
+      row.removeEventListener("transitionstart", onTransitionStart);
+    }
+    return { failures, animated };
+  });
+  expect(result).toEqual({ failures: [], animated: true });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  await expect(
+    row.getByText("Three café names:", { exact: true }),
+  ).toBeVisible();
+  await expect(row.getByTestId("inline-add-reaction")).toHaveCount(0);
+  // A real nested link owns its handled keyboard gesture; the row still owns
+  // the same gesture on its disclosure. Verify each portal's focus return.
+  const link = row.getByRole("link", {
+    name: "Nested destination",
+    exact: true,
+  });
+  await link.focus();
+  await page.keyboard.press("Shift+F10");
+  await expect(
+    page.getByRole("menuitem", { name: "Open in browser", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("menu", { includeHidden: true })).toHaveCount(1);
+  await expect(page.getByRole("menu")).toBeFocused();
+  await expect(
+    page.getByRole("menuitem", { name: "Copy message", exact: true }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(link).toBeFocused();
+  await toggle.focus();
+  await page.keyboard.press("Shift+F10");
+  await expect(
+    page.getByRole("menuitem", { name: "Copy message", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("menu", { includeHidden: true })).toHaveCount(1);
+  await expect(page.getByRole("menu")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(toggle).toBeFocused();
 });
 
 // Native Tab must discover deferred controls before the browser chooses focus;
@@ -55,8 +205,7 @@ for (const direction of ["forward", "backward"]) {
     await page.keyboard.press(direction === "forward" ? "Tab" : "Shift+Tab");
     await expect(
       actions.getByRole("button", {
-        name:
-          direction === "forward" ? "React with 👍" : "More message actions",
+        name: direction === "forward" ? "Add reaction" : "More message actions",
         exact: true,
       }),
     ).toBeFocused();
@@ -64,7 +213,7 @@ for (const direction of ["forward", "backward"]) {
     await page.keyboard.press(direction === "forward" ? "Tab" : "Shift+Tab");
     await expect(
       actions.getByRole("button", {
-        name: direction === "forward" ? "React with ❤️" : "Copy link",
+        name: direction === "forward" ? "Reply" : "Copy link",
         exact: true,
       }),
     ).toBeFocused();
@@ -89,6 +238,7 @@ test("message actions reveal, copy, restore focus and reply across responsive la
       },
     });
   });
+  await chooseDefaultSkinTone(page);
   await open(page, app);
   const event = app.append("primary", "alpha", "Message actions browser check");
   const row = page.locator(
@@ -98,7 +248,7 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   const actions = row.getByRole("group", { name: "Message actions" });
   await page.mouse.move(0, 0);
   await expect(actions).toHaveCSS("opacity", "0");
-  await row.hover();
+  await hoverMessage(row);
   await expect(actions).toHaveCSS("opacity", "1");
   const trigger = row.getByRole("button", { name: "More message actions" });
   await trigger.focus();
@@ -120,7 +270,7 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   expect(await page.evaluate(() => window.copiedMessages)).toEqual([
     event.content,
   ]);
-  await row.hover();
+  await hoverMessage(row);
   await row.getByRole("button", { name: "Copy link", exact: true }).click();
   await expect(
     page
@@ -129,6 +279,7 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   ).toBeVisible();
   const copiedLink = await page.evaluate(() => window.copiedMessages.at(-1));
   expect(copiedLink).toBe(`buzz://message?channel=alpha&id=${event.id}`);
+  await hoverMessage(row);
   await row.getByRole("button", { name: "Reply", exact: true }).click();
   const panel = page.getByRole("complementary", {
     name: "Thread",
@@ -137,8 +288,11 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   const root = panel.locator(`[data-message-id="${event.id}"]`);
   await expect(root).toBeVisible();
   // A pointer click leaves focus on the control; the bar still follows hover.
-  const copyLink = row.getByRole("button", { name: "Copy link", exact: true });
-  await row.hover();
+  const copyLink = row.getByRole("button", {
+    name: "Copy link",
+    exact: true,
+  });
+  await hoverMessage(row);
   await copyLink.click();
   await root.hover();
   await expect(actions).toHaveCSS("opacity", "0");
@@ -166,7 +320,7 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   await expect(actions).toHaveCSS("opacity", "1");
   // Keyboard dismissal restores focus even when the menu was pointer-opened.
   // Waiting for deferred initial focus keeps Escape off the trigger.
-  await row.hover();
+  await hoverMessage(row);
   await trigger.click();
   await expect(menu).toBeFocused();
   await page.keyboard.press("Escape");
@@ -178,12 +332,12 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   await expect(menu).toBeVisible();
   // Keyboard opening focuses the first item; Mark unread leads a managed row.
   await expect(
-    page.getByRole("menuitem", { name: "Mark unread", exact: true }),
+    page.getByRole("menuitem", { name: "Mark as unread", exact: true }),
   ).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(trigger).toBeFocused();
   // Pointer-only selection still leaves the bar free to follow hover.
-  await row.hover();
+  await hoverMessage(row);
   await trigger.click();
   await expect(menu).toBeFocused();
   await page
@@ -193,9 +347,12 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   await expect(trigger).not.toBeFocused();
   await page.mouse.move(0, 0);
   await expect(actions).toHaveCSS("opacity", "0");
-  await root.hover();
-  await root
-    .getByRole("button", { name: "React with 👍", exact: true })
+  await hoverMessage(root);
+  await root.getByRole("button", { name: "Add reaction", exact: true }).click();
+  await page.locator('em-emoji-picker input[type="search"]').fill("thumbsup");
+  await page
+    .locator("em-emoji-picker")
+    .getByRole("button", { name: "👍", exact: true })
     .click();
   await expect(
     root.getByRole("button", {
@@ -231,7 +388,7 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   expect(added.tags).toContainEqual(["e", event.id]);
   expect(removed.tags).toContainEqual(["e", added.id]);
   expect(removed.pubkey).toBe(added.pubkey);
-  await root.hover();
+  await hoverMessage(root);
   await root.getByRole("button", { name: "Reply", exact: true }).click();
   const replyBox = panel.getByRole("textbox", {
     name: "Reply to thread",
@@ -239,11 +396,12 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   });
   await expect(replyBox).toBeFocused();
   await replyBox.fill("Keep this reply draft");
-  await row.hover();
+  await hoverMessage(row);
+  await hoverMessage(row);
   await row.getByRole("button", { name: "Reply", exact: true }).click();
   await expect(replyBox).toBeFocused();
   await expect(replyBox).toHaveText("Keep this reply draft");
-  await root.hover();
+  await hoverMessage(root);
   await root.getByRole("button", { name: "Reply", exact: true }).click();
   await expect(
     panel.getByRole("textbox", { name: "Reply to thread", exact: true }),
@@ -269,7 +427,7 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   // Closing retains the split until its transition finishes. Establish the
   // final row geometry before placing the pointer over the next message.
   await expect(page.locator("[data-panel-dock][data-closing]")).toHaveCount(0);
-  await broadcastRow.hover();
+  await hoverMessage(broadcastRow);
   await broadcastRow
     .getByRole("button", { name: "Reply", exact: true })
     .click();
@@ -294,8 +452,15 @@ test("message actions reveal, copy, restore focus and reply across responsive la
     await page.mouse.move(0, 0);
     await page.mouse.click(0, 0);
     await expect(actions).toHaveCSS("opacity", "0");
-    await row.hover();
+    await hoverMessage(row);
     await expect(actions).toHaveCSS("opacity", "1");
+    // The click left keyboard navigation, so this is a pointer reveal and its
+    // entry keeps its time. Only keyboard reveal, in the journey below, is
+    // immediate.
+    await expect(page.locator("html")).not.toHaveAttribute(
+      "data-keyboard-navigation",
+    );
+    await expect(actions).not.toHaveCSS("animation-duration", "0s");
     await expect(
       row.getByRole("button", { name: "Copy link", exact: true }),
     ).toBeVisible();
@@ -314,6 +479,83 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   await page.screenshot({
     path: test.info().outputPath("message-actions-narrow.png"),
   });
+});
+
+// Browser-only: jsdom has neither CSS animations nor native popovers. An arrow
+// key typed in the composer turns keyboard navigation on, so the bar opens
+// with no entry motion. The pointer press on More then clears that flag under
+// the open bar; replaying the entry there resizes the bar and moves the menu
+// anchored to it.
+test("a pointer press on More after keyboard input leaves the open toolbar in place", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const event = app.append("primary", "alpha", "Steady toolbar check");
+  const row = page.locator(
+    `[data-channel-timeline] [data-message-id="${event.id}"]`,
+  );
+  await expect(row).toBeVisible();
+  await settle(page);
+  const composer = page.getByRole("textbox", {
+    name: "Message #Alpha",
+    exact: true,
+  });
+  await composer.click();
+  await composer.press("ArrowLeft");
+  const root = page.locator("html");
+  await expect(root).toHaveAttribute("data-keyboard-navigation");
+  const actions = row.getByRole("group", { name: "Message actions" });
+  await hoverMessage(row);
+  await expect(actions).toHaveCSS("opacity", "1");
+  // Keyboard reveal gives the entry no time rather than removing it. Were the
+  // entry absent, nothing could restart and the check after the press would
+  // pass without proving anything.
+  await expect(actions).not.toHaveCSS("animation-name", "none");
+  await expect(actions).toHaveCSS("animation-duration", "0s");
+  // Keyboard reveal skips the entry, but the entry still spans its pointer
+  // duration (at most --duration-state) from the moment the bar opened, and a
+  // press inside that span resumes its last frames. A person presses later,
+  // so let the span pass on the clock that times the entry. That clock counts
+  // milliseconds and the token is served in seconds, so convert by unit, and
+  // fail on a token that is not a time: a span of 0.15 or NaN ends the wait
+  // after one frame.
+  await actions.evaluate(async (bar) => {
+    const token = getComputedStyle(bar)
+      .getPropertyValue("--duration-state")
+      .trim();
+    const [, amount, unit] = /^(\d*\.?\d+)(m?s)$/.exec(token) ?? [];
+    const span = Number(amount) * (unit === "s" ? 1000 : 1);
+    if (!(span > 0))
+      throw new Error(`--duration-state is not a positive time: "${token}"`);
+    const opened = document.timeline.currentTime;
+    while (document.timeline.currentTime - opened < span)
+      await new Promise(requestAnimationFrame);
+  });
+  const before = await actions.evaluate((bar) => {
+    window.messageActionAnimations = [];
+    bar.addEventListener("animationstart", (event) => {
+      if (event.target === bar)
+        window.messageActionAnimations.push(event.animationName);
+    });
+    return bar.getBoundingClientRect().toJSON();
+  });
+  await row.getByRole("button", { name: "More message actions" }).click();
+  await expect(
+    page.getByRole("menuitem", { name: "Copy message", exact: true }),
+  ).toBeVisible();
+  // The test proves nothing unless the press really left keyboard navigation
+  // and gave the open bar's entry a duration again, which a restart needs.
+  await expect(root).not.toHaveAttribute("data-keyboard-navigation");
+  await expect(actions).not.toHaveCSS("animation-duration", "0s");
+  // The rendering update after the press is the one that reports a restart.
+  await frames(page);
+  expect(
+    await actions.evaluate((bar) => ({
+      started: window.messageActionAnimations,
+      rect: bar.getBoundingClientRect().toJSON(),
+    })),
+  ).toEqual({ started: [], rect: before });
 });
 
 // Browser-only: clipboard -> rendered Markdown -> cross-conversation navigation
@@ -337,7 +579,7 @@ test("copied Buzz links and the desktop alias reveal their destination from a co
   const row = page.locator(
     `[data-channel-timeline] [data-message-id="${event.id}"]`,
   );
-  await row.hover();
+  await hoverMessage(row);
   await row.getByRole("button", { name: "Copy link", exact: true }).click();
   await expect(
     page
@@ -367,6 +609,7 @@ test("copied Buzz links and the desktop alias reveal their destination from a co
 });
 
 test("DM actions open the correct reply thread", async ({ page, app }) => {
+  await chooseDefaultSkinTone(page);
   await open(page, app);
   await page
     .getByRole("navigation", { name: "Subscribed channels" })
@@ -376,8 +619,13 @@ test("DM actions open the correct reply thread", async ({ page, app }) => {
   const channel = await timeline.getAttribute("data-channel-timeline");
   const event = app.append("primary", channel, "DM menu check");
   const row = timeline.locator(`[data-message-id="${event.id}"]`);
-  await row.hover();
-  await row.getByRole("button", { name: "React with 👍", exact: true }).click();
+  await hoverMessage(row);
+  await row.getByRole("button", { name: "Add reaction", exact: true }).click();
+  await page.locator('em-emoji-picker input[type="search"]').fill("thumbsup");
+  await page
+    .locator("em-emoji-picker")
+    .getByRole("button", { name: "👍", exact: true })
+    .click();
   await expect(
     row.getByRole("button", {
       name: "👍: You",
@@ -403,12 +651,13 @@ test("DM actions open the correct reply thread", async ({ page, app }) => {
   expect(added.tags).toContainEqual(["e", event.id]);
   expect(removed.tags).toContainEqual(["e", added.id]);
   expect(removed.pubkey).toBe(added.pubkey);
-  await row.hover();
+  await hoverMessage(row);
   await row.getByRole("button", { name: "More message actions" }).click();
   await expect(
     page.getByRole("menuitem", { name: "Copy message", exact: true }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
+  await hoverMessage(row);
   await row.getByRole("button", { name: "Reply", exact: true }).click();
   await expect(
     page
@@ -420,7 +669,8 @@ test("DM actions open the correct reply thread", async ({ page, app }) => {
     exact: true,
   });
   await expect(replyBox).toBeFocused();
-  await row.hover();
+  await hoverMessage(row);
+  await hoverMessage(row);
   await row.getByRole("button", { name: "Reply", exact: true }).click();
   await expect(replyBox).toBeFocused();
 });
@@ -428,8 +678,10 @@ test("DM actions open the correct reply thread", async ({ page, app }) => {
 test.describe("touch", () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 850 } });
   test("opens the message menu without hover", async ({ page, app }) => {
+    // This checks touch access, not live-append scrolling. Include the message
+    // in initial history so open() settles its layout before the single tap.
+    const event = app.append("primary", "alpha", "Touch menu check", false);
     await open(page, app);
-    const event = app.append("primary", "alpha", "Touch menu check");
     const row = page.locator(
       `[data-channel-timeline] [data-message-id="${event.id}"]`,
     );
@@ -447,7 +699,7 @@ test("narrow timeline continuation actions never cover prose or move adjacent ro
   page,
   app,
 }) => {
-  await page.setViewportSize({ width: 900, height: 950 });
+  await page.setViewportSize({ width: 390, height: 950 });
   await open(page, app);
   app.append("primary", "alpha", "Start a compact group");
   const event = app.append(
@@ -475,16 +727,31 @@ test("narrow timeline continuation actions never cover prose or move adjacent ro
   };
   const baseline = await following.boundingBox();
   for (const mode of ["hover", "focus"]) {
-    if (mode === "hover") await row.hover();
+    if (mode === "hover")
+      await row.locator("[data-message-action-anchor]").hover();
     else {
       await page.mouse.move(0, 0);
+      await page.keyboard.press("ArrowRight");
       await row.getByRole("button", { name: "More message actions" }).focus();
     }
+    await expect
+      .poll(() =>
+        actions.evaluate((bar) => {
+          const bubble = bar
+            .closest("[data-layout]")
+            .querySelector("[data-message-action-anchor]")
+            .getBoundingClientRect();
+          return bar.getBoundingClientRect().top < bubble.top;
+        }),
+      )
+      .toBe(true);
     await expect(actions).toHaveCSS("opacity", "1");
     const prose = await row.locator("p").first().boundingBox();
     const toolbar = await actions.boundingBox();
     expect(
       toolbar.y + toolbar.height <= prose.y ||
+        toolbar.x + toolbar.width <= prose.x ||
+        toolbar.y >= prose.y + prose.height ||
         toolbar.x >= prose.x + prose.width,
     ).toBe(true);
     await expect(actions).toHaveCSS("position", "fixed");
@@ -493,28 +760,94 @@ test("narrow timeline continuation actions never cover prose or move adjacent ro
     await expect
       .poll(() =>
         link.evaluate((node) => {
-          const rect = node.getBoundingClientRect();
-          return node.contains(
-            document.elementFromPoint(
-              rect.x + rect.width / 2,
-              rect.y + rect.height / 2,
-            ),
+          // Wrapped inline links have separate hit regions; the union box
+          // includes empty space beside shorter lines.
+          const fragments = Array.from(node.getClientRects());
+          return (
+            fragments.length > 0 &&
+            fragments.every((rect) =>
+              node.contains(
+                document.elementFromPoint(rect.x + rect.width / 2, rect.y + 1),
+              ),
+            )
           );
         }),
       )
       .toBe(true);
   }
+  // Start on ordinary prose, not the link's native drag target.
+  await hoverMessage(row);
+  const prose = await row
+    .locator("p")
+    .first()
+    .evaluate((node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node.firstChild);
+      const { x, y, width, height } = range.getBoundingClientRect();
+      return { x, y, width, height };
+    });
+  // Aim at one of the link's line fragments: when it wraps, its union box
+  // includes prose before the first line and gaps between lines.
+  const fragmentPoint = (which) =>
+    link.evaluate((node, which) => {
+      const fragments = Array.from(node.getClientRects());
+      const rect = fragments[which === "first" ? 0 : fragments.length - 1];
+      return {
+        x: which === "first" ? rect.left + rect.width / 2 : rect.right - 1,
+        y: rect.top + rect.height / 2,
+      };
+    }, which);
+  const end = await fragmentPoint("last");
+  await page.mouse.move(prose.x + 1, prose.y + 1);
+  await expect(actions).toHaveCSS("opacity", "1");
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 10 });
+  await page.mouse.up();
+  await expect
+    .poll(() => page.evaluate(() => getSelection()?.toString()))
+    .toContain("reference");
+  await page.evaluate(() => getSelection()?.removeAllRanges());
+  // The first line must receive a real pointer press, not just have a clear
+  // center. Prevent navigation while observing the link's native click.
+  await link.evaluate((node) => {
+    node.addEventListener(
+      "click",
+      (event) => {
+        event.preventDefault();
+        node.dataset.clicked = "true";
+      },
+      { once: true },
+    );
+  });
+  const first = await fragmentPoint("first");
+  await page.mouse.move(first.x, first.y);
+  await expect
+    .poll(() =>
+      link.evaluate(
+        (node, { x, y }) => node.contains(document.elementFromPoint(x, y)),
+        first,
+      ),
+    )
+    .toBe(true);
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(link).toHaveAttribute("data-clicked", "true");
+  // Chromium retains focus on the clicked link. Return to the composer.
+  await page
+    .getByRole("textbox", { name: "Message #Alpha", exact: true })
+    .focus();
+  await page.mouse.move(0, 0);
+  await page.setViewportSize({ width: 900, height: 950 });
+  await settle(page);
   await page.evaluate(() =>
     document.documentElement.style.setProperty("--buzz-text-scale", "2"),
   );
+  // Let the virtual list reconcile resized rows before binding a scroll action
+  // to a node that text scaling can replace. This observes layout, not a delay.
+  await settle(page);
   await row.scrollIntoViewIfNeeded();
   await settle(page);
   await expectClockHidden();
-  await row.locator("[data-message-action-anchor]").hover();
-  const timestampHint = page.getByRole("tooltip").filter({ hasText: "2023" });
-  await expect(timestampHint).toBeVisible();
-  await page.mouse.move(0, 0);
-  await expect(timestampHint).toHaveCount(0);
 });
 
 test("historical single-day DMs and their threads expose dates without hover", async ({
@@ -604,13 +937,24 @@ test("live grouped appends preserve avatar focus in channel and thread", async (
     const avatar = row
       .getByRole("button", { name: /^View .* profile$/ })
       .first();
+    await expect(avatar).toBeVisible();
+    await settle(page);
+    await page.keyboard.press("Tab");
     await avatar.focus();
+    const preview = page.getByRole("dialog", { name: /profile preview$/ });
+    await expect(preview).toBeVisible();
     const second = append(`Next ${mode} message`);
     await expect(row.locator("[data-stack-next]")).toBeVisible();
     await expect(avatar).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(
-      row.getByRole("button", { name: "React with 👍", exact: true }),
+      preview.getByRole("button", { name: "View profile", exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(preview).toBeHidden();
+    await page.keyboard.press("Tab");
+    await expect(
+      row.getByRole("button", { name: "Add reaction", exact: true }),
     ).toBeFocused();
     await expect(avatar).toHaveCount(0);
     await composer.focus();

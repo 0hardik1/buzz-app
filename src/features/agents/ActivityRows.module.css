@@ -32,7 +32,9 @@
   display: inline-flex;
   padding: var(--space-half);
   border-radius: calc(var(--radius-row) - var(--space-1));
-  background: var(--affordance-subtle-hover);
+  /* Covers the timestamp with the hovered row's own fill, so the action never
+     reads as a separate gray chip on a colored row. */
+  background: var(--affordance-floating-hover);
   opacity: 0;
   pointer-events: none;
 }
@@ -64,7 +66,7 @@
     background: var(--affordance-floating-hover);
   }
   .activityItemAction [data-icon-variant]:hover:not([data-disabled]) {
-    background: var(--surface-popover);
+    background: var(--affordance-floating-selected);
   }
   .activityItemWithAction:hover .activityTimestamp {
     opacity: 0;
@@ -76,6 +78,54 @@
     pointer-events: auto;
   }
   .activityItemWithAction .activityTimestamp {
+    opacity: 0;
+  }
+}
+/* Unread activity: the trailing dot is Mark as read. Hover or keyboard focus
+   turns the dot into the action in its place, and the timestamp stays.
+   Without a hover pointer the dot stays and a tap on it reads the row. */
+.activityUnreadDot {
+  display: block;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  /* Room for the action's hover fill, so it never touches the timestamp. */
+  margin-inline-start: calc(
+    var(--size-control-sm) /
+    2 -
+    var(--space-2) /
+    2 -
+    var(--space-row-gap)
+  );
+  background: var(--text-navigation-unread);
+  transition: opacity var(--duration-state) var(--easing-state);
+}
+.activityItemUnread > .activityItemAction {
+  top: 0;
+  bottom: 0;
+  /* Center the button on the dot, inside the row's trailing inset. */
+  right: calc(
+    var(--space-control-inset) +
+    var(--space-2) /
+    2 -
+    var(--size-control-sm) /
+    2
+  );
+  align-items: center;
+  padding: 0;
+  background: none;
+  transition: opacity var(--duration-state) var(--easing-state);
+}
+.activityItemUnread:has(.activityItemAction:focus-within) .activityUnreadDot {
+  opacity: 0;
+}
+@media (hover: hover) and (pointer: fine) {
+  .activityItemUnread:hover .activityUnreadDot {
+    opacity: 0;
+  }
+}
+@media (hover: none) {
+  .activityItemUnread > .activityItemAction:not(:focus-within) {
     opacity: 0;
   }
 }
@@ -119,15 +169,11 @@
 .activityStatic > .activityItemBody {
   flex: 1;
 }
-.activityScope {
-  display: block;
-  color: var(--text-subtle);
-  font-size: var(--text-caption);
+.activityItemMeta {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.activityItemWithAction .activityItemMeta,
-.activityItemWithAction .activityScope {
+.activityItemWithAction .activityItemMeta {
   padding-inline-end: var(--size-control-sm);
 }

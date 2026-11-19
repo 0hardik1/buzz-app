@@ -19,9 +19,10 @@ async function setup({ cachedAssignment = true } = {}) {
   const heads = new Map();
   for (const [coordinate, blob] of [
     [
-      "channel-sections",
+      "channel-workspaces",
       {
         version: 1,
+        sectionOrder: [],
         sections: [{ id: "work", name: "Work", order: 0 }],
         assignments: { alpha: "work", beta: "work" },
       },
@@ -64,7 +65,7 @@ async function setup({ cachedAssignment = true } = {}) {
       secret,
       async () => {
         signal.throwIfAborted();
-        return [heads.get("channel-sections")];
+        return [heads.get("channel-workspaces")];
       },
       publish,
     ),
@@ -83,7 +84,12 @@ async function setup({ cachedAssignment = true } = {}) {
       .filter(([, value]) => value.starred)
       .map(([id]) => id);
   });
-  const owner = createSidebarPreferencesStore(read, true, assignment, star);
+  const owner = createSidebarPreferencesStore({
+    read,
+    available: true,
+    write: assignment,
+    writeStar: star,
+  });
   await owner.queries.ensure();
   return {
     owner,
@@ -102,7 +108,7 @@ it.each([true, false])(
     const h = await setup({ cachedAssignment });
     try {
       await h.prefs.setStar("alpha", false);
-      expect(h.publications).toEqual(["channel-sections", "channel-stars"]);
+      expect(h.publications).toEqual(["channel-workspaces", "channel-stars"]);
       const restored = await h.read();
       expect(restored.assignments).toEqual({ beta: "work" });
       expect(restored.starred).toEqual([]);
@@ -111,7 +117,7 @@ it.each([true, false])(
         sidebarSections([{ id: "alpha", name: "Alpha" }], restored).map(
           ({ key }) => key,
         ),
-      ).toEqual(["group:work", "channels", "dms"]);
+      ).toEqual(["starred", "group:work", "solo", "channels", "forums", "dms"]);
     } finally {
       h.owner.dispose();
     }
@@ -129,7 +135,7 @@ it("moves directly from Starred into a saved group and retains other assignments
       sidebarSections([{ id: "alpha", name: "Alpha" }], restored).map(
         ({ key }) => key,
       ),
-    ).toEqual(["group:work", "channels", "dms"]);
+    ).toEqual(["starred", "group:work", "solo", "channels", "forums", "dms"]);
   } finally {
     h.owner.dispose();
   }
@@ -174,7 +180,7 @@ it("keeps Starred after a partial failure and retry cannot resurrect the old gro
     await h.prefs.refresh();
     await h.prefs.setStar("alpha", false);
     expect(h.prefs.snapshot().data).toEqual({ ...partial, starred: [] });
-    expect(h.publications).toEqual(["channel-sections", "channel-stars"]);
+    expect(h.publications).toEqual(["channel-workspaces", "channel-stars"]);
   } finally {
     h.owner.dispose();
   }
@@ -296,9 +302,9 @@ it("create-and-move from Starred retries one durable section after partial failu
     expect(h.prefs.snapshot().moves).toEqual([
       expect.objectContaining({ pending: false, error: expect.any(String) }),
     ]);
-    expect(h.publications).toEqual(["channel-sections"]);
+    expect(h.publications).toEqual(["channel-workspaces"]);
     await h.prefs.createAndAssign("alpha", section);
-    expect(h.publications).toEqual(["channel-sections", "channel-stars"]);
+    expect(h.publications).toEqual(["channel-workspaces", "channel-stars"]);
     const restored = await h.read();
     expect(restored.sections).toHaveLength(2);
     expect(restored.assignments).toEqual({ alpha: section.id, beta: "work" });

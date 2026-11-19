@@ -1,35 +1,39 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { readView, writeView } from "../../shared/view-state";
-
-export const CHANNEL_SIDEBAR_DEFAULT_WIDTH = 260;
-export const CHANNEL_SIDEBAR_MIN_WIDTH = 220;
-export const CHANNEL_SIDEBAR_MAX_WIDTH = 520;
-
-export function clampChannelSidebarWidth(width: number) {
-  return Math.min(
-    CHANNEL_SIDEBAR_MAX_WIDTH,
-    Math.max(CHANNEL_SIDEBAR_MIN_WIDTH, Math.round(width)),
-  );
-}
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { readView, subscribeView, writeView } from "../../shared/view-state";
+import { contributedSidebarSectionKey } from "./sidebar-sections";
 
 type SidebarView = {
   collapsed: string[];
+  importedWorkspaceCollapse?: true;
+  contributionOrder: string[];
   scrollTop: number;
-  width: number;
   /** The destination whose sidebar entry the saved position shows. */
   location?: string | undefined;
 };
-
-// Preserve explicit resize intent across route remounts when storage is unavailable.
-const widths = new Map<string, number>();
 
 function restore(scope: string): SidebarView {
   const raw = readView<unknown>(scope, "channel-sidebar", null);
   const saved =
     raw && typeof raw === "object" ? (raw as Partial<SidebarView>) : {};
+  const collapsed = Array.isArray(saved.collapsed)
+    ? saved.collapsed.filter((key): key is string => typeof key === "string")
+    : [];
+  const legacy = saved.importedWorkspaceCollapse
+    ? []
+    : readView<unknown>(scope, "solo:collapsed-projects", []);
+  if (Array.isArray(legacy))
+    for (const id of legacy)
+      if (typeof id === "string") collapsed.push(id ? `group:${id}` : "solo");
   return {
-    collapsed: Array.isArray(saved.collapsed)
-      ? saved.collapsed.filter((key): key is string => typeof key === "string")
+    collapsed: [...new Set(collapsed)],
+    importedWorkspaceCollapse: true,
+    contributionOrder: Array.isArray(saved.contributionOrder)
+      ? saved.contributionOrder
+          .filter((key): key is string => typeof key === "string")
+          // Earlier orders saved raw `<plugin>/<id>` keys; section keys are prefixed.
+          .map((key) =>
+            key.includes(":") ? key : contributedSidebarSectionKey(key),
+          )
       : [],
     scrollTop:
       typeof saved.scrollTop === "number" &&
@@ -37,18 +41,18 @@ function restore(scope: string): SidebarView {
       saved.scrollTop >= 0
         ? saved.scrollTop
         : 0,
-    width:
-      widths.get(scope) ??
-      (typeof saved.width === "number" && Number.isFinite(saved.width)
-        ? clampChannelSidebarWidth(saved.width)
-        : CHANNEL_SIDEBAR_DEFAULT_WIDTH),
     location: typeof saved.location === "string" ? saved.location : undefined,
   };
 }
 
-/** Scoped to the ready community/viewer workspace; no roster or message cache. */
-export function readChannelSidebarWidth(scope: string): number {
-  return restore(scope).width;
+/** Header creation shares the sidebar's durable section expansion. */
+export function expandSidebarSection(scope: string, key: string) {
+  const saved = readView<object>(scope, "channel-sidebar", {});
+  writeView(scope, "channel-sidebar", {
+    ...saved,
+    importedWorkspaceCollapse: true,
+    collapsed: restore(scope).collapsed.filter((id) => id !== key),
+  });
 }
 
 /**
@@ -105,13 +109,38 @@ export function useSidebarView(
   scope: string,
   ready: boolean,
   location?: string,
+  preserve = false,
 ) {
   const [view, setView] = useState(() => restore(scope));
+  const savedLocation = useRef(view.location).current;
   const intent = useRef(view);
   const list = useRef<HTMLElement>(null);
   const pending = useRef(true);
+  const latestLocation = useRef(location);
+  useLayoutEffect(
+    () =>
+      subscribeView(scope, () => {
+        const saved = restore(scope);
+        if (
+          JSON.stringify(saved.collapsed) ===
+            JSON.stringify(intent.current.collapsed) &&
+          JSON.stringify(saved.contributionOrder) ===
+            JSON.stringify(intent.current.contributionOrder)
+        )
+          return;
+        intent.current = {
+          ...intent.current,
+          collapsed: saved.collapsed,
+          contributionOrder: saved.contributionOrder,
+        };
+        setView(intent.current);
+      }),
+    [scope],
+  );
   // The destination waiting for its entry to render.
-  const reveal = useRef<string | undefined>(undefined);
+  const reveal = useRef<{ location: string; explicit?: true } | undefined>(
+    undefined,
+  );
   // Until the first reveal or scroll, the saved destination keeps the
   // restored position.
   const restored = useRef(view.location);
@@ -133,8 +162,12 @@ export function useSidebarView(
       // The user's position now belongs to the destination they navigated
       // to, so returning there keeps it instead of revealing again.
       if (reveal.current)
-        intent.current = { ...intent.current, location: reveal.current };
-      reveal.current = restored.current = undefined;
+        intent.current = {
+          ...intent.current,
+          location: reveal.current.location,
+        };
+      reveal.current = undefined;
+      restored.current = undefined;
     };
     viewport.addEventListener("scroll", scrolled, { passive: true });
     return () => viewport.removeEventListener("scroll", scrolled);
@@ -153,19 +186,47 @@ export function useSidebarView(
   // resolves to a conversation) stays pending. It owns the saved position
   // only if the user scrolls there.
   useLayoutEffect(() => {
-    reveal.current = location === restored.current ? undefined : location;
-  }, [location]);
+    latestLocation.current = location;
+    reveal.current =
+      preserve || location === undefined || location === restored.current
+        ? undefined
+        : { location };
+  }, [location, preserve]);
   // The entry can render after navigation (roster startup, a new DM), so
   // retry after each commit until it exists. Runs after the restore above.
   const attempt = useRef(() => {});
+  const preparations = useRef(new Set<(location: string) => boolean>());
+  const beforeReveal = useCallback((prepare: (location: string) => boolean) => {
+    preparations.current.add(prepare);
+    return () => {
+      preparations.current.delete(prepare);
+    };
+  }, []);
+  // Only an explicit reveal of the current destination may reclaim the viewport.
+  const revealAgain = useCallback(() => {
+    if (latestLocation.current === undefined) return;
+    reveal.current = { location: latestLocation.current, explicit: true };
+    attempt.current();
+  }, []);
+  const retryReveal = useCallback(() => {
+    // Children can retry before this hook's layout effects clear an old reveal.
+    if (
+      !preserve ||
+      (reveal.current?.explicit && reveal.current.location === location)
+    )
+      attempt.current();
+  }, [preserve, location]);
   useLayoutEffect(() => {
     attempt.current = () => {
       if (!ready || !reveal.current || !list.current) return;
+      for (const prepare of preparations.current)
+        if (!prepare(reveal.current.location)) return;
       const top = revealCurrent(list.current);
       if (top === false) return;
       moved.current = scroll(list.current, top) ?? moved.current;
-      intent.current = { ...intent.current, location: reveal.current };
-      reveal.current = restored.current = undefined;
+      intent.current = { ...intent.current, location: reveal.current.location };
+      reveal.current = undefined;
+      restored.current = undefined;
     };
     attempt.current();
   });
@@ -185,7 +246,11 @@ export function useSidebarView(
           ...intent.current,
           scrollTop: list.current.scrollTop,
         };
-      writeView(scope, "channel-sidebar", intent.current);
+      // ResizableSidebar owns the record's width; keep its latest value.
+      writeView(scope, "channel-sidebar", {
+        ...readView<object | null>(scope, "channel-sidebar", null),
+        ...intent.current,
+      });
     };
     window.addEventListener("pagehide", save);
     return () => {
@@ -194,10 +259,17 @@ export function useSidebarView(
     };
   }, [scope]);
 
-  const update = useCallback((next: SidebarView) => {
-    intent.current = next;
-    setView(next);
-  }, []);
+  const update = useCallback(
+    (next: SidebarView) => {
+      intent.current = next;
+      setView(next);
+      writeView(scope, "channel-sidebar", {
+        ...readView<object>(scope, "channel-sidebar", {}),
+        ...next,
+      });
+    },
+    [scope],
+  );
   const toggle = useCallback(
     (key: string, open: boolean) => {
       const collapsed = intent.current.collapsed;
@@ -212,17 +284,33 @@ export function useSidebarView(
     },
     [update],
   );
-  return {
-    list,
-    collapsed: view.collapsed,
-    width: view.width,
-    toggle,
-    setWidth: (width: number) => {
-      const next = clampChannelSidebarWidth(width);
-      if (intent.current.width === next) return;
-      widths.set(scope, next);
-      update({ ...intent.current, width: next });
-      writeView(scope, "channel-sidebar", { ...intent.current, width: next });
+  const setContributionOrder = useCallback(
+    (contributionOrder: readonly string[]) => {
+      update({ ...intent.current, contributionOrder: [...contributionOrder] });
     },
-  };
+    [update],
+  );
+  return useMemo(
+    () => ({
+      list,
+      savedLocation,
+      collapsed: view.collapsed,
+      contributionOrder: view.contributionOrder,
+      setContributionOrder,
+      toggle,
+      retryReveal,
+      revealAgain,
+      beforeReveal,
+    }),
+    [
+      savedLocation,
+      view.collapsed,
+      view.contributionOrder,
+      setContributionOrder,
+      toggle,
+      retryReveal,
+      revealAgain,
+      beforeReveal,
+    ],
+  );
 }

@@ -4,6 +4,7 @@ export type ChannelSetup = {
   canvas: string;
   agents: string[];
   groupId: string;
+  starred?: boolean;
   templateId: string;
 };
 export type ChannelCreationInput = Readonly<{
@@ -13,8 +14,26 @@ export type ChannelCreationInput = Readonly<{
   ttlSeconds?: number | undefined;
   /** NIP-CL labels to create the channel with. */
   labels?: readonly string[] | undefined;
+  /** Create a NIP-CL system channel: left out of channel lists. */
+  system?: true | undefined;
   setup?: ChannelSetup | undefined;
 }>;
+/** Whether a request asks for anything beyond the channel itself. A template
+ * that currently resolves to nothing still names itself in `setup`. */
+export const setupWork = (setup: ChannelSetup | undefined) =>
+  !!setup &&
+  !!(setup.canvas || setup.agents.length || setup.groupId || setup.starred);
+/** What the person chose. The agents and Canvas follow live inventory and the
+ * template's contents, so they cannot make an unchanged form look new. */
+const requested = ({ setup, ...input }: ChannelCreationInput) =>
+  JSON.stringify({
+    ...input,
+    setup: setup && {
+      templateId: setup.templateId,
+      groupId: setup.groupId,
+      starred: setup.starred,
+    },
+  });
 type Progress = {
   version: 2;
   id: string;
@@ -52,6 +71,7 @@ export function createChannelSetup({
   refresh,
   canvasHead,
   place,
+  star,
   preflight,
   signal,
   changed,
@@ -68,9 +88,15 @@ export function createChannelSetup({
   delivered(id: string, active?: () => boolean): Promise<void>;
   /** Observe/read back only; never retry template publications. */
   confirm(id: string): Promise<void>;
-  refresh(id: string, member: string): Promise<void>;
+  /** Wait for relay roster proof that `member` is in the channel `input` made. */
+  refresh(
+    id: string,
+    member: string,
+    input: ChannelCreationInput,
+  ): Promise<void>;
   canvasHead(id: string): Promise<string | undefined>;
   place(id: string, group: string): Promise<void>;
+  star(id: string): Promise<void>;
   preflight(input: ChannelCreationInput): Promise<void>;
   signal: AbortSignal;
   changed(): void;
@@ -81,16 +107,7 @@ export function createChannelSetup({
   const encoder = new TextEncoder();
   let pending: Progress | undefined;
   let admitting: ReturnType<typeof run> | undefined;
-  const admitted = new Set<string>();
-  function isAdmitted(id: string) {
-    if (admitted.has(id)) return true;
-    try {
-      const saved = JSON.parse(localStorage.getItem(prefix + id) ?? "null");
-      return saved?.version === 2 && saved.id === id && saved.created === true;
-    } catch {
-      return false;
-    }
-  }
+  let admittingRequest: string | undefined;
   function write(p: Progress) {
     const raw = JSON.stringify(p);
     signal.throwIfAborted();
@@ -131,8 +148,35 @@ export function createChannelSetup({
     input: ChannelCreationInput,
     viewer: string,
   ): { admission: Promise<string>; completion: Promise<void> } {
-    if (admitting) return admitting;
-    const checking = pending;
+    if (admitting) {
+      if (admittingRequest === requested(input)) return admitting;
+      // A different request waits its turn instead of sharing this admission.
+      const next = admitting.admission
+        .then(
+          () => {},
+          () => {},
+        )
+        .then(() => {
+          // Queued work never abandons an unconfirmed attempt; only a request
+          // its owner makes may.
+          if (pending && requested(pending.input) !== requested(input))
+            throw new Error(
+              "Another channel's creation is unconfirmed; try again shortly",
+            );
+          return run(input, viewer);
+        });
+      return {
+        admission: next.then((queued) => queued.admission),
+        completion: next.then((queued) => queued.completion),
+      };
+    }
+    // Only an identical request rechecks the unconfirmed attempt; any other
+    // request abandons it.
+    const checking =
+      pending && requested(pending.input) === requested(input)
+        ? pending
+        : undefined;
+    if (!checking) forget();
 
     let opened!: (id: string) => void;
     let rejected!: (reason: unknown) => void;
@@ -156,7 +200,7 @@ export function createChannelSetup({
         let retrying = true;
         try {
           await delivered(operation, () => retrying && !signal.aborted);
-          await refresh(checking.id, viewer);
+          await refresh(checking.id, viewer, checking.input);
         } catch (error) {
           if (
             local
@@ -172,14 +216,13 @@ export function createChannelSetup({
           retrying = false;
         }
         checking.created = true;
-        admitted.add(checking.id);
         pending = undefined;
         changed();
         opened(checking.id);
         await save(checking);
-        if (checking.input.setup)
+        if (setupWork(checking.input.setup))
           throw new Error(
-            "Channel confirmed. Template setup was not continued; check its group, Canvas and members before finishing them manually.",
+            "Channel confirmed. Template setup was not continued; check its sidebar placement, Canvas and members before finishing them manually.",
           );
         await retire(checking);
         return;
@@ -261,19 +304,28 @@ export function createChannelSetup({
             create(p.id, p.input, active),
           );
           await delivered(id);
-          await refresh(p.id, viewer);
+          // Place before the row first lists, so it renders in its destination
+          // and the creation reveal targets that entry.
+          const setup = p.input.setup;
+          const placement = setup?.starred
+            ? star(p.id)
+            : setup?.groupId
+              ? place(p.id, setup.groupId)
+              : undefined;
+          // Observed after admission. If admission fails its result is dropped,
+          // but the delivered channel still lists in its destination.
+          placement?.catch(() => {});
+          await refresh(p.id, viewer, p.input);
           p.created = true;
-          admitted.add(p.id);
           pending = undefined;
           changed();
           // The original form owns admission until this exact channel is usable.
           // A subsequent storage/setup failure belongs to its completion notice.
           opened(p.id);
           await persist();
-          const setup = p.input.setup;
           let placementError: unknown;
           try {
-            if (setup?.groupId) await place(p.id, setup.groupId);
+            await placement;
           } catch (error) {
             placementError = error;
           }
@@ -334,7 +386,7 @@ export function createChannelSetup({
               }
               // Accepted without roster proof stays unresolved. Never restore a
               // deliberately removed member by replaying a confirmed command.
-              await refresh(p.id, agent);
+              await refresh(p.id, agent, p.input);
               p.added.push(agent);
               await persist();
             }
@@ -372,6 +424,7 @@ export function createChannelSetup({
     void completion.catch(rejected);
     const result = { admission, completion };
     admitting = result;
+    admittingRequest = requested(input);
     void admission
       .finally(() => {
         if (admitting === result) admitting = undefined;
@@ -379,20 +432,12 @@ export function createChannelSetup({
       .catch(() => {});
     return result;
   }
-  return Object.freeze({
-    run,
-    snapshot: () => pending?.input,
-    owns: (id: string) => pending?.id === id || isAdmitted(id),
-    recovered(id: string) {
-      admitted.add(id);
-      // A restarted session confirms only the saved Outbox creation. Keep any
-      // historical template receipt intact; it must never authorize new writes.
-      try {
-        return localStorage.getItem(prefix + id) !== null;
-      } catch {
-        // Storage failure cannot turn a confirmed channel into another Create.
-        return true;
-      }
-    },
-  });
+  /** Drops an unconfirmed attempt; one being checked continues. */
+  function forget() {
+    const abandoned = pending;
+    if (!abandoned || admitting) return;
+    pending = undefined;
+    void retire(abandoned).catch(() => {});
+  }
+  return Object.freeze({ run, forget });
 }

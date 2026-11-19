@@ -74,12 +74,10 @@ echo "==> Extracting $APPIMAGE_NAME"
 
 LIBDIR="$WORKDIR/squashfs-root/usr/lib"
 
-# Guard against a bundler layout change: if the primary offending lib is not
-# where we expect it, the rm globs below would silently no-op and we'd ship
-# an unfixed artifact. Fail loudly instead so a tauri/linuxdeploy upgrade
-# that changes the bundled lib set gets noticed here, not by users.
-if ! compgen -G "$LIBDIR/libwayland-client.so*" > /dev/null; then
-  echo "Error: libwayland-client not found in $LIBDIR — bundler layout changed; update fix-appimage.sh" >&2
+# Newer linuxdeploy excludes libwayland-client itself (Tauri CLI 2.12.2).
+# Validate the layout, not the presence of a library we want absent.
+if [[ ! -d "$LIBDIR" ]]; then
+  echo "Error: library directory not found: $LIBDIR — bundler layout changed; update fix-appimage.sh" >&2
   exit 1
 fi
 
@@ -112,24 +110,24 @@ echo "==> Installing GStreamer launcher shim on the app binary"
 # it is a shim between AppRun.wrapped and the real binary. First confirm the
 # wrapper still injects the override; if a tauri/linuxdeploy bump drops it, the
 # shim becomes a harmless no-op, but we want a human to re-verify rather than
-# silently ship — so fail loudly (mirrors the libwayland guard above).
+# silently ship — so fail loudly.
 APPRUN_WRAPPED="$WORKDIR/squashfs-root/AppRun.wrapped"
 if ! grep -aq "GST_PLUGIN_SYSTEM_PATH_1_0" "$APPRUN_WRAPPED"; then
   echo "Error: AppRun.wrapped is missing or no longer references GST_PLUGIN_SYSTEM_PATH_1_0 — GStreamer path injection changed; re-verify fix-appimage.sh" >&2
   exit 1
 fi
 
-APP_BIN="$WORKDIR/squashfs-root/usr/bin/buzz-foundation"
+APP_BIN="$WORKDIR/squashfs-root/usr/bin/Buzz"
 if [[ ! -f "$APP_BIN" ]]; then
-  echo "Error: app binary usr/bin/buzz-foundation not found — bundler layout changed; update fix-appimage.sh" >&2
+  echo "Error: app binary usr/bin/Buzz not found — bundler layout changed; update fix-appimage.sh" >&2
   exit 1
 fi
 if [[ -e "$APP_BIN.bin" ]]; then
-  echo "Error: usr/bin/buzz-foundation.bin already exists — shim already installed?" >&2
+  echo "Error: usr/bin/Buzz.bin already exists — shim already installed?" >&2
   exit 1
 fi
 
-# The real binary moves aside; buzz-foundation becomes a shim AppRun.wrapped execs.
+# The real binary moves aside; Buzz becomes a shim AppRun.wrapped execs.
 mv "$APP_BIN" "$APP_BIN.bin"
 cat > "$APP_BIN" <<'SHIM'
 #!/usr/bin/env bash
@@ -152,7 +150,7 @@ for var in GST_PLUGIN_SYSTEM_PATH_1_0 GST_PLUGIN_SYSTEM_PATH \
     unset "$var"
   fi
 done
-exec -a "buzz-foundation" "$here/buzz-foundation.bin" "$@"
+exec -a "Buzz" "$here/Buzz.bin" "$@"
 SHIM
 chmod +x "$APP_BIN"
 

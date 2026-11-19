@@ -280,6 +280,13 @@ it("byte LRU enforces both budgets and rejects a single oversize object", () => 
   expect(cache.stats().bytes).toBe(8);
   expect(cache.set("d", "D", 20)).toBe(false);
   expect(cache.keys()).toEqual(["a", "c"]);
+  // Replacing keeps recency, so the replaced entry is still evicted first.
+  expect(cache.replace("a", "A2", 5)).toBe(true);
+  expect(cache.replace("d", "D", 1)).toBe(false);
+  expect(cache.keys()).toEqual(["a", "c"]);
+  expect(cache.stats().bytes).toBe(9);
+  cache.set("e", "E", 1);
+  expect(cache.keys()).toEqual(["c", "e"]);
 });
 it("storage failure does not block foreground reads", async () => {
   const disk = memoryDisk();
@@ -346,8 +353,13 @@ it("reads rosters scoped to the viewer, then metadata only for unnamed channels"
   await flush();
   const names = next();
   expect(names.filters).toEqual([
-    { kinds: [39000], "#d": ["a", "b"], limit: 500 },
+    { kinds: [39000], authors: [relay.pubkey], "#d": ["a", "b"], limit: 500 },
   ]);
+  expect(
+    queries.list().channels.map((channel) => channel.metadataPending),
+  ).toEqual([true, true]);
+  expect(queries.get?.("a")?.metadataPending).toBe(true);
+  expect(queries.get?.("b")?.metadataPending).toBe(true);
   names.respond([metadata(relay, "a", "Alpha")]);
   await flush();
   expect(queries.list()).toMatchObject({
@@ -357,6 +369,11 @@ it("reads rosters scoped to the viewer, then metadata only for unnamed channels"
       { id: "b", name: "b" },
     ],
   });
+  expect(
+    queries.list().channels.every((channel) => !channel.metadataPending),
+  ).toBe(true);
+  expect(queries.get?.("a")?.metadataPending).toBeUndefined();
+  expect(queries.get?.("b")?.metadataPending).toBeUndefined();
   expect(queries.list().coverage).toBeUndefined();
   queries.prepare?.("a");
   next().respond(empty("a"));
@@ -371,13 +388,38 @@ it("reads rosters scoped to the viewer, then metadata only for unnamed channels"
   const nameRead = pending.at(-1);
   assert.exists(nameRead);
   expect(nameRead.filters).toEqual([
-    { kinds: [39000], "#d": ["a"], limit: 500 },
+    { kinds: [39000], authors: [relay.pubkey], "#d": ["a"], limit: 500 },
   ]);
   next().respond([metadata(relay, "a", "Alpha")]);
   await flush();
   expect(queries.list().channels.map((c) => c.id)).toEqual(["a"]);
   expect(store.diagnostics().heads.entries).toBe(1);
   store.dispose();
+});
+
+it("keeps failed classification pending and releases it after an empty successful retry", async () => {
+  const { queries, store, next } = setup();
+  try {
+    queries.ensureList();
+    next().respond([roster(relay, "a", [viewer.pubkey])]);
+    await flush();
+    next().fail(new Error("Metadata unavailable"));
+    await vi.waitFor(() => expect(queries.list().status).toBe("error"));
+    expect(queries.list().channels[0]?.metadataPending).toBe(true);
+    queries.refreshList?.();
+    next().respond([roster(relay, "a", [viewer.pubkey])]);
+    await flush();
+    next().respond([]);
+    await vi.waitFor(() =>
+      expect(queries.list().channels[0]?.metadataPending).toBeUndefined(),
+    );
+    expect(queries.list()).toMatchObject({
+      status: "ready",
+      channels: [{ id: "a" }],
+    });
+  } finally {
+    store.dispose();
+  }
 });
 
 it("keeps known membership and cached heads when a later roster page fails", async () => {
@@ -428,8 +470,10 @@ it("hides DM channels behind the NIP-29 hidden tag", async () => {
       name: "DM",
       description: "",
       visibility: undefined,
+      joinRole: "member",
       hidden: true,
       members: [viewer.pubkey, alice.pubkey].sort(),
+      owners: [],
       preview: undefined,
     },
   ]);
@@ -495,6 +539,48 @@ it("persists a ready head before optional profiles, enriching only after they ar
     names.respond([profile(alice, { name: "Alice" })]);
     await vi.waitFor(() => expect(disk.write).toHaveBeenCalledTimes(2));
     expect(vi.mocked(disk.write).mock.calls[1]?.[0].profiles).toHaveLength(1);
+  } finally {
+    store.dispose();
+  }
+});
+
+it("reads and persists a Solo chat's head like any channel's, threads staying in their thread", async () => {
+  const disk = memoryDisk();
+  const { queries, next, store } = setup({ persistence: disk });
+  try {
+    queries.ensureList();
+    next().respond([
+      roster(relay, "work", [viewer.pubkey]),
+      metadata(relay, "work", "Work", undefined, [
+        ["t", "stream"],
+        ["private"],
+        ["t", "buzz.solo"],
+      ]),
+    ]);
+    await flush();
+    expect(queries.get?.("work")?.channelType).toBe("solo");
+    queries.ensure("work");
+    const read = next();
+    expect(read.filters).toEqual([
+      expect.objectContaining({
+        "#h": ["work"],
+        top_level: true,
+        include_aux: true,
+      }),
+    ]);
+    const prompt = message(viewer, "work", "Prompt", 20);
+    const answer = message(alice, "work", "Answer", 21);
+    const reply = message(alice, "work", "In a thread", 22, [
+      ["e", prompt.id, "", "reply"],
+    ]);
+    read.respond([answer, prompt, reply, ...empty("work")]);
+    await flush();
+    expect(queries.window("work").rows.map((row) => row.content)).toEqual([
+      "Prompt",
+      "Answer",
+    ]);
+    expect(disk.write).toHaveBeenCalledOnce();
+    expect(vi.mocked(disk.write).mock.calls[0]?.[0].channelId).toBe("work");
   } finally {
     store.dispose();
   }

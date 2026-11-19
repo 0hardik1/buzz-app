@@ -1,3 +1,4 @@
+import { isRetryableRead, retryRead } from "./read-retry";
 import {
   canonicalChannel,
   MissingThreadBounds,
@@ -8,12 +9,14 @@ import { threadReference } from "./thread-reference";
 export { threadReference } from "./thread-reference";
 import type { ChannelMessage } from "./contracts";
 import type { EventData, ReadFilter, RelayEvent } from "./events";
+import { newer } from "./events";
 import type { LocalEvents } from "./outbox";
-import type { RelayReader } from "./reader";
-import { byteSize } from "./budget";
+import type { Priority, RelayReader } from "./reader";
+import { listByteSize } from "./budget";
 import { foldMessages } from "./fold";
 import { compareMessages, MessageClock } from "./message-order";
 import { shareMessageRows } from "./row-identity";
+import { RESUME_READ_AGE } from "./live";
 
 const AUX = new Set([5, 7, 9005, 40003, 39005, 39006]);
 const PAGE_SIZE = 50;
@@ -46,7 +49,42 @@ export type ThreadSnapshot = Readonly<{
   /** Exact navigation target, folded independently of bounded thread traversal. */
   target?: ChannelMessage | undefined;
   targetStatus?: "loading" | "ready" | "unavailable" | "error" | undefined;
+  /** Rows include a closed view's resumed rows, until this view's first
+   * refresh settles either way. */
+  resumed?: true | undefined;
 }>;
+/** What a closed ordinary thread last showed. A view opened from it shows
+ * these rows at once, as display only: they are never evidence, and the
+ * view's first refresh replaces them. */
+export type ThreadResume = Readonly<{
+  root: ChannelMessage;
+  replies: readonly ChannelMessage[];
+  direction: "older" | "forward";
+  canLoadMore: boolean;
+  limited: boolean;
+}>;
+/** Every ID a deletion among these events names, valid or not. */
+function deletionTargets(events: Iterable<EventData>) {
+  const ids = new Set<string>();
+  for (const event of events)
+    if (event.kind === 5 || event.kind === 9005)
+      for (const [name, id] of event.tags) if (name === "e" && id) ids.add(id);
+  return ids;
+}
+/** A resume without the rows any of these retained events deletes. A thread
+ * view admits a deletion only beside its target, so a tombstone retained
+ * alone would not hide a resumed row. */
+export function resumeAfter(
+  resume: ThreadResume,
+  events: readonly EventData[],
+): ThreadResume | undefined {
+  const deleted = deletionTargets(events);
+  if (deleted.has(resume.root.id)) return undefined;
+  const replies = resume.replies.filter((row) => !deleted.has(row.id));
+  return replies.length === resume.replies.length
+    ? resume
+    : Object.freeze({ ...resume, replies });
+}
 export type ThreadRetarget =
   | "selected"
   | "different"
@@ -57,11 +95,25 @@ export type ThreadView = {
   snapshot(): ThreadSnapshot;
   subscribe(listener: () => void): () => void;
   refresh(): Promise<void>;
-  loadMore(): Promise<void>;
+  /** Reads older replies; with `through`, keeps paging in this one read until
+   * a reply at or before the time it returns is loaded. */
+  loadMore(through?: () => number): Promise<void>;
   /** Change exact selection only when verified ancestry belongs to this thread. */
   retarget(messageId: string, signal: AbortSignal): Promise<ThreadRetarget>;
   dispose(): void;
 };
+/** Why an exact read can't show its target: this channel holds no such message
+ * (`not-found`), or the read failed (`unavailable`). A failed thread read also
+ * fails a target that is its `root`. Undefined while the read may still show it. */
+export function threadFailure(
+  snapshot: ThreadSnapshot,
+  root: boolean,
+): "not-found" | "unavailable" | undefined {
+  if (root && snapshot.status === "error") return "unavailable";
+  if (snapshot.targetStatus === "unavailable") return "not-found";
+  if (snapshot.targetStatus === "error") return "unavailable";
+  return undefined;
+}
 
 /** Session-owned evidence. Finite page cursors NEVER come from the live/local display union. */
 export function createThreadView({
@@ -69,40 +121,75 @@ export function createThreadView({
   messageId,
   relayAuthor,
   signingAuthority,
-  reader,
-  targetReader = reader,
+  agentOwner,
+  reader: sourceReader,
+  targetReader: sourceTargetReader = sourceReader,
   admitTarget,
   seed,
+  resume,
   local,
   canAccess,
+  canRefresh = canAccess,
   visible,
   notify,
   exact = false,
+  priority = "foreground",
   admit = (events) => events,
   clock = new MessageClock(),
+  dropped: openedDropped = false,
+  now = Date.now,
 }: {
   channelId: string;
   messageId: string;
   relayAuthor: string;
   /** Explicit NIP-11 self; only it may attribute messages to others. */
   signingAuthority?: string | undefined;
+  agentOwner?: ((pubkey: string) => string | undefined) | undefined;
   reader: RelayReader;
   targetReader?: RelayReader;
   admitTarget?: (events: readonly RelayEvent[]) => readonly RelayEvent[];
   seed: RelayEvent | undefined;
+  /** Ignored by exact views and by a view of a reply. */
+  resume?: ThreadResume | undefined;
   local: LocalEvents | undefined;
   canAccess(): boolean;
+  /** Cached membership can display saved rows but cannot authorize a network retry. */
+  canRefresh?(): boolean;
   visible(events: readonly RelayEvent[]): readonly RelayEvent[];
   notify(listener: () => void): void;
   exact?: boolean;
+  /** Admission for every read this view makes. A passive reader, one that
+   * only decorates a link, takes `background` so an opened or previewed
+   * conversation's reads start ahead of it. */
+  priority?: Priority | undefined;
   /** The session's send clock; rendered replies raise its channel watermark. */
   clock?: MessageClock;
   /** Exact finite reads enter session reconciliation only after a complete fold. */
   admit?:
     | ((events: readonly RelayEvent[]) => readonly RelayEvent[])
     | undefined;
+  /** Opened while the stream was down, or before it was up: the first read
+   * is the snapshot its establishment refresh must reach. */
+  dropped?: boolean;
+  /** The store's clock: a thread resumes with no read on the same age rule. */
+  now?: (() => number) | undefined;
 }) {
+  // These finite thread reads have no session recovery source. Their existing
+  // selection/page controllers still own cancellation and stale-result fencing.
+  const retrying = (source: RelayReader): RelayReader => ({
+    read: (filters, settings) =>
+      retryRead(
+        (signal) => source.read(filters, { priority, ...settings, signal }),
+        settings?.signal ?? new AbortController().signal,
+        (error) => canRefresh() && isRetryableRead(error),
+      ),
+  });
+  const reader = retrying(sourceReader);
+  const targetReader = retrying(sourceTargetReader);
   const acceptTarget = admitTarget ?? admit;
+  // Only a view created exact reads through a reader that returns rows
+  // unadmitted; a retarget makes a view exact but keeps its reader.
+  const unadmitted = exact;
   let disposed = false;
   let rootId: string | undefined;
   let rootUnavailable = false;
@@ -110,6 +197,7 @@ export function createThreadView({
     ? "loading"
     : undefined;
   let remote: readonly RelayEvent[] = [];
+  let remoteIds = new Set<string>();
   let staged: readonly RelayEvent[] = [];
   let selectionStaged: readonly RelayEvent[] = [];
   let selectionController: AbortController | undefined;
@@ -121,8 +209,41 @@ export function createThreadView({
     : "legacy";
   let cursor: ThreadCursor | undefined;
   let pages = 0;
+  const isReply = (event: RelayEvent) =>
+    !AUX.has(event.kind) &&
+    event.id !== rootId &&
+    inChannel(event, channelId) &&
+    threadReference(event)?.rootId === rootId;
+  /** Replies a strict refresh must reach from its newest page. The selected
+   * target is retained beyond traversal by design. */
+  const unverified = () =>
+    new Set(
+      remote
+        .filter((event) => isReply(event) && !(exact && event.id === messageId))
+        .map((event) => event.id),
+    );
+  /** The replies held when the stream dropped, or read while it was down,
+   * until the refresh after it is back completes. The re-established stream
+   * replays its last minutes before that refresh; those replies are newer
+   * than any gap, not overlap with it. */
+  let held: Set<string> | undefined;
+  /** The stream is down: a completed refresh keeps `held`, taking one from
+   * its replies if the view has none. Only its establishment refresh clears it. */
+  let dropped = openedDropped;
+  /** The view was ready, with no read running, when the stream dropped, and
+   * its replies came from a refresh started at most `RESUME_READ_AGE` before:
+   * they reached the live stream then. Cleared by any establishment. */
+  let liveAtDrop = false;
+  /** When the refresh whose replies the view holds started. */
+  let readAt = -Infinity;
   let controller: AbortController | undefined;
-  let again = false;
+  /** A refresh requested while a read runs; the stream's return carries over. */
+  let again: false | "refresh" | "established" = false;
+  /** An older page requested during a background repair, which stays ready. */
+  let older = false;
+  /** Resumed rows shown beside the evidence until the first refresh settles.
+   * That refresh reads as a fresh view would, in the background. */
+  let shown: ThreadResume | undefined;
   let snapshot: ThreadSnapshot = Object.freeze({
     status: "idle",
     root: undefined,
@@ -132,6 +253,10 @@ export function createThreadView({
     limited: false,
   });
   const listeners = new Set<() => void>();
+  // The last fold's local and profile inputs: its operations and the agent
+  // owners it looked up.
+  let localInputs: ReturnType<LocalEvents["snapshot"]> = [];
+  let owners = new Map<string, string | undefined>();
   function related<T extends EventData>(
     events: readonly T[],
     selectedId = exact ? messageId : undefined,
@@ -170,16 +295,33 @@ export function createThreadView({
     return [...result.values()];
   }
   function union(...batches: readonly (readonly RelayEvent[])[]) {
-    return [
-      ...new Map(batches.flat().map((event) => [event.id, event])).values(),
-    ];
+    const events = new Map<string, RelayEvent>();
+    const summaries = new Map<string, RelayEvent>();
+    for (const event of batches.flat()) {
+      if (event.kind === 39005) {
+        const target = event.tags.find(([name]) => name === "e")?.[1];
+        if (!target || event.pubkey !== relayAuthor) continue;
+        const previous = summaries.get(target);
+        const latest = newer(previous, event);
+        if (latest !== event) continue;
+        if (previous) events.delete(previous.id);
+        summaries.set(target, event);
+      }
+      events.set(event.id, event);
+    }
+    // Match the fold before budgeting; messages and tombstones remain evidence.
+    return [...events.values()];
   }
-  function notifyListeners() {
+  /** A fold that changed nothing keeps the snapshot and notifies no one. */
+  function emit(next: ThreadSnapshot) {
+    const keys = Object.keys(next) as (keyof ThreadSnapshot)[];
+    if (keys.every((key) => next[key] === snapshot[key])) return;
+    snapshot = Object.freeze(next);
     for (const listener of listeners) notify(listener);
   }
   function publishStatus(patch: Partial<ThreadSnapshot>) {
     if (disposed) return;
-    snapshot = Object.freeze({
+    emit({
       ...snapshot,
       ...patch,
       ...(exact
@@ -189,23 +331,28 @@ export function createThreadView({
           }
         : {}),
     });
-    notifyListeners();
+  }
+  /** This thread's local operations; others never reach its fold. */
+  function localOperations() {
+    const operations = (canAccess() ? (local?.snapshot() ?? []) : []).filter(
+      // Failed reply intent stays visible for same-event retry, just like channel
+      // messages; failed edits/reactions must not change the rendered content.
+      (item) => item.delivery !== "failed" || contentKind(item.event),
+    );
+    const events = new Set(related(operations.map((item) => item.event)));
+    return operations.filter((item) => events.has(item.event));
   }
   function publish(patch: Partial<ThreadSnapshot> = {}) {
     if (disposed) return;
-    const operations = canAccess() ? (local?.snapshot() ?? []) : [];
+    const operations = localOperations();
+    localInputs = operations;
     const inputs = new Map(
       remote.map((event) => [event.id, event as EventData]),
     );
-    for (const event of related(
-      operations
-        // Failed reply intent stays visible for same-event retry, just like channel
-        // messages; failed edits/reactions must not change the rendered content.
-        .filter((item) => item.delivery !== "failed" || contentKind(item.event))
-        .map((item) => item.event),
-    ))
-      inputs.set(event.id, event);
+    for (const item of operations) inputs.set(item.event.id, item.event);
     const deliveries = new Map(operations.map((item) => [item.event.id, item]));
+    const looked = new Map<string, string | undefined>();
+    owners = looked;
     const rows = shareMessageRows(
       snapshot.root ? [snapshot.root, ...snapshot.replies] : snapshot.replies,
       foldMessages(
@@ -215,6 +362,13 @@ export function createThreadView({
         {
           includeReplies: true,
           signingAuthority,
+          agentOwner:
+            agentOwner &&
+            ((pubkey) => {
+              const owner = agentOwner(pubkey);
+              looked.set(pubkey, owner);
+              return owner;
+            }),
         },
       ).map((row) => {
         const item = deliveries.get(row.id);
@@ -243,34 +397,47 @@ export function createThreadView({
       .sort(compareMessages);
     for (const row of nextReplies)
       clock.observe(channelId, row.createdAtMs ?? row.createdAt * 1000);
+    let nextRoot = !rootUnavailable
+      ? readable.find((row) => row.id === rootId)
+      : undefined;
+    if (shown && !rootUnavailable) {
+      // Evidence wins. A resumed row fills in only an event not read yet, and
+      // never one a retained deletion names, valid or not: the refresh decides.
+      const read = deletionTargets(inputs.values());
+      for (const event of inputs.values()) read.add(event.id);
+      nextReplies.push(...shown.replies.filter((row) => !read.has(row.id)));
+      nextReplies.sort(compareMessages);
+      if (!read.has(shown.root.id)) nextRoot ??= shown.root;
+    }
     const replies =
       snapshot.replies.length === nextReplies.length &&
       snapshot.replies.every((row, index) => row === nextReplies[index])
         ? snapshot.replies
         : Object.freeze(nextReplies);
-    snapshot = Object.freeze({
+    emit({
       ...snapshot,
       ...patch,
-      root: !rootUnavailable
-        ? readable.find((row) => row.id === rootId)
-        : undefined,
+      root: nextRoot,
       replies,
+      resumed: shown ? true : undefined,
       ...(exact ? { target, targetStatus } : {}),
     });
-    notifyListeners();
   }
   function retain(events: readonly RelayEvent[], commit = true) {
-    if (events.length > MAX_EVENTS || byteSize(events) > MAX_BYTES) {
+    if (events.length > MAX_EVENTS || listByteSize(events) > MAX_BYTES) {
       // Never silently evict a deletion/ancestor then display resurrected content.
       controller?.abort();
       selectionController?.abort();
       selectionStaged = [];
       remote = [];
+      remoteIds.clear();
       staged = [];
       rootId = undefined;
       cursor = undefined;
       pages = 0;
       again = false;
+      older = false;
+      shown = undefined;
       if (exact) targetStatus = "error";
       publish({
         status: "error",
@@ -281,12 +448,17 @@ export function createThreadView({
       });
       return false;
     }
-    if (commit) remote = events;
+    if (commit) {
+      remote = events;
+      remoteIds = new Set(events.map((event) => event.id));
+    }
     return true;
   }
   function receive(events: readonly RelayEvent[]) {
     if (disposed || !canAccess() || (!rootId && !exact)) return;
-    const incoming = related(events);
+    const fresh = events.filter((event) => !remoteIds.has(event.id));
+    if (!fresh.length) return;
+    const incoming = related(fresh);
     if (!incoming.length) return;
     if (retain(union(remote, incoming))) {
       publish();
@@ -294,17 +466,41 @@ export function createThreadView({
   }
   if (seed && canAccess() && contentKind(seed) && inChannel(seed, channelId)) {
     rootId = threadReference(seed)?.rootId ?? seed.id;
-    if (seed.id === rootId) remote = [seed];
+    if (seed.id === rootId) {
+      remote = [seed];
+      remoteIds.add(seed.id);
+    }
     publish();
   }
+  if (
+    resume &&
+    !exact &&
+    canAccess() &&
+    resume.root.id === messageId &&
+    (!rootId || rootId === messageId)
+  ) {
+    rootId = messageId;
+    shown = resume;
+    publish({
+      status: "ready",
+      direction: resume.direction,
+      canLoadMore: resume.canLoadMore,
+      limited: resume.limited,
+    });
+  }
   function purge(clear = false) {
+    // A purged view no longer holds what the stream delivered before the drop.
+    liveAtDrop = false;
+    readAt = -Infinity;
     controller?.abort();
     selectionController?.abort();
     selectionController = undefined;
     selectionStaged = [];
     controller = undefined;
     again = false;
+    older = false;
     staged = [];
+    shown = undefined;
     if (exact) targetStatus = "loading";
     if (clear || !canAccess()) {
       remote = [];
@@ -312,7 +508,9 @@ export function createThreadView({
       rootId = undefined;
       cursor = undefined;
       pages = 0;
+      held = undefined;
     } else remote = visible(remote);
+    remoteIds = new Set(remote.map((event) => event.id));
     publish({
       status: "idle",
       canLoadMore: false,
@@ -341,10 +539,18 @@ export function createThreadView({
       else staged = events;
       return retain(union(remote, staged, selectionStaged), false);
     };
-    const response = await targetReader.read(
+    const target = targetReader.read(
       [{ ids: [id], "#h": [channelId], limit: 1 }],
       { signal: owned.signal },
     );
+    // The overlay read overlaps the target read; its rows are staged only
+    // after the target is.
+    const overlaysRead = targetReader.read(
+      [{ kinds: [5, 7, 9005, 40003, 39005], "#e": [id], limit: 500 }],
+      { signal: owned.signal },
+    );
+    overlaysRead.catch(() => undefined);
+    const response = await target;
     if (!active()) return "cancelled";
     // The reader verifies the wire response; this pure visibility check does
     // not reconcile the bare candidate into this or another published view.
@@ -360,10 +566,7 @@ export function createThreadView({
     // Staging makes live overlay deletions resolvable without exposing an
     // incomplete selected fold. Existing displayed content remains untouched.
     if (!stage([event])) return "error";
-    const overlays = await targetReader.read(
-      [{ kinds: [5, 7, 9005, 40003, 39005], "#e": [id], limit: 500 }],
-      { signal: owned.signal },
-    );
+    const overlays = await overlaysRead;
     if (!active()) return "cancelled";
     if (!stage(union(pending, related(overlays, id)))) return "error";
     const ids = union(remote, pending)
@@ -412,6 +615,7 @@ export function createThreadView({
       !foldMessages(channelId, relayAuthor, combined, {
         includeReplies: true,
         signingAuthority,
+        agentOwner,
       }).some((row) => row.id === id)
     ) {
       // Keep real tombstones, but do not replace the selected target with a
@@ -455,6 +659,8 @@ export function createThreadView({
         ? "cancelled"
         : "error";
     } finally {
+      // Stops a read started alongside another that this ended without.
+      owned.abort();
       signal.removeEventListener("abort", cancel);
       if (selectionController === owned) {
         selectionStaged = [];
@@ -463,10 +669,16 @@ export function createThreadView({
     }
   }
 
-  async function run(replace: boolean) {
+  async function run(
+    replace: boolean,
+    established = false,
+    through?: () => number,
+  ) {
     if (disposed) return;
     if (controller) {
-      if (replace) again = true;
+      if (established) again = "established";
+      else if (replace) again ||= "refresh";
+      else older = true;
       return;
     }
     if (!canAccess()) {
@@ -474,8 +686,16 @@ export function createThreadView({
       return;
     }
     if (!replace && (!snapshot.canLoadMore || snapshot.limited)) return;
+    const background = established || (replace && !!shown);
     const owned = new AbortController();
     controller = owned;
+    const startedAt = now();
+    // A read after the drop can fail or replace the rows the stream kept live,
+    // so only an untouched view may skip its establishment refresh.
+    liveAtDrop = false;
+    // Cleared as this refresh starts, not when the stream came back: a refresh
+    // it supersedes still completes against the replies held across the drop.
+    if (established) dropped = false;
     const active = () =>
       !disposed && !owned.signal.aborted && controller === owned;
     const targetPages = replace ? Math.max(1, pages) : 1;
@@ -485,11 +705,14 @@ export function createThreadView({
     // Repair retains already-verified presentation; only a new/unavailable
     // selection waits for its initial fold. Never unmount a reader on reconnect.
     if (exact && replace && targetStatus !== "ready") targetStatus = "loading";
-    publishStatus({
-      status: "loading",
-      error: undefined,
-      readKind: replace ? "refresh" : "older",
-    });
+    // A stream establishment (a reconnect, or a minute renewal) repairs a ready
+    // view in the background: it stays ready unless the repair changes it.
+    if (!background || snapshot.status !== "ready")
+      publishStatus({
+        status: "loading",
+        error: undefined,
+        readKind: replace ? "refresh" : "older",
+      });
     try {
       if (exact && replace) {
         const revision = selectionRevision;
@@ -529,14 +752,44 @@ export function createThreadView({
         "#h": [channelId],
         limit: 1,
       };
+      const filter: ReadFilter = {
+        kinds: [9, 40002, 40008],
+        "#h": [channelId],
+        "#e": [rootId],
+        depth_limit: 100,
+        limit: PAGE_SIZE,
+        include_aux: true,
+      };
+      const windowRead = (signal: AbortSignal) =>
+        reader.read(
+          [
+            {
+              ...filter,
+              kinds: STRICT_WINDOW_KINDS,
+              limit: nextPages === 0 ? INITIAL_WINDOW_SIZE : PAGE_SIZE,
+              thread_window: true,
+              ...(nextCursor
+                ? { until: nextCursor.created_at, before_id: nextCursor.id }
+                : {}),
+            },
+          ],
+          { signal },
+        );
+      let firstWindow: ReturnType<typeof windowRead> | undefined;
       let root: readonly RelayEvent[] = [];
       if (mode !== "legacy") {
         // Strict requests cannot batch an ID lookup with a window. Admit the
-        // verified root first so channel-less root aux has visibility evidence.
+        // verified root first so channel-less root aux has visibility evidence:
+        // the first window's rows are read only after it.
         // Revalidate once per run, not once per page of a retained-range repair.
-        const rootResponse = await reader.read([rootFilter], {
-          signal: owned.signal,
-        });
+        const rootRead = reader.read([rootFilter], { signal: owned.signal });
+        // An admitting reader would drop root aux from a window answered
+        // before the root; only an unadmitting one overlaps the window.
+        if (unadmitted) {
+          firstWindow = windowRead(owned.signal);
+          firstWindow.catch(() => undefined);
+        }
+        const rootResponse = await rootRead;
         if (!active()) return;
         root = admit(rootResponse);
         if (!active()) return;
@@ -557,34 +810,30 @@ export function createThreadView({
         }
         if (!retain(union(remote, related(root)))) return;
       }
+      // A strict refresh re-reads from the newest end. Live replay covers
+      // minutes, not a long disconnect, so keep paging until a reply kept
+      // across the drop is reached.
+      const kept = replace ? (held ?? unverified()) : new Set<string>();
+      let reached = !kept.size;
       let more = false;
-      for (let page = 0; page < targetPages; page++) {
-        const filter: ReadFilter = {
-          kinds: [9, 40002, 40008],
-          "#h": [channelId],
-          "#e": [rootId],
-          depth_limit: 100,
-          limit: PAGE_SIZE,
-          include_aux: true,
-        };
+      // Where the loop passed the range the reader had, so a fill that never
+      // reaches a pre-refresh reply can settle back on it.
+      let range: { cursor: ThreadCursor | undefined } | undefined;
+      let oldest = Infinity;
+      for (
+        let page = 0;
+        page < targetPages ||
+        (mode === "older" && !reached && page < MAX_PAGES) ||
+        (through !== undefined && oldest > through() && nextPages < MAX_PAGES);
+        page++
+      ) {
         let response: readonly RelayEvent[];
         let bounds: ReturnType<typeof threadBounds> | undefined;
         if (mode !== "legacy") {
           try {
-            const page = await reader.read(
-              [
-                {
-                  ...filter,
-                  kinds: STRICT_WINDOW_KINDS,
-                  limit: nextPages === 0 ? INITIAL_WINDOW_SIZE : PAGE_SIZE,
-                  thread_window: true,
-                  ...(nextCursor
-                    ? { until: nextCursor.created_at, before_id: nextCursor.id }
-                    : {}),
-                },
-              ],
-              { signal: owned.signal },
-            );
+            const read = firstWindow ?? windowRead(owned.signal);
+            firstWindow = undefined;
+            const page = await read;
             if (!active()) return;
             const bound = page.find((event) => event.kind === 39007);
             if (!bound) throw new MissingThreadBounds();
@@ -649,15 +898,10 @@ export function createThreadView({
         }
         // Count traversal rows before presentation filtering. The bridge may return
         // other content kinds, and appended auxiliaries do not consume its page limit.
-        const replies = events
-          .filter(
-            (event) =>
-              !AUX.has(event.kind) &&
-              event.id !== rootId &&
-              inChannel(event, channelId) &&
-              threadReference(event)?.rootId === rootId,
-          )
-          .sort(compare);
+        const replies = events.filter(isReply).sort(compare);
+        reached ||= replies.some((event) => kept.has(event.id));
+        for (const event of replies)
+          oldest = Math.min(oldest, event.created_at);
         if (
           !bounds &&
           replies.some((event) => nextCursor && compare(event, nextCursor) <= 0)
@@ -670,22 +914,54 @@ export function createThreadView({
           : (replies.at(-1) ?? nextCursor);
         nextPages++;
         fetched = union(fetched, related(events));
-        if (fetched.length > MAX_EVENTS || byteSize(fetched) > MAX_BYTES) {
+        if (fetched.length > MAX_EVENTS || listByteSize(fetched) > MAX_BYTES) {
           retain(fetched);
           return;
         }
         // Only strict bounds prove exhaustion. Legacy short pages may be filtered
         // after LIMIT, so an empty continuation means merely no more returned.
         more = bounds ? bounds.hasMore : replies.length > 0;
+        if (nextPages === targetPages) range = { cursor: nextCursor };
+        // Each older page commits as it lands, so a later failure retries
+        // from the next page rather than the first.
+        if (!replace) {
+          if (!retain(union(remote, fetched))) return;
+          cursor = nextCursor;
+          pages = nextPages;
+        }
         if (!more) break;
       }
       if (!active()) return;
       // A bounded response cannot retract observed evidence. Retain known edits,
-      // tombstones and live rows even when a later finite read omits them.
-      if (!retain(union(remote, fetched))) return;
+      // tombstones and live rows even when a later finite read omits them. Replies
+      // the re-read never reached sit past a gap it cannot show; those go. The
+      // pages read past the reader's range stay as evidence, but the range
+      // settles back on the reader's: as the retained range, every later
+      // refresh would re-read them all.
+      const unreached = mode === "older" && !reached && more;
+      if (unreached && range) {
+        nextCursor = range.cursor;
+        nextPages = targetPages;
+      }
+      if (
+        !retain(
+          union(
+            unreached ? remote.filter((event) => !kept.has(event.id)) : remote,
+            fetched,
+          ),
+        )
+      )
+        return;
       rootUnavailable = false;
       cursor = nextCursor;
       pages = nextPages;
+      if (replace) readAt = startedAt;
+      // While the stream is down (a drop mid-refresh ran stale() first) the
+      // held replies stand; a view holding none, or a fill that gave them up,
+      // takes the replies now.
+      if (replace && !dropped) held = undefined;
+      else if (replace && (unreached || !held?.size)) held = unverified();
+      if (replace) shown = undefined;
       publish({
         status: "ready",
         error: undefined,
@@ -696,16 +972,30 @@ export function createThreadView({
       });
     } catch (error) {
       if (active()) {
+        // A failed repair stays visible with Retry; the page queued behind it
+        // would clear that error.
+        older = false;
         if (targetStatus === "loading") targetStatus = "error";
+        // A failed refresh shows what is read, as a fresh view would.
+        if (replace && shown) {
+          shown = undefined;
+          publish();
+        }
         publishStatus({ status: "error", error: String(error) });
       }
     } finally {
+      // Stops a read started alongside another that the run ended without.
+      owned.abort();
       if (controller === owned) {
         staged = [];
         controller = undefined;
         if (again && !disposed) {
+          const established = again === "established";
           again = false;
-          void run(true);
+          void run(true, established);
+        } else if (older && !disposed) {
+          older = false;
+          void run(false);
         }
       }
     }
@@ -718,9 +1008,78 @@ export function createThreadView({
       [...remote, ...staged, ...selectionStaged].find(
         (event) => event.id === id,
       ),
+    events: () => [...remote, ...staged, ...selectionStaged],
     receive,
     purge,
-    changed: () => publish(),
+    /** What a later view of this thread may show at once: a settled ordinary
+     * view of a root. `keep` leaves an earlier resume in place: a read runs,
+     * rows are still resumed, or a retarget made this view exact. */
+    resume(): ThreadResume | "keep" | undefined {
+      if (controller || shown || exact) return "keep";
+      const { status, root, replies, direction, canLoadMore, limited } =
+        snapshot;
+      if (
+        disposed ||
+        rootId !== messageId ||
+        rootUnavailable ||
+        status !== "ready" ||
+        !root ||
+        !direction
+      )
+        return undefined;
+      return Object.freeze({
+        root,
+        // Pending local sends are the outbox's to show, not a resume's.
+        replies: replies.filter((row) => !row.delivery),
+        direction,
+        canLoadMore,
+        limited,
+      });
+    },
+    /** The stream dropped: the replies held now are what its establishment
+     * refresh must reach. */
+    stale() {
+      // Only the first drop: a later one keeps the views the first took.
+      if (!dropped)
+        liveAtDrop =
+          snapshot.status === "ready" &&
+          !controller &&
+          !again &&
+          now() - readAt <= RESUME_READ_AGE;
+      dropped = true;
+      held ??= unverified();
+      // A queued establishment was for the stream that just dropped.
+      if (again === "established") again = "refresh";
+    },
+    /** The stream is back: refresh, reaching the replies held across the drop.
+     * When the channel's replay was continuous (`resumed`) and the view was
+     * live at the drop, the replay delivered every reply since: no read. */
+    established(resumed = false) {
+      const live =
+        resumed &&
+        liveAtDrop &&
+        dropped &&
+        !controller &&
+        snapshot.status === "ready";
+      liveAtDrop = false;
+      if (!live) return run(true, true);
+      dropped = false;
+      held = undefined;
+      return Promise.resolve();
+    },
+    localChanged() {
+      const next = localOperations();
+      if (
+        next.length !== localInputs.length ||
+        next.some((item, index) => item !== localInputs[index])
+      )
+        publish();
+    },
+    /** Profiles change the rows only through an owner the fold looked up. */
+    ownersChanged() {
+      for (const [pubkey, owner] of owners)
+        if (agentOwner?.(pubkey) !== owner) return publish();
+    },
     view: {
       snapshot: () => snapshot,
       subscribe(listener: () => void) {
@@ -731,7 +1090,7 @@ export function createThreadView({
       },
       retarget,
       refresh: () => run(true),
-      loadMore: () => run(false),
+      loadMore: (through?: () => number) => run(false, false, through),
       dispose() {
         listeners.clear();
         purge(true);

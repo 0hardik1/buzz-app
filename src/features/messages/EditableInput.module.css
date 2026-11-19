@@ -13,7 +13,9 @@
   cursor: text;
   outline: none;
 }
-html[data-keyboard-navigation] .input:focus-visible {
+/* Sending can disable the focused editor briefly. It keeps focus, but a
+   non-editable focused element matches :focus-visible, so the ring would flash. */
+html[data-keyboard-navigation] .input:focus-visible:not([aria-disabled]) {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
 }
@@ -32,14 +34,14 @@ html[data-keyboard-navigation] .input:focus-visible {
 }
 .input::selection,
 .input ::selection {
-  background-color: Highlight;
-  color: HighlightText;
+  background-color: var(--surface-text-selection);
+  color: var(--text-on-selection);
 }
-.input:focus .token[data-editor-selected] {
-  background-color: Highlight;
-  color: HighlightText;
+.input[data-selection-inside] .token[data-editor-selected] {
+  background-color: var(--surface-text-selection);
+  color: var(--text-on-selection);
 }
-.input:focus .token[data-editor-selected] * {
+.input[data-selection-inside] .token[data-editor-selected] * {
   background-color: transparent;
   color: inherit;
 }
@@ -96,12 +98,15 @@ html[data-keyboard-navigation] .input:focus-visible {
   vertical-align: bottom;
   margin-top: calc(var(--text-body-sm) - var(--size-emoji-display));
 }
-.input[data-emoji-images-only]:focus .token[data-editor-selected] img {
+.input[data-emoji-images-only][data-selection-inside]
+  .token[data-editor-selected]
+  img {
   background-color: Highlight;
 }
 
 .input p {
   margin: 0;
+  line-height: inherit;
 }
 
 .input code {
@@ -123,6 +128,11 @@ html[data-keyboard-navigation] .input:focus-visible {
   text-underline-offset: 2px;
   cursor: text;
 }
+/* The location follows its popover's title or description. */
+.skillLocation {
+  margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
+}
 
 .input blockquote {
   margin: 0;
@@ -142,6 +152,11 @@ html[data-keyboard-navigation] .input:focus-visible {
   background: transparent;
 }
 
+/* WebKit paints a selected list's own boxes apart from its text: each marker
+   in a box of its own and the indent beside it. Only the text shows selected. */
+.input :is(ul, ol, li)::selection {
+  background-color: transparent;
+}
 .input :is(ul, ol) {
   margin: 0;
   padding-left: var(--space-6);
@@ -152,10 +167,28 @@ html[data-keyboard-navigation] .input:focus-visible {
 .input ol {
   list-style: decimal;
 }
+.annotation {
+  text-decoration: underline wavy var(--text-danger);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
 .input [data-spoiler] {
   background: var(--affordance-subtle);
   border-radius: var(--radius-chip);
   box-decoration-break: clone;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
+}
+
+@media (forced-colors: active) {
+  .input::selection,
+  .input ::selection,
+  .input[data-selection-inside] .token[data-editor-selected] {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+  .input .token::selection,
+  .input .token *::selection {
+    background-color: transparent;
+  }
 }

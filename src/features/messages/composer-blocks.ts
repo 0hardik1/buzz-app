@@ -131,7 +131,7 @@ function isolate(tr: Transaction) {
 
 /** Use native ProseMirror block commands, composing their steps into the same
  * transaction as token expansion/selection isolation. No second history owner. */
-function apply(tr: Transaction, command: Command) {
+export function apply(tr: Transaction, command: Command) {
   const state = EditorState.create({
     doc: tr.doc,
     selection: tr.selection,
@@ -397,10 +397,11 @@ const PREFIX_WINDOW = 12;
  * content, and the paragraph's other lines stay where they are. Inside a quote
  * the markers nest a list or a second quote; inside a list item a marker of
  * the item's own list kind, typed as the only text of an item after the first,
- * nests that item as Tab does. A marker typed after prose, inside a code block,
- * inside pasted fenced source, or on a line holding a token or
- * code/link/literal text stays literal. The caller closes history around the
- * transaction, so one undo restores the typed prefix. */
+ * nests that item as Tab does. A marker typed after prose, as code, link or
+ * literal text, inside a code block, or inside pasted fenced source stays
+ * literal; chips, links and formatting later on the line move into the block.
+ * The caller closes history around the transaction, so one undo restores the
+ * typed prefix. */
 export function composerBlockPrefix(
   state: EditorState,
   typed: string,
@@ -462,13 +463,10 @@ export function composerBlockPrefix(
   const from = source.position(start),
     to = $from.pos;
   if (source.source(from) !== start) return;
-  const lineBreak = text.indexOf("\n", caret);
-  const lineEnd =
-    lineBreak < 0
-      ? block.to
-      : Math.min(block.to, source.position(lineBreak, -1));
+  // Only the marker must be typed prose. Chips, links and code after it move
+  // into the block with the line's text, as the toolbar toggle keeps them.
   let plain = true;
-  state.doc.nodesBetween(from, lineEnd, (node) => {
+  state.doc.nodesBetween(from, to, (node) => {
     if (!node.isInline) return;
     if (
       !node.isText ||
@@ -506,6 +504,29 @@ export function composerBlockPrefix(
   // The marker's own marks (an explicit Bold typing mode) continue into the
   // block, as the typed prose already carried them.
   return marks.length ? tr.setStoredMarks(marks) : tr;
+}
+
+/** A caret leaving a code block by an arrow key, past the edge of the block in
+ * that direction, lands in an empty paragraph opened there when no textblock
+ * lies beyond, as Enter on the block's empty last line opens one below it.
+ * Elsewhere the native caret motion already leaves the block. The caller
+ * decides that the caret is at the block's edge in the key's direction. */
+export function composerCodeBlockExit(
+  state: EditorState,
+  forward: boolean,
+): Transaction | undefined {
+  const { $head, empty } = state.selection;
+  if (!empty || !$head.parent.type.spec.code) return;
+  const edge = forward ? $head.after() : $head.before();
+  const $edge = state.doc.resolve(edge);
+  if (Selection.findFrom($edge, forward ? 1 : -1, true)) return;
+  const index = $edge.index();
+  if (!$edge.parent.canReplaceWith(index, index, schema.nodes.paragraph))
+    return;
+  const tr = state.tr.insert(edge, schema.nodes.paragraph.create());
+  return tr
+    .setSelection(TextSelection.create(tr.doc, edge + 1))
+    .setStoredMarks([]);
 }
 
 /** A line break continues the block; an empty last line exits it. The host

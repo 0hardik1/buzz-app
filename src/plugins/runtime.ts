@@ -2,6 +2,7 @@ import type { Context, Fiber } from "@deepseek-ai/cordis";
 import type { PluginModule } from "./api";
 import type { PluginInfo } from "./types";
 import { withTimeout } from "./timeout.ts";
+import { bundledOwner } from "./provenance";
 import type {} from "./status";
 
 export type PluginState = {
@@ -39,12 +40,17 @@ export class PluginRuntime {
     root: Context,
     load: (plugin: PluginInfo) => Promise<PluginModule>,
     timeoutMs = 10_000,
+    /** Whether the manager is still reading which plugins to run. */
+    configuring = () => false,
   ) {
     this.root = root;
     this.load = load;
     root.provide("pluginStatus", {
       isActive: this.isActive,
       subscribe: this.subscribe,
+      settled: () =>
+        !configuring() &&
+        Object.values(this.states).every(({ status }) => status !== "starting"),
     });
     this.timeoutMs = timeoutMs;
   }
@@ -65,14 +71,18 @@ export class PluginRuntime {
   }
 
   // The manager chooses desired plugins; this adapter owns only their execution.
-  reconcile(plugins: readonly PluginInfo[]) {
+  reconcile(plugins: readonly PluginInfo[], retryId?: string) {
     if (this.closed) return;
     const wanted = new Map(
       plugins.map((plugin) => [plugin.manifest.id, plugin]),
     );
     for (const [id, entry] of this.entries) {
       const next = wanted.get(id);
-      if (next?.revision === entry.plugin.revision && !entry.cancelled)
+      if (
+        next?.revision === entry.plugin.revision &&
+        !entry.cancelled &&
+        !(id === retryId && entry.failed)
+      )
         continue;
       // Keep the entry as a teardown barrier: rapid disable/enable must also wait.
       void this.stop(entry).catch(() => {});
@@ -100,6 +110,8 @@ export class PluginRuntime {
       this.update(entry, "starting", null);
       void this.start(entry);
     }
+    // Configuration can settle without changing the desired activations.
+    this.publish();
   }
 
   private update(
@@ -140,11 +152,20 @@ export class PluginRuntime {
         this.timeoutMs,
       );
       if (entry.cancelled) return;
+      const owner = Object.freeze({
+        id: entry.plugin.manifest.id,
+        revision: entry.plugin.revision,
+        agentHooks: Object.freeze([
+          ...(entry.plugin.manifest.host?.agentHooks ?? []),
+        ]),
+        agentExecution: Object.freeze([
+          ...(entry.plugin.manifest.host?.agentExecution ?? []),
+        ]),
+      });
+      // The loader runs only the host's own module for a bundled source.
       const scope = this.root.extend({
-        pluginOwner: Object.freeze({
-          id: entry.plugin.manifest.id,
-          revision: entry.plugin.revision,
-        }),
+        pluginOwner:
+          entry.plugin.source === "bundled" ? bundledOwner(owner) : owner,
       });
       const fiber = scope.plugin({
         name: entry.plugin.manifest.id,

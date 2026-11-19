@@ -1,36 +1,39 @@
 import {
   useEffect,
+  useId,
   useCallback,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
+import type { WorkflowAgentMentions } from "./workflowAgentMentionWarning";
 import type {
   WorkflowCapability,
   WorkflowDefinition,
 } from "../../features/workflows/types";
-import {
-  EyeSlashIcon,
-  HashIcon,
-  ListBulletsIcon,
-  PlayIcon,
-  TrashIcon,
-} from "../../shared/design-system/icons";
+import { PlayIcon, TrashIcon } from "../../shared/design-system/icons";
 import {
   MenuIcon,
   MenuItem,
-  MenuSeparator,
+  MenuNote,
 } from "../../shared/design-system/ui/Menu";
 import { Button } from "../../shared/design-system/ui/Button";
+import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { ConfirmAction } from "./ConfirmAction";
 import { WorkflowEditor } from "./WorkflowEditor";
-import { WorkflowOperations } from "./WorkflowOperations";
+import { messages, WorkflowOperations } from "./WorkflowOperations";
 import { WorkflowRuns } from "./WorkflowRuns";
-import { saveAwaitsReadback } from "./WorkflowLanding";
+import { ARCHIVED_REASON, saveAwaitsReadback } from "./WorkflowLanding";
 import { exactSaveReadback } from "./editor-model";
 import { DEFAULT_FORM_STATE, formStateToYaml } from "./workflowFormTypes";
-import { readWorkflowDocumentFields } from "./workflowYamlDocument";
 import { useWorkflowView } from "./useWorkflowView";
+import { useWorkflowCanDelete } from "./useWorkflowCanDelete";
+import { readWorkflowDocumentFields } from "./workflowYamlDocument";
+import {
+  type ChannelLabel,
+  channelIcon,
+} from "../../features/channels/channel-icon";
+import type { ChannelSummary } from "../../features/relay/contracts";
 
 type Draft = {
   editorKey: number;
@@ -56,27 +59,27 @@ function draftFor(next: WorkflowDefinition | "new", editorKey: number): Draft {
 export function WorkflowChannel({
   capability,
   channelId,
-  channelName,
+  channel,
   initialSelection,
-  initialAction,
   viewer,
   onDraftRiskChange,
   onSaveReadback,
   onClose,
   onDelete,
+  agentMentions,
 }: {
   capability: WorkflowCapability;
   channelId: string;
-  channelName: string;
-  initialSelection?: WorkflowDefinition | "new" | undefined;
-  initialAction?: "run" | undefined;
+  channel: ChannelLabel & Pick<ChannelSummary, "archived">;
+  initialSelection: WorkflowDefinition | "new";
   viewer: string;
   onDraftRiskChange?: (atRisk: boolean) => void;
   onSaveReadback?: (
     saved: Pick<WorkflowDefinition, "channelId" | "revision">,
   ) => void;
-  onClose?: () => void;
+  onClose: () => void;
   onDelete: (definition: WorkflowDefinition) => void;
+  agentMentions?: WorkflowAgentMentions | undefined;
 }) {
   const { snapshot, refresh } = useWorkflowView(
     useCallback(
@@ -90,21 +93,24 @@ export function WorkflowChannel({
     capability.operations.snapshot,
   );
   const submission = useRef<string | null>(null);
+  const deleteReasonId = useId();
+  const archivedReasonId = useId();
   const editorGeneration = useRef(0);
-  const detailOnly = initialSelection !== undefined;
   const [draft, setDraft] = useState<Draft | null>(() =>
-    initialSelection === undefined ? null : draftFor(initialSelection, 0),
+    draftFor(initialSelection, 0),
   );
   const [pendingSelection, setPendingSelection] = useState<
     WorkflowDefinition | "new" | "close" | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [confirmRun, setConfirmRun] = useState(initialAction === "run");
   const [error, setError] = useState<string | null>(null);
-  const [readRuns, setReadRuns] = useState(false);
   const [createdRun, setCreatedRun] = useState<string>();
+  const [runRequest, setRunRequest] = useState<string>();
   const operation = draft?.operationId
     ? operations.find((item) => item.eventId === draft.operationId)
+    : undefined;
+  const runOperation = runRequest
+    ? operations.find((item) => item.eventId === runRequest)
     : undefined;
   const ownOperations = operations.filter(
     (item) => item.workflow.channelId === channelId,
@@ -113,11 +119,17 @@ export function WorkflowChannel({
     !!draft?.operationId && (!operation || operation.outcome === "pending");
   const [localDraftAtRisk, setLocalDraftAtRisk] = useState(false);
   const readonly = !!draft?.original && draft.original.owner !== viewer;
+  const canDelete = useWorkflowCanDelete(capability, draft?.original);
   const dirty = !!draft && (draft.yaml !== draft.initial || localDraftAtRisk);
+  const draftFields = draft && readWorkflowDocumentFields(draft.yaml);
+  // The relay accepts this save, but every run of the workflow would fail.
+  // An omitted or unreadable `enabled` counts as on, as the switch shows it.
+  const archivedEnabled =
+    !!channel.archived && !!draftFields && draftFields.enabled !== false;
   const atRisk = dirty || !!draft?.operationId;
   // A run request never changes configuration, so its lost receipt cannot
   // leave a configuration write unresolved; nor can a save a newer head replaced.
-  const unresolvedWrite = ownOperations.some((item) => {
+  const unresolved = ownOperations.filter((item) => {
     const original = draft?.original;
     if (!original)
       return (
@@ -138,6 +150,7 @@ export function WorkflowChannel({
       saveAwaitsReadback(item, original)
     );
   });
+  const unresolvedWrite = unresolved.length > 0;
   useEffect(() => {
     onDraftRiskChange?.(atRisk);
     return () => onDraftRiskChange?.(false);
@@ -149,18 +162,16 @@ export function WorkflowChannel({
     return () => window.removeEventListener("beforeunload", warn);
   }, [atRisk]);
   const open = (next: WorkflowDefinition | "new" | "close") => {
-    if (next === "close" && onClose) {
+    if (next === "close") {
       onClose();
       return;
     }
     setLocalDraftAtRisk(false);
     // Explicit replacement discards local form state even for the same revision.
-    setDraft(
-      next === "close" ? null : draftFor(next, ++editorGeneration.current),
-    );
+    setDraft(draftFor(next, ++editorGeneration.current));
     submission.current = null;
+    setRunRequest(undefined);
     setError(null);
-    setReadRuns(false);
     setPendingSelection(null);
     setConfirmDelete(false);
   };
@@ -198,7 +209,6 @@ export function WorkflowChannel({
       setDraft(null);
       setPendingSelection(null);
       setConfirmDelete(false);
-      setReadRuns(false);
       setError(null);
     }
   }, [snapshot?.status]);
@@ -218,6 +228,7 @@ export function WorkflowChannel({
       busy ||
       unresolvedWrite ||
       readonly ||
+      archivedEnabled ||
       !capability.availability.save ||
       draft.operationId
     )
@@ -245,12 +256,22 @@ export function WorkflowChannel({
     if (
       !draft?.original ||
       submission.current ||
-      readonly ||
       unresolvedWrite ||
-      !capability.availability.delete ||
       draft.operationId
     )
       return;
+    if (
+      !capability.permissions.canDelete(draft.original) ||
+      !capability.availability.delete
+    ) {
+      setConfirmDelete(false);
+      setError(
+        capability.availability.delete
+          ? "You no longer have permission to delete this workflow. Refresh and try again."
+          : "Workflow deletion is unavailable on this connection.",
+      );
+      return;
+    }
     // The page owns submission and recovery after this editor is discarded.
     const definition = draft.original;
     setDraft(null);
@@ -263,6 +284,7 @@ export function WorkflowChannel({
   const trigger = () => {
     if (
       !draft?.original ||
+      channel.archived ||
       submission.current ||
       dirty ||
       unresolvedWrite ||
@@ -273,7 +295,9 @@ export function WorkflowChannel({
       return;
     try {
       submission.current = "submitting";
-      submission.current = capability.trigger(draft.original);
+      const eventId = capability.trigger(draft.original);
+      submission.current = eventId;
+      setRunRequest(eventId);
       setError(null);
     } catch (cause) {
       submission.current = null;
@@ -294,18 +318,16 @@ export function WorkflowChannel({
     )
       return;
     submission.current = null;
-    // Like base Buzz, a created run is shown, not just acknowledged.
-    if (active.runId) {
-      setCreatedRun(active.runId);
-      setReadRuns(true);
-    }
+    // A created run rereads the history behind the Runs tab.
+    if (active.runId) setCreatedRun(active.runId);
   }, [operations]);
   let blocked: string | undefined;
   if (!capability.availability.save)
     blocked = "Saving is unavailable from this host.";
   else if (unresolvedWrite && !draft?.operationId)
-    blocked =
-      "Check saved configuration or review Recent activity before continuing.";
+    blocked = unresolved.every((item) => item.action === "trigger")
+      ? messages.trigger.pending
+      : "Check saved configuration or review Recent activity before continuing.";
   else if (draft?.operationId)
     blocked =
       operation?.outcome === "succeeded"
@@ -313,36 +335,13 @@ export function WorkflowChannel({
         : operation?.outcome === "rejected"
           ? "Draft retained. Review the error below before continuing."
           : undefined;
+  // Unreadable YAML keeps the editor's own "Correct the YAML" reason.
+  else if (archivedEnabled && draftFields?.editable)
+    blocked = `${ARCHIVED_REASON} Turn this workflow off to save it.`;
   if (!snapshot) return <p role="status">Reading configurations…</p>;
+  const ChannelIcon = channelIcon(channel);
   return (
-    <section aria-label={`Workflows in ${channelName}`}>
-      {!detailOnly && (
-        <div className="workflow-toolbar">
-          <h2 className="text-heading">Saved configurations</h2>
-          <Button
-            disabled={snapshot.status === "loading"}
-            onClick={() => void refresh()}
-          >
-            Refresh configurations
-          </Button>
-          <Button
-            disabled={
-              !capability.availability.save ||
-              snapshot.status === "unavailable" ||
-              snapshot.status === "idle"
-            }
-            onClick={() => select("new")}
-          >
-            New workflow
-          </Button>
-        </div>
-      )}
-      {!detailOnly && (
-        <p className="text-body-sm text-secondary">
-          Saved configuration only. Turning off does not confirm runs have
-          stopped or cancel active runs.
-        </p>
-      )}
+    <section aria-label={`Workflows in ${channel.name}`}>
       {snapshot.status === "loading" && !snapshot.data.items.length && (
         <p role="status">Reading configurations…</p>
       )}
@@ -367,37 +366,6 @@ export function WorkflowChannel({
           browse saved configurations, but cannot save changes here yet.
         </p>
       )}
-      {!detailOnly &&
-        snapshot.status === "ready" &&
-        !snapshot.data.items.length && (
-          <p>
-            No saved configurations returned for this channel.
-            {capability.availability.save &&
-              " Create a disabled draft to start."}
-          </p>
-        )}
-      {!detailOnly && (
-        <ul className="workflow-list">
-          {snapshot.data.items.map((definition) => {
-            const header = readWorkflowDocumentFields(definition.yaml);
-            return (
-              <li key={`${definition.owner}:${definition.id}`}>
-                <Button variant="ghost" onClick={() => select(definition)}>
-                  {header.name || "Unnamed or malformed workflow"}
-                </Button>
-                <span className="text-body-sm text-secondary">
-                  {header.editable
-                    ? header.enabled === false
-                      ? "Configured disabled"
-                      : "Configured enabled"
-                    : "Unreadable configuration"}
-                  {definition.owner !== viewer ? " · Read-only" : ""}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
       {draft &&
         snapshot.status !== "unavailable" &&
         snapshot.status !== "idle" && (
@@ -409,71 +377,87 @@ export function WorkflowChannel({
             onChange={(yaml) => setDraft({ ...draft, yaml })}
             onSave={save}
             onLocalDraftRiskChange={setLocalDraftAtRisk}
+            agentMentions={agentMentions}
             readOnly={readonly}
             busy={busy}
             locked={!!draft.operationId}
             blocked={blocked}
+            enableBlocked={channel.archived ? ARCHIVED_REASON : undefined}
             onCancel={() => select("close")}
             scope={
               <span className="workflow-channel-label text-label">
-                <HashIcon size={18} aria-hidden="true" />
-                {channelName}
+                <ChannelIcon size={18} aria-hidden="true" />
+                {channel.name}
               </span>
             }
-            actions={(enable) => (
-              <>
-                <MenuItem
-                  disabled={!capability.availability.history}
-                  onClick={() => setReadRuns((value) => !value)}
-                >
-                  <MenuIcon>
-                    {readRuns ? (
-                      <EyeSlashIcon size={14} />
-                    ) : (
-                      <ListBulletsIcon size={14} />
-                    )}
-                  </MenuIcon>
-                  {readRuns ? "Hide runs" : "Read runs"}
-                </MenuItem>
-                {!readonly && (
-                  <>
-                    <MenuItem
-                      disabled={
-                        dirty ||
-                        !!draft.operationId ||
-                        unresolvedWrite ||
-                        !capability.availability.trigger
-                      }
-                      onClick={trigger}
-                    >
-                      <MenuIcon>
-                        <PlayIcon size={14} />
-                      </MenuIcon>
-                      Run now
-                    </MenuItem>
-                    {enable}
-                    <MenuSeparator />
-                    <MenuItem
-                      tone="danger"
-                      disabled={
-                        !!draft.operationId ||
-                        unresolvedWrite ||
-                        !capability.availability.delete
-                      }
-                      onClick={() => setConfirmDelete(true)}
-                    >
-                      <MenuIcon>
-                        <TrashIcon size={14} />
-                      </MenuIcon>
-                      Delete workflow
-                    </MenuItem>
-                  </>
-                )}
-                {readonly && enable}
-              </>
-            )}
+            run={
+              !readonly && (
+                <IconButton
+                  aria-label="Run now"
+                  title={channel.archived ? ARCHIVED_REASON : "Run now"}
+                  aria-describedby={
+                    channel.archived ? archivedReasonId : undefined
+                  }
+                  disabled={
+                    channel.archived ||
+                    dirty ||
+                    !!draft.operationId ||
+                    unresolvedWrite ||
+                    !capability.availability.trigger
+                  }
+                  // A natively disabled button gets no hover, so its reason would never show.
+                  focusableWhenDisabled={channel.archived}
+                  icon={<PlayIcon size={20} aria-hidden="true" />}
+                  onClick={trigger}
+                />
+              )
+            }
+            actions={
+              draft.original && (
+                <>
+                  <MenuItem
+                    tone="danger"
+                    aria-describedby={!canDelete ? deleteReasonId : undefined}
+                    disabled={
+                      !canDelete ||
+                      !!draft.operationId ||
+                      unresolvedWrite ||
+                      !capability.availability.delete
+                    }
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    <MenuIcon>
+                      <TrashIcon size={14} />
+                    </MenuIcon>
+                    Delete workflow
+                  </MenuItem>
+                  {!canDelete && (
+                    <MenuNote id={deleteReasonId}>
+                      Only the author or their verified agent owner can delete
+                      this workflow.
+                    </MenuNote>
+                  )}
+                </>
+              )
+            }
+            runs={
+              draft.original &&
+              capability.availability.history && (
+                <WorkflowRuns
+                  key={`${draft.original.owner}:${draft.original.id}:${createdRun ?? ""}`}
+                  capability={capability}
+                  workflow={draft.original}
+                  heading={false}
+                />
+              )
+            }
             status={
               <>
+                {channel.archived && (
+                  <span id={archivedReasonId} hidden>
+                    {ARCHIVED_REASON}
+                  </span>
+                )}
                 {(snapshot.status === "error" ||
                   snapshot.status === "loading") && (
                   <div className="workflow-options">
@@ -503,6 +487,11 @@ export function WorkflowChannel({
                     {error}
                   </p>
                 )}
+                {runOperation?.outcome === "succeeded" && (
+                  <p role="status" className="text-body-sm text-secondary">
+                    {messages.trigger.succeeded}
+                  </p>
+                )}
                 {operation?.outcome === "rejected" && (
                   <Button
                     onClick={() => {
@@ -514,16 +503,13 @@ export function WorkflowChannel({
                     Continue editing retained draft
                   </Button>
                 )}
-                {draft.original && readRuns && (
-                  <WorkflowRuns
-                    key={`${draft.original.owner}:${draft.original.id}:${createdRun ?? ""}`}
-                    capability={capability}
-                    workflow={draft.original}
-                  />
-                )}
                 <WorkflowOperations
                   operations={ownOperations.filter(
-                    (item) => item.action !== "delete",
+                    (item) =>
+                      item.action === "save" ||
+                      (item.action === "trigger" &&
+                        (item.outcome === "unknown" ||
+                          item.outcome === "rejected")),
                   )}
                   snapshot={snapshot}
                   onCheckSaved={refresh}
@@ -534,10 +520,6 @@ export function WorkflowChannel({
             }
             details={
               <>
-                <p className="text-body-sm text-subtle">
-                  Configuration changes apply on save. Turning off does not
-                  confirm runs have stopped or cancel active runs.
-                </p>
                 <p className="text-body-sm text-subtle">
                   Unsaved changes stay in this editor. Leaving or reloading
                   discards them without cancelling submitted operations.
@@ -561,20 +543,9 @@ export function WorkflowChannel({
                 title="Leave this draft?"
                 description="Unsaved draft changes will be discarded. Any submitted operation stays with the captured community session; leaving does not cancel or repeat it."
                 action="Leave draft"
+                destructive
                 onConfirm={() => open(pendingSelection)}
                 onCancel={() => setPendingSelection(null)}
-              />
-            )}
-            {confirmRun && (
-              <ConfirmAction
-                title="Run this workflow now?"
-                description="This submits a manual run of the saved configuration, not unsaved edits."
-                action="Run now"
-                onCancel={() => setConfirmRun(false)}
-                onConfirm={() => {
-                  setConfirmRun(false);
-                  trigger();
-                }}
               />
             )}
             {confirmDelete && (

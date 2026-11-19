@@ -4,6 +4,528 @@ import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { watchPageErrors } from "./page-errors.mjs";
 
+// Browser-only: real same-origin storage events must carry the registered
+// Settings card's changes to another mounted xterm, without replacing it.
+test("terminal settings apply, persist and reset across windows", async ({
+  page,
+  context,
+}) => {
+  const server = await createServer({
+    configFile: false,
+    envDir: false,
+    server: { host: "127.0.0.1", port: 0 },
+  });
+  await context.addInitScript(() => {
+    document.fonts.add(
+      new FontFace(
+        "Buzz Terminal Settings Test",
+        'url("/node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2")',
+      ),
+    );
+  });
+  const second = await context.newPage();
+  const errors = [watchPageErrors(page), watchPageErrors(second)];
+  try {
+    await server.listen();
+    const url = `http://127.0.0.1:${server.httpServer.address().port}/tests/fixtures/terminal-panel.html`;
+    for (const target of [page, second]) {
+      await target.goto(url);
+      await target
+        .getByRole("button", { name: "Toggle channel terminal", exact: true })
+        .click();
+      await expect(target.locator(".xterm-rows")).toContainText(
+        "FIXTURE_SHELL_READY",
+      );
+      await target.evaluate(() => {
+        window.retainedTerminal = document.querySelector(".xterm");
+      });
+    }
+    await page
+      .getByRole("button", { name: "Terminal font settings", exact: true })
+      .click();
+    const input = page.getByRole("textbox", { name: "Font family" });
+    const size = page.getByRole("spinbutton", { name: "Font size (px)" });
+    await input.fill("ASDF Buzz Missing Font");
+    await input.blur();
+    await expect(page.getByRole("alert")).toContainText("Couldn’t load");
+    await expect(
+      page.getByRole("button", { name: "Apply", exact: true }),
+    ).toBeDisabled();
+    await expect(page.locator(".xterm-rows")).toHaveCSS(
+      "font-family",
+      /^"?JetBrains Mono"?,/,
+    );
+    await input.fill("Buzz Terminal Settings Test");
+    await size.fill("18");
+    await expect(
+      page.getByRole("button", { name: "Apply", exact: true }),
+    ).toBeEnabled();
+    await input.press("Enter");
+    await expect(second.locator(".xterm-rows")).toHaveCSS("font-size", "18px");
+    await expect(second.locator(".xterm-rows")).toHaveCSS(
+      "font-family",
+      /^"?Buzz Terminal Settings Test"?,/,
+    );
+    await expect(second.locator(".xterm-rows")).toContainText(
+      "FIXTURE_SHELL_READY",
+    );
+    expect(
+      await second.evaluate(
+        () => window.retainedTerminal === document.querySelector(".xterm"),
+      ),
+    ).toBe(true);
+    await second.reload();
+    await second
+      .getByRole("button", { name: "Toggle channel terminal", exact: true })
+      .click();
+    await expect(second.locator(".xterm-rows")).toHaveCSS(
+      "font-family",
+      /^"?Buzz Terminal Settings Test"?,/,
+    );
+    await expect(second.locator(".xterm-rows")).toHaveCSS("font-size", "18px");
+    await page.setViewportSize({ width: 390, height: 950 });
+    await page
+      .getByRole("button", { name: "Enlarge text", exact: true })
+      .click();
+    const section = page.getByRole("region", { name: "Terminal", exact: true });
+    expect(
+      await section.evaluate(
+        (element) => element.scrollWidth <= element.clientWidth,
+      ),
+    ).toBe(true);
+    await page
+      .getByRole("button", { name: "Use default", exact: true })
+      .click();
+    await expect(input).toHaveValue("");
+    await expect(size).toHaveValue("12");
+    await expect(second.locator(".xterm-rows")).toHaveCSS(
+      "font-family",
+      /^"?JetBrains Mono"?,/,
+    );
+    await expect(second.locator(".xterm-rows")).toHaveCSS("font-size", "12px");
+    expect(errors.flatMap((error) => error.unexplained())).toEqual([]);
+  } finally {
+    await server.close();
+  }
+});
+
+// Browser-only: CSS font resolution, xterm cell measurement and FitAddon must
+// cooperate on a live font swap. A DOM emulator cannot establish that boundary.
+test("terminal font changes refit the retained emulator and restore the default", async ({
+  page,
+}) => {
+  const server = await createServer({
+    configFile: false,
+    envDir: false,
+    server: { host: "127.0.0.1", port: 0 },
+  });
+  const errors = watchPageErrors(page);
+  let fontGate = Promise.withResolvers();
+  let fontRequest = Promise.withResolvers();
+  const startupFont = Promise.withResolvers();
+  const startupRequest = Promise.withResolvers();
+  try {
+    await server.listen();
+    await page.route(
+      "**/jetbrains-mono-latin-400-normal.woff2",
+      async (route) => {
+        startupRequest.resolve();
+        await startupFont.promise;
+        await route.continue();
+      },
+    );
+    await page.goto(
+      `http://127.0.0.1:${server.httpServer.address().port}/tests/fixtures/terminal.html`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const rows = page.locator(".xterm-rows");
+    await startupRequest.promise;
+    // Theme must be present even while the initial font metrics are pending.
+    const background = await page
+      .locator(".xterm")
+      .locator("..")
+      .evaluate((element) => getComputedStyle(element).backgroundColor);
+    await expect(page.locator(".xterm-scrollable-element")).toHaveCSS(
+      "background-color",
+      background,
+    );
+    startupFont.resolve();
+    // Terminal ANSI styles must work even if an installed family has one face.
+    // The surrounding app disables font synthesis for its own bundled fonts.
+    await expect(rows).toHaveCSS("font-synthesis-weight", "auto");
+    await expect(rows).toHaveCSS("font-synthesis-style", "auto");
+    await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+    await page.route("**/terminal-delayed.woff2*", async (route) => {
+      fontRequest.resolve();
+      await fontGate.promise;
+      await route.fulfill({
+        response: await route.fetch({
+          url: new URL(
+            "/node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2",
+            page.url(),
+          ).href,
+        }),
+      });
+    });
+    await page.evaluate(async () => {
+      // Use a deliberately wider face from the pinned font asset, independent
+      // of whichever system fonts happen to be installed on a CI machine.
+      const face = new FontFace(
+        "Buzz Terminal Test",
+        'url("/terminal-delayed.woff2")',
+        { sizeAdjust: "150%" },
+      );
+      document.fonts.add(face);
+      await document.fonts.load('12px "JetBrains Mono"');
+      await document.fonts.ready;
+    });
+    await page.evaluate(async () => {
+      await window.terminalRenderer.output("FONT_SWAP_RETAINS_OUTPUT");
+      window.retainedTerminal = document.querySelector(".xterm");
+    });
+    await expect(rows).toContainText("FONT_SWAP_RETAINS_OUTPUT");
+    const dimensions = page.getByLabel("Dimensions", { exact: true });
+    await expect(dimensions).not.toBeEmpty();
+    const original = await dimensions.textContent();
+    await page.evaluate(() =>
+      window.terminalRenderer.font.set("Buzz Terminal Test"),
+    );
+    await fontRequest.promise;
+    await expect(dimensions).toHaveText(original);
+    fontGate.resolve();
+    await page.evaluate(() => document.fonts.load('12px "Buzz Terminal Test"'));
+    await expect(rows).toHaveCSS("font-family", /^"?Buzz Terminal Test"?,/);
+    await expect(dimensions).not.toHaveText(original);
+    await page.evaluate(() => window.terminalRenderer.font.reset());
+    await expect(rows).toHaveCSS("font-family", /^"?JetBrains Mono"?,/);
+    await expect(dimensions).toHaveText(original);
+    // A slower, older choice must not overwrite a newer reset.
+    fontGate = Promise.withResolvers();
+    fontRequest = Promise.withResolvers();
+    await page.evaluate(() => {
+      document.fonts.add(
+        new FontFace(
+          "Buzz Terminal Stale",
+          'url("/terminal-delayed.woff2?stale")',
+          { sizeAdjust: "200%" },
+        ),
+      );
+      window.terminalRenderer.font.set("Buzz Terminal Stale");
+    });
+    await fontRequest.promise;
+    await page.evaluate(() => window.terminalRenderer.font.reset());
+    await expect(rows).toHaveCSS("font-family", /^"?JetBrains Mono"?,/);
+    fontGate.resolve();
+    await page.evaluate(async () => {
+      await document.fonts.load('12px "Buzz Terminal Stale"');
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+    await expect(rows).toHaveCSS("font-family", /^"?JetBrains Mono"?,/);
+    await expect(dimensions).toHaveText(original);
+    // Same face, different size: real cell dimensions and PTY resize must follow.
+    await page.evaluate(() => window.terminalRenderer.font.set(null, 18));
+    await expect(rows).toHaveCSS("font-size", "18px");
+    await expect(page.locator(".xterm").locator("..")).toHaveCSS(
+      "line-height",
+      "18px",
+    );
+    // Engines serialize zero tracking as either "normal" or "0px".
+    expect(
+      await page
+        .locator(".xterm")
+        .locator("..")
+        .evaluate(
+          (element) =>
+            Number.parseFloat(getComputedStyle(element).letterSpacing) || 0,
+        ),
+    ).toBe(0);
+    await expect(dimensions).not.toHaveText(original);
+    await page.locator(".xterm-helper-textarea").focus();
+    await page.keyboard.type("still typing");
+    await expect(page.getByLabel("Input", { exact: true })).toHaveText(
+      '"still typing"',
+    );
+    await page.evaluate(() => window.terminalRenderer.font.reset());
+    await expect(dimensions).toHaveText(original);
+    expect(
+      await page.evaluate(
+        () => window.retainedTerminal === document.querySelector(".xterm"),
+      ),
+    ).toBe(true);
+    // Detached screens take the latest choice when reattached.
+    await page
+      .getByRole("button", { name: "Toggle mount", exact: true })
+      .click();
+    await page.evaluate(() =>
+      window.terminalRenderer.font.set("Buzz Terminal Test"),
+    );
+    await page
+      .getByRole("button", { name: "Toggle mount", exact: true })
+      .click();
+    await expect(rows).toHaveCSS("font-family", /^"?Buzz Terminal Test"?,/);
+    await expect(rows).toContainText("FONT_SWAP_RETAINS_OUTPUT");
+    await page.evaluate(() =>
+      window.terminalRenderer.font.set("Nonexistent Buzz Font"),
+    );
+    await expect(dimensions).toHaveText(original);
+    expect(errors.unexplained()).toEqual([]);
+  } finally {
+    startupFont.resolve();
+    fontGate.resolve();
+    await server.close();
+  }
+});
+
+// Real keyboard, paste and parser events must cross the renderer's provenance
+// seam. A DOM emulator or mocked Terminal cannot establish that contract.
+for (const platform of ["MacIntel", "Linux x86_64"]) {
+  test(`real xterm preserves navigation and input provenance on ${platform}`, async ({
+    page,
+  }) => {
+    await page.addInitScript((platform) => {
+      Object.defineProperty(navigator, "platform", { value: platform });
+    }, platform);
+    const server = await createServer({
+      configFile: false,
+      envDir: false,
+      server: { host: "127.0.0.1", port: 0 },
+    });
+    const errors = watchPageErrors(page);
+    try {
+      await server.listen();
+      await page.goto(
+        `http://127.0.0.1:${server.httpServer.address().port}/tests/fixtures/terminal.html`,
+      );
+      await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+      const apple = platform === "MacIntel";
+      const generated = () =>
+        page.evaluate(() => window.terminalRenderer.generated);
+      const expected = [];
+      for (const [key, data] of [
+        ["ArrowLeft", "\x1b[D"],
+        ["Control+ArrowRight", "\x1b[1;5C"],
+        ["Alt+ArrowLeft", apple ? "\x1bb" : "\x1b[1;5D"],
+        ["Alt+ArrowRight", apple ? "\x1bf" : "\x1b[1;5C"],
+        ["Alt+ArrowUp", apple ? "\x1b[1;3A" : "\x1b[1;5A"],
+        ["Alt+ArrowDown", apple ? "\x1b[1;3B" : "\x1b[1;5B"],
+        ["Alt+Shift+ArrowLeft", "\x1b[1;4D"],
+        ["Alt+Control+ArrowRight", "\x1b[1;7C"],
+      ]) {
+        await page.keyboard.press(key);
+        expected.push({ data, source: "user" });
+        await expect.poll(generated).toEqual(expected);
+      }
+      if (apple) {
+        // Off, xterm leaves Option to the keyboard layout and sends no Meta.
+        // Turning the setting on makes the open terminal send Meta-B; that
+        // single Meta-B also proves the first press sent nothing.
+        await page.keyboard.press("Alt+KeyB");
+        await page.evaluate((key) => {
+          localStorage.setItem(key, "on");
+          window.dispatchEvent(new StorageEvent("storage", { key }));
+        }, "buzz-terminal-option-meta.v1");
+        await page.keyboard.press("Alt+KeyB");
+        expected.push({ data: "\x1bb", source: "user" });
+        await expect.poll(generated).toEqual(expected);
+      }
+      await page.evaluate(() =>
+        window.terminalRenderer.output("\x1b[?1h\x1b[?2004h"),
+      );
+      await page.keyboard.press("ArrowUp");
+      expected.push({ data: "\x1bOA", source: "user" });
+      await page.keyboard.press("Alt+ArrowLeft");
+      expected.push({
+        data: apple ? "\x1bb" : "\x1b[1;5D",
+        source: "user",
+      });
+      await page.locator(".xterm-helper-textarea").evaluate((textarea) => {
+        const clipboardData = new DataTransfer();
+        clipboardData.setData("text/plain", "first\nsecond");
+        textarea.dispatchEvent(
+          new ClipboardEvent("paste", {
+            clipboardData,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      expected.push({
+        data: "\x1b[200~first\rsecond\x1b[201~",
+        source: "user",
+      });
+      await page.evaluate(() =>
+        window.terminalRenderer.output("\x1b[5n\x1b[6n"),
+      );
+      expected.push(
+        { data: "\x1b[0n", source: "reply" },
+        { data: "\x1b[1;1R", source: "reply" },
+      );
+      await expect.poll(generated).toEqual(expected);
+      expect(errors.unexplained()).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+}
+
+// A hidden screen parses in slices; only the real parser can show that a
+// split character or escape sequence survives the boundary.
+test("real xterm parses a large hidden output completely and in order", async ({
+  page,
+}) => {
+  const server = await createServer({
+    configFile: false,
+    envDir: false,
+    server: { host: "127.0.0.1", port: 0 },
+  });
+  const errors = watchPageErrors(page);
+  try {
+    await server.listen();
+    await page.goto(
+      `http://127.0.0.1:${server.httpServer.address().port}/tests/fixtures/terminal.html`,
+    );
+    await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+    await expect(
+      page.getByLabel("Dimensions", { exact: true }),
+    ).not.toBeEmpty();
+    await page
+      .getByRole("button", { name: "Toggle mount", exact: true })
+      .click();
+    await expect(page.locator(".xterm")).toHaveCount(0);
+    // Each segment starts at its own column and reports where it ended. At 76
+    // bytes, the 16 KiB slice boundaries fall inside a CJK character, an SGR
+    // sequence, an emoji and a two-byte letter.
+    const segment = (i) =>
+      `\x1b[1;${10 + (i % 50)}H\x1b[1;31m${"é中😀".repeat(6)}\x1b[0m\x1b[6n`;
+    const output = (data) =>
+      page.evaluate((data) => window.terminalRenderer.output(data), data);
+    const generated = () =>
+      page.evaluate(() =>
+        window.terminalRenderer.generated.map(({ data }) => data),
+      );
+    await output(segment(0));
+    const width = Number((await generated())[0].match(/;(\d+)R$/)[1]) - 10;
+    await output(Array.from({ length: 1000 }, (_, i) => segment(i)).join(""));
+    expect((await generated()).slice(1)).toEqual(
+      Array.from(
+        { length: 1000 },
+        (_, i) => `\x1b[1;${10 + (i % 50) + width}R`,
+      ),
+    );
+    expect(errors.unexplained()).toEqual([]);
+  } finally {
+    await server.close();
+  }
+});
+
+// Rendering barriers and wheel scrolling require the real xterm renderer and
+// browser layout. Hold the clock to observe an incomplete synchronized frame.
+test("real xterm batches synchronized redraws, recovers an unfinished frame and retains scrollback", async ({
+  page,
+}) => {
+  const server = await createServer({
+    configFile: false,
+    envDir: false,
+    server: { host: "127.0.0.1", port: 0 },
+  });
+  const errors = watchPageErrors(page);
+  try {
+    await server.listen();
+    await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });
+    await page.goto(
+      `http://127.0.0.1:${server.httpServer.address().port}/tests/fixtures/terminal.html`,
+    );
+    await expect(page.locator(".xterm-helper-textarea")).toBeFocused();
+    await page.evaluate(() => document.fonts.ready);
+    await page.clock.pauseAt(new Date("2026-01-01T01:00:00Z"));
+    const rows = page.locator(".xterm-rows");
+    const output = async (data) => {
+      await page.evaluate((data) => {
+        window.terminalOutputParsed = false;
+        void window.terminalRenderer.output(data).then(() => {
+          window.terminalOutputParsed = true;
+        });
+      }, data);
+      await page.clock.runFor(50);
+      await expect
+        .poll(() => page.evaluate(() => window.terminalOutputParsed))
+        .toBe(true);
+    };
+    await output("\x1b[2J\x1b[HBEFORE_FRAME");
+    await expect(rows).toContainText("BEFORE_FRAME");
+    await output("\x1b[?2026h\x1b[HINTERMEDIATE_FRAME");
+    await expect(rows).toContainText("BEFORE_FRAME");
+    await expect(rows).not.toContainText("INTERMEDIATE_FRAME");
+    await output("\x1b[HAFTER_FRAME\x1b[K\x1b[?2026l");
+    await expect(rows).toContainText("AFTER_FRAME");
+    await expect(rows).not.toContainText("INTERMEDIATE_FRAME");
+    await output("\x1b[?2026h\x1b[HRECOVERED_FRAME");
+    await page.clock.runFor(800);
+    await expect(rows).toContainText("AFTER_FRAME");
+    await page.clock.runFor(300);
+    await expect(rows).toContainText("RECOVERED_FRAME");
+    await page.clock.resume();
+
+    await page.locator(".xterm-helper-textarea").focus();
+    await page.keyboard.press("Shift"); // Dismiss the welcome before wheel input.
+
+    await page.evaluate(() =>
+      window.terminalRenderer.output(
+        "\x1b[2J\x1b[H" +
+          Array.from({ length: 80 }, (_, i) => `SCROLL_LINE_${i}`).join("\r\n"),
+      ),
+    );
+    await expect(rows).toContainText("SCROLL_LINE_79");
+    const screen = page.locator(".xterm-screen");
+    await screen.hover();
+    await page.mouse.wheel(0, -120);
+    await expect(rows).not.toContainText("SCROLL_LINE_79");
+    const dragScrollbar = async (bottom) => {
+      const track = await page
+        .locator(".xterm-scrollable-element > .scrollbar.vertical")
+        .boundingBox();
+      const thumb = await page
+        .locator(".xterm-scrollable-element > .scrollbar.vertical > .slider")
+        .boundingBox();
+      if (!track || !thumb) throw new Error("Missing terminal scrollbar");
+      const x = thumb.x + thumb.width / 2;
+      await page.mouse.move(x, thumb.y + thumb.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(x, bottom ? track.y + track.height : track.y);
+      await page.mouse.up();
+    };
+    await dragScrollbar(false);
+    await expect(rows).toContainText("SCROLL_LINE_0");
+    const scrolled = await rows.textContent();
+    await page.evaluate(() =>
+      window.terminalRenderer.output("\x1b[?1049h\x1b[2J\x1b[HFULL_SCREEN"),
+    );
+    await expect(rows).toContainText("FULL_SCREEN");
+    await page.mouse.wheel(0, -1000);
+    await page.evaluate(() => window.terminalRenderer.output("\x1b[?1049l"));
+    await expect(rows).toHaveText(scrolled);
+    await page
+      .getByRole("button", { name: "Toggle mount", exact: true })
+      .click();
+    await expect(page.locator(".xterm")).toHaveCount(0);
+    await page.evaluate(() =>
+      window.terminalRenderer.output("\r\nHIDDEN_OUTPUT"),
+    );
+    await page
+      .getByRole("button", { name: "Toggle mount", exact: true })
+      .click();
+    await expect(rows).toHaveText(scrolled);
+    await screen.hover();
+    await page.mouse.wheel(0, 120);
+    await expect(rows).not.toContainText("SCROLL_LINE_0");
+    await dragScrollbar(true);
+    await expect(rows).toContainText("HIDDEN_OUTPUT");
+    expect(errors.unexplained()).toEqual([]);
+  } finally {
+    await server.close();
+  }
+});
+
 test("real xterm retains output across detach, handles input and resize, and does not reserve absent shortcuts", async ({
   page,
 }) => {
@@ -73,7 +595,7 @@ test("real xterm retains output across detach, handles input and resize, and doe
     await page.screenshot({
       path: test.info().outputPath("buzzterm-light.png"),
     });
-    const xterm = page.locator(".xterm-viewport");
+    const xterm = page.locator(".xterm-scrollable-element");
     const assertAnsiContrast = async () => {
       for (const text of [
         "ANSI_WHITE_ON_BLACK",
@@ -84,7 +606,8 @@ test("real xterm retains output across detach, handles input and resize, and doe
         const ratio = await page
           .getByText(text, { exact: true })
           .evaluate((el) => {
-            const css = getComputedStyle(el);
+            // xterm can split one ANSI run across several glyph spans.
+            const css = getComputedStyle(el.querySelector("span") ?? el);
             const luminance = (color) => {
               const rgb = color
                 .match(/[\d.]+/g)
@@ -101,8 +624,9 @@ test("real xterm retains output across detach, handles input and resize, and doe
             const fg = luminance(css.color);
             const background =
               css.backgroundColor === "rgba(0, 0, 0, 0)"
-                ? getComputedStyle(document.querySelector(".xterm-viewport"))
-                    .backgroundColor
+                ? getComputedStyle(
+                    document.querySelector(".xterm-scrollable-element"),
+                  ).backgroundColor
                 : css.backgroundColor;
             const bg = luminance(background);
             return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
@@ -175,18 +699,9 @@ test("real xterm retains output across detach, handles input and resize, and doe
     await expect(page.locator(".xterm-rows")).toContainText(
       "BUZZ_RENDERER_READY",
     );
-    const fontSize = await page
-      .locator(".xterm-rows")
-      .evaluate((el) => getComputedStyle(el).fontSize);
     await button("Enlarge text").click();
-    await expect
-      .poll(() =>
-        page
-          .locator(".xterm-rows")
-          .evaluate((el) => getComputedStyle(el).fontSize),
-      )
-      .not.toBe(fontSize);
-    expect(await assertSystemAppearance()).toBe(18);
+    await expect(page.locator("html")).toHaveCSS("font-size", "24px");
+    expect(await assertSystemAppearance()).toBe(12);
     const dimensions = await page.getByLabel("Dimensions").textContent();
     await page.setViewportSize({ width: 800, height: 600 });
     await expect(page.getByLabel("Dimensions")).not.toHaveText(dimensions);
@@ -344,6 +859,9 @@ test("terminal shared controls keep focus, recovery and layout in both modes", a
         );
         if (width === 1280) {
           const splash = drawer.locator("[data-terminal-splash]");
+          const spawns = await page.evaluate(() =>
+            window.terminalPanel.spawns(),
+          );
           await page.evaluate(() => window.terminalPanel.holdClose());
           try {
             await restart.click();
@@ -358,6 +876,11 @@ test("terminal shared controls keep focus, recovery and layout in both modes", a
           } finally {
             await page.evaluate(() => window.terminalPanel.releaseClose());
           }
+          // The restarted shell queues its first write on the paused clock
+          // right after it spawns; run the clock only once that spawn is seen.
+          await expect
+            .poll(() => page.evaluate(() => window.terminalPanel.spawns()))
+            .toBe(spawns + 1);
           await page.clock.runFor(50);
           await expect(splash.locator("canvas")).toBeVisible();
           const bounds = await splash.evaluate((el) => {
@@ -437,7 +960,9 @@ test("terminal shared controls keep focus, recovery and layout in both modes", a
     await expect(restart).toBeInViewport();
     await expect(button("End session")).toBeInViewport();
     expect(
-      await drawer.locator(".xterm-viewport").evaluate((el) => el.clientHeight),
+      await drawer
+        .locator(".xterm-scrollable-element")
+        .evaluate((el) => el.clientHeight),
     ).toBeGreaterThanOrEqual(78); // two 26px mono lines at 1.5 leading
     expect(
       await drawer.locator(".panel-header").evaluate((el) => el.scrollWidth),
@@ -671,6 +1196,21 @@ test("focused terminal follows rebind, restore and reset without swallowing the 
     await page.keyboard.press("Control+Enter");
     await expect(drawer).toHaveCount(0);
     expect(await page.evaluate(() => window.terminalPanel.toggles())).toBe(2);
+    expect(await page.evaluate(() => window.terminalPanel.written())).toBe("");
+    // Compatibility mappings must still yield to a live app binding.
+    await settings.click();
+    await row
+      .getByRole("button", {
+        name: "Change shortcut for Toggle channel terminal",
+        exact: true,
+      })
+      .click();
+    await page.keyboard.press("Alt+ArrowLeft");
+    await expect(row.locator("kbd")).toHaveAttribute("data-binding", "Alt+←");
+    await launcher.click();
+    await expect(textarea).toBeFocused();
+    await page.keyboard.press("Alt+ArrowLeft");
+    await expect(drawer).toHaveCount(0);
     expect(await page.evaluate(() => window.terminalPanel.written())).toBe("");
     await page.evaluate(() => window.terminalPanel.dispose());
     expect(errors.unexplained()).toEqual([]);

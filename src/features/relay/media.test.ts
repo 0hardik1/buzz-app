@@ -1,10 +1,19 @@
-import { assert, afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { getLogger, logLevel, setLogLevel } from "../developer/logging";
-import { createMediaPreparation, saveData, wasIntended } from "./media";
+import {
+  createMediaPreparation,
+  decodedImageCapture,
+  hasDecodedImage,
+  openingFrame,
+  openingFrameCapture,
+  rememberOpeningFrame,
+  retainDecodedImage,
+  saveData,
+  takeDecodedImage,
+} from "./media";
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  vi.useRealTimers();
 });
 
 class FakeImage {
@@ -33,56 +42,40 @@ const flushDecode = async () => {
   await Promise.resolve();
 };
 
-it("warms requests without retaining decoded bytes, and releases active image timers on dispose", async () => {
-  vi.useFakeTimers();
+it.each([
+  [100, true],
+  [21000, false],
+])("a %ipx-wide original is explicitly decoded: %s", async (width, decoded) => {
   const created = stubImages();
-  const media = createMediaPreparation();
-  media.prepare(["a", "b", "c", "d"]);
-  expect(media.stats()).toMatchObject({ active: 2, queued: 2 });
-  const first = created[0];
-  assert.exists(first);
-  assert.exists(first.onload);
-  first.onload();
+  createMediaPreparation().prepare(["a"]);
+  const image = created[0];
+  if (!image?.onload) throw new Error("image not requested");
+  image.naturalWidth = width;
+  image.onload();
   await flushDecode();
-  expect(first.decode).toHaveBeenCalled();
-  // The freed slot immediately promotes the next queued speculation.
-  expect(media.stats()).toMatchObject({ active: 2, queued: 1, decoded: 1 });
-  const second = created[1];
-  assert.exists(second);
-  second.naturalWidth = 21000;
-  assert.exists(second.onload);
-  second.onload();
-  // Oversized originals are not explicitly decoded just to prepare an avatar.
-  expect(second.decode).not.toHaveBeenCalled();
-  media.dispose();
-  expect(media.stats()).toEqual({
-    active: 0,
-    queued: 0,
-    prefetched: 0,
-    decoded: 1,
-  });
-  expect(vi.getTimerCount()).toBe(0);
+  // Oversized originals are not decoded just to prepare an avatar.
+  expect(image.decode).toHaveBeenCalledTimes(decoded ? 1 : 0);
 });
 
-it("skips urls already in flight", () => {
-  stubImages();
-  const media = createMediaPreparation();
-  media.prepare(["a"]);
-  media.prepare(["a", "a"]);
-  expect(FakeImage.created).toHaveLength(1);
-});
-
-it("prefetch warming appends across channels instead of replacing the queue", () => {
-  stubImages();
-  const media = createMediaPreparation();
-  media.prepare(["focus-1", "focus-2"]);
-  // prepare() immediately activates two; a warm pass appends behind them.
-  media.warm(["warm-1", "warm-2", "warm-3"]);
-  expect(media.stats()).toMatchObject({ queued: 3, prefetched: 3 });
-  // A focused prepare intent replaces queued speculation.
-  media.prepare(["focus-3"]);
-  expect(media.stats()).toMatchObject({ queued: 1, prefetched: 3 });
-  expect(wasIntended("warm-1")).toBe(true);
+it("settled avatars are not reloaded until the intent TTL passes", async () => {
+  vi.useFakeTimers();
+  try {
+    const created = stubImages();
+    const media = createMediaPreparation();
+    media.prepare(["a", "b"]);
+    created[0]?.onload?.();
+    created[1]?.onerror?.();
+    await flushDecode();
+    // A loaded avatar and a failed one both settle; repeated intent skips them.
+    media.prepare(["a", "b"]);
+    media.warm(["a", "b"]);
+    expect(created).toHaveLength(2);
+    vi.advanceTimersByTime(5 * 60_000);
+    media.prepare(["a", "b"]);
+    expect(created).toHaveLength(4);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("Save-Data disables warming but nothing else", () => {
@@ -129,4 +122,68 @@ it("avatar completion diagnostics never expose signed URL credentials", async ()
     logger.setReporters(reporters);
     setLogLevel(previous);
   }
+});
+
+it("bounds opening frames by encoded size and forgets them with session media", () => {
+  const frame = (bytes: number) => ({
+    poster: `data:image/jpeg;${"x".repeat(bytes)}`,
+    width: 640,
+    height: 360,
+  });
+  createMediaPreparation().dispose();
+  const capture = openingFrameCapture();
+  rememberOpeningFrame("oversized", frame(300 * 1024), capture);
+  expect(openingFrame("oversized")).toBeUndefined();
+  for (let i = 0; i < 20; i++)
+    rememberOpeningFrame(`frame-${i}`, frame(250 * 1024), capture);
+  expect(openingFrame("frame-0")).toBeUndefined();
+  expect(openingFrame("frame-3")).toBeUndefined();
+  expect(openingFrame("frame-4")).toBeDefined();
+  expect(openingFrame("frame-19")).toBeDefined();
+  expect(openingFrame("frame-4")).toBeDefined();
+  rememberOpeningFrame("frame-20", frame(250 * 1024), capture);
+  expect(openingFrame("frame-4")).toBeDefined();
+  expect(openingFrame("frame-5")).toBeUndefined();
+
+  createMediaPreparation().dispose();
+  expect(openingFrame("frame-19")).toBeUndefined();
+  rememberOpeningFrame("late", frame(10), capture);
+  expect(openingFrame("late")).toBeUndefined();
+  rememberOpeningFrame("current", frame(10), openingFrameCapture());
+  expect(openingFrame("current")).toBeDefined();
+});
+
+it("bounds decoded images by size and owner and forgets them with session media", () => {
+  // 64 MiB decoded each, the largest retained; the 512 MiB budget holds eight.
+  const image = (side = 4096) =>
+    ({ naturalWidth: side, naturalHeight: side }) as HTMLImageElement;
+  const owner = {};
+  createMediaPreparation().dispose();
+  const capture = decodedImageCapture();
+  retainDecodedImage(owner, "oversized", image(4097), capture);
+  retainDecodedImage(owner, "empty", image(0), capture);
+  expect(hasDecodedImage(owner, "oversized")).toBe(false);
+  expect(hasDecodedImage(owner, "empty")).toBe(false);
+  const images = Array.from({ length: 10 }, () => image());
+  for (const [i, item] of images.entries())
+    retainDecodedImage(owner, `image-${i}`, item, capture);
+  expect(hasDecodedImage(owner, "image-1")).toBe(false);
+  expect(hasDecodedImage(owner, "image-2")).toBe(true);
+  expect(takeDecodedImage({}, "image-9")).toBeUndefined();
+  const claimed = takeDecodedImage(owner, "image-9");
+  expect(claimed).toBe(images[9]);
+  expect(takeDecodedImage(owner, "image-9")).toBeUndefined();
+  // Claiming frees its budget; re-retaining makes the source newest.
+  if (claimed) retainDecodedImage(owner, "image-9", claimed, capture);
+  retainDecodedImage(owner, "image-10", image(), capture);
+  expect(hasDecodedImage(owner, "image-2")).toBe(false);
+  expect(hasDecodedImage(owner, "image-3")).toBe(true);
+  expect(hasDecodedImage(owner, "image-9")).toBe(true);
+
+  createMediaPreparation().dispose();
+  expect(hasDecodedImage(owner, "image-9")).toBe(false);
+  retainDecodedImage(owner, "late", image(), capture);
+  expect(hasDecodedImage(owner, "late")).toBe(false);
+  retainDecodedImage(owner, "current", image(), decodedImageCapture());
+  expect(hasDecodedImage(owner, "current")).toBe(true);
 });

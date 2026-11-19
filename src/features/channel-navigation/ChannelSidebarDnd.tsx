@@ -4,7 +4,9 @@ import {
   PointerSensor,
   type CollisionDetection,
   pointerWithin,
+  useDndContext,
   useDraggable,
+  useDndMonitor,
   useDroppable,
   useSensor,
   useSensors,
@@ -12,20 +14,42 @@ import {
 import {
   createContext,
   useContext,
+  useEffect,
   useState,
+  useRef,
   type ComponentProps,
+  type PointerEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { frame, motion, useReducedMotion } from "motion/react";
 import { SidebarSection } from "../../bundled/channels/SidebarSection";
+import type { SidebarRowKind } from "../../bundled/channels/sidebar-sections";
+import { PlusIcon } from "../../shared/design-system/icons";
+import styles from "../../bundled/channels/Channels.module.css";
 
 const Writable = createContext(false);
+const CREATE_SECTION = "create-section";
 
 // Group gaps target the neighbour whose insertion edge lies in that same gap.
 const sidebarCollisions: CollisionDetection = (args) => {
-  if (!args.active.data.current?.group) return pointerWithin(args);
+  const domain = args.active.data.current?.groupDomain ?? "channels";
+  if (!args.active.data.current?.group)
+    return pointerWithin({
+      ...args,
+      droppableContainers: args.droppableContainers.filter(
+        ({ data }) =>
+          (data.current?.groupDomain ?? "channels") === domain &&
+          (!data.current?.accepts ||
+            data.current.accepts.includes(args.active.data.current?.rowKind)),
+      ),
+    });
   const groups = args.droppableContainers
-    .filter(({ id }) => String(id).startsWith("group:"))
+    .filter(
+      ({ data }) =>
+        data.current?.group &&
+        (data.current?.groupDomain ?? "channels") === domain,
+    )
     .sort((a, b) => a.data.current?.groupIndex - b.data.current?.groupIndex);
   const hits = pointerWithin({ ...args, droppableContainers: groups });
   if (hits.length) return hits;
@@ -55,9 +79,14 @@ const sidebarCollisions: CollisionDetection = (args) => {
   return [];
 };
 
+// A click must still select the row; only a deliberate pull starts a move.
+// useSensor memoizes on this object, so an inline literal would rebuild the
+// sensors, and re-render every draggable row, on each sidebar render.
+const pointerSensorOptions = { activationConstraint: { distance: 6 } };
+
 /**
  * Pointer moves between sidebar sections (Messages groups, Starred and Channels,
- * or Me projects and Chats), and reorders saved groups by their header. A drop
+ * or Solo projects and Chats), and reorders saved groups by their header. A drop
  * only reports its destination, so the caller saves it exactly like the menus'
  * moves; those menus remain the keyboard path.
  */
@@ -65,20 +94,19 @@ export function ChannelSidebarDnd({
   writable,
   onMove,
   onReorder,
+  onCreateSection,
   overlay,
   children,
 }: {
   writable: boolean;
   onMove: (channelId: string, sectionKey: string) => void;
   onReorder: (sectionKey: string, overKey: string) => void;
+  onCreateSection?: ((channelId: string) => void) | undefined;
   overlay: (id: string, group: boolean) => ReactNode;
   children: ReactNode;
 }) {
   const [dragging, setDragging] = useState<{ id: string; group: boolean }>();
-  const sensors = useSensors(
-    // A click must still select the row; only a deliberate pull starts a move.
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-  );
+  const sensors = useSensors(useSensor(PointerSensor, pointerSensorOptions));
   return (
     <DndContext
       sensors={sensors}
@@ -98,6 +126,8 @@ export function ChannelSidebarDnd({
         if (active.data.current?.group) {
           if (over.id !== active.id)
             onReorder(String(active.id), String(over.id));
+        } else if (over.id === CREATE_SECTION) {
+          if (writable) onCreateSection?.(String(active.id));
         } else if (over.id !== active.data.current?.sectionKey)
           onMove(String(active.id), String(over.id));
       }}
@@ -114,6 +144,71 @@ export function ChannelSidebarDnd({
   );
 }
 
+function CreateSectionDropTarget({ available }: { available: boolean }) {
+  const { active, measureDroppableContainers } = useDndContext();
+  const enabled =
+    useContext(Writable) &&
+    available &&
+    !!active &&
+    !active.data.current?.group;
+  const reducedMotion = useReducedMotion();
+  const [revealed, setRevealed] = useState(false);
+  const { setNodeRef, isOver } = useDroppable({
+    id: CREATE_SECTION,
+    disabled: !enabled,
+    // dnd-kit treats an empty list as all droppables on resize. Expansion also
+    // shifts the sections below this slot, so their collision rects must refresh.
+    resizeObserverConfig: { updateMeasurementsFor: [] },
+  });
+  useDndMonitor({
+    onDragStart: () => setRevealed(false),
+    onDragOver: ({ over }) => {
+      if (enabled && over?.id === CREATE_SECTION) setRevealed(true);
+    },
+    onDragEnd: () => setRevealed(false),
+    onDragCancel: () => setRevealed(false),
+  });
+  const open = enabled && revealed;
+  return (
+    <div
+      className={`${styles.channelSection} ${styles.createSectionSlot}`}
+      data-create-section-slot=""
+    >
+      {/* The original gap stays inside the target throughout expansion. */}
+      <div
+        ref={setNodeRef}
+        className={styles.createSectionHitArea}
+        data-create-section-trigger={available ? "" : undefined}
+      />
+      <motion.div
+        className={styles.createSectionReveal}
+        initial={false}
+        // The first resize delivery can include the reveal, and dnd-kit
+        // ignores it. Measure after Motion has committed the final height.
+        onAnimationComplete={() =>
+          frame.postRender(() => measureDroppableContainers([]))
+        }
+        animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
+        transition={{
+          duration: reducedMotion ? 0 : open ? 0.22 : 0.12,
+          ease: [0.23, 1, 0.32, 1],
+        }}
+        aria-hidden={!open}
+        inert={!open}
+      >
+        <div
+          className={`${styles.createSectionDrop} text-caption`}
+          data-create-section-drop={open ? "" : undefined}
+          data-drop-target={isOver || undefined}
+        >
+          <PlusIcon size={24} />
+          <span>Add to new workspace</span>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 /**
  * Frames only a channel's select surface, so its sessions never start a move.
  * The frame stays mounted while placement is read-only: the row keeps its
@@ -122,15 +217,17 @@ export function ChannelSidebarDnd({
 export function DraggableChannel({
   channelId,
   sectionKey,
+  rowKind = "channel",
   children,
 }: {
   channelId: string;
   sectionKey: string;
+  rowKind?: SidebarRowKind;
   children: ReactNode;
 }) {
   const { setNodeRef, listeners, isDragging } = useDraggable({
     id: channelId,
-    data: { sectionKey },
+    data: { sectionKey, groupDomain: "channels", rowKind },
     disabled: !useContext(Writable),
   });
   return (
@@ -144,51 +241,132 @@ export function DraggableChannel({
   );
 }
 
+/** Shared header drag and post-drag click suppression for Team and Solo. */
+export function useSidebarSectionDrag({
+  sectionKey,
+  reorderable,
+  groupIndex,
+  groupDomain = "channels",
+}: {
+  sectionKey: string;
+  reorderable: boolean;
+  groupIndex: number;
+  groupDomain?: string;
+}) {
+  const drag = useDraggable({
+    id: sectionKey,
+    data: { group: true, groupIndex, groupDomain },
+    disabled: !reorderable,
+  });
+  const suppressClick = useRef(false);
+  const handle = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!reorderable) return;
+    const document = handle.current?.ownerDocument;
+    if (!document) return;
+    const suppressDragClick = (event: MouseEvent) => {
+      if (
+        !suppressClick.current ||
+        event.detail === 0 ||
+        !(event.target instanceof Node) ||
+        !handle.current?.contains(event.target)
+      )
+        return;
+      // dnd-kit stops clicks at document capture before React can cancel the
+      // native summary toggle. Cancel there too, including its cleanup window.
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    document.addEventListener("click", suppressDragClick, true);
+    return () => document.removeEventListener("click", suppressDragClick, true);
+  }, [reorderable]);
+  useDndMonitor({
+    onDragStart: ({ active }) => {
+      if (active.id === sectionKey) suppressClick.current = true;
+    },
+  });
+  return {
+    isDragging: drag.isDragging,
+    handle: reorderable
+      ? {
+          ref: (node: HTMLElement | null) => {
+            handle.current = node;
+            drag.setNodeRef(node);
+          },
+          listeners: {
+            ...drag.listeners,
+            onPointerDown: (event: PointerEvent<HTMLElement>) => {
+              suppressClick.current = false;
+              drag.listeners?.onPointerDown?.(event);
+            },
+          },
+        }
+      : undefined,
+  };
+}
+
 /** A reorderable saved group drags by its header, never its rows or actions. */
 export function DroppableSidebarSection({
   disabled,
   reorderable,
   groupIndex,
+  groupDomain = "channels",
+  accepts,
+  createSectionTarget,
   ...section
 }: ComponentProps<typeof SidebarSection> & {
   disabled: boolean;
   reorderable: boolean;
   groupIndex: number;
+  groupDomain?: string;
+  /** Row kinds a drop may place here; every row when omitted. */
+  accepts?: readonly SidebarRowKind[];
+  createSectionTarget?: "available" | "unavailable" | undefined;
 }) {
   const { setNodeRef, isOver, active } = useDroppable({
     id: section.sectionKey,
-    data: { groupIndex },
+    data: { group: reorderable, groupIndex, groupDomain, accepts },
     disabled,
+    // dnd-kit queues a re-measure of only the droppable that resized and clears
+    // that queue after each render, losing ids queued in between: a section
+    // resized mid-drag (text size) could keep a stale drop target. An empty list
+    // keeps dnd-kit's drag-start queue: any section's resize re-measures every
+    // enabled droppable.
+    resizeObserverConfig: { updateMeasurementsFor: [] },
   });
-  const drag = useDraggable({
-    id: section.sectionKey,
-    data: { group: true, groupIndex },
-    disabled: !reorderable,
+  const drag = useSidebarSectionDrag({
+    sectionKey: section.sectionKey,
+    reorderable,
+    groupIndex,
+    groupDomain,
   });
   const group = !!active?.data.current?.group;
   const from = active?.data.current?.groupIndex;
   return (
-    <SidebarSection
-      {...section}
-      dropRef={setNodeRef}
-      dropTarget={
-        !group &&
-        isOver &&
-        active?.data.current?.sectionKey !== section.sectionKey
-      }
-      dropEdge={
-        group && isOver && active?.id !== section.sectionKey
-          ? from !== undefined && from < groupIndex
-            ? "after"
-            : "before"
-          : undefined
-      }
-      dragHandle={
-        reorderable
-          ? { ref: drag.setNodeRef, listeners: drag.listeners }
-          : undefined
-      }
-      dragging={drag.isDragging}
-    />
+    <>
+      {createSectionTarget && (
+        <CreateSectionDropTarget
+          available={createSectionTarget === "available"}
+        />
+      )}
+      <SidebarSection
+        {...section}
+        dropRef={setNodeRef}
+        dropTarget={
+          !group &&
+          isOver &&
+          active?.data.current?.sectionKey !== section.sectionKey
+        }
+        dropEdge={
+          group && isOver && active?.id !== section.sectionKey
+            ? from !== undefined && from < groupIndex
+              ? "after"
+              : "before"
+            : undefined
+        }
+        dragHandle={drag.handle}
+        dragging={drag.isDragging}
+      />
+    </>
   );
 }

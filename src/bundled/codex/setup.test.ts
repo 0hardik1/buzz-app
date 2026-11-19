@@ -1,11 +1,34 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import type {
   HostProcess,
   HostProcessOptions,
 } from "../../features/host/service";
 import script from "./codex.sh?raw";
 import type { Wire } from "./rpc";
-import { checkCodex, CodexSetup, withScript } from "./setup";
+import {
+  buzzHome,
+  checkCodex,
+  CodexSetup,
+  explainTurn,
+  reviewHome,
+  withScript,
+} from "./setup";
+import manifest from "./manifest.json";
+
+it("declares protected file reads through the bundled helper with a positional path", () => {
+  expect(
+    manifest.host.processes.find((process) => process.id === "read-protected"),
+  ).toEqual({
+    id: "read-protected",
+    program: "buzz-agent-command",
+    bundled: true,
+    args: [
+      "--shell",
+      `case "$1" in "~/"*) set -- "$HOME/\${1:2}";; esac; exec /usr/bin/base64 -i "$1"`,
+      "buzz-read",
+    ],
+  });
+});
 
 type Result = { stdout?: string; stderr?: string; code: number | null };
 
@@ -25,8 +48,15 @@ function finished(result: Result, options: HostProcessOptions = {}) {
   };
 }
 
-/** An app server that lists `models` models and exits once its input ends. */
-function appServer(models: number, options: HostProcessOptions = {}) {
+type Account = { account: unknown; requiresOpenaiAuth: boolean };
+const SIGNED_OUT: Account = { account: null, requiresOpenaiAuth: true };
+
+/** An app server that lists `models` models, reads `account`, and exits once its input ends. */
+function appServer(
+  models: number,
+  options: HostProcessOptions = {},
+  account = SIGNED_OUT,
+) {
   let exit!: (code: number | null) => void;
   const process: HostProcess & { ended?: boolean } = {
     write: async (text) => {
@@ -40,7 +70,9 @@ function appServer(models: number, options: HostProcessOptions = {}) {
               })),
               nextCursor: null,
             }
-          : {};
+          : wire.method === "account/read"
+            ? account
+            : {};
       options.onStdout?.(`${JSON.stringify({ id: wire.id, result })}\n`);
     },
     end: async () => {
@@ -55,12 +87,14 @@ function appServer(models: number, options: HostProcessOptions = {}) {
   return process;
 }
 
-/** A spawn whose processes print `output[args]` and exit with its code. */
-function scripted(output: Record<string, Partial<Result>>) {
+/** A spawn whose processes print `output[args]` and exit with its code, and
+ * whose app server reads `account`. */
+function scripted(output: Record<string, Partial<Result>>, account?: Account) {
   const calls: { id: string; args: readonly string[] }[] = [];
   const spawn = async (id: string, options: HostProcessOptions = {}) => {
     const args = options.args ?? [];
     calls.push({ id, args });
+    if (id === "app-server") return appServer(0, options, account);
     const result = output[`${id} ${args.join(" ")}`.trim()];
     return finished({ code: 0, ...result }, options);
   };
@@ -89,11 +123,79 @@ it("reports the version and whether it is signed in", async () => {
     state: "ready",
     version: "0.162.1",
   });
+  // Stored sign-in is enough; the app server is not asked.
+  expect(ready.calls.map((call) => call.id)).toEqual(["codex", "codex"]);
+});
+
+it("is ready without an OpenAI sign-in when its model provider needs none", async () => {
+  const signedOut = {
+    "codex --version": { stdout: "codex-cli 0.163.0\n" },
+    "codex login status": { stderr: "Not logged in\n", code: 1 },
+  };
+  const own = scripted(signedOut, { account: null, requiresOpenaiAuth: false });
+  await expect(checkCodex(own.spawn)).resolves.toEqual({
+    state: "ready",
+    version: "0.163.0",
+  });
+  expect(own.calls.map((call) => call.id)).toEqual([
+    "codex",
+    "codex",
+    "app-server",
+  ]);
+  const openai = scripted(signedOut, SIGNED_OUT);
+  await expect(checkCodex(openai.spawn)).resolves.toEqual({
+    state: "signed-out",
+    version: "0.163.0",
+  });
+});
+
+it("stops asking an app server that does not answer within the check's bound", async () => {
+  const { spawn } = scripted({
+    "codex --version": { stdout: "codex-cli 0.163.0\n" },
+    "codex login status": { stderr: "Not logged in\n", code: 1 },
+  });
+  let ended = false;
+  let started!: () => void;
+  const starting = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const silent = async (id: string, options: HostProcessOptions = {}) => {
+    if (id !== "app-server") return spawn(id, options);
+    // The check arms its bound right after starting the app server.
+    vi.useFakeTimers();
+    started();
+    let exit!: (code: number | null) => void;
+    return {
+      write: async () => undefined,
+      end: async () => {
+        ended = true;
+        exit(0);
+      },
+      kill: async () => exit(null),
+      exited: new Promise<number | null>((resolve) => {
+        exit = resolve;
+      }),
+    };
+  };
+  try {
+    let status: unknown;
+    void checkCodex(silent).then((result) => {
+      status = result;
+    });
+    await starting;
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(status).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(status).toEqual({ state: "signed-out", version: "0.163.0" });
+    expect(ended).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("runs sign-in, shows its output, and checks again after", async () => {
   const { spawn, calls } = scripted({
-    "codex login": { stdout: "Starting local login server…\n" },
+    login: { stdout: "Starting local login server…\n" },
     "codex --version": { stdout: "codex-cli 0.162.1\n" },
   });
   const setup = new CodexSetup(spawn);
@@ -105,10 +207,11 @@ it("runs sign-in, shows its output, and checks again after", async () => {
     output: "Starting local login server…\n",
     status: { state: "ready", version: "0.162.1" },
   });
-  expect(calls.map((call) => call.args.join(" "))).toEqual([
-    "login",
-    "--version",
-    "login status",
+  // Signing in through the review home, which records its workspace.
+  expect(calls.map((call) => `${call.id} ${call.args.join(" ")}`)).toEqual([
+    "login ",
+    "codex --version",
+    "codex login status",
   ]);
 });
 
@@ -258,13 +361,33 @@ it("starts Codex, its app server and install steps as steps of codex.sh", async 
   await run("codex", { args: ["--version"] });
   await run("app-server");
   await run("use", { args: ["0.163.0"] });
+  await run("login");
   await run("platform");
   expect(calls).toEqual([
     { id: "codex-sh", args: [script, "codex.sh", "run", "--version"] },
     { id: "codex-sh", args: [script, "codex.sh", "run", "app-server"] },
     { id: "codex-sh", args: [script, "codex.sh", "use", "0.163.0"] },
+    { id: "codex-sh", args: [script, "codex.sh", "login"] },
     { id: "platform", args: [] },
   ]);
+});
+
+it("looks up Buzz's homes, and refuses a step that prints no home", async () => {
+  const good = scripted({
+    home: { stdout: "/buzz/codex-home\n" },
+    review: { stdout: "/buzz/review-home\n/buzz/review-state\nworkspace-1\n" },
+  });
+  await expect(buzzHome(good.spawn)).resolves.toBe("/buzz/codex-home");
+  await expect(reviewHome(good.spawn)).resolves.toEqual({
+    home: "/buzz/review-home",
+    state: "/buzz/review-state",
+    workspace: "workspace-1",
+  });
+  const empty = scripted({ home: { stdout: "" }, review: { stdout: "/a\n" } });
+  await expect(buzzHome(empty.spawn)).rejects.toThrow("home is unavailable");
+  await expect(reviewHome(empty.spawn)).rejects.toThrow(
+    "review is unavailable",
+  );
 });
 
 /** `releases` whose first `id` process waits until `release` is called. */
@@ -359,4 +482,35 @@ it("tries the first download again when a mention finds no copy", async () => {
   await setup.installed(new AbortController().signal);
   expect(disk.state.fetched).toHaveLength(2);
   expect(disk.state.used).toEqual(["0.163.0"]);
+});
+
+const SETTINGS = "buzz://settings?section=agents&provider=buzz.codex%2Fcodex";
+const NOT_SIGNED_IN = `Codex isn't signed in. Head to [Settings](${SETTINGS}) to sign in.`;
+
+it("quotes Codex's words after the link, without the notice around them", () => {
+  const words =
+    "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses";
+  for (const notice of [
+    `Codex could not finish: ${words}.`,
+    `Codex could not start: ${words}.`,
+  ])
+    expect(explainTurn(notice, SETTINGS)).toBe(
+      `${NOT_SIGNED_IN}\n\nCodex said:\n> ${words}`,
+    );
+  // A failed handover reports Codex's error as it is.
+  expect(explainTurn(`Error: ${words}`, SETTINGS)).toBe(
+    `${NOT_SIGNED_IN}\n\nCodex said:\n> Error: ${words}`,
+  );
+});
+
+it("quotes at most 500 characters of Codex's words, marking the cut", () => {
+  const words = `Missing bearer or basic authentication ${"x".repeat(600)}`;
+  expect(explainTurn(`Codex could not finish: ${words}.`, SETTINGS)).toBe(
+    `${NOT_SIGNED_IN}\n\nCodex said:\n> ${words.slice(0, 500)}…`,
+  );
+});
+
+it("leaves a notice it can't explain exactly as Codex's runtime wrote it", () => {
+  const notice = "Codex could not finish: model busy.";
+  expect(explainTurn(notice, SETTINGS)).toBe(notice);
 });

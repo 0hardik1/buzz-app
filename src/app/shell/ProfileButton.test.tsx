@@ -7,13 +7,19 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { AccountActionsService } from "../../features/account-actions/service";
 import type { Communities } from "../../features/communities/service";
+import { APPEARANCE_KEY, createAppearance } from "../../shared/theme/service";
 import { ProfileButton } from "./ProfileButton";
+import * as communityApi from "../../features/communities/api";
+import { resetSharedTimeZones } from "../../features/profiles/share-time-zone";
+
+const testAppearance = createAppearance(window);
 
 afterEach(cleanup);
 
@@ -69,6 +75,7 @@ it("keeps the header cutout and menu status in sync with presence", () => {
     <ProfileButton
       communities={communities}
       accountActions={accountActions}
+      appearance={testAppearance}
       settingsSelected={false}
       onSettings={() => {}}
     />,
@@ -88,29 +95,34 @@ it("keeps the header cutout and menu status in sync with presence", () => {
       .closest("[data-status]"),
   ).toHaveAttribute("data-status", "online");
 
-  for (const [status, label] of [
-    ["away", "Away"],
-    ["offline", "Offline"],
-    ["unknown", "Status unavailable"],
+  for (const [status, name] of [
+    ["away", "Availability: Away"],
+    ["offline", "Availability: Offline"],
+    ["unknown", "Availability unknown"],
   ] as const) {
     act(() => {
       presence = { ...presence, status };
       for (const listener of listeners) listener();
     });
-    if (status === "unknown")
+    if (status === "unknown") {
       expect(button.querySelector(".buzz-avatar-status")).not.toHaveAttribute(
         "data-status",
       );
-    else
+      expect(
+        screen.getByRole("img", { name: "Your availability is unknown" }),
+      ).toBeInTheDocument();
+    } else
       expect(button.querySelector(".buzz-avatar-status")).toHaveAttribute(
         "data-status",
         status,
       );
-    expect(
-      screen
-        .getByRole("button", { name: `Availability: ${label}` })
-        .closest("[data-status]"),
-    ).toHaveAttribute("data-status", status);
+    const pill = screen.getByRole("button", { name });
+    expect(pill.closest("[data-status]")).toHaveAttribute(
+      "data-status",
+      status,
+    );
+    // The unknown pill shows its whole accessible name.
+    if (status === "unknown") expect(pill).toHaveTextContent(name);
   }
 });
 
@@ -158,6 +170,7 @@ it("checks observed Away despite automatic Online intent and dispatches checked-
     <ProfileButton
       communities={communities}
       accountActions={accountActions}
+      appearance={testAppearance}
       settingsSelected={false}
       onSettings={() => {}}
     />,
@@ -219,6 +232,7 @@ it.each([false, true])(
           <ProfileButton
             communities={communities}
             accountActions={accountActions}
+            appearance={testAppearance}
             settingsSelected={settings}
             onSettings={() => setSettings(true)}
           />
@@ -255,7 +269,7 @@ it.each([false, true])(
   },
 );
 
-it("opens the viewer's profile from the menu avatar and hands focus to the page", async () => {
+it("opens profile settings from the header, selects appearance in a submenu, and opens Plugins", async () => {
   const user = userEvent.setup();
   const snapshot = {
     profile: { name: "Fixture", picture: "" },
@@ -275,64 +289,91 @@ it("opens the viewer's profile from the menu avatar and hands focus to the page"
     presence: { subscribe, snapshot: () => presence },
     relay: { subscribe, snapshot: () => connection },
   } as unknown as Communities;
-  const onProfile = vi.fn();
-  const view = render(
+  localStorage.clear();
+  const appearance = createAppearance(window);
+  const onSettings = vi.fn();
+  render(
     <>
       <ProfileButton
         communities={communities}
         accountActions={accountActions}
+        appearance={appearance}
         settingsSelected={false}
-        onSettings={() => {}}
+        onSettings={onSettings}
       />
       <main id="main-content" tabIndex={-1} />
     </>,
   );
   const trigger = screen.getByRole("button", { name: "Your profile" });
-  await user.click(trigger);
-  await screen.findByRole("menu", { name: "Fixture" });
-  // Without a profile panel the header avatar stays presentational.
-  expect(
-    screen.queryByRole("menuitem", { name: "View your profile" }),
-  ).not.toBeInTheDocument();
-  await user.keyboard("{Escape}");
-  await waitFor(() =>
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument(),
-  );
-  view.rerender(
-    <>
-      <ProfileButton
-        communities={communities}
-        accountActions={accountActions}
-        settingsSelected={false}
-        onSettings={() => {}}
-        onProfile={onProfile}
-      />
-      <main id="main-content" tabIndex={-1} />
-    </>,
-  );
   act(() => trigger.focus());
   await user.keyboard("{Enter}");
   const menu = await screen.findByRole("menu", { name: "Fixture" });
-  const item = screen.getByRole("menuitem", { name: "View your profile" });
-  expect(item).toHaveAttribute("data-icon-variant", "avatar");
-  // Local Online intent supplies no observed badge without a community session.
-  expect(item.querySelector(".buzz-avatar-status")).not.toHaveAttribute(
-    "data-status",
+  // The header avatar is the first item and leads to profile settings.
+  const header = screen.getByRole("menuitem", {
+    name: "Fixture, edit profile",
+  });
+  await waitFor(() => expect(header).toHaveFocus());
+
+  const appearanceRow = screen.getByRole("menuitem", { name: "Appearance" });
+  expect(appearanceRow).toHaveAttribute("aria-haspopup", "menu");
+  act(() => appearanceRow.focus());
+  await user.keyboard("{ArrowRight}");
+  const submenu = await screen.findByRole("menu", { name: "Appearance" });
+  expect(appearance.snapshot().preference).toBe("system");
+  expect(
+    within(submenu).getByRole("menuitemradio", { name: "System" }),
+  ).toBeChecked();
+  const light = within(submenu).getByRole("menuitemradio", { name: "Light" });
+  await user.click(light);
+  expect(appearance.snapshot().preference).toBe("light");
+  expect(light).toBeChecked();
+  expect(
+    within(submenu).getByRole("menuitemradio", { name: "System" }),
+  ).not.toBeChecked();
+  await user.keyboard("{ArrowDown}{Enter}");
+  expect(appearance.snapshot().preference).toBe("dark");
+  expect(
+    within(submenu).getByRole("menuitemradio", { name: "Dark" }),
+  ).toBeChecked();
+  await user.click(
+    within(submenu).getByRole("menuitemradio", { name: "System" }),
   );
-  // A keyboard opening lands on the avatar as the first item. The item and the
-  // button it renders must activate once between them, not on the opening key.
-  await waitFor(() => expect(item).toHaveFocus());
-  await user.keyboard("{ArrowDown}");
-  await waitFor(() =>
-    expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus(),
+  expect(appearance.snapshot().preference).toBe("system");
+  expect(
+    within(submenu).getByRole("menuitemradio", { name: "System" }),
+  ).toBeChecked();
+  const storage = vi.spyOn(Storage.prototype, "setItem");
+  storage.mockImplementation(() => {
+    throw new Error("Storage unavailable");
+  });
+  await user.click(light);
+  expect(within(submenu).getByRole("alert")).toHaveTextContent(
+    "This appearance is active, but could not be saved on this device. Try again.",
   );
-  await user.keyboard("{ArrowUp}");
-  await waitFor(() => expect(item).toHaveFocus());
-  await user.keyboard("{Enter}");
-  // The header trigger, not the closing menu item, owns focus restoration.
-  expect(onProfile).toHaveBeenCalledExactlyOnceWith(trigger);
+  storage.mockRestore();
+  await user.click(light);
+  expect(within(submenu).queryByRole("alert")).not.toBeInTheDocument();
+  expect(localStorage.getItem(APPEARANCE_KEY)).toBe("light");
+  const restored = createAppearance(window);
+  expect(restored.snapshot().preference).toBe("light");
+  restored.dispose();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(submenu).not.toBeInTheDocument());
+  expect(appearanceRow).toHaveFocus();
+  expect(menu).toBeInTheDocument();
+
+  await user.click(
+    screen.getByRole("menuitem", { name: "Fixture, edit profile" }),
+  );
+  expect(onSettings).toHaveBeenLastCalledWith("profile");
   await waitFor(() => expect(menu).not.toBeInTheDocument());
   await waitFor(() => expect(screen.getByRole("main")).toHaveFocus());
+
+  await user.click(trigger);
+  await screen.findByRole("menu", { name: "Fixture" });
+  await user.click(screen.getByRole("menuitem", { name: "Plugins" }));
+  expect(onSettings).toHaveBeenLastCalledWith("plugins");
+  appearance.dispose();
 });
 
 it("shows the selected community name and authenticated avatar without saving a local default", async () => {
@@ -384,6 +425,7 @@ it("shows the selected community name and authenticated avatar without saving a 
     <ProfileButton
       communities={communities}
       accountActions={accountActions}
+      appearance={testAppearance}
       settingsSelected={false}
       onSettings={() => {}}
     />,
@@ -409,7 +451,7 @@ it("shows the selected community name and authenticated avatar without saving a 
       await screen.findByRole("menu", { name: "Community name" }),
     ).toBeVisible();
     expect(
-      screen.getByRole("button", { name: "Availability: Status unavailable" }),
+      screen.getByRole("button", { name: "Availability unknown" }),
     ).toBeVisible();
     expect(media).toHaveBeenCalledWith(
       "https://community.test/media/avatar.png",
@@ -442,8 +484,8 @@ it("shows the selected community name and authenticated avatar without saving a 
   }
 });
 
-it.each(["escape", "outside", "reopen"])(
-  "cancels a held status opening on %s dismissal",
+it.each(["escape", "close button", "reopen", "scope switch"])(
+  "opens status immediately and ignores a held refresh after %s dismissal",
   async (dismiss) => {
     const { createRelaySession } = await import("../../features/relay/session");
     const owner = createRelaySession(null);
@@ -456,7 +498,7 @@ it.each(["escape", "outside", "reopen"])(
         }),
     );
     const viewer = "a".repeat(64);
-    const connection = {
+    let connection = {
       scope: "https://status.test",
       session: {
         ...owner.session,
@@ -468,7 +510,13 @@ it.each(["escape", "outside", "reopen"])(
       viewer,
     };
     const presence = { status: "online", preference: "auto", error: null };
-    const subscribe = () => () => {};
+    const listeners = new Set<() => void>();
+    const subscribe = (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    };
     const actions: readonly [] = [];
     const accountActions = {
       subscribe,
@@ -485,6 +533,7 @@ it.each(["escape", "outside", "reopen"])(
         <ProfileButton
           communities={communities}
           accountActions={accountActions}
+          appearance={testAppearance}
           settingsSelected={false}
           onSettings={() => {}}
         />
@@ -498,8 +547,23 @@ it.each(["escape", "outside", "reopen"])(
       await screen.findByRole("menu", { name: "Local" });
       await user.click(screen.getByRole("menuitem", { name: "Set a status" }));
       expect(current).toHaveBeenCalledOnce();
-      if (dismiss === "outside")
-        await user.click(screen.getByRole("button", { name: "Outside" }));
+      expect(
+        screen.getByRole("dialog", { name: "Set a status" }),
+      ).toBeVisible();
+      if (dismiss === "scope switch") {
+        const original = connection;
+        act(() => {
+          connection = { ...original, session: { ...original.session } };
+          for (const listener of listeners) listener();
+        });
+        act(() => {
+          connection = original;
+          for (const listener of listeners) listener();
+        });
+      } else if (dismiss === "close button")
+        await user.click(
+          screen.getByRole("button", { name: "Close status editor" }),
+        );
       else await user.keyboard("{Escape}");
       await waitFor(() =>
         expect(
@@ -524,6 +588,61 @@ it.each(["escape", "outside", "reopen"])(
     }
   },
 );
+
+it("names the status emoji on hover in the menu's status row", async () => {
+  const { createRelaySession } = await import("../../features/relay/session");
+  const owner = createRelaySession(null);
+  const user = userEvent.setup();
+  const viewer = "a".repeat(64);
+  const statuses = new Map([
+    [viewer, { userId: viewer, text: "Buzzin'", emoji: "🏠", updatedAt: 1 }],
+  ]);
+  const connection = {
+    scope: "https://status.test",
+    session: {
+      ...owner.session,
+      statuses: { ...owner.session.statuses, snapshot: () => statuses },
+    },
+  };
+  const snapshot = { profile: { name: "Local", picture: "" }, viewer };
+  const presence = { status: "online", preference: "auto", error: null };
+  const subscribe = () => () => {};
+  const actions: readonly [] = [];
+  const view = render(
+    <ProfileButton
+      communities={
+        {
+          subscribe,
+          snapshot: () => snapshot,
+          presence: { subscribe, snapshot: () => presence },
+          relay: { subscribe, snapshot: () => connection },
+        } as unknown as Communities
+      }
+      accountActions={
+        {
+          subscribe,
+          snapshot: () => actions,
+        } as unknown as AccountActionsService
+      }
+      appearance={testAppearance}
+      settingsSelected={false}
+      onSettings={() => {}}
+    />,
+  );
+  try {
+    await user.click(screen.getByRole("button", { name: "Your profile" }));
+    await screen.findByRole("menu", { name: "Local" });
+    const row = screen.getByRole("menuitem", {
+      name: "Set a status: 🏠 Buzzin'",
+    });
+    await user.hover(within(row).getByText("🏠"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(/^:house:$/);
+    expect(row).toHaveAttribute("data-highlighted");
+  } finally {
+    view.unmount();
+    owner.dispose();
+  }
+});
 
 it.each(["online", "offline"] as const)(
   "shares %s presence between trigger and account menu",
@@ -571,6 +690,7 @@ it.each(["online", "offline"] as const)(
       <ProfileButton
         communities={communities}
         accountActions={accountActions}
+        appearance={testAppearance}
         settingsSelected={false}
         onSettings={() => {}}
       />,
@@ -660,6 +780,7 @@ it("drops the previous community profile on switching and uses local defaults on
     <ProfileButton
       communities={communities}
       accountActions={accountActions}
+      appearance={testAppearance}
       settingsSelected={false}
       onSettings={() => {}}
     />,
@@ -731,6 +852,19 @@ it("refreshes the viewer through the real session after roster setup, not a stal
   owner.session.channels.ensureList();
   const initialRoster = wire.next();
   const read = vi.fn(owner.session.read);
+  resetSharedTimeZones();
+  const publish = vi
+    .spyOn(communityApi, "publishProfile")
+    .mockResolvedValue(undefined);
+  // The strong read just before sharing sees a newer description.
+  const strong = {
+    exists: true,
+    existing: { name: "Current community name", about: "Newer" },
+    profile: { name: "Current community name", picture: "", about: "Newer" },
+  };
+  const inspect = vi
+    .spyOn(communityApi, "inspectProfile")
+    .mockResolvedValue(strong);
   const connection = {
     viewer: viewer.pubkey,
     status: "ready",
@@ -758,6 +892,7 @@ it("refreshes the viewer through the real session after roster setup, not a stal
     <ProfileButton
       communities={communities}
       accountActions={accountActions}
+      appearance={testAppearance}
       settingsSelected={false}
       onSettings={() => {}}
     />,
@@ -816,82 +951,123 @@ it("refreshes the viewer through the real session after roster setup, not a stal
       await screen.findByRole("menu", { name: "Current community name" }),
     ).toBeVisible();
     expect(snapshot.profile.name).toBe("Local only");
+    // That fresh read shows no `tz`, so this device's zone is shared once,
+    // into what a strong read of the same session holds just before.
+    await waitFor(() =>
+      expect(publish).toHaveBeenCalledWith(
+        "https://community.test",
+        strong.profile,
+        {
+          ...strong.existing,
+          tz: new Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
+      ),
+    );
+    expect(inspect).toHaveBeenCalledExactlyOnceWith(
+      "https://community.test",
+      connection.session,
+    );
     // Unrelated live notifications do not start extra reads.
     act(() => live.state({ status: "connected", routes: [] }));
     expect(read).toHaveBeenCalledTimes(1);
   } finally {
+    publish.mockRestore();
+    inspect.mockRestore();
     view.unmount();
     owner.dispose();
   }
 });
 
-it("opens a contributed account action and removes it when its registration retires", async () => {
-  const user = userEvent.setup();
-  const profile = { profile: { name: "Fixture", picture: "" }, viewer: null };
-  const presence = { status: "online", preference: "auto", error: null };
-  const subscribe = () => () => {};
-  const connection = { status: "unavailable", session: undefined, scope: "" };
-  const communities = {
-    subscribe,
-    snapshot: () => profile,
-    presence: { subscribe, snapshot: () => presence },
-    relay: { subscribe, snapshot: () => connection },
-  } as unknown as Communities;
-  function Action({
-    open,
-    onOpenChange,
-  }: {
-    open: boolean;
-    onOpenChange(open: boolean): void;
-  }) {
-    return open ? (
-      <div role="dialog" aria-label="Feedback">
-        <button type="button" onClick={() => onOpenChange(false)}>
-          Dismiss feedback
-        </button>
-      </div>
-    ) : null;
-  }
-  const entry = {
-    key: "buzz.feedback/send",
-    pluginId: "buzz.feedback",
-    title: "Send feedback",
-    component: Action,
-  };
-  let actions = [entry];
-  const listeners = new Set<() => void>();
-  const accountActions = {
-    subscribe: (listener: () => void) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    snapshot: () => actions,
-  } as unknown as AccountActionsService;
-  render(
-    <ProfileButton
-      communities={communities}
-      accountActions={accountActions}
-      settingsSelected={false}
-      onSettings={() => {}}
-    />,
-  );
-  await user.click(screen.getByRole("button", { name: "Your profile" }));
-  await user.click(
-    await screen.findByRole("menuitem", { name: "Send feedback" }),
-  );
-  expect(screen.getByRole("dialog", { name: "Feedback" })).toBeInTheDocument();
-  await act(async () => {
-    actions = [];
-    for (const listener of listeners) listener();
-  });
-  expect(
-    screen.queryByRole("dialog", { name: "Feedback" }),
-  ).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Your profile" }));
-  expect(
-    screen.queryByRole("menuitem", { name: "Send feedback" }),
-  ).not.toBeInTheDocument();
-});
+it.each(["default", "before-settings"] as const)(
+  "opens a contributed %s action in host menu order and removes retired registrations",
+  async (placement) => {
+    const user = userEvent.setup();
+    const profile = { profile: { name: "Fixture", picture: "" }, viewer: null };
+    const presence = { status: "online", preference: "auto", error: null };
+    const subscribe = () => () => {};
+    const connection = { status: "unavailable", session: undefined, scope: "" };
+    const communities = {
+      subscribe,
+      snapshot: () => profile,
+      presence: { subscribe, snapshot: () => presence },
+      relay: { subscribe, snapshot: () => connection },
+    } as unknown as Communities;
+    function Action({
+      open,
+      onOpenChange,
+    }: {
+      open: boolean;
+      onOpenChange(open: boolean): void;
+    }) {
+      return open ? (
+        <div role="dialog" aria-label="Feedback">
+          <button type="button" onClick={() => onOpenChange(false)}>
+            Dismiss feedback
+          </button>
+        </div>
+      ) : null;
+    }
+    const entry = {
+      placement,
+      key: "buzz.feedback/send",
+      pluginId: "buzz.feedback",
+      title: "Send feedback",
+      component: Action,
+    };
+    let actions = [entry];
+    const listeners = new Set<() => void>();
+    const accountActions = {
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      snapshot: () => actions,
+    } as unknown as AccountActionsService;
+    render(
+      <ProfileButton
+        communities={communities}
+        accountActions={accountActions}
+        appearance={testAppearance}
+        settingsSelected={false}
+        onSettings={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Your profile" }));
+    const menu = await screen.findByRole("menu", { name: "Fixture" });
+    expect(within(menu).getAllByRole("separator")).toHaveLength(
+      placement === "default" ? 2 : 1,
+    );
+    const items = within(menu).getAllByRole("menuitem");
+    const feedback = await screen.findByRole("menuitem", {
+      name: "Send feedback",
+    });
+    const settings = within(menu).getByRole("menuitem", { name: "Settings" });
+    expect(items.indexOf(feedback) - items.indexOf(settings)).toBe(
+      placement === "default" ? 1 : -1,
+    );
+    feedback.focus();
+    await user.keyboard("{Enter}");
+    expect(
+      screen.getByRole("dialog", { name: "Feedback" }),
+    ).toBeInTheDocument();
+    await act(async () => {
+      actions = [];
+      for (const listener of listeners) listener();
+    });
+    expect(
+      screen.queryByRole("dialog", { name: "Feedback" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Your profile" }));
+    expect(
+      screen.queryByRole("menuitem", { name: "Send feedback" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(await screen.findByRole("menu", { name: "Fixture" })).getAllByRole(
+        "separator",
+      ),
+    ).toHaveLength(1);
+  },
+);
 
 async function statusFeedbackFixture(disconnected = false) {
   const listeners = new Set<() => void>();
@@ -926,6 +1102,7 @@ async function statusFeedbackFixture(disconnected = false) {
   const actions: readonly [] = [];
   render(
     <ProfileButton
+      appearance={testAppearance}
       communities={
         {
           subscribe,
@@ -947,7 +1124,7 @@ async function statusFeedbackFixture(disconnected = false) {
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "Your profile" }));
   await user.click(
-    await screen.findByRole("button", { name: /^Availability:/ }),
+    await screen.findByRole("button", { name: /^Availability/ }),
   );
   await screen.findByRole("menuitemradio", { name: "Away" });
   return {
@@ -991,7 +1168,7 @@ it("keeps confirmed indicators while pending, replaces attempts, times out, retr
     act(() => vi.advanceTimersByTime(1));
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Could not confirm your status",
+      "Could not confirm your availability",
     );
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Offline" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -1020,6 +1197,11 @@ it("cancels feedback on disconnected community switches even when both sessions 
   try {
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Away" }));
     expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Availability unknown, updating to away",
+      }),
+    ).toBeInTheDocument();
     h.community();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     act(() => vi.advanceTimersByTime(15000));
@@ -1029,3 +1211,44 @@ it("cancels feedback on disconnected community switches even when both sessions 
     vi.useRealTimers();
   }
 });
+
+it.each([
+  [0, null],
+  [1, "1 recommended plugin"],
+  [3, "3 recommended plugins"],
+])(
+  "points to %s managed plugin recommendations beside Plugins",
+  async (count, text) => {
+    const user = userEvent.setup();
+    const subscribe = () => () => {};
+    const actions: readonly [] = [];
+    const state = { profile: { name: "Fixture", picture: "" }, viewer: null };
+    const presence = { status: "online", preference: "auto" };
+    const connection = { status: "unavailable", session: undefined, scope: "" };
+    const communities = {
+      subscribe,
+      snapshot: () => state,
+      presence: { subscribe, snapshot: () => presence },
+      relay: { subscribe, snapshot: () => connection },
+    } as unknown as Communities;
+    render(
+      <ProfileButton
+        communities={communities}
+        accountActions={
+          {
+            subscribe,
+            snapshot: () => actions,
+          } as unknown as AccountActionsService
+        }
+        appearance={testAppearance}
+        settingsSelected={false}
+        pluginRecommendations={count}
+        onSettings={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Your profile" }));
+    const item = await screen.findByRole("menuitem", { name: /Plugins/ });
+    if (text) expect(item).toHaveTextContent(text);
+    else expect(item).not.toHaveTextContent("recommended");
+  },
+);

@@ -1,5 +1,3 @@
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { RegisteredPage } from "../../features/pages/service";
 import {
@@ -9,7 +7,8 @@ import {
   RobotIcon,
 } from "../../shared/design-system/icons/index";
 import {
-  headerPageSelection,
+  navigationOwner,
+  pagePlacement,
   orderPages,
   pagePresentation,
 } from "./presentation";
@@ -29,16 +28,15 @@ function page(key: string, title: string, icon?: string): RegisteredPage {
   };
 }
 
-const me = page("buzz.me/me", "Me");
 const messages = page("buzz.channels/channels", "Channels");
 const inbox = page("buzz.inbox/inbox", "Inbox");
 const bestie = page("buzz.bestie/bestie", "Bestie");
-const projects = page("buzz.projects/projects", "Projects");
+const projects = page("fixture.projects/projects", "Projects");
 
 test("bundled page order ignores activation order without mutating the registry", () => {
-  const input = Object.freeze([projects, bestie, messages, inbox, me]);
-  expect(orderPages(input)).toEqual([me, messages, inbox, bestie, projects]);
-  expect(input).toEqual([projects, bestie, messages, inbox, me]);
+  const input = Object.freeze([projects, bestie, messages, inbox]);
+  expect(orderPages(input)).toEqual([messages, inbox, bestie, projects]);
+  expect(input).toEqual([projects, bestie, messages, inbox]);
   expect(orderPages([messages, projects])).toEqual([messages, projects]);
   expect(orderPages([projects])).toEqual([projects]);
   expect(orderPages([])).toEqual([]);
@@ -54,11 +52,11 @@ test("other pages sort by label then full key and cannot claim bundled slots", (
     messages,
     inbox,
     bestie,
-    projects,
     alpha,
     alpha2,
     foreignInbox,
     sameId,
+    projects,
     zulu,
   ];
   expect(orderPages([...expected].reverse())).toEqual(expected);
@@ -77,16 +75,11 @@ test("other pages sort by label then full key and cannot claim bundled slots", (
   ).toEqual(expected);
 });
 
-test("bundled pages get their own icons and Bestie's row shows its artwork", () => {
+test("bundled pages get their own icons", () => {
   expect(pagePresentation(inbox).icon).toBe(BellIcon);
   expect(pagePresentation(page("buzz.agents/agents", "Agents")).icon).toBe(
     RobotIcon,
   );
-  expect(
-    renderToStaticMarkup(
-      createElement(pagePresentation(bestie).icon, { size: 15 }),
-    ),
-  ).toContain("/bestie.png");
   expect(pagePresentation(page("example.mail/inbox", "Inbox")).icon).toBe(
     BrowserIcon,
   );
@@ -135,68 +128,101 @@ describe("page mark precedence", () => {
   });
 });
 
-describe("header area selection", () => {
-  const entries: RegisteredPage[] = [
-    { ...me, primary: true, placement: "topbar" },
-    { ...messages, primary: true, placement: "topbar" },
-    inbox,
-    { ...page("buzz.reminders/reminders", "Reminders"), placement: "sidebar" },
-    page("buzz.agents/agents", "Agents"),
-    page("buzz.workflows/workflows", "Workflows"),
-    { ...page("buzz.sessions/sessions", "Sessions"), primary: false },
-    page("example.sidebar/me", "External sidebar"),
-    {
-      ...page("example.header/main", "External header"),
+test.each([undefined, "toolbar"] as const)(
+  "bundled Messages uses host placement regardless of registered %s placement",
+  (placement) => {
+    expect(
+      pagePlacement({
+        ...messages,
+        primary: true,
+        ...(placement ? { placement } : {}),
+      }),
+    ).toBe("dock");
+  },
+);
+
+test.each([undefined, "dock"] as const)(
+  "bundled Activity is a Messages sidebar row regardless of registered %s placement",
+  (placement) => {
+    expect(
+      pagePlacement({
+        ...inbox,
+        primary: true,
+        ...(placement ? { placement } : {}),
+      }),
+    ).toBe("sidebar");
+  },
+);
+
+test.each([
+  [undefined, "sidebar"],
+  ["sidebar", "sidebar"],
+  ["dock", "dock"],
+  // Pre-dock names stay accepted and resolve to the dock.
+  ["topbar", "dock"],
+  ["toolbar", "dock"],
+] as const)("a plugin's %s placement resolves to %s", (placement, expected) => {
+  expect(
+    pagePlacement({
+      ...page("example.plugin/main", "Plugin"),
       primary: true,
-      placement: "topbar",
-    },
-    {
-      ...page("example.tools/main", "External toolbar"),
-      primary: true,
-      placement: "toolbar",
-    },
-    {
-      ...page("example.linked/main", "External linked"),
-      primary: false,
-      placement: "toolbar",
-    },
+      ...(placement ? { placement } : {}),
+    }),
+  ).toBe(expected);
+});
+
+describe("navigation owner", () => {
+  const primary = (
+    key: string,
+    fields: Partial<RegisteredPage> = {},
+  ): RegisteredPage => ({ ...page(key, key), primary: true, ...fields });
+  const listed = [
+    primary("example.sidebar/main"),
+    primary("example.listed/main", { placement: "sidebar" }),
+    primary("example.own-sidebar/main", { sidebar: () => null }),
+  ];
+  const entries = [
+    primary(messages.key),
+    ...listed,
+    primary("example.header/main", { placement: "topbar" }),
+    primary("example.tools/main", { placement: "toolbar" }),
+    primary("example.linked/main", { primary: false, placement: "sidebar" }),
   ];
   test.each([
-    ["buzz.channels/channels", "buzz.channels/channels"],
-    ["buzz.inbox/inbox", "buzz.channels/channels"],
-    ["buzz.reminders/reminders", "buzz.channels/channels"],
-    ["buzz.agents/agents", "buzz.channels/channels"],
-    ["buzz.workflows/workflows", "buzz.channels/channels"],
-    ["buzz.sessions/sessions", "buzz.channels/channels"],
-    ["example.sidebar/me", "buzz.channels/channels"],
-    ["buzz.me/me", "buzz.me/me"],
-    ["settings", "settings"],
+    // Every external page listed in the Messages sidebar keeps Messages
+    // selected, including one that supplies its own sidebar.
+    ["example.sidebar/main", messages.key],
+    ["example.listed/main", messages.key],
+    ["example.own-sidebar/main", messages.key],
+    // External dock apps own themselves.
     ["example.header/main", "example.header/main"],
     ["example.tools/main", "example.tools/main"],
-    ["example.linked/main", "buzz.channels/channels"],
+    // Destinations without a navigation entry select nothing in the dock.
+    ["example.linked/main", "example.linked/main"],
+    ["settings", "settings"],
     ["missing/page", "missing/page"],
-  ])("%s selects %s without changing the destination", (selected, expected) => {
-    expect(headerPageSelection(entries, selected)).toBe(expected);
+  ])("%s belongs to %s", (selected, owner) => {
+    expect(navigationOwner(entries, selected)).toBe(owner);
   });
-  test("never borrows an absent, non-primary or non-topbar Messages entry", () => {
-    const others = entries.filter((entry) => entry.key !== messages.key);
-    for (const registered of [
-      others,
-      [...others, { ...messages, placement: "topbar" as const }],
-      [
-        ...others,
-        { ...messages, primary: true, placement: "toolbar" as const },
-      ],
-    ]) {
-      expect(headerPageSelection(registered, inbox.key)).toBe(inbox.key);
-    }
-  });
-  test("Me stays separate even when its placement is omitted", () => {
-    expect(
-      headerPageSelection(
-        [...entries.filter((entry) => entry.key !== me.key), me],
-        me.key,
-      ),
-    ).toBe(me.key);
-  });
+  // Without Messages there is no app to keep selected.
+  test.each(listed.map(({ key }) => key))(
+    "%s owns itself when Messages is absent",
+    (selected) => {
+      const pages = entries.filter((page) => page.key !== messages.key);
+      expect(navigationOwner(pages, selected)).toBe(selected);
+    },
+  );
+});
+
+test("unlisted conversation pages keep Messages without adding a navigation row", () => {
+  const taskPage = {
+    ...page("example.task/main", "Task"),
+    primary: false,
+    conversationNavigation: true,
+  };
+  expect(pagePlacement(taskPage)).toBeUndefined();
+  expect(
+    navigationOwner([{ ...messages, primary: true }, taskPage], taskPage.key),
+  ).toBe(messages.key);
+  expect(navigationOwner([taskPage], taskPage.key)).toBe(taskPage.key);
 });

@@ -9,9 +9,11 @@ import { ContributionBoundary, contributionKey } from "./ContributionBoundary";
 
 export function ComposerAccessories({
   registry,
+  placement,
   ...props
 }: ComposerAccessoryProps & {
   registry: ContributionReader<ComposerAccessory>;
+  placement?: ComposerAccessory["placement"];
 }) {
   const entries = useSyncExternalStore(
     registry.subscribe,
@@ -20,20 +22,44 @@ export function ComposerAccessories({
   );
   const order = (entry: ComposerAccessory) =>
     Number.isFinite(entry.order) ? (entry.order ?? 0) : 0;
-  return entries
-    .filter((entry) => (entry.placement === "message") === !!props.message)
+  const ordered = entries
+    .filter(
+      (entry) =>
+        (entry.placement ?? "composer") ===
+        (placement ?? (props.message ? "message" : "composer")),
+    )
     .sort(
       (a, b) =>
         order(a) - order(b) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
-    )
-    .map((entry) => (
-      <ContributionBoundary
-        key={`${contributionKey(entry)}:${props.scope}:${props.channelId}:${props.message?.id ?? props.threadRootId ?? ""}`}
-        fallback={<p role="status">{entry.title} unavailable</p>}
-      >
-        <OwnedAccessory entry={entry} registry={registry} {...props} />
-      </ContributionBoundary>
-    ));
+    );
+  const decorator = props.renderMessageSummary
+    ? ordered.find((entry) => entry.decoratesMessageSummary)
+    : undefined;
+  return (
+    <>
+      {!decorator && props.renderMessageSummary?.()}
+      {ordered.map((entry) => (
+        <ContributionBoundary
+          key={`${contributionKey(entry)}:${props.scope}:${props.channelId}:${props.message?.id ?? props.threadRootId ?? ""}`}
+          fallback={
+            <>
+              {entry === decorator && props.renderMessageSummary?.()}
+              <p role="status">{entry.title} unavailable</p>
+            </>
+          }
+        >
+          <OwnedAccessory
+            entry={entry}
+            registry={registry}
+            {...props}
+            renderMessageSummary={
+              entry === decorator ? props.renderMessageSummary : undefined
+            }
+          />
+        </ContributionBoundary>
+      ))}
+    </>
+  );
 }
 function OwnedAccessory({
   entry,
@@ -77,5 +103,9 @@ function OwnedAccessory({
     };
   }, [entry, registry, props.session, canOpenThread]);
   const Accessory = entry.component;
-  return commands ? <Accessory {...props} {...commands} /> : null;
+  return commands ? (
+    <Accessory {...props} {...commands} />
+  ) : (
+    (props.renderMessageSummary?.() ?? null)
+  );
 }

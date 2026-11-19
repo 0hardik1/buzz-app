@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { isSidebarPreferencesBatch } from "../../src/features/relay/sidebar-preferences.ts";
 import { verifyEvent } from "nostr-tools";
 import { createHash } from "node:crypto";
 
@@ -9,15 +10,25 @@ export function policyRelay({
   viewer,
   relayAuthor,
   answer,
+  searchProfiles,
   report,
   pending,
   discovery,
   acceptPublication,
   latencyMs = 0,
   holdOlder = true,
+  // Release each held older page after this delay instead of on demand.
+  olderPageDelayMs = null,
 }) {
   const sockets = [];
+  // A page can close between sending a publication and its acceptance. The
+  // relay still accepts it, but that community has no open socket left to
+  // deliver it to, so publish skips its delivery check for that community.
+  let closedAcceptance;
   let presenceHeld = false;
+  // A NIP-FI front-door refusal: every signed request gets the relay's exact
+  // plain-text denial (buzz-auth `nip_fi/denial.rs`) until cleared.
+  let refusal;
   const presenceWaiters = [];
   report.presenceSnapshots = [];
   report.presencePublications = [];
@@ -67,6 +78,8 @@ export function policyRelay({
   }
   const heldEose = new Set();
   const pendingEose = [];
+  // Stored events the next replaying REQ for a channel sends before EOSE.
+  const replays = new Map();
   const pendingProfiles = [];
   const pendingUnread = [];
   const unreadHolds = [];
@@ -87,6 +100,8 @@ export function policyRelay({
           ? "observer"
           : undefined);
   report.wireFrames = [];
+  // Subscription ids are per socket: pair a frame with its socket to match it.
+  report.socketFrames = [];
   report.startupFrames = [];
   let emptyRoster = false;
   let heldContent = false;
@@ -98,6 +113,7 @@ export function policyRelay({
   };
   function emit(socket, frame) {
     report.wireFrames.push(frame);
+    report.socketFrames.push({ socket: sockets.indexOf(socket), frame });
     if (wsLimit)
       report.startupFrames.push({
         socket: sockets.indexOf(socket),
@@ -139,6 +155,13 @@ export function policyRelay({
     holdEose(channel) {
       heldEose.add(channel);
     },
+    /** Model a reconnect's replay: fixture events predate the client's
+     * wall-clock `since`, so the next REQ whose filter for `channel` asks for
+     * a replay (limit above zero) sends these events, up to that limit,
+     * before EOSE. Passing the limit or more cuts the replay. */
+    replayNext(community, channel, events) {
+      replays.set(`${community}/${channel}`, events);
+    },
     releaseEose(channel) {
       heldEose.delete(channel);
       for (let i = pendingEose.length - 1; i >= 0; i--) {
@@ -166,14 +189,20 @@ export function policyRelay({
     emptyRoster() {
       emptyRoster = true;
     },
+    // Quotas refuse primary's next matching read: every joined community
+    // reads its own roster and heads at startup.
     quotaNextRoster(seconds = 1) {
-      quotas.set("roster", seconds);
+      quotas.set("primary/roster", seconds);
     },
     quotaNextHead(channel, seconds = 1) {
-      quotas.set(channel, seconds);
+      quotas.set(`primary/${channel}`, seconds);
     },
     quotaNextOlder(channel, seconds = 1) {
-      quotas.set(`older:${channel}`, seconds);
+      quotas.set(`primary/older:${channel}`, seconds);
+    },
+    /** With `only`, just the signed requests to those paths. */
+    refuseSigned(status, body, only) {
+      refusal = status ? { status, body, only } : undefined;
     },
     async fetch(url, init) {
       try {
@@ -185,9 +214,19 @@ export function policyRelay({
           expect(new URL(url).pathname).toBe("/");
           return Response.json(discovery?.(communityOf(url)) ?? {});
         }
-        expect(["/query", ...(acceptPublication ? ["/events"] : [])]).toContain(
-          new URL(url).pathname,
-        );
+        if (
+          refusal &&
+          (!refusal.only || refusal.only.includes(new URL(url).pathname))
+        )
+          return new Response(refusal.body, {
+            status: refusal.status,
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
+        expect([
+          "/query",
+          "/profiles/search",
+          ...(acceptPublication ? ["/events"] : []),
+        ]).toContain(new URL(url).pathname);
         const auth = JSON.parse(
           Buffer.from(init.headers.Authorization.slice(6), "base64").toString(),
         );
@@ -200,6 +239,8 @@ export function policyRelay({
           createHash("sha256").update(init.body).digest("hex"),
         ]);
         const filters = JSON.parse(init.body);
+        if (new URL(url).pathname === "/profiles/search")
+          return Response.json(searchProfiles(communityOf(url), filters));
         if (new URL(url).pathname === "/events") {
           acceptPublication(communityOf(url), filters);
           return Response.json({ accepted: true, event_id: filters.id });
@@ -320,12 +361,12 @@ export function policyRelay({
             filters.flatMap((filter) => answer(communityOf(url), filter)),
           );
         }
-        if (filters.length === 2 && "#buzz-channel" in filters[0]) {
-          // A channel's project-home read: projects and repositories, one channel.
+        if (filters.length === 1 && "#buzz-channel" in filters[0]) {
+          // A channel’s listed repositories, one channel.
           const channel = filters[0]["#buzz-channel"];
           expect(channel).toEqual([expect.any(String)]);
           expect(filters).toEqual(
-            [30621, 30617].map((kind) => ({
+            [30617].map((kind) => ({
               kinds: [kind],
               "#buzz-channel": channel,
               limit: 100,
@@ -360,15 +401,45 @@ export function policyRelay({
             filters.flatMap((filter) => answer(community, filter)),
           );
         }
+        if (
+          filters.every(
+            (filter) => filter.kinds?.length === 1 && filter.kinds[0] === 9007,
+          )
+        ) {
+          // Advisory creator receipts use bounded batches, independently of sidebar reads.
+          expect(filters.length).toBeGreaterThan(0);
+          expect(filters.length).toBeLessThanOrEqual(4);
+          for (const filter of filters) {
+            expect(filter).toEqual({
+              kinds: [9007],
+              authors: expect.arrayContaining([expect.any(String)]),
+              "#h": expect.arrayContaining([expect.any(String)]),
+              limit: expect.any(Number),
+              ...(filter.consistency ? { consistency: "strong" } : {}),
+            });
+            expect(filter["#h"].length).toBeLessThanOrEqual(2048);
+            expect(filter.limit).toBeGreaterThan(0);
+            expect(filter.limit).toBeLessThanOrEqual(500);
+            report.queries.push({
+              community: communityOf(url),
+              filter,
+              at: performance.now(),
+            });
+          }
+          return Response.json(
+            filters.flatMap((filter) => answer(communityOf(url), filter)),
+          );
+        }
         if (filters.length !== 1) {
-          // Sidebar preferences read only these four exact own-author coordinates.
-          expect(filters).toHaveLength(4);
-          expect(filters.map((filter) => filter["#d"]?.[0]).sort()).toEqual([
-            "channel-mutes",
-            "channel-sections",
-            "channel-sort",
-            "channel-stars",
-          ]);
+          const legacySortAndFilter =
+            filters.length === 2 &&
+            filters
+              .map((filter) => filter["#d"]?.[0])
+              .sort()
+              .join() === "channel-filter,channel-sort";
+          expect(
+            legacySortAndFilter || isSidebarPreferencesBatch(filters),
+          ).toBe(true);
           for (const filter of filters) {
             expect(filter.kinds).toEqual([30078]);
             expect(filter.authors).toEqual([viewer]);
@@ -436,7 +507,7 @@ export function policyRelay({
         const channel = filter["#h"]?.[0];
         // Head catch-up is an exact top-level channel window, not a batched
         // sidebar preview that happens to contain that channel.
-        const quota = filter.kinds?.includes(39002)
+        const scope = filter.kinds?.includes(39002)
           ? "roster"
           : filter.kinds?.includes(9)
             ? filter.until === undefined
@@ -445,6 +516,7 @@ export function policyRelay({
                 : undefined
               : `older:${channel}`
             : undefined;
+        const quota = scope && `${community}/${scope}`;
         if (quotas.has(quota)) {
           const seconds = quotas.get(quota);
           quotas.delete(quota);
@@ -465,12 +537,15 @@ export function policyRelay({
           heldUnread &&
           filter.kinds?.includes(9) &&
           filter["#h"]?.length &&
+          // Unread repair asks for edits too; a search preview's plain
+          // channel read does not.
+          filter.include_aux &&
           filter.top_level === undefined &&
           filter.depth_limit === undefined &&
           filter.until === undefined
         )
           return new Promise((resolve, reject) => {
-            const held = { pending: true, aborted: false };
+            const held = { community, pending: true, aborted: false };
             unreadHolds.push(held);
             const abort = () => {
               held.pending = false;
@@ -512,7 +587,7 @@ export function policyRelay({
           return new Promise((resolve, reject) => {
             const abort = () => reject(init.signal.reason);
             init.signal.addEventListener("abort", abort, { once: true });
-            pending.push({
+            const receipt = {
               community,
               channel,
               filter,
@@ -521,7 +596,10 @@ export function policyRelay({
                 init.signal.removeEventListener("abort", abort);
                 resolve(Response.json(result));
               },
-            });
+            };
+            pending.push(receipt);
+            if (olderPageDelayMs !== null)
+              setTimeout(() => receipt.release(), olderPageDelayMs);
           });
         return Response.json(result);
       } catch (error) {
@@ -582,6 +660,14 @@ export function policyRelay({
             if (kind === "EVENT" && acceptPublication) {
               expect(this.authenticated).toBe(true);
               setTimeout(() => {
+                if (
+                  !sockets.some(
+                    (socket) =>
+                      socket.readyState === 1 &&
+                      socket.community === this.community,
+                  )
+                )
+                  closedAcceptance = this.community;
                 try {
                   const accepted = acceptPublication(this.community, id);
                   // A fixture may hold the OK while relay side effects proceed.
@@ -593,6 +679,8 @@ export function policyRelay({
                   else emit(this, ["OK", id.id, true, ""]);
                 } catch (error) {
                   fault(error);
+                } finally {
+                  closedAcceptance = undefined;
                 }
               }, latencyMs);
               return;
@@ -620,12 +708,10 @@ export function policyRelay({
             if (!admitWs(this, kind, id)) return;
             for (const filter of filters) {
               const channel = filter["#h"]?.[0];
-              // Initial replay stays per channel; zero replay may consolidate the wire.
+              // History and live-only requests may both name multiple channels.
               if (
                 filter.kinds.includes(9) &&
-                (!channel ||
-                  filter["#h"].length > 10 ||
-                  (filter.limit !== 0 && filter["#h"].length !== 1))
+                (!channel || filter["#h"].length > 2048)
               ) {
                 queueMicrotask(() =>
                   emit(this, [
@@ -648,6 +734,15 @@ export function policyRelay({
               }
             }
             this.routes.set(id, filters);
+            for (const filter of filters) {
+              const key = `${this.community}/${filter["#h"]?.[0]}`;
+              const events = replays.get(key);
+              if (!events || !(filter.limit > 0) || filter["#h"].length !== 1)
+                continue;
+              replays.delete(key);
+              for (const event of events.slice(0, filter.limit))
+                emit(this, ["EVENT", id, event]);
+            }
             if (routes.some((route) => heldEose.has(route)))
               pendingEose.push({ socket: this, id, routes });
             else if (eoseMs) setTimeout(() => emit(this, ["EOSE", id]), eoseMs);
@@ -674,6 +769,20 @@ export function policyRelay({
           [...s.routes.values()].some((filters) =>
             filters.some((filter) =>
               (filter["#h"] ?? [routeOf(filter)]).includes(channel),
+            ),
+          ),
+      );
+    },
+    hasPresenceRoute(community, author) {
+      return sockets.some(
+        (socket) =>
+          socket.readyState === 1 &&
+          socket.community === community &&
+          [...socket.routes.values()].some((filters) =>
+            filters.some(
+              (filter) =>
+                filter.kinds.includes(20001) &&
+                filter.authors?.includes(author),
             ),
           ),
       );
@@ -721,7 +830,7 @@ export function policyRelay({
         "observer must traverse the production owner-only route",
       ).toBeGreaterThan(0);
     },
-    publish(community, event) {
+    publish(community, event, { requireSubscriber = true } = {}) {
       let deliveries = 0;
       // Relay-authored group state names its channel with d, not h.
       const destinationTag =
@@ -746,10 +855,11 @@ export function policyRelay({
           deliveries++;
         }
       }
-      expect(
-        deliveries,
-        "event must traverse an explicit production channel REQ",
-      ).toBeGreaterThan(0);
+      if (requireSubscriber && closedAcceptance !== community)
+        expect(
+          deliveries,
+          "event must traverse an explicit production channel REQ",
+        ).toBeGreaterThan(0);
     },
     failRoute(
       community,

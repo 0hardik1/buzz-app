@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { RelaySession } from "../relay/session";
+import type { ComposerSession } from "./composer-session";
 import { canAddMembers } from "../channel-members/members";
 import type { MentionRecipient } from "./mention-draft";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
@@ -16,13 +16,14 @@ type Pending = {
 
 /** One consent decision for a captured send. The session owns durable additions. */
 export function useNonmemberMentions(
-  session: RelaySession,
+  session: ComposerSession,
   channelId: string,
   restoreFocus: () => void,
 ) {
   const [pending, setPending] = useState<Pending>();
   const adding = useRef(false);
-  const safeAction = useRef<HTMLButtonElement>(null);
+  // Mentioning someone outside the channel usually means you want them here,
+  // so Enter right after Send invites. Escape and Close keep the draft unsent.
   const inviteAction = useRef<HTMLButtonElement>(null);
   const channel = session.channels
     .list()
@@ -39,10 +40,16 @@ export function useNonmemberMentions(
     };
     setPending({ ...request, busy: true });
     try {
-      for (const person of request.people) {
-        check();
-        await session.memberAdditions.add(channelId, person.pubkey);
-      }
+      check();
+      // Requested together, so they go to the relay together.
+      const failed = (
+        await Promise.allSettled(
+          request.people.map((person) =>
+            session.memberAdditions.add(channelId, person.pubkey),
+          ),
+        )
+      ).find((result) => result.status === "rejected");
+      if (failed) throw failed.reason;
       check();
       request.finish([]);
     } catch (reason) {
@@ -76,6 +83,7 @@ export function useNonmemberMentions(
     },
     dialog: (
       <Dialog
+        size="compact"
         open={!!pending}
         onOpenChange={(open) => {
           if (!open) pending?.finish(null);
@@ -83,7 +91,7 @@ export function useNonmemberMentions(
         title="Mention people outside this channel?"
         description={pending && describe(pending.people, canAdd)}
         preventClose={!!pending?.busy}
-        initialFocus={canAdd ? inviteAction : safeAction}
+        initialFocus={canAdd ? inviteAction : undefined}
         finalFocus={() => {
           restoreFocus();
           return false;
@@ -91,7 +99,6 @@ export function useNonmemberMentions(
         actions={
           <>
             <Button
-              ref={safeAction}
               type="button"
               disabled={pending?.busy}
               onClick={() =>

@@ -3,6 +3,8 @@ export type KeyBinding = Readonly<{
   key: string;
   /** Command on Apple platforms, Control elsewhere. Other modifiers match exactly. */
   mod?: boolean;
+  /** Control beside Command on Apple platforms. Elsewhere Control is `mod`, so this never matches. */
+  ctrl?: boolean;
   shift?: boolean;
   alt?: boolean;
 }>;
@@ -15,6 +17,8 @@ export type Shortcut = Readonly<{
   when?: () => boolean;
   allowInEditable?: boolean;
   allowInModal?: boolean;
+  /** Also run when the topmost modal is its own navigation visit (Settings, Members). */
+  allowInVisit?: boolean;
   /** Held keys are consumed but run only once unless opted in. */
   repeat?: boolean;
   /** Lower values appear first within this owner's Settings category; defaults to zero. */
@@ -34,9 +38,12 @@ export function normalizeShortcut(shortcut: Shortcut): NormalizedShortcut {
     !shortcut.title.trim() ||
     typeof shortcut.run !== "function" ||
     (shortcut.when !== undefined && typeof shortcut.when !== "function") ||
-    [shortcut.allowInEditable, shortcut.allowInModal, shortcut.repeat].some(
-      (value) => value !== undefined && typeof value !== "boolean",
-    ) ||
+    [
+      shortcut.allowInEditable,
+      shortcut.allowInModal,
+      shortcut.allowInVisit,
+      shortcut.repeat,
+    ].some((value) => value !== undefined && typeof value !== "boolean") ||
     (shortcut.order !== undefined && typeof shortcut.order !== "number")
   )
     throw new Error("A shortcut needs an id, title, binding and run function");
@@ -61,7 +68,7 @@ export function isKeyBinding(value: unknown): value is KeyBinding {
   return (
     typeof binding.key === "string" &&
     binding.key.length > 0 &&
-    [binding.mod, binding.shift, binding.alt].every(
+    [binding.mod, binding.ctrl, binding.shift, binding.alt].every(
       (flag) => flag === undefined || typeof flag === "boolean",
     )
   );
@@ -72,6 +79,7 @@ export function sameBinding(a: KeyBinding, b: KeyBinding) {
   return (
     a.key.toLowerCase() === b.key.toLowerCase() &&
     !!a.mod === !!b.mod &&
+    !!a.ctrl === !!b.ctrl &&
     !!a.shift === !!b.shift &&
     !!a.alt === !!b.alt
   );
@@ -92,7 +100,9 @@ export function matches(
     (binding) =>
       binding.key.toLowerCase() === event.key.toLowerCase() &&
       !!binding.mod === (apple ? event.metaKey : event.ctrlKey) &&
-      !(apple ? event.ctrlKey : event.metaKey) &&
+      (apple
+        ? !!binding.ctrl === event.ctrlKey
+        : !binding.ctrl && !event.metaKey) &&
       !!binding.shift === event.shiftKey &&
       !!binding.alt === event.altKey,
   );

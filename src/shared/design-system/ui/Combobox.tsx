@@ -94,26 +94,95 @@ function Control({
   );
 }
 
+/** A button-style field for comboboxes whose search input lives in the popup. */
+function Trigger({
+  label,
+  children,
+  error,
+  disabled,
+}: {
+  label: string;
+  children: ReactNode;
+  error?: ReactNode;
+  disabled?: boolean | undefined;
+}) {
+  return (
+    <Field label={label} error={error}>
+      <BaseCombobox.Trigger
+        aria-label={label}
+        disabled={disabled}
+        data-buzz-ui=""
+        className="buzz-input buzz-select-trigger"
+      >
+        <span className="buzz-select-value">{children}</span>
+        <CaretDownIcon
+          size={16}
+          className="buzz-dropdown-chevron"
+          aria-hidden="true"
+        />
+      </BaseCombobox.Trigger>
+    </Field>
+  );
+}
+
+function Search() {
+  return (
+    <div className="p-2">
+      <BaseCombobox.Input
+        aria-label="Search"
+        placeholder="Search"
+        data-buzz-ui=""
+        className="buzz-input"
+        autoCorrect="off"
+        autoCapitalize="none"
+        spellCheck={false}
+      />
+    </div>
+  );
+}
+
 function Popup({
   children,
   empty,
   className = "",
+  collisionBoundary,
+  side = "bottom",
+  collisionAvoidance,
+  size = "default",
+  search = false,
 }: {
   children: ReactNode;
+  search?: boolean;
   empty: ReactNode;
   className?: string | undefined;
+  /** Compact keeps search visible above a bounded, scrollable result list. */
+  size?: "default" | "compact";
+  side?: ComponentProps<typeof BaseCombobox.Positioner>["side"];
+  collisionAvoidance?: ComponentProps<
+    typeof BaseCombobox.Positioner
+  >["collisionAvoidance"];
+  /** Constrain nested choices to their containing surface; Base UI owns sizing. */
+  collisionBoundary?: ComponentProps<
+    typeof BaseCombobox.Positioner
+  >["collisionBoundary"];
 }) {
   return (
     <BaseCombobox.Portal>
       <BaseCombobox.Positioner
+        side={side}
         sideOffset={4}
+        collisionBoundary={collisionBoundary}
+        collisionAvoidance={collisionAvoidance}
         className="buzz-select-positioner"
       >
         <BaseCombobox.Popup
           data-buzz-ui=""
           className={`buzz-select-popup text-body ${className}`}
           data-variant="field"
+          data-combobox-size={size}
+          initialFocus={search ? true : undefined}
         >
+          {search && <Search />}
           <BaseCombobox.Empty className="buzz-combobox-empty">
             {empty}
           </BaseCombobox.Empty>
@@ -155,6 +224,7 @@ function Item({
 export const Combobox = {
   Root: BaseCombobox.Root,
   Control,
+  Trigger,
   Popup,
   List: BaseCombobox.List,
   Item,

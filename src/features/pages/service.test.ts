@@ -67,7 +67,7 @@ describe("page decoration validation", () => {
     return snapshot;
   }
 
-  it.each([undefined, "sidebar", "topbar", "toolbar"])(
+  it.each([undefined, "sidebar", "dock", "topbar", "toolbar"])(
     "preserves placement %j without changing the primary opt-in",
     async (placement) => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -89,7 +89,7 @@ describe("page decoration validation", () => {
       expect(page).toMatchObject({ key: "example/main", primary: true, icon });
       expect(page).not.toHaveProperty("placement");
       expect(warn).toHaveBeenCalledExactlyOnceWith(
-        "Ignoring page placement for example/main: expected sidebar, topbar, or toolbar",
+        "Ignoring page placement for example/main: expected sidebar or dock",
       );
     },
   );
@@ -149,5 +149,62 @@ describe("page decoration validation", () => {
     expect(snapshot.map((page) => page.key)).toEqual(["example/main"]);
     expect(Object.keys(snapshot[0] ?? {})).not.toContain("icon");
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("requires a callable page sidebar and disposes its scoped contribution", async () => {
+    const root = new Context();
+    root.provide("pluginStatus", {
+      isActive: () => true,
+      subscribe: () => () => {},
+    });
+    const pages = new PagesService(root);
+    const scope = root.extend({
+      pluginOwner: { id: "example", revision: "one" },
+    });
+    const sidebar = () => null;
+    const fiber = scope.plugin((ctx) => {
+      expect(() =>
+        ctx.pages.register({
+          id: "invalid",
+          title: "Invalid",
+          component: () => null,
+          sidebar: "not a component",
+        } as never),
+      ).toThrow("A page needs an id, a title, and a React component function");
+      ctx.pages.register({
+        id: "main",
+        title: "Main",
+        component: () => null,
+        sidebar,
+      });
+    });
+    await fiber.await();
+    expect(typeof pages.snapshot()[0]?.sidebar).toBe("function");
+    await fiber.dispose();
+    expect(pages.snapshot()).toEqual([]);
+    await root.fiber.dispose();
+  });
+
+  it("requires a callable page preview", async () => {
+    const root = new Context();
+    root.provide("pluginStatus", {
+      isActive: () => true,
+      subscribe: () => () => {},
+    });
+    const pages = new PagesService(root);
+    const scope = root.extend({
+      pluginOwner: { id: "example", revision: "one" },
+    });
+    const fiber = scope.plugin((ctx) => {
+      const base = { id: "main", title: "Main", component: () => null };
+      for (const preview of [null, "card", {}])
+        expect(() => ctx.pages.register({ ...base, preview } as never)).toThrow(
+          "A page needs an id, a title, and a React component function",
+        );
+      ctx.pages.register({ ...base, primary: true, preview: () => null });
+    });
+    await fiber.await();
+    expect(typeof pages.snapshot()[0]?.preview).toBe("function");
+    await root.fiber.dispose();
   });
 });

@@ -28,7 +28,11 @@ import {
 } from "../../shared/design-system/icons/index";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { formatBinding, isApplePlatform } from "../shortcuts/format";
-import { composerFormats, type ComposerFormat } from "./composer-dom";
+import {
+  composerFormats,
+  linkBindings,
+  type ComposerFormat,
+} from "./composer-dom";
 import styles from "./ComposerFormattingTools.module.css";
 
 // A short ease-out gives immediate feedback without an entrance delay.
@@ -69,8 +73,11 @@ export function ComposerFormattingTools({
   activeFormats,
   toggleFormat,
   editLink,
+  trailing,
 }: {
   children: ReactNode;
+  /** Conversation controls that follow the tools on the same row. */
+  trailing?: ReactNode;
   disabled: boolean;
   singleRow?: boolean;
   activeFormats: readonly ComposerFormat[];
@@ -99,6 +106,7 @@ export function ComposerFormattingTools({
   const faded = { opacity: 0, scale: instant ? 1 : 0.95 };
   const formatToggle = (
     <IconButton
+      hint="familiar"
       ref={closedToggle}
       size="sm"
       variant="ghost"
@@ -135,6 +143,7 @@ export function ComposerFormattingTools({
               transition={transition}
             >
               <IconButton
+                hint="familiar"
                 ref={openToggle}
                 size="sm"
                 variant="subtle"
@@ -164,14 +173,12 @@ export function ComposerFormattingTools({
                   );
                   const isLink = label === "Link";
                   const binding =
-                    format?.binding ??
-                    (isLink
-                      ? { key: "k", mod: true, shift: false }
-                      : undefined);
+                    format?.binding ?? (isLink ? linkBindings[0] : undefined);
                   const active = format && activeFormats.includes(format.mark);
                   const apple = isApplePlatform(navigator.platform);
                   return (
                     <IconButton
+                      hint={binding ? "familiar" : "helpful"}
                       key={label}
                       size="sm"
                       aria-label={label}
@@ -223,6 +230,7 @@ export function ComposerFormattingTools({
             >
               {formatToggle}
             </motion.div>
+            {trailing}
           </ToolGroup>
         )}
       </AnimatePresence>

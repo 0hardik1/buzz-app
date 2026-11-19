@@ -1,7 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   ArchiveIcon,
-  ArrowClockwiseIcon,
   EyeSlashIcon,
   SignOutIcon,
   TrashIcon,
@@ -12,50 +11,30 @@ import {
   MenuItem,
   MenuSeparator,
 } from "../../shared/design-system/ui/Menu";
-import type { ChannelLifecycleCapability } from "../../features/relay/channel-lifecycle";
-import type {
-  ChannelLifecycleAction,
-  ChannelLifecycleSettings,
-} from "../../features/relay/channel-lifecycle-protocol";
+import type { ChannelSummary } from "../../features/relay/contracts";
+import type { LifecycleNoun } from "./ChannelLifecycleDialog";
+import type { ChannelLifecycleAction } from "../../features/relay/channel-lifecycle-protocol";
+import { useLifecycleOffer, type LifecycleSession } from "./useLifecycleOffer";
 
-/** Read permissions only while open; the header keeps its popup owner mounted. */
 export function ChannelLifecycleMenu({
-  channelId,
-  lifecycle,
+  channel,
+  session,
   choose,
   disabled,
   separator,
-  open = true,
+  noun = "channel",
   render = (items) => items,
 }: {
-  channelId: string;
-  lifecycle: ChannelLifecycleCapability;
+  channel: ChannelSummary;
+  session: LifecycleSession;
   choose(action: ChannelLifecycleAction): void;
   disabled: boolean;
   separator: boolean;
-  open?: boolean;
+  noun?: LifecycleNoun;
   render?(items: ReactNode): ReactNode;
 }) {
-  const [state, setState] = useState<ChannelLifecycleSettings>();
-  const [failed, setFailed] = useState(false);
-  const [retry, setRetry] = useState(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: explicit retry starts a fresh permission lookup.
-  useEffect(() => {
-    if (!open || !lifecycle.available) return;
-    const controller = new AbortController();
-    setState(undefined);
-    setFailed(false);
-    void lifecycle.load(channelId, controller.signal).then(
-      (settings) => {
-        if (!controller.signal.aborted) setState(settings);
-      },
-      () => {
-        if (!controller.signal.aborted) setFailed(true);
-      },
-    );
-    return () => controller.abort();
-  }, [channelId, lifecycle, retry, open]);
-  if (!lifecycle.available)
+  const state = useLifecycleOffer(session, channel);
+  if (!session.channelLifecycle.available)
     return render(
       <>
         {separator && <MenuSeparator />}
@@ -67,23 +46,6 @@ export function ChannelLifecycleMenu({
         </MenuItem>
       </>,
     );
-  if (failed)
-    return render(
-      <>
-        {separator && <MenuSeparator />}
-        <p role="alert">Channel actions unavailable</p>
-        <MenuItem
-          closeOnClick={false}
-          disabled={disabled}
-          onClick={() => setRetry((value) => value + 1)}
-        >
-          <MenuIcon>
-            <ArrowClockwiseIcon size={14} />
-          </MenuIcon>
-          Retry channel permissions
-        </MenuItem>
-      </>,
-    );
   if (
     !state ||
     !(
@@ -91,8 +53,7 @@ export function ChannelLifecycleMenu({
       state.canArchive ||
       state.canUnarchive ||
       state.canDelete ||
-      state.canLeave ||
-      state.deleteUnavailable
+      state.canLeave
     )
   )
     return render(null);
@@ -113,7 +74,7 @@ export function ChannelLifecycleMenu({
               <MenuIcon>
                 <SignOutIcon size={14} />
               </MenuIcon>
-              Leave channel
+              Leave {noun}
             </MenuItem>
           )}
           {(state.canArchive || state.canUnarchive) && (
@@ -126,28 +87,8 @@ export function ChannelLifecycleMenu({
               <MenuIcon>
                 <ArchiveIcon size={14} />
               </MenuIcon>
-              {state.canUnarchive ? "Unarchive channel" : "Archive channel"}
+              {state.canUnarchive ? `Unarchive ${noun}` : `Archive ${noun}`}
             </MenuItem>
-          )}
-          {state.deleteUnavailable && (
-            <>
-              <MenuItem disabled>
-                <MenuIcon>
-                  <WarningCircleIcon size={14} />
-                </MenuIcon>
-                Delete check unavailable
-              </MenuItem>
-              <MenuItem
-                closeOnClick={false}
-                disabled={disabled}
-                onClick={() => setRetry((value) => value + 1)}
-              >
-                <MenuIcon>
-                  <ArrowClockwiseIcon size={14} />
-                </MenuIcon>
-                Retry Delete check
-              </MenuItem>
-            </>
           )}
           {state.canDelete && (
             <MenuItem
@@ -158,7 +99,7 @@ export function ChannelLifecycleMenu({
               <MenuIcon>
                 <TrashIcon size={14} />
               </MenuIcon>
-              Delete channel
+              Delete {noun}
             </MenuItem>
           )}
         </>

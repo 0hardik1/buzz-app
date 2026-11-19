@@ -3,6 +3,7 @@ import { ToastProvider } from "../../src/shared/design-system/ui/Toast";
 import { createRoot } from "react-dom/client";
 import { ProfileButton } from "../../src/app/shell/ProfileButton";
 import { ChannelSidebarItem } from "../../src/bundled/channels/ChannelSidebarItem";
+import sidebarStyles from "../../src/features/channel-navigation/SidebarFrame.module.css";
 import { MessageRow } from "../../src/features/messages/MessageRow";
 import { UserStatusDisplay } from "../../src/features/user-status/StatusDisplay";
 import { createRelaySession } from "../../src/features/relay/session";
@@ -10,7 +11,10 @@ import type { LiveCallbacks } from "../../src/features/relay/live";
 import type { RelayEvent } from "../../src/features/relay/events";
 import type { Communities } from "../../src/features/communities/service";
 import { keypair, signed, profile } from "../../src/features/relay/testing";
+import { createAppearance } from "../../src/shared/theme/service";
 import "../../src/shared/styles/globals.css";
+
+const appearance = createAppearance();
 
 const viewer = keypair(),
   other = keypair(),
@@ -33,9 +37,11 @@ Object.assign(window, {
   },
 });
 let remoteTime = Math.floor(Date.now() / 1000);
+// ?name= renames Bob in the DM row and in his message byline.
+const bobName = new URLSearchParams(location.search).get("name") ?? "Bob";
 const profiles = [
   profile(viewer, { name: "Alice" }),
-  profile(other, { name: "Bob" }),
+  profile(other, { name: bobName }),
 ];
 const catalog = signed(relay, {
   kind: 30030,
@@ -129,15 +135,12 @@ const communities = {
   subscribe: () => () => {},
   relay: { snapshot: () => connection, subscribe: () => () => {} },
 } as unknown as Communities;
-function remote(text: string, emoji = "🏠") {
+function remote(text: string, emoji = "🏠", url?: string) {
   const event = signed(other, {
     kind: 30315,
     created_at: ++remoteTime,
     content: text,
-    tags: [
-      ["d", "general"],
-      ["emoji", emoji],
-    ],
+    tags: [["d", "general"], url ? ["emoji", emoji, url] : ["emoji", emoji]],
   });
   events.set(other.pubkey, event);
   for (const listener of listeners) listener.receive([event]);
@@ -152,6 +155,7 @@ createRoot(root).render(
         <ProfileButton
           communities={communities}
           accountActions={accountActions}
+          appearance={appearance}
           settingsSelected={false}
           onSettings={() => {}}
         />
@@ -162,25 +166,23 @@ createRoot(root).render(
           className="rounded-2xl border border-line p-4"
         >
           <h2>Navigation</h2>
-          <ChannelSidebarItem
-            channel={{
-              id: "status-dm",
-              name: new URLSearchParams(location.search).get("name") ?? "Bob",
-              channelType: "dm",
-              participants: [other.pubkey],
-            }}
-            session={first}
-            working={false}
-            selected={undefined}
-            collapsed
-            onToggle={() => {}}
-            draft={false}
-            draftSelected={false}
-            sessions={[]}
-            onSelect={() => {}}
-            onNewSession={() => {}}
-            onOpenThread={() => {}}
-          />
+          {/* The real sidebar's row metrics, including its emoji size. */}
+          <div className={sidebarStyles.sidebar}>
+            <ChannelSidebarItem
+              channel={{
+                id: "status-dm",
+                name: bobName,
+                channelType: "dm",
+                participants: [other.pubkey],
+              }}
+              session={first}
+              working={false}
+              selected={undefined}
+              onSelect={() => {}}
+              onOpenThread={() => {}}
+              onOpenMessage={() => {}}
+            />
+          </div>
         </section>
         <section
           aria-label="Chat"
@@ -199,7 +201,9 @@ createRoot(root).render(
                 id: name,
                 channelId: "status-dm",
                 authorId: authorId,
-                content: "A message",
+                // Wider than the byline, so the hover toolbar above the
+                // bubble's end corner leaves the status reachable.
+                content: "A message that runs past its byline",
                 createdAt: remoteTime,
                 mentions: [],
                 participants: [],
@@ -232,6 +236,21 @@ createRoot(root).render(
           <UserStatusDisplay session={first} userId={viewer.pubkey} />
           <UserStatusDisplay session={first} userId={other.pubkey} />
         </section>
+        <section
+          aria-label="Profile preview"
+          className="rounded-2xl border border-line p-4"
+        >
+          <h2>Profile preview</h2>
+          {["16rem", "5rem"].map((width) => (
+            <div key={width} style={{ width }}>
+              <UserStatusDisplay
+                session={first}
+                userId={other.pubkey}
+                size="caption"
+              />
+            </div>
+          ))}
+        </section>
       </div>
       <div className="mt-6 flex gap-2">
         <button
@@ -248,11 +267,47 @@ createRoot(root).render(
         <button type="button" onClick={() => remote("Celebrating", ":party:")}>
           Custom Bob
         </button>
+        <button
+          type="button"
+          onClick={() =>
+            remote(
+              "Buzzin' between hives all afternoon, so replies may wait until the honey run is done",
+              ":bee-intensifies:",
+            )
+          }
+        >
+          Uncatalogued Bob
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            remote(
+              "Buzzin'",
+              ":bee-intensifies:",
+              "https://emoji.test/bee-intensifies.svg",
+            )
+          }
+        >
+          Uncatalogued Bob with image
+        </button>
         <button type="button" onClick={() => remote("Buzzy", "")}>
           Text-only Bob
         </button>
         <button type="button" onClick={() => remote("", "")}>
           Clear Bob
+        </button>
+        {/* Other clients can put text, or several emoji, in the emoji tag. */}
+        <button
+          type="button"
+          onClick={() => remote("Buzzin'", "🐝 working from the office")}
+        >
+          Free-text Bob
+        </button>
+        <button
+          type="button"
+          onClick={() => remote("Buzzin'", "🐝🏠🎉🚀🌊🔥🍕🎸👩‍💻🏳️‍🌈")}
+        >
+          Emoji-run Bob
         </button>
         <button
           type="button"

@@ -5,16 +5,24 @@ import type {
   SidebarAssignmentMutator,
   SidebarAssignmentIntent,
   SidebarSectionOrderMutator,
+  SidebarGroups,
   SidebarSectionRemovalMutator,
+  SidebarSectionRenameMutator,
+  SidebarSectionCreationMutator,
+  SidebarSectionDraft,
+  SidebarSectionEdit,
   SidebarStarMutator,
   SidebarMuteMutator,
   SidebarPreferences,
   SidebarSortMode,
   SidebarSortMutator,
+  SidebarFilterMode,
+  SidebarFilterMutator,
+  SidebarFilterSettings,
 } from "./sidebar-preferences";
 
 type MoveDestination =
-  | { starred: true }
+  | { starred: boolean }
   | Omit<SidebarAssignmentIntent, "channelId">;
 type MoveIntent = Readonly<{
   id: number;
@@ -25,6 +33,12 @@ type MoveFailure = MoveIntent & Readonly<{ error: string }>;
 type SortFailure = Readonly<{
   group: string;
   mode: SidebarSortMode;
+  error: string;
+}>;
+type FilterFailure = Readonly<{
+  group: string;
+  mode: SidebarFilterMode;
+  activeWindowSeconds?: number | null;
   error: string;
 }>;
 type OrderFailure = Readonly<{
@@ -40,25 +54,46 @@ type Snapshot = Readonly<{
   transient?: true;
   cached?: true;
   sortErrors?: readonly SortFailure[];
+  filterErrors?: readonly FilterFailure[];
   moves?: readonly (MoveIntent & { pending: boolean; error?: string })[];
   orderError?: OrderFailure;
 }>;
 
 /** One bounded account-preference projection per relay session, not per page. */
-export function createSidebarPreferencesStore(
-  read: (signal?: AbortSignal) => Promise<SidebarPreferences>,
-  available: boolean,
-  write?: SidebarAssignmentMutator,
-  writeStar?: SidebarStarMutator,
+export function createSidebarPreferencesStore({
+  read,
+  readAfterWrite = read,
+  available,
+  write,
+  writeStar,
   notify = (listener: () => void) => listener(),
-  writeMute?: SidebarMuteMutator,
-  writeSort?: SidebarSortMutator,
-  persistence?: HeadPersistence,
-  removeSection?: SidebarSectionRemovalMutator,
-  /** Me groups have no Star coordinate; do not write Messages stars on moves. */
-  groupsOnly = false,
-  writeOrder?: SidebarSectionOrderMutator,
-) {
+  writeMute,
+  writeSort,
+  persistence,
+  removeSection,
+  renameSection,
+  writeOrder,
+  createSection,
+  writeFilter,
+}: Readonly<{
+  read: (signal?: AbortSignal) => Promise<SidebarPreferences>;
+  /** Fresh authoritative reconciliation after writes or live invalidation. */
+  readAfterWrite?:
+    | ((signal?: AbortSignal) => Promise<SidebarPreferences>)
+    | undefined;
+  available: boolean;
+  write?: SidebarAssignmentMutator | undefined;
+  writeStar?: SidebarStarMutator | undefined;
+  notify?: ((listener: () => void) => void) | undefined;
+  writeMute?: SidebarMuteMutator | undefined;
+  writeSort?: SidebarSortMutator | undefined;
+  persistence?: HeadPersistence | undefined;
+  removeSection?: SidebarSectionRemovalMutator | undefined;
+  renameSection?: SidebarSectionRenameMutator | undefined;
+  writeOrder?: SidebarSectionOrderMutator | undefined;
+  createSection?: SidebarSectionCreationMutator | undefined;
+  writeFilter?: SidebarFilterMutator | undefined;
+}>) {
   const listeners = new Set<() => void>();
   const empty = (): Snapshot =>
     Object.freeze({ status: available ? "idle" : "unsupported" });
@@ -70,15 +105,38 @@ export function createSidebarPreferencesStore(
   let writeQueue = Promise.resolve();
   let writeLifetime = new AbortController();
   let mutation = 0;
+  let invalidation = 0;
+  let reconciled = 0;
+  let scheduled = false;
+  const owed = () => invalidation !== reconciled;
+  function scheduleReconciliation() {
+    if (closed || !available || scheduled) return;
+    scheduled = true;
+    const scheduledGeneration = generation;
+    queueMicrotask(() => {
+      if (closed || generation !== scheduledGeneration) return;
+      scheduled = false;
+      if (owed()) void refresh(true);
+    });
+  }
+  function invalidate() {
+    if (closed || !available) return;
+    invalidation++;
+    scheduleReconciliation();
+  }
   let confirmed: SidebarPreferences | undefined;
   let readFailure: string | undefined;
   let readTransient = false;
-  const writable = () =>
+  // Retain writer routing through failed reads and cache clears until reconciled.
+  let creationUncertain = false;
+  const starWritable = () =>
     !closed &&
     !!confirmed &&
     readFailure === undefined &&
     !!write &&
-    (groupsOnly || !!writeStar);
+    !!writeStar;
+  const writable = () =>
+    starWritable() && !confirmed?.workspaceMigrationPending;
   let nextMove = 0;
   const pendingMoves = new Map<number, MoveIntent>();
   const failedMoves = new Map<string, MoveFailure>();
@@ -91,33 +149,49 @@ export function createSidebarPreferencesStore(
   const orderWritable = () =>
     !closed &&
     !!confirmed &&
+    !confirmed.workspaceMigrationPending &&
     readFailure === undefined &&
     !snapshot.cached &&
     !!writeOrder;
+  const renameWritable = () =>
+    !closed &&
+    !!confirmed &&
+    !confirmed.workspaceMigrationPending &&
+    readFailure === undefined &&
+    !snapshot.cached &&
+    !!renameSection;
   const withPendingMoves = (data: SidebarPreferences): SidebarPreferences => {
     let sections = data.sections;
     const assignments = { ...data.assignments };
     const starred = new Set(data.starred);
     for (const { channelId, destination } of pendingMoves.values()) {
-      if ("starred" in destination) starred.add(channelId);
-      else {
+      if ("starred" in destination) {
+        if (destination.starred) starred.add(channelId);
+        else starred.delete(channelId);
+      } else {
         starred.delete(channelId);
         const created = destination.createSection;
-        if (created && !sections.some(({ id }) => id === created.id))
-          sections = [
-            ...sections,
-            {
-              ...created,
-              name: created.name.trim(),
-              order: Math.max(-1, ...sections.map(({ order }) => order)) + 1,
-            },
-          ];
+        if (created && !sections.some(({ id }) => id === created.id)) {
+          const section = {
+            id: created.id,
+            name: created.name.trim(),
+            ...(created.icon === undefined ? {} : { icon: created.icon }),
+            order:
+              created.position === "first"
+                ? Math.min(0, ...sections.map(({ order }) => order)) - 1
+                : Math.max(-1, ...sections.map(({ order }) => order)) + 1,
+          };
+          sections =
+            created.position === "first"
+              ? [section, ...sections]
+              : [...sections, section];
+        }
         const target = created?.id ?? destination.sectionId;
         if (target) assignments[channelId] = target;
         else delete assignments[channelId];
       }
     }
-    if (pendingOrder) {
+    if (pendingOrder && !data.sectionOrder) {
       const ids = pendingOrder.sectionIds;
       const rank = (id: string) =>
         ids.includes(id) ? ids.indexOf(id) : ids.length;
@@ -125,7 +199,15 @@ export function createSidebarPreferencesStore(
         .sort((a, b) => rank(a.id) - rank(b.id))
         .map((section, order) => ({ ...section, order }));
     }
-    return { ...data, sections, assignments, starred: [...starred] };
+    return {
+      ...data,
+      sections,
+      assignments,
+      starred: [...starred],
+      ...(pendingOrder && data.sectionOrder
+        ? { sectionOrder: pendingOrder.sectionIds }
+        : {}),
+    };
   };
   let generation = 0;
   let nextSortMutation = 0;
@@ -154,20 +236,76 @@ export function createSidebarPreferencesStore(
     return next;
   };
 
+  let nextFilterMutation = 0;
+  const latestFilter = new Map<string, number>();
+  const failedFilters = new Map<string, FilterFailure>();
+  const pendingFilters = new Map<
+    number,
+    {
+      group: string;
+      mode: SidebarFilterMode;
+      activeWindowSeconds?: number | null;
+    }
+  >();
+  const withFilter = (
+    filters: Readonly<Record<string, SidebarFilterMode>>,
+    group: string,
+    mode: SidebarFilterMode,
+  ) => {
+    const next = { ...filters };
+    if (mode === "all") delete next[group];
+    else next[group] = mode;
+    return next;
+  };
+  const withPendingFilters = (
+    filters: Readonly<Record<string, SidebarFilterMode>>,
+  ) => {
+    let next = filters;
+    for (const pending of pendingFilters.values())
+      next = withFilter(next, pending.group, pending.mode);
+    return next;
+  };
+
+  const withPendingWindows = () => {
+    const windows = { ...confirmed?.activeWindowSeconds };
+    for (const pending of pendingFilters.values()) {
+      if (pending.activeWindowSeconds === null) delete windows[pending.group];
+      else if (pending.activeWindowSeconds !== undefined)
+        windows[pending.group] = pending.activeWindowSeconds;
+    }
+    return windows;
+  };
+
   const retained = (data: SidebarPreferences): SidebarPreferences =>
     Object.freeze({
       sections: Object.freeze(
         data.sections.map((section) => Object.freeze({ ...section })),
       ),
       assignments: Object.freeze({ ...data.assignments }),
+      ...(data.sectionOrder
+        ? { sectionOrder: Object.freeze([...data.sectionOrder]) }
+        : {}),
+      ...(data.legacyTemplates
+        ? { legacyTemplates: Object.freeze({ ...data.legacyTemplates }) }
+        : {}),
       starred: Object.freeze([...data.starred]),
       muted: Object.freeze([...data.muted]),
+      ...(data.workspaceMigrationPending
+        ? { workspaceMigrationPending: true as const }
+        : {}),
       ...(data.sort ? { sort: Object.freeze({ ...data.sort }) } : {}),
+      ...(data.filters ? { filters: Object.freeze({ ...data.filters }) } : {}),
+      ...(data.activeWindowSeconds
+        ? {
+            activeWindowSeconds: Object.freeze({ ...data.activeWindowSeconds }),
+          }
+        : {}),
     });
   const publish = (next: Snapshot) => {
     const {
       moves: _moves,
       sortErrors: _errors,
+      filterErrors: _filterErrors,
       orderError: _order,
       ...state
     } = next;
@@ -186,6 +324,9 @@ export function createSidebarPreferencesStore(
       ...(failedSorts.size
         ? { sortErrors: Object.freeze([...failedSorts.values()]) }
         : {}),
+      ...(failedFilters.size
+        ? { filterErrors: Object.freeze([...failedFilters.values()]) }
+        : {}),
       ...(moves.length ? { moves: Object.freeze(moves) } : {}),
       ...(failedOrder ? { orderError: failedOrder } : {}),
     });
@@ -195,11 +336,12 @@ export function createSidebarPreferencesStore(
   // replaces its own fields; mute stays confirmed-only for notification policy.
   const project = () => {
     if (!confirmed) return;
-    void persistence
-      ?.writeStartup?.({
-        preferences: { savedAt: Date.now(), data: confirmed },
-      })
-      .catch(() => {});
+    if (!confirmed.workspaceMigrationPending)
+      void persistence
+        ?.writeStartup?.({
+          preferences: { savedAt: Date.now(), data: confirmed },
+        })
+        .catch(() => {});
     publish({
       // A field-only confirmation cannot recover a failed full read. Any
       // concurrent read made stale by a write must leave recovery available.
@@ -211,76 +353,107 @@ export function createSidebarPreferencesStore(
             ...(readTransient ? { transient: true as const } : {}),
           }),
       data: retained(
-        withPendingMoves(
-          pendingSorts.size
-            ? { ...confirmed, sort: withPendingSorts(confirmed.sort ?? {}) }
-            : confirmed,
-        ),
+        withPendingMoves({
+          ...confirmed,
+          ...(pendingSorts.size
+            ? { sort: withPendingSorts(confirmed.sort ?? {}) }
+            : {}),
+          ...(pendingFilters.size
+            ? {
+                filters: withPendingFilters(confirmed.filters ?? {}),
+                activeWindowSeconds: withPendingWindows(),
+              }
+            : {}),
+        }),
       ),
     });
   };
-  function refresh(): Promise<void> {
+  function refresh(quiet = false): Promise<void> {
     if (closed || !available) return Promise.resolve();
     if (pendingMoves.size) {
       const refreshGeneration = generation;
       return writeQueue.then(() => {
-        if (!closed && generation === refreshGeneration) return refresh();
+        if (!closed && generation === refreshGeneration) return refresh(quiet);
       });
     }
     if (active) return active.promise;
     const controller = new AbortController();
-    const refreshMutation = mutation;
     const job = { controller, promise: Promise.resolve() };
     active = job;
     job.promise = Promise.resolve().then(async () => {
       if (closed || controller.signal.aborted) return;
+      const current = () =>
+        !closed && !controller.signal.aborted && active === job;
       try {
-        const data = await read(controller.signal);
-        if (
-          closed ||
-          controller.signal.aborted ||
-          active !== job ||
-          mutation !== refreshMutation
-        )
-          return;
-        readFailure = undefined;
-        confirmed = data;
-        project();
-      } catch (error) {
-        if (
-          !closed &&
-          !controller.signal.aborted &&
-          active === job &&
-          mutation === refreshMutation
-        ) {
-          readFailure = error instanceof Error ? error.message : String(error);
-          readTransient = isTransientFailure(error);
-          const { transient: _transient, ...rest } = snapshot;
-          publish({
-            ...rest,
-            status: "error",
-            error: readFailure,
-            ...(readTransient ? { transient: true as const } : {}),
-          });
+        while (current()) {
+          // Other preference families share the queue. Read after they settle,
+          // and repeat if a write admitted during the read invalidates it.
+          const authoritative = creationUncertain || owed();
+          const writes = writeQueue;
+          if (authoritative) await writes;
+          if (!current()) return;
+          // A newly admitted writer must settle before a strong read starts.
+          if (authoritative && writes !== writeQueue) continue;
+          const refreshMutation = mutation;
+          const refreshInvalidation = invalidation;
+          try {
+            const data = await (authoritative ? readAfterWrite : read)(
+              controller.signal,
+            );
+            if (!current()) return;
+            if (
+              mutation !== refreshMutation ||
+              (authoritative && writes !== writeQueue)
+            ) {
+              if (creationUncertain || owed()) continue;
+              return;
+            }
+            if (invalidation !== refreshInvalidation) continue;
+            // Reconciliation installs current preferences, not confirmation of
+            // the failed creation. Its caller retains the error and exact draft;
+            // a conflicting retry is rejected by the existing writer policy.
+            if (authoritative) reconciled = refreshInvalidation;
+            readFailure = undefined;
+            creationUncertain = false;
+            confirmed = data;
+            project();
+            return;
+          } catch (error) {
+            if (!current()) return;
+            if (
+              mutation !== refreshMutation ||
+              (authoritative && writes !== writeQueue)
+            ) {
+              if (creationUncertain || owed()) continue;
+              return;
+            }
+            if (invalidation !== refreshInvalidation) continue;
+            readFailure =
+              error instanceof Error ? error.message : String(error);
+            readTransient = isTransientFailure(error);
+            const { transient: _transient, ...rest } = snapshot;
+            publish({
+              ...rest,
+              status: "error",
+              error: readFailure,
+              ...(readTransient ? { transient: true as const } : {}),
+            });
+            return;
+          }
         }
       } finally {
         if (active === job) active = undefined;
       }
     });
-    publish({
-      status: "loading",
-      ...(snapshot.cached ? { cached: true as const } : {}),
-      ...(snapshot.data ? { data: snapshot.data } : {}),
-    });
-    return job.promise;
-  }
-  function rejectMove(channelId: string, message: string): Promise<never> {
-    const failed = failedMoves.get(channelId);
-    if (failed) {
-      failedMoves.set(channelId, { ...failed, error: message });
-      publish(snapshot);
+    // Live reconciliation is quiet while useful confirmed content is mounted.
+    if (!quiet || !confirmed) {
+      publish({
+        status: "loading",
+        ...(snapshot.cached ? { cached: true as const } : {}),
+        ...(snapshot.data ? { data: snapshot.data } : {}),
+      });
     }
-    return Promise.reject(new Error(message));
+    return job.promise;
   }
   // Optimistic placement is a projection over confirmed data. Persistence keeps
   // assignment/create before Star removal. A failed
@@ -290,25 +463,36 @@ export function createSidebarPreferencesStore(
     destination: MoveDestination,
     signal?: AbortSignal,
   ): Promise<SidebarPreferences> {
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    const intent: MoveIntent = { id: ++nextMove, channelId, destination };
     if (
-      !writable() ||
+      !("starred" in destination ? starWritable() : writable()) ||
+      (creationUncertain && "createSection" in destination) ||
       !snapshot.data ||
       !confirmed ||
       !write ||
-      (!writeStar && !groupsOnly) ||
-      (groupsOnly && "starred" in destination)
-    )
-      return rejectMove(
-        channelId,
-        "Sidebar group moves are unavailable; refresh saved sidebar preferences before retrying",
-      );
+      !writeStar
+    ) {
+      const error =
+        "Sidebar group moves are unavailable; refresh saved sidebar preferences before retrying";
+      if (!closed && available && write && writeStar) {
+        const previous = failedMoves.get(channelId);
+        latestMove.set(channelId, intent.id);
+        failedMoves.set(channelId, {
+          ...intent,
+          id: previous?.id ?? intent.id,
+          error,
+        });
+        publish(snapshot);
+      }
+      return Promise.reject(new Error(error));
+    }
     const writeGeneration = generation;
     const writeSignal = AbortSignal.any([
       writeLifetime.signal,
       ...(signal ? [signal] : []),
     ]);
     if (writeSignal.aborted) return Promise.reject(writeSignal.reason);
-    const intent: MoveIntent = { id: ++nextMove, channelId, destination };
     pendingMoves.set(intent.id, intent);
     latestMove.set(channelId, intent.id);
     failedMoves.delete(channelId);
@@ -323,6 +507,8 @@ export function createSidebarPreferencesStore(
       .then(async () => {
         try {
           check();
+          if (creationUncertain && "createSection" in destination)
+            throw new Error("Section creation is unavailable");
           const starring = "starred" in destination;
           // Always check the fresh assignment head on removal, even if cached
           // placement has no assignment. Another device may have changed it.
@@ -330,18 +516,16 @@ export function createSidebarPreferencesStore(
             ? undefined
             : await write({ channelId, ...destination }, writeSignal);
           check();
-          const stars =
-            !groupsOnly && writeStar
-              ? await writeStar({ channelId, starred: starring }, writeSignal)
-              : [];
+          const stars = await writeStar(
+            { channelId, starred: starring && destination.starred },
+            writeSignal,
+          );
           check();
           if (!confirmed)
             throw new Error("Sidebar group moves are unavailable");
           confirmed = {
             ...confirmed,
-            ...(groups
-              ? { sections: groups.sections, assignments: groups.assignments }
-              : {}),
+            ...groups,
             starred: stars,
           };
           return retained(confirmed);
@@ -379,6 +563,7 @@ export function createSidebarPreferencesStore(
     if (
       closed ||
       !confirmed ||
+      confirmed.workspaceMigrationPending ||
       readFailure !== undefined ||
       snapshot.cached ||
       !removeSection ||
@@ -416,6 +601,19 @@ export function createSidebarPreferencesStore(
         if (!confirmed)
           throw new Error("Sidebar section removal is unavailable");
         confirmed = { ...confirmed, sort };
+        if (writeFilter) {
+          const settings = await writeFilter(
+            group,
+            "all",
+            confirmed.sections.map(({ id }) => id),
+            writeSignal,
+            null,
+          );
+          if (closed || generation !== writeGeneration || !confirmed)
+            throw new Error("Sidebar section removal is unavailable");
+          writeSignal.throwIfAborted();
+          confirmed = { ...confirmed, ...settings };
+        }
         mutation++;
         project();
         const next = await removeSection(sectionId, writeSignal);
@@ -423,11 +621,8 @@ export function createSidebarPreferencesStore(
           throw new Error("Sidebar section removal is unavailable");
         writeSignal.throwIfAborted();
         mutation++;
-        confirmed = {
-          ...confirmed,
-          sections: next.sections,
-          assignments: next.assignments,
-        };
+        confirmed = { ...confirmed, ...next };
+        failedFilters.delete(group);
         project();
         return retained(confirmed);
       })
@@ -471,10 +666,25 @@ export function createSidebarPreferencesStore(
         ),
       });
       const parsed = projectSidebarPreferences(
-        { version: 1, sections: data.sections, assignments: data.assignments },
+        {
+          version: 1,
+          sections: data.sections,
+          assignments: data.assignments,
+          sectionOrder: data.sectionOrder,
+          legacyTemplates: data.legacyTemplates,
+        },
         rows(data.starred, "starred"),
         rows(data.muted, "muted"),
         { version: 1, groups: data.sort ?? {} },
+        undefined,
+        data.filters === undefined && data.activeWindowSeconds === undefined
+          ? undefined
+          : {
+              version: 1,
+              groups: data.filters ?? {},
+              activeWindowSeconds: data.activeWindowSeconds,
+            },
+        data.sectionOrder !== undefined,
       );
       // Display-only: do not initialize the confirmed mutation base from disk.
       publish({
@@ -484,37 +694,110 @@ export function createSidebarPreferencesStore(
       });
     })
     .catch(() => {});
+  /** One queued groups-only write whose confirmed result replaces sections. */
+  const writeGroups = (
+    failure: string,
+    run: (signal: AbortSignal) => Promise<SidebarGroups>,
+  ) => {
+    const writeGeneration = generation;
+    const signal = writeLifetime.signal;
+    const next = writeQueue
+      .catch(() => {})
+      .then(async () => {
+        signal.throwIfAborted();
+        if (closed || generation !== writeGeneration) throw new Error(failure);
+        const groups = await run(signal);
+        signal.throwIfAborted();
+        if (closed || generation !== writeGeneration || !confirmed)
+          throw new Error(failure);
+        mutation++;
+        confirmed = { ...confirmed, ...groups };
+        project();
+      });
+    writeQueue = next.catch(() => {});
+    return next;
+  };
   return {
     ready,
+    async forgetDeletedFiling(channelId: string) {
+      // A confirmed deletion supersedes any retry for this conversation.
+      latestMove.delete(channelId);
+      if (failedMoves.delete(channelId)) publish(snapshot);
+      if (!writable() || snapshot.cached || !write) return;
+      const failure = "Deleted filing cleanup is unavailable";
+      await writeGroups(failure, (signal) => {
+        if (!writable()) throw new Error(failure);
+        return write({ channelId }, signal);
+      });
+    },
+    invalidate,
+    reconnect(continuous = false) {
+      if (!continuous) invalidate();
+      else if (owed()) scheduleReconciliation();
+    },
     queries: Object.freeze({
       available,
       get sectionRemovalWritable() {
-        return groupsOnly
-          ? writable() && !snapshot.cached && !!removeSection
-          : this.removeSectionWritable;
+        return this.removeSectionWritable;
       },
       removeSection(sectionId: string, callerSignal?: AbortSignal) {
-        if (!groupsOnly) return removeSectionMutation(sectionId, callerSignal);
-        if (!writable() || snapshot.cached || !removeSection)
-          return Promise.reject(new Error("Section deletion is unavailable"));
+        return removeSectionMutation(sectionId, callerSignal);
+      },
+      get sectionRenameWritable() {
+        return renameWritable();
+      },
+      renameSection(
+        sectionId: string,
+        edit: string | SidebarSectionEdit,
+        expectedName?: string,
+      ) {
+        if (!renameWritable() || !renameSection)
+          return Promise.reject(new Error("Section edit is unavailable"));
+        const changes = typeof edit === "string" ? { name: edit } : edit;
+        return writeGroups("Section edit is unavailable", (signal) =>
+          renameSection(
+            {
+              sectionId,
+              ...changes,
+              ...(expectedName === undefined ? {} : { expectedName }),
+            },
+            signal,
+          ),
+        );
+      },
+      get sectionCreationWritable() {
+        return (
+          writable() &&
+          !creationUncertain &&
+          !snapshot.cached &&
+          !!(createSection || write)
+        );
+      },
+      createSection(section: SidebarSectionDraft) {
+        const failure = "Section creation is unavailable";
+        const create =
+          createSection ??
+          (write
+            ? (section: SidebarSectionDraft, signal: AbortSignal) =>
+                write({ createSection: section }, signal)
+            : undefined);
+        if (!writable() || creationUncertain || snapshot.cached || !create)
+          return Promise.reject(new Error(failure));
         const writeGeneration = generation;
-        const signal = writeLifetime.signal;
-        const run = writeQueue
-          .catch(() => {})
-          .then(async () => {
-            signal.throwIfAborted();
-            if (closed || generation !== writeGeneration)
-              throw new Error("Section deletion is unavailable");
-            const groups = await removeSection(sectionId, signal);
-            signal.throwIfAborted();
-            if (closed || generation !== writeGeneration || !confirmed)
-              throw new Error("Section deletion is unavailable");
-            mutation++;
-            confirmed = { ...confirmed, ...groups };
-            project();
-          });
-        writeQueue = run.catch(() => {});
-        return run;
+        return writeGroups(failure, (signal) => create(section, signal)).catch(
+          async (error) => {
+            if (!closed && generation === writeGeneration) {
+              // The relay may have accepted the creation. Reconcile before
+              // the form can discard its ID, without replaying the write or
+              // joining a read that began before publication.
+              active?.controller.abort();
+              active = undefined;
+              creationUncertain = true;
+              await refresh();
+            }
+            throw error;
+          },
+        );
       },
       get sectionOrderWritable() {
         return orderWritable();
@@ -543,11 +826,7 @@ export function createSidebarPreferencesStore(
               const groups = await save(intent.sectionIds, signal);
               if (closed || generation !== writeGeneration || !confirmed)
                 throw new Error("Sidebar section order is unavailable");
-              confirmed = {
-                ...confirmed,
-                sections: groups.sections,
-                assignments: groups.assignments,
-              };
+              confirmed = { ...confirmed, ...groups };
               return retained(confirmed);
             } catch (error) {
               if (
@@ -658,6 +937,105 @@ export function createSidebarPreferencesStore(
         );
         return run;
       },
+      dismissFilterError(group: string) {
+        failedFilters.delete(group);
+        publish(snapshot);
+      },
+      get filterWritable() {
+        return (
+          !closed &&
+          !!writeFilter &&
+          !!confirmed &&
+          readFailure === undefined &&
+          !snapshot.cached
+        );
+      },
+      setFilter(
+        group: string,
+        mode: SidebarFilterMode,
+        sectionIds: readonly string[],
+        signal?: AbortSignal,
+        activeWindowSeconds?: number | null,
+      ) {
+        if (
+          closed ||
+          !writeFilter ||
+          !confirmed ||
+          readFailure !== undefined ||
+          snapshot.cached
+        )
+          return Promise.reject(
+            new Error("Sidebar filtering is read-only in this host"),
+          );
+        const writeGeneration = generation;
+        const writeSignal = AbortSignal.any([
+          writeLifetime.signal,
+          ...(signal ? [signal] : []),
+        ]);
+        if (writeSignal.aborted) return Promise.reject(writeSignal.reason);
+        const id = ++nextFilterMutation;
+        pendingFilters.set(id, {
+          group,
+          mode,
+          ...(activeWindowSeconds === undefined ? {} : { activeWindowSeconds }),
+        });
+        latestFilter.set(group, id);
+        failedFilters.delete(group);
+        mutation++;
+        project();
+        const settle = (settings?: SidebarFilterSettings) => {
+          if (closed || generation !== writeGeneration || !confirmed) return;
+          confirmed = {
+            ...confirmed,
+            ...(settings ?? {}),
+          };
+          pendingFilters.delete(id);
+          project();
+        };
+        const run = writeQueue
+          .catch(() => {})
+          .then(async () => {
+            if (closed || generation !== writeGeneration)
+              throw new Error("Sidebar filtering is unavailable");
+            try {
+              writeSignal.throwIfAborted();
+              const settings = await writeFilter(
+                group,
+                mode,
+                sectionIds,
+                writeSignal,
+                activeWindowSeconds,
+              );
+              if (closed || generation !== writeGeneration)
+                throw new Error("Sidebar filtering is unavailable");
+              writeSignal.throwIfAborted();
+              mutation++;
+              settle(settings);
+              return settings;
+            } catch (error) {
+              if (!closed && generation === writeGeneration) {
+                mutation++;
+                if (!writeSignal.aborted && latestFilter.get(group) === id)
+                  failedFilters.set(group, {
+                    group,
+                    mode,
+                    ...(activeWindowSeconds === undefined
+                      ? {}
+                      : { activeWindowSeconds }),
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  });
+              }
+              settle();
+              throw error;
+            }
+          });
+        writeQueue = run.then(
+          () => undefined,
+          () => undefined,
+        );
+        return run;
+      },
       get muteWritable() {
         return !!writeMute && !snapshot.cached;
       },
@@ -713,7 +1091,7 @@ export function createSidebarPreferencesStore(
       },
       createAndAssign(
         channelId: string,
-        section: { id: string; name: string },
+        section: NonNullable<SidebarAssignmentIntent["createSection"]>,
         signal?: AbortSignal,
       ) {
         return move(channelId, { createSection: section }, signal);
@@ -722,6 +1100,7 @@ export function createSidebarPreferencesStore(
         return (
           !closed &&
           !!confirmed &&
+          !confirmed.workspaceMigrationPending &&
           readFailure === undefined &&
           !snapshot.cached &&
           !!removeSection &&
@@ -729,12 +1108,12 @@ export function createSidebarPreferencesStore(
         );
       },
       get starWritable() {
-        return !groupsOnly && writable();
+        return starWritable();
       },
       async setStar(channelId: string, starred: boolean, signal?: AbortSignal) {
         const data = await move(
           channelId,
-          starred ? { starred: true } : {},
+          starred || confirmed?.workspaceMigrationPending ? { starred } : {},
           signal,
         );
         return data.starred;
@@ -753,15 +1132,20 @@ export function createSidebarPreferencesStore(
         snapshot.status === "idle"
           ? refresh()
           : (active?.promise ?? Promise.resolve()),
-      refresh,
+      refresh: () => refresh(),
     }),
     clear() {
       if (closed) return;
       generation++;
+      invalidation = reconciled = 0;
+      scheduled = false;
       confirmed = undefined;
       pendingSorts.clear();
       latestSort.clear();
       failedSorts.clear();
+      pendingFilters.clear();
+      latestFilter.clear();
+      failedFilters.clear();
       readFailure = undefined;
       pendingMoves.clear();
       failedMoves.clear();
@@ -779,10 +1163,15 @@ export function createSidebarPreferencesStore(
       closed = true;
       writeLifetime.abort();
       generation++;
+      invalidation = reconciled = 0;
+      scheduled = false;
       confirmed = undefined;
       pendingSorts.clear();
       latestSort.clear();
       failedSorts.clear();
+      pendingFilters.clear();
+      latestFilter.clear();
+      failedFilters.clear();
       readFailure = undefined;
       pendingMoves.clear();
       failedMoves.clear();

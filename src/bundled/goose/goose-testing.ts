@@ -28,6 +28,8 @@ export type FakeTurn = {
 export type FakeGoose = {
   id: string;
   options: HostProcessOptions;
+  /** The agent its credential was bound to, if any. */
+  actedAs?: Readonly<{ pubkey: string; relay: string }>;
   /** Every message written to its stdin. */
   received: Message[];
   /** Each `session/new`'s params. */
@@ -39,12 +41,24 @@ export type FakeGoose = {
   closed: string[];
   cancelled: string[];
   deleted: string[];
+  /** Each `session/set_config_option`, as `sessionId configId=value`. */
+  configured: string[];
+  /** When set, the next system prompt set fails with it. */
+  promptError?: string;
+  /** Rejects the next native turn before it begins. */
+  rejectPrompt?: boolean;
+  /** When set, system prompt sets wait for it. */
+  promptGate?: Promise<void>;
+  /** When set, `session/set_config_option` fails with it. */
+  configError?: string;
   /** The environment it started with. */
   env: Readonly<Record<string, string | null>>;
   /** When set, a turn stays open until it is finished. */
   hold: boolean;
   /** When set, a turn takes a steer and ends before goose answers the steer. */
   endOnSteer: boolean;
+  /** Requests it never answers, as a goose that hangs. */
+  silent: Set<string>;
   killed: boolean;
   /** Asks the client a request and resolves with its response. */
   ask(method: string, params: Record<string, unknown>): Promise<Message>;
@@ -66,6 +80,8 @@ export type FakeSession = Readonly<{
   cwd: string;
   updatedAt: string;
   conversation: readonly Record<string, unknown>[];
+  /** The tags it was opened with, which `session/list` filters by. */
+  tags?: Readonly<Record<string, string>>;
 }>;
 
 /** A loopback MCP server `serve` started, as the app's host would. */
@@ -78,9 +94,9 @@ export type FakeMcpServer = {
   stop(): void;
 };
 
-/** A spawn whose `goose` processes answer like `goose-acp`, and whose
- * `workspace` process prints `home` for a `~/…` directory; and a `serve` that
- * starts in-memory MCP servers those processes reach. */
+/** A spawn whose `goose` processes answer like `goose-acp`; a
+ * `resolveDirectory` that puts `home` for `~`; and a `serve` that starts
+ * in-memory MCP servers those processes reach. */
 export function fakeSpawn(
   options: Readonly<{
     /** Whether goose says it can reach HTTP MCP servers. */
@@ -98,8 +114,30 @@ export function fakeSpawn(
     supported?: readonly string[];
     /** Saved sessions `session/list` and `session/export` read. */
     history?: readonly FakeSession[];
+    /** How many sessions a `session/list` page holds; all by default. */
+    page?: number;
+    /** Whether goose's config turns session naming off. */
+    namingDisabled?: boolean;
+    /** goose's `DATABRICKS_MODEL_FILTER`, as its config reads it. */
+    modelFilter?: unknown;
+    /** Requests each process never answers. */
+    silent?: readonly string[];
+    /** The thinking levels a session lists on each model, `""` being the
+     * one it opens on; one not here lists none. `grouped` lists them in one
+     * ACP option group. */
+    thinking?: Readonly<
+      Record<
+        string,
+        Readonly<{ current: string; levels: readonly string[]; grouped?: true }>
+      >
+    >;
   }> = {},
 ) {
+  let defaults = options.defaults;
+  // Stored provider models are distinct from catalog defaultModel metadata.
+  const providerModels = new Map<string, string>();
+  if (defaults?.providerId && defaults.modelId)
+    providerModels.set(defaults.providerId, defaults.modelId);
   const processes: FakeGoose[] = [];
   const servers: FakeMcpServer[] = [];
   const serve = async (handler: McpHandler): Promise<HostMcpServer> => {
@@ -134,27 +172,32 @@ export function fakeSpawn(
     const exited = new Promise<number | null>((resolve) => {
       resolveExit = resolve;
     });
-    if (id === "workspace") {
-      const cwd = process.cwd ?? "";
-      queueMicrotask(() => {
-        process.onStdout?.(
-          `${cwd.replace(/^~/, options.home ?? "/home/test")}\n`,
-        );
-        resolveExit(0);
-      });
-      return {
-        write: async () => undefined,
-        end: async () => undefined,
-        kill: async () => undefined,
-        exited,
-      };
-    }
     let alive = true;
     let sessions = 0;
     let requests = 0;
     let mcpRequests = 0;
     /** The Buzz MCP server each session was given. */
     const declared = new Map<string, string>();
+    /** The model each session was put on; `""` is the one it opened on. */
+    const models = new Map<string, string>();
+    const configOptions = (sessionId: string) => {
+      const thinking = options.thinking?.[models.get(sessionId) ?? ""];
+      if (!thinking) return [];
+      const levels = thinking.levels.map((level) => ({
+        value: level,
+        name: level,
+      }));
+      return [
+        {
+          id: "thinking_effort",
+          category: "thought_level",
+          currentValue: thinking.current,
+          options: thinking.grouped
+            ? [{ group: "levels", name: "Levels", options: levels }]
+            : levels,
+        },
+      ];
+    };
     const answers = new Map<number | string, (message: Message) => void>();
     const send = (message: Message) =>
       queueMicrotask(() => {
@@ -173,9 +216,11 @@ export function fakeSpawn(
       closed: [],
       cancelled: [],
       deleted: [],
+      configured: [],
       env: process.env ?? {},
       hold: options.hold ?? false,
       endOnSteer: false,
+      silent: new Set(options.silent),
       killed: false,
       ask: (method, params) => {
         const requestId = `goose-${++requests}`;
@@ -219,8 +264,14 @@ export function fakeSpawn(
         answers.delete(id ?? "");
         return;
       }
+      if (fake.silent.has(method)) return;
       const sessionId = String(params.sessionId ?? "");
       switch (method) {
+        case "_buzz/security/capabilities":
+          return reply(id, {
+            version: 2,
+            enabled: fake.env.BUZZ_SECURITY_URL != null,
+          });
         case "initialize":
           return reply(id, {
             protocolVersion: 1,
@@ -235,12 +286,36 @@ export function fakeSpawn(
             ?.enabledExtensions ?? []) as { server?: { url?: string } }[];
           const url = extensions.find((item) => item.server?.url)?.server?.url;
           if (url) declared.set(sessionId, url);
-          return reply(id, { sessionId });
+          return reply(id, {
+            sessionId,
+            configOptions: configOptions(sessionId),
+          });
         }
-        case "_goose/unstable/session/system-prompt/set":
-          fake.prompts.set(sessionId, String(params.text));
-          return reply(id, {});
+        case "_goose/unstable/session/system-prompt/set": {
+          const failure = fake.promptError;
+          delete fake.promptError;
+          if (failure)
+            return send({
+              jsonrpc: "2.0",
+              ...(id !== undefined && { id }),
+              error: { code: -32603, message: failure },
+            });
+          const set = () => {
+            fake.prompts.set(sessionId, String(params.text));
+            reply(id, {});
+          };
+          if (fake.promptGate) return void fake.promptGate.then(set);
+          return set();
+        }
         case "session/prompt": {
+          if (fake.rejectPrompt) {
+            fake.rejectPrompt = false;
+            return send({
+              jsonrpc: "2.0",
+              ...(id !== undefined && { id }),
+              error: { code: -32603, message: "Native prompt rejected" },
+            });
+          }
           const runId = `run-${fake.turns.length + 1}`;
           const text = (params.prompt as { text: string }[])
             .map((block) => block.text)
@@ -290,6 +365,20 @@ export function fakeSpawn(
           if (fake.endOnSteer) turn.finish();
           return reply(id, { runId: turn.runId, messageId: "m" });
         }
+        case "session/set_config_option":
+          if (fake.configError)
+            return send({
+              jsonrpc: "2.0",
+              ...(id !== undefined && { id }),
+              error: { code: -32603, message: fake.configError },
+            });
+          fake.configured.push(
+            `${sessionId} ${String(params.configId)}=${String(params.value)}`,
+          );
+          if (params.configId === "model")
+            models.set(sessionId, String(params.value));
+          if (params.configId === "provider") models.delete(sessionId);
+          return reply(id, { configOptions: configOptions(sessionId) });
         case "session/cancel":
           fake.cancelled.push(sessionId);
           running.get(sessionId)?.finish("cancelled");
@@ -304,8 +393,33 @@ export function fakeSpawn(
                 Boolean(options.saved?.get(String(entry.providerId))?.size),
             })),
           });
+        case "_goose/unstable/config/read":
+          return reply(id, {
+            value:
+              params.key === "providers"
+                ? Object.fromEntries(
+                    [...providerModels].map(([id, model]) => [id, { model }]),
+                  )
+                : params.key === "GOOSE_DISABLE_SESSION_NAMING"
+                  ? (options.namingDisabled ?? null)
+                  : params.key === "DATABRICKS_MODEL_FILTER"
+                    ? (options.modelFilter ?? null)
+                    : null,
+          });
         case "_goose/unstable/defaults/read":
-          return reply(id, options.defaults ?? {});
+          return reply(id, defaults ?? {});
+        case "_goose/unstable/defaults/save": {
+          const providerId = String(params.providerId);
+          const modelId = String(
+            params.modelId || providerModels.get(providerId) || "",
+          );
+          providerModels.set(providerId, modelId);
+          defaults = { providerId, ...(modelId ? { modelId } : {}) };
+          return reply(id, {
+            providerId,
+            ...(params.modelId ? { modelId: String(params.modelId) } : {}),
+          });
+        }
         case "_goose/unstable/providers/config/read": {
           const set = options.saved?.get(String(params.providerId));
           return reply(id, {
@@ -326,23 +440,28 @@ export function fakeSpawn(
             models: options.supported ?? [],
           });
         case "session/list": {
-          const query = String(
-            (params._meta as { query?: string } | undefined)?.query ?? "",
+          const tags = (params._meta as { tags?: Record<string, string> })
+            ?.tags;
+          // A session carries every tag asked for, as goose's index filters.
+          const listed = (options.history ?? []).filter(
+            (session) =>
+              session.cwd === params.cwd &&
+              Object.entries(tags ?? {}).every(
+                ([key, value]) => session.tags?.[key] === value,
+              ),
           );
-          const mentions = (session: FakeSession) =>
-            JSON.stringify(session.conversation).includes(query);
+          const from = Number(params.cursor ?? 0);
+          const to = from + (options.page ?? listed.length);
           return reply(id, {
-            sessions: (options.history ?? [])
-              .filter(
-                (session) =>
-                  session.cwd === params.cwd && (!query || mentions(session)),
-              )
+            sessions: listed
+              .slice(from, to)
               .map(({ sessionId, title, cwd, updatedAt }) => ({
                 sessionId,
                 title,
                 cwd,
                 updatedAt,
               })),
+            nextCursor: to < listed.length ? String(to) : null,
           });
         }
         case "_goose/unstable/session/export": {
@@ -391,11 +510,18 @@ export function fakeSpawn(
         fake.killed = true;
         fake.exit(null);
       },
+      ...(process.agentCredential && {
+        actAs: async (agent: Readonly<{ pubkey: string; relay: string }>) => {
+          fake.actedAs = agent;
+        },
+      }),
       exited,
     };
   };
   return {
     spawn,
+    resolveDirectory: async (path: string) =>
+      path.replace(/^~/, options.home ?? "/home/test"),
     serve,
     processes,
     /** The MCP servers `serve` started, in order. */
@@ -411,3 +537,49 @@ export function fakeSpawn(
 export const flush = async (rounds = 10) => {
   for (let index = 0; index < rounds; index++) await Promise.resolve();
 };
+
+/** Holds each goose's requests for `method` until they are released, as a
+ * slow goose's answers are; those whose session `rejects` names are answered
+ * with an error instead. `wrap` makes the spawn that hands them out. */
+export function gated(
+  method: string,
+  rejects: (sessionId: string) => boolean = () => false,
+) {
+  const held: { sessionId: string; resume(): void }[] = [];
+  return {
+    wrap:
+      (spawn: ReturnType<typeof fakeSpawn>["spawn"]) =>
+      async (id: string, options: HostProcessOptions = {}) => {
+        const process = await spawn(id, options);
+        return {
+          ...process,
+          write: async (data: string) => {
+            if (id !== "goose" || !data.includes(`"method":"${method}"`))
+              return process.write(data);
+            const { id: requestId, params } = JSON.parse(data);
+            const sessionId = String(params?.sessionId ?? "");
+            await new Promise<void>((resume) =>
+              held.push({ sessionId, resume }),
+            );
+            if (!rejects(sessionId)) return process.write(data);
+            options.onStdout?.(
+              `${JSON.stringify({
+                jsonrpc: "2.0",
+                id: requestId,
+                error: { code: -32602, message: "No active run" },
+              })}\n`,
+            );
+          },
+        };
+      },
+    /** The sessions whose request is held. */
+    waiting: () => held.map((request) => request.sessionId),
+    /** Lets the request of `sessionId` go, or every held one. */
+    release: (sessionId?: string) => {
+      for (const request of held.splice(0))
+        if (sessionId === undefined || request.sessionId === sessionId)
+          request.resume();
+        else held.push(request);
+    },
+  };
+}

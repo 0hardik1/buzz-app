@@ -1,360 +1,223 @@
-// One agent's goose sessions: one `goose-acp` process for the agent, and in
-// it one ACP session per conversation (a thread, a whole DM, or a channel).
-// A quiet conversation's session is closed; its next message opens a new one,
-// shown the conversation again. A one-off turn (a watch or timer wake) gets a
-// session of its own, closed when it ends. Nothing is saved: sessions live as
-// long as the app does.
+// One agent's goose sessions, in that agent's own `goose-acp` process. The
+// sessions themselves live in the shared ACP client.
 import {
-  GooseProcess,
-  type ActivityReceipt,
-  type GooseSession,
-  type ServeMcp,
-  type Settled,
-  type Spawn,
-  type ToolServer,
-} from "./goose";
+  AgentSessions as AcpAgentSessions,
+  type SessionsOptions as AcpSessionsOptions,
+  savedConversation,
+} from "../../features/agent-harness/acp/agent-sessions";
+import type { AgentProtection } from "../../features/agent-protection/service";
+import { nativeProtectionBridge } from "../../features/agent-protection/native-bridge";
+import { GooseProcess, type GooseHost, type ServeMcp } from "./goose";
+import type {
+  SavedConversation,
+  SessionStore,
+} from "../../features/agent-harness/acp/agent-sessions";
 
-/** A conversation's session closes after this long without a message. */
-export const IDLE_MS = 15 * 60_000;
-/** How long a one-off turn can run before it is given up; Janet's turn
- * deadline. */
-export const ONCE_DEADLINE_MS = 5 * 60_000;
+export {
+  abortable,
+  absolute,
+  IDLE_MS,
+  POOL_LIMIT,
+  ServerPool,
+  type Launch,
+  type SavedConversation,
+  type SessionStore,
+} from "../../features/agent-harness/acp/agent-sessions";
 
-/** What a session is opened with. */
-export type Launch = Readonly<{
-  /** The agent's working directory, absolute or `~/…`. */
-  workspace: string;
-  /** Added to the process's environment: its model and provider. */
-  env: Readonly<Record<string, string | null>>;
-  systemPrompt: string;
-}>;
+/** The `goose-acp` one agent's sessions open in, started in the home folder
+ * when a session first needs it, and again after it exits. Its own process,
+ * so its environment carries only this agent's Buzz credential. */
+export class AgentProcess {
+  /** The start new sessions use. */
+  private current: Start | undefined;
+  /** Every start whose process has not exited, even when its start failed
+   * or a newer one replaced it, so `shutdown` stops each. */
+  private readonly starts = new Set<Start>();
+  constructor(
+    private readonly host: GooseHost,
+    /** Starts a session's MCP server for its agent's tools. */
+    private readonly serve: ServeMcp,
+    private readonly protection?: AgentProtection,
+    /** The agent as its latest delivery named it, once known. */
+    private readonly agent: () =>
+      | Readonly<{ pubkey: string; relay: string }>
+      | undefined = () => undefined,
+    /** The context size, in tokens, its sessions compact at. */
+    private readonly compactAt: () => number | undefined = () => undefined,
+  ) {}
 
-export type SessionsOptions = Readonly<{
-  spawn: Spawn;
-  tools: ToolServer;
-  /** Starts a session's MCP server for `tools`. */
-  serve: ServeMcp;
-  /** The agent's current settings, for a new session. */
-  launch(): Promise<Launch>;
-  /** Changes when a setting the process was started with has changed. */
-  processFingerprint(): string;
-  /** Changes when a setting a session was opened with has changed. */
-  fingerprint(): string;
-  /** Called when a conversation's session opens or closes. */
-  onChange?(): void;
-}>;
-
-type Process = { goose: GooseProcess; cwd: string; fingerprint: string };
-type Live = {
-  session: GooseSession;
-  process: Process;
-  fingerprint: string;
-  timer?: ReturnType<typeof setTimeout>;
-};
-
-export class AgentSessions {
-  /** The process new sessions open in. One started with older settings keeps
-   * running while a session in it works. */
-  private current: { fingerprint: string; ready: Promise<Process> } | undefined;
-  private readonly live = new Map<string, Live>();
-  /** One-off turns running or starting, by label. */
-  private readonly once = new Map<string, Live | undefined>();
-  private onceCount = 0;
-  private readonly opening = new Map<string, Promise<Live>>();
-  /** created_at of the newest event each conversation's session was shown. */
-  private readonly shown = new Map<string, number>();
-  /** Conversations that have had a session, whose next new one may have been
-   * prompted for the old one. */
-  private readonly had = new Set<string>();
-  private disposed = false;
-
-  constructor(private readonly options: SessionsOptions) {}
-
-  /** What this conversation's session has been shown. */
-  seen(key: string) {
-    return this.shown.get(key) ?? 0;
-  }
-  /** Conversations with a session, and whether each is working. */
-  snapshot(): { key: string; busy: boolean; sessionId?: string }[] {
-    return [
-      ...[...this.live].map(([key, live]) => ({
-        key,
-        busy: live.session.busy,
-        sessionId: live.session.id,
-      })),
-      ...[...this.once.keys()].map((key) => ({ key, busy: true })),
-    ];
-  }
-
-  /** Sends `text` into the conversation `key`, and resolves when the session
-   * has answered it. `steer` replaces `text` when the session is mid-turn;
-   * `fresh` builds it again when the session it was built for was closed;
-   * `title` names a session opened for it. */
-  async deliver(
-    key: string,
-    text: string,
-    seen: number,
-    {
-      steer = text,
-      fresh,
-      title,
-      ...activity
-    }: Readonly<{
-      steer?: string;
-      fresh?: () => Promise<string>;
-      title?: string;
-    }> &
-      ActivityReceipt = {},
-  ): Promise<Settled> {
-    if (this.disposed) return { ok: false, error: "goose was stopped" };
-    // A message that arrives while its conversation's session opens uses it.
-    const opening = this.opening.get(key);
-    if (opening) await opening.catch(() => undefined);
-    let live = this.live.get(key);
-    if (
-      live &&
-      (!live.session.open || (!live.session.busy && this.stale(live)))
-    ) {
-      this.drop(key, live);
-      live = undefined;
-    }
-    if (live) {
-      this.touch(key, live, seen);
-      return this.answer(key, live, live.session.busy ? steer : text, activity);
-    }
-    // Perhaps built for a session closed since, which had been shown the rest.
-    if (this.had.has(key) && fresh) text = await fresh();
-    const starting = this.open(key, title);
-    this.opening.set(key, starting);
-    try {
-      live = await starting;
-    } catch (error) {
-      console.warn("goose could not start", error);
-      return { ok: false, error: `goose could not start: ${message(error)}` };
-    } finally {
-      if (this.opening.get(key) === starting) this.opening.delete(key);
-    }
-    if (this.disposed) {
-      void live.process.goose.close(live.session);
-      return { ok: false, error: "goose was stopped" };
-    }
-    this.adopt(key, live, seen);
-    return this.answer(key, live, text, activity);
-  }
-
-  /** Runs one turn in a new session, then closes it. `label` names it in the
-   * snapshot. It gives up, and stops the turn, after `deadline` ms. `prompt`
-   * is asked for the turn's text once the session is open, so a turn that
-   * should no longer run by then returns undefined and sends nothing. */
-  async runOnce(
-    label: string,
-    prompt: () => string | undefined | Promise<string | undefined>,
-    {
-      deadline = ONCE_DEADLINE_MS,
-      title,
-    }: Readonly<{
-      deadline?: number;
-      title?: string;
-    }> = {},
-  ): Promise<Settled> {
-    if (this.disposed) return { ok: false, error: "goose was stopped" };
-    const key = `${label} #${++this.onceCount}`;
-    this.once.set(key, undefined);
-    this.options.onChange?.();
-    let live: Live | undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      live = await this.open(key, title);
-      if (this.disposed) return { ok: false, error: "goose was stopped" };
-      this.once.set(key, live);
-      const text = await prompt();
-      if (text === undefined || this.disposed) return { ok: true };
-      return await Promise.race([
-        live.session.send(text),
-        new Promise<Settled>((resolve) => {
-          timer = setTimeout(
-            () =>
-              resolve({
-                ok: false,
-                error: `The turn ran past its ${Math.round(deadline / 1000)}s deadline and was stopped`,
+  /** The running process. One that failed to start is started again on the
+   * next call once it has exited. One started with another compaction limit
+   * is left to its sessions, which stop it once none needs it, or stopped
+   * first when `drained` says none does, so it holds no process slot. */
+  get(
+    drained: (process: GooseProcess) => boolean = () => false,
+  ): Promise<GooseProcess> {
+    this.protection?.assertAvailable();
+    const limit = this.compactAt();
+    if (this.current && limit === this.current.limit) return this.current.ready;
+    const previous = this.current;
+    const old = previous?.process;
+    const stopped =
+      old && drained(old)
+        ? old
+            .kill()
+            .then(() => old.exited)
+            .catch(() => undefined)
+        : undefined;
+    const agent = this.agent();
+    const start: Start = {
+      limit,
+      previous,
+      ready: (async () => {
+        await stopped;
+        const bridge =
+          this.protection &&
+          (await nativeProtectionBridge(this.serve, this.protection));
+        try {
+          const goose = await GooseProcess.start(
+            (id, options) =>
+              this.protection
+                ? this.protection.spawn(options ?? {})
+                : this.host.spawn(id, options),
+            {
+              ...(limit && { compactAt: limit }),
+              cwd: await this.host.resolveDirectory("~"),
+              serve: this.serve,
+              onProcess: (goose) => {
+                start.process = goose;
+              },
+              ...(agent && {
+                agent: { pubkey: agent.pubkey, relay: agent.relay },
               }),
-            deadline,
+              ...(bridge && {
+                protected: true,
+                env: {
+                  ...bridge.env,
+                  BASH_ENV: null,
+                  ENV: null,
+                  DYLD_INSERT_LIBRARIES: null,
+                  DYLD_LIBRARY_PATH: null,
+                  DYLD_FRAMEWORK_PATH: null,
+                  LD_PRELOAD: null,
+                  LD_LIBRARY_PATH: null,
+                },
+              }),
+            },
           );
-        }),
-      ]);
-    } catch (error) {
-      console.warn("goose could not start a one-off session", error);
-      return { ok: false, error: `goose could not start: ${message(error)}` };
-    } finally {
-      clearTimeout(timer);
-      this.once.delete(key);
-      if (live) {
-        await live.process.goose.close(live.session);
-        this.retire(live.process);
-      }
-      this.options.onChange?.();
-    }
-  }
-
-  /** Closes idle sessions opened with old settings; busy ones close when they
-   * next fall idle. A process started with old settings stops once nothing
-   * runs in it. */
-  reconfigure() {
-    for (const [key, live] of this.live)
-      if (!live.session.busy && this.stale(live)) this.drop(key, live);
-    void this.current?.ready
-      .then((process) => this.retire(process))
-      .catch(() => undefined);
-  }
-
-  dispose() {
-    this.disposed = true;
-    const processes = new Set<Process>();
-    for (const [key, live] of this.live) {
-      processes.add(live.process);
-      this.drop(key, live);
-    }
-    for (const live of this.once.values())
-      if (live) processes.add(live.process);
-    for (const process of processes) void process.goose.kill();
-    void this.current?.ready
-      .then((process) => process.goose.kill())
-      .catch(() => undefined);
-    this.current = undefined;
-  }
-
-  private stale(live: Live) {
-    return (
-      live.fingerprint !== this.options.fingerprint() ||
-      live.process.fingerprint !== this.options.processFingerprint()
-    );
-  }
-
-  private async open(key: string, title?: string): Promise<Live> {
-    // Read before `launch` reads the settings, so it never describes newer ones.
-    const fingerprint = this.options.fingerprint();
-    const launch = await this.options.launch();
-    const process = await this.process(launch);
-    const session = await process.goose.open({
-      cwd: process.cwd,
-      systemPrompt: launch.systemPrompt,
-      ...(title ? { title } : {}),
-    });
-    session.conversation = key;
-    if (fingerprint === this.options.fingerprint() || this.disposed)
-      return { session, process, fingerprint };
-    // Settings saved while it opened: it would work with the old ones.
-    void process.goose.close(session);
-    return this.open(key, title);
-  }
-
-  /** The process for the current settings, started when there is none. */
-  private process(launch: Launch): Promise<Process> {
-    const fingerprint = this.options.processFingerprint();
-    if (this.current?.fingerprint === fingerprint) return this.current.ready;
-    const old = this.current;
-    const current = {
-      fingerprint,
-      ready: (async (): Promise<Process> => {
-        const cwd = await absolute(this.options.spawn, launch.workspace);
-        const goose = await GooseProcess.start(this.options.spawn, {
-          cwd,
-          env: launch.env,
-          tools: this.options.tools,
-          serve: this.options.serve,
-        });
-        const process = { goose, cwd, fingerprint };
-        void goose.exited.then(() => {
-          if (this.current === current) this.current = undefined;
-          for (const [key, live] of this.live)
-            if (live.process === process) this.drop(key, live);
-        });
-        return process;
+          void goose.exited.finally(() => bridge?.close());
+          return goose;
+        } catch (error) {
+          await bridge?.close();
+          throw error;
+        }
       })(),
     };
-    // A process that failed to start is started again on the next message.
-    current.ready.catch(() => {
-      if (this.current === current) this.current = undefined;
-    });
-    this.current = current;
-    void old?.ready
-      .then((process) => this.retire(process))
-      .catch(() => undefined);
-    return current.ready;
+    const forget = () => {
+      this.starts.delete(start);
+      if (this.current !== start) return;
+      // One that failed leaves the latest it replaced still running current,
+      // so the next start retires it once drained.
+      let kept = start.previous;
+      while (kept && !this.starts.has(kept)) kept = kept.previous;
+      this.current = kept;
+    };
+    void start.ready.then(
+      (goose) => {
+        delete start.previous;
+        return goose.exited.then(forget);
+      },
+      () => (start.process ? start.process.exited.then(forget) : forget()),
+    );
+    this.starts.add(start);
+    this.current = start;
+    return start.ready;
   }
-
-  /** Stops `process` when it has old settings and nothing runs in it. */
-  private retire(process: Process) {
-    if (
-      !this.disposed &&
-      process.fingerprint === this.options.processFingerprint()
-    )
-      return;
-    const users = [...this.live.values(), ...this.once.values()];
-    if (users.some((live) => live?.process === process)) return;
-    if (this.current?.fingerprint === process.fingerprint)
-      this.current = undefined;
-    void process.goose.kill();
+  /** Stops it, failing every session in it. */
+  stop() {
+    void this.shutdown().catch(() => undefined);
   }
-
-  private adopt(key: string, live: Live, seen: number) {
-    this.had.add(key);
-    this.live.set(key, live);
-    this.touch(key, live, seen);
-    this.options.onChange?.();
-  }
-  private async answer(
-    key: string,
-    live: Live,
-    text: string,
-    activity: ActivityReceipt,
-  ) {
-    const settled = await live.session.send(text, activity);
-    if (this.live.get(key) === live) {
-      this.touch(key, live);
-      if (!live.session.busy && this.stale(live)) this.drop(key, live);
-    }
-    return settled;
-  }
-  /** Notes what the session has been shown and restarts its idle countdown. */
-  private touch(key: string, live: Live, seen?: number) {
-    clearTimeout(live.timer);
-    live.timer = setTimeout(() => {
-      if (live.session.busy) this.touch(key, live);
-      else if (this.live.get(key) === live) this.drop(key, live);
-    }, IDLE_MS);
-    if (seen !== undefined)
-      this.shown.set(key, Math.max(seen, this.shown.get(key) ?? 0));
-  }
-  private drop(key: string, live: Live) {
-    clearTimeout(live.timer);
-    if (this.live.get(key) === live) {
-      this.live.delete(key);
-      this.shown.delete(key);
-      this.options.onChange?.();
-    }
-    void live.process.goose.close(live.session).then(() => {
-      this.retire(live.process);
-    });
+  /** Stops every process it started and resolves once each has exited,
+   * whether or not its start succeeded. Each stays here until then, so a
+   * failed stop is repeated. */
+  async shutdown() {
+    await Promise.all(
+      [...this.starts].map(async (start) => {
+        await start.ready.catch(() => undefined);
+        await start.process?.kill();
+        await start.process?.exited;
+      }),
+    );
   }
 }
 
-/** `workspace` as an absolute path, which ACP sessions need: the host
- * resolves `~/…` for the process it starts there. */
-export async function absolute(spawn: Spawn, workspace: string) {
-  if (workspace.startsWith("/")) return workspace;
-  let directory = "";
-  const process = await spawn("workspace", {
-    cwd: workspace,
-    onStdout: (data) => {
-      directory += data;
+/** One start of `goose-acp`, the token limit goose read at it, and its
+ * process once spawned. Until it succeeds, it keeps the start it replaced. */
+type Start = {
+  ready: Promise<GooseProcess>;
+  limit: number | undefined;
+  previous?: Start | undefined;
+  process?: GooseProcess;
+};
+
+export type SessionsOptions = Omit<AcpSessionsOptions, "label">;
+
+/** An agent's sessions, in its own process. */
+export class AgentSessions extends AcpAgentSessions {
+  constructor(options: SessionsOptions) {
+    super({ ...options, label: "goose" });
+  }
+}
+
+/** Saved conversations per agent; the least recently used are forgotten. */
+const SAVED_LIMIT = 200;
+
+/** Conversations saved in local storage, by agent and then conversation. */
+export function localSessions(
+  storage: Storage,
+  agent: string,
+  name = "buzz.goose.sessions.v1",
+): SessionStore & {
+  /** Saved conversations, most recently used first. */
+  list(): [string, SavedConversation][];
+} {
+  const readAll = (): Record<string, Record<string, SavedConversation>> => {
+    try {
+      const value = JSON.parse(storage.getItem(name) ?? "{}");
+      if (!value || typeof value !== "object" || Array.isArray(value))
+        return {};
+      // Each agent's damaged conversations are dropped, keeping the rest.
+      return Object.fromEntries(
+        Object.entries(value).map(([agent, saved]) => [
+          agent,
+          Object.fromEntries(
+            Object.entries(
+              saved && typeof saved === "object" ? saved : {},
+            ).flatMap(([key, conversation]) => {
+              const kept = savedConversation(conversation);
+              return kept ? [[key, kept]] : [];
+            }),
+          ),
+        ]),
+      );
+    } catch {
+      return {};
+    }
+  };
+  const list = (saved: Record<string, SavedConversation> = {}) =>
+    Object.entries(saved).sort(([, a], [, b]) => b.at - a.at);
+  return {
+    list: () => list(readAll()[agent]),
+    get: (key) => readAll()[agent]?.[key],
+    set: (key, saved) => {
+      const all = readAll();
+      const kept = list({ ...all[agent], [key]: saved }).slice(0, SAVED_LIMIT);
+      all[agent] = Object.fromEntries(kept);
+      try {
+        storage.setItem(name, JSON.stringify(all));
+      } catch (error) {
+        console.warn("goose sessions were not saved", error);
+      }
     },
-  });
-  if ((await process.exited) !== 0 || !directory.trim())
-    throw new Error(`Could not find the workspace ${workspace}`);
-  return directory.trim();
-}
-
-function message(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  };
 }

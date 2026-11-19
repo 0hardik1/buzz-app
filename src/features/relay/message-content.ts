@@ -28,6 +28,7 @@ type MarkdownNode = {
   value?: string;
   url?: string;
   identifier?: string;
+  alt?: string | null;
   children?: MarkdownNode[];
   position?: { start: { offset?: number }; end: { offset?: number } };
 };
@@ -43,13 +44,18 @@ type MarkdownScan = {
 /** Raw HTML in chat is shown as the typed text, except complete HTML
  * comments. Comments are hidden markup by Markdown convention, and clients
  * put protocol markers in them (Buzz Desktop waves start with
- * `<!-- buzz:wave:v1 -->`). An unclosed `<!--` stays visible. */
+ * `<!-- buzz:wave:v1 -->`). An unclosed `<!--` stays visible.
+ * This is text projection, not HTML sanitization: callers must render the
+ * result as text. Remove only authored comments once; joining their neighbors
+ * can form new HTML syntax that must remain visible literal text. */
 export function visibleHtmlSource(value: string): string {
   return value.replace(/<!--[\s\S]*?-->/g, "");
 }
 
 export const MAX_ATTACHMENT_NAME_LENGTH = 256;
 export const RELAY_HASH_BASENAME = /^[0-9a-f]{64}(?:\.[^./?#]+)?$/i;
+/** `imeta dim` as senders write and receivers read it: `WxH`. */
+export const IMETA_DIM = /^(\d{1,6})x(\d{1,6})$/;
 
 export function relayHashBasename(value: string): boolean {
   return RELAY_HASH_BASENAME.test(value);

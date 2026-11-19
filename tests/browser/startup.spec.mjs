@@ -264,41 +264,50 @@ test("fresh roster omission removes cached conversation and its next-launch reco
   }
 });
 
-test("offline reload remains readable and recovers in place on the browser online signal", async ({
-  page,
-  app,
-}) => {
-  await open(page, app);
-  await expect
-    .poll(async () =>
-      (await cached(page)).heads.some((h) => h.channelId === "alpha"),
-    )
-    .toBe(true);
-  await page.route("**/api/relay/*/session", async (route) => {
-    app.report.startupFailures ??= [];
-    app.report.startupFailures.push(route.request().url());
-    await route.fulfill({ status: 502, json: { error: "Fixture offline" } });
+test.describe("one saved community", () => {
+  // The reloaded page's session requests share this harness's HTTP/1.1 origin
+  // with the old page's streams, which WebKit releases late; a second
+  // community's streams can then queue them past the paint deadline. Native
+  // streams use IPC, not this pool.
+  test.use({ savedCommunities: ["primary"] });
+  test("offline reload remains readable and recovers in place on the browser online signal", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await expect
+      .poll(async () =>
+        (await cached(page)).heads.some((h) => h.channelId === "alpha"),
+      )
+      .toBe(true);
+    await page.route("**/api/relay/*/session", async (route) => {
+      app.report.startupFailures ??= [];
+      app.report.startupFailures.push(route.request().url());
+      await route.fulfill({ status: 502, json: { error: "Fixture offline" } });
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const history = page.getByRole("region", {
+      name: "Channel message history",
+    });
+    await expect(history).toContainText("primary alpha message 0");
+    await expect(
+      page.getByRole("button", { name: "Retry connection", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "Message #Alpha", exact: true }),
+    ).toBeDisabled();
+    const retained = await history.elementHandle();
+    await page.unroute("**/api/relay/*/session");
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect(
+      page.getByRole("textbox", { name: "Message #Alpha", exact: true }),
+    ).toBeEditable();
+    await expect(
+      page.getByRole("button", { name: "Retry connection", exact: true }),
+    ).toHaveCount(0);
+    expect(await retained.evaluate((node) => node.isConnected)).toBe(true);
+    await retained.dispose();
   });
-  await page.reload({ waitUntil: "domcontentloaded" });
-  const history = page.getByRole("region", { name: "Channel message history" });
-  await expect(history).toContainText("primary alpha message 0");
-  await expect(
-    page.getByRole("button", { name: "Retry connection", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("textbox", { name: "Message #Alpha", exact: true }),
-  ).toBeDisabled();
-  const retained = await history.elementHandle();
-  await page.unroute("**/api/relay/*/session");
-  await page.evaluate(() => window.dispatchEvent(new Event("online")));
-  await expect(
-    page.getByRole("textbox", { name: "Message #Alpha", exact: true }),
-  ).toBeEditable();
-  await expect(
-    page.getByRole("button", { name: "Retry connection", exact: true }),
-  ).toHaveCount(0);
-  expect(await retained.evaluate((node) => node.isConnected)).toBe(true);
-  await retained.dispose();
 });
 
 for (const theme of ["light", "dark"]) {
@@ -324,7 +333,7 @@ for (const theme of ["light", "dark"]) {
       await expect(launch).toBeVisible();
       await expect(launch).toHaveCSS(
         "background-color",
-        theme === "dark" ? "rgb(0, 0, 0)" : "rgb(245, 245, 246)",
+        theme === "dark" ? "rgb(16, 16, 16)" : "rgb(241, 241, 242)",
       );
       await expect(launch.getByRole("img", { name: "Buzz" })).toHaveCSS(
         "filter",
@@ -368,7 +377,7 @@ test("launch waits for the initial sidebar and message history before revealing 
   app.relay.holdUnread();
   const head = held();
   let requested = false;
-  await page.route("**/api/relay/**/query", async (route) => {
+  await page.route("**/api/relay/primary/query", async (route) => {
     if (
       route
         .request()
@@ -392,7 +401,7 @@ test("launch waits for the initial sidebar and message history before revealing 
       "true",
     );
     await expect(
-      page.locator('[aria-label="Channel sidebar"][data-buzz-launch-pending]'),
+      page.locator('[aria-label="Sidebar"][data-buzz-launch-pending]'),
     ).toBeAttached();
     await page.clock.runFor(1900);
     await expect(launch).toBeVisible();
@@ -400,7 +409,7 @@ test("launch waits for the initial sidebar and message history before revealing 
     app.relay.releaseUnread();
     await expect.poll(() => requested).toBe(true);
     await expect(
-      page.locator('[aria-label="Channel sidebar"][data-buzz-launch-pending]'),
+      page.locator('[aria-label="Sidebar"][data-buzz-launch-pending]'),
     ).toHaveCount(0);
     const composer = page.locator(
       '#root [role="textbox"][contenteditable="true"]',
@@ -503,7 +512,7 @@ test.describe("populated device cache", () => {
         const tx = db.transaction(["heads", "startup"], "readwrite");
         const request = tx.objectStore("startup").getAll();
         request.onsuccess = () => {
-          const row = request.result[0];
+          const row = request.result.find((r) => r.data.discovery);
           row.data.discovery.events = input.discovery;
           tx.objectStore("startup").put(row);
           for (const head of input.heads)
@@ -584,10 +593,10 @@ test.describe("saved DM labels", () => {
     await expect(dm).toBeVisible();
     await expect
       .poll(async () =>
-        (await cached(page)).startup.some((r) =>
-          r.data.discovery?.profiles?.some(
-            (p) => p.pubkey === app.participants[0],
-          ),
+        (await cached(page)).startup.some(
+          (r) =>
+            Array.isArray(r.data) &&
+            r.data.some((p) => p.pubkey === app.participants[0]),
         ),
       )
       .toBe(true);
@@ -622,7 +631,7 @@ test.describe("pending startup navigation", () => {
   }) => {
     const gate = held();
     let requested = false;
-    await page.route("**/api/relay/**/query", async (route) => {
+    await page.route("**/api/relay/primary/query", async (route) => {
       if (
         route
           .request()
@@ -666,7 +675,7 @@ test.describe("pending startup navigation", () => {
       gate.release();
       await expect(page.locator("#buzz-launch")).toHaveCount(0);
       await expect(
-        page.getByRole("heading", { name: "This destination couldn’t open" }),
+        page.getByRole("heading", { name: "This page isn’t available" }),
       ).toBeVisible();
     } finally {
       gate.release();
@@ -696,6 +705,8 @@ test.describe("pending startup navigation", () => {
             const rows = store.getAll();
             rows.onsuccess = () => {
               for (const row of rows.result) {
+                // The profile mirror row holds no roster.
+                if (!row.data.discovery) continue;
                 row.data.discovery.events = row.data.discovery.events.filter(
                   (event) =>
                     !event.tags.some(

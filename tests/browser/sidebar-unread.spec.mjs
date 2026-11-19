@@ -1,3 +1,4 @@
+import { selectCommunity } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 import { test as base, expect } from "./fixture.mjs";
 import { streamEvidence } from "./stream-evidence.mjs";
@@ -16,7 +17,7 @@ test.use({
   historyCounts: { alpha: 20, beta: 20 },
 });
 const sidebar = (page) =>
-  page.getByRole("complementary", { name: "Channel sidebar", exact: true });
+  page.getByRole("complementary", { name: "Sidebar", exact: true });
 const list = (page) =>
   page.getByRole("navigation", { name: "Subscribed channels" });
 const cue = (page, edge) =>
@@ -37,7 +38,7 @@ const removeDm = async (page, id) => {
   await dm.click({ button: "right" });
   const menu = page.getByRole("menu", { name: /Actions for / });
   const remove = menu.getByRole("menuitem", {
-    name: "Remove from Messages",
+    name: "Close conversation",
     exact: true,
   });
   await expect(remove).toBeVisible();
@@ -121,6 +122,66 @@ test("channel establishment preserves an in-flight unread batch and its sidebar 
   page,
   app,
 }) => {
+  await holdReadingFocus(page);
+  // The held unread read must outlive the app's 10s read deadline and the
+  // broker's 20s upstream deadline on slow runners. Deadlines of those lengths
+  // started while it is held are deferred, not dropped: each starts its full
+  // length when the test releases the read, so an unrelated timer started
+  // during the hold still fires. The broker runs in this process.
+  const timeout = AbortSignal.timeout;
+  let deferredUpstream = [];
+  AbortSignal.timeout = (ms) => {
+    if (!deferredUpstream || ms !== 20_000)
+      return timeout.call(AbortSignal, ms);
+    const deadline = new AbortController();
+    deferredUpstream.push(deadline);
+    return deadline.signal;
+  };
+  const releaseUpstreamDeadlines = () => {
+    for (const deadline of deferredUpstream ?? [])
+      timeout
+        .call(AbortSignal, 20_000)
+        .addEventListener("abort", (event) =>
+          deadline.abort(event.target.reason),
+        );
+    deferredUpstream = undefined;
+  };
+  // The caller's deadline is an abort signal and the reader's is a timer; a
+  // deferred timer keeps its id, so clearing it before release still works.
+  await page.addInitScript(() => {
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    const schedule = window.setTimeout.bind(window);
+    const clear = window.clearTimeout.bind(window);
+    let deferred = new Map();
+    const started = new Map();
+    let next = -1;
+    AbortSignal.timeout = (ms) => {
+      if (!deferred || ms !== 10_000) return timeout(ms);
+      const deadline = new AbortController();
+      deferred.set(next--, () =>
+        timeout(ms).addEventListener("abort", (event) =>
+          deadline.abort(event.target.reason),
+        ),
+      );
+      return deadline.signal;
+    };
+    window.setTimeout = (callback, ms, ...args) => {
+      if (!deferred || ms !== 10_000) return schedule(callback, ms, ...args);
+      const id = next--;
+      deferred.set(id, () => started.set(id, schedule(callback, ms, ...args)));
+      return id;
+    };
+    window.clearTimeout = (id) => {
+      if (deferred?.delete(id)) return;
+      clear(started.get(id) ?? id);
+      started.delete(id);
+    };
+    window.__releaseReadDeadlines = () => {
+      const held = deferred;
+      deferred = undefined;
+      for (const start of held.values()) start();
+    };
+  });
   const alphaHeads = () =>
     app.report.queries.filter(
       ({ community, filter }) =>
@@ -135,45 +196,58 @@ test("channel establishment preserves an in-flight unread batch and its sidebar 
         community === "primary" &&
         filter.kinds?.includes(9) &&
         filter["#h"]?.length &&
+        filter.include_aux &&
         filter.top_level === undefined &&
         filter.depth_limit === undefined &&
         filter.until === undefined,
     );
+  // Every joined community holds its unread batch; only primary's is under test.
+  const holds = () =>
+    app.report.unreadHolds.filter(({ community }) => community === "primary");
   app.relay.holdEose("alpha");
   app.relay.holdUnread();
+  const opening = open(page, app);
   try {
-    await open(page, app);
-    await expect.poll(() => app.report.unreadHolds.length).toBe(1);
+    await expect.poll(() => holds().length).toBe(1);
     expect(evidence()[0].filter["#h"]).toContain("alpha");
     expect(evidence()[0].filter["#h"]).toContain("dm-090");
-    expect(alphaHeads()).toHaveLength(1);
-    await expect(row(page, "dm-090").getByRole("img")).toHaveCount(0);
+    await expect.poll(() => alphaHeads().length).toBe(1);
 
     // Establish only after unread is in flight; observe the real finite catch-up
     // before releasing evidence. No sleep or scheduler luck creates the overlap.
     app.relay.releaseEose("alpha");
     await expect.poll(() => alphaHeads().length).toBe(2);
-    expect(app.report.unreadHolds).toEqual([{ pending: true, aborted: false }]);
+    expect(holds()).toEqual([
+      { community: "primary", pending: true, aborted: false },
+    ]);
+    await opening;
+    await expect(row(page, "dm-090")).toHaveCount(1);
+    await expect(row(page, "dm-090").getByRole("img")).toHaveCount(0);
+    await page.evaluate(() => window.__releaseReadDeadlines());
+    releaseUpstreamDeadlines();
     app.relay.releaseUnread();
     await expect(row(page, "dm-030").getByRole("img")).toHaveCount(1);
     await expect(row(page, "dm-090").getByRole("img")).toHaveCount(1);
     await expect(cue(page, "below")).toBeVisible();
-    await expect(cue(page, "below")).toHaveCSS("border-radius", "26px");
+    await expect(cue(page, "below")).toHaveCSS("border-radius", "34px");
     await expect(cue(page, "below").locator("..")).toHaveCSS(
       "border-radius",
-      "26px",
+      "34px",
     );
     await expect.poll(() => evidence().length).toBe(2); // 130 IDs, not retries.
     expect(evidence().map(({ filter }) => filter["#h"].length)).toEqual([
       128, 2,
     ]);
-    expect(app.report.unreadHolds).toEqual([
-      { pending: false, aborted: false },
+    expect(holds()).toEqual([
+      { community: "primary", pending: false, aborted: false },
     ]);
     expect(app.report.readPublications).toEqual([]);
   } finally {
+    releaseUpstreamDeadlines();
+    AbortSignal.timeout = timeout;
     app.relay.releaseEose("alpha");
     app.relay.releaseUnread();
+    await opening;
   }
 });
 
@@ -205,8 +279,15 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
     app.relay.releaseEose("alpha");
     await opening;
   }
-  const ordinary = row(page, "alpha");
-  await expect(ordinary).toHaveAttribute("aria-current", "page");
+  // The selected channel's row is quiet: opening it saw its unread.
+  const selected = row(page, "alpha");
+  await expect(selected).toHaveAttribute("aria-current", "page");
+  await expect(selected.locator("[data-channel-unread]")).toHaveCount(0);
+  await expect(selected.getByText("Alpha", { exact: true })).not.toHaveCSS(
+    "font-weight",
+    "600",
+  );
+  const ordinary = row(page, "beta");
   const ordinaryState = ordinary.locator("[data-channel-unread]");
   const directed = row(page, "dm-090").locator("[data-channel-priority]");
   await expect(ordinaryState).toHaveAttribute("data-priority", "false");
@@ -215,10 +296,8 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
     /observed unread messages/,
   );
   await expect(ordinary.locator("[data-channel-priority]")).toHaveCount(0);
-  await expect(ordinary.getByText("Alpha", { exact: true })).toHaveCSS(
-    "font-weight",
-    "600",
-  );
+  const ordinaryLabel = ordinary.getByText("Beta", { exact: true });
+  await expect(ordinaryLabel).toHaveCSS("font-weight", "600");
   await expect(directed).toBeVisible();
   await expect(directed).toHaveCSS("width", "6px");
   await expect(
@@ -249,8 +328,8 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
   await releaseReadingFocus(page);
   // Keep actionable DMs below while moving only ordinary unread above: priority
   // is derived from the destinations on each edge, not from the whole roster.
-  await scrollRowAbove(page, "alpha");
-  await expect.poll(() => inView(page, "alpha")).toBe(false);
+  await scrollRowAbove(page, "beta");
+  await expect.poll(() => inView(page, "beta")).toBe(false);
   await expect(cue(page, "above")).toBeVisible();
   await expect(cue(page, "above")).toHaveText(/\d+ unread$/);
   await expect(cue(page, "above").locator("..")).toHaveCSS("top", "12px");
@@ -259,6 +338,9 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
   );
   await expect(cue(page, "above")).toHaveAttribute("data-attention", "false");
   await expect(cue(page, "below")).toHaveAttribute("data-attention", "true");
+  // Only attention earns the strong fill; ordinary unread is the quiet cue.
+  await expect(cue(page, "above")).toHaveAttribute("data-variant", "subtle");
+  await expect(cue(page, "below")).toHaveAttribute("data-variant", "prominent");
   await scroll(page, 0);
   await expect(cue(page, "below")).toHaveAttribute("data-attention", "true");
   await scroll(page, 1800);
@@ -346,48 +428,30 @@ test("resizing, collapsed groups and new unread evidence update only the display
   await open(page, app);
   await expect(row(page, "dm-090").getByRole("img")).toHaveCount(1);
   await expect(cue(page, "below")).toBeVisible();
-  // Messages are hidden behind a visible section summary: not below the scroll fold.
-  await list(page)
-    .locator("summary")
-    .filter({ hasText: /^Channels$/ })
-    .click();
-  // Channels are collapsed, but unread DMs remain eligible and keep the cue.
+  // Messages behind the Team heading sit above the DMs in this scrollport.
+  const team = list(page).locator('[data-sidebar-section="channels"]');
+  const channelsSummary = team.locator("summary");
+  await channelsSummary.click();
   await expect(cue(page, "below")).toBeVisible();
-  await list(page)
-    .locator("summary")
-    .filter({ hasText: /^Channels$/ })
-    .click();
+  await channelsSummary.click();
   await cue(page, "below").click();
   await expect.poll(() => inView(page, "dm-030")).toBe(true);
   // Collapse the preceding group without scrolling it into view first.
-  await list(page)
-    .locator("summary")
-    .filter({ hasText: /^Channels$/ })
-    .evaluate((el) => el.click());
+  await channelsSummary.evaluate((element) => element.click());
   await expect(cue(page, "above")).toBeVisible();
   await cue(page, "above").click();
   await expect.poll(() => inView(page, "Beta")).toBe(true);
-  await expect(list(page).locator("details").first()).toHaveAttribute(
-    "open",
-    "",
-  );
-  const controlledContent = await list(page)
-    .locator("details")
-    .first()
-    .locator("summary")
-    .getAttribute("aria-controls");
+  await expect(team.locator("details")).toHaveAttribute("open", "");
+  const controlledContent = await channelsSummary.getAttribute("aria-controls");
   await expect(page.locator(`[id="${controlledContent}"]`)).not.toHaveAttribute(
     "inert",
   );
   await expect(row(page, "Beta")).toBeFocused();
   await expect(row(page, "Beta")).toBeEnabled();
-  const channelsSummary = list(page)
-    .locator("summary")
-    .filter({ hasText: /^Channels$/ });
   await channelsSummary.focus();
   await page.keyboard.press("Tab");
   await expect(
-    list(page).getByRole("button", { name: "More actions for Channels" }),
+    list(page).getByRole("button", { name: "More actions for Team" }),
   ).toBeFocused();
   await page.keyboard.press("Tab");
   // Disabled header actions are skipped; traversal still reaches rows only
@@ -434,7 +498,7 @@ test("resizing, collapsed groups and new unread evidence update only the display
   await page.getByText("Diagnostics", { exact: true }).click();
   await page
     .getByRole("button", {
-      name: "Mark read through loaded messages",
+      name: "Mark as read through loaded messages",
       exact: true,
     })
     .click();
@@ -468,9 +532,7 @@ test("session changes discard the previous sidebar targets and manual unread sti
   try {
     await open(page, app);
     await expect(cue(page, "below")).toBeVisible();
-    await page
-      .getByRole("button", { name: "Switch to Secondary", exact: true })
-      .click();
+    await selectCommunity(page, "Secondary");
     await expect(
       page.getByText(/secondary alpha message/).first(),
     ).toBeVisible();
@@ -478,13 +540,16 @@ test("session changes discard the previous sidebar targets and manual unread sti
     await openChannelDetails(page);
     await page.getByText("Diagnostics", { exact: true }).press("Enter");
     await page
-      .getByRole("button", { name: "Mark unread on this device", exact: true })
+      .getByRole("button", { name: "Mark as unread", exact: true })
       .click();
     await page
       .getByRole("button", { name: "Close Channel settings tab", exact: true })
       .click();
     await expect.poll(() => pendingRoutes.length).toBeGreaterThan(0);
-    const panel = page.getByRole("complementary", { name: "Channel sidebar" });
+    const panel = page.getByRole("complementary", {
+      name: "Sidebar",
+      exact: true,
+    });
     await expect(panel).toHaveAttribute("aria-busy", "true");
     // A new session reveals its roster after the bounded startup wait even if
     // preferences are still blocked. Scrolling the empty loading view is a no-op.
@@ -520,7 +585,7 @@ test("session changes discard the previous sidebar targets and manual unread sti
   }
 });
 
-test("priority dots stay aligned and use semantic primary color in both modes", async ({
+test("priority dots stay aligned and use the prominent mark color in both modes", async ({
   page,
   app,
 }, info) => {
@@ -553,7 +618,7 @@ test("priority dots stay aligned and use semantic primary color in both modes", 
               row.getBoundingClientRect().right -
                 Number.parseFloat(fill.right) -
                 marker.right ===
-              10,
+              12,
             separated: marker.left - label.right >= 6,
           };
         }),
@@ -570,7 +635,9 @@ test("priority dots stay aligned and use semantic primary color in both modes", 
     const primary = await page.evaluate(() => {
       const root = getComputedStyle(document.documentElement);
       const probe = document.createElement("span");
-      probe.style.backgroundColor = root.getPropertyValue("--primary");
+      probe.style.backgroundColor = root.getPropertyValue(
+        "--affordance-prominent-mark",
+      );
       document.body.append(probe);
       const color = getComputedStyle(probe).backgroundColor;
       probe.remove();
@@ -605,8 +672,9 @@ test.describe("DM preview wiring", () => {
   test("production sidebar wires only 1:1 avatars and preserves their shape and overlap", async ({
     page,
     app,
-  }) => {
+  }, info) => {
     await page.setViewportSize({ width: 1440, height: 500 });
+    await page.emulateMedia({ colorScheme: "dark" });
     await open(page, app);
     for (const id of ["dm-a", "dm-b", "dm-c", "dm-d", "dm-group", "dm-self"])
       await expect(
@@ -639,7 +707,7 @@ test.describe("DM preview wiring", () => {
         return edge === "above" ? ids.reverse() : ids;
       }, edge);
       await expect(pill).toHaveAccessibleName(
-        `${expected.length} unread conversations ${edge}`,
+        `${expected.length} unread conversation${expected.length === 1 ? "" : "s"} ${edge}`,
       );
       const previews = pill.locator("[data-unread-dm]");
       await expect
@@ -670,5 +738,175 @@ test.describe("DM preview wiring", () => {
     );
     expect(boxes[1].left).toBeLessThan(boxes[0].right);
     expect(boxes[2].left).toBeLessThan(boxes[1].right);
+
+    // Check the painted cue against the sidebar centerline and the New button.
+    const resize = page.getByRole("separator", { name: "Resize sidebar" });
+    const action = sidebar(page).getByRole("button", { name: "New options" });
+    await expect(action).toBeVisible();
+    const geometry = () =>
+      below.evaluate((button) => {
+        const pane = button.closest("aside");
+        const sidebar = pane.getBoundingClientRect();
+        const cue = button.getBoundingClientRect();
+        const action = pane
+          .querySelector("[data-sidebar-floating-action]")
+          .getBoundingClientRect();
+        return {
+          centerDelta: Math.abs(
+            cue.left + cue.width / 2 - (sidebar.left + sidebar.width / 2),
+          ),
+          horizontalGap: cue.left - action.right,
+          verticalGap: action.top - cue.bottom,
+        };
+      });
+    const expectCentered = () =>
+      expect
+        .poll(async () => (await geometry()).centerDelta)
+        .toBeLessThanOrEqual(1);
+    const visibleAvatars = below.locator("[data-unread-dm]:visible");
+    const expectReadable = () =>
+      expect
+        .poll(() =>
+          below
+            .getByText(/^\d+ unread$/)
+            .evaluate((label) => label.scrollWidth - label.clientWidth),
+        )
+        .toBeLessThanOrEqual(1);
+    await expectCentered();
+    await expect
+      .poll(async () => (await geometry()).horizontalGap)
+      .toBeGreaterThanOrEqual(7);
+    await expect(below.locator("..")).toHaveCSS("bottom", "12px");
+    await sidebar(page).screenshot({
+      path: info.outputPath("unread-centered.png"),
+    });
+
+    await resize.press("Home");
+    await expectCentered();
+    await expect
+      .poll(async () => (await geometry()).horizontalGap)
+      .toBeGreaterThanOrEqual(7);
+    await expect(below.locator("..")).toHaveCSS("bottom", "12px");
+    await expect.poll(() => visibleAvatars.count()).toBeLessThan(3);
+    await expectReadable();
+    await action.click({ trial: true });
+    await below.click({ trial: true });
+    await sidebar(page).screenshot({
+      path: info.outputPath("unread-centered-compact.png"),
+    });
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%";
+    });
+    const lowerWrapper = below.locator("..");
+    await expect(lowerWrapper).toHaveAttribute("data-lifted", "");
+    const narrowPreviews = await visibleAvatars.count();
+    await expectCentered();
+    await expect
+      .poll(async () => (await geometry()).verticalGap)
+      .toBeGreaterThanOrEqual(7);
+    await expectReadable();
+    await action.click({ trial: true });
+    await below.click({ trial: true });
+
+    for (let step = 0; step < 4; step++) await resize.press("Shift+ArrowRight");
+    await expect(resize).toHaveAttribute("aria-valuenow", "412");
+    await expect(lowerWrapper).not.toHaveAttribute("data-lifted");
+    expect(await visibleAvatars.count()).toBeGreaterThanOrEqual(narrowPreviews);
+    await resize.press("End");
+    await expect(visibleAvatars).toHaveCount(3);
+
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "";
+    });
+    await expectCentered();
+    await expect(below.locator("..")).toHaveCSS("bottom", "12px");
+    await expect(visibleAvatars).toHaveCount(3);
+  });
+  test("both unread cues and New are reachable in a short drawer at 200% interface size", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await page.getByRole("textbox", { name: "Message #Alpha" }).focus();
+    await expect(
+      row(page, "alpha").locator("[data-channel-unread]"),
+    ).toHaveCount(0);
+    await page.setViewportSize({ width: 568, height: 240 });
+    await page.evaluate(() => {
+      localStorage.setItem("buzz-font-scale.v1", "2");
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: null, storageArea: localStorage }),
+      );
+    });
+    await expect(page.locator("html")).toHaveCSS("--buzz-text-scale", "2");
+    await page
+      .getByRole("button", { name: "Show navigation", exact: true })
+      .click();
+    const action = sidebar(page).getByRole("button", { name: "New options" });
+    const below = cue(page, "below");
+    const firstUnread = row(page, "beta");
+    // Place Beta just beyond the visible frame. Oversized nav padding would
+    // put it inside the nav's bounds even though the drawer clips it.
+    const clipFirstUnread = () =>
+      firstUnread.evaluate((button) => {
+        const nav = button.closest("nav");
+        const frame = nav.parentElement;
+        nav.scrollTop +=
+          button.getBoundingClientRect().top -
+          frame.getBoundingClientRect().bottom -
+          2;
+      });
+    await expect(firstUnread.locator("[data-channel-unread]")).toBeAttached();
+    await clipFirstUnread();
+    await expect(firstUnread).not.toBeInViewport();
+    await expect(action).toBeInViewport({ ratio: 1 });
+    await expect(below).toBeInViewport({ ratio: 1 });
+    await expect(below).toHaveAccessibleName("7 unread conversations below");
+    await action.click({ trial: true });
+    await below.click();
+    await expect(firstUnread).toBeFocused();
+    // Leave the drawer before it resizes under the pointer and opens a pinned preview.
+    await page.mouse.move(0, 0);
+
+    await clipFirstUnread();
+    await expect(below).toHaveAccessibleName("7 unread conversations below");
+    await action.focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(below).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(firstUnread).toBeFocused();
+
+    const above = cue(page, "above");
+    for (const height of [340, 240]) {
+      await page.setViewportSize({ width: 568, height });
+      await scrollRowAbove(page, "beta");
+      await expect(above).toHaveAccessibleName("1 unread conversation above");
+      await expect(below).toHaveAccessibleName("6 unread conversations below");
+      for (const [control, count] of [
+        [above, 1],
+        [below, 6],
+      ]) {
+        const label = control.getByText(`${count} unread`, { exact: true });
+        await expect(label).toBeVisible();
+        await expect
+          .poll(() =>
+            label.evaluate((label) => label.scrollWidth - label.clientWidth),
+          )
+          .toBeLessThanOrEqual(1);
+      }
+      for (const control of [above, below, action]) {
+        await expect(control).toBeInViewport({ ratio: 1 });
+        await control.click({ trial: true });
+      }
+    }
+    await above.click();
+    await expect(firstUnread).toBeFocused();
+    await page.mouse.move(0, 0);
+
+    await scroll(page, 0);
+    await page.setViewportSize({ width: 568, height: 500 });
+    await expect(below).toBeInViewport({ ratio: 1 });
+    await expect(below.getByText(/^\d+ unread$/)).toBeVisible();
+    await below.click({ trial: true });
   });
 });

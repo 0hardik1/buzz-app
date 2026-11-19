@@ -4,14 +4,18 @@ import type { Agents } from "../../features/agents/service";
 import {
   templateAgents,
   useChannelTemplates,
+  type ChannelTemplate,
 } from "../../features/channel-templates/local";
+import {
+  projectDefault,
+  projectTemplateId,
+  shareableInstructions,
+} from "../../features/solo/workspace";
 import { Select } from "../../shared/design-system/ui/Select";
 import { useTeams } from "../../features/agents/react";
 import { useAgentChoices } from "../../features/agents/use-choices";
-import {
-  templateAgentChoices,
-  type AgentChoicesSnapshot,
-} from "../../features/agents/choices";
+import { templateEvidence } from "../../features/channel-templates/useTemplateAgents";
+import { templateAgentChoices } from "../../features/agents/choices";
 import {
   useEffect,
   useId,
@@ -22,6 +26,7 @@ import {
   type RefObject,
 } from "react";
 import { Button } from "../../shared/design-system/ui/Button";
+import { Checkbox } from "../../shared/design-system/ui/Checkbox";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import {
   ChannelPrivacyConfirmation,
@@ -31,12 +36,13 @@ import {
 import { ChannelDurationField } from "./ChannelDurationField";
 import { ChannelTextField } from "./ChannelTextField";
 import { SidebarGroupIcon } from "./SidebarGroupIcon";
+import { SidebarStarIcon } from "./SidebarStarIcon";
 import {
   canonicalDetailsName,
   detailsDraftErrors,
 } from "../../features/relay/channel-details-protocol";
 import { Switch } from "../../shared/design-system/ui/Switch";
-import { DEFAULT_TEMPORARY_CHANNEL_TTL_SECONDS } from "../../features/relay/work-sessions";
+import { DEFAULT_TEMPORARY_CHANNEL_TTL_SECONDS } from "../../features/relay/channel-writes";
 import styles from "./CreateChannelDialog.module.css";
 
 export type CreateChannelInput = ChannelCreationInput;
@@ -45,7 +51,6 @@ type Props = {
   open: boolean;
   onOpenChange(open: boolean): void;
   onCreate(input: CreateChannelInput): Promise<void>;
-  pending?: CreateChannelInput | undefined;
   finalFocus?: RefObject<HTMLElement | null> | undefined;
   session: RelaySession;
   /** Supplies the agents and teams a template adds. */
@@ -56,36 +61,23 @@ type Props = {
     icon?: string;
   }>[];
   initialGroup: string;
+  initialStarred?: boolean;
   groupsReady: boolean;
 };
 export function CreateChannelDialog(props: Props) {
   // Each opening owns its callbacks. Closing/reopening cannot revive an old editor.
   return props.open ? <OpenCreateChannelDialog {...props} /> : null;
 }
-/** Templates add members only from ready inventory and archive evidence. */
-function templateEvidence(choices: AgentChoicesSnapshot) {
-  const ready =
-    choices.templates.status === "ready" && choices.archives.status === "ready";
-  return {
-    ready,
-    // Still being read, as opposed to failed or unavailable.
-    checking:
-      !ready &&
-      (choices.templates.pending ||
-        choices.archives.status === "idle" ||
-        choices.archives.status === "loading"),
-  };
-}
 function OpenCreateChannelDialog({
   open,
   onOpenChange,
   onCreate,
-  pending,
   finalFocus,
   session,
   agents,
   destinations,
   initialGroup,
+  initialStarred = false,
   groupsReady,
 }: Props) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -110,7 +102,6 @@ function OpenCreateChannelDialog({
   }, [privacyChoice]);
   const mounted = useRef(true);
   const previousOpen = useRef(false);
-  const previousPending = useRef(pending);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [lifetime, setLifetime] = useState<"ongoing" | "temporary">("ongoing");
@@ -121,12 +112,84 @@ function OpenCreateChannelDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [groupId, setGroupId] = useState("");
-  const templates = useChannelTemplates();
+  const [starred, setStarred] = useState(false);
+  const loadDefaults = !!initialGroup && session.channelKit.available;
+  const channelTemplates = useChannelTemplates();
+  const [workspaceTemplate, setWorkspaceTemplate] = useState<ChannelTemplate>();
+  // Workspace instructions start a channel's Canvas unless unticked.
+  const [shareWorkspaceInstructions, setShareWorkspaceInstructions] =
+    useState(true);
+  const [loadingDefaults, setLoadingDefaults] = useState(loadDefaults);
+  const [defaultsError, setDefaultsError] = useState("");
+  const [defaultsAttempt, setDefaultsAttempt] = useState(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Retry reloads the same workspace.
+  useEffect(() => {
+    if (!loadDefaults) return;
+    let active = true;
+    setLoadingDefaults(true);
+    setDefaultsError("");
+    void (async () => {
+      await session.channelKit.refresh();
+      const kit = session.channelKit.snapshot();
+      if (kit.status !== "ready")
+        throw new Error(kit.error ?? "Workspace defaults could not load.");
+      const preferred = projectDefault(
+        kit.entries,
+        await projectTemplateId(initialGroup),
+        session.sidebarPreferences.snapshot().data?.legacyTemplates?.[
+          initialGroup
+        ],
+        true,
+      );
+      if (!active || !preferred) return;
+      const teamAgents = preferred.teamIds.flatMap((id) => {
+        const team = kit.entries.find(
+          ({ record }) =>
+            !record.deleted &&
+            record.value.type === "team" &&
+            record.value.id === id,
+        )?.record.value;
+        if (team?.type !== "team")
+          throw new Error("A team in the workspace defaults could not load.");
+        return team.agents;
+      });
+      // Only standalone instructions are eligible to share; local paths stay.
+      const canvas = shareableInstructions(preferred.canvas);
+      setWorkspaceTemplate({
+        id: preferred.id,
+        name: "Workspace defaults",
+        teams: [],
+        agents: [...new Set([...preferred.agents, ...teamAgents])],
+        canvas,
+      });
+    })()
+      .catch((reason: unknown) => {
+        if (active)
+          setDefaultsError(
+            reason instanceof Error ? reason.message : String(reason),
+          );
+      })
+      .finally(() => {
+        if (active) setLoadingDefaults(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [defaultsAttempt, initialGroup, loadDefaults, session]);
+  const templates = workspaceTemplate
+    ? [
+        workspaceTemplate,
+        ...channelTemplates.filter(({ id }) => id !== workspaceTemplate.id),
+      ]
+    : channelTemplates;
   const teams = useTeams(agents);
-  const [chosenTemplate, setTemplateId] = useState("");
+  const [chosenTemplate, setTemplateId] = useState<string>();
   // A template deleted meanwhile, here or in another window, is no choice.
-  const template = templates.find((item) => item.id === chosenTemplate);
+  const template = templates.find(
+    (item) => item.id === (chosenTemplate ?? workspaceTemplate?.id),
+  );
   const templateId = template?.id ?? "";
+  const usesWorkspaceDefaults = !!template && template === workspaceTemplate;
   // A template names agents and teams' members; which are the owner's agents in
   // this community is the shared selection's call, under the policy session
   // setup applies.
@@ -176,7 +239,10 @@ function OpenCreateChannelDialog({
   };
   const templateSetup = template && {
     agents: templateAgents(template, teams, new Set(agentNames.keys())),
-    canvas: template.canvas,
+    canvas:
+      usesWorkspaceDefaults && !shareWorkspaceInstructions
+        ? ""
+        : template.canvas,
   };
   const templateNote =
     templateSetup &&
@@ -191,35 +257,33 @@ function OpenCreateChannelDialog({
       .join(" · ") ||
       "None of its agents are in this community, and it has no Canvas.");
   const destination = destinations.find((g) => g.id === groupId);
-  const summary = pending?.setup;
   const editing = useRef(false);
-  editing.current = !pending && !busy && !privacyChoice && !confirmDiscard;
+  editing.current = !busy && !privacyChoice && !confirmDiscard;
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      // Closing forgets an unconfirmed attempt; nothing restores it later.
+      session.channelCreation.forget();
     };
-  }, []);
+  }, [session]);
   useEffect(() => {
     const opening = open && !previousOpen.current;
-    const restoring =
-      open && pending !== undefined && previousPending.current === undefined;
     previousOpen.current = open;
-    previousPending.current = pending;
-    if (!opening && !restoring) return;
-    setName(pending?.name ?? "");
-    setDescription(pending?.description ?? "");
-    setLifetime(pending?.ttlSeconds === undefined ? "ongoing" : "temporary");
-    setTemporaryTtl(
-      pending?.ttlSeconds ?? DEFAULT_TEMPORARY_CHANNEL_TTL_SECONDS,
-    );
-    setPrivateChannel(pending?.visibility === "private");
+    if (!opening) return;
+    setName("");
+    setDescription("");
+    setLifetime("ongoing");
+    setTemporaryTtl(DEFAULT_TEMPORARY_CHANNEL_TTL_SECONDS);
+    setPrivateChannel(false);
     setPrivacyChoice(undefined);
     setConfirmDiscard(false);
     setError("");
-    setGroupId(pending ? (pending.setup?.groupId ?? "") : initialGroup);
-    setTemplateId("");
-  }, [open, pending, initialGroup]);
+    setGroupId(initialGroup);
+    setStarred(initialStarred);
+    setTemplateId(undefined);
+    setShareWorkspaceInstructions(true);
+  }, [open, initialGroup, initialStarred]);
 
   const normalizedName = canonicalDetailsName(name);
   const errors = detailsDraftErrors({
@@ -227,17 +291,20 @@ function OpenCreateChannelDialog({
     description,
     visibility: privateChannel ? "private" : "public",
   });
-  // Recovery must retain the original frozen request, not reinterpret its fields.
   const invalid =
-    !pending && (Object.values(errors).some(Boolean) || unresolved);
+    Object.values(errors).some(Boolean) ||
+    unresolved ||
+    (chosenTemplate === undefined && (loadingDefaults || !!defaultsError));
 
   const dirty =
-    !pending &&
-    (name !== "" ||
-      description !== "" ||
-      privateChannel ||
-      lifetime !== "ongoing" ||
-      templateId !== "");
+    name !== "" ||
+    description !== "" ||
+    privateChannel ||
+    lifetime !== "ongoing" ||
+    groupId !== initialGroup ||
+    !shareWorkspaceInstructions ||
+    (chosenTemplate !== undefined &&
+      chosenTemplate !== (workspaceTemplate?.id ?? ""));
   const requestClose = () => {
     if (busy) return;
     if (privacyChoice) setPrivacyChoice(undefined);
@@ -253,33 +320,33 @@ function OpenCreateChannelDialog({
     setError("");
     try {
       if (
-        !pending &&
         groupId &&
         (!groupsReady || !destinations.some((g) => g.id === groupId))
       )
         throw new Error(
           groupsReady
-            ? "This group is no longer available. Close this dialog and create from another sidebar group or Channels."
-            : "Wait for saved sidebar groups to load, then try again.",
+            ? "This workspace is no longer available. Choose another workspace or Team."
+            : "Wait for saved workspaces to load, then try again.",
         );
-      await onCreate(
-        pending ?? {
-          name: normalizedName,
-          visibility: privateChannel ? "private" : "open",
-          ...(lifetime === "temporary" ? { ttlSeconds: temporaryTtl } : {}),
-          ...(description.trim() ? { description: description.trim() } : {}),
-          ...(groupId || templateSetup?.agents.length || templateSetup?.canvas
-            ? {
-                setup: {
-                  agents: templateSetup?.agents ?? [],
-                  canvas: templateSetup?.canvas ?? "",
-                  groupId,
-                  templateId,
-                },
-              }
-            : {}),
-        },
-      );
+      await onCreate({
+        name: normalizedName,
+        visibility: privateChannel ? "private" : "open",
+        ...(lifetime === "temporary" ? { ttlSeconds: temporaryTtl } : {}),
+        ...(description.trim() ? { description: description.trim() } : {}),
+        // The selected template stays part of the request even when it
+        // currently resolves to nothing, so a retry still matches it.
+        ...(groupId || starred || templateId
+          ? {
+              setup: {
+                agents: templateSetup?.agents ?? [],
+                canvas: templateSetup?.canvas ?? "",
+                groupId,
+                ...(starred ? { starred: true } : {}),
+                templateId,
+              },
+            }
+          : {}),
+      });
       if (mounted.current) onOpenChange(false);
     } catch (reason) {
       if (mounted.current)
@@ -292,18 +359,6 @@ function OpenCreateChannelDialog({
       if (mounted.current) setBusy(false);
     }
   };
-
-  const recoverySummary = summary && (
-    <section aria-label="Channel setup summary">
-      <p>
-        {summary.agents.length
-          ? `${summary.agents.length} selected agent${summary.agents.length === 1 ? "" : "s"}.`
-          : "Only you."}
-        {summary.groupId &&
-          ` Destination: ${destinations.find((g) => g.id === summary.groupId)?.name ?? "saved group"}.`}
-      </p>
-    </section>
-  );
 
   return (
     <Dialog
@@ -319,7 +374,6 @@ function OpenCreateChannelDialog({
             ? { key: "privacy", scale: 0.95 }
             : { key: "details", scale: 1.05 }
       }
-      headerGap="compact"
       footerGap={privacyChoice ? "compact" : "default"}
       preventClose={busy}
       title={
@@ -334,18 +388,22 @@ function OpenCreateChannelDialog({
         ) : (
           <span className={styles.title}>
             Create a channel
-            {groupId && (
+            {(groupId || starred) && (
               <>
                 {" in "}
-                {destination?.icon && (
+                {starred ? (
+                  <>
+                    <SidebarStarIcon />{" "}
+                  </>
+                ) : destination?.icon ? (
                   <>
                     <SidebarGroupIcon
                       icon={destination.icon}
                       session={session}
                     />{" "}
                   </>
-                )}
-                {destination?.name ?? "saved group"}
+                ) : null}
+                {starred ? "Starred" : (destination?.name ?? "saved workspace")}
               </>
             )}
           </span>
@@ -370,7 +428,7 @@ function OpenCreateChannelDialog({
             <Button
               variant="destructive"
               onClick={() => {
-                if (!busy && !pending) onOpenChange(false);
+                if (!busy) onOpenChange(false);
               }}
             >
               Discard changes
@@ -386,9 +444,9 @@ function OpenCreateChannelDialog({
             </Button>
             <Button
               variant="prominent"
-              disabled={busy || !!pending}
+              disabled={busy}
               onClick={() => {
-                if (busy || pending) return;
+                if (busy) return;
                 if (skipWarning) rememberPrivacyConfirmation(session.scope);
                 setPrivateChannel(privacyChoice === "private");
                 setPrivacyChoice(undefined);
@@ -406,9 +464,8 @@ function OpenCreateChannelDialog({
                 ref={privateSwitch}
                 aria-label="Private"
                 checked={privateChannel}
-                disabled={!!pending}
                 readOnly={busy}
-                aria-disabled={busy || !!pending || undefined}
+                aria-disabled={busy || undefined}
                 onCheckedChange={(checked) => {
                   if (!editing.current) return;
                   const choice = checked ? "private" : "public";
@@ -432,7 +489,7 @@ function OpenCreateChannelDialog({
               loading={busy}
               disabled={invalid}
             >
-              {pending ? "Retry channel" : "Create channel"}
+              Create channel
             </Button>
           </>
         )
@@ -455,101 +512,137 @@ function OpenCreateChannelDialog({
             void submit();
           }}
         >
-          {pending && (
-            <p role="status">
-              This attempt may already have created a channel. Retry checks it
-              first and, if unconfirmed, resends only the same creation request.
-              It will not create another channel or continue its setup.
+          <ChannelTextField
+            field="name"
+            creation
+            inputRef={input}
+            value={name}
+            error={name ? errors.name : undefined}
+            onChange={(value) => {
+              setName(value);
+              setError("");
+            }}
+          />
+          <ChannelTextField
+            field="description"
+            value={description}
+            error={errors.description}
+            onChange={(value) => {
+              setDescription(value);
+              setError("");
+            }}
+          />
+          {initialGroup && (
+            <Select
+              label="Destination workspace"
+              variant="field"
+              value={groupId}
+              groups={[
+                {
+                  label: "",
+                  options: [
+                    { value: "", label: "Team" },
+                    ...(groupId && !destination
+                      ? [{ value: groupId, label: "Saved workspace" }]
+                      : []),
+                    ...destinations.map(({ id, name }) => ({
+                      value: id,
+                      label: name,
+                    })),
+                  ],
+                },
+              ]}
+              onValueChange={(value) => {
+                if (!editing.current) return;
+                setGroupId(value);
+                setError("");
+              }}
+            />
+          )}
+          {defaultsError && chosenTemplate === undefined && (
+            <p role="alert">
+              {defaultsError}{" "}
+              <Button
+                size="xs"
+                onClick={() => setDefaultsAttempt(defaultsAttempt + 1)}
+              >
+                Retry
+              </Button>{" "}
+              <Button size="xs" onClick={() => setTemplateId("")}>
+                Use no template
+              </Button>
             </p>
           )}
-          <fieldset
-            disabled={!!pending}
-            inert={!!pending}
-            style={{ display: "contents", border: 0, padding: 0 }}
-          >
-            <ChannelTextField
-              field="name"
-              creation
-              inputRef={input}
-              value={name}
-              error={name ? errors.name : undefined}
-              onChange={(value) => {
-                setName(value);
-                setError("");
-              }}
-            />
-            <ChannelTextField
-              field="description"
-              value={description}
-              error={errors.description}
-              onChange={(value) => {
-                setDescription(value);
-                setError("");
-              }}
-            />
-            {!pending && templates.length > 0 && (
-              <div ref={templateField} style={{ display: "contents" }}>
-                <Select
-                  label="Template"
-                  variant="field"
-                  value={templateId}
-                  description={
-                    checkingAgents
+          {(templates.length > 0 || loadingDefaults) && (
+            <div ref={templateField} style={{ display: "contents" }}>
+              <Select
+                label="Template"
+                variant="field"
+                value={templateId}
+                description={
+                  loadingDefaults && chosenTemplate === undefined
+                    ? "Loading workspace defaults…"
+                    : checkingAgents
                       ? "Checking which of its agents are in this community…"
                       : templateNote
-                  }
-                  error={
-                    (unresolved && !checkingAgents) ||
-                    (needsAgents && retrying) ? (
-                      <>
-                        Its agents can’t be checked right now, so they can’t be
-                        added. Retry, or choose None to create the channel
-                        without them.{" "}
-                        <Button
-                          ref={retryButton}
-                          size="xs"
-                          variant="outline"
-                          loading={retrying}
-                          onClick={() => void retryAgents()}
-                        >
-                          Retry
-                        </Button>
-                      </>
-                    ) : undefined
-                  }
-                  groups={[
-                    {
-                      label: "",
-                      options: [
-                        { value: "", label: "None" },
-                        ...templates.map((item) => ({
-                          value: item.id,
-                          label: item.name,
-                        })),
-                      ],
-                    },
-                  ]}
-                  onValueChange={(value) => {
-                    if (!editing.current) return;
-                    setTemplateId(value);
-                    setError("");
-                  }}
-                />
-              </div>
-            )}
-            <ChannelDurationField
-              temporary={lifetime === "temporary"}
-              ttlSeconds={temporaryTtl}
-              disabled={!!pending}
-              onChange={(ttlSeconds) => {
-                if (!editing.current) return;
-                setLifetime(ttlSeconds === undefined ? "ongoing" : "temporary");
-                if (ttlSeconds !== undefined) setTemporaryTtl(ttlSeconds);
-                setError("");
-              }}
+                }
+                error={
+                  (unresolved && !checkingAgents) ||
+                  (needsAgents && retrying) ? (
+                    <>
+                      Its agents can’t be checked right now, so they can’t be
+                      added. Retry, or choose None to create the channel without
+                      them.{" "}
+                      <Button
+                        ref={retryButton}
+                        size="xs"
+                        variant="outline"
+                        loading={retrying}
+                        onClick={() => void retryAgents()}
+                      >
+                        Retry
+                      </Button>
+                    </>
+                  ) : undefined
+                }
+                groups={[
+                  {
+                    label: "",
+                    options: [
+                      { value: "", label: "None" },
+                      ...templates.map((item) => ({
+                        value: item.id,
+                        label: item.name,
+                      })),
+                    ],
+                  },
+                ]}
+                onValueChange={(value) => {
+                  if (!editing.current) return;
+                  setTemplateId(value);
+                  setShareWorkspaceInstructions(true);
+                  setError("");
+                }}
+              />
+            </div>
+          )}
+          {usesWorkspaceDefaults && template.canvas.trim() && (
+            <Checkbox
+              label="Copy workspace instructions to the shared Canvas"
+              checked={shareWorkspaceInstructions}
+              onCheckedChange={setShareWorkspaceInstructions}
             />
-          </fieldset>
-          {recoverySummary}
+          )}
+          <ChannelDurationField
+            temporary={lifetime === "temporary"}
+            ttlSeconds={temporaryTtl}
+            onChange={(ttlSeconds) => {
+              if (!editing.current) return;
+              setLifetime(ttlSeconds === undefined ? "ongoing" : "temporary");
+              if (ttlSeconds !== undefined) setTemporaryTtl(ttlSeconds);
+              setError("");
+            }}
+          />
           {error && (
             <p role="alert" className={styles.error}>
               {error}

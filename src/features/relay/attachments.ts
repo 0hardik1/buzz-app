@@ -4,7 +4,7 @@ import {
   videoDemuxer,
   VIDEO_PREPARATION_MS,
 } from "./video-preparation.ts";
-import { safeAttachmentName } from "./message-content.ts";
+import { IMETA_DIM, safeAttachmentName } from "./message-content.ts";
 
 import {
   mediaByteLimit,
@@ -19,8 +19,26 @@ export type UploadedAttachment = Readonly<{
   type: string;
   size: number;
   sha256: string;
+  dim?: string;
   voice?: Readonly<{ duration: number; waveform: readonly number[] }>;
 }>;
+/** A descriptor read back from device storage. */
+export function isUploadedAttachment(a: unknown): a is UploadedAttachment {
+  const v = a as UploadedAttachment | null;
+  return (
+    !!v &&
+    typeof v.name === "string" &&
+    typeof v.url === "string" &&
+    typeof v.type === "string" &&
+    typeof v.sha256 === "string" &&
+    Number.isFinite(v.size) &&
+    (v.voice === undefined ||
+      (!!v.voice &&
+        Number.isFinite(v.voice.duration) &&
+        Array.isArray(v.voice.waveform) &&
+        v.voice.waveform.every(Number.isFinite)))
+  );
+}
 /** Bytes of the transferred file handed to the connection so far. */
 export type UploadProgress = (sent: number, total: number) => void;
 export type AttachmentUpload = (
@@ -100,9 +118,31 @@ export function validateUploadResult(
     type: v.type.toLowerCase(),
     size,
     sha256: v.sha256,
+    // Optional layout metadata: a malformed value is dropped, not fatal.
+    ...(typeof v.dim === "string" && IMETA_DIM.test(v.dim)
+      ? { dim: v.dim }
+      : {}),
   });
 }
-function attachmentMarkdown(name: string, result: UploadedAttachment) {
+/** A file's name as relay filename metadata takes it: a basename capped at
+ * 255 UTF-8 bytes. */
+export function attachmentName(file: string) {
+  let name = "";
+  let bytes = 0;
+  for (const char of file) {
+    const clean =
+      !safeAttachmentName(char) || char === "/" || char === "\\" ? " " : char;
+    bytes += new TextEncoder().encode(clean).length;
+    if (bytes > 255) break;
+    name += clean;
+  }
+  return name.trim() || "File";
+}
+/** An uploaded file's Markdown link: inline media embeds, others link. */
+export function attachmentMarkdown(
+  name: string,
+  result: Pick<UploadedAttachment, "url" | "type">,
+) {
   const label = Array.from(name, (char) =>
     char.charCodeAt(0) < 32 ? " " : char,
   )
@@ -179,10 +219,11 @@ async function prepareMedia(
 export function brokerUpload(
   endpoint: string,
   origin: string,
+  send: typeof fetch = fetch,
 ): AttachmentUpload {
   return hostUpload(
     (file, signal) =>
-      fetch(`${endpoint}/upload`, {
+      send(`${endpoint}/upload`, {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": file.type || "application/octet-stream" },
@@ -296,17 +337,8 @@ export function attachmentMessage(
     if (!origin || typeof item.name !== "string")
       throw new UploadError("invalid");
     const result = validateUploadResult(item, origin, item.size, item.name);
-    // Relay filename metadata is a basename capped at 255 UTF-8 bytes.
-    let name = "";
-    let bytes = 0;
-    for (const char of item.name) {
-      const clean =
-        !safeAttachmentName(char) || char === "/" || char === "\\" ? " " : char;
-      bytes += new TextEncoder().encode(clean).length;
-      if (bytes > 255) break;
-      name += clean;
-    }
-    name = name.trim() || "File";
+    const name = attachmentName(item.name);
+    if (item.voice) validateVoiceMetadata(item.voice);
     tags.push([
       "imeta",
       `url ${result.url}`,
@@ -314,7 +346,9 @@ export function attachmentMessage(
       `size ${result.size}`,
       `x ${result.sha256}`,
       `filename ${name}`,
-      ...(item.voice ? voiceMetadataTags(item.voice) : []),
+      ...(result.dim ? [`dim ${result.dim}`] : []),
+      // The relay rejects waveform imeta fields. Recorded duration is also
+      // not authoritative after conversion; playback reads the media duration.
     ]);
     return attachmentMarkdown(name, result);
   });
@@ -324,7 +358,9 @@ export function attachmentMessage(
   };
 }
 
-function voiceMetadataTags(voice: NonNullable<UploadedAttachment["voice"]>) {
+function validateVoiceMetadata(
+  voice: NonNullable<UploadedAttachment["voice"]>,
+) {
   if (
     !Number.isFinite(voice.duration) ||
     voice.duration <= 0 ||
@@ -335,5 +371,4 @@ function voiceMetadataTags(voice: NonNullable<UploadedAttachment["voice"]>) {
     voice.waveform.some((n) => !Number.isInteger(n) || n < 0 || n > 100)
   )
     throw new UploadError("invalid");
-  return [`duration ${voice.duration}`, `waveform ${voice.waveform.join(" ")}`];
 }

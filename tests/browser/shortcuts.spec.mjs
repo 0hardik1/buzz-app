@@ -1,4 +1,12 @@
-import { openPage, pageChoices } from "./navigation.mjs";
+import { pluginAction } from "./plugin-settings.mjs";
+import {
+  closeSettings,
+  openPage,
+  pageChoice,
+  pageChoices,
+  selectSettingsSection,
+  settingsDialog,
+} from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open, edge, settle } from "./timeline.mjs";
 
@@ -19,7 +27,7 @@ const scale = async (page, expected) =>
     )
     .toBe(String(expected));
 
-test("real Settings keys respect dialogs and modifiers, focus main, and preserve drafts", async ({
+test("real Settings keys respect dialogs and modifiers, focus Settings, and preserve drafts", async ({
   page,
   app,
 }) => {
@@ -36,7 +44,7 @@ test("real Settings keys respect dialogs and modifiers, focus main, and preserve
   await page.keyboard.press(`${modifier}+,`);
   await expect(page.getByRole("dialog", { name: "Search Buzz" })).toBeVisible();
   await expect(
-    page.getByRole("region", {
+    page.getByRole("dialog", {
       name: "Settings",
       exact: true,
       includeHidden: true,
@@ -49,11 +57,11 @@ test("real Settings keys respect dialogs and modifiers, focus main, and preserve
   await expect(button(page, "Search Buzz")).toBeFocused();
   await composer.focus();
   await page.keyboard.press(`${modifier}+,`);
-  await expect(
-    page.getByRole("region", { name: "Settings", exact: true }),
-  ).toBeVisible();
-  await expect(page.getByRole("main")).toBeFocused();
-  await openPage(page, "Messages");
+  await expect(settingsDialog(page)).toBeVisible();
+  await expect(button(settingsDialog(page), "Close Settings")).toBeFocused();
+  // Closing returns to the retained conversation and its focused draft.
+  await closeSettings(page);
+  await expect(composer).toBeFocused();
   await expect(composer).toHaveJSProperty("value", "Keep my draft");
 });
 
@@ -165,15 +173,18 @@ test("zoom keys scale text, icons and spacing together and persist/reset", async
   await page.keyboard.press("Enter");
   await scale(page, 1);
   await expect(button(page, "Increase interface size")).toBeFocused();
+  const colorMode = page.getByRole("combobox", { name: "Mode", exact: true });
+  const modeHeight = await colorMode.evaluate(
+    (el) => el.getBoundingClientRect().height,
+  );
   // At 200%, the handoff target is disabled until the reset commit finishes.
   for (const reset of ["keyboard", "external", "external-unfocused"]) {
     for (let i = 0; i < 10; i++)
       await button(page, "Increase interface size").click();
     await scale(page, 2);
-    const colorMode = page.getByRole("radio", { name: "Light", exact: true });
-    await expect(
-      page.locator('.buzz-theme-thumbnail[data-mode="light"]'),
-    ).toHaveCSS("width", "160px");
+    await expect
+      .poll(() => colorMode.evaluate((el) => el.getBoundingClientRect().height))
+      .toBeCloseTo(modeHeight * 2, 1);
     await expect(button(page, "Increase interface size")).toBeDisabled();
     await (reset === "external-unfocused"
       ? colorMode
@@ -220,7 +231,7 @@ test("interface zoom preserves an open emoji search and scales its controls", as
   await expect(search).toBeFocused();
   await search.fill("grinning");
   const emoji = button(page, "😀");
-  await expect(emoji).toHaveCSS("width", "48px");
+  await expect(emoji).toHaveCSS("width", "40px");
   await search.press("ArrowRight");
   const selected = page.locator(
     'em-emoji-picker .category:not([data-id]) button[aria-selected="true"]',
@@ -231,7 +242,7 @@ test("interface zoom preserves an open emoji search and scales its controls", as
   await scale(page, 2);
   await expect(search).toHaveValue("grinning");
   await expect(search).toBeFocused();
-  await expect(emoji).toHaveCSS("width", "96px");
+  await expect(emoji).toHaveCSS("width", "80px");
   await expect(selected).toHaveAttribute("aria-label", chosen);
   await expect(page.locator("em-emoji-picker .search .loupe svg")).toHaveCSS(
     "width",
@@ -255,10 +266,13 @@ test("interface zoom preserves an open emoji search and scales its controls", as
   await scale(page, 1);
   await expect(search).toHaveValue("grinning");
   await expect(search).toBeFocused();
-  await expect(emoji).toHaveCSS("width", "48px");
+  await expect(emoji).toHaveCSS("width", "40px");
   await expect(selected).toHaveAttribute("aria-label", chosen);
   await search.press("Enter");
-  await expect(composer).toHaveJSProperty("value", `Keep this draft ${chosen}`);
+  await expect(composer).toHaveJSProperty(
+    "value",
+    `Keep this draft ${chosen} `,
+  );
   await expect(composer).toBeFocused();
   await button(page, "Emoji and GIFS").click();
   await search.fill("grinning");
@@ -276,14 +290,17 @@ test("interface zoom preserves an open emoji search and scales its controls", as
   await expect
     // The old vendor node is briefly absent during the geometry rebuild.
     .poll(async () => (await emoji.boundingBox())?.width)
-    .toBeCloseTo(52.8, 1);
+    .toBeCloseTo(44, 1);
   await expect(search).toBeFocused();
   await expect.poll(range).toEqual([0, 2]);
   await page.keyboard.type("gr");
   await expect(search).toHaveValue("grinning");
   await expect.poll(range).toEqual([2, 2]);
   await search.press("Escape");
-  await expect(composer).toHaveJSProperty("value", `Keep this draft ${chosen}`);
+  await expect(composer).toHaveJSProperty(
+    "value",
+    `Keep this draft ${chosen} `,
+  );
 });
 
 test.describe("scaled history", () => {
@@ -313,10 +330,11 @@ test.describe("scaled history", () => {
       ),
     ).toBe(112);
     const sidebar = page.getByRole("complementary", {
-      name: "Channel sidebar",
+      name: "Sidebar",
+      exact: true,
     });
     const handle = page.getByRole("separator", {
-      name: "Resize channel sidebar",
+      name: "Resize sidebar",
     });
     const before = await sidebar.boundingBox();
     const grip = await handle.boundingBox();
@@ -369,11 +387,11 @@ test("independent plugin consumes injected shortcuts; disable/re-enable and edit
   await openPage(page, "Shortcut counter");
   const count = page.getByRole("main").getByRole("status");
   await expect(count).toHaveText("Shortcut count: 0");
-  await page.keyboard.press(`${modifier}+Shift+k`);
+  await page.keyboard.press(`${modifier}+Shift+g`);
   await expect(count).toHaveText("Shortcut count: 1");
   const input = page.getByRole("textbox", { name: "Shortcut typing guard" });
   await input.fill("Keep typing");
-  await page.keyboard.press(`${modifier}+Shift+k`);
+  await page.keyboard.press(`${modifier}+Shift+g`);
   await expect(count).toHaveText("Shortcut count: 1");
   await page.evaluate(() => {
     const host = document.createElement("div");
@@ -383,7 +401,7 @@ test("independent plugin consumes injected shortcuts; disable/re-enable and edit
     root.append(input);
     input.focus();
   });
-  await page.keyboard.press(`${modifier}+Shift+k`);
+  await page.keyboard.press(`${modifier}+Shift+g`);
   await expect(count).toHaveText("Shortcut count: 1");
   // Core zoom explicitly opts into editable targets, including Shadow DOM.
   await page.keyboard.press(`${modifier}+=`);
@@ -391,7 +409,7 @@ test("independent plugin consumes injected shortcuts; disable/re-enable and edit
   await page.keyboard.press(`${modifier}+0`);
   await scale(page, 1);
   await button(page, "Search Buzz").click();
-  await page.keyboard.press(`${modifier}+Shift+k`);
+  await page.keyboard.press(`${modifier}+Shift+g`);
   // Base UI hides the background from assistive technology while modal.
   await expect(
     page
@@ -406,25 +424,29 @@ test("independent plugin consumes injected shortcuts; disable/re-enable and edit
   ).toHaveCount(0);
   await expect(button(page, "Search Buzz")).toBeFocused();
   await page.keyboard.press(`${modifier}+,`);
-  await button(page, "Plugins").click();
-  const toggle = page.getByRole("switch", { name: "Enable Shortcut counter" });
+  await button(page, "Manage plugins").click();
+  const toggle = pluginAction(page, "Shortcut counter");
   await toggle.click();
-  const choices = await pageChoices(page);
-  await expect(
-    choices.getByRole("option", { name: "Settings", exact: true }),
-  ).toBeVisible();
-  await expect(
-    choices.getByRole("option", { name: "Shortcut counter", exact: true }),
-  ).toHaveCount(0);
+  // Search Buzz lives in the workspace, which is inert behind Settings.
+  await closeSettings(page);
+  const choices = await pageChoices(page, "Settings");
+  await expect(pageChoice(choices, "Settings")).toBeVisible();
+  await page
+    .getByRole("combobox", { name: "Search Buzz", exact: true })
+    .fill("Shortcut counter");
+  await expect(pageChoice(choices, "Shortcut counter")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(
     page.getByRole("dialog", { name: "Search Buzz", includeHidden: true }),
   ).toHaveCount(0);
-  await page.keyboard.press(`${modifier}+Shift+k`);
+  await page.keyboard.press(`${modifier}+Shift+g`);
+  await page.keyboard.press(`${modifier}+,`);
+  await selectSettingsSection(page, "Manage plugins");
   await toggle.click();
+  await closeSettings(page);
   await openPage(page, "Shortcut counter");
   await expect(count).toHaveText("Shortcut count: 0");
-  await page.keyboard.press(`${modifier}+Shift+k`);
+  await page.keyboard.press(`${modifier}+Shift+g`);
   await expect(count).toHaveText("Shortcut count: 1");
 });
 
@@ -453,13 +475,13 @@ test("a shadow-root modal blocks Settings and plugin bindings but allows interfa
   await page.keyboard.press(`${modifier}+,`);
   await expect(control).toBeFocused();
   await expect(
-    page.getByRole("region", {
+    page.getByRole("dialog", {
       name: "Settings",
       exact: true,
       includeHidden: true,
     }),
   ).toHaveCount(0);
-  await page.keyboard.press(`${modifier}+Shift+k`);
+  await page.keyboard.press(`${modifier}+Shift+g`);
   await expect(page.getByRole("main").getByRole("status")).toHaveText(
     "Shortcut count: 0",
   );
@@ -470,7 +492,7 @@ test("a shadow-root modal blocks Settings and plugin bindings but allows interfa
   await page.keyboard.press("Escape");
   await page.evaluate(() => document.getElementById("shadow-modal").remove());
   await page.getByRole("main").focus();
-  await page.keyboard.press(`${modifier}+Shift+k`);
+  await page.keyboard.press(`${modifier}+Shift+g`);
   await expect(page.getByRole("main").getByRole("status")).toHaveText(
     "Shortcut count: 1",
   );
@@ -488,7 +510,7 @@ test("Settings → Shortcuts rebinds a plugin shortcut live, blocks host conflic
   await openPage(page, "Shortcut counter");
   const count = page.getByRole("main").getByRole("status");
   await expect(count).toHaveText("Shortcut count: 0");
-  await page.keyboard.press(`${modifier}+Shift+k`);
+  await page.keyboard.press(`${modifier}+Shift+g`);
   await expect(count).toHaveText("Shortcut count: 1");
   await page.keyboard.press(`${modifier}+,`);
   await button(page, "Shortcuts").click();
@@ -504,7 +526,7 @@ test("Settings → Shortcuts rebinds a plugin shortcut live, blocks host conflic
   ).toHaveCount(1);
   const row = region.getByRole("article", { name: title });
   await expect(
-    row.getByText(`${spokenModifiers} K`, { exact: true }),
+    row.getByText(`${spokenModifiers} G`, { exact: true }),
   ).toBeAttached();
   await button(row, `Change shortcut for ${title}`).click();
   const listening = page.getByRole("textbox", {
@@ -526,9 +548,10 @@ test("Settings → Shortcuts rebinds a plugin shortcut live, blocks host conflic
   ).toBeAttached();
   await expect(button(row, `Reset shortcut for ${title}`)).toBeVisible();
   await expect(button(row, `Change shortcut for ${title}`)).toBeFocused();
+  await closeSettings(page);
   await openPage(page, "Shortcut counter");
   await expect(count).toHaveText("Shortcut count: 1");
-  await page.keyboard.press(`${modifier}+Shift+k`);
+  await page.keyboard.press(`${modifier}+Shift+g`);
   await page.keyboard.press(`${modifier}+Shift+u`);
   await expect(count).toHaveText("Shortcut count: 2");
   await page.reload();
@@ -543,9 +566,10 @@ test("Settings → Shortcuts rebinds a plugin shortcut live, blocks host conflic
   await expect(
     page.getByRole("button", { name: "Reset all shortcuts", exact: true }),
   ).toBeDisabled();
+  await closeSettings(page);
   await openPage(page, "Shortcut counter");
   await page.keyboard.press(`${modifier}+Shift+u`);
-  await page.keyboard.press(`${modifier}+Shift+k`);
+  await page.keyboard.press(`${modifier}+Shift+g`);
   await expect(count).toHaveText("Shortcut count: 2");
 });
 

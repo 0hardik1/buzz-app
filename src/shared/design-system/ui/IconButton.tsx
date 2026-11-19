@@ -3,7 +3,9 @@ import { Button, type ButtonProps } from "./Button";
 
 type IconButtonVariant =
   | NonNullable<ButtonProps["variant"]>
+  | "destructive-quiet"
   | "solid"
+  | "inset"
   | "tint"
   | "chrome"
   | "avatar"
@@ -14,21 +16,25 @@ type IconButtonSize =
   | "xs"
   | "toolbar"
   | "large";
-type IconButtonShape = "control" | "round" | "row-end" | "squircle";
+type IconButtonShape = "inset" | "control" | "round" | "row-end" | "squircle";
 
 export type IconButtonProps = Omit<
   ComponentProps<typeof Button>,
   "children" | "size" | "variant" | "shape"
 > & {
   "aria-label": string;
-  icon: ReactElement;
   variant?: IconButtonVariant;
   size?: IconButtonSize;
   shape?: IconButtonShape;
-};
+} & (
+    | { icon: ReactElement; emoji?: never }
+    /** A glyph in place of an icon, such as a hand in the chosen skin tone. */
+    | { emoji: string; icon?: never }
+  );
 
 export function IconButton({
   icon,
+  emoji,
   variant = "ghost",
   size = "sm",
   shape = variant === "avatar" ? "round" : "control",
@@ -38,15 +44,19 @@ export function IconButton({
     <Button
       {...props}
       variant={
-        variant === "solid"
-          ? "prominent"
-          : variant === "tint" ||
-              variant === "chrome" ||
-              variant === "avatar" ||
-              variant === "media" ||
-              variant === "bare"
-            ? "ghost"
-            : variant
+        variant === "destructive-quiet"
+          ? "destructive"
+          : variant === "solid"
+            ? "prominent"
+            : variant === "inset"
+              ? "subtle"
+              : variant === "tint" ||
+                  variant === "chrome" ||
+                  variant === "avatar" ||
+                  variant === "media" ||
+                  variant === "bare"
+                ? "ghost"
+                : variant
       }
       size={
         size === "xs" || size === "toolbar"
@@ -59,7 +69,13 @@ export function IconButton({
       data-icon-size={size}
       data-icon-shape={shape}
     >
-      {icon}
+      {emoji === undefined ? (
+        icon
+      ) : (
+        <span className="buzz-icon-button-emoji" aria-hidden="true">
+          {emoji}
+        </span>
+      )}
     </Button>
   );
 }

@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { messageActivity } from "./message-activity";
+import { messageActivity, messageWork } from "./message-activity";
+import { requestWork } from "../../features/agents/request-work";
 import type { RelaySession } from "../../features/relay/session";
 const request = "a".repeat(64),
   sibling = "b".repeat(64);
@@ -8,12 +9,6 @@ function fixture(): Snapshot {
   return {
     status: "listening",
     trimmed: 0,
-    history: "unavailable",
-    hasOlder: false,
-    historyOlder: false,
-    historySkipped: 0,
-    historyAgents: [],
-    capture: "off",
 
     typing: [],
     records: ["agent", "peer"].map((agent) => ({
@@ -22,7 +17,6 @@ function fixture(): Snapshot {
       kind: "turn_started",
       channelIds: ["channel"],
       receivedAt: 1000,
-      historical: false,
       createdAt: 1,
       plaintext: JSON.stringify({
         kind: "turn_started",
@@ -58,16 +52,16 @@ it("associates activity only with the exact triggering message and channel", () 
     messageActivity({ ...source, records: [] }, "channel", request),
   ).toEqual([]);
 });
-it("stops animation on interrupted or stale evidence and removes settled work", () => {
+it("stops animation on interrupted or stale evidence, retires success and retains failure", () => {
   const source = fixture();
   expect(messageActivity(source, "channel", request)[0]?.working).toBe(true);
   expect(
     messageActivity({ ...source, status: "interrupted" }, "channel", request)[0]
       ?.working,
   ).toBe(false);
-  expect(
-    messageActivity({ ...source, turns: [] }, "channel", request)[0]?.working,
-  ).toBe(false);
+  const uncertain = { ...source, turns: [] };
+  expect(requestWork(uncertain, "channel", request)[0]?.state).toBe("unknown");
+  expect(messageActivity(uncertain, "channel", request)).toEqual([]);
   const start = source.records[0];
   if (!start) throw new Error("Missing start fixture");
   for (const kind of ["turn_completed", "turn_error", "agent_panic"]) {
@@ -90,7 +84,12 @@ it("stops animation on interrupted or stale evidence and removes settled work", 
         },
       ],
     };
-    expect(messageActivity(ended, "channel", request)).toEqual([]);
+    if (kind === "turn_completed")
+      expect(messageActivity(ended, "channel", request)).toEqual([]);
+    else
+      expect(messageActivity(ended, "channel", request)[0]?.state).toBe(
+        "error",
+      );
   }
 });
 it("never uses typing as message association or resurrects an ended request", () => {
@@ -116,19 +115,107 @@ it("never uses typing as message association or resurrects an ended request", ()
   ).toEqual(["agent"]);
 });
 
-it("keeps restored starts out of live message bubbles even if a heartbeat has the same turn ID", () => {
-  const source = fixture();
+it("passes stoppable through from the chosen local row and hides it once stopped", () => {
+  const local = {
+    scope: "scope",
+    agent: "agent",
+    channelId: "channel",
+    messageId: request,
+    threadRootId: request,
+    startedAt: 1000,
+  } as const;
+  const source = (...rows: NonNullable<Snapshot["local"]>): Snapshot => ({
+    ...fixture(),
+    records: [],
+    turns: [],
+    local: rows,
+  });
+  const stoppable = { ...local, state: "working", stoppable: true } as const;
+  expect(
+    messageActivity(source(stoppable), "channel", request)[0],
+  ).toMatchObject({ state: "working", stoppable: true });
   expect(
     messageActivity(
-      {
-        ...source,
-        records: source.records.map((record) => ({
-          ...record,
-          historical: true,
-        })),
-      },
+      source({ ...local, state: "working" }),
       "channel",
       request,
-    ),
+    )[0]?.stoppable,
+  ).toBeUndefined();
+  expect(
+    messageActivity(source({ ...local, state: "stopped" }), "channel", request),
   ).toEqual([]);
+  // A stopped earlier attempt neither shows nor hides a live one on the same message.
+  expect(
+    messageActivity(
+      source({ ...local, state: "stopped" }, stoppable),
+      "channel",
+      request,
+    ).map(({ state, stoppable }) => [state, stoppable]),
+  ).toEqual([["working", true]]);
+});
+
+it("keeps a finished request noted only when it carries a notice", () => {
+  const local = {
+    scope: "scope",
+    agent: "agent",
+    channelId: "channel",
+    messageId: request,
+    threadRootId: request,
+    startedAt: 1000,
+    state: "done",
+  } as const;
+  const source = (row: NonNullable<Snapshot["local"]>[number]): Snapshot => ({
+    ...fixture(),
+    records: [],
+    turns: [],
+    local: [row],
+  });
+  expect(messageWork(source(local), "channel", request)).toEqual({
+    live: [],
+    stopped: [],
+  });
+  const noted = messageWork(
+    source({ ...local, notice: "Ran without the gateway." }),
+    "channel",
+    request,
+  );
+  expect(noted.live).toEqual([]);
+  expect(noted.stopped).toMatchObject([
+    { agent: "agent", state: "done", notice: "Ran without the gateway." },
+  ]);
+});
+
+it("keeps a superseded request's notice, which says where its turn ran", () => {
+  const local = {
+    scope: "scope",
+    agent: "agent",
+    channelId: "channel",
+    messageId: request,
+    threadRootId: request,
+    startedAt: 1000,
+    state: "superseded",
+  } as const;
+  const source = (row: NonNullable<Snapshot["local"]>[number]): Snapshot => ({
+    ...fixture(),
+    records: [],
+    turns: [],
+    local: [row],
+  });
+  expect(messageWork(source(local), "channel", request)).toEqual({
+    live: [],
+    stopped: [],
+  });
+  const noted = messageWork(
+    source({ ...local, notice: "Ran without the gateway." }),
+    "channel",
+    request,
+  );
+  expect(noted.live).toEqual([]);
+  expect(noted.stopped).toMatchObject([
+    {
+      agent: "agent",
+      state: "superseded",
+      notice: "Ran without the gateway.",
+    },
+  ]);
 });

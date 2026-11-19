@@ -5,13 +5,16 @@ import { StrictMode, useState, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { finalizeEvent } from "nostr-tools";
 import { Context } from "@deepseek-ai/cordis";
+import { emptySync } from "../../src/features/communities/known-communities";
 import { createPluginManager } from "../../src/plugins/manager";
 import { PagesService } from "../../src/features/pages/service";
 import { PanelsService } from "../../src/features/panels/service";
+import { ShortcutsService } from "../../src/features/shortcuts/service";
 import { SettingsCardsService } from "../../src/features/settings/service";
 import { provideNavigation } from "../../src/features/navigation/service";
 import { ConversationService } from "../../src/features/conversation/service";
 import { bundledPlugins } from "../../src/bundled";
+import { conversationFeatures } from "../../src/app/conversation-features";
 import { bindNames } from "../../src/features/identity-names/service";
 import { createAgentDirectory } from "../../src/features/identity-names/testing";
 import { createRelaySession } from "../../src/features/relay/session";
@@ -24,10 +27,12 @@ import {
   profile,
   message,
   signed,
+  bounds,
 } from "../../src/features/relay/testing";
 import { matchesEvent } from "../../src/features/relay/projection";
 import type { RelayEvent } from "../../src/features/relay/events";
 
+const showSettings = new URLSearchParams(location.search).has("settings");
 const viewer = keypair(),
   relay = keypair(),
   first = keypair(),
@@ -36,6 +41,11 @@ const viewer = keypair(),
 let members = [viewer.pubkey, first.pubkey, second.pubkey];
 let time = 1700000000;
 const publications: RelayEvent[] = [];
+// Channel history the viewer wrote elsewhere, read like the relay's own.
+const history: RelayEvent[] = [];
+let replaceRecipients = (
+  _people: readonly { pubkey: string; name: string }[],
+): boolean => false;
 let incoming = (_events: readonly RelayEvent[]) => {};
 let releaseProfiles = () => {};
 let libraryReads = 0;
@@ -43,6 +53,10 @@ const reads: (readonly number[])[] = [];
 // Parallel to `reads`: the directory search term a read carries, or null. The
 // directory reads once per new query by design, unlike cold session reads.
 const readSearches: (string | null)[] = [];
+// Parallel to `reads`: whether a typed query made the read rather than the
+// session. The people directory searches each query; the public channel
+// directory reads its page once per query after the typing pause.
+const readQueries: boolean[] = [];
 let pendingReads = 0;
 let libraryIncludesFirst = false;
 const admission = new URLSearchParams(location.search).has(
@@ -145,6 +159,16 @@ const owner = createRelaySession(
       readSearches.push(
         filters.find((filter) => filter.search !== undefined)?.search ?? null,
       );
+      readQueries.push(
+        filters.some(
+          (filter) =>
+            filter.search !== undefined ||
+            (filter.kinds?.length === 1 &&
+              filter.kinds[0] === 39000 &&
+              !filter["#d"] &&
+              !filter.ids),
+        ),
+      );
       pendingReads++;
       try {
         if (filters.some((filter) => filter.kinds?.includes(0)))
@@ -206,8 +230,9 @@ const owner = createRelaySession(
           ...extraChannels,
           ...openChannels,
           ...publications,
+          ...history,
         ];
-        return events.filter((event) =>
+        const matched = events.filter((event) =>
           filters.some((filter) => {
             const { search, search_mode: _mode, ...ordinary } = filter;
             // Name-prefix directory search, like the relay's prefix mode.
@@ -221,6 +246,17 @@ const owner = createRelaySession(
             );
           }),
         );
+        // Seeded history ends the channel's window: nothing older remains.
+        return history.length &&
+          filters.some((filter) => filter["#h"]?.includes("c"))
+          ? [
+              ...matched,
+              bounds(relay, "c", "head", {
+                has_more: false,
+                next_cursor: null,
+              }),
+            ]
+          : matched;
       } finally {
         pendingReads--;
       }
@@ -287,12 +323,12 @@ const disabledCalls: {
 }[] = [];
 const plugins = createPluginManager(context, {
   bundled: [
-    ...bundledPlugins.filter(({ manifest }) =>
-      [
-        "buzz.emoji",
-        "buzz.mentions",
-        ...(channels ? ["buzz.channels", "buzz.links"] : []),
-      ].includes(manifest.id),
+    // This harness deliberately makes the real providers optional to exercise
+    // contribution removal and stale callbacks. The app always loads them.
+    ...conversationFeatures,
+    ...bundledPlugins.filter(
+      ({ manifest }) =>
+        channels && ["buzz.channels", "buzz.links"].includes(manifest.id),
     ),
     {
       manifest: {
@@ -306,7 +342,18 @@ const plugins = createPluginManager(context, {
           ctx.conversation.registerTool({
             id: "probe",
             title: "Disabled command probe",
-            component: ({ disabled, insertText, insertMention }) => {
+            component: ({
+              disabled,
+              insertText,
+              insertMention,
+              replaceRecipients: replace,
+            }) => {
+              useLayoutEffect(() => {
+                replaceRecipients = replace;
+                return () => {
+                  replaceRecipients = () => false;
+                };
+              }, [replace]);
               useLayoutEffect(() => {
                 if (disabled)
                   disabledCalls.push({
@@ -334,9 +381,23 @@ if (channels) {
   new PagesService(context);
   new PanelsService(context);
   new SettingsCardsService(context);
+  new ShortcutsService(context);
   provideNavigation(context);
   // Channels requires Agents for its page/settings, neither mounted here.
   context.provide("agents", {});
+  context.provide("communityReader", {
+    subscribe: () => () => {},
+    snapshot: () => ({
+      status: "unavailable",
+      relayAvailable: false,
+      profile: { name: "", picture: "" },
+      memberships: [],
+      selected: null,
+      sync: emptySync(),
+    }),
+  });
+  // Channels hands community membership to its page for the auto-join switch; no roster here.
+  context.provide("adminAccess", { membership: undefined });
   // Only the composer is mounted; the Channels page never consumes this service.
   context.provide("relay", {
     snapshot: () => ({ session: namedSession }),
@@ -356,6 +417,8 @@ Object.assign(window, {
     first: first.pubkey,
     second: second.pubkey,
     publications,
+    replaceRecipients: (people: readonly { pubkey: string; name: string }[]) =>
+      replaceRecipients(people),
     disabledCalls,
     change: (action: "enable" | "disable", id: string) =>
       plugins.change(action, id),
@@ -371,6 +434,7 @@ Object.assign(window, {
     reads: () => ({
       kinds: reads,
       searches: readSearches,
+      queries: readQueries,
       pending: pendingReads,
     }),
     searches: () => [...searches],
@@ -407,6 +471,7 @@ function Fixture() {
   useKeyboardFocusVisibility();
   const [thread, setThread] = useState(false);
   const [disabled, setDisabled] = useState(false);
+  const [focusRequest, setFocusRequest] = useState(0);
   return (
     <main
       style={
@@ -439,6 +504,24 @@ function Fixture() {
           <button type="button" onClick={() => setDisabled(!disabled)}>
             Toggle disabled
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              // The viewer's latest message tagged an agent, as when the
+              // channel's history lands after its composer mounted.
+              const sent = message(viewer, "c", "@Honey hi", ++time, [
+                ["p", second.pubkey],
+              ]);
+              history.push(sent);
+              owner.session.channels.ensure("c");
+              incoming([sent]);
+            }}
+          >
+            Load history
+          </button>
+          <button type="button" onClick={() => setFocusRequest((n) => n + 1)}>
+            Focus composer
+          </button>
         </>
       )}
       <div style={{ width: "100%", maxWidth: 720 }}>
@@ -452,12 +535,11 @@ function Fixture() {
           }
           channelId="c"
           channelName="General"
+          {...(focusRequest ? { focusRequest } : {})}
           {...(thread ? { threadRootId: "a".repeat(64) } : {})}
         />
       </div>
-      {new URLSearchParams(location.search).has("settings") && (
-        <AgentSettings />
-      )}
+      {showSettings && <AgentSettings />}
     </main>
   );
 }

@@ -1,5 +1,174 @@
-use buzzodz_plugins::{bundled_manifests, Manager};
+use buzzodz_plugins::{bundled_manifests, sign_release, Manager};
+use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder as _};
+use nostr::key::SecretKey;
 use std::{fs, path::PathBuf};
+
+// Public, synthetic fixture key; never read a saved Buzz identity in these tests.
+const TEST_KEY: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+
+fn sign(source: &std::path::Path) {
+    sign_release(source, TEST_KEY).unwrap();
+}
+
+fn png(width: u32, height: u32) -> Vec<u8> {
+    let mut encoded = vec![];
+    PngEncoder::new(&mut encoded)
+        .write_image(
+            &vec![0; width as usize * height as usize * 4],
+            width,
+            height,
+            ExtendedColorType::Rgba8,
+        )
+        .unwrap();
+    encoded
+}
+fn install_error(manager: &Manager, source: &std::path::Path) -> String {
+    match manager.install(source) {
+        Ok(_) => panic!("installation should fail"),
+        Err(error) => error,
+    }
+}
+fn decode_content_icon(encoded: Option<&str>) -> Option<Vec<u8>> {
+    use base64::Engine as _;
+    encoded.map(|value| {
+        base64::engine::general_purpose::STANDARD
+            .decode(value)
+            .unwrap()
+    })
+}
+
+fn jpg(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = vec![];
+    image::codecs::jpeg::JpegEncoder::new(&mut bytes)
+        .write_image(
+            &vec![128; width as usize * height as usize * 3],
+            width,
+            height,
+            ExtendedColorType::Rgb8,
+        )
+        .unwrap();
+    bytes
+}
+
+#[test]
+fn both_signed_icon_formats_survive_reload_restart_and_rollback() {
+    let (temp, manager, source) = fixture();
+    let key = SecretKey::generate().to_secret_hex();
+    let png_bytes = png(1, 1);
+    let first_jpg = jpg(2, 1);
+    fs::write(source.join("icon.png"), &png_bytes).unwrap();
+    fs::write(source.join("icon.jpg"), &first_jpg).unwrap();
+    sign_release(&source, &key).unwrap();
+    let first = manager
+        .install(&source)
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|p| p.manifest.id == "example.page")
+        .unwrap();
+    let content = manager.content("example.page", &first.revision).unwrap();
+    assert_eq!(
+        decode_content_icon(content.icon_png.as_deref()).as_deref(),
+        Some(png_bytes.as_slice())
+    );
+    assert_eq!(
+        decode_content_icon(content.icon_jpg.as_deref()).as_deref(),
+        Some(first_jpg.as_slice())
+    );
+    assert!(first.icon_jpg_revision.is_some());
+    let serialized = serde_json::to_value(&content).unwrap();
+    assert!(serialized["iconPng"].is_string());
+    assert!(serialized["iconJpg"].is_string());
+    let registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(temp.path().join("profiles/test/registry.json")).unwrap())
+            .unwrap();
+    let entry = &registry["installed"]["example.page"];
+    assert!(entry.get("readmeRevision").is_none());
+    assert!(entry.get("iconRevision").is_none());
+    assert!(entry["iconPngRevision"].is_string());
+    assert!(entry["iconJpgRevision"].is_string());
+
+    fs::write(source.join("icon.jpg"), jpg(1, 2)).unwrap();
+    sign_release(&source, &key).unwrap();
+    let second = manager
+        .reload("example.page")
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|p| p.manifest.id == "example.page")
+        .unwrap();
+    assert_ne!(first.icon_jpg_revision, second.icon_jpg_revision);
+    assert_eq!(first.icon_png_revision, second.icon_png_revision);
+    assert_eq!(first.publisher, second.publisher);
+
+    // A different, valid JPEG still fails the signature check when substituted.
+    let mut artifact: serde_json::Value =
+        serde_json::from_slice(&fs::read(source.join("plugin.artifact.json")).unwrap()).unwrap();
+    use base64::Engine as _;
+    artifact["iconJpg"] =
+        serde_json::json!(base64::engine::general_purpose::STANDARD.encode(&first_jpg));
+    fs::write(
+        source.join("plugin.artifact.json"),
+        serde_json::to_vec(&artifact).unwrap(),
+    )
+    .unwrap();
+    assert!(install_error(&manager, &source).contains("plugin release x tag"));
+
+    let reopened = Manager::open(Some(temp.path().into()), "test", false).unwrap();
+    let rolled_back = reopened
+        .change("rollback", "example.page")
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|p| p.manifest.id == "example.page")
+        .unwrap();
+    assert_eq!(rolled_back.icon_jpg_revision, first.icon_jpg_revision);
+    let content = reopened.content("example.page", &first.revision).unwrap();
+    assert_eq!(
+        decode_content_icon(content.icon_jpg.as_deref()).as_deref(),
+        Some(first_jpg.as_slice())
+    );
+    assert_eq!(
+        decode_content_icon(content.icon_png.as_deref()).as_deref(),
+        Some(png_bytes.as_slice())
+    );
+}
+
+#[test]
+fn jpeg_only_packages_validate_type_decode_and_resource_bounds() {
+    let (_temp, manager, source) = fixture();
+    let bytes = jpg(1, 1);
+    fs::write(source.join("icon.jpg"), &bytes).unwrap();
+    sign(&source);
+    let plugin = manager
+        .install(&source)
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|p| p.manifest.id == "example.page")
+        .unwrap();
+    let content = manager.content("example.page", &plugin.revision).unwrap();
+    assert!(content.icon_png.is_none());
+    assert_eq!(
+        decode_content_icon(content.icon_jpg.as_deref()).as_deref(),
+        Some(bytes.as_slice())
+    );
+    for (bytes, expected) in [
+        (png(1, 1), "JPEG"),
+        (vec![0xff, 0xd8, 0xff, 0xe0], "valid JPEG"),
+        (vec![0; 1024 * 1024 + 1], "size limit"),
+        (jpg(4097, 1), "dimensions"),
+        (jpg(1025, 1024), "1,048,576"),
+    ] {
+        fs::write(source.join("icon.jpg"), bytes).unwrap();
+        assert!(
+            sign_release(&source, TEST_KEY)
+                .unwrap_err()
+                .contains(expected),
+            "{expected}"
+        );
+    }
+}
 fn fixture() -> (tempfile::TempDir, Manager, PathBuf) {
     let temp = tempfile::tempdir().unwrap();
     let manager = Manager::open(Some(temp.path().into()), "test", false).unwrap();
@@ -11,8 +180,182 @@ fn fixture() -> (tempfile::TempDir, Manager, PathBuf) {
     )
     .unwrap();
     fs::write(source.join("plugin.js"), "export function apply() {}").unwrap();
+    sign(&source);
     (temp, manager, source)
 }
+
+#[test]
+fn unsigned_external_packages_are_rejected_without_affecting_bundled_plugins() {
+    if std::env::var("BUZZ_REQUIRE_PLUGIN_SIGNATURES").as_deref() != Ok("1") {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "unsigned_external_packages_are_rejected_without_affecting_bundled_plugins",
+                "--nocapture",
+            ])
+            .env("BUZZ_REQUIRE_PLUGIN_SIGNATURES", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let (_temp, manager, source) = fixture();
+    for name in ["plugin.artifact.json", "plugin.signature.json"] {
+        fs::remove_file(source.join(name)).unwrap();
+    }
+    assert!(install_error(&manager, &source).contains("External plugins require a signed release"));
+    let catalog = manager.catalog().unwrap();
+    assert_eq!(catalog.plugins.len(), bundled_manifests().len());
+    assert!(catalog
+        .plugins
+        .iter()
+        .any(|plugin| plugin.manifest.id == "buzz.channels" && plugin.enabled));
+    sign(&source);
+    manager.install(&source).unwrap();
+    manager.change("enable", "example.page").unwrap();
+}
+
+#[test]
+fn unsigned_plugins_work_by_default_without_disabling_verification() {
+    use std::process::Command;
+    const FLAG: &str = "BUZZ_REQUIRE_PLUGIN_SIGNATURES";
+    // Isolate the launch environment from the other tests in this process.
+    if std::env::var_os(FLAG).is_some() {
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "unsigned_plugins_work_by_default_without_disabling_verification",
+                "--nocapture",
+            ])
+            .env_remove(FLAG)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
+    let (temp, manager, source) = fixture();
+    for name in ["plugin.artifact.json", "plugin.signature.json"] {
+        fs::remove_file(source.join(name)).unwrap();
+    }
+    fs::write(
+        source.join("manifest.json"),
+        r#"{"id":"example.page","name":"Example","apiVersion":1,"host":{"files":true}}"#,
+    )
+    .unwrap();
+    let preview = buzzodz_plugins::imports::prepare_folder(&source).unwrap();
+    assert_eq!(preview.preview.candidates.len(), 1);
+    assert!(preview.preview.candidates[0].publisher.is_none());
+    let revision = preview.preview.candidates[0].revision.clone();
+    preview
+        .install(&manager, &preview.preview.token, ".")
+        .unwrap();
+    manager.change("enable", "example.page").unwrap();
+    let reopened = Manager::open(Some(temp.path().into()), "test", false).unwrap();
+    assert!(reopened
+        .module("example.page", &revision)
+        .unwrap()
+        .contains("apply"));
+    assert!(reopened.content("example.page", &revision).is_ok());
+    assert!(
+        reopened
+            .host_grants("example.page", &revision)
+            .unwrap()
+            .files
+    );
+
+    // Only an explicit opt-in rejects this same unsigned installation.
+    for value in [
+        None,
+        Some("0"),
+        Some("1"),
+        Some(""),
+        Some("false"),
+        Some("true"),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_buzzodz"));
+        command.args([
+            "--home",
+            temp.path().to_str().unwrap(),
+            "--profile",
+            "test",
+            "plugin",
+            "enable",
+            "example.page",
+        ]);
+        command.env_remove(FLAG);
+        if let Some(value) = value {
+            command.env(FLAG, value);
+        }
+        let output = command.output().unwrap();
+        assert_eq!(output.status.success(), value != Some("1"), "{value:?}");
+        if value == Some("1") {
+            assert!(String::from_utf8_lossy(&output.stderr)
+                .contains("External plugins require a signed release"));
+        }
+    }
+
+    fs::write(
+        source.join("plugin.js"),
+        "export function apply() { return 2; }",
+    )
+    .unwrap();
+    let updated = reopened.reload_live("example.page").unwrap();
+    let plugin = updated
+        .plugins
+        .iter()
+        .find(|p| p.manifest.id == "example.page")
+        .unwrap();
+    assert!(plugin.error.is_none());
+    assert!(plugin.publisher.is_none());
+    assert_eq!(plugin.previous.as_deref(), Some(revision.as_str()));
+    assert!(plugin.rollback_blocked_reason.is_none());
+    reopened.change("rollback", "example.page").unwrap();
+    assert!(reopened.module("example.page", &revision).is_ok());
+
+    sign(&source);
+    let signature_path = source.join("plugin.signature.json");
+    let signature = fs::read(&signature_path).unwrap();
+    let mut invalid: serde_json::Value = serde_json::from_slice(&signature).unwrap();
+    invalid["content"] = "tampered".into();
+    fs::write(&signature_path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+    assert!(
+        install_error(&reopened, &source).contains("Invalid plugin release event ID or signature")
+    );
+    fs::write(&signature_path, signature).unwrap();
+    let signed = reopened.install(&source).unwrap();
+    let plugin = signed
+        .plugins
+        .iter()
+        .find(|p| p.manifest.id == "example.page")
+        .unwrap();
+    assert!(plugin.publisher.is_some());
+    assert!(plugin.rollback_blocked_reason.is_some());
+    assert!(reopened.change("rollback", "example.page").is_err());
+
+    sign_release(&source, &"02".repeat(32)).unwrap();
+    assert!(install_error(&reopened, &source).contains("Publisher changed"));
+    for name in ["plugin.artifact.json", "plugin.signature.json"] {
+        fs::remove_file(source.join(name)).unwrap();
+    }
+    assert!(install_error(&reopened, &source).contains("signed plugin became unsigned"));
+    assert!(reopened
+        .reload_live("example.page")
+        .err()
+        .unwrap()
+        .contains("signed plugin became unsigned"));
+}
+
 #[test]
 fn install_enable_update_rollback_and_remove_survive_restart() {
     let (temp, manager, source) = fixture();
@@ -35,6 +378,7 @@ fn install_enable_update_rollback_and_remove_survive_restart() {
     assert!(manager.module("example.page", &first).is_err());
     manager.change("enable", "example.page").unwrap();
     fs::write(source.join("plugin.js"), "export const second = true;").unwrap();
+    sign(&source);
     let next = manager.install(&source).unwrap();
     assert!(
         next.plugins
@@ -80,6 +424,173 @@ fn install_enable_update_rollback_and_remove_survive_restart() {
         bundled_manifests().len()
     );
 }
+
+#[test]
+fn readme_and_icon_are_versioned_read_on_demand_and_preserved_by_rollback() {
+    let (temp, manager, source) = fixture();
+    let first_icon = png(2, 1);
+    fs::write(source.join("README.md"), "# First\n").unwrap();
+    fs::write(source.join("icon.png"), &first_icon).unwrap();
+    sign(&source);
+    let first = manager
+        .install(&source)
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|plugin| plugin.manifest.id == "example.page")
+        .unwrap();
+    assert!(first.readme_revision.is_some());
+    assert!(first.icon_png_revision.is_some());
+    let content = manager.content("example.page", &first.revision).unwrap();
+    assert_eq!(content.readme.as_deref(), Some("# First\n"));
+    assert_eq!(
+        decode_content_icon(content.icon_png.as_deref()).as_deref(),
+        Some(first_icon.as_slice())
+    );
+
+    let second_icon = png(1, 2);
+    fs::write(source.join("README.md"), "# Second\n").unwrap();
+    fs::write(source.join("icon.png"), &second_icon).unwrap();
+    sign(&source);
+    let second = manager
+        .install(&source)
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|plugin| plugin.manifest.id == "example.page")
+        .unwrap();
+    assert_ne!(second.readme_revision, first.readme_revision);
+    assert_ne!(second.icon_png_revision, first.icon_png_revision);
+    assert!(manager.content("example.page", &first.revision).is_err());
+
+    let reopened = Manager::open(Some(temp.path().into()), "test", false).unwrap();
+    let rolled_back = reopened
+        .change("rollback", "example.page")
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|plugin| plugin.manifest.id == "example.page")
+        .unwrap();
+    assert_eq!(rolled_back.revision, first.revision);
+    assert_eq!(rolled_back.readme_revision, first.readme_revision);
+    assert_eq!(rolled_back.icon_png_revision, first.icon_png_revision);
+    let content = reopened
+        .content("example.page", &rolled_back.revision)
+        .unwrap();
+    assert_eq!(content.readme.as_deref(), Some("# First\n"));
+    assert_eq!(
+        decode_content_icon(content.icon_png.as_deref()).as_deref(),
+        Some(first_icon.as_slice())
+    );
+}
+
+#[test]
+fn package_assets_are_optional_and_reject_invalid_boundaries() {
+    let (_temp, manager, source) = fixture();
+    let installed = manager.install(&source).unwrap();
+    let plugin = installed
+        .plugins
+        .iter()
+        .find(|plugin| plugin.manifest.id == "example.page")
+        .unwrap();
+    assert_eq!(plugin.readme_revision, None);
+    assert_eq!(plugin.icon_png_revision, None);
+    let content = manager.content("example.page", &plugin.revision).unwrap();
+    assert!(content.readme.is_none());
+    assert!(content.icon_png.is_none());
+    let registry: serde_json::Value = serde_json::from_slice(
+        &fs::read(_temp.path().join("profiles/test/registry.json")).unwrap(),
+    )
+    .unwrap();
+    let entry = &registry["installed"]["example.page"];
+    for key in ["readmeRevision", "iconPngRevision", "iconJpgRevision"] {
+        assert!(entry.get(key).is_none(), "{key}");
+    }
+
+    fs::write(source.join("README.md"), [0xff]).unwrap();
+    assert!(sign_release(&source, TEST_KEY)
+        .unwrap_err()
+        .contains("UTF-8"));
+    fs::write(source.join("README.md"), vec![b'x'; 256 * 1024 + 1]).unwrap();
+    assert!(sign_release(&source, TEST_KEY)
+        .unwrap_err()
+        .contains("size limit"));
+    fs::remove_file(source.join("README.md")).unwrap();
+
+    fs::write(source.join("icon.png"), b"not a png").unwrap();
+    assert!(sign_release(&source, TEST_KEY).unwrap_err().contains("PNG"));
+    let mut corrupt = b"\x89PNG\r\n\x1a\n".to_vec();
+    corrupt.extend_from_slice(b"broken");
+    fs::write(source.join("icon.png"), corrupt).unwrap();
+    assert!(sign_release(&source, TEST_KEY)
+        .unwrap_err()
+        .contains("valid PNG"));
+    fs::write(source.join("icon.png"), vec![0; 1024 * 1024 + 1]).unwrap();
+    assert!(sign_release(&source, TEST_KEY)
+        .unwrap_err()
+        .contains("size limit"));
+    fs::write(source.join("icon.png"), png(4097, 1)).unwrap();
+    assert!(sign_release(&source, TEST_KEY)
+        .unwrap_err()
+        .contains("dimensions"));
+    fs::write(source.join("icon.png"), png(1025, 1024)).unwrap();
+    assert!(sign_release(&source, TEST_KEY)
+        .unwrap_err()
+        .contains("1,048,576"));
+}
+
+#[test]
+fn signed_asset_updates_keep_publisher_and_detect_tampering() {
+    let (_temp, manager, source) = fixture();
+    let key = SecretKey::generate().to_secret_hex();
+    fs::write(source.join("README.md"), "signed first").unwrap();
+    fs::write(source.join("icon.png"), png(1, 1)).unwrap();
+    let publisher = sign_release(&source, &key).unwrap();
+    let first = manager
+        .install(&source)
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|plugin| plugin.manifest.id == "example.page")
+        .unwrap();
+    assert_eq!(first.publisher.as_deref(), Some(publisher.as_str()));
+
+    fs::write(source.join("README.md"), "signed second").unwrap();
+    fs::write(source.join("icon.png"), png(2, 1)).unwrap();
+    assert_eq!(sign_release(&source, &key).unwrap(), publisher);
+    let second = manager
+        .install(&source)
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|plugin| plugin.manifest.id == "example.page")
+        .unwrap();
+    assert_eq!(second.publisher.as_deref(), Some(publisher.as_str()));
+    assert_ne!(second.readme_revision, first.readme_revision);
+    assert_ne!(second.icon_png_revision, first.icon_png_revision);
+
+    let mut artifact: serde_json::Value =
+        serde_json::from_slice(&fs::read(source.join("plugin.artifact.json")).unwrap()).unwrap();
+    artifact["readme"] = serde_json::json!("tampered");
+    fs::write(
+        source.join("plugin.artifact.json"),
+        serde_json::to_vec(&artifact).unwrap(),
+    )
+    .unwrap();
+    assert!(install_error(&manager, &source).contains("Invalid or ambiguous plugin release x tag"));
+
+    let rolled_back = manager
+        .change("rollback", "example.page")
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|plugin| plugin.manifest.id == "example.page")
+        .unwrap();
+    let content = manager
+        .content("example.page", &rolled_back.revision)
+        .unwrap();
+    assert_eq!(content.readme.as_deref(), Some("signed first"));
+}
 #[test]
 fn folder_reload_updates_current_revision_and_preserves_disabled_state() {
     let (_temp, manager, source) = fixture();
@@ -93,6 +604,7 @@ fn folder_reload_updates_current_revision_and_preserves_disabled_state() {
         .revision
         .clone();
     fs::write(source.join("plugin.js"), "export const reloaded = true;").unwrap();
+    sign(&source);
     let catalog = manager.reload("example.page").unwrap();
     let plugin = catalog
         .plugins
@@ -109,6 +621,60 @@ fn folder_reload_updates_current_revision_and_preserves_disabled_state() {
         .unwrap()
         .contains("reloaded"));
 }
+#[test]
+fn live_reload_preserves_enabled_state_and_rejects_stale_module_reads() {
+    let (_temp, manager, source) = fixture();
+    manager.install(&source).unwrap();
+    let first = manager
+        .change("enable", "example.page")
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|p| p.manifest.id == "example.page")
+        .unwrap();
+    fs::write(source.join("plugin.js"), "export const reloaded = true;").unwrap();
+    sign(&source);
+    let next = manager
+        .reload_live("example.page")
+        .unwrap()
+        .plugins
+        .into_iter()
+        .find(|p| p.manifest.id == "example.page")
+        .unwrap();
+    assert!(next.enabled);
+    assert_ne!(next.revision, first.revision);
+    assert_eq!(next.previous.as_deref(), Some(first.revision.as_str()));
+    assert!(manager.module("example.page", &first.revision).is_err());
+    assert!(manager
+        .module("example.page", &next.revision)
+        .unwrap()
+        .contains("reloaded"));
+}
+
+#[test]
+fn accepting_reload_permissions_does_not_accept_a_different_publisher() {
+    let (_temp, manager, source) = fixture();
+    sign_release(&source, &SecretKey::generate().to_secret_hex()).unwrap();
+    manager.install(&source).unwrap();
+    let first = manager.change("enable", "example.page").unwrap();
+    fs::write(source.join("plugin.js"), "export const changed = true;").unwrap();
+    sign_release(&source, &SecretKey::generate().to_secret_hex()).unwrap();
+    assert!(manager
+        .reload_live("example.page")
+        .err()
+        .unwrap()
+        .contains("Publisher changed"));
+    let after = manager.catalog().unwrap();
+    let plugin = |catalog: buzzodz_plugins::Catalog| {
+        catalog
+            .plugins
+            .into_iter()
+            .find(|p| p.manifest.id == "example.page")
+            .unwrap()
+    };
+    assert_eq!(plugin(first).revision, plugin(after).revision);
+}
+
 #[test]
 fn folder_reload_compares_effective_output_limits() {
     for (before, after, allowed) in [
@@ -129,6 +695,7 @@ fn folder_reload_compares_effective_output_limits() {
                 manifest["host"]["commands"][0]["maxOutputBytes"] = serde_json::json!(limit);
             }
             fs::write(source.join("manifest.json"), manifest.to_string()).unwrap();
+            sign(&source);
         };
         write_manifest(before);
         let first = manager
@@ -191,6 +758,8 @@ fn reload_rejects_invalid_sources_without_changing_revision() {
     assert!(manager.reload("example.page").is_err());
     manager.change("disable", "example.page").unwrap();
     fs::remove_file(source.join("plugin.js")).unwrap();
+    assert!(sign_release(&source, TEST_KEY).is_err());
+    fs::remove_file(source.join("plugin.artifact.json")).unwrap();
     assert!(manager.reload("example.page").is_err());
     fs::write(source.join("plugin.js"), "export function apply() {}").unwrap();
     fs::write(
@@ -198,6 +767,7 @@ fn reload_rejects_invalid_sources_without_changing_revision() {
         r#"{"id":"example.other","name":"Other","apiVersion":1}"#,
     )
     .unwrap();
+    sign(&source);
     assert!(manager.reload("example.page").is_err());
     assert_eq!(
         manager
@@ -216,6 +786,40 @@ fn reload_rejects_invalid_sources_without_changing_revision() {
     )
     .is_ok());
     assert!(manager.reload("example.page").is_err());
+}
+#[test]
+fn signing_rejects_nonconforming_reserved_asset_until_source_migrates() {
+    let (_temp, manager, source) = fixture();
+    let installed = |manager: &Manager| {
+        manager
+            .catalog()
+            .unwrap()
+            .plugins
+            .into_iter()
+            .find(|p| p.manifest.id == "example.page")
+            .unwrap()
+    };
+    manager.install(&source).unwrap();
+    let first = installed(&manager);
+    // Older hosts ignored this filename; it is now a reserved package asset.
+    fs::write(source.join("icon.png"), png(2048, 2048)).unwrap();
+    let error = sign_release(&source, TEST_KEY).unwrap_err();
+    assert!(error.contains("icon.png"), "{error}");
+    // Failed signing preserves the previous signed release and installed revision.
+    manager.reload("example.page").unwrap();
+    assert_eq!(installed(&manager).revision, first.revision);
+    assert!(installed(&manager).icon_png_revision.is_none());
+
+    fs::rename(source.join("icon.png"), source.join("icon-2048.png")).unwrap();
+    sign(&source);
+    manager.reload("example.page").unwrap();
+    assert_eq!(installed(&manager).revision, first.revision);
+    fs::write(source.join("icon.png"), png(1024, 1024)).unwrap();
+    sign(&source);
+    manager.reload("example.page").unwrap();
+    let migrated = installed(&manager);
+    assert_ne!(migrated.revision, first.revision);
+    assert!(migrated.icon_png_revision.is_some());
 }
 #[cfg(unix)]
 #[test]
@@ -243,6 +847,7 @@ fn reload_rejects_replaced_source_folder_symlink() {
         "export const escaped = true;",
     )
     .unwrap();
+    sign(&replacement);
     std::os::unix::fs::symlink(&replacement, &source).unwrap();
     assert!(manager.reload("example.page").is_err());
     assert_eq!(
@@ -258,7 +863,7 @@ fn reload_rejects_replaced_source_folder_symlink() {
     );
 }
 #[test]
-fn rollback_swaps_reload_sources_and_same_byte_reload_refreshes_source() {
+fn rollback_restores_reload_source_and_same_byte_reload_refreshes_source() {
     let (temp, manager, source) = fixture();
     let first = manager
         .install(&source)
@@ -281,6 +886,7 @@ fn rollback_swaps_reload_sources_and_same_byte_reload_refreshes_source() {
         "export const second = true;",
     )
     .unwrap();
+    sign(&second_source);
     let second = manager
         .install(&second_source)
         .unwrap()
@@ -292,7 +898,23 @@ fn rollback_swaps_reload_sources_and_same_byte_reload_refreshes_source() {
         .clone();
     assert_ne!(second, first);
     manager.change("rollback", "example.page").unwrap();
+    // Rollback consumes its target rather than turning the rejected update into a forward toggle.
+    let reopened = Manager::open(Some(temp.path().into()), "test", false).unwrap();
+    let catalog = reopened.catalog().unwrap();
+    let plugin = catalog
+        .plugins
+        .iter()
+        .find(|p| p.manifest.id == "example.page")
+        .unwrap();
+    assert_eq!(plugin.revision, first);
+    assert!(plugin.previous.is_none());
+    assert!(reopened
+        .change("rollback", "example.page")
+        .err()
+        .unwrap()
+        .contains("No previous revision"));
     fs::write(source.join("plugin.js"), "export const firstReload = true;").unwrap();
+    sign(&source);
     let catalog = manager.reload("example.page").unwrap();
     let plugin = catalog
         .plugins
@@ -313,6 +935,7 @@ fn rollback_swaps_reload_sources_and_same_byte_reload_refreshes_source() {
         "export const firstReload = true;",
     )
     .unwrap();
+    sign(&third_source);
     let same = manager.install(&third_source).unwrap();
     let plugin = same
         .plugins
@@ -323,6 +946,7 @@ fn rollback_swaps_reload_sources_and_same_byte_reload_refreshes_source() {
     assert!(plugin.reloadable);
     let changed = "export const thirdReload = true;";
     fs::write(third_source.join("plugin.js"), changed).unwrap();
+    sign(&third_source);
     let catalog = manager.reload("example.page").unwrap();
     let reloaded = catalog
         .plugins
@@ -354,6 +978,7 @@ fn reload_from_exact_folder(name: &str, with_trimmed_sibling: bool) {
         )
         .unwrap();
         fs::write(folder.join("plugin.js"), code).unwrap();
+        sign(&folder);
     }
     let prepared = buzzodz_plugins::imports::prepare_folder(&root).unwrap();
     let first = prepared
@@ -366,6 +991,7 @@ fn reload_from_exact_folder(name: &str, with_trimmed_sibling: bool) {
     assert!(!first.enabled);
     assert!(first.reloadable);
     fs::write(root.join(name).join("plugin.js"), "export const exact = 2;").unwrap();
+    sign(&root.join(name));
     let reloaded = manager
         .reload("example.page")
         .unwrap()
@@ -399,12 +1025,16 @@ fn invalid_install_preserves_working_revision() {
         .unwrap()
         .revision
         .clone();
+    for name in ["plugin.artifact.json", "plugin.signature.json"] {
+        fs::remove_file(source.join(name)).unwrap();
+    }
     for metadata in [
         r#"{"id":"../escape","name":"Invalid","apiVersion":1}"#,
         r#"{"id":"example.page","name":"Invalid","apiVersion":2}"#,
         "{broken}",
     ] {
         fs::write(source.join("manifest.json"), metadata).unwrap();
+        assert!(sign_release(&source, TEST_KEY).is_err());
         assert!(manager.install(&source).is_err());
         assert_eq!(
             manager
@@ -542,6 +1172,7 @@ fn management_never_executes_code_and_protects_bundled_identity() {
         "throw new Error('broken'); while(true) {}",
     )
     .unwrap();
+    sign(&source);
     manager.install(&source).unwrap();
     manager.change("enable", "example.page").unwrap();
     manager.change("disable", "example.page").unwrap();
@@ -551,6 +1182,12 @@ fn management_never_executes_code_and_protects_bundled_identity() {
         serde_json::to_vec(&bundled_manifests()[0]).unwrap(),
     )
     .unwrap();
+    assert!(sign_release(&source, TEST_KEY)
+        .unwrap_err()
+        .contains("Cannot replace a bundled plugin"));
+    for name in ["plugin.artifact.json", "plugin.signature.json"] {
+        fs::remove_file(source.join(name)).unwrap();
+    }
     assert!(manager.install(&source).is_err());
     assert!(manager
         .change("remove", &bundled_manifests()[0].id)
@@ -560,6 +1197,9 @@ fn management_never_executes_code_and_protects_bundled_identity() {
 #[test]
 fn bundled_plugins_have_independent_flags_and_all_ids_are_reserved() {
     let (root, manager, source) = fixture();
+    for name in ["plugin.artifact.json", "plugin.signature.json"] {
+        fs::remove_file(source.join(name)).unwrap();
+    }
     manager.change("disable", "buzz.github").unwrap();
     let catalog = manager.catalog().unwrap();
     assert!(
@@ -581,11 +1221,8 @@ fn bundled_plugins_have_independent_flags_and_all_ids_are_reserved() {
     for id in [
         "buzz.identity-naming",
         "buzz.terminal",
-        "buzz.sessions",
         "buzz.inbox",
-        "buzz.projects",
-        "buzz.emoji",
-        "buzz.mentions",
+        "buzz.repos",
         "buzz.voice-notes",
         "buzz.links",
     ] {
@@ -645,6 +1282,20 @@ fn bundled_plugins_have_independent_flags_and_all_ids_are_reserved() {
         )
         .unwrap();
         assert!(manager.install(&source).is_err());
+    }
+    for id in ["buzz.emoji", "buzz.mentions"] {
+        fs::write(
+            source.join("manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "id": id, "name": "Reserved feature", "apiVersion": 1
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            install_error(&manager, &source),
+            "Cannot replace a bundled plugin"
+        );
     }
     drop(root);
 }
@@ -717,10 +1368,24 @@ fn bundled_defaults_preserve_saved_choices_and_only_channels_is_required() {
     assert!(catalog
         .plugins
         .iter()
-        .any(|plugin| plugin.manifest.id == "buzz.me"));
+        .any(|plugin| plugin.manifest.id == "buzz.inbox"));
     for plugin in &catalog.plugins {
         let id = plugin.manifest.id.as_str();
-        let default = !matches!(id, "buzz.bestie" | "buzz.todos");
+        let default = !matches!(
+            id,
+            "buzz.pi"
+                | "buzz.usage"
+                | "buzz.relay-notes"
+                | "buzz.reminders"
+                | "buzz.workflows"
+                | "buzz.mesh-compute"
+                | "buzz.focus"
+                | "buzz.drafts-and-sent"
+                | "buzz.changesets"
+                | "buzz.charts"
+                | "buzz.file-viewer"
+                | "buzz.performance-diagnostics"
+        );
         assert_eq!(plugin.enabled, default, "{id}");
         if id == "buzz.channels" {
             assert!(manager.change("disable", id).is_err());
@@ -744,17 +1409,302 @@ fn bundled_defaults_preserve_saved_choices_and_only_channels_is_required() {
             }
         }
     }
-    // Existing native profiles can keep Bestie on across process restarts.
-    manager.change("enable", "buzz.bestie").unwrap();
-    let reopened = Manager::open(Some(_root.path().to_path_buf()), "test", false).unwrap();
-    assert!(
-        reopened
-            .catalog()
-            .unwrap()
+    // Saved choices override current defaults even across process restarts.
+    for id in ["buzz.bestie", "buzz.reminders", "buzz.workflows"] {
+        for enabled in [true, false] {
+            manager
+                .change(if enabled { "enable" } else { "disable" }, id)
+                .unwrap();
+            let reopened = Manager::open(Some(_root.path().to_path_buf()), "test", false).unwrap();
+            assert_eq!(
+                reopened
+                    .catalog()
+                    .unwrap()
+                    .plugins
+                    .iter()
+                    .find(|p| p.manifest.id == id)
+                    .unwrap()
+                    .enabled,
+                enabled,
+                "{id}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bundled_defaults_are_pinned_for_fresh_and_untouched_existing_profiles() {
+    for existing in [false, true] {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("profiles/test");
+        if existing {
+            // Older catalog reads made a lock file even without saved settings.
+            fs::create_dir_all(&root).unwrap();
+            fs::write(root.join("registry.lock"), "").unwrap();
+        }
+        for _launch in 0..2 {
+            let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
+            let catalog = manager.catalog().unwrap();
+            for (id, expected) in [
+                ("buzz.reminders", existing),
+                ("buzz.workflows", existing),
+                ("buzz.bestie", !existing),
+            ] {
+                assert_eq!(
+                    catalog
+                        .plugins
+                        .iter()
+                        .find(|p| p.manifest.id == id)
+                        .unwrap()
+                        .enabled,
+                    expected,
+                    "{id}, existing={existing}"
+                );
+            }
+            let saved: serde_json::Value =
+                serde_json::from_slice(&fs::read(root.join("registry.json")).unwrap()).unwrap();
+            for plugin in &catalog.plugins {
+                assert_eq!(
+                    saved["bundledOverrides"][&plugin.manifest.id],
+                    plugin.enabled
+                );
+            }
+        }
+        let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
+        manager.change("disable", "buzz.workflows").unwrap();
+        assert!(
+            !manager
+                .catalog()
+                .unwrap()
+                .plugins
+                .iter()
+                .find(|p| p.manifest.id == "buzz.workflows")
+                .unwrap()
+                .enabled
+        );
+        manager.recover().unwrap();
+        let reopened = Manager::open(Some(home.path().into()), "test", false).unwrap();
+        for (id, expected) in [
+            ("buzz.reminders", false),
+            ("buzz.workflows", false),
+            ("buzz.bestie", true),
+        ] {
+            assert_eq!(
+                reopened
+                    .catalog()
+                    .unwrap()
+                    .plugins
+                    .iter()
+                    .find(|p| p.manifest.id == id)
+                    .unwrap()
+                    .enabled,
+                expected,
+                "reset {id}"
+            );
+        }
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn failed_default_snapshot_does_not_block_untouched_upgrades() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for saved_workflows in [None, Some(false)] {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("profiles/test");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("registry.lock"), "").unwrap();
+        let settings = root.join("registry.json");
+        let original = saved_workflows.map(|enabled| {
+            let bytes = serde_json::to_vec(&serde_json::json!({
+                "version": 2, "bundledEnabled": true,
+                "bundledOverrides": { "buzz.workflows": enabled }, "installed": {}
+            }))
+            .unwrap();
+            fs::write(&settings, &bytes).unwrap();
+            bytes
+        });
+        let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
+        let permissions = fs::metadata(&root).unwrap().permissions();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
+        let first = manager.catalog();
+        let second = manager.catalog();
+        let edit = manager.change("disable", "buzz.reminders");
+        // Restore before asserting, so a failing test can clean up its profile.
+        fs::set_permissions(&root, permissions).unwrap();
+        assert!(edit.is_err(), "explicit edits must report the failed write");
+        assert_eq!(fs::read(&settings).ok(), original);
+        for result in [first, second] {
+            let catalog = result.expect("a failed snapshot must not block launch");
+            for (id, enabled) in [
+                ("buzz.reminders", true),
+                ("buzz.workflows", saved_workflows.unwrap_or(true)),
+                ("buzz.bestie", false),
+            ] {
+                assert_eq!(
+                    catalog
+                        .plugins
+                        .iter()
+                        .find(|p| p.manifest.id == id)
+                        .unwrap()
+                        .enabled,
+                    enabled,
+                    "{id}"
+                );
+            }
+        }
+        // Once storage is writable, a later read must save the same decisions.
+        manager.catalog().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(settings).unwrap()).unwrap();
+        assert_eq!(saved["bundledOverrides"]["buzz.reminders"], true);
+        assert_eq!(saved["bundledOverrides"]["buzz.bestie"], false);
+        assert_eq!(
+            saved["bundledOverrides"]["buzz.workflows"],
+            saved_workflows.unwrap_or(true)
+        );
+    }
+}
+
+#[test]
+fn legacy_plugin_settings_preserve_choices_while_missing_flags_keep_old_defaults() {
+    for saved in [None, Some(true), Some(false)] {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("profiles/test");
+        fs::create_dir_all(&root).unwrap();
+        let mut flags = serde_json::json!({ "buzz.github": false });
+        if let Some(enabled) = saved {
+            for id in ["buzz.bestie", "buzz.reminders", "buzz.workflows"] {
+                flags[id] = enabled.into();
+            }
+        }
+        fs::write(
+            root.join("registry.json"),
+            serde_json::json!({
+                "version": 2, "bundledEnabled": true,
+                "bundledOverrides": flags, "installed": {}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        for _launch in 0..2 {
+            let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
+            let catalog = manager.catalog().unwrap();
+            for id in ["buzz.bestie", "buzz.reminders", "buzz.workflows"] {
+                assert_eq!(
+                    catalog
+                        .plugins
+                        .iter()
+                        .find(|p| p.manifest.id == id)
+                        .unwrap()
+                        .enabled,
+                    saved.unwrap_or(id != "buzz.bestie"),
+                    "{id}, saved={saved:?}"
+                );
+            }
+            assert!(
+                !catalog
+                    .plugins
+                    .iter()
+                    .find(|p| p.manifest.id == "buzz.github")
+                    .unwrap()
+                    .enabled
+            );
+        }
+    }
+}
+
+#[test]
+fn built_in_conversation_features_are_absent_even_with_old_disabled_flags() {
+    let (root, manager, _source) = fixture();
+    fs::create_dir_all(manager.storage_root()).unwrap();
+    fs::write(
+        manager.storage_root().join("registry.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 2,
+            "bundledEnabled": true,
+            "bundledOverrides": { "buzz.emoji": false, "buzz.mentions": false },
+            "installed": {}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let reopened = Manager::open(Some(root.path().to_path_buf()), "test", false).unwrap();
+    let catalog = reopened.catalog().unwrap();
+    for id in ["buzz.emoji", "buzz.mentions"] {
+        assert!(!catalog
             .plugins
             .iter()
-            .find(|p| p.manifest.id == "buzz.bestie")
-            .unwrap()
-            .enabled
-    );
+            .any(|plugin| plugin.manifest.id == id));
+        for action in ["enable", "disable", "remove", "rollback"] {
+            assert_eq!(
+                reopened.change(action, id).err().as_deref(),
+                Some("Built-in conversation features cannot be managed as plugins"),
+            );
+        }
+        assert_eq!(
+            reopened.reload(id).err().as_deref(),
+            Some("Bundled plugins cannot be reloaded from disk"),
+        );
+        assert_eq!(
+            reopened.reload_live(id).err().as_deref(),
+            Some("Bundled plugins cannot be reloaded from disk"),
+        );
+    }
+}
+
+#[test]
+fn registry_cannot_restore_plugins_with_built_in_conversation_ids() {
+    for id in ["buzz.emoji", "buzz.mentions"] {
+        let (_root, manager, source) = fixture();
+        manager.install(&source).unwrap();
+        let path = manager.storage_root().join("registry.json");
+        let mut registry: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let installed = registry["installed"].as_object_mut().unwrap();
+        let mut plugin = installed.remove("example.page").unwrap();
+        plugin["manifest"]["id"] = serde_json::json!(id);
+        installed.insert(id.into(), plugin);
+        fs::write(&path, serde_json::to_vec(&registry).unwrap()).unwrap();
+        assert_eq!(
+            manager.catalog().err().as_deref(),
+            Some("Invalid installed plugin identity"),
+        );
+    }
+}
+
+#[test]
+fn managed_policy_lives_beside_profiles_and_never_installs() {
+    use buzzodz_plugins::managed::{Managed, ManagedState};
+    let home = tempfile::tempdir().unwrap();
+    let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
+    let catalog = manager.catalog().unwrap();
+    assert!(manager.managed(&catalog).is_absent());
+    fs::write(
+        home.path().join("managed-plugins.json"),
+        r#"{"version":1,"source":"Example Org","plugins":[
+            {"id":"example.managed","repository":"https://example.com/plugins","reference":"v1","commit":"0123456789abcdef0123456789abcdef01234567"},
+            {"id":"broken"}
+        ]}"#,
+    )
+    .unwrap();
+    let Managed::Ready {
+        source,
+        plugins,
+        problems,
+        ..
+    } = manager.managed(&catalog)
+    else {
+        panic!("expected a usable policy");
+    };
+    assert_eq!(source, "Example Org");
+    assert_eq!(plugins.len(), 1);
+    assert_eq!(plugins[0].state, ManagedState::Missing);
+    assert_eq!(problems.len(), 1);
+    let after = manager.catalog().unwrap();
+    assert!(!after
+        .plugins
+        .iter()
+        .any(|plugin| plugin.manifest.id == "example.managed"));
 }

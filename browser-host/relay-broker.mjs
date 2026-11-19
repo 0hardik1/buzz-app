@@ -1,4 +1,11 @@
 import {
+  isSidebarPreferencesBatch,
+  decodeLegacyWorkspaceEnvelope,
+  WORKSPACE_COORDINATE,
+  WORKSPACE_SORT_COORDINATE,
+  WORKSPACE_FILTER_COORDINATE,
+} from "../src/features/relay/sidebar-preferences.ts";
+import {
   isCatalogKind,
   MAX_EVENT_BYTES as CATALOG_EVENT_BYTES,
   validCatalogEnvelope,
@@ -8,16 +15,25 @@ import { filterSummary, httpLabel } from "../src/features/developer/traffic.ts";
 
 import { isWorkflowDefinitionBatch } from "../src/features/workflows/queries.ts";
 import { validStatusTemplate } from "./user-status.mjs";
+import { validTypingTemplate } from "../src/features/relay/typing-protocol.ts";
 import { memoryFilter, decodeAgentMemory } from "./agent-memory.mjs";
 import { memoryResponseText } from "../src/features/agents/memory.ts";
 import { prepareMedia } from "./media-preparation.mjs";
-import { assertSidebarSortIntent, mutateSidebarSort } from "./sidebar-sort.mjs";
+import {
+  assertSidebarSortIntent,
+  mutateWorkspaceSort,
+  assertSidebarFilterIntent,
+  mutateWorkspaceFilter,
+} from "./sidebar-sort.mjs";
 import { readProjectGit } from "./project-git.mjs";
 import {
   communityGitRepository,
   parseGitRead,
-} from "../src/features/projects/git.ts";
-import { validateMemberAdministrationTemplate } from "../src/features/channel-members/administration-protocol.ts";
+} from "../src/features/repos/git.ts";
+import {
+  isAdminAddition,
+  validateMemberAdministrationTemplate,
+} from "../src/features/channel-members/administration-protocol.ts";
 import { validateLifecycleTemplate } from "../src/features/relay/channel-lifecycle-protocol.ts";
 import { validateDetailsTemplate } from "../src/features/relay/channel-details-protocol.ts";
 import { validateArchiveRequestTemplate } from "../src/features/relay/identity-archive-protocol.ts";
@@ -25,11 +41,12 @@ import {
   prepareChannelKit,
   decodeChannelKit,
   admitChannelKit,
+  canvasEventFits,
   validCanvas,
 } from "./channel-kit.mjs";
 import { uploadAttachment, UploadError } from "./attachment-upload.mjs";
 import { validateUploadResult } from "../src/features/relay/attachments.ts";
-import { validChannelCommand } from "./session-commands.mjs";
+import { validChannelCommand } from "./channel-commands.mjs";
 import {
   adminReason,
   claimReason,
@@ -44,7 +61,13 @@ import {
   directMessageEvent,
   directMessageReceipt,
 } from "./direct-messages.mjs";
+import { directMessageRefusal } from "../src/features/relay/direct-message-policy.ts";
 import { SocketRequestError } from "../src/features/relay/socket-requests.ts";
+import { CANVAS_MAX_EVENT_BYTES } from "../src/features/channel-templates/canvas-limits.ts";
+import {
+  ARTIFACT_SYNC_MAX_VIEWS,
+  artifactSyncFilter,
+} from "../src/features/relay/artifact-sync-filter.ts";
 import {
   assertSidebarStarIntent,
   mutateSidebarStar,
@@ -64,7 +87,9 @@ import { openArchive } from "./archive.mjs";
 import { observerGeneration } from "../src/features/agents/observer.ts";
 import {
   decodeReadState,
+  decodeThreadFollows,
   signReadState,
+  signThreadFollows,
   READ_STATE_DECODE_BYTES,
 } from "./read-state.mjs";
 import {
@@ -88,8 +113,10 @@ import {
   assertSidebarAssignmentIntent,
   assertSidebarSectionOrderIntent,
   assertSidebarSectionRemovalIntent,
+  assertSidebarSectionRenameIntent,
   mutateSidebarSectionOrder,
   mutateSidebarSectionRemoval,
+  mutateSidebarSectionRename,
   mutateSidebarAssignment,
   SIDEBAR_REQUEST_BYTES,
   SIDEBAR_HEAD_BYTES,
@@ -124,7 +151,10 @@ import {
   apiFailure,
   presenceFilter,
   presenceText,
+  readApiFailure,
+  BROKER_REFUSAL_HEADER,
 } from "../src/features/relay/http-admission.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { Readable, Transform } from "node:stream";
@@ -134,13 +164,17 @@ import {
   mediaByteLimit,
   UPLOAD_TIMEOUT_MS,
 } from "../src/features/relay/attachment-limits.ts";
+import { legacyEmojiPicture } from "../src/shared/avatar-source.ts";
 import dc from "node:diagnostics_channel";
 import { finalizeEvent, getPublicKey, nip19, verifyEvent } from "nostr-tools";
 import { Agent, fetch as upstreamHttp, interceptors } from "undici";
 import { schnorr } from "@noble/curves/secp256k1.js";
 
+/** The app's profile save policy: an HTTPS URL, or old Buzz's emoji avatar
+ * that Buzz mobile still writes, never other inline or SVG data. */
 function validProfilePicture(value) {
-  if (!value) return true;
+  if (!value || legacyEmojiPicture(value.trim())) return true;
+  if (value.length > 2048) return false;
   try {
     const url = new URL(value);
     return url.protocol === "https:" && !url.username && !url.password;
@@ -237,7 +271,7 @@ function loadIdentity(authorizedViewer) {
   }
   if (!expected)
     throw new Error(
-      "Set BUZZ_DEV_VIEWER in .env.local to your existing Buzz public key (hex or npub, never nsec). See README.md#relay-channels.",
+      "Set BUZZ_DEV_VIEWER in .env.local to your existing Buzz public key (hex or npub, never nsec). See docs/contributing.md#live-relay-development.",
     );
   // The installed Buzz desktop keeps its secrets blob in the OS credential
   // store under service `buzz-desktop`, username `secrets`: the macOS Keychain,
@@ -318,6 +352,15 @@ async function relayAuthority(fetch, relay) {
     channelIdentity:
       Array.isArray(nip11.supported_extensions) &&
       nip11.supported_extensions.includes("nip-cl"),
+    // NIP-AR sync: REQ with `"artifact": "current"` keeps a set current.
+    artifactSync: nip11.artifacts?.sync?.version === 1,
+    artifactSupport:
+      Array.isArray(nip11.supported_extensions) &&
+      nip11.supported_extensions.includes("nip-ar"),
+    // Bridge search accepts `search_sort: "newest"`.
+    searchSort:
+      Array.isArray(nip11.supported_extensions) &&
+      nip11.supported_extensions.includes("buzz-search-sort"),
     ...(readSnapshotCommunity(nip11.read_state_snapshot)
       ? { readStateCommunity: readSnapshotCommunity(nip11.read_state_snapshot) }
       : {}),
@@ -354,6 +397,7 @@ function relayMediaTarget(raw, relay) {
     /^[0-9a-f]{64}$/.test(hash) &&
     (extension === "" ||
       extension === "thumb.jpg" ||
+      extension === "thumb.webp" ||
       /^[a-z0-9]{1,8}$/.test(extension))
     ? target
     : undefined;
@@ -596,6 +640,59 @@ export function validAgentEnrollment(event) {
     )
   );
 }
+/** Owner-signed agent listings; preserve prior settings and extension tags. */
+function validAgentRecord(event, viewer) {
+  if (
+    event?.kind !== 30177 ||
+    typeof event.content !== "string" ||
+    !Number.isSafeInteger(event.created_at) ||
+    event.created_at < 0 ||
+    !Array.isArray(event.tags) ||
+    !event.tags.every(
+      (tag) =>
+        Array.isArray(tag) && tag.every((value) => typeof value === "string"),
+    )
+  )
+    return false;
+  const coordinates = event.tags.filter(([name]) => name === "d");
+  if (
+    coordinates.length !== 1 ||
+    coordinates[0].length !== 2 ||
+    !/^[0-9a-f]{64}$/.test(coordinates[0][1])
+  )
+    return false;
+  // Admission must fit the complete socket frame, including the fixed-width
+  // hash and signature. This also fits the HTTP body and native signing bounds.
+  const frame = [
+    "EVENT",
+    {
+      id: "0".repeat(64),
+      pubkey: viewer,
+      created_at: event.created_at,
+      kind: event.kind,
+      tags: event.tags,
+      content: event.content,
+      sig: "0".repeat(128),
+    },
+  ];
+  if (Buffer.byteLength(JSON.stringify(frame)) > 64 * 1024) return false;
+  try {
+    const body = JSON.parse(event.content);
+    return (
+      body !== null &&
+      typeof body === "object" &&
+      !Array.isArray(body) &&
+      typeof body.name === "string" &&
+      !!body.name.trim() &&
+      Number.isSafeInteger(body.parallelism) &&
+      body.parallelism >= 0 &&
+      typeof body.respond_to === "string"
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Base Buzz agent delete: only removal of one member, relay-authorized. */
 /** The owner's NIP-09 deletion of one of their own kind 30177 agent records. */
 export function validAgentRecordDeletion(event, owner) {
@@ -677,7 +774,9 @@ export function validFilters(filters) {
   return (
     Array.isArray(filters) &&
     filters.length >= 1 &&
-    (filters.length <= MAX_FILTERS || isWorkflowDefinitionBatch(filters)) &&
+    (filters.length <= MAX_FILTERS ||
+      isWorkflowDefinitionBatch(filters) ||
+      isSidebarPreferencesBatch(filters)) &&
     filters.every(
       (filter) =>
         filter &&
@@ -730,6 +829,35 @@ function failureSummary(error) {
   );
   return `${category}${code ? ` (${code})` : ""}`;
 }
+/** A community refusal in a relay 401/403, read from a copy of its body. Only
+ * the relay's short denial (its NIP-FI text, or a membership refusal's JSON)
+ * counts, so a longer body stops being read at once; its route still owns,
+ * reads or cancels the original. */
+async function refusalOf(response) {
+  const reader = response.clone().body?.getReader();
+  if (!reader) return undefined;
+  const chunks = [];
+  for (let bytes = 0; ; ) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > 256) {
+      // A tee'd copy's cancel settles only once the original's does too.
+      void reader.cancel().catch(() => {});
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  const copy = new Response(Buffer.concat(chunks), { status: response.status });
+  return (await readApiFailure(copy)).admission;
+}
+/** The browser response whose route is making a relay request. */
+const refusalTarget = new AsyncLocalStorage();
+/** `admittedApiRequest`, but a queued request keeps its own route's response:
+ * the shared lane starts a waiting request from whichever one finished, so
+ * left unbound it would mark that one's response with this one's refusal. */
+const admittedRelayRequest = (lane, request, ...rest) =>
+  admittedApiRequest(lane, AsyncLocalStorage.bind(request), ...rest);
 const json = (res, code, body) => {
   res.writeHead(code, {
     "Content-Type": "application/json",
@@ -741,6 +869,7 @@ const json = (res, code, body) => {
 /** @returns {import('vite').Plugin} */
 export function relayBrokerPlugin({
   authorizedViewer,
+  browserOrigin,
   relayUrl,
   communityAliases,
   identity = () => loadIdentity(authorizedViewer),
@@ -752,35 +881,80 @@ export function relayBrokerPlugin({
   archiveFile,
   // Tests that hold EOSE on purpose lengthen this real-time deadline.
   liveSetupTimeoutMs,
+  // Tests pin the live reconnect draw; production uses Math.random.
+  liveRandom,
 } = {}) {
+  const publicOrigin =
+    browserOrigin === undefined
+      ? undefined
+      : typeof browserOrigin === "string"
+        ? URL.parse(browserOrigin)
+        : null;
+  if (
+    browserOrigin !== undefined &&
+    (publicOrigin?.protocol !== "https:" ||
+      publicOrigin.username ||
+      publicOrigin.password ||
+      publicOrigin.pathname !== "/" ||
+      publicOrigin.search ||
+      publicOrigin.hash)
+  )
+    throw new Error(
+      "browserOrigin must be an HTTPS origin without credentials, path, query, or fragment.",
+    );
   const aliases = parseCommunityAliases(communityAliases);
   const defaultRelay = relayUrl?.trim() ? relayOrigin(relayUrl) : undefined;
   return {
     name: "buzz-relay-broker",
+    configResolved(config) {
+      if (
+        publicOrigin &&
+        (config.command !== "serve" ||
+          config.mode !== "development" ||
+          config.isProduction)
+      )
+        throw new Error(
+          "browserOrigin requires the Vite development server in development mode.",
+        );
+      // Request headers express browser origin intent, not remote-client
+      // authentication. Check the effective listener, including CLI overrides,
+      // before configureServer loads the signing identity.
+      const host = config.server.host;
+      if (
+        host !== undefined &&
+        host !== false &&
+        host !== "localhost" &&
+        host !== "127.0.0.1" &&
+        host !== "::1"
+      )
+        throw new Error(
+          "The live identity broker requires a loopback-only Vite listener; remove --host or use --host 127.0.0.1.",
+        );
+    },
     async configureServer(server) {
       const log = getLogger("relay-broker");
       const key = identity();
       const viewer = getPublicKey(key);
       let archive;
       const localArchive = () => (archive ??= openArchive(archiveFile));
-      const archiveSettings = (relay) =>
-        localArchive().request(viewer, relay, { action: "settings" }, key);
-      const updateArchiveCapture = (stream) => {
-        const settings = archiveSettings(stream.relay);
-        stream.archiveRevision = settings.revision;
-        stream.archiveObserver = settings.observer;
-        if (stream.archiveFailureRevision !== settings.revision) {
-          stream.archiveFailureRevision = undefined;
-          stream.archiveState(settings.observer ? "saving" : "off");
-        }
-        stream.traffic.archive([
-          ...(settings.observer ? [24200] : []),
-          ...(settings.metrics ? [44200] : []),
-        ]);
-      };
       const upstream = createUpstream();
       // Injected fixtures bypass the pool; the live relay always uses the warm agent.
-      const fetchUpstream = upstreamFetch ?? upstream.fetch;
+      const relayFetch = upstreamFetch ?? upstream.fetch;
+      /** Every relay request passes here, so a community refusal reaches the
+       * browser whichever route met it and whatever it does with the body. */
+      const fetchUpstream = async (url, init) => {
+        const response = await relayFetch(url, init);
+        const res = refusalTarget.getStore();
+        if (
+          res &&
+          !res.headersSent &&
+          (response.status === 401 || response.status === 403)
+        ) {
+          const admission = await refusalOf(response);
+          if (admission) res.setHeader(BROKER_REFUSAL_HEADER, admission);
+        }
+        return response;
+      };
       const readSidebarHead = async (response, label = "preference") => {
         if (!response.body)
           throw new Error(`Sidebar ${label} response missing`);
@@ -842,12 +1016,14 @@ export function relayBrokerPlugin({
         return gifSearchPaths.get(relay);
       };
       const stats = { queries: 0, errors: 0, media: 0, connects: 0 };
-      let inflight = 0;
+      // Queries in flight per community: one community's load must not refuse
+      // another's, as natively each has its own socket.
+      const inflight = new Map();
       let gitReads = 0;
       let presenceFlight = false;
       let sidebarUploads = 0;
       let attachmentUploads = 0;
-      let libraryRead;
+      const libraryReads = new Map();
       const sidebarMutations = new Map();
       const streams = new Map();
       const admissions = createHostAdmission();
@@ -856,6 +1032,7 @@ export function relayBrokerPlugin({
         ...builderlabOptions,
       });
       server.httpServer?.once("close", () => {
+        builderlab.signOut();
         for (const { close } of streams.values()) close();
         archive?.close();
         key.fill(0);
@@ -866,6 +1043,10 @@ export function relayBrokerPlugin({
         `signing as ${viewer.slice(0, 8)}… for explicitly selected communities (lazy, scoped connections)`,
       );
       server.middlewares.use(async (req, res, next) => {
+        // This request's relay requests run with its response, so a community
+        // refusal any of them meets marks it (`fetchUpstream`). Each request
+        // has its own async context, so nothing else sees it.
+        refusalTarget.enterWith(res);
         if (
           !req.url?.startsWith("/api/relay/") &&
           !req.url?.startsWith("/api/builderlab/")
@@ -882,7 +1063,8 @@ export function relayBrokerPlugin({
           else if (res.statusCode >= 400) log.warn(line);
           else log.debug(line);
         });
-        const origin = `http://${req.headers.host ?? ""}`;
+        const origin =
+          publicOrigin?.origin ?? `http://${req.headers.host ?? ""}`;
         // Same-origin browser access only; trusted plugins/local processes are not sandboxed.
         if (!/^(localhost|127\.0\.0\.1):\d+$/.test(req.headers.host ?? ""))
           return json(res, 403, { error: "Host rejected" });
@@ -905,9 +1087,29 @@ export function relayBrokerPlugin({
         if (res.destroyed) release();
         try {
           if (url.pathname.startsWith("/api/builderlab/")) {
-            // Hosted communities plugin only; the session credential never leaves Node.
+            // One development sign-in for hosting, agents and apps; its credential stays in Node.
             const action = url.pathname.slice("/api/builderlab/".length);
             try {
+              if (action === "events" && req.method === "GET") {
+                res.writeHead(200, {
+                  "Content-Type": "text/event-stream",
+                  "Cache-Control": "no-store",
+                });
+                const send = (state) =>
+                  res.write(`data: ${JSON.stringify(state)}\n\n`);
+                const stop = builderlab.subscribe(send);
+                res.once("close", stop);
+                send(builderlab.snapshot());
+                return;
+              }
+              if (action === "capabilities" && req.method === "GET")
+                return json(
+                  res,
+                  200,
+                  await builderlab.capabilities(
+                    url.searchParams.get("revision"),
+                  ),
+                );
               if (action === "auth" && req.method === "GET")
                 return json(res, 200, { auth: await builderlab.auth() });
               if (req.method !== "POST")
@@ -916,12 +1118,64 @@ export function relayBrokerPlugin({
               req.setEncoding("utf8");
               for await (const part of req) {
                 raw += part;
-                if (raw.length > 4096)
+                if (
+                  raw.length >
+                  (action === "decisions"
+                    ? 128 * 1024
+                    : action === "request"
+                      ? 1024 * 1024
+                      : 4096)
+                )
                   return json(res, 413, { error: "Request too large" });
               }
+              const input = raw ? JSON.parse(raw) : {};
+              const nativeRoute = {
+                // Native Decisions puts the public revision in its existing credential header.
+                decisions: [
+                  "/v3/builderlab/decisions",
+                  "x-bb-session-credential",
+                ],
+                viewer: [
+                  "/v1/auth/hosted-site/native-session",
+                  "x-buzz-builderlab-revision",
+                ],
+              }[action];
+              if (nativeRoute) {
+                const [path, header] = nativeRoute;
+                const reply = await builderlab.request(
+                  {
+                    revision: req.headers[header],
+                    path,
+                    method: "POST",
+                    body: raw,
+                    community: req.headers["x-buzz-community"],
+                  },
+                  cancel.signal,
+                  true,
+                );
+                res
+                  .writeHead(reply.status, {
+                    "Content-Type": "application/json",
+                    "Cache-Control": "no-store",
+                  })
+                  .end(reply.body);
+                return;
+              }
+              if (action === "request")
+                return json(
+                  res,
+                  200,
+                  await builderlab.request(input, cancel.signal),
+                );
+              // Scoped callers cannot submit an operation for a replacement account.
+              if (
+                input.revision !== undefined &&
+                input.revision !== builderlab.snapshot().revision
+              )
+                return json(res, 409, { error: "Builderlab session changed" });
               if (action === "login")
                 return json(res, 200, {
-                  auth: await builderlab.login(cancel.signal),
+                  auth: await builderlab.login(),
                 });
               if (action === "sign-out") {
                 builderlab.signOut();
@@ -929,10 +1183,7 @@ export function relayBrokerPlugin({
               }
               if (action === "bind")
                 return json(res, 200, await builderlab.bind());
-              const result = await builderlab.call(
-                action,
-                raw ? JSON.parse(raw) : {},
-              );
+              const result = await builderlab.call(action, input);
               return result
                 ? json(res, builderlabResponseStatus(result), result)
                 : json(res, 404, { error: "Unknown Builderlab route" });
@@ -1061,9 +1312,15 @@ export function relayBrokerPlugin({
                 error: "Community discovery failed",
               });
             const info = await response.json();
-            // Saved-community icons are public NIP-11 metadata, not join admission.
+            // Saved-community presentation is public metadata, not join admission.
             if (route === "/api/relay/icon-info")
-              return json(res, 200, { icon: info?.icon });
+              return json(res, 200, {
+                name:
+                  typeof info?.name === "string" && info.name.length <= 100
+                    ? info.name
+                    : undefined,
+                icon: info?.icon,
+              });
             const gifSearchPath = relayKlipySearchPath(info);
             if (gifSearchPath)
               gifSearchPaths.set(relay, Promise.resolve(gifSearchPath));
@@ -1081,6 +1338,9 @@ export function relayBrokerPlugin({
                 ? null
                 : (await policyResponse.json()).policy;
             return json(res, 200, {
+              membershipRequired:
+                Array.isArray(info.supported_nips) &&
+                info.supported_nips.includes(43),
               name: info.name,
               icon: info.icon,
               policy: policy ?? null,
@@ -1097,11 +1357,14 @@ export function relayBrokerPlugin({
               "/api/relay/sidebar-preferences",
               "/api/relay/read-state-decode",
               "/api/relay/assistive-decode",
+              "/api/relay/thread-follows-decode",
               "/api/relay/channel-kit-decode",
             ].includes(route) &&
             req.method === "POST"
           ) {
-            const readStateDecode = route === "/api/relay/read-state-decode";
+            const followsDecode = route === "/api/relay/thread-follows-decode";
+            const readStateDecode =
+              followsDecode || route === "/api/relay/read-state-decode";
             const assistiveDecode = route === "/api/relay/assistive-decode";
             if (assistiveDecode && !scoped)
               return json(res, 400, { error: "Select a community first" });
@@ -1136,18 +1399,22 @@ export function relayBrokerPlugin({
                   ? decodeAssistive(events, key, relay)
                   : kitDecode
                     ? decodeChannelKit(events, key, relay)
-                    : readStateDecode
-                      ? decodeReadState(events, key)
-                      : decodeSidebarPreferences(events, key),
+                    : followsDecode
+                      ? decodeThreadFollows(events, key)
+                      : readStateDecode
+                        ? decodeReadState(events, key)
+                        : decodeSidebarPreferences(events, key),
               );
             } catch {
               if (!res.destroyed)
                 return json(res, 400, {
                   error: assistiveDecode
                     ? "Assistive progress could not be decoded"
-                    : readStateDecode
-                      ? "Read state could not be decoded"
-                      : "Sidebar preferences could not be decoded",
+                    : followsDecode
+                      ? "Thread follows could not be decoded"
+                      : readStateDecode
+                        ? "Read state could not be decoded"
+                        : "Sidebar preferences could not be decoded",
                 });
             } finally {
               clearTimeout(deadline);
@@ -1159,25 +1426,32 @@ export function relayBrokerPlugin({
               "/api/relay/sidebar-assignment",
               "/api/relay/sidebar-section-removal",
               "/api/relay/sidebar-section-order",
+              "/api/relay/sidebar-section-rename",
               "/api/relay/sidebar-star",
               "/api/relay/sidebar-sort",
+              "/api/relay/sidebar-filter",
               "/api/relay/sidebar-mute",
             ].includes(route) &&
             req.method === "POST"
           ) {
             const [coordinate, assertIntent, mutate] = {
               "/api/relay/sidebar-section-removal": [
-                "channel-sections",
+                WORKSPACE_COORDINATE,
                 assertSidebarSectionRemovalIntent,
                 mutateSidebarSectionRemoval,
               ],
+              "/api/relay/sidebar-section-rename": [
+                WORKSPACE_COORDINATE,
+                assertSidebarSectionRenameIntent,
+                mutateSidebarSectionRename,
+              ],
               "/api/relay/sidebar-section-order": [
-                "channel-sections",
+                WORKSPACE_COORDINATE,
                 assertSidebarSectionOrderIntent,
                 mutateSidebarSectionOrder,
               ],
               "/api/relay/sidebar-assignment": [
-                "channel-sections",
+                WORKSPACE_COORDINATE,
                 assertSidebarAssignmentIntent,
                 mutateSidebarAssignment,
               ],
@@ -1186,10 +1460,15 @@ export function relayBrokerPlugin({
                 assertSidebarStarIntent,
                 mutateSidebarStar,
               ],
+              "/api/relay/sidebar-filter": [
+                WORKSPACE_FILTER_COORDINATE,
+                assertSidebarFilterIntent,
+                mutateWorkspaceFilter,
+              ],
               "/api/relay/sidebar-sort": [
-                "channel-sort",
+                WORKSPACE_SORT_COORDINATE,
                 assertSidebarSortIntent,
-                mutateSidebarSort,
+                mutateWorkspaceSort,
               ],
               "/api/relay/sidebar-mute": [
                 "channel-mutes",
@@ -1197,24 +1476,47 @@ export function relayBrokerPlugin({
                 mutateSidebarMute,
               ],
             }[route];
-            const sorting = coordinate === "channel-sort";
+            const sorting =
+              coordinate === WORKSPACE_SORT_COORDINATE ||
+              coordinate === WORKSPACE_FILTER_COORDINATE;
             const muting = coordinate === "channel-mutes";
-            // Sort and order intents carry up to 100 section IDs.
+            // Sort, filter and order intents carry the workspace roster.
             const listing =
               sorting || route === "/api/relay/sidebar-section-order";
+            const workspace = coordinate === WORKSPACE_COORDINATE;
+            const limit = workspace ? 192 * 1024 : listing ? 64 * 1024 : 2048;
             const chunks = [];
             let bytes = 0;
             for await (const part of req) {
               bytes += part.length;
-              if (bytes > (listing ? 32 * 1024 : 2048))
+              if (bytes > limit)
                 return json(res, 413, {
                   error: `Sidebar preference intent is too large`,
                 });
               chunks.push(part);
             }
             let intent;
+            let legacy;
             try {
               intent = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+              if (workspace && intent && Object.hasOwn(intent, "legacy")) {
+                if (
+                  Object.keys(intent).some(
+                    (key) => key !== "intent" && key !== "legacy",
+                  )
+                )
+                  throw new Error("Invalid workspace intent envelope");
+                ({ intent, legacy } = intent);
+                legacy = decodeLegacyWorkspaceEnvelope(legacy);
+              }
+              if (
+                workspace &&
+                Buffer.byteLength(JSON.stringify(intent) ?? "") >
+                  (listing ? 64 * 1024 : 2048)
+              )
+                return json(res, 413, {
+                  error: "Sidebar preference intent is too large",
+                });
               assertIntent(intent);
             } catch {
               return json(res, 400, {
@@ -1253,7 +1555,7 @@ export function relayBrokerPlugin({
                   AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
                 ]);
                 const dispatch = (path, body) =>
-                  admittedApiRequest(
+                  admittedRelayRequest(
                     lane,
                     () => {
                       requestSignal.throwIfAborted();
@@ -1292,8 +1594,11 @@ export function relayBrokerPlugin({
                     },
                     requestSignal,
                   );
-                const readHead = async () => {
-                  const response = await dispatch("/query", filter);
+                const readHead = async (target = coordinate) => {
+                  const response = await dispatch(
+                    "/query",
+                    filter.map((entry) => ({ ...entry, "#d": [target] })),
+                  );
                   if (!response.ok)
                     throw new Error(
                       `Sidebar preference query failed (${response.status})`,
@@ -1325,8 +1630,16 @@ export function relayBrokerPlugin({
                   key,
                   readHead,
                   publishEvent,
+                  legacy,
                 );
-                return sorting ? { groups: result } : result;
+                return coordinate === WORKSPACE_FILTER_COORDINATE
+                  ? {
+                      groups: result.filters,
+                      activeWindowSeconds: result.activeWindowSeconds,
+                    }
+                  : sorting
+                    ? { groups: result }
+                    : result;
               });
             sidebarMutations.set(relay, mutation);
             try {
@@ -1370,17 +1683,11 @@ export function relayBrokerPlugin({
             )
               return json(res, 400, { error: "Invalid archive request" });
             try {
-              const result = localArchive().request(viewer, relay, body, key);
-              if (["configure", "clear"].includes(body.action))
-                for (const stream of streams.values())
-                  if (stream.relay === relay) {
-                    try {
-                      updateArchiveCapture(stream);
-                    } catch {
-                      stream.archiveState("error");
-                    }
-                  }
-              return json(res, 200, result);
+              return json(
+                res,
+                200,
+                localArchive().request(viewer, relay, body, key),
+              );
             } catch {
               return json(res, 500, {
                 error:
@@ -1391,13 +1698,20 @@ export function relayBrokerPlugin({
 
           if (route === "/api/relay/agent-library" && req.method === "GET") {
             try {
-              // Share concurrent reads, never retain the local snapshot after completion.
-              libraryRead ??= Promise.resolve()
-                .then(() => agentLibrary())
-                .finally(() => {
-                  libraryRead = undefined;
-                });
-              return json(res, 200, await libraryRead);
+              // Share only same-community reads; never retain a completed snapshot.
+              if (!libraryReads.has(relay))
+                libraryReads.set(
+                  relay,
+                  Promise.resolve()
+                    .then(() =>
+                      agentLibrary(undefined, {
+                        community: relay,
+                        owner: viewer,
+                      }),
+                    )
+                    .finally(() => libraryReads.delete(relay)),
+                );
+              return json(res, 200, await libraryReads.get(relay));
             } catch {
               return json(res, 503, {
                 error:
@@ -1424,10 +1738,11 @@ export function relayBrokerPlugin({
                 9001,
                 30078,
                 30175,
+                30177,
                 30178,
                 40100,
                 1984,
-                45010,
+                ...((await getAuthority(relay)).artifactSupport ? [45010] : []),
                 ...WORKFLOW_KINDS,
                 ...((await getAuthority(relay)).channelCreation ? [9007] : []),
               ],
@@ -1439,7 +1754,9 @@ export function relayBrokerPlugin({
               projectGit: true,
               attachmentUploads: true,
               sidebarPreferences: true,
+              sidebarWorkspaceMigration: true,
               sidebarSortWrites: true,
+              sidebarFilterWrites: true,
               channelActivity: true,
               sidebarMuteWrites: true,
               channelKit: true,
@@ -1448,6 +1765,7 @@ export function relayBrokerPlugin({
               sidebarPreferenceWrites: true,
               sidebarSectionRemoval: true,
               sidebarSectionOrder: true,
+              sidebarSectionRename: true,
               sidebarStarWrites: true,
               agentLibrary: true,
               agentLogProof: true,
@@ -1457,6 +1775,76 @@ export function relayBrokerPlugin({
               presence: true,
               agentActivity: true,
             });
+          }
+          if (
+            (route === "/api/relay/stream-artifact-sync" ||
+              route === "/api/relay/stream-artifact-sync-close") &&
+            req.method === "POST"
+          ) {
+            const opening = route === "/api/relay/stream-artifact-sync";
+            let raw = "";
+            req.setEncoding("utf8");
+            for await (const part of req) {
+              raw += part;
+              if (Buffer.byteLength(raw) > 300000)
+                return json(res, 413, { error: "Artifact sync too large" });
+            }
+            let streamId, id, filter;
+            try {
+              const body = JSON.parse(raw);
+              streamId = body.streamId;
+              id = body.id;
+              if (typeof id !== "string" || !/^[0-9a-z-]{1,32}$/.test(id))
+                throw new Error("Invalid sync id");
+              if (opening) filter = artifactSyncFilter(body.filter);
+            } catch {
+              return json(res, 400, { error: "Invalid artifact sync" });
+            }
+            if (
+              typeof streamId !== "string" ||
+              !/^[0-9a-f]{32}$/.test(streamId)
+            )
+              return json(res, 400, { error: "Invalid artifact sync" });
+            const stream = streams.get(streamId);
+            if (!stream || stream.relay !== relay)
+              return json(res, 404, {
+                error: "Live stream no longer available",
+              });
+            const existing = stream.syncs.get(id);
+            if (!opening) {
+              stream.syncs.delete(id);
+              existing?.();
+              // The close can overtake its open: remember it so the late
+              // open cannot take a slot. IDs are never reused on a stream.
+              // A forgotten record would let its open take a slot again, so
+              // a stream with too many unresolved closes ends instead: that
+              // ends every sync on it, and a late open finds no stream.
+              if (!existing) {
+                if (stream.closedSyncs.size >= 64) stream.close();
+                else stream.closedSyncs.add(id);
+              }
+              return json(res, 200, { accepted: true });
+            }
+            if (stream.closedSyncs.delete(id))
+              return json(res, 409, { error: "Artifact sync already closed" });
+            if (existing || stream.syncs.size >= ARTIFACT_SYNC_MAX_VIEWS)
+              return json(res, 429, {
+                error: "Artifact sync capacity reached",
+              });
+            const frame = (value) =>
+              stream.write("artifact-sync", { id, ...value });
+            stream.syncs.set(
+              id,
+              stream.traffic.syncArtifacts(filter, {
+                event: (event) => frame({ type: "event", event }),
+                eose: () => frame({ type: "eose" }),
+                closed: (reason) => {
+                  stream.syncs.delete(id);
+                  frame({ type: "closed", reason });
+                },
+              }),
+            );
+            return json(res, 200, { accepted: true });
           }
           if (
             [
@@ -1475,14 +1863,16 @@ export function relayBrokerPlugin({
             const prioritizing = route === "/api/relay/stream-priority";
             const observing = route === "/api/relay/stream-observer";
             const updating = route === "/api/relay/stream-interests";
-            let raw = "";
+            let raw = "",
+              bytes = 0;
             req.setEncoding("utf8");
             for await (const part of req) {
               raw += part;
+              bytes += Buffer.byteLength(part);
               if (
-                Buffer.byteLength(raw) >
+                bytes >
                 (updating
-                  ? 450000
+                  ? 64 * 1024 * 1024
                   : watchingPresence
                     ? 20000
                     : prioritizing
@@ -1578,9 +1968,10 @@ export function relayBrokerPlugin({
               // Coalescing may hide a removal followed by re-add. Retire the old
               // wire before stamping the new revision; unchanged routes survive.
               if (removed.length) {
+                const removedIds = new Set(removed);
                 stream.traffic.update(
-                  stream.channels.filter((id) => !removed.includes(id)),
-                  stream.joined.filter((id) => !removed.includes(id)),
+                  stream.channels.filter((id) => !removedIds.has(id)),
+                  stream.joined.filter((id) => !removedIds.has(id)),
                 );
               }
               stream.interestRevision = interestRevision;
@@ -1595,11 +1986,13 @@ export function relayBrokerPlugin({
             return json(res, 200, { accepted: true });
           }
           if (route === "/api/relay/stream" && req.method === "POST") {
-            let raw = "";
+            let raw = "",
+              bytes = 0;
             req.setEncoding("utf8");
             for await (const part of req) {
               raw += part;
-              if (Buffer.byteLength(raw) > 300000)
+              bytes += Buffer.byteLength(part);
+              if (bytes > 64 * 1024 * 1024)
                 return json(res, 413, { error: "Live interests too large" });
             }
             let channels,
@@ -1607,9 +2000,11 @@ export function relayBrokerPlugin({
               priority,
               observer,
               interestRevision,
-              presenceAuthors;
+              presenceAuthors,
+              statusDeltas;
             try {
               const body = JSON.parse(raw);
+              statusDeltas = body.statusDeltas === true;
               channels = liveChannels(body.channels);
               joined = liveJoined(channels, body.joined ?? []);
               interestRevision = body.interestRevision ?? 0;
@@ -1647,7 +2042,7 @@ export function relayBrokerPlugin({
             // Bound slow-client buffering rather than retaining unbounded traffic.
             const write = (kind, value) => {
               if (res.destroyed) return;
-              if (res.writableLength > 2 * 1024 * 1024) {
+              if (res.writableLength > 8 * 1024 * 1024) {
                 res.destroy();
                 return;
               }
@@ -1662,12 +2057,12 @@ export function relayBrokerPlugin({
             let lastStateStatus;
             let lastObserverStatus;
             let liveChannelIds = new Set();
-            const flushState = () => {
+            const flushLegacyState = () => {
               const state = pendingState;
               pendingState = undefined;
               if (state) write("state", state);
             };
-            const writeState = (state) => {
+            const writeLegacyState = (state) => {
               const observerStatus = state.routes.find(
                 (route) => route.id === "observer",
               )?.status;
@@ -1692,6 +2087,138 @@ export function relayBrokerPlugin({
               if (replaceable && res.writableNeedDrain) pendingState = state;
               else write("state", state);
             };
+            let knownRoutes = new Map();
+            const dirtyRoutes = new Map();
+            const pendingEstablished = new Map();
+            let deltaHeader;
+            const sameRoute = (a, b) =>
+              a?.status === b.status &&
+              a?.replay === b.replay &&
+              a?.error === b.error;
+            const flushDeltas = () => {
+              if (!deltaHeader) return;
+              while (dirtyRoutes.size && !res.destroyed) {
+                const routes = [],
+                  removed = [];
+                for (const [id, route] of dirtyRoutes) {
+                  dirtyRoutes.delete(id);
+                  if (route) routes.push(route);
+                  else removed.push(id);
+                  if (routes.length + removed.length === 512) break;
+                }
+                write("state-delta", { ...deltaHeader, routes, removed });
+                if (res.writableNeedDrain) return;
+              }
+              while (pendingEstablished.size && !res.destroyed) {
+                const [first, entry] = pendingEstablished
+                  .entries()
+                  .next().value;
+                const { interestRevision, singleton } = entry;
+                if (singleton) {
+                  pendingEstablished.delete(first);
+                  write("established", {
+                    channelId: first,
+                    ...(entry.continuous ? { continuous: [first] } : {}),
+                    interestRevision,
+                  });
+                } else {
+                  const channels = [];
+                  const continuous = [];
+                  for (const [id, pending] of pendingEstablished) {
+                    if (
+                      pending.interestRevision !== interestRevision ||
+                      pending.singleton
+                    )
+                      continue;
+                    pendingEstablished.delete(id);
+                    channels.push(id);
+                    if (pending.continuous) continuous.push(id);
+                    if (channels.length === 512) break;
+                  }
+                  write("established", {
+                    channels,
+                    ...(continuous.length ? { continuous } : {}),
+                    interestRevision,
+                  });
+                }
+                if (res.writableNeedDrain) return;
+              }
+            };
+            const writeState = statusDeltas
+              ? (state) => {
+                  const reset =
+                    !deltaHeader || state.status !== deltaHeader.status;
+                  if (reset) {
+                    dirtyRoutes.clear();
+                    pendingEstablished.clear();
+                    knownRoutes.clear();
+                    write("state-delta", {
+                      status: state.status,
+                      ...(state.error ? { error: state.error } : {}),
+                      interestRevision: state.interestRevision,
+                      reset: true,
+                      routes: [],
+                      removed: [],
+                    });
+                  }
+                  deltaHeader = {
+                    status: state.status,
+                    ...(state.error ? { error: state.error } : {}),
+                    interestRevision: state.interestRevision,
+                  };
+                  const next = new Map();
+                  const urgent = [];
+                  for (const route of state.routes) {
+                    next.set(route.id, route);
+                    const previous = knownRoutes.get(route.id);
+                    // The browser already owns the IDs and can construct pending rows.
+                    const implicit =
+                      !previous &&
+                      route.channelId &&
+                      route.status === "pending" &&
+                      route.replay === "unknown" &&
+                      !route.error;
+                    if (
+                      (!implicit || dirtyRoutes.get(route.id) === null) &&
+                      !sameRoute(previous, route)
+                    ) {
+                      dirtyRoutes.set(route.id, route);
+                      if (
+                        (previous?.status === "live" &&
+                          route.status !== "live") ||
+                        route.id === "observer"
+                      )
+                        urgent.push(route);
+                    }
+                  }
+                  for (const id of knownRoutes.keys())
+                    if (!next.has(id)) {
+                      dirtyRoutes.set(id, null);
+                      if (id.startsWith("channel:"))
+                        pendingEstablished.delete(id.slice(8));
+                    }
+                  for (let offset = 0; offset < urgent.length; offset += 512) {
+                    const routes = urgent.slice(offset, offset + 512);
+                    for (const route of routes) dirtyRoutes.delete(route.id);
+                    write("state-delta", {
+                      ...deltaHeader,
+                      routes,
+                      removed: [],
+                    });
+                  }
+                  if (knownRoutes.has("observer") && !next.has("observer")) {
+                    dirtyRoutes.delete("observer");
+                    write("state-delta", {
+                      ...deltaHeader,
+                      routes: [],
+                      removed: ["observer"],
+                    });
+                  }
+                  knownRoutes = next;
+                  if (!res.writableNeedDrain) flushDeltas();
+                }
+              : writeLegacyState;
+            const flushState = statusDeltas ? flushDeltas : flushLegacyState;
             res.on("drain", flushState);
             const stream = {
               relay,
@@ -1699,8 +2226,10 @@ export function relayBrokerPlugin({
               joined,
               interestRevision,
               traffic: undefined,
-              archiveState: (state) => write("archive-state", { state }),
               close: undefined,
+              write,
+              syncs: new Map(),
+              closedSyncs: new Set(),
             };
             const traffic = subscribeRelayTraffic(
               relay.replace(/^http/, "ws"),
@@ -1716,33 +2245,6 @@ export function relayBrokerPlugin({
                     });
                 },
                 presence: (event) => write("presence", event),
-                capture: (event) => {
-                  try {
-                    localArchive().ingest(
-                      viewer,
-                      relay,
-                      event,
-                      stream.archiveRevision,
-                      key,
-                    );
-                    if (event.kind === 24200) {
-                      stream.archiveFailureRevision = undefined;
-                      stream.archiveState(
-                        stream.archiveObserver ? "saving" : "off",
-                      );
-                    }
-                  } catch {
-                    if (event.kind === 24200) {
-                      stream.archiveFailureRevision = stream.archiveRevision;
-                      write("archive-error", {});
-                    }
-                    try {
-                      updateArchiveCapture(stream);
-                    } catch {
-                      /* Live decode stays independent of disk failure. */
-                    }
-                  }
-                },
                 telemetry: (event, generation) => {
                   if (res.destroyed) return;
                   try {
@@ -1759,13 +2261,31 @@ export function relayBrokerPlugin({
                     ...state,
                     interestRevision: stream.interestRevision,
                   }),
-                established: (channelId) =>
-                  write("established", {
-                    ...(Array.isArray(channelId)
-                      ? { channels: channelId }
-                      : { channelId }),
-                    interestRevision: stream.interestRevision,
-                  }),
+                established: (channelId, global, continuous) => {
+                  if (statusDeltas && channelId !== undefined) {
+                    for (const id of typeof channelId === "string"
+                      ? [channelId]
+                      : channelId)
+                      pendingEstablished.set(id, {
+                        interestRevision: stream.interestRevision,
+                        singleton: typeof channelId === "string",
+                        // A coalesced establishment is continuous only if
+                        // every one it replaces was too.
+                        continuous:
+                          !!continuous?.includes(id) &&
+                          (pendingEstablished.get(id)?.continuous ?? true),
+                      });
+                    if (!res.writableNeedDrain) flushDeltas();
+                  } else
+                    write("established", {
+                      ...(Array.isArray(channelId)
+                        ? { channels: channelId }
+                        : { channelId }),
+                      ...(global ? { global } : {}),
+                      ...(continuous ? { continuous } : {}),
+                      interestRevision: stream.interestRevision,
+                    });
+                },
                 recover: () => write("recover", {}),
                 denied: (channelId, reason) =>
                   write("denied", {
@@ -1778,6 +2298,8 @@ export function relayBrokerPlugin({
               principal.live,
               undefined,
               liveSetupTimeoutMs,
+              undefined,
+              liveRandom,
             );
             principal.streams++;
             traffic.observe(observer);
@@ -1794,6 +2316,9 @@ export function relayBrokerPlugin({
               closed = true;
               principal.streams--;
               pendingState = undefined;
+              dirtyRoutes.clear();
+              pendingEstablished.clear();
+              knownRoutes.clear();
               res.off("drain", flushState);
               traffic.dispose();
               clearInterval(keepAlive);
@@ -1801,11 +2326,6 @@ export function relayBrokerPlugin({
               res.destroy();
             };
             Object.assign(stream, { traffic, close });
-            try {
-              updateArchiveCapture(stream);
-            } catch {
-              write("archive-error", {});
-            }
             streams.set(streamId, stream);
             res.once("close", close);
             if (res.destroyed) close();
@@ -1891,7 +2411,7 @@ export function relayBrokerPlugin({
               cancel.signal,
               AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
             ]);
-            const upstream = await fetchUpstream(target, {
+            const init = {
               headers: {
                 Authorization:
                   "Nostr " +
@@ -1900,7 +2420,20 @@ export function relayBrokerPlugin({
               },
               redirect: "error",
               signal: mediaDeadline,
-            });
+            };
+            let upstream = await fetchUpstream(target, init);
+            // Relays before WebP thumbnails, and images uploaded before them,
+            // have only the `.thumb.jpg` that every relay writes.
+            if (
+              upstream.status === 404 &&
+              target.pathname.endsWith(".thumb.webp")
+            ) {
+              await upstream.body?.cancel();
+              upstream = await fetchUpstream(
+                new URL(target.href.replace(/\.thumb\.webp$/, ".thumb.jpg")),
+                init,
+              );
+            }
             stats.media++;
             if (!upstream.ok) {
               await upstream.body?.cancel();
@@ -1992,6 +2525,8 @@ export function relayBrokerPlugin({
               "/api/relay/assistive-publish",
               "/api/relay/channel-kit-prepare",
               "/api/relay/read-state-publish",
+              "/api/relay/thread-follows-sign",
+              "/api/relay/thread-follows-publish",
               "/api/relay/profile",
               "/api/relay/direct-message",
               "/api/relay/agent-log-proof",
@@ -2004,6 +2539,7 @@ export function relayBrokerPlugin({
               "/api/relay/member",
               "/api/relay/leave",
               "/api/relay/gifs",
+              "/api/relay/profile-search",
               "/api/relay/workflow-runs",
               "/api/relay/project-git",
             ].includes(route) ||
@@ -2012,8 +2548,9 @@ export function relayBrokerPlugin({
             return json(res, 404, { error: "Unknown broker route" });
           const memory = route === "/api/relay/agent-memories";
           const presence = route === "/api/relay/presence-snapshot";
-          // Only NIP-AP catalog events may exceed the ordinary body bound.
-          const catalogWrite =
+          // Only NIP-AP catalog and Canvas events may exceed the ordinary
+          // body bound, each up to its own complete-event bound.
+          const largeWrite =
             route === "/api/relay/sign" || route === "/api/relay/publish";
           let raw = "";
           const uploadDeadline = memory
@@ -2026,7 +2563,10 @@ export function relayBrokerPlugin({
               if (
                 presence
                   ? Buffer.byteLength(raw) > 20 * 1024
-                  : raw.length > (catalogWrite ? CATALOG_EVENT_BYTES : 65536)
+                  : raw.length >
+                    (largeWrite
+                      ? Math.max(CATALOG_EVENT_BYTES, CANVAS_MAX_EVENT_BYTES)
+                      : 65536)
               )
                 return json(res, 413, { error: "Filter body too large" });
             }
@@ -2041,8 +2581,15 @@ export function relayBrokerPlugin({
           }
           if (
             raw.length > 65536 &&
-            (!isCatalogKind(filters?.kind) ||
-              Buffer.byteLength(raw) > CATALOG_EVENT_BYTES)
+            !(
+              largeWrite &&
+              Buffer.byteLength(raw) <=
+                (isCatalogKind(filters?.kind)
+                  ? CATALOG_EVENT_BYTES
+                  : filters?.kind === 40100
+                    ? CANVAS_MAX_EVENT_BYTES
+                    : 0)
+            )
           )
             return json(res, 413, { error: "Filter body too large" });
           let memoryAgent;
@@ -2290,9 +2837,12 @@ export function relayBrokerPlugin({
           if (directMessage) {
             try {
               filters = directMessageEvent(filters, viewer, key);
-            } catch {
+            } catch (error) {
               return json(res, 400, {
-                error: "Choose between one and eight other people.",
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : "Choose between one and eight other people.",
                 sent: false,
               });
             }
@@ -2303,6 +2853,7 @@ export function relayBrokerPlugin({
           const member = route === "/api/relay/member";
           const leave = route === "/api/relay/leave";
           const gifs = route === "/api/relay/gifs";
+          const profileSearch = route === "/api/relay/profile-search";
           // Only these routes may surface an exact, allowed relay refusal.
           const refusal =
             invite || member
@@ -2311,7 +2862,13 @@ export function relayBrokerPlugin({
                 ? claimReason
                 : leave
                   ? leaveRefusal
-                  : undefined;
+                  : directMessage
+                    ? (body) =>
+                        directMessageRefusal(
+                          filters.tags.some(([name]) => name === "h"),
+                          body?.error,
+                        )
+                    : undefined;
           if (invite || member || leave) {
             // Community-bound only; the relay remains the authority for roles.
             if (!scoped)
@@ -2339,13 +2896,39 @@ export function relayBrokerPlugin({
             )
               return json(res, 400, { error: "Invalid GIF search" });
           }
+          if (profileSearch) {
+            // Forward only the relay's name-search shape.
+            if (
+              !filters ||
+              typeof filters !== "object" ||
+              Object.keys(filters).some(
+                (key) => !["query", "limit", "page"].includes(key),
+              ) ||
+              typeof filters.query !== "string" ||
+              !filters.query.trim() ||
+              // The relay counts code points in the trimmed query.
+              [...filters.query.trim()].length > 100 ||
+              !Number.isSafeInteger(filters.limit) ||
+              filters.limit < 1 ||
+              filters.limit > 100 ||
+              (filters.page !== undefined &&
+                (!Number.isSafeInteger(filters.page) ||
+                  filters.page < 1 ||
+                  filters.page > 1000))
+            )
+              return json(res, 400, { error: "Invalid profile search" });
+            filters = {
+              query: filters.query,
+              limit: filters.limit,
+              ...(filters.page === undefined ? {} : { page: filters.page }),
+            };
+          }
           if (profile) {
             if (
               typeof filters?.name !== "string" ||
               !filters.name.trim() ||
               filters.name.length > 100 ||
               typeof filters?.picture !== "string" ||
-              filters.picture.length > 2048 ||
               !validProfilePicture(filters.picture) ||
               (filters.about !== undefined &&
                 (typeof filters.about !== "string" ||
@@ -2421,15 +3004,32 @@ export function relayBrokerPlugin({
               });
             }
           }
-          const readSigning = route === "/api/relay/read-state-sign";
-          const readPublishing = route === "/api/relay/read-state-publish";
+          const followSigning = route === "/api/relay/thread-follows-sign";
+          const followPublishing =
+            route === "/api/relay/thread-follows-publish";
+          const readSigning =
+            followSigning || route === "/api/relay/read-state-sign";
+          const readPublishing =
+            followPublishing || route === "/api/relay/read-state-publish";
           if (readSigning || readPublishing) {
             try {
+              if (followSigning)
+                return json(res, 200, signThreadFollows(filters, key));
               if (readSigning)
                 return json(res, 200, signReadState(filters, key));
               // A valid own signature alone is not permission to publish arbitrary kind-30078 data.
               // Receive-only compatibility must not widen publication admission.
-              decodeReadState([filters], key, READ_STATE_EVENT_BYTES);
+              // Never publish an own follow coordinate that can't be read back.
+              if (followPublishing) {
+                if (
+                  !decodeThreadFollows(
+                    [filters],
+                    key,
+                    READ_STATE_EVENT_BYTES,
+                  )[0].payload
+                )
+                  throw new Error("Unreadable thread-follows event");
+              } else decodeReadState([filters], key, READ_STATE_EVENT_BYTES);
             } catch {
               return json(res, 400, {
                 error: "Read-state operation rejected",
@@ -2483,7 +3083,8 @@ export function relayBrokerPlugin({
           if (signing || publishing) {
             if (administration) {
               try {
-                validateMemberAdministrationTemplate(filters, viewer);
+                if (!isAdminAddition(filters, viewer))
+                  validateMemberAdministrationTemplate(filters, viewer);
               } catch {
                 return json(res, 400, {
                   error: "Invalid member administration command",
@@ -2567,7 +3168,10 @@ export function relayBrokerPlugin({
                   throw new Error("Expired operation");
                 if (filters.kind === 30078)
                   admitChannelKit(filters, key, relay);
-                else if (!validCanvas(filters))
+                else if (
+                  !validCanvas(filters) ||
+                  (!signing && !canvasEventFits(filters))
+                )
                   throw new Error("Invalid Canvas");
               } catch {
                 return json(res, 400, {
@@ -2575,6 +3179,12 @@ export function relayBrokerPlugin({
                   sent: false,
                 });
               }
+            } else if (filters?.kind === 30177) {
+              if (!validAgentRecord(filters, viewer))
+                return json(res, 400, {
+                  error: "Malformed agent record",
+                  sent: false,
+                });
             } else if ([30175, 30178].includes(filters?.kind)) {
               if (!validCatalogEnvelope(filters))
                 return json(res, 400, {
@@ -2587,6 +3197,12 @@ export function relayBrokerPlugin({
               if (!validReport(filters))
                 return json(res, 400, {
                   error: "Report rejected",
+                  sent: false,
+                });
+            } else if (filters?.kind === 20002) {
+              if (!validTypingTemplate(filters))
+                return json(res, 400, {
+                  error: "Invalid typing indicator",
                   sent: false,
                 });
             } else if (
@@ -2627,6 +3243,13 @@ export function relayBrokerPlugin({
                 },
                 key,
               );
+              // The relay limits the complete event, which escaping and the
+              // id, pubkey and sig make larger than its content.
+              if (event.kind === 40100 && !canvasEventFits(event))
+                return json(res, 400, {
+                  error: "Relay event is too large",
+                  sent: false,
+                });
               res.setHeader(
                 "Server-Timing",
                 `sign;dur=${(performance.now() - started).toFixed(2)}`,
@@ -2644,6 +3267,7 @@ export function relayBrokerPlugin({
             !member &&
             !leave &&
             !gifs &&
+            !profileSearch &&
             !workflowPath &&
             !readPublishing &&
             !assistivePublishing &&
@@ -2688,6 +3312,18 @@ export function relayBrokerPlugin({
               const conflict =
                 failure?.sent === false &&
                 failure.refusal?.startsWith("conflict:");
+              // Answer a proven validation refusal as the relay's HTTP API does,
+              // 400 with its bounded text, so every publish path shows the same
+              // reason. The text goes to this client only, never to the log.
+              if (
+                failure?.sent === false &&
+                failure.reason?.startsWith("invalid:") &&
+                !(
+                  readPublishing &&
+                  failure.refusal === READ_STATE_TIMESTAMP_REFUSAL
+                )
+              )
+                return json(res, 400, { error: failure.reason });
               return json(res, conflict ? 409 : 503, {
                 error:
                   failure?.sent === false &&
@@ -2714,15 +3350,17 @@ export function relayBrokerPlugin({
             workflowPath ??
             (gifs
               ? gifSearchPath
-              : profile || directMessage || member || leave
-                ? "/events"
-                : claim
-                  ? "/api/invites/claim"
-                  : policy
-                    ? "/api/invites/accept-policy"
-                    : invite
-                      ? "/api/invites"
-                      : "/query");
+              : profileSearch
+                ? "/profiles/search"
+                : profile || directMessage || member || leave
+                  ? "/events"
+                  : claim
+                    ? "/api/invites/claim"
+                    : policy
+                      ? "/api/invites/accept-policy"
+                      : invite
+                        ? "/api/invites"
+                        : "/query");
           const method = workflowPath ? "GET" : "POST";
           const lane = admissions(relay, viewer).api;
           let releasePresence;
@@ -2734,12 +3372,12 @@ export function relayBrokerPlugin({
             }
             presenceFlight = true;
           }
-          if (!presence && inflight >= MAX_INFLIGHT)
+          if (!presence && (inflight.get(relay) ?? 0) >= MAX_INFLIGHT)
             return json(res, 429, {
               error: "Query concurrency limit",
               sent: false,
             });
-          if (!presence) inflight++;
+          if (!presence) inflight.set(relay, (inflight.get(relay) ?? 0) + 1);
           try {
             const body = workflowPath ? undefined : JSON.stringify(filters);
             const admissionStart = performance.now();
@@ -2804,12 +3442,12 @@ export function relayBrokerPlugin({
             };
             response = presence
               ? await request()
-              : await admittedApiRequest(
+              : await admittedRelayRequest(
                   lane,
                   request,
                   requestSignal,
                   channelActivity ||
-                    (route === "/api/relay/query" &&
+                    ((route === "/api/relay/query" || profileSearch) &&
                       req.headers["x-buzz-read-priority"] === "background")
                     ? "background"
                     : "foreground",
@@ -2901,7 +3539,11 @@ export function relayBrokerPlugin({
             if (presence) {
               presenceFlight = false;
               releasePresence();
-            } else inflight--;
+            } else {
+              const left = inflight.get(relay) - 1;
+              if (left) inflight.set(relay, left);
+              else inflight.delete(relay);
+            }
           }
         } catch (error) {
           if (res.destroyed) return; // The browser gave up first; nothing to answer.

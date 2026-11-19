@@ -1,32 +1,40 @@
-import { useRef, useState } from "react";
-import type {
-  Attachment,
-  ChannelSummary,
-} from "../../features/relay/contracts";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import type { ChannelSummary } from "../../features/relay/contracts";
 import type { RelaySession } from "../../features/relay/session";
 import type { ConversationExtensions } from "../../features/conversation/contracts";
-import { MessageComposer } from "../../features/messages/MessageComposer";
 import {
-  MessageManagement,
-  MessageManagementStatus,
-} from "../../features/messages/MessageManagement";
-import { ThreadPanel } from "../../features/messages/ThreadPanel";
+  ConversationChannel,
+  ConversationComposer,
+  ConversationThread,
+  useMediaReview,
+} from "../../features/conversation/Conversation";
+import { MessageManagementStatus } from "../../features/messages/MessageManagement";
+import { useMessageOpening } from "../../features/messages/use-message-opening";
+import { usePendingRequest } from "../../features/messages/use-pending-request";
 import type { MessageLinkOrigin } from "../../features/messages/MessageRow";
-import { MediaReviewViewer } from "../../features/messages/MediaReviewViewer";
-import { rejectUnhandledFileDrop } from "../../features/messages/use-file-drop";
+import type { ThreadPanelProps } from "../../features/messages/ThreadPanel";
 import { ChannelBody } from "./ChannelBody";
-import {
-  SessionColumn,
-  SessionHeading,
-} from "../../features/sessions/SessionPresentation";
+import { SoloColumn } from "../../features/solo/SoloPresentation";
 import type { ConversationTab as Tab } from "./useChannelTabState";
 import type { PageNavigation } from "../../features/navigation/service";
 import styles from "./ChannelTabs.module.css";
 
 type ConversationTabProps = {
   tab: Tab;
+  intro?: ReactNode;
   active: boolean;
+  /** Showing the tab visits its conversation, as Channels does. */
+  visit?: boolean | undefined;
   focusOnMount?: boolean;
+  /** The tab as its visit began, when it mounts later in that visit. */
+  restored?: Tab | undefined;
   channel: ChannelSummary;
   session: RelaySession;
   scope: string;
@@ -40,12 +48,17 @@ type ConversationTabProps = {
   onRetryNavigation?: (() => void) | undefined;
   onResolvedRoot?: ((rootId: string) => void) | undefined;
   onDifferentThread?: ((requested: string, kept: string) => void) | undefined;
+  /** Where a thread shown here lives, when it can open there. */
+  parent?: ThreadPanelProps["parent"];
 };
 /** Each secondary conversation retains its own editing and media-review scope. */
 export function ConversationTab({
   tab,
+  intro,
   active,
+  visit = true,
   focusOnMount = true,
+  restored,
   channel,
   session,
   scope,
@@ -58,49 +71,101 @@ export function ConversationTab({
   onRetryNavigation,
   onResolvedRoot,
   onDifferentThread,
+  parent,
 }: ConversationTabProps) {
-  // A saved reply intent belongs to the previous visit, not this restoration.
-  const restoredTab = useRef(focusOnMount ? undefined : tab);
-  const sessionConversation = channel.channelType === "session";
-  const [sent, setSent] = useState<string>();
-  const [media, setMedia] = useState<{
-    messageId: string;
-    attachment: Attachment;
-    seconds: number;
-    hasComments: boolean;
+  // A saved reply intent belongs to the previous visit, not this restoration;
+  // a renamed or merged copy of the tab carries the same request.
+  const initial = restored ?? (focusOnMount ? undefined : tab);
+  const reply = tab.kind === "thread" ? tab.replyRequest : undefined;
+  const restoredReply = useRef(
+    initial?.kind === "thread" ? initial.replyRequest : undefined,
+  );
+  if (reply !== restoredReply.current) restoredReply.current = undefined;
+  const soloConversation = channel.channelType === "solo";
+  // Likewise a saved unread request.
+  const unread = tab.kind === "thread" ? tab.unreadRequest : undefined;
+  const restoredUnread = useRef(
+    initial?.kind === "thread" ? initial.unreadRequest : undefined,
+  );
+  if (unread !== restoredUnread.current) restoredUnread.current = undefined;
+  // Likewise a saved reveal belongs to the opening that asked for it.
+  const restoredReveal = useRef(initial?.revealRequest);
+  if (tab.revealRequest !== restoredReveal.current)
+    restoredReveal.current = undefined;
+  const asked =
+    tab.revealRequest !== restoredReveal.current
+      ? tab.revealRequest
+      : undefined;
+  const opening = tab.kind === "conversation" ? tab : undefined;
+  // Likewise a saved focus request.
+  const focus = tab.focusRequest;
+  const restoredFocus = useRef(initial?.focusRequest);
+  if (focus !== restoredFocus.current) restoredFocus.current = undefined;
+  const focusRequest = usePendingRequest(
+    focus === restoredFocus.current ? undefined : focus,
+  );
+  const target = opening?.messageId && asked ? opening.messageId : undefined;
+  const revealRequest = target ? asked : undefined;
+  const threadReveal = tab.kind === "thread" ? asked : undefined;
+  const inTimeline = useMessageOpening(
+    session.channels,
+    channel.id,
+    target,
+    revealRequest,
+  );
+  const [reveal, setReveal] = useState<{
+    key: string;
+    signal: AbortSignal;
   }>();
-  const mediaTrigger = useRef<HTMLElement | null>(null);
-  const openMedia = (
-    messageId: string,
-    attachment: Attachment,
-    seconds: number,
-    hasComments = false,
-  ) => {
-    mediaTrigger.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    setMedia({ messageId, attachment, seconds, hasComments });
-  };
+  const revealKey = target && JSON.stringify([target, revealRequest]);
+  useEffect(() => {
+    if (!revealKey) return;
+    const request = new AbortController();
+    setReveal({ key: revealKey, signal: request.signal });
+    return () => request.abort();
+  }, [revealKey]);
+  const [sent, setSent] = useState<string>();
+  const media = useMediaReview();
+  // A retained tab re-renders with its page. Its memoized rows open links and
+  // threads through stable openers that consult the latest handlers when chosen.
+  const latest = useRef({ openLink, openThread });
+  useLayoutEffect(() => {
+    latest.current = { openLink, openThread };
+  });
+  const onOpenLink = useCallback(
+    (url: string, origin?: MessageLinkOrigin) =>
+      latest.current.openLink(url, origin),
+    [],
+  );
+  const onOpenThread = useCallback<typeof openThread>(
+    (messageId, rootId, intent) =>
+      latest.current.openThread(messageId, rootId, intent),
+    [],
+  );
   return (
-    <MessageManagement session={session} channelId={channel.id} active={active}>
+    <ConversationChannel
+      session={session}
+      scope={scope}
+      extensions={extensions}
+      channel={channel}
+      active={active && visit}
+      interactions={{
+        onOpenLink,
+        canOpenLink,
+        onOpenMediaReview: media.open,
+      }}
+      mediaReview={media.review}
+    >
       <section
         data-attachment-drop-zone=""
-        onDragOver={rejectUnhandledFileDrop}
-        onDrop={rejectUnhandledFileDrop}
         className={styles.conversation}
         aria-label={`Conversation in ${channel.name}`}
       >
         <MessageManagementStatus />
-        {sessionConversation && <SessionHeading channel={channel} />}
         {tab.kind === "thread" ? (
-          <ThreadPanel
-            sessionConversation={sessionConversation}
+          <ConversationThread
+            intro={intro}
             active={active}
-            session={session}
-            scope={scope}
-            channelId={channel.id}
-            channelName={channel.name}
             messageId={tab.messageId}
             navigation={navigation}
             retainThread
@@ -108,61 +173,58 @@ export function ConversationTab({
             onRetryNavigation={onRetryNavigation}
             onResolvedRoot={onResolvedRoot}
             onDifferentThread={onDifferentThread}
-            replyRequest={
-              tab === restoredTab.current ? undefined : tab.replyRequest
+            replyRequest={reply === restoredReply.current ? undefined : reply}
+            focusRequest={focusRequest}
+            revealSelected={threadReveal !== undefined}
+            revealRequest={threadReveal}
+            unreadRequest={
+              unread === restoredUnread.current ? undefined : unread
             }
-            extensions={extensions}
             close={close}
-            onOpenLink={openLink}
-            canOpenLink={canOpenLink}
-            onOpenMediaReview={openMedia}
+            parent={parent}
+          />
+        ) : target && inTimeline === false ? (
+          <ConversationThread
+            intro={intro}
+            active={active}
+            messageId={target}
+            retainThread
+            tabbed
+            revealSelected
+            revealRequest={revealRequest}
+            close={close}
+            parent={parent}
           />
         ) : (
-          <SessionColumn enabled={sessionConversation}>
+          <SoloColumn enabled={soloConversation}>
             <ChannelBody
-              queries={session}
-              scope={scope}
-              channelId={channel.id}
+              intro={intro}
               viewer={session.viewer}
               cached={!!channel.cached}
-              extensions={extensions}
-              onOpenLink={openLink}
-              canOpenLink={canOpenLink}
-              onOpenThread={openThread}
-              onOpenMediaReview={openMedia}
+              // The composer below mounts TypingIndicator for a live channel.
+              onOpenThread={onOpenThread}
               revealMessageId={sent}
+              // Mount the list once, at the message, not while it is sought.
+              holding={!!target && inTimeline === undefined}
+              inlineTarget={
+                target &&
+                reveal &&
+                reveal.key === revealKey &&
+                !reveal.signal.aborted
+                  ? { messageId: target, signal: reveal.signal }
+                  : undefined
+              }
+              marksRead={opening?.markRead !== false}
             />
-            <MessageComposer
-              sessionConversation={sessionConversation}
-              label={sessionConversation ? "Message this session" : undefined}
-              session={session}
-              scope={scope}
-              channelId={channel.id}
-              channelName={channel.name}
-              extensions={extensions}
-              onOpenLink={openLink}
-              canOpenLink={canOpenLink}
+            <ConversationComposer
+              // Shown follows the tab, not whether showing it visits the chat.
+              shown={active}
               onSend={setSent}
+              {...(focusRequest ? { focusRequest } : {})}
             />
-          </SessionColumn>
-        )}
-        {media && (
-          <MediaReviewViewer
-            session={session}
-            scope={scope}
-            channelId={channel.id}
-            channelName={channel.name}
-            extensions={extensions}
-            messageId={media.messageId}
-            attachment={media.attachment}
-            initialTime={media.seconds}
-            hasComments={media.hasComments}
-            restoreFocus={mediaTrigger}
-            onOpenLink={openLink}
-            close={() => setMedia(undefined)}
-          />
+          </SoloColumn>
         )}
       </section>
-    </MessageManagement>
+    </ConversationChannel>
   );
 }

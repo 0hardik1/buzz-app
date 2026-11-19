@@ -1,5 +1,7 @@
+import { hoverMessage } from "./message-actions.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
+import { readJournal } from "./reading.mjs";
 import { npubEncode } from "nostr-tools/nip19";
 
 test.use({
@@ -7,6 +9,78 @@ test.use({
   dmLabels: true,
   readState: true,
   historyCounts: { alpha: 2, beta: 1 },
+});
+
+// Separate app windows retain their own row/confirmation while sharing the
+// production IndexedDB receipt and Web Lock. A DOM emulator cannot prove this.
+test("discarding an orphan already removed by another window closes confirmation", async ({
+  page,
+  context,
+  app,
+}, testInfo) => {
+  const message = app.sign({
+    kind: 9,
+    created_at: Math.floor(Date.now() / 1000) - 3600,
+    content: "Orphaned follow-up",
+    tags: [["h", "alpha"]],
+  });
+  await page.addInitScript(
+    ({ scope, message }) => {
+      localStorage.setItem(
+        `buzz-outbox-v1:${scope}`,
+        JSON.stringify([
+          {
+            event: message,
+            signed: message,
+            delivery: "unknown",
+            recovery: { key: "follow-up:orphan", value: "orphan" },
+          },
+        ]),
+      );
+    },
+    { scope: `https://primary.example:${app.viewer}`, message },
+  );
+  const confirm = async (window) => {
+    await open(window, app);
+    const row = window.locator(`[data-message-id="${message.id}"]`);
+    await expect(row).toBeVisible();
+    await hoverMessage(row);
+    await row.getByRole("button", { name: "More message actions" }).click();
+    await window
+      .getByRole("menuitem", { name: "Remove from this device", exact: true })
+      .click();
+    return window.getByRole("alertdialog", {
+      name: "Remove message from this device?",
+      exact: true,
+    });
+  };
+  const a = await confirm(page);
+  const other = await context.newPage();
+  app.watchPageErrors(other);
+  try {
+    const b = await confirm(other);
+    await b.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(b).toHaveCount(0);
+    await expect(other.getByText(message.content, { exact: true })).toHaveCount(
+      0,
+    );
+    await expect(a).toBeVisible();
+    await a.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(a).toHaveCount(0);
+    await expect(page.getByText(message.content, { exact: true })).toHaveCount(
+      0,
+    );
+    expect(
+      app.report.publications.filter(({ event }) =>
+        [5, 9].includes(event.kind),
+      ),
+    ).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath("discarded-in-both-windows.png"),
+    });
+  } finally {
+    await other.close();
+  }
 });
 
 // Real shared-row/portal integration, keyboard focus and responsive geometry;
@@ -23,7 +97,7 @@ test("manage a channel message, peer unread state, and its thread", async ({
   );
   await expect(row).toBeVisible();
   const trigger = row.getByRole("button", { name: "More message actions" });
-  await row.hover();
+  await hoverMessage(row);
   await trigger.click();
   await page
     .getByRole("menuitem", { name: "Edit message", exact: true })
@@ -95,30 +169,41 @@ test("manage a channel message, peer unread state, and its thread", async ({
     `[data-channel-timeline] [data-message-id="${peer.id}"]`,
   );
   await expect(peerRow).toBeVisible();
-  await peerRow.hover();
   const peerTrigger = peerRow.getByRole("button", {
     name: "More message actions",
   });
-  await peerTrigger.click();
-  const toggle = page.getByRole("menuitem", { name: /^Mark (read|unread)$/ });
-  const initial = await toggle.textContent();
-  await toggle.click();
+  // Automatic reading can change the action while its menu opens. Establish
+  // the durable read boundary first, then exercise exact actions, not whichever
+  // toggle happens to occupy the same menu row when the click is dispatched.
+  await peerRow.click();
+  await expect
+    .poll(async () => (await readJournal(page))?.state.frontiers["alpha"] ?? 0)
+    .toBeGreaterThanOrEqual(peer.created_at);
+  const toggle = page.getByRole("menuitem", {
+    name: /^Mark as (read|unread)$/,
+  });
+  for (const [action, next] of [
+    ["Mark as unread", "Mark as read"],
+    ["Mark as read", "Mark as unread"],
+  ]) {
+    await hoverMessage(peerRow);
+    await peerTrigger.click();
+    await page.getByRole("menuitem", { name: action, exact: true }).click();
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await hoverMessage(peerRow);
+    await peerTrigger.click();
+    await expect(toggle).toHaveText(next);
+    await page.keyboard.press("Escape");
+  }
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
-  await peerRow.hover();
-  await peerTrigger.click();
-  await expect(toggle).toHaveText(
-    initial === "Mark read" ? "Mark unread" : "Mark read",
-  );
-  await toggle.click();
-  await expect(page.getByRole("alertdialog")).toHaveCount(0);
-  await row.hover();
+  await hoverMessage(row);
   await row.getByRole("button", { name: "Reply", exact: true }).click();
   const thread = page.getByRole("complementary", {
     name: "Thread",
     exact: true,
   });
   const root = thread.locator(`[data-message-id="${event.id}"]`);
-  await root.hover();
+  await hoverMessage(root);
   await root.getByRole("button", { name: "More message actions" }).click();
   await page
     .getByRole("menuitem", { name: "Edit message", exact: true })
@@ -140,7 +225,7 @@ test("manage a channel message, peer unread state, and its thread", async ({
   for (const width of [900, 390]) {
     await page.setViewportSize({ width, height: 850 });
     await row.scrollIntoViewIfNeeded();
-    await row.hover();
+    await hoverMessage(row);
     await trigger.click();
     await page
       .getByRole("menuitem", { name: "Delete message", exact: true })
@@ -167,7 +252,7 @@ test("manage a channel message, peer unread state, and its thread", async ({
     await expect(trigger).toBeFocused();
     await expect(actions).toHaveCSS("opacity", "1");
   }
-  await row.hover();
+  await hoverMessage(row);
   await trigger.click();
   await page
     .getByRole("menuitem", { name: "Delete message", exact: true })
@@ -178,6 +263,12 @@ test("manage a channel message, peer unread state, and its thread", async ({
   await expect(
     page.getByRole("textbox", { name: "Message #Alpha", exact: true }),
   ).toBeFocused();
+  // The row leaves before the relay records the deletion.
+  await expect
+    .poll(() =>
+      app.report.publications.some(({ event: item }) => item.kind === 5),
+    )
+    .toBe(true);
   const deletion = app.report.publications.find(
     ({ event: item }) => item.kind === 5,
   ).event;
@@ -195,7 +286,7 @@ test("deleting a thread reply returns focus to the surviving thread composer", a
     `[data-channel-timeline] [data-message-id="${root.id}"]`,
   );
   await expect(channelRow).toBeVisible();
-  await channelRow.hover();
+  await hoverMessage(channelRow);
   await channelRow.getByRole("button", { name: "Reply", exact: true }).click();
   const thread = page.getByRole("complementary", {
     name: "Thread",
@@ -211,7 +302,7 @@ test("deleting a thread reply returns focus to the surviving thread composer", a
   );
   const replyRow = thread.locator(`[data-message-id="${reply.id}"]`);
   await expect(replyRow).toBeVisible();
-  await replyRow.hover();
+  await hoverMessage(replyRow);
   await replyRow.getByRole("button", { name: "More message actions" }).click();
   await page
     .getByRole("menuitem", { name: "Delete message", exact: true })
@@ -225,7 +316,7 @@ test("deleting a thread reply returns focus to the surviving thread composer", a
     thread.getByRole("textbox", { name: "Reply to thread" }),
   ).toBeFocused();
   const rootRow = thread.locator(`[data-message-id="${root.id}"]`);
-  await rootRow.hover();
+  await hoverMessage(rootRow);
   await rootRow.getByRole("button", { name: "More message actions" }).click();
   await page
     .getByRole("menuitem", { name: "Delete message", exact: true })
@@ -251,7 +342,7 @@ test("DM menus edit own messages but never expose destructive actions for peers"
   const channel = await timeline.getAttribute("data-channel-timeline");
   const own = app.append("primary", channel, "Own DM message");
   const row = timeline.locator(`[data-message-id="${own.id}"]`);
-  await row.hover();
+  await hoverMessage(row);
   await row.getByRole("button", { name: "More message actions" }).click();
   await page
     .getByRole("menuitem", { name: "Edit message", exact: true })
@@ -266,10 +357,10 @@ test("DM menus edit own messages but never expose destructive actions for peers"
   await expect(row).toContainText("Corrected DM");
   const peer = app.append("primary", channel, "Peer DM message", true, false);
   const peerRow = timeline.locator(`[data-message-id="${peer.id}"]`);
-  await peerRow.hover();
+  await hoverMessage(peerRow);
   await peerRow.getByRole("button", { name: "More message actions" }).click();
   await expect(
-    page.getByRole("menuitem", { name: /^Mark (read|unread)$/ }),
+    page.getByRole("menuitem", { name: /^Mark as (read|unread)$/ }),
   ).toBeVisible();
   await expect(
     page.getByRole("menuitem", { name: "Edit message", exact: true }),
@@ -303,7 +394,7 @@ test("saving an attachment caption preserves its original metadata through the b
     `[data-channel-timeline] [data-message-id="${event.id}"]`,
   );
   await expect(row).toBeVisible();
-  await row.hover();
+  await hoverMessage(row);
   await row.getByRole("button", { name: "More message actions" }).click();
   await page
     .getByRole("menuitem", { name: "Edit message", exact: true })
@@ -380,7 +471,7 @@ test("thread media preserves its tab and draft while modal Escape restores focus
   const row = page.locator(
     `[data-channel-timeline] [data-message-id="${root.id}"]`,
   );
-  await row.hover();
+  await hoverMessage(row);
   await row.getByRole("button", { name: "Reply", exact: true }).click();
   const thread = page.getByRole("complementary", {
     name: "Thread",
@@ -424,7 +515,15 @@ test("thread media preserves its tab and draft while modal Escape restores focus
     await page.keyboard.press("Tab");
     await expect(remove).toBeFocused();
     await page.keyboard.press("Tab");
+    await expect(
+      confirmation.getByRole("button", { name: "Close", exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
     await expect(cancel).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(
+      confirmation.getByRole("button", { name: "Close", exact: true }),
+    ).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(remove).toBeFocused();
     await page.keyboard.press("Shift+Tab");

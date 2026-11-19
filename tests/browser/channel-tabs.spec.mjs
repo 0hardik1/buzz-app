@@ -1,17 +1,129 @@
+import { getPublicKey } from "nostr-tools";
+import { hoverMessage } from "./message-actions.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
-import { openPage, settlePanelMotion } from "./navigation.mjs";
+import {
+  closeSettings,
+  openPage,
+  settingsDialog,
+  settlePanelMotion,
+} from "./navigation.mjs";
+
+// Another person in shared Beta, so it is a conversation, not a chat with agents.
+// A fixed key keeps the roster static; its profile confirms it is a person.
+const teammateKey = new Uint8Array(32);
+teammateKey[31] = 1;
+const teammate = getPublicKey(teammateKey);
 
 test.use({
   productionBroker: true,
+  companionFixture: true,
   readState: true,
-  sessionChannels: ["beta"],
+  soloChannels: ["beta"],
+  sessionMembers: { beta: [teammate] },
   historyCounts: { alpha: 2, beta: 1 },
+});
+test.beforeEach(({ app }) => {
+  app.serveProfile(teammateKey, { name: "Teammate" });
 });
 
 // Real content links, two independent editors, browser focus and signed routing
 // prove the retained tab path without a test-only way to manufacture tabs.
+test("middle-click closes a content tab without selecting it", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const main = page.getByRole("article", { name: "Conversation", exact: true });
+  const link = app.append(
+    "primary",
+    "alpha",
+    "[Open Beta](buzz://channel/beta)",
+  );
+  await main
+    .locator(`[data-message-id="${link.id}"]`)
+    .getByRole("link", { name: "Open Beta" })
+    .click();
+  const workspace = page.locator("[data-panel-workspace]");
+  const beta = workspace.getByRole("tab", { name: "Beta", exact: true });
+  await expect(beta).toBeVisible();
+  await openChannelDetails(page);
+  const settings = workspace.getByRole("tab", {
+    name: "Channel settings",
+    exact: true,
+  });
+  await expect(settings).toHaveAttribute("aria-selected", "true");
+  // A covered tab keeps its state but leaves workspace layout until shown.
+  const contentVisibility = async (tab) => {
+    const pane = await tab.getAttribute("aria-controls");
+    return page
+      .locator(`[id="${pane}"]`)
+      .evaluate((element) => getComputedStyle(element).contentVisibility);
+  };
+  await expect.poll(() => contentVisibility(beta)).toBe("hidden");
+  await expect.poll(() => contentVisibility(settings)).toBe("visible");
+  await beta.click({ button: "right" });
+  await expect(
+    page.getByRole("menuitem", { name: "Close all tabs", exact: true }),
+  ).toBeVisible();
+  // The popup can paint before its animation-frame focus handoff completes.
+  await expect(page.getByRole("menu")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(beta).toBeVisible();
+  const draft = main.getByRole("textbox", {
+    name: "Message #Alpha",
+    exact: true,
+  });
+  await draft.fill("Keep this draft");
+  await beta.click({ button: "middle" });
+  await expect(beta).toHaveCount(0);
+  await expect(settings).toHaveAttribute("aria-selected", "true");
+  await expect(draft).toBeFocused();
+  await expect(draft).toHaveText("Keep this draft");
+  await settings.click({ button: "middle" });
+  await expect(workspace).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Channel actions", exact: true }),
+  ).toBeFocused();
+});
+
+test("Open in channel takes a content tab to its conversation with its composer focused", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const main = page.getByRole("article", { name: "Conversation", exact: true });
+  const link = app.append(
+    "primary",
+    "alpha",
+    "[Open Beta](buzz://channel/beta)",
+  );
+  await main
+    .locator(`[data-message-id="${link.id}"]`)
+    .getByRole("link", { name: "Open Beta" })
+    .click();
+  await page
+    .locator("[data-panel-workspace]")
+    .getByRole("tab", { name: "Beta", exact: true })
+    .click({ button: "right" });
+  await page
+    .getByRole("menuitem", { name: "Open in channel", exact: true })
+    .click();
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(
+    page.evaluate(() => history.state.buzzNavigationV1.entry.target),
+  ).resolves.toMatchObject({ kind: "conversation", channelId: "beta" });
+  // The menu hands focus back before navigating, so the destination takes it.
+  await expect(
+    main.getByRole("textbox", {
+      name: "Message this conversation",
+      exact: true,
+    }),
+  ).toBeFocused();
+});
+
 test("content-opened tabs restore drafts without offering blank-tab creation", async ({
   page,
   app,
@@ -23,9 +135,7 @@ test("content-opened tabs restore drafts without offering blank-tab creation", a
     name: "Toggle tab pane",
     exact: true,
   });
-  await expect(split).toHaveAttribute("aria-disabled", "true");
-  await split.focus();
-  await split.press("Enter");
+  await expect(split).toHaveCount(0);
   await expect(workspace).toHaveCount(0);
   const fullWidth = (await main.boundingBox()).width;
   const link = app.append(
@@ -47,7 +157,7 @@ test("content-opened tabs restore drafts without offering blank-tab creation", a
     exact: true,
   });
   const composer = beta.getByRole("textbox", {
-    name: "Message this session",
+    name: "Message this conversation",
     exact: true,
   });
   await expect(composer).toBeVisible();
@@ -75,11 +185,12 @@ test("content-opened tabs restore drafts without offering blank-tab creation", a
   await expect
     .poll(async () => (await main.boundingBox()).width)
     .toBeCloseTo(fullWidth, 0);
-  // An account companion is separate from this channel's hidden tabs.
-  await page.getByRole("button", { name: "Your profile", exact: true }).click();
-  await page.getByRole("menuitem", { name: "View your profile" }).click();
+  // A shell companion is independent of this channel's hidden tabs.
+  await page
+    .getByRole("button", { name: "Companion fixture", exact: true })
+    .click();
   const account = page.getByRole("complementary", {
-    name: "Profile",
+    name: "Companion fixture",
     exact: true,
   });
   await expect(account).toBeVisible();
@@ -88,17 +199,28 @@ test("content-opened tabs restore drafts without offering blank-tab creation", a
   await expect(composer).toHaveText("Beta draft");
   await expect(account).toBeVisible();
   await account
-    .getByRole("button", { name: "Close Profile panel", exact: true })
+    .getByRole("button", { name: "Close Companion fixture panel", exact: true })
     .click();
+  // Settings covers the retained channel: its tabs stay mounted behind the
+  // modal, inert, and are restored when Settings closes.
   await openPage(page, "Settings");
-  await openPage(page, "Messages");
+  await expect(settingsDialog(page)).toBeVisible();
+  await expect(workspace).toContainText("Beta draft");
+  expect(
+    await workspace.evaluate(
+      (el) => !!el.closest('[aria-hidden="true"], [inert]'),
+    ),
+  ).toBe(true);
+  await closeSettings(page);
   await expect(composer).toHaveText("Beta draft");
   await expect(
     workspace.getByRole("tab", { name: "Beta", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
   await split.click();
   await openPage(page, "Settings");
-  await openPage(page, "Messages");
+  await expect(settingsDialog(page)).toBeVisible();
+  await expect(workspace).toHaveCount(1);
+  await closeSettings(page);
   await expect(workspace).toBeHidden();
   await expect(split).toHaveAttribute("aria-expanded", "false");
   await split.click();
@@ -118,24 +240,31 @@ test("content-opened tabs restore drafts without offering blank-tab creation", a
       ),
     )
     .toBe(true);
-  const row = beta
+  // Solo agents answer at top level, so a Solo row starts no thread.
+  const sent = beta
     .locator("[data-message-id]")
     .filter({ has: page.getByText("Beta draft", { exact: true }) });
-  await row.hover();
+  await hoverMessage(sent);
+  await expect(
+    sent.getByRole("button", { name: "Reply", exact: true }),
+  ).toHaveCount(0);
+  const row = main.locator(`[data-message-id="${link.id}"]`);
+  await hoverMessage(row);
   await row.getByRole("button", { name: "Reply", exact: true }).click();
   const reply = workspace.getByRole("textbox", {
     name: "Reply to thread",
     exact: true,
   });
   await expect(reply).toBeFocused();
-  await reply.fill("Beta reply draft");
-  await page.locator('button[data-channel-id="beta"]').click();
+  await reply.fill("Alpha reply draft");
+  // Shared Beta lists with the viewer's chats.
+  await page.locator('button[data-solo-destination-id="beta"]').click();
   await expect(workspace).toHaveCount(0);
   await page.locator('button[data-channel-id="alpha"]').click();
   await expect(
-    workspace.locator('[role="tab"][data-tab-value^="thread:beta:"]'),
+    workspace.locator('[role="tab"][data-tab-value^="thread:alpha:"]'),
   ).toHaveAttribute("aria-selected", "true");
-  await expect(reply).toHaveText("Beta reply draft");
+  await expect(reply).toHaveText("Alpha reply draft");
   const alphaComposer = main.getByRole("textbox", {
     name: "Message #Alpha",
     exact: true,
@@ -144,13 +273,13 @@ test("content-opened tabs restore drafts without offering blank-tab creation", a
   // Restored side content must not take focus from the main conversation.
   await expect(alphaComposer).toBeFocused();
   await workspace.getByRole("tab", { name: "Beta", exact: true }).click();
-  await row.hover();
+  await hoverMessage(row);
   await row.getByRole("button", { name: "Reply", exact: true }).click();
   await expect(reply).toBeFocused();
-  await expect(reply).toHaveText("Beta reply draft");
+  await expect(reply).toHaveText("Alpha reply draft");
   await workspace
     .locator(
-      '.buzz-tabs-item:has([data-tab-value^="thread:beta:"][aria-selected="true"]) > button:not([role="tab"])',
+      '.buzz-tabs-item:has([data-tab-value^="thread:alpha:"][aria-selected="true"]) > button:not([role="tab"])',
     )
     .click();
   await workspace.getByRole("tab", { name: "Beta", exact: true }).click();
@@ -168,6 +297,8 @@ test("content-opened tabs restore drafts without offering blank-tab creation", a
     }
   }
   await page.setViewportSize({ width: 1440, height: 950 });
+  // Alpha's own thread took its details tab; reopen it for Diagnostics.
+  await openChannelDetails(page);
   app.omitChannel("beta");
   await workspace
     .getByRole("tab", { name: "Channel settings", exact: true })
@@ -196,19 +327,19 @@ test("content-opened tabs restore drafts without offering blank-tab creation", a
     .getByRole("button", { name: "Close Channel settings tab", exact: true })
     .click();
   await expect(workspace).toHaveCount(0);
-  await expect(split).toHaveAttribute("aria-disabled", "true");
+  await expect(split).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Channel actions", exact: true }),
   ).toBeFocused();
 });
 
 // Overflow and native keyboard reveal need actual tab-strip geometry. Six
-// linked sessions supply real content tabs rather than removed blank tabs.
+// linked Solo chats supply real content tabs rather than removed blank tabs.
 test.describe("crowded content tabs", () => {
   const ids = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"];
   test.use({
     channelIds: ids,
-    sessionChannels: ids.slice(1),
+    soloChannels: ids.slice(1),
     historyCounts: Object.fromEntries(ids.map((id) => [id, 1])),
   });
   test("tab overflow stays horizontal and keyboard navigation reveals its destination", async ({
@@ -295,7 +426,7 @@ test.describe("crowded content tabs", () => {
     }));
     expect(geometry.scrollbar).toBeLessThanOrEqual(4);
     expect(geometry.nativeWidth).toBe("auto");
-    expect(geometry.trackHeight).toBe("4px");
+    expect(geometry.trackHeight).toBe("3px");
     await expect
       .poll(() => list.evaluate((el) => el.scrollWidth > el.clientWidth))
       .toBe(true);
@@ -332,7 +463,7 @@ test.describe("crowded content tabs", () => {
     await expect(
       list.getByRole("tab", { name: "zeta", exact: true }),
     ).toBeFocused();
-    // Closing the final content tab returns focus to the empty pane toggle.
+    // Closing the final content tab returns focus to channel actions.
     for (let remaining = 5; remaining > 0; remaining--) {
       await tabs.first().focus();
       await tabs.first().press("Delete");
@@ -342,10 +473,150 @@ test.describe("crowded content tabs", () => {
       name: "Toggle tab pane",
       exact: true,
     });
-    await expect(split).toHaveAttribute("aria-disabled", "true");
-    await expect(split).toBeFocused();
+    await expect(split).toHaveCount(0);
+    await expect(
+      main.getByRole("button", { name: "Channel actions", exact: true }),
+    ).toBeFocused();
     await expect(
       workspace.getByRole("button", { name: "Add tab", exact: true }),
     ).toHaveCount(0);
+  });
+});
+
+// Real plugin registration through the channel menu, channel navigation and
+// tab focus need app wiring in both browsers. Save/conflict permutations
+// belong to editor tests.
+test("Canvas opens once beside Thread and retains its channel draft", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const main = page.getByRole("article", { name: "Conversation", exact: true });
+  const row = main.locator("[data-message-id]").first();
+  await hoverMessage(row);
+  await row.getByRole("button", { name: "Reply", exact: true }).click();
+  const workspace = page.locator("[data-panel-workspace]");
+  const thread = workspace.locator(
+    '[role="tab"][data-tab-value^="thread:alpha:"]',
+  );
+  await expect(thread).toHaveAttribute("aria-selected", "true");
+  const viewCanvas = async () => {
+    await main
+      .getByRole("button", { name: "Channel actions", exact: true })
+      .click();
+    await page
+      .getByRole("menuitem", { name: "View canvas", exact: true })
+      .click();
+  };
+  await viewCanvas();
+  const canvas = workspace.getByRole("tab", { name: "Canvas", exact: true });
+  const text = workspace.getByRole("textbox", { name: "Canvas Markdown" });
+  const view = workspace.getByRole("article", { name: "Saved Canvas" });
+  const edit = workspace.getByRole("tab", { name: "Edit", exact: true });
+  await expect(canvas).toHaveAttribute("aria-selected", "true");
+  await expect(view).toBeVisible();
+  await edit.click();
+  await expect(text).toBeEnabled();
+  await text.fill("Channel-scoped draft");
+  await thread.click();
+  await expect(text).toBeHidden();
+  await viewCanvas();
+  await expect(canvas).toHaveCount(1);
+  await expect(canvas).toHaveAttribute("aria-selected", "true");
+  // Returning to an open Canvas tab keeps its selected Edit tab.
+  await expect(text).toHaveValue("Channel-scoped draft");
+  // Pointer-returning to Canvas on Edit resumes the editor, not hidden View.
+  await text.evaluate((node) => node.setSelectionRange(2, 7));
+  await thread.click();
+  await expect(text).toBeHidden();
+  await canvas.click();
+  await expect(text).toBeFocused();
+  await expect(text).toHaveValue("Channel-scoped draft");
+  expect(
+    await text.evaluate((node) => [node.selectionStart, node.selectionEnd]),
+  ).toEqual([2, 7]);
+  await workspace
+    .getByRole("button", { name: "Close Canvas tab", exact: true })
+    .click();
+  await expect(thread).toHaveAttribute("aria-selected", "true");
+  await viewCanvas();
+  await expect(view).toBeVisible();
+  await edit.click();
+  await expect(text).toHaveValue("Channel-scoped draft");
+  // Leaving a channel keeps its Canvas tab open for the return.
+  await page.locator('button[data-solo-destination-id="beta"]').click();
+  await expect(workspace).toHaveCount(0);
+  await page.locator('button[data-channel-id="alpha"]').click();
+  await expect(thread).toBeVisible();
+  await expect(canvas).toHaveCount(1);
+  await expect(canvas).toHaveAttribute("aria-selected", "true");
+  // Returning shows the open Canvas; Edit still holds the channel's draft.
+  await edit.click();
+  await expect(text).toHaveValue("Channel-scoped draft");
+});
+
+// Real channel metadata, membership, panel registration, and history reads must
+// agree on archived access. The write-control matrix stays in component tests.
+test.describe("archived Canvas", () => {
+  test.use({ lifecycleVisibility: { archived: ["alpha"], hidden: [] } });
+  test("members can open Canvas and History in an archived channel", async ({
+    page,
+    app,
+  }) => {
+    const revision = app.sign({
+      kind: 40100,
+      content: "Archived plan",
+      tags: [["h", "alpha"]],
+      created_at: 1700000000,
+    });
+    await page.route("**/api/relay/primary/query", async (route) => {
+      const filters = route.request().postDataJSON();
+      if (!filters.every((filter) => filter.kinds?.includes(40100)))
+        return route.continue();
+      return route.fulfill({ json: [revision] });
+    });
+    await page.goto(app.origin);
+    await openPage(page, "Messages");
+    const scope = await page.evaluate(
+      () => history.state.buzzNavigationV1.entry.target.scope,
+    );
+    const target = {
+      version: 1,
+      kind: "conversation",
+      channelId: "alpha",
+      scope,
+    };
+    await page.goto(
+      `${app.origin}/#buzz=${encodeURIComponent(JSON.stringify(target))}`,
+    );
+    await page
+      .getByRole("button", { name: "Channel actions", exact: true })
+      .click();
+    await page
+      .getByRole("menuitem", { name: "View canvas", exact: true })
+      .click();
+    const canvas = page.getByRole("region", {
+      name: "Channel Canvas",
+      exact: true,
+    });
+    await expect(
+      canvas.getByRole("article", { name: "Saved Canvas" }),
+    ).toHaveText("Archived plan");
+    await canvas.getByRole("tab", { name: "Edit", exact: true }).click();
+    const editor = canvas.getByRole("textbox", { name: "Canvas Markdown" });
+    await expect(editor).toHaveValue("Archived plan");
+    await expect(editor).toHaveAttribute("readonly", "");
+    await expect(
+      canvas.getByRole("button", { name: "Save Canvas" }),
+    ).toBeDisabled();
+    await canvas.getByRole("tab", { name: "History", exact: true }).click();
+    await expect(canvas.getByText("Same as current version.")).toBeVisible();
+    await canvas.getByRole("checkbox", { name: "Show full content" }).click();
+    await expect(
+      canvas.getByRole("textbox", { name: "Revision Markdown" }),
+    ).toHaveValue("Archived plan");
+    await expect(
+      canvas.getByRole("button", { name: "Restore this version" }),
+    ).toBeDisabled();
   });
 });

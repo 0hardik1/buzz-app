@@ -70,9 +70,10 @@ function matches(index: ArchiveIndex, item: InboxItem) {
 }
 
 // The shared Inbox projection groups DMs under a channel read target,
-// including top-level messages and replies. Both renew ordinary activity.
+// including top-level messages and replies, and a Solo chat's top-level
+// messages into one timeline row.
 const ordinaryActivity = (item: InboxItem) =>
-  item.thread || item.target.kind === "channel";
+  item.thread || item.target.kind === "channel" || !!item.timeline;
 
 function renewed(archive: Archive, item: InboxItem, mentionsOnly = false) {
   const observed = new Set(archive.messageIds);
@@ -84,12 +85,12 @@ function renewed(archive: Archive, item: InboxItem, mentionsOnly = false) {
   );
 }
 
-// A session row merges what were separate per-message rows, so archives saved
+// A Solo chat row merges what were separate per-message rows, so archives saved
 // for some of them must not hide the rest.
 const partial = (entries: readonly Archive[], item: InboxItem) => {
   const observed = new Set(entries.flatMap((archive) => archive.messageIds));
   return (
-    item.id === `${item.channelId}:${item.channelId}` &&
+    !!item.timeline &&
     entries.some((archive) => archive.id !== item.id) &&
     !item.messageIds.every((id) => observed.has(id))
   );
@@ -125,7 +126,8 @@ export function updateArchive(
     archives.push({
       id: item.id,
       channelId: item.channelId,
-      through: Math.max(at, item.createdAt),
+      // The row's time may come from a newer message that is not evidence.
+      through: Math.max(at, ...item.messages.map(({ createdAt }) => createdAt)),
       messageIds: [...item.messageIds],
     });
   if (archives.length > 1000 || JSON.stringify(archives).length > maxBytes)

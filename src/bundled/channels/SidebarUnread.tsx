@@ -12,6 +12,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { CONVERSATION_LIST_LABEL, UNREAD_MARKERS } from "./conversation-rows";
 import styles from "./Channels.module.css";
 
 export type UnreadDmPreview = {
@@ -34,9 +35,9 @@ function unreadEdges(list: HTMLElement): Edges {
   const viewport = list.getBoundingClientRect();
   if (!list.clientHeight || !viewport.width) return edges;
   const rows = new Set<HTMLButtonElement>();
-  for (const marker of list.querySelectorAll(
-    "[data-channel-unread], [data-channel-activity]",
-  )) {
+  for (const marker of list.querySelectorAll(UNREAD_MARKERS)) {
+    // Muting keeps unread evidence but excludes it from scroll notifications.
+    if (marker.hasAttribute("data-channel-muted")) continue;
     const row = marker.closest("button");
     if (row) rows.add(row);
   }
@@ -80,14 +81,18 @@ export function SidebarUnread({
   children,
   listRef,
   dmPreviews,
+  floatingAction,
 }: {
   children: ReactNode;
   listRef?: RefObject<HTMLElement | null>;
   dmPreviews?: ReadonlyMap<string, UnreadDmPreview>;
+  floatingAction?: RefObject<HTMLDivElement | null> | undefined;
 }) {
   const ownList = useRef<HTMLElement>(null);
   const list = listRef ?? ownList;
   const content = useRef<HTMLDivElement>(null);
+  const upperCue = useRef<HTMLDivElement>(null);
+  const lowerCue = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState<Edges>({ above: [], below: [] });
   useEffect(() => {
     const viewport = list.current;
@@ -115,10 +120,97 @@ export function SidebarUnread({
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(measure);
     };
-    const resize = new ResizeObserver(schedule);
+    const cue = lowerCue.current;
+    const upper = upperCue.current;
+    const action = floatingAction?.current;
+    let positionFrame = 0;
+    const schedulePosition = () => {
+      if (!cue || !upper || !action || positionFrame) return;
+      // The adjustments below change an observed width. Do them outside the
+      // ResizeObserver delivery so each pass settles before another runs.
+      positionFrame = requestAnimationFrame(() => {
+        positionFrame = 0;
+        upper.removeAttribute("data-beside-action");
+        upper.removeAttribute("data-share-action-row");
+        cue.removeAttribute("data-beside-action");
+        cue.removeAttribute("data-share-action-row");
+        const cueRect = cue.getBoundingClientRect();
+        const actionRect = action.getBoundingClientRect();
+        const center = cueRect.left + cueRect.width / 2;
+        // The floating row uses the same gap around New as below it.
+        const gap =
+          Number.parseFloat(getComputedStyle(action).insetBlockEnd) || 0;
+        const available =
+          2 * Math.max(center - actionRect.right, actionRect.left - center) -
+          2 * gap;
+        cue.removeAttribute("data-preview-limit");
+        if (actionRect.width > 0 && cue.offsetWidth > available) {
+          // Try the widest option first and drop the farthest avatars first.
+          const previews = cue.querySelectorAll("[data-unread-dm]").length;
+          for (
+            let limit = previews - 1;
+            limit >= 0 && cue.offsetWidth > available;
+            limit--
+          ) {
+            cue.dataset.previewLimit = String(limit);
+          }
+        }
+        const lifted = actionRect.width > 0 && cue.offsetWidth > available;
+        cue.toggleAttribute("data-lifted", lifted);
+
+        // Measure in the list frame so the entrance animation cannot change fit.
+        const upperVisible = upper.dataset.visible === "true";
+        const lowerVisible = cue.dataset.visible === "true";
+        const upperEnd = upperVisible
+          ? upper.offsetTop + upper.offsetHeight + gap
+          : 0;
+        if (lifted && cue.offsetTop < upperEnd) {
+          cue.dataset.besideAction = "";
+        }
+        const actionTop = actionRect.top - viewport.getBoundingClientRect().top;
+        if (
+          upperVisible &&
+          actionRect.width > 0 &&
+          (upperEnd > actionTop || (lowerVisible && upperEnd > cue.offsetTop))
+        ) {
+          upper.dataset.besideAction = "";
+          if (lowerVisible) {
+            cue.dataset.besideAction = "";
+            cue.dataset.shareActionRow = "split";
+            upper.dataset.shareActionRow = "split";
+            const clippedCount = [cue, upper].some((edge) => {
+              const label = edge.querySelector(`.${styles.unreadEdgeLabel}`);
+              return label && label.scrollWidth > label.clientWidth;
+            });
+            if (clippedCount) {
+              cue.dataset.shareActionRow = "stacked";
+              upper.dataset.shareActionRow = "stacked";
+            }
+          }
+        }
+      });
+    };
+    const resize = new ResizeObserver(() => {
+      schedulePosition();
+      schedule();
+    });
     resize.observe(viewport);
     resize.observe(rows);
-    const mutations = new MutationObserver(schedule);
+    if (cue && upper && action) {
+      resize.observe(cue);
+      resize.observe(upper);
+      resize.observe(action);
+      schedulePosition();
+    }
+    const mutations = new MutationObserver((records) => {
+      if (
+        records.some(
+          ({ target }) => cue?.contains(target) || upper?.contains(target),
+        )
+      )
+        schedulePosition();
+      if (records.some(({ target }) => rows.contains(target))) schedule();
+    });
     mutations.observe(rows, {
       subtree: true,
       childList: true,
@@ -126,21 +218,40 @@ export function SidebarUnread({
       attributeFilter: [
         "open",
         "data-channel-unread",
+        "data-channel-muted",
         "data-channel-activity",
         "data-channel-type",
         "data-channel-id",
         "data-priority",
+        "data-moving",
       ],
     });
+    if (cue && upper && action) {
+      for (const edge of [cue, upper]) {
+        mutations.observe(edge, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributeFilter: ["data-visible"],
+        });
+      }
+    }
     viewport.addEventListener("scroll", schedule, { passive: true });
     schedule();
     return () => {
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(positionFrame);
       resize.disconnect();
       mutations.disconnect();
       viewport.removeEventListener("scroll", schedule);
+      for (const edge of [cue, upper]) {
+        edge?.removeAttribute("data-beside-action");
+        edge?.removeAttribute("data-share-action-row");
+      }
+      cue?.removeAttribute("data-lifted");
+      cue?.removeAttribute("data-preview-limit");
     };
-  }, [list]);
+  }, [list, floatingAction]);
   const reveal = (edge: keyof Edges) => {
     const viewport = list.current;
     if (!viewport) return;
@@ -178,20 +289,25 @@ export function SidebarUnread({
       })
       .slice(0, 3);
     const Icon = edge === "above" ? ArrowUpIcon : ArrowDownIcon;
+    // Spend the strong fill only when a DM, a mention of you or a thread
+    // reply waits past this edge; ordinary unread uses the quiet gray fill.
+    const attention = edges[edge].some((target) => target.attention);
     return (
       <div
+        ref={edge === "below" ? lowerCue : upperCue}
         className={styles.unreadEdge}
         data-edge={edge}
         key={edge}
+        data-attention={attention}
         data-visible={count > 0}
         inert={count === 0}
         aria-hidden={count === 0}
       >
         <Button
-          variant="prominent"
+          variant={attention ? "prominent" : "subtle"}
           aria-label={`${count} unread ${count === 1 ? "conversation" : "conversations"} ${edge}`}
           data-edge={edge}
-          data-attention={edges[edge].some(({ attention }) => attention)}
+          data-attention={attention}
           size="xs"
           shape="capsule"
           type="button"
@@ -221,14 +337,17 @@ export function SidebarUnread({
               <span>·</span>
             </span>
           )}
-          <span className={styles.unreadEdgeLabel}>{count} unread</span>
+          <span className={styles.unreadEdgeLabel}>
+            {count}
+            <span className={styles.unreadEdgeSuffix}> unread</span>
+          </span>
         </Button>
       </div>
     );
   });
   return (
     <SidebarList
-      navigation={{ label: "Subscribed channels", ref: list }}
+      navigation={{ label: CONVERSATION_LIST_LABEL, ref: list }}
       contentRef={content}
       overlay={edgeCues}
     >

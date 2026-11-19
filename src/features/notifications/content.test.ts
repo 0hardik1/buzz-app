@@ -6,6 +6,54 @@ import {
   pluginNotificationText,
 } from "./content";
 
+it.each([
+  ["The answer is ||Rosebud||", "The answer is [Spoiler]"],
+  ["||**Rosebud** and `secret`|| then ||another||", "[Spoiler] then [Spoiler]"],
+  ["before ||line one\nline two|| after", "before [Spoiler] after"],
+  ["||[secret](https://example.com)||", "[Spoiler]"],
+  ["||decoy `||` Rosebud `||` more||", "[Spoiler]"],
+  [String.raw`||decoy \|\| Rosebud \|\| more||`, "[Spoiler]"],
+  ["`||literal||`", "||literal||"],
+  ["```\n||literal||\n```", "||literal||"],
+  [String.raw`\|\|literal\|\|`, "||literal||"],
+  ["&#124;&#124;literal&#124;&#124;", "||literal||"],
+  ["unclosed ||literal", "unclosed ||literal"],
+  ["||||", "||||"],
+  ["\uE000 ||Rosebud||", "\uE000 [Spoiler]"],
+  ["||&#xE000; Rosebud||", "[Spoiler]"],
+  ["||&#57344; Rosebud||", "[Spoiler]"],
+  ["||&lt;&#xE000;&gt; Rosebud||", "[Spoiler]"],
+  ["||Rosebud*||*", "[Spoiler]*"],
+  ["*||*Rosebud||", "*[Spoiler]"],
+  [`before ||${"secret ".repeat(700)}||`, "before [Spoiler]"],
+])(
+  "protects spoilers without hiding literal Markdown: %s",
+  (source, expected) => {
+    expect(messagePreview(source)).toBe(expected);
+  },
+);
+
+it("conservatively redacts an old preview whose closing delimiter was truncated", () => {
+  expect(
+    messagePreview("The answer is ||Rosebud…", { storedPreview: true }),
+  ).toBe("The answer is [Spoiler]");
+});
+
+it("redacts spoilers in message and plugin notifications", () => {
+  expect(
+    messageNotificationText(
+      { ...message, previewContent: "The answer is ||Rosebud||" },
+      "mention",
+      undefined,
+      undefined,
+    ).body,
+  ).toBe("The answer is [Spoiler]");
+  expect(
+    pluginNotificationText({ body: "The answer is ||Rosebud||" }, "Reminders")
+      .body,
+  ).toBe("The answer is [Spoiler]");
+});
+
 const message = {
   channelId: "room",
   messageId: "b".repeat(64),
@@ -67,6 +115,16 @@ it("bounds source, Unicode output and nesting, with a nonempty fallback", () => 
     "Logan waved at you.",
   );
   expect(messagePreview("<!-- buzz:wave:v1 -->")).toBe("New message");
+});
+it.each([
+  ["<div><!<!-- hidden -->-- visible --></div>", "<div><!-- visible --></div>"],
+  [
+    "<div><scr<!-- hidden -->ipt>alert(1)</script></div>",
+    "<div><script>alert(1)</script></div>",
+  ],
+  ["an <!-- unclosed comment", "an <!-- unclosed comment"],
+])("preserves literal HTML in notification text: %s", (source, text) => {
+  expect(messagePreview(source)).toBe(text);
 });
 it("normalizes whitespace/control characters in names and body", () => {
   const text = messageNotificationText(

@@ -15,7 +15,9 @@ export const KIT_TAG = "buzz-channel-kit-v1";
 /** Separate discovery prevents older clients from rejecting the whole catalog. */
 export const ME_KIT_TAG = "buzz-me-kit-v1";
 export const KIT_RECORD_BYTES = 16 * 1024;
-export const CANVAS_BYTES = 24 * 1024;
+/** Canvas content a channel template may carry. */
+export const TEMPLATE_CANVAS_BYTES = 24 * 1024;
+export { LIVE_CANVAS_BYTES, LIVE_CANVAS_LIMIT } from "./canvas-limits.ts";
 export type Lineup = { teamIds: string[]; agents: string[]; canvas: string };
 export type Team = {
   type: "team";
@@ -35,9 +37,8 @@ export type Groups = {
   type: "groups";
   id: "me";
   groups: Group[];
+  /** Project filing only; the channel's Solo label decides what is Solo. */
   assignments: Record<string, string>;
-  /** Me placement is independent of group membership. */
-  channels?: string[];
 };
 export type KitValue = Team | Template | Groups;
 export type PayloadRecord = {
@@ -115,9 +116,11 @@ function keys(value: unknown, pattern: RegExp, max: number): string[] {
 }
 export function parseLineup(raw: unknown): Lineup {
   const v = object(raw);
-  const canvas = text(v.canvas, CANVAS_BYTES);
-  if (new TextEncoder().encode(canvas).length > CANVAS_BYTES)
-    throw new Error("Canvas is too large (24 KiB maximum)");
+  const canvas = text(v.canvas, TEMPLATE_CANVAS_BYTES);
+  if (new TextEncoder().encode(canvas).length > TEMPLATE_CANVAS_BYTES)
+    throw new Error(
+      `Canvas is too large (${TEMPLATE_CANVAS_BYTES / 1024} KiB maximum)`,
+    );
   return {
     teamIds: keys(v.teamIds, idPattern, 100),
     agents: keys(v.agents, keyPattern, 200),
@@ -129,8 +132,8 @@ export function kitRecordFits(record: KitRecord) {
     new TextEncoder().encode(JSON.stringify(record)).length <= KIT_RECORD_BYTES
   );
 }
-export const meCapacityMessage =
-  "Me storage is full. Move a conversation from Me to Messages, then try again.";
+export const soloCapacityMessage =
+  "Solo workspace storage is full. Remove a chat from a workspace, then try again.";
 
 export function parseKitRecord(raw: unknown, community: string): KitRecord {
   const r = object(raw),
@@ -160,7 +163,7 @@ export function parseKitRecord(raw: unknown, community: string): KitRecord {
     };
   else if (v.type === "groups" && v.id === "me") {
     if (!Array.isArray(v.groups) || v.groups.length > 100)
-      throw new Error("Too many Me groups");
+      throw new Error("Too many Solo groups");
     const groups = v.groups.map((raw) => {
       const g = object(raw);
       return {
@@ -171,7 +174,7 @@ export function parseKitRecord(raw: unknown, community: string): KitRecord {
       };
     });
     if (new Set(groups.map((g) => g.id)).size !== groups.length)
-      throw new Error("Duplicate Me group");
+      throw new Error("Duplicate Solo group");
     const assignments = Object.entries(object(v.assignments));
     if (
       assignments.length > 1000 ||
@@ -181,17 +184,14 @@ export function parseKitRecord(raw: unknown, community: string): KitRecord {
           !groups.some((g) => g.id === group),
       )
     )
-      throw new Error("Invalid Me group placement");
+      throw new Error("Invalid Solo group placement");
     value = {
       type: "groups",
       id: v.id,
       groups,
+      // Records from before the Solo label also list `channels`. Dropping
+      // it here frees that space on the next write.
       assignments: Object.fromEntries(assignments) as Record<string, string>,
-      channels: keys(
-        v.channels ?? [],
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-        1000,
-      ),
     };
   } else throw new Error("Unsupported channel recipe type");
   if (
@@ -210,7 +210,7 @@ export function parseKitRecord(raw: unknown, community: string): KitRecord {
   if (!kitRecordFits(result))
     throw new Error(
       value.type === "groups"
-        ? meCapacityMessage
+        ? soloCapacityMessage
         : "This saved recipe exceeds 16 KiB; shorten its Canvas or selections",
     );
   return result;
@@ -227,6 +227,9 @@ export function kitTag(record: KitRecord) {
 export function coordinate(record: KitRecord) {
   return `${kitTag(record)}:${encodeURIComponent(record.community)}:${record.value.type}:${record.value.id}`;
 }
+
+export const legacyWorkspaceRecipeCoordinate = (community: string) =>
+  `${ME_KIT_TAG}:${encodeURIComponent(community)}:groups:me`;
 export function resolveLineup(
   lineup: Lineup,
   entries: readonly KitEntry[],

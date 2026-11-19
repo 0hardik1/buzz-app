@@ -1,4 +1,5 @@
 use super::*;
+use crate::federated_identity::FederatedIdentity;
 use serde_json::Value;
 
 pub(super) fn uuid(value: &str) -> bool {
@@ -19,18 +20,7 @@ fn common(event: &EventTemplate) -> bool {
     event.content.is_empty() && event.created_at <= i64::MAX as u64
 }
 fn details(event: &EventTemplate) -> bool {
-    if event.kind == 9002 && common(event) && event.tags.len() == 2 {
-        return tag(event, 0, "h").is_some_and(uuid)
-            && tag(event, 1, "name").is_some_and(|name| {
-                !name.is_empty()
-                    && name.chars().count() <= 120
-                    && name
-                        .trim_start_matches(|c: char| c == '#' || c.is_whitespace())
-                        .trim_end_matches(char::is_whitespace)
-                        == name
-            });
-    }
-    if event.kind != 9002 || !common(event) || !(3..=13).contains(&event.tags.len()) {
+    if event.kind != 9002 || !common(event) || !(3..=14).contains(&event.tags.len()) {
         return false;
     }
     let (Some(id), Some(name), Some(about)) = (
@@ -58,8 +48,28 @@ fn details(event: &EventTemplate) -> bool {
         index += 1;
     }
     // NIP-CL: trailing `t` tags replace the label set; one `["t", ""]` clears it.
+    if let Some(role) = tag(event, index, "join_role") {
+        if !matches!(role, "member" | "guest") {
+            return false;
+        }
+        index += 1;
+    }
     let labels = &event.tags[index..];
-    let labels_valid = match labels {
+    let labels_valid = details_labels(labels);
+    uuid(id)
+        && labels_valid
+        && !name.is_empty()
+        && name.chars().count() <= 120
+        && name
+            .trim_start_matches(|c: char| c == '#' || c.is_whitespace())
+            .trim_end_matches(char::is_whitespace)
+            == name
+        && about.chars().count() <= 1000
+        && !about.contains("Buzz Huddle (")
+}
+
+fn details_labels(labels: &[Vec<String>]) -> bool {
+    match labels {
         [] => true,
         [only] if only.len() == 2 && only[0] == "t" && only[1].is_empty() => true,
         _ => {
@@ -71,17 +81,7 @@ fn details(event: &EventTemplate) -> bool {
                         && labels[..n].iter().all(|prior| prior[1] != t[1])
                 })
         }
-    };
-    uuid(id)
-        && labels_valid
-        && !name.is_empty()
-        && name.chars().count() <= 120
-        && name
-            .trim_start_matches(|c: char| c == '#' || c.is_whitespace())
-            .trim_end_matches(char::is_whitespace)
-            == name
-        && about.chars().count() <= 1000
-        && !about.contains("Buzz session (")
+    }
 }
 fn lifecycle(event: &EventTemplate) -> bool {
     if !matches!(event.kind, 9002 | 9008 | 9021 | 9022 | 41012)
@@ -90,8 +90,14 @@ fn lifecycle(event: &EventTemplate) -> bool {
     {
         return false;
     }
+    // The narrow 9002 flips one relay-enforced flag: archive, or auto-join
+    // for community owners/admins. Generic metadata edits take the details route.
     tag(event, 0, "h").is_some_and(uuid)
-        && (event.kind != 9002 || matches!(tag(event, 1, "archived"), Some("true" | "false")))
+        && (event.kind != 9002
+            || matches!(
+                tag(event, 1, "archived").or_else(|| tag(event, 1, "auto_join")),
+                Some("true" | "false")
+            ))
 }
 fn archive(event: &EventTemplate) -> bool {
     if !matches!(event.kind, 9035 | 9036)
@@ -126,9 +132,26 @@ fn member_administration(event: &EventTemplate) -> bool {
         && event.created_at <= 9_007_199_254_740_991
         && event.tags.len() == if event.kind == 9000 { 3 } else { 2 }
         && tag(event, 0, "h").is_some_and(uuid)
-        && tag(event, 1, "p").is_some_and(super::hex_key)
-        && (event.kind == 9001
-            || matches!(tag(event, 2, "role"), Some("admin" | "member" | "guest")))
+        && (ownership_transfer(event).is_some()
+            || (tag(event, 1, "p").is_some_and(super::hex_key)
+                && (event.kind == 9001
+                    || matches!(tag(event, 2, "role"), Some("admin" | "member" | "guest")))))
+}
+/// The stepping-down owner of `[h, ["p", heir, "owner"], ["p", owner, "admin"]]`.
+fn ownership_transfer(event: &EventTemplate) -> Option<&str> {
+    let [_, heir, owner] = event.tags.as_slice() else {
+        return None;
+    };
+    (event.kind == 9000
+        && matches!(heir.as_slice(), [p, key, role] if p == "p" && role == "owner" && super::hex_key(key))
+        && matches!(owner.as_slice(), [p, key, role] if p == "p" && role == "admin" && super::hex_key(key))
+        && heir[1] != owner[1])
+        .then(|| owner[1].as_str())
+}
+/// A member command may change only others, except an owner stepping down.
+fn member_signer_mismatch(event: &EventTemplate, viewer: &str) -> bool {
+    tag(event, 1, "p") == Some(viewer)
+        || ownership_transfer(event).is_some_and(|owner| owner != viewer)
 }
 fn valid(route: &str, event: &EventTemplate) -> bool {
     match route {
@@ -147,7 +170,7 @@ fn validate(route: &str, event: &Value, viewer: Option<&str>) -> Result<EventTem
     if !valid(route, &parsed)
         || viewer.is_some_and(|v| event.get("pubkey").and_then(Value::as_str) != Some(v))
         || (route == "member-administration"
-            && viewer.is_some_and(|v| tag(&parsed, 1, "p") == Some(v)))
+            && viewer.is_some_and(|v| member_signer_mismatch(&parsed, v)))
     {
         return Err("Invalid channel lifecycle command".into());
     }
@@ -166,9 +189,7 @@ pub(crate) async fn relay_channel_sign(
 ) -> Result<Value> {
     origin(&community)?;
     let parsed = validate(&route, &event, None)?;
-    if route == "member-administration"
-        && tag(&parsed, 1, "p") == Some(host.viewer().await?.as_str())
-    {
+    if route == "member-administration" && member_signer_mismatch(&parsed, &host.viewer().await?) {
         return Err("Invalid member administration command".into());
     }
     host.sign(parsed).await
@@ -177,6 +198,7 @@ pub(crate) async fn relay_channel_sign(
 #[tauri::command]
 pub(crate) async fn relay_channel_publish(
     host: tauri::State<'_, IdentityHost>,
+    fi: tauri::State<'_, FederatedIdentity>,
     community: String,
     route: String,
     event: Value,
@@ -188,31 +210,21 @@ pub(crate) async fn relay_channel_publish(
     if body.len() > MAX_BODY {
         return Err("Invalid relay request body".into());
     }
-    send(host.inner(), url, "POST", Some(body), true, MAX_RESPONSE).await
+    send(
+        host.inner(),
+        Some(fi.inner()),
+        url,
+        "POST",
+        Some(body),
+        true,
+        MAX_RESPONSE,
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn session_rename_only_admits_a_canonical_name() {
-        let mut event = EventTemplate {
-            kind: 9002,
-            created_at: 12,
-            content: String::new(),
-            tags: vec![
-                vec!["h".into(), uuid::Uuid::nil().to_string()],
-                vec!["name".into(), "Session title".into()],
-            ],
-        };
-        assert!(valid("channel-details", &event));
-        for name in ["", "#name", " name", "name "] {
-            event.tags[1][1] = name.into();
-            assert!(!valid("channel-details", &event));
-        }
-        event.tags[1] = vec!["visibility".into(), "open".into()];
-        assert!(!valid("channel-details", &event));
-    }
     #[test]
     fn purpose_bound_templates() {
         let mut event = EventTemplate {
@@ -286,57 +298,66 @@ pub(crate) async fn relay_kit_decode(
     Ok(decoded)
 }
 
+/// Opens the DM of `pubkeys` (kind:41010), or, with `channel`, adds them to
+/// that DM (kind:41011). Only with `history` `"include"` may anyone join an
+/// existing DM and read its history: an open then finds the DM of these
+/// people and adds any named agents, and an add joins that DM instead of
+/// starting a new DM of its people plus them, its agents left behind. An
+/// add's `"ask"` lets the relay decide, refusing with `needs-choice: history`
+/// when people would join. Returns the DM the relay settled on.
 #[tauri::command]
 pub(crate) async fn relay_direct_message(
     host: tauri::State<'_, IdentityHost>,
+    fi: tauri::State<'_, FederatedIdentity>,
     community: String,
     pubkeys: Vec<String>,
+    channel: Option<String>,
+    history: Option<String>,
 ) -> Result<String> {
     let url = request_url(&community, "/events", "POST")?;
     let viewer = host.viewer().await?;
-    let unique: std::collections::HashSet<_> = pubkeys.iter().collect();
-    if pubkeys.is_empty()
-        || pubkeys.len() > 8
-        || unique.len() != pubkeys.len()
-        || pubkeys.iter().any(|p| !super::hex_key(p) || p == &viewer)
-    {
-        return Err("Choose between one and eight other people.".into());
-    }
+    let tags = direct_message_tags(&viewer, pubkeys, channel, history.as_deref())?;
+    let adding = tags[0][0] == "h";
+    let failed = direct_message_refusal(adding, None);
     let event = host
         .sign(EventTemplate {
-            kind: 41010,
+            kind: if adding { 41011 } else { 41010 },
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|_| "System clock is unavailable")?
                 .as_secs(),
             content: String::new(),
-            tags: pubkeys
-                .into_iter()
-                .map(|p| vec!["p".into(), p])
-                .chain(std::iter::once(vec![
-                    "client".into(),
-                    uuid::Uuid::new_v4().to_string(),
-                ]))
-                .collect(),
+            tags,
         })
         .await?;
     let body = serde_json::to_string(&event).map_err(|_| "Invalid channel lifecycle command")?;
-    let response = send(host.inner(), url, "POST", Some(body), true, MAX_RESPONSE).await?;
+    let response = send(
+        host.inner(),
+        Some(fi.inner()),
+        url,
+        "POST",
+        Some(body),
+        true,
+        MAX_RESPONSE,
+    )
+    .await?;
     if response.status != 200 {
-        return Err("The direct message could not be opened. Try again.".into());
+        let reason = serde_json::from_str::<Value>(&response.body)
+            .ok()
+            .and_then(|body| body.get("error")?.as_str().map(str::to_owned));
+        return Err(direct_message_refusal(adding, reason.as_deref()).into());
     }
-    let receipt: Value = serde_json::from_str(&response.body)
-        .map_err(|_| "The direct message could not be opened. Try again.")?;
+    let receipt: Value = serde_json::from_str(&response.body).map_err(|_| failed)?;
     if receipt.get("event_id") != event.get("id")
         || receipt.get("accepted") != Some(&Value::Bool(true))
     {
-        return Err("The direct message could not be opened. Try again.".into());
+        return Err(failed.into());
     }
     let payload = receipt
         .get("message")
         .and_then(Value::as_str)
         .and_then(|m| m.strip_prefix("response:"))
-        .ok_or("The direct message could not be opened. Try again.")?;
+        .ok_or(failed)?;
     let result: Value = serde_json::from_str(payload)
         .map_err(|_| "The relay returned an invalid direct message.")?;
     let id = result
@@ -349,8 +370,79 @@ pub(crate) async fn relay_direct_message(
     Ok(id.into())
 }
 
+/// What to show for the relay's refusal of a DM command, from its exact
+/// reason, as `directMessageRefusal` in `direct-message-policy.ts` words it.
+/// A relay from before `ask` refuses the tag itself, which asks too.
+fn direct_message_refusal(adding: bool, reason: Option<&str>) -> &'static str {
+    match reason {
+        Some("needs-choice: history" | r#"invalid: history must be "include", got "ask""#)
+            if adding =>
+        {
+            "needs-choice: history"
+        }
+        Some(reason) if reason.contains("at most 9 people") => {
+            if adding {
+                "Couldn’t add them. A DM holds up to 9 people, not counting agents."
+            } else {
+                "A DM holds up to 9 people, not counting agents."
+            }
+        }
+        _ if adding => "Couldn’t add them. Try again.",
+        _ => "The direct message could not be opened. Try again.",
+    }
+}
+
+/// The most people and agents one addition to a DM names, as
+/// `MAX_DIRECT_MESSAGE_ADDITIONS`: the relay counts its people.
+const MAX_DIRECT_MESSAGE_ADDITIONS: usize = 100;
+
+/// The tags of a DM open, or of an addition to the DM `channel`: an `h` tag
+/// first when adding, a `p` per person, `["history", "include"]` or, adding,
+/// `["history", "ask"]` when asked, and a unique `client` tag so a repeat is
+/// a new command.
+pub(super) fn direct_message_tags(
+    viewer: &str,
+    pubkeys: Vec<String>,
+    channel: Option<String>,
+    history: Option<&str>,
+) -> Result<Vec<Vec<String>>> {
+    let unique: std::collections::HashSet<_> = pubkeys.iter().collect();
+    let most = if channel.is_some() {
+        MAX_DIRECT_MESSAGE_ADDITIONS
+    } else {
+        8
+    };
+    if pubkeys.is_empty()
+        || pubkeys.len() > most
+        || unique.len() != pubkeys.len()
+        || pubkeys.iter().any(|p| !super::hex_key(p) || p == viewer)
+    {
+        return Err(if channel.is_some() {
+            "Choose who to add to this DM.".into()
+        } else {
+            "Choose between one and eight other people.".into()
+        });
+    }
+    let mut tags = Vec::with_capacity(pubkeys.len() + 3);
+    match channel {
+        Some(channel) if uuid(&channel) => tags.push(vec!["h".into(), channel]),
+        Some(_) => return Err("Choose a direct message to add people to.".into()),
+        None => {}
+    }
+    let adding = tags.len() == 1;
+    tags.extend(pubkeys.into_iter().map(|p| vec!["p".into(), p]));
+    match history {
+        None => {}
+        Some(value @ "include") => tags.push(vec!["history".into(), value.into()]),
+        Some(value @ "ask") if adding => tags.push(vec!["history".into(), value.into()]),
+        Some(_) => return Err("Choose whether they see this DM’s history.".into()),
+    }
+    tags.push(vec!["client".into(), uuid::Uuid::new_v4().to_string()]);
+    Ok(tags)
+}
+
 pub(super) fn creation(event: &EventTemplate) -> bool {
-    if event.kind != 9007 || !event.content.is_empty() || !(4..=15).contains(&event.tags.len()) {
+    if event.kind != 9007 || !event.content.is_empty() || !(4..=47).contains(&event.tags.len()) {
         return false;
     }
     let (Some(id), Some(name), Some(visibility), Some(channel_type)) = (
@@ -365,7 +457,7 @@ pub(super) fn creation(event: &EventTemplate) -> bool {
         || name.trim().is_empty()
         || name.chars().count() > 120
         || !matches!(visibility, "open" | "private")
-        || channel_type != "stream"
+        || !matches!(channel_type, "stream" | "system")
     {
         return false;
     }
@@ -378,9 +470,7 @@ pub(super) fn creation(event: &EventTemplate) -> bool {
         let Some(about) = tag(event, index, "about") else {
             return false;
         };
-        if about.chars().count() > 1000
-            || (about.contains("Buzz session (") && !session_metadata(about))
-        {
+        if about.chars().count() > 1000 {
             return false;
         }
         index += 1;
@@ -393,10 +483,9 @@ pub(super) fn creation(event: &EventTemplate) -> bool {
         let Some(ttl) = tag(event, index, "ttl") else {
             return false;
         };
-        if event.tags.get(4).is_some_and(|t| {
-            t.first().is_some_and(|s| s == "about") && session_metadata(&event.tags[4][1])
-        }) || ttl.starts_with('0')
-            || !ttl.parse::<u32>().is_ok_and(|n| n <= 2_147_483_647)
+        if ttl.starts_with('0')
+            || !ttl.bytes().all(|b| b.is_ascii_digit())
+            || !ttl.parse::<i32>().is_ok_and(|n| n > 0)
         {
             return false;
         }
@@ -415,6 +504,26 @@ pub(super) fn creation(event: &EventTemplate) -> bool {
         if index - first_label >= 8
             || !channel_label(label)
             || event.tags[first_label..index].iter().any(|t| t[1] == label)
+        {
+            return false;
+        }
+        index += 1;
+    }
+    // block/buzz#8421: up to 32 distinct `p` tags name the first members.
+    let first_member = index;
+    while event
+        .tags
+        .get(index)
+        .is_some_and(|t| t.first().is_some_and(|s| s == "p"))
+    {
+        let Some(member) = tag(event, index, "p") else {
+            return false;
+        };
+        if index - first_member >= 32
+            || !super::hex_key(member)
+            || event.tags[first_member..index]
+                .iter()
+                .any(|t| t[1] == member)
         {
             return false;
         }
@@ -462,12 +571,17 @@ mod boundary_tests {
         }
     }
     #[test]
-    fn lifecycle_accepts_only_exact_archive_values() {
+    fn lifecycle_accepts_only_exact_archive_and_auto_join_values() {
+        for flag in ["archived", "auto_join"] {
+            lifecycle_accepts_only_exact_flag_values(flag);
+        }
+    }
+    fn lifecycle_accepts_only_exact_flag_values(flag: &str) {
         let event = serde_json::json!({
             "kind": 9002,
             "created_at": 1700000010,
             "content": "",
-            "tags": [["h", uuid::Uuid::nil().to_string()], ["archived", "false"]]
+            "tags": [["h", uuid::Uuid::nil().to_string()], [flag, "false"]]
         });
         for value in ["true", "false"] {
             let mut command = event.clone();
@@ -492,23 +606,30 @@ mod boundary_tests {
         }
         for tags in [
             serde_json::json!([["h", uuid::Uuid::nil().to_string()]]),
-            serde_json::json!([["h", uuid::Uuid::nil().to_string()], ["archived"]]),
+            serde_json::json!([["h", uuid::Uuid::nil().to_string()], [flag]]),
             serde_json::json!([
                 ["h", uuid::Uuid::nil().to_string()],
-                ["archived", "false", "extra"]
+                [flag, "false", "extra"]
+            ]),
+            serde_json::json!([
+                ["h", uuid::Uuid::nil().to_string()],
+                [flag, "false"],
+                [flag, "true"]
             ]),
             serde_json::json!([
                 ["h", uuid::Uuid::nil().to_string()],
                 ["archived", "false"],
-                ["archived", "true"]
+                ["auto_join", "true"]
             ]),
             serde_json::json!([
                 ["h", uuid::Uuid::nil().to_string()],
-                ["archived", "false"],
+                [flag, "false"],
                 ["name", "injected"]
             ]),
-            serde_json::json!([["archived", "false"], ["h", uuid::Uuid::nil().to_string()]]),
-            serde_json::json!([["h", "not-a-channel"], ["archived", "false"]]),
+            serde_json::json!([[flag, "false"], ["h", uuid::Uuid::nil().to_string()]]),
+            serde_json::json!([["h", "not-a-channel"], [flag, "false"]]),
+            serde_json::json!([["h", uuid::Uuid::nil().to_string()], ["autojoin", "true"]]),
+            serde_json::json!([["h", uuid::Uuid::nil().to_string()], ["auto-join", "true"]]),
         ] {
             let mut command = event.clone();
             command["tags"] = tags;
@@ -519,14 +640,19 @@ mod boundary_tests {
     #[test]
     fn commands_reject_cross_route_and_foreign_signatures() {
         let host = IdentityHost::fixture();
-        for (value, tampered) in [("true", "false"), ("false", "true")] {
+        for (flag, value, tampered) in [
+            ("archived", "true", "false"),
+            ("archived", "false", "true"),
+            ("auto_join", "true", "false"),
+            ("auto_join", "false", "true"),
+        ] {
             let template = EventTemplate {
                 kind: 9002,
                 created_at: 1700000010,
                 content: String::new(),
                 tags: vec![
                     vec!["h".into(), uuid::Uuid::new_v4().to_string()],
-                    vec!["archived".into(), value.into()],
+                    vec![flag.into(), value.into()],
                 ],
             };
             let event = tauri::async_runtime::block_on(host.sign(template)).unwrap();
@@ -578,6 +704,53 @@ mod boundary_tests {
     }
 
     #[test]
+    fn details_admit_only_member_and_guest_admission_defaults() {
+        let host = IdentityHost::fixture();
+        for role in ["member", "guest"] {
+            let event =
+                serde_json::to_value(details_event(vec![vec!["join_role".into(), role.into()]]))
+                    .unwrap();
+            let parsed = validate("channel-details", &event, None).unwrap();
+            assert!(validate("channel-lifecycle", &event, None).is_err());
+            let signed = tauri::async_runtime::block_on(host.sign(parsed)).unwrap();
+            assert!(validate("channel-details", &signed, signed["pubkey"].as_str()).is_ok());
+        }
+        for extra in [
+            vec![vec!["join_role", "owner"]],
+            vec![vec!["join_role", "admin"]],
+            vec![vec!["join_role", "bot"]],
+            vec![vec!["join_role", ""]],
+            vec![vec!["join_role"]],
+            vec![vec!["join_role", "guest", "extra"]],
+            vec![vec!["join_role", "member"], vec!["join_role", "guest"]],
+            vec![vec!["join_role", "guest"], vec!["ttl", "60"]],
+        ] {
+            let template = details_event(
+                extra
+                    .iter()
+                    .map(|tag| tag.iter().map(|s| (*s).into()).collect())
+                    .collect(),
+            );
+            let event = serde_json::to_value(&template).unwrap();
+            assert!(validate("channel-details", &event, None).is_err());
+            let signed = tauri::async_runtime::block_on(host.sign(template)).unwrap();
+            assert!(validate("channel-details", &signed, signed["pubkey"].as_str()).is_err());
+        }
+    }
+
+    #[test]
+    fn details_reject_huddle_markers_at_sign_and_publish_boundaries() {
+        let mut event = details_event(vec![]);
+        event.tags[2][1] =
+            "Buzz Huddle (buzz.huddles/v1)\nparent:11111111-1111-4111-8111-111111111111".into();
+        let value = serde_json::to_value(&event).unwrap();
+        assert!(validate("channel-details", &value, None).is_err());
+        let host = IdentityHost::fixture();
+        let signed = tauri::async_runtime::block_on(host.sign(event)).unwrap();
+        assert!(validate("channel-details", &signed, signed["pubkey"].as_str()).is_err());
+    }
+
+    #[test]
     fn details_reject_malformed_optional_tags() {
         for extra in [
             vec![vec![]],
@@ -620,6 +793,66 @@ mod boundary_tests {
     }
 
     #[test]
+    fn creation_lifetime_is_canonical_and_follows_the_description() {
+        let host = IdentityHost::fixture();
+        let base = EventTemplate {
+            kind: 9007,
+            created_at: 12,
+            content: String::new(),
+            tags: vec![
+                vec!["h".into(), uuid::Uuid::nil().to_string()],
+                vec!["name".into(), "Work".into()],
+                vec!["visibility".into(), "private".into()],
+                vec!["channel_type".into(), "stream".into()],
+                vec!["about".into(), "Notes".into()],
+            ],
+        };
+        for ttl in ["1", "600", "2147483647"] {
+            let mut event = template(&serde_json::to_value(&base).unwrap()).unwrap();
+            event.tags.push(vec!["ttl".into(), ttl.into()]);
+            assert!(creation(&event));
+            let signed = tauri::async_runtime::block_on(
+                host.sign(template(&serde_json::to_value(&event).unwrap()).unwrap()),
+            )
+            .unwrap();
+            super::super::verify_signature(&signed).unwrap();
+            assert!(creation(&super::template(&signed).unwrap()));
+            event.tags.swap(4, 5);
+            assert!(!creation(&event));
+        }
+        for ttl in [
+            "",
+            "0",
+            "01",
+            "+1",
+            "-1",
+            " 1",
+            "1\n",
+            "1.5",
+            "1e3",
+            "2147483648",
+        ] {
+            let mut invalid = template(&serde_json::to_value(&base).unwrap()).unwrap();
+            invalid.tags.push(vec!["ttl".into(), ttl.into()]);
+            assert!(!creation(&invalid), "{ttl:?}");
+            let signed = tauri::async_runtime::block_on(host.sign(invalid)).unwrap();
+            assert!(!creation(&super::template(&signed).unwrap()));
+        }
+        for extra in [
+            vec![vec!["ttl", "1"], vec!["ttl", "2"]],
+            vec![vec!["ttl", "1", "extra"]],
+            vec![vec!["unknown", "1"]],
+        ] {
+            let mut invalid = template(&serde_json::to_value(&base).unwrap()).unwrap();
+            invalid.tags.extend(
+                extra
+                    .iter()
+                    .map(|tag| tag.iter().map(|v| (*v).to_string()).collect::<Vec<_>>()),
+            );
+            assert!(!creation(&invalid));
+        }
+    }
+    #[test]
     fn creation_requires_the_exact_stream_command() {
         let mut event = EventTemplate {
             kind: 9007,
@@ -651,45 +884,28 @@ mod boundary_tests {
         event.tags.push(vec!["p".into(), "attacker".into()]);
         assert!(!creation(&event));
         event.tags.pop();
-        event.tags[3][1] = "dm".into();
+        let member = |n: usize| vec!["p".to_string(), format!("{n:064x}")];
+        event.tags.extend((1..=32).map(member));
+        assert!(creation(&event));
+        event.tags.push(member(33));
         assert!(!creation(&event));
-    }
-
-    #[test]
-    fn creation_accepts_only_the_session_description_grammar() {
-        const PREFIX: &str = "Buzz session (buzz.sessions/v1)";
-        let parent = uuid::Uuid::new_v4().to_string();
-        let with_about = |about: &str| EventTemplate {
-            kind: 9007,
-            created_at: 1700000010,
-            content: String::new(),
-            tags: vec![
-                vec!["h".into(), uuid::Uuid::new_v4().to_string()],
-                vec!["name".into(), "Team".into()],
-                vec!["visibility".into(), "private".into()],
-                vec!["channel_type".into(), "stream".into()],
-                vec!["about".into(), about.into()],
-            ],
-        };
-        for about in [
-            PREFIX.to_string(),
-            format!("{PREFIX}\nparent:{parent}"),
-            format!("{PREFIX}\npersonal"),
-            format!("{PREFIX}\nparent:{parent}\npersonal"),
-        ] {
-            assert!(creation(&with_about(&about)), "{about:?}");
-        }
-        for about in [
-            format!("{PREFIX}\n"),
-            format!("{PREFIX}\nparent:"),
-            format!("{PREFIX}\nparent:not-a-uuid"),
-            format!("{PREFIX}\npersonal\nparent:{parent}"),
-            format!("{PREFIX}\npersonal\npersonal"),
-            format!("{PREFIX}\npersonal\n"),
-            format!("{PREFIX}\nme"),
-            format!(" {PREFIX}"),
-        ] {
-            assert!(!creation(&with_about(&about)), "{about:?}");
+        event.tags.truncate(4);
+        event.tags.extend([member(1), member(1)]);
+        assert!(!creation(&event));
+        event.tags.truncate(4);
+        event.tags.push(vec!["p".into(), "A".repeat(64)]);
+        assert!(!creation(&event));
+        event.tags.truncate(4);
+        event
+            .tags
+            .extend([member(1), vec!["t".into(), "buzz.solo".into()]]);
+        assert!(!creation(&event));
+        event.tags.truncate(4);
+        event.tags[3][1] = "system".into();
+        assert!(creation(&event));
+        for other in ["dm", "forum", "session", "System", ""] {
+            event.tags[3][1] = other.into();
+            assert!(!creation(&event), "{other:?}");
         }
     }
 
@@ -765,27 +981,6 @@ pub(super) fn channel_label(label: &str) -> bool {
         && !matches!(label, "stream" | "forum" | "dm" | "workflow" | "system")
 }
 
-/// Mirrors `sessionMetadata` in `src/features/sessions/metadata.ts`: the header,
-/// then an optional `parent:<uuid>` line, then an optional `personal` line.
-fn session_metadata(description: &str) -> bool {
-    const PREFIX: &str = "Buzz session (buzz.sessions/v1)";
-    let mut lines = description.split('\n');
-    if lines.next() != Some(PREFIX) {
-        return false;
-    }
-    let mut next = lines.next();
-    if let Some(parent) = next.and_then(|line| line.strip_prefix("parent:")) {
-        if !uuid(parent) {
-            return false;
-        }
-        next = lines.next();
-    }
-    if next == Some("personal") {
-        next = lines.next();
-    }
-    next.is_none()
-}
-
 #[cfg(test)]
 mod member_administration_tests {
     use super::*;
@@ -799,6 +994,7 @@ mod member_administration_tests {
         .unwrap();
         let app = mock_builder()
             .manage(IdentityHost::fixture())
+            .manage(FederatedIdentity::new().unwrap())
             .invoke_handler(crate::commands())
             .build(crate::app_context())
             .unwrap();
@@ -861,6 +1057,135 @@ mod member_administration_tests {
             );
             let error = invoke("relay_channel_sign", event).unwrap_err();
             assert!(!error.to_string().contains("not allowed"), "{error}");
+        }
+        let viewer = invoke("relay_channel_sign", cases["accepted"][0]["event"].clone())
+            .unwrap()
+            .deserialize::<Value>()
+            .unwrap()["pubkey"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let transfer = |case: &Value| -> Value {
+            serde_json::from_str(&case["event"].to_string().replace("$viewer", &viewer)).unwrap()
+        };
+        for case in cases["transfer"]["accepted"].as_array().unwrap() {
+            let template = transfer(case);
+            let event: Value = invoke("relay_channel_sign", template.clone())
+                .unwrap()
+                .deserialize()
+                .unwrap();
+            assert_eq!(event["tags"], template["tags"]);
+            assert!(validate("member-administration", &event, Some(&viewer)).is_ok());
+            assert!(validate("member-administration", &event, Some(&"f".repeat(64))).is_err());
+        }
+        for case in cases["transfer"]["rejected"].as_array().unwrap() {
+            let error = invoke("relay_channel_sign", transfer(case)).unwrap_err();
+            assert!(
+                error.to_string().contains("Invalid"),
+                "{}: {error}",
+                case["name"]
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod direct_message_tests {
+    use super::*;
+
+    fn key(byte: char) -> String {
+        byte.to_string().repeat(64)
+    }
+
+    #[test]
+    fn an_open_names_people_only() {
+        let tags = direct_message_tags(&key('a'), vec![key('b')], None, None).unwrap();
+        assert_eq!(tags[0], vec!["p".to_string(), key('b')]);
+        assert_eq!(tags[1][0], "client");
+        assert_eq!(tags.len(), 2);
+    }
+
+    #[test]
+    fn an_open_carries_the_history_choice() {
+        let shared = direct_message_tags(&key('a'), vec![key('b')], None, Some("include")).unwrap();
+        assert_eq!(
+            shared[1],
+            vec!["history".to_string(), "include".to_string()]
+        );
+        let exact = direct_message_tags(&key('a'), vec![key('b')], None, None).unwrap();
+        assert!(!exact.iter().any(|tag| tag[0] == "history"));
+    }
+
+    #[test]
+    fn an_addition_leads_with_its_dm_and_carries_the_history_choice() {
+        let dm = uuid::Uuid::nil().to_string();
+        for value in ["include", "ask"] {
+            let tags =
+                direct_message_tags(&key('a'), vec![key('c')], Some(dm.clone()), Some(value))
+                    .unwrap();
+            assert_eq!(tags[0], vec!["h".to_string(), dm.clone()]);
+            assert_eq!(tags[1], vec!["p".to_string(), key('c')]);
+            assert_eq!(tags[2], vec!["history".to_string(), value.to_string()]);
+        }
+        let fresh = direct_message_tags(&key('a'), vec![key('c')], Some(dm), None).unwrap();
+        assert!(!fresh.iter().any(|tag| tag[0] == "history"));
+    }
+
+    #[test]
+    fn an_addition_is_bounded_only_for_size() {
+        let dm = uuid::Uuid::nil().to_string();
+        let many = |n: usize| (1..=n).map(|i| format!("{i:064}")).collect::<Vec<_>>();
+        assert!(direct_message_tags(&key('a'), many(100), Some(dm.clone()), Some("ask")).is_ok());
+        assert!(direct_message_tags(&key('a'), many(101), Some(dm), Some("ask")).is_err());
+    }
+
+    #[test]
+    fn refusals_show_the_relays_reason() {
+        for reason in [
+            "needs-choice: history",
+            r#"invalid: history must be "include", got "ask""#,
+        ] {
+            assert_eq!(
+                direct_message_refusal(true, Some(reason)),
+                "needs-choice: history"
+            );
+        }
+        assert_eq!(
+            direct_message_refusal(
+                true,
+                Some("invalid: history must be \"include\", got \"x\"")
+            ),
+            "Couldn’t add them. Try again."
+        );
+        assert_eq!(
+            direct_message_refusal(true, Some("invalid: DM supports at most 9 people")),
+            "Couldn’t add them. A DM holds up to 9 people, not counting agents."
+        );
+        assert_eq!(
+            direct_message_refusal(false, Some("needs-choice: history")),
+            "The direct message could not be opened. Try again."
+        );
+    }
+
+    #[test]
+    fn malformed_requests_are_refused() {
+        let viewer = key('a');
+        let dm = Some(uuid::Uuid::nil().to_string());
+        for (pubkeys, channel, history) in [
+            (vec![], None, None),
+            (vec![viewer.clone()], None, None),
+            (vec![key('b'), key('b')], None, None),
+            (vec!["b".into()], None, None),
+            ((0..9).map(|i| format!("{i:064}")).collect(), None, None),
+            (
+                vec![key('b')],
+                Some("not-a-uuid".to_string()),
+                Some("include"),
+            ),
+            (vec![key('b')], None, Some("ask")),
+            (vec![key('b')], dm, Some("exclude")),
+        ] {
+            assert!(direct_message_tags(&viewer, pubkeys, channel, history).is_err());
         }
     }
 }

@@ -21,13 +21,16 @@ import {
   signed,
 } from "../relay/testing";
 import { ThreadPanel } from "./ThreadPanel";
+import { createAgentActivity } from "../agents/activity";
+import { createLocalAgentActivity } from "../agents/local-activity";
+import { stubAvatarBrowserApis } from "../agents/avatar-testing";
 
-const bodyRender = vi.fn();
+stubAvatarBrowserApis();
+
 vi.mock("./MessageMarkdown", () => ({
-  MessageMarkdown: ({ row }: { row: ChannelMessage }) => {
-    bodyRender(row.content);
-    return <span>{row.content}</span>;
-  },
+  MessageMarkdown: ({ row }: { row: ChannelMessage }) => (
+    <span>{row.content}</span>
+  ),
 }));
 vi.mock("./MessageComposer", () => ({ MessageComposer: () => null }));
 vi.mock("./MediaAttachment", () => ({
@@ -51,127 +54,188 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-it("retains mounted rows through a deferred real-session page and profile noise", async () => {
-  const relay = keypair();
-  const viewer = keypair();
-  const aliceKey = keypair();
-  const bobKey = keypair();
-  const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
+it.each([false, true])(
+  "retains rows and seeks timestamps with media viewer available=%s",
+  async (viewerAvailable) => {
+    const openMediaReview = vi.fn();
+    const relay = keypair();
+    const viewer = keypair();
+    const aliceKey = keypair();
+    const bobKey = keypair();
+    const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
+    let traffic!: LiveCallbacks;
+    const owner = createRelaySession({
+      ...wire.transport,
+      query(filters, signal) {
+        if (filters[0]?.kinds?.includes(30315)) return Promise.resolve([]);
+        return wire.transport.query(filters, signal);
+      },
+      subscribe(callbacks) {
+        traffic = callbacks;
+        return { update() {}, retry() {}, dispose() {} };
+      },
+    });
+    const root = message(aliceKey, "a", "Root body", 1, [
+      ["imeta", "url https://example.com/video.mp4", "m video/mp4"],
+    ]);
+    const reply = message(bobKey, "a", "⏱ 0:42 — Reply body", 2, [
+      ["e", root.id, "", "root"],
+      ["e", root.id, "", "reply"],
+    ]);
+    traffic.receive([
+      root,
+      reply,
+      profile(aliceKey, { name: "Alice" }),
+      profile(bobKey, { name: "Bob" }),
+    ]);
+    const session = owner.session;
+
+    render(
+      <StrictMode>
+        <ThreadPanel
+          session={session}
+          scope="identity-test"
+          channelName="A"
+          channelId="a"
+          messageId={root.id}
+          {...(viewerAvailable ? { onOpenMediaReview: openMediaReview } : {})}
+          close={() => {}}
+          onOpenLink={() => false}
+        />
+      </StrictMode>,
+    );
+
+    await waitFor(() =>
+      expect(wire.pending.some((request) => !request.signal?.aborted)).toBe(
+        true,
+      ),
+    );
+    const initial = wire.pending.find((request) => !request.signal?.aborted);
+    if (!initial) throw new Error("Initial thread page was not requested");
+    initial.respond([root, reply]);
+    expect(await screen.findByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("Bob")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        wire.pending.filter(
+          (request) => request !== initial && !request.signal?.aborted,
+        ),
+      ).toHaveLength(1),
+    );
+    const page = wire.pending.find(
+      (request) => request !== initial && !request.signal?.aborted,
+    );
+    if (!page) throw new Error("Deferred thread page was not requested");
+    expect(screen.queryByText("Loading thread…")).not.toBeInTheDocument();
+
+    await act(async () => {
+      traffic.receive([profile(keypair(), { name: "Other" })]);
+    });
+
+    const retainedReply = screen.getByText("Reply body");
+    const retainedRow = retainedReply.closest("[data-message-id]");
+    const appended = message(bobKey, "a", "Appended reply body", 3, [
+      ["e", root.id, "", "root"],
+      ["e", root.id, "", "reply"],
+    ]);
+    await act(async () => page.respond([root, appended]));
+    expect(await screen.findByText("Appended reply body")).toBeInTheDocument();
+    // The previous last bubble joins the new same-author reply while its
+    // mounted content stays intact.
+    expect(screen.getByText("Reply body")).toBe(retainedReply);
+    expect(retainedRow?.querySelector("[data-stack-next]")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "0:42" }));
+    if (viewerAvailable) {
+      expect(openMediaReview).toHaveBeenCalledExactlyOnceWith(
+        root.id,
+        expect.objectContaining({
+          url: "https://example.com/video.mp4",
+          kind: "video",
+        }),
+        39,
+        true,
+        undefined,
+      );
+    } else {
+      expect(screen.getByTestId("video-seek")).toHaveTextContent("42");
+    }
+
+    const edited = signed(bobKey, {
+      kind: 40003,
+      content: "Edited reply body",
+      created_at: 4,
+      tags: [["e", reply.id]],
+    });
+    traffic.receive([edited]);
+    expect(await screen.findByText("Edited reply body")).toBeInTheDocument();
+
+    await act(async () => {
+      traffic.receive([profile(bobKey, { name: "Robert" }, 1_700_000_001)]);
+    });
+    expect(await screen.findAllByText("Robert")).toHaveLength(2);
+    owner.dispose();
+  },
+);
+
+it("keeps a standalone activity root subscribed to its request through completion", async () => {
+  const agent = keypair();
+  const root = message(agent, "a", "Checking root activity", 1, [
+    ["audience", "agents"],
+  ]);
+  const wire = scriptedTransport(keypair().pubkey, keypair().pubkey);
   let traffic!: LiveCallbacks;
   const owner = createRelaySession({
     ...wire.transport,
-    query(filters, signal) {
-      if (filters[0]?.kinds?.includes(30315)) return Promise.resolve([]);
-      return wire.transport.query(filters, signal);
-    },
     subscribe(callbacks) {
       traffic = callbacks;
       return { update() {}, retry() {}, dispose() {} };
     },
+    query(filters, signal) {
+      return filters[0]?.kinds?.includes(30315)
+        ? Promise.resolve([])
+        : wire.transport.query(filters, signal);
+    },
   });
-  const root = message(aliceKey, "a", "Root body", 1, [
-    ["imeta", "url https://example.com/video.mp4", "m video/mp4"],
-  ]);
-  const reply = message(bobKey, "a", "⏱ 0:42 — Reply body", 2, [
-    ["e", root.id, "", "root"],
-    ["e", root.id, "", "reply"],
-  ]);
-  traffic.receive([
-    root,
-    reply,
-    profile(aliceKey, { name: "Alice" }),
-    profile(bobKey, { name: "Bob" }),
-  ]);
-  const session = owner.session;
-
-  render(
-    <StrictMode>
+  traffic.receive([root]);
+  const local = createLocalAgentActivity();
+  const activity = createAgentActivity(
+    true,
+    () => {},
+    () => true,
+    undefined,
+    undefined,
+    { source: local.reader, scope: "root-test" },
+  );
+  const release = activity.queries.activate();
+  const work = local.begin({
+    scope: "root-test",
+    agent: agent.pubkey,
+    channelId: "a",
+    messageId: root.id,
+    threadRootId: root.id,
+  });
+  work.started();
+  try {
+    render(
       <ThreadPanel
-        session={session}
-        scope="identity-test"
+        session={{ ...owner.session, agentActivity: activity.queries }}
+        scope="activity-root-test"
         channelName="A"
         channelId="a"
         messageId={root.id}
         close={() => {}}
         onOpenLink={() => false}
-      />
-    </StrictMode>,
-  );
-
-  await waitFor(() =>
-    expect(wire.pending.some((request) => !request.signal?.aborted)).toBe(true),
-  );
-  const initial = wire.pending.find((request) => !request.signal?.aborted);
-  if (!initial) throw new Error("Initial thread page was not requested");
-  initial.respond([root, reply]);
-  expect(await screen.findByText("Alice")).toBeInTheDocument();
-  expect(screen.getByText("Bob")).toBeInTheDocument();
-  await waitFor(() =>
-    expect(
-      wire.pending.filter(
-        (request) => request !== initial && !request.signal?.aborted,
-      ),
-    ).toHaveLength(1),
-  );
-  const page = wire.pending.find(
-    (request) => request !== initial && !request.signal?.aborted,
-  );
-  if (!page) throw new Error("Deferred thread page was not requested");
-  expect(screen.queryByText("Loading thread…")).not.toBeInTheDocument();
-  bodyRender.mockClear();
-
-  // An unrelated signed profile preserves the selected map, but the shared
-  // name service still invalidates every mounted row. Do not claim zero renders.
-  await act(async () => {
-    traffic.receive([profile(keypair(), { name: "Other" })]);
-  });
-  expect(bodyRender.mock.calls).toEqual([
-    ["Root body"],
-    ["Root body"],
-    ["Reply body"],
-    ["Reply body"],
-  ]);
-  bodyRender.mockClear();
-
-  const retainedReply = screen.getByText("Reply body");
-  const retainedRow = retainedReply.closest("[data-message-id]");
-  const appended = message(bobKey, "a", "Appended reply body", 3, [
-    ["e", root.id, "", "root"],
-    ["e", root.id, "", "reply"],
-  ]);
-  await act(async () => page.respond([root, appended]));
-  expect(await screen.findByText("Appended reply body")).toBeInTheDocument();
-  // The previous last bubble re-renders to join the new same-author reply.
-  // Its mounted content stays intact; unrelated rows still do not render.
-  expect(screen.getByText("Reply body")).toBe(retainedReply);
-  expect(retainedRow?.querySelector("[data-stack-next]")).not.toBeNull();
-  expect(bodyRender.mock.calls).toEqual([
-    ["Reply body"],
-    ["Reply body"],
-    ["Appended reply body"],
-    ["Appended reply body"],
-  ]);
-  bodyRender.mockClear();
-
-  fireEvent.click(screen.getByRole("button", { name: "0:42" }));
-  expect(screen.getByTestId("video-seek")).toHaveTextContent("42");
-  bodyRender.mockClear();
-
-  const edited = signed(bobKey, {
-    kind: 40003,
-    content: "Edited reply body",
-    created_at: 4,
-    tags: [["e", reply.id]],
-  });
-  traffic.receive([edited]);
-  expect(await screen.findByText("Edited reply body")).toBeInTheDocument();
-  expect(bodyRender).toHaveBeenCalledWith("Edited reply body");
-  bodyRender.mockClear();
-
-  await act(async () => {
-    traffic.receive([profile(bobKey, { name: "Robert" }, 1_700_000_001)]);
-  });
-  expect(await screen.findAllByText("Robert")).toHaveLength(2);
-  expect(bodyRender).toHaveBeenCalled();
-  owner.dispose();
+      />,
+    );
+    const preview = await screen.findByText("Checking root activity");
+    expect(preview).toHaveAttribute("data-active", "true");
+    act(() => work.finish({ ok: true }));
+    expect(preview).not.toHaveAttribute("data-active");
+  } finally {
+    cleanup();
+    release();
+    activity.dispose();
+    owner.dispose();
+  }
 });

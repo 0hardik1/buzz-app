@@ -13,8 +13,17 @@ import { InlineHeader } from "../../shared/design-system/ui/Header";
 import { PreferenceRow } from "../../shared/design-system/ui/PreferenceRow";
 import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
 import { ProviderDialog } from "./ProviderDialog";
+import type { PageNavigation } from "../../features/navigation/service";
 
-export function AgentDefaults({ agents }: { agents: Agents }) {
+export function AgentDefaults({
+  agents,
+  navigation,
+  onProvider,
+}: {
+  agents: Agents;
+  navigation?: PageNavigation | undefined;
+  onProvider?: ((provider?: string) => void) | undefined;
+}) {
   const types = useSyncExternalStore(
     agents.subscribe,
     agents.types,
@@ -32,9 +41,10 @@ export function AgentDefaults({ agents }: { agents: Agents }) {
   }, [types]);
   return (
     <div className="mt-section-gap">
-      <InlineHeader title="AI defaults" />
+      <InlineHeader title="Harness defaults" />
       <SettingsGroup>
         {types.map((type) => {
+          if (!type.provider) return null;
           const fallback = (
             <PreferenceRow
               title={type.title}
@@ -54,11 +64,12 @@ export function AgentDefaults({ agents }: { agents: Agents }) {
               key={contributionKey(type)}
               fallback={fallback}
             >
-              {type.provider ? (
-                <ProviderDefaults type={type} provider={type.provider} />
-              ) : (
-                fallback
-              )}
+              <ProviderDefaults
+                type={type}
+                provider={type.provider}
+                navigation={navigation}
+                onProvider={onProvider}
+              />
             </ContributionBoundary>
           );
         })}
@@ -70,23 +81,45 @@ export function AgentDefaults({ agents }: { agents: Agents }) {
 function ProviderDefaults({
   type,
   provider,
+  navigation,
+  onProvider,
 }: {
   type: RegisteredAgentType;
   provider: NonNullable<RegisteredAgentType["provider"]>;
+  navigation?: PageNavigation | undefined;
+  onProvider?: ((provider?: string) => void) | undefined;
 }) {
   const state = useSyncExternalStore(
     provider.subscribe,
     provider.snapshot,
     provider.snapshot,
   );
-  const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null);
+  const [localOpen, setLocalOpen] = useState(false);
+  const routed = navigation?.target.kind === "settings" && !!onProvider;
+  const open = routed
+    ? navigation.target.kind === "settings" &&
+      navigation.target.provider === type.key
+    : localOpen;
+  const setOpen = (open: boolean) => {
+    if (!routed) setLocalOpen(open);
+    else if (!navigation.signal.aborted)
+      onProvider(open ? type.key : undefined);
+  };
+  const focusTarget = useRef<HTMLElement>(null);
   const checking = state.readiness === "checking";
+  const statusOnly =
+    state.readiness === "attention" && state.attentionLabel === null;
+  // A recheck must not unmount the focused inline defaults control.
+  const [settledReadiness, setSettledReadiness] = useState(state.readiness);
+  if (!checking && settledReadiness !== state.readiness) {
+    setSettledReadiness(state.readiness);
+  }
   const label =
     state.readiness === "attention"
       ? (state.attentionLabel ?? `Set up ${type.title}`)
       : type.title;
   const Icon = type.icon;
+  const DefaultControl = provider.DefaultControl;
   const select = () => {
     if (state.readiness === "attention" && provider.attentionAction) {
       try {
@@ -103,34 +136,70 @@ function ProviderDefaults({
       <PreferenceRow
         title={type.title}
         icon={Icon && <Icon size={20} />}
-        trailing={
-          <Button
-            ref={trigger}
-            size="sm"
-            aria-label={`${label}, ${state.readiness}`}
-            aria-busy={checking || undefined}
-            disabled={checking}
-            onClick={select}
-          >
-            {checking && (
-              <CircleNotchIcon
-                size={17}
-                aria-hidden="true"
-                className="motion-safe:animate-spin"
-              />
-            )}
-            {checking
-              ? "Checking…"
-              : state.readiness === "attention"
-                ? label
-                : "Configure"}
-          </Button>
+        subtitle={
+          statusOnly ? (
+            <span
+              ref={(node) => {
+                focusTarget.current = node;
+              }}
+              tabIndex={-1}
+            >
+              {state.attentionDescription}
+            </span>
+          ) : state.readiness === "attention" ? (
+            state.attentionDescription
+          ) : undefined
         }
+        trailing={(description) => {
+          if (statusOnly) return null;
+          return (checking ? settledReadiness : state.readiness) === "ready" &&
+            DefaultControl ? (
+            <div
+              ref={(node) => {
+                if (node) focusTarget.current = node.querySelector("button");
+              }}
+              className="flex flex-wrap items-center gap-2"
+            >
+              <span className="text-body-sm text-subtle">Default model</span>
+              <DefaultControl
+                onConfigure={() => {
+                  setOpen(true);
+                }}
+              />
+            </div>
+          ) : (
+            <Button
+              ref={(node) => {
+                focusTarget.current = node;
+              }}
+              size="sm"
+              aria-label={`${label}, ${state.readiness}`}
+              aria-describedby={description["aria-describedby"]}
+              aria-busy={checking || undefined}
+              disabled={checking}
+              onClick={select}
+            >
+              {checking && (
+                <CircleNotchIcon
+                  size={17}
+                  aria-hidden="true"
+                  className="motion-safe:animate-spin"
+                />
+              )}
+              {checking
+                ? "Checking…"
+                : state.readiness === "attention"
+                  ? label
+                  : "Edit configuration"}
+            </Button>
+          );
+        }}
       />
       {open && (
         <ProviderDialog
           type={type}
-          finalFocus={trigger}
+          finalFocus={focusTarget}
+          visit={routed}
           onClose={() => setOpen(false)}
         />
       )}

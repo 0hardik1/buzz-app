@@ -20,9 +20,7 @@ and acceptance gaps here; keep chronological results in the [archive](#historica
 The checkpoint is recorded at `deb1d310`, typed relay URLs at `a85fda6`, and the
 browser gate at `95eeacc`. Those are implementation checkpoints, not release tags.
 The recorded validation used Apple Silicon macOS and synthetic isolated transports.
-Wes confirmed the reported native interaction freeze fixed; that does not close
-all native workflows. See the archive for exact-state results and known warnings,
-and [contributing](contributing.md) for maintained commands and test organization.
+See [contributing](contributing.md) for maintained commands and test organization.
 
 ## Decisions to preserve
 
@@ -55,7 +53,7 @@ and [contributing](contributing.md) for maintained commands and test organizatio
 | Gate | What is still needed |
 | --- | --- |
 | Native lifecycle acceptance | Agree app-data **and keyring** isolation, then exercise actual CLI install/update → running-app observation, on-disk rollback/backup, disable/recovery/safe mode and process restart. Browser fixture storage is not native IPC/filesystem evidence. |
-| Native identity and networking | External plugins can declare exact commands and HTTPS origins for bounded native calls. Packaged real-data acceptance and per-user login/session behavior remain open. Hosted communities' Builderlab sign-in and identity binding run natively in desktop builds; the session lasts until the app restarts. The declarations are disclosure, not plugin isolation; private keys stay outside plugin JavaScript. Do not widen CSP to unrestricted networking. |
+| Native identity and networking | External plugins can declare exact commands and HTTPS origins for bounded native calls. Packaged real-data acceptance and per-user login/session behavior remain open. The Builderlab sign-in, shared by hosted communities, remote agents and apps, and its identity binding run natively in desktop builds; the session lasts until the app restarts. The declarations are disclosure, not plugin isolation; private keys stay outside plugin JavaScript. Do not widen CSP to unrestricted networking. |
 | Supported author contract | The conversation preview adds generated type-only `@buzz/author`, scaffold consumption and external Composer/Message reuse. Final validation, archived cross-host compatibility and native acceptance remain open; no stable SDK promise. |
 | Independent plugin acceptance | Independently build a real-data page and a non-GitHub panel without private host imports, copied contracts or bespoke host patches. In a packaged app: install disabled → enable/use → A/B switching → update/remount → disable → rollback → failed-start recovery. Include revocation, unknown/rejected writes and stalled cleanup. |
 | Distribution | PR CI is wired in `.github/workflows/ci.yml`; decide release signing, updating, provenance and compatibility support. Record packaged artifacts and platform-specific results. Native test targets at the recorded gate contain zero cases; compilation is not GUI acceptance. |
@@ -94,10 +92,6 @@ consent. Owner review decides expansion; this checklist does not authorize it.
 
 - [Query and delivery review, 2026-09-07](archive/foundation-review.md): reproduced
   delivery/hydration defects, local measurements and library/API recommendations.
-- [Hardening plan and execution journal, 2026-09-08–09](archive/hardening-plan.md):
-  authorizations, sequencing and successive checkpoint handoffs.
-- [Validation journal, 2026-09-08–09](archive/hardening-validation.md): exact-state
-  checks, regressions, browser acceptance, owner confirmation and evidence paths.
 
 The journals are historical evidence, not parallel current task lists. Later
 entries supersede earlier status within them; their local artifact paths may not

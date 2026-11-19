@@ -1,6 +1,8 @@
 import { test, expect } from "./fixture.mjs";
-import { open, settle, wheel } from "./timeline.mjs";
+import { frames, open, settle, wheel } from "./timeline.mjs";
 import { generateSecretKey, getPublicKey, finalizeEvent } from "nostr-tools";
+import { animationsSettled } from "./animations.mjs";
+import { markAllRead } from "./reading.mjs";
 
 test.use({
   productionBroker: true,
@@ -18,12 +20,13 @@ test("thread stays beside the channel whenever both panes fit", async ({
   app,
 }, testInfo) => {
   await open(page, app);
-  await page
-    .getByRole("separator", { name: "Resize channel sidebar" })
-    .press("Home");
+  await page.getByRole("separator", { name: "Resize sidebar" }).press("Home");
+  // A narrow thread covers the channel, removing it from the accessibility
+  // tree; its geometry still applies.
   const channel = page.getByRole("article", {
     name: "Conversation",
     exact: true,
+    includeHidden: true,
   });
   const input = channel.getByRole("textbox", { name: "Message #Alpha" });
   const draft =
@@ -116,6 +119,7 @@ test("thread preserves bottom and reading position through activity and composer
     .find((row) => row.content.startsWith("Thread root"));
   for (let i = 0; i < 30; i++) app.reply(root.id, false, false);
   await open(page, app);
+  await markAllRead(page);
   await expect.poll(() => app.relay.hasRoute("primary", "observer")).toBe(true);
   app.serveProfile(key, { name: "Diagnostic Agent", is_agent: true });
   const rootRow = page.locator(
@@ -134,9 +138,23 @@ test("thread preserves bottom and reading position through activity and composer
   });
   const gap = () =>
     history.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
+  // The thread corrects each resize in its ResizeObserver, which runs only in
+  // a rendering update. Those can be sparse (Linux WebKit under load), so
+  // geometry can rest with a correction still pending; render before settling.
+  const settled = async () => {
+    await frames(page);
+    await settle(page, history);
+  };
+  // Activity grows in and leaves over several rendering updates. Leaving hides
+  // its region at once, but it stays mounted until its animation ends; its
+  // removal is the last resize.
+  const arrived = (row) =>
+    animationsSettled(row.locator("[data-message-activity]"));
+  const left = (row) =>
+    expect(row.locator("[data-message-activity]")).toHaveCount(0);
   await expect(history.locator("[data-message-id]")).toHaveCount(33);
   await expect.poll(gap).toBeLessThan(4);
-  await settle(page, history);
+  await settled();
 
   // Observe layout delivery after the app's observer, before paint. Sampling
   // in a task can instead catch a newer DOM mutation awaiting its next layout.
@@ -187,11 +205,11 @@ test("thread preserves bottom and reading position through activity and composer
     await expect(
       history.getByText("Short send", { exact: true }),
     ).toBeVisible();
-    await settle(page, history);
+    await settled();
     await input.fill(
       `Multiline send\n${"Another line of the draft\n".repeat(8)}`,
     );
-    await settle(page, history);
+    await settled();
     expect(await gap()).toBeLessThan(4);
     await input.press("Enter");
     await expect(input).toHaveText("");
@@ -205,13 +223,12 @@ test("thread preserves bottom and reading position through activity and composer
     await expect(
       sent.getByRole("region", { name: "Agent activity on this message" }),
     ).toBeVisible();
-    await settle(page, history);
+    await arrived(sent);
+    await settled();
     expect(await gap()).toBeLessThan(4);
     stop("bottom");
-    await expect(
-      sent.getByRole("region", { name: "Agent activity on this message" }),
-    ).toHaveCount(0);
-    await settle(page, history);
+    await left(sent);
+    await settled();
     expect(await gap()).toBeLessThan(4);
     const samples = await sampling.evaluate((state) => {
       state.stop();
@@ -230,15 +247,23 @@ test("thread preserves bottom and reading position through activity and composer
     await sampling.dispose();
   }
 
-  // The center can reveal a top-layer message toolbar that consumes wheel
-  // input without scrolling the thread. Aim at its left gutter instead.
-  await history.hover({ position: { x: 48, y: 80 } });
+  // Hovering reveals a top-layer message toolbar that consumes wheel input
+  // without scrolling the thread. It can span a short received bubble and the
+  // avatar gutter, so aim at the empty trailing side of these received rows.
+  const probe = await history.evaluate((element) => ({
+    x: element.clientWidth - 48,
+    y: 80,
+  }));
+  await history.hover({ position: probe });
   expect(
-    await history.evaluate((element) => {
+    await history.evaluate((element, probe) => {
       const bounds = element.getBoundingClientRect();
-      const hit = document.elementFromPoint(bounds.left + 48, bounds.top + 80);
+      const hit = document.elementFromPoint(
+        bounds.left + probe.x,
+        bounds.top + probe.y,
+      );
       return !!hit && element.contains(hit) && !hit.closest("[popover]");
-    }),
+    }, probe),
   ).toBe(true);
   await wheel(page, -350, history);
   expect(await gap()).toBeGreaterThan(200);
@@ -253,7 +278,7 @@ test("thread preserves bottom and reading position through activity and composer
     };
   });
   const unchanged = async () => {
-    await settle(page, history);
+    await settled();
     expect(
       await history.evaluate((el, anchor) => {
         const row = el.querySelector(`[data-message-id="${anchor.id}"]`);
@@ -266,23 +291,19 @@ test("thread preserves bottom and reading position through activity and composer
     ).toBeLessThan(4);
   };
   // Activity above the reader is a child-only reflow, not a thread snapshot.
+  const threadRoot = history.locator(`[data-message-id="${root.id}"]`);
   start(root.id, "reading");
   await expect(
-    history
-      .locator(`[data-message-id="${root.id}"]`)
-      .getByRole("region", { name: "Agent activity on this message" }),
+    threadRoot.getByRole("region", { name: "Agent activity on this message" }),
   ).toHaveCount(1);
+  await arrived(threadRoot);
   await unchanged();
   await input.fill("Growing draft\n".repeat(8));
   await unchanged();
   await input.fill("");
   await unchanged();
   stop("reading");
-  await expect(
-    history
-      .locator(`[data-message-id="${root.id}"]`)
-      .getByRole("region", { name: "Agent activity on this message" }),
-  ).toHaveCount(0);
+  await left(threadRoot);
   await unchanged();
 });
 
@@ -291,10 +312,27 @@ test.describe("exact history resize ownership", () => {
     exactMessages: true,
     historyCounts: { alpha: 103, beta: 0 },
   });
-  test("held exact target resize followed by live reply", async ({
+  test("held exact target resize followed by live reply", ({ page, app }) =>
+    heldResizeThenReply({ page, app }, "before reply"));
+  // The shift lands in the live reply's own commit, before ResizeObserver
+  // delivery. Browser scroll anchoring must not correct it ahead of the
+  // thread's exact-target anchor, which would then apply it a second time.
+  test("exact target shift committed with a live reply", ({ page, app }) =>
+    heldResizeThenReply({ page, app }, "with reply"));
+  // A reader gesture retires the exact-target anchor. The thread's ordinary
+  // reading anchor must then own the same-commit shift, since native
+  // anchoring is off.
+  test("reading position shift committed with a live reply", ({ page, app }) =>
+    heldResizeThenReply({ page, app }, "with reply after reading"));
+  // Content above the reader shrinks in the reply's commit far enough that
+  // the browser clamps scrollTop to the new maximum. That clamp is layout, not
+  // reader intent, so the reading anchor must still own the shift.
+  test("reading position contraction clamped with a live reply", ({
     page,
     app,
-  }) => {
+  }) => heldResizeThenReply({ page, app }, "contraction after reading"));
+
+  async function heldResizeThenReply({ page, app }, shift) {
     const key = generateSecretKey();
     await page.route("**/agent-library", (route) =>
       route.fulfill({
@@ -313,7 +351,7 @@ test.describe("exact history resize ownership", () => {
     const held = new Promise((r) => (release = r)),
       seen = new Promise((r) => (intercepted = r));
     let first = true;
-    await page.route("**/api/relay/**/query", async (route) => {
+    await page.route("**/api/relay/primary/query", async (route) => {
       if (
         !first ||
         !route
@@ -406,8 +444,32 @@ test.describe("exact history resize ownership", () => {
       ).toHaveCount(1);
       await page.evaluate(() => window.releaseExactReveal());
       await settle(page, history);
+      let anchor = target;
+      const reading = shift.endsWith("after reading");
+      if (reading) {
+        await history.hover();
+        await page.mouse.wheel(0, 200);
+        await settle(page, history);
+        const id = await history.evaluate((scroller) => {
+          const top = scroller.getBoundingClientRect().top;
+          return [...scroller.querySelectorAll("[data-message-id]")].find(
+            (row) => row.getBoundingClientRect().bottom > top,
+          )?.dataset.messageId;
+        });
+        expect(id).toBeTruthy();
+        anchor = history.locator(`[data-message-id="${id}"]`);
+      }
+      if (shift === "contraction after reading") {
+        await anchor.evaluate((el) => {
+          const spacer = document.createElement("div");
+          spacer.dataset.contraction = "";
+          spacer.style.height = "700px";
+          el.before(spacer);
+        });
+        await settle(page, history);
+      }
       const y = () =>
-        target.evaluate(
+        anchor.evaluate(
           (el) =>
             el.getBoundingClientRect().top -
             el.closest('[aria-label="Thread messages"]').getBoundingClientRect()
@@ -415,18 +477,55 @@ test.describe("exact history resize ownership", () => {
         );
 
       // Controlled child-only geometry change above the exact row; no React parent commit.
-      await target.evaluate((el) => {
-        const spacer = document.createElement("div");
-        spacer.style.height = "37px";
-        el.before(spacer);
-      });
-      await settle(page, history);
-      const resized = await y();
+      let resized;
+      if (shift === "before reply") {
+        await target.evaluate((el) => {
+          const spacer = document.createElement("div");
+          spacer.style.height = "37px";
+          el.before(spacer);
+        });
+        await settle(page, history);
+        resized = await y();
+      } else {
+        resized = await y();
+        // Shift the layout when React inserts the next reply's row: inside
+        // that commit and before its layout effects run.
+        await anchor.evaluate((el, contract) => {
+          const originals = {
+            appendChild: Node.prototype.appendChild,
+            insertBefore: Node.prototype.insertBefore,
+          };
+          for (const [name, original] of Object.entries(originals))
+            Node.prototype[name] = function (node, ...rest) {
+              const result = original.call(this, node, ...rest);
+              if (node?.textContent?.includes("Review live reply 15")) {
+                Object.assign(Node.prototype, originals);
+                if (contract) {
+                  const scroller = el.closest('[aria-label="Thread messages"]');
+                  const before = scroller.scrollTop;
+                  scroller.querySelector("[data-contraction]").remove();
+                  window.contractionClamped = scroller.scrollTop < before;
+                } else {
+                  const spacer = document.createElement("div");
+                  spacer.style.height = "37px";
+                  el.before(spacer);
+                  el.getBoundingClientRect();
+                }
+              }
+              return result;
+            };
+        }, shift === "contraction after reading");
+      }
       reply();
       await expect(
         history.getByText("Review live reply 15", { exact: true }),
       ).toHaveCount(1);
       await settle(page, history);
+      if (shift === "contraction after reading")
+        expect(
+          await page.evaluate(() => window.contractionClamped),
+          "the contraction must clamp scrollTop",
+        ).toBe(true);
       const later = await y();
       expect(
         Math.abs(later - resized),
@@ -436,5 +535,5 @@ test.describe("exact history resize ownership", () => {
       await page.evaluate(() => window.releaseExactReveal());
       release();
     }
-  });
+  }
 });

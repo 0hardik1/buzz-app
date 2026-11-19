@@ -1,13 +1,13 @@
 import {
   AlarmIcon,
   BellIcon,
-  BestieIcon,
   BrowserIcon,
   ChatsCircleIcon,
-  FolderSimpleIcon,
+  NoteIcon,
   GearIcon,
   LightningIcon,
   RobotIcon,
+  SendIcon,
 } from "../../shared/design-system/icons/index";
 import type { RegisteredPage } from "../../features/pages/service";
 
@@ -21,17 +21,25 @@ export const shellPresentation = {
 // Navigation order is host policy, never plugin activation timing. Match full
 // contribution keys so an external page's local ID cannot claim a bundled slot.
 const bundledOrder = [
-  "buzz.me/me",
   "buzz.channels/channels",
   "buzz.inbox/inbox",
+  "buzz.drafts-and-sent/drafts-sent",
   "buzz.reminders/reminders",
   "buzz.bestie/bestie",
-  "buzz.projects/projects",
 ];
-export function orderPages(pages: readonly RegisteredPage[]) {
+const dockOrder = [
+  "buzz.bestie/bestie",
+  "buzz.channels/channels",
+  "buzz.reminders/reminders",
+];
+export function orderPages(
+  pages: readonly RegisteredPage[],
+  location: "default" | "dock" = "default",
+) {
+  const order = location === "dock" ? dockOrder : bundledOrder;
   const rank = (page: RegisteredPage) => {
-    const slot = bundledOrder.indexOf(page.key);
-    return slot === -1 ? bundledOrder.length : slot;
+    const slot = order.indexOf(page.key);
+    return slot === -1 ? order.length : slot;
   };
   return [...pages].sort(
     (a, b) =>
@@ -46,12 +54,51 @@ export function orderPages(pages: readonly RegisteredPage[]) {
 
 const bundledIcons = new Map<string, typeof BrowserIcon>([
   ["buzz.inbox/inbox", BellIcon],
+  ["buzz.drafts-and-sent/drafts-sent", SendIcon],
   ["buzz.reminders/reminders", AlarmIcon],
-  ["buzz.bestie/bestie", BestieIcon],
-  ["buzz.projects/projects", FolderSimpleIcon],
   ["buzz.agents/agents", RobotIcon],
   ["buzz.workflows/workflows", LightningIcon],
+  ["buzz.relay-notes/notes", NoteIcon],
 ]);
+/** Resolve host navigation policy once, independently of icons and registrations. */
+export function pagePlacement(page: RegisteredPage) {
+  if (!page.primary) return undefined;
+  switch (page.key) {
+    // Activity is a row at the top of the Messages sidebar.
+    case "buzz.inbox/inbox":
+      return "sidebar";
+    case "buzz.channels/channels":
+    case "buzz.bestie/bestie":
+    case "buzz.reminders/reminders":
+    case "buzz.agents/agents":
+    case "buzz.workflows/workflows":
+      return "dock";
+    default:
+      // `topbar` and `toolbar` predate the dock; both mean it.
+      return page.placement === undefined || page.placement === "sidebar"
+        ? "sidebar"
+        : "dock";
+  }
+}
+
+/** The app whose navigation lists a destination: the dock selects it and the
+ * shell shows its sidebar unless the page supplies its own. Pages listed in
+ * the Messages sidebar belong to Messages while it is registered;
+ * conversations already select the Messages page. Every other destination,
+ * including Settings and unlisted pages, owns itself. */
+export function navigationOwner(
+  pages: readonly RegisteredPage[],
+  selected: string,
+) {
+  const messages = "buzz.channels/channels";
+  const page = pages.find((page) => page.key === selected);
+  return page &&
+    (page.conversationNavigation || pagePlacement(page) === "sidebar") &&
+    pages.some((page) => page.key === messages)
+    ? messages
+    : selected;
+}
+
 type PagePresentation = Readonly<{
   label: string;
   icon: typeof BrowserIcon;
@@ -71,26 +118,13 @@ export function pagePresentation(page: RegisteredPage): PagePresentation {
   };
 }
 
-// Header selection describes the area; sidebar selection and routes stay exact.
-export function headerPageSelection(
+/** Visibility compatibility for callers of AppShell predating registered sidebar contexts. */
+export function legacySidebarAvailable(
   pages: readonly RegisteredPage[],
   selected: string,
-): string {
-  const page = pages.find((page) => page.key === selected);
-  if (
-    selected !== "buzz.me/me" &&
-    page &&
-    // Placement applies only to primary pages.
-    (!page.primary ||
-      page.placement === undefined ||
-      page.placement === "sidebar") &&
-    pages.some(
-      (page) =>
-        page.key === "buzz.channels/channels" &&
-        page.primary &&
-        page.placement === "topbar",
-    )
-  )
-    return "buzz.channels/channels";
-  return selected;
+) {
+  return (
+    navigationOwner(pages, selected) === "buzz.channels/channels" ||
+    pages.some((page) => page.key === selected && !!page.sidebar)
+  );
 }

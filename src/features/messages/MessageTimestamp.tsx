@@ -1,10 +1,12 @@
-import { useRef, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import {
   formatDayGroupLabel,
   formatFullTimestamp,
+  formatCompactTime,
   formatItemTimestamp,
 } from "../../shared/datetime";
+import { useClockPreference } from "../../shared/clock-preference";
 import { useLocalDay } from "../../shared/use-local-day";
 import styles from "./Messages.module.css";
 
@@ -54,62 +56,66 @@ export function DayDivider({ createdAt }: { createdAt: number }) {
   );
 }
 
-/** The byline includes a day outside today because its divider can scroll away. */
-export function MessageTimestamp({ createdAt }: { createdAt: number }) {
+/** The byline includes a day outside today because its divider can scroll away.
+ * When timestamps are hidden in settings, only assistive technology reads it. */
+export function MessageTimestamp({
+  createdAt,
+  visible = true,
+  compact = false,
+}: {
+  createdAt: number;
+  visible?: boolean;
+  compact?: boolean;
+}) {
   useLocalDay();
+  useClockPreference();
   const date = new Date(createdAt * 1000);
   const fullDate = formatFullTimestamp(createdAt);
+  // Keep accessible dates out of copied conversation text.
+  const accessible = <span className="sr-only select-none">{fullDate}</span>;
+  if (!visible) return <time dateTime={date.toISOString()}>{accessible}</time>;
   return (
-    <Tooltip content={fullDate} delay={500} disableHoverablePopup>
+    <Tooltip content={fullDate} disableHoverablePopup>
       <time dateTime={date.toISOString()} style={{ cursor: "default" }}>
         <span aria-hidden="true">
-          {formatItemTimestamp(createdAt, { withTime: true })}
+          {compact
+            ? formatCompactTime(createdAt)
+            : formatItemTimestamp(createdAt, { withTime: true })}
         </span>
-        {/* Keep accessible dates out of copied conversation text. */}
-        <span className="sr-only select-none">{fullDate}</span>
+        {accessible}
       </time>
     </Tooltip>
   );
 }
 
-/** Grouped messages keep their date available without an inline clock. */
+/** Grouped messages keep their date for assistive technology without an inline clock. */
 export function MessageTimestampHint({
   createdAt,
+  attachments = false,
   children,
 }: {
   createdAt: number | undefined;
+  /** Percentage-sized media needs the payload's full width. */
+  attachments?: boolean;
   children: ReactNode;
 }) {
   useLocalDay();
-  const payload = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-  const fullDate =
-    createdAt === undefined ? undefined : formatFullTimestamp(createdAt);
+  useClockPreference();
   return (
-    <Tooltip
-      content={fullDate}
-      open={createdAt !== undefined && open}
-      onOpenChange={(next) =>
-        setOpen(next && !payload.current?.contains(document.activeElement))
-      }
-      delay={1000}
-      disableHoverablePopup
+    <div
+      className={styles.messagePayload}
+      data-message-payload=""
+      data-attachments={attachments || undefined}
     >
-      <div
-        ref={payload}
-        className={styles.messagePayload}
-        onFocusCapture={() => setOpen(false)}
-      >
-        {children}
-        {createdAt !== undefined && (
-          <time
-            dateTime={new Date(createdAt * 1000).toISOString()}
-            className="sr-only select-none"
-          >
-            {fullDate}
-          </time>
-        )}
-      </div>
-    </Tooltip>
+      {children}
+      {createdAt !== undefined && (
+        <time
+          dateTime={new Date(createdAt * 1000).toISOString()}
+          className="sr-only select-none"
+        >
+          {formatFullTimestamp(createdAt)}
+        </time>
+      )}
+    </div>
   );
 }

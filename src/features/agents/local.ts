@@ -6,10 +6,22 @@ export type LocalAgent = Readonly<{
   /** The community origin it was created for. */
   relayUrl: string;
   owner: string;
+  /** Its profile picture, an HTTPS image URL. */
+  picture?: string;
+  /** A managed native harness can run on a saved remote execution target. */
+  execution?: "remote" | "local";
+  /** Hosted runtime identity for display; it grants no local control. */
+  runtime?: string;
+  /** Its agent type on this machine, for host features a harness keys. */
+  type?: string;
+  /** Its Delete started and has not finished: never a forward choice. */
+  deleting?: true;
 }>;
 export type LocalAgentsSnapshot = Readonly<{
   status: "unavailable" | "loading" | "ready" | "error";
   agents: readonly LocalAgent[];
+  /** Completed owned hosted agents shown in the selected community. No local custody. */
+  hosted?: readonly LocalAgent[];
   error?: string;
 }>;
 export type LocalAgents = {

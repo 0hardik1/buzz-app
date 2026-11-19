@@ -1,5 +1,6 @@
 import type { EventTemplate } from "nostr-tools";
-import { sessionMetadata } from "../sessions/metadata.ts";
+import { soloLabels } from "../solo/labels.ts";
+import { channelIdentity } from "../relay/channel-labels.ts";
 import type { RelayEvent } from "../relay/events.ts";
 import {
   channelTypeTag,
@@ -13,13 +14,18 @@ export type EditableMemberRole = (typeof editableMemberRoles)[number];
 export type MemberRole = EditableMemberRole | "owner" | "bot" | "unknown";
 export type MemberChange = Readonly<{
   pubkey: string;
-  expectedRole: MemberRole;
-  role: EditableMemberRole | "remove";
+  /** `none` is reserved for system setup; `absent` is an explicit role addition. */
+  expectedRole: MemberRole | "none" | "absent";
+  /** `owner` transfers ownership: `pubkey` becomes owner and the viewer an admin. */
+  role: EditableMemberRole | "owner" | "remove";
 }>;
 export type MemberAuthority = Readonly<{
   roles: Readonly<Record<string, MemberRole>>;
   canManage: boolean;
+  canRemove: boolean;
   canRemoveOwnedAgent: boolean;
+  /** A NIP-CL system channel, where administration may also add members. */
+  system: boolean;
 }>;
 const PUBKEY = /^[0-9a-f]{64}$/;
 
@@ -42,7 +48,7 @@ export function memberAuthority(
   const type = channelTypeTag(metadata);
   const archived = exactLifecycleTag(metadata, "archived");
   if (
-    !["stream", "forum", "dm"].includes(type ?? "") ||
+    !["stream", "forum", "dm", "system"].includes(type ?? "") ||
     (archived !== undefined && archived !== "true" && archived !== "false")
   )
     throw new Error("Malformed channel state");
@@ -88,15 +94,16 @@ export function memberAuthority(
     throw new Error(
       "Member roles are inconsistent. Refresh members and roles.",
     );
-  const activeChannel =
-    type !== "dm" &&
-    archived !== "true" &&
-    !sessionMetadata(exactLifecycleTag(metadata, "about"));
+  const activeChannel = type !== "dm" && archived !== "true";
+  // In Solo chats only owners and admins remove people; nobody changes roles.
+  const solo = !!soloLabels(channelIdentity(metadata).labels);
   return Object.freeze({
     roles: Object.freeze(roles),
-    canManage: activeChannel && elevated.has(viewer),
+    canManage: activeChannel && !solo && elevated.has(viewer),
+    canRemove: activeChannel && elevated.has(viewer),
     canRemoveOwnedAgent:
-      activeChannel && !!roles[viewer] && roles[viewer] !== "unknown",
+      activeChannel && !solo && !!roles[viewer] && roles[viewer] !== "unknown",
+    system: type === "system",
   });
 }
 
@@ -122,14 +129,32 @@ export function canRemoveMember(
   key: string,
   owner?: string,
 ) {
+  const role = state.roles[key];
   return (
-    canManageMember(state, viewer, key) ||
-    (state.canRemoveOwnedAgent &&
-      owner === viewer &&
-      key !== viewer &&
-      !!state.roles[key] &&
-      state.roles[key] !== "owner" &&
-      state.roles[key] !== "unknown")
+    (state.canRemove || (state.canRemoveOwnedAgent && owner === viewer)) &&
+    key !== viewer &&
+    !!role &&
+    role !== "owner" &&
+    role !== "unknown"
+  );
+}
+
+export const transferRefusal =
+  "Ownership can only go to a person who has set up a profile.";
+
+/** Only an owner hands over ownership, never to an agent or in a system channel. */
+export function canTransferOwnership(
+  state: MemberAuthority,
+  viewer: string,
+  key: string,
+  agent: boolean,
+) {
+  return (
+    !agent &&
+    !state.system &&
+    state.roles[viewer] === "owner" &&
+    state.roles[key] !== "bot" &&
+    canManageMember(state, viewer, key)
   );
 }
 
@@ -138,44 +163,115 @@ export function authorizeMemberChange(
   viewer: string,
   change: MemberChange,
   owner?: string,
+  /** Whether `change.pubkey` is an agent; unknown counts as one. */
+  agent = true,
 ) {
+  if (change.expectedRole === "none") {
+    // This sentinel is reserved for the system-channel setup path.
+    if (
+      !state.system ||
+      !state.canManage ||
+      change.pubkey === viewer ||
+      change.pubkey in state.roles ||
+      !isEditableMemberRole(change.role)
+    )
+      throw new Error(
+        "Membership or permissions changed. Refresh members and roles before trying again.",
+      );
+    return;
+  }
   if (
-    !(change.role === "remove"
-      ? canRemoveMember(state, viewer, change.pubkey, owner)
-      : canManageMember(state, viewer, change.pubkey)) ||
-    state.roles[change.pubkey] !== change.expectedRole ||
-    (change.role !== "remove" &&
-      (change.expectedRole === change.role ||
-        !editableMemberRoles.includes(change.role)))
+    !(change.expectedRole === "absent"
+      ? isEditableMemberRole(change.role) &&
+        state.canManage &&
+        PUBKEY.test(change.pubkey) &&
+        change.pubkey !== viewer &&
+        !(change.pubkey in state.roles)
+      : change.role === "remove"
+        ? canRemoveMember(state, viewer, change.pubkey, owner)
+        : change.role === "owner"
+          ? canTransferOwnership(state, viewer, change.pubkey, agent)
+          : canManageMember(state, viewer, change.pubkey) &&
+            isEditableMemberRole(change.role)) ||
+    (change.expectedRole !== "absent" &&
+      state.roles[change.pubkey] !== change.expectedRole) ||
+    change.expectedRole === change.role
   )
     throw new Error(
       "Membership or permissions changed. Refresh members and roles before trying again.",
     );
 }
 
+/**
+ * The relay stores an ordinary role as `bot` for a key with a recorded agent
+ * owner, even when the request says `member`. Both are the same ordinary
+ * permission level, so either one confirms a requested `member`. Other roles
+ * must match exactly.
+ */
 export function memberChangeConfirmed(
   state: MemberAuthority,
+  viewer: string,
   change: MemberChange,
 ) {
-  return change.role === "remove"
-    ? !(change.pubkey in state.roles)
-    : state.roles[change.pubkey] === change.role;
+  if (change.role === "remove") return !(change.pubkey in state.roles);
+  if (change.role === "owner")
+    return (
+      state.roles[change.pubkey] === "owner" && state.roles[viewer] === "admin"
+    );
+  const stored = state.roles[change.pubkey];
+  return (
+    stored === change.role || (change.role === "member" && stored === "bot")
+  );
 }
 
 export function memberAdministrationTemplate(
   channelId: string,
+  viewer: string,
   change: MemberChange,
 ): EventTemplate {
+  const h = ["h", lifecycleChannelId(channelId)];
   return {
     kind: change.role === "remove" ? 9001 : 9000,
     created_at: Math.floor(Date.now() / 1000),
     content: "",
-    tags: [
-      ["h", lifecycleChannelId(channelId)],
-      ["p", change.pubkey],
-      ...(change.role === "remove" ? [] : [["role", change.role]]),
-    ],
+    // The relay decides each person in order, so the heir's promotion lets
+    // the viewer, possibly the only owner, step down in the same event.
+    tags:
+      change.role === "owner"
+        ? [h, ["p", change.pubkey, "owner"], ["p", viewer, "admin"]]
+        : [
+            h,
+            ["p", change.pubkey],
+            ...(change.role === "remove" ? [] : [["role", change.role]]),
+          ],
   };
+}
+
+/** The exact single-Admin addition saved by Outbox, including its retry ID.
+ * This uses the existing administration boundary; ordinary writes stay closed. */
+export function isAdminAddition(event: EventTemplate, viewer: string): boolean {
+  const tags = event?.tags;
+  if (!Array.isArray(tags)) return false;
+  const client = tags.at(-1);
+  if (
+    event.kind !== 9000 ||
+    tags.length !== 4 ||
+    tags[2]?.[0] !== "role" ||
+    tags[2]?.[1] !== "admin" ||
+    client?.length !== 2 ||
+    client[0] !== "client-id"
+  )
+    return false;
+  try {
+    lifecycleChannelId(client[1] ?? "");
+    validateMemberAdministrationTemplate(
+      { ...event, tags: tags.slice(0, -1) },
+      viewer,
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Purpose-bound broker admission; relay remains the authoritative ACL boundary. */
@@ -183,7 +279,16 @@ export function validateMemberAdministrationTemplate(
   event: EventTemplate,
   viewer: string,
 ) {
-  const [h, p, role] = event?.tags ?? [];
+  const [h, p, last] = event?.tags ?? [];
+  const transfer =
+    event?.kind === 9000 &&
+    p?.length === 3 &&
+    p[2] === "owner" &&
+    last?.length === 3 &&
+    last[0] === "p" &&
+    last[1] === viewer &&
+    last[2] === "admin" &&
+    PUBKEY.test(viewer);
   if (
     !event ||
     ![9000, 9001].includes(event.kind) ||
@@ -194,15 +299,20 @@ export function validateMemberAdministrationTemplate(
     event.tags.length !== (event.kind === 9000 ? 3 : 2) ||
     h?.length !== 2 ||
     h[0] !== "h" ||
-    p?.length !== 2 ||
+    p?.length !== (transfer ? 3 : 2) ||
     p[0] !== "p" ||
     !PUBKEY.test(p[1] ?? "") ||
     p[1] === viewer ||
     (event.kind === 9000 &&
-      (role?.length !== 2 ||
-        role[0] !== "role" ||
-        !editableMemberRoles.some((value) => value === role[1])))
+      !transfer &&
+      (last?.length !== 2 ||
+        last[0] !== "role" ||
+        !isEditableMemberRole(last[1])))
   )
     throw new Error("Invalid member administration command");
   lifecycleChannelId(h[1] ?? "");
+}
+
+function isEditableMemberRole(role: unknown): role is EditableMemberRole {
+  return editableMemberRoles.some((value) => value === role);
 }

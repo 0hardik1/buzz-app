@@ -6,6 +6,7 @@ import { Button } from "../shared/design-system/ui/Button";
 import { PreferenceRow } from "../shared/design-system/ui/PreferenceRow";
 import { Select } from "../shared/design-system/ui/Select";
 import { UnreadIndicatorSettings } from "./UnreadIndicatorSettings";
+import { usePermissionCheck } from "./usePermissionCheck";
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { NotificationsService } from "../features/notifications/service";
 import type { NotificationCategory } from "../features/notifications/preferences";
@@ -14,6 +15,8 @@ import {
   RECOMMENDED_SOUND_BY_CATEGORY,
   SOUND_NAMES,
   type SoundName,
+  type NotificationSoundPlayback,
+  createNotificationSoundPlayback,
 } from "../features/notifications/sound";
 import styles from "./NotificationSettings.module.css";
 
@@ -22,6 +25,7 @@ const SOUND_ROWS: readonly NotificationCategory[] = [
   "direct",
   "mention",
   "thread",
+  "agent",
 ];
 
 function AlertSoundRow({
@@ -86,55 +90,33 @@ export function NotificationSettings({
     notifications.snapshot,
   );
   const { preferences, permission } = state;
+  const [checking, checkPermission] = usePermissionCheck(() =>
+    notifications.refreshPermission(),
+  );
   const preview = useRef<{
     category: NotificationCategory;
     name: SoundName;
   } | null>(null);
-  const previewAudio = useRef<HTMLAudioElement | null>(null);
-  const stopPreview = useCallback((owner?: HTMLAudioElement) => {
+  const previewAudio = useRef<NotificationSoundPlayback | null>(null);
+  const stopPreview = useCallback((owner?: NotificationSoundPlayback) => {
     const audio = previewAudio.current;
     if (owner && audio !== owner) return;
     previewAudio.current = null;
-    if (audio) {
-      audio.onended = null;
-      audio.onpause = null;
-      audio.onerror = null;
-      audio.pause();
-    }
+    audio?.stop();
     preview.current = null;
   }, []);
   const previewSound = useCallback(
     (category: NotificationCategory, name: SoundName) => {
       stopPreview();
-      if (name === "silent") return;
-      try {
-        const audio = new Audio(`/sounds/${name}.mp3`);
-        previewAudio.current = audio;
-        preview.current = { category, name };
-        const stop = () => stopPreview(audio);
-        audio.onended = stop;
-        audio.onpause = stop;
-        audio.onerror = stop;
-        void audio.play().catch(stop);
-      } catch {
-        stopPreview();
-      }
+      const audio = createNotificationSoundPlayback(name);
+      if (!audio) return;
+      previewAudio.current = audio;
+      preview.current = { category, name };
+      void audio.finished.then(() => stopPreview(audio));
     },
     [stopPreview],
   );
-  useEffect(
-    () => () => {
-      const audio = previewAudio.current;
-      previewAudio.current = null;
-      if (audio) {
-        audio.onended = null;
-        audio.onpause = null;
-        audio.onerror = null;
-        audio.pause();
-      }
-    },
-    [],
-  );
+  useEffect(() => () => stopPreview(), [stopPreview]);
   useEffect(() => {
     if (
       preview.current &&
@@ -185,7 +167,7 @@ export function NotificationSettings({
             ))}
           </SettingsGroup>
         </section>
-        <section aria-label="Desktop delivery">
+        <section id="setting-delivery" aria-label="Desktop delivery">
           <InlineHeader title="Delivery" />
           <SettingsGroup>
             <SwitchPreferenceRow
@@ -232,7 +214,8 @@ export function NotificationSettings({
                         size="sm"
                         variant="link"
                         disabled={state.requesting}
-                        onClick={() => void notifications.refreshPermission()}
+                        loading={checking}
+                        onClick={checkPermission}
                       >
                         Check permission
                       </Button>
@@ -243,6 +226,7 @@ export function NotificationSettings({
             {desktopAlertsEnabled && (
               <div className={styles.nestedPreferences}>
                 <SwitchPreferenceRow
+                  id="setting-viewing"
                   label="Notify while viewing"
                   description="Include direct messages in the conversation you’re viewing."
                   checked={preferences.notifyWhileViewing}
@@ -251,6 +235,7 @@ export function NotificationSettings({
                   }
                 />
                 <SwitchPreferenceRow
+                  id="setting-sound"
                   label="Sound"
                   description="Choose a sound to preview it."
                   checked={preferences.sound}

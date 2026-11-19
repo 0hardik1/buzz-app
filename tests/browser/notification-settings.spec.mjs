@@ -1,14 +1,18 @@
-import { selectSettingsSection } from "./navigation.mjs";
+import {
+  openSettings,
+  selectSettingsSection,
+  settingsDialog,
+} from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 
-test.use({ historyCounts: { alpha: 0, beta: 0 } });
-
-const button = (page, name) => page.getByRole("button", { name, exact: true });
+test.use({
+  enabledPlugins: ["buzz.reminders"],
+  historyCounts: { alpha: 0, beta: 0 },
+});
 
 async function settings(page) {
-  await button(page, "Your profile").click();
-  await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("main")).toBeFocused();
+  await openSettings(page);
+  await expect(settingsDialog(page).locator(":focus")).toHaveCount(1);
 }
 
 // Real font metrics, wrapping and parent layout need a browser, not jsdom.
@@ -46,9 +50,14 @@ test("Notifications keeps settings separated and button labels contained at supp
     await expect(
       section.getByRole("button", { name: "Allow notifications" }),
     ).toBeVisible();
-    await expect(section.getByRole("switch")).toHaveCount(7);
+    await expect(section.getByRole("switch")).toHaveCount(8);
     // The per-event sound controls must be present for the geometry sweep.
-    for (const name of ["Direct messages", "@Mentions", "Thread replies"]) {
+    for (const name of [
+      "Direct messages",
+      "@Mentions",
+      "Thread replies",
+      "Solo chat completions",
+    ]) {
       await expect(section.getByRole("combobox", { name })).toBeVisible();
     }
     await expect(

@@ -10,8 +10,8 @@ test.use({
 });
 
 // Real catalog → session media URL → sidebar/menu image; browser layout owns
-// loading placeholders and single-line dialog truncation, not a DOM emulator.
-test("group icons resolve custom media without overlapping labels, and the create dialog stays one line", async ({
+// loading placeholders and narrow-dialog geometry, not a DOM emulator.
+test("group icons resolve custom media without overlapping labels, and the move dialog fits narrow widths", async ({
   page,
   app,
 }, testInfo) => {
@@ -47,6 +47,15 @@ test("group icons resolve custom media without overlapping labels, and the creat
     await expect(placeholder).toBeVisible();
     await expect(placeholder).toHaveCSS("width", "16px");
     await expect(placeholder).toHaveCSS("height", "16px");
+    const loadingLayout = await placeholder.evaluate((element) => {
+      const artwork = element.getBoundingClientRect();
+      const slot = element.parentElement.getBoundingClientRect();
+      return {
+        artworkCenter: artwork.left + artwork.width / 2,
+        slotCenter: slot.left + slot.width / 2,
+      };
+    });
+    expect(loadingLayout.artworkCenter).toBe(loadingLayout.slotCenter);
     await expect(placeholder).not.toHaveCSS(
       "background-color",
       "rgba(0, 0, 0, 0)",
@@ -77,6 +86,8 @@ test("group icons resolve custom media without overlapping labels, and the creat
       const iconBounds = icon.getBoundingClientRect();
       const summaryBounds = element.getBoundingClientRect();
       return {
+        width: iconBounds.width,
+        labelOffset: title.getBoundingClientRect().left - iconBounds.left,
         gap: title.getBoundingClientRect().left - iconBounds.right,
         height: summaryBounds.height,
         iconTop: iconBounds.top,
@@ -85,7 +96,9 @@ test("group icons resolve custom media without overlapping labels, and the creat
         summaryBottom: summaryBounds.bottom,
       };
     });
-    expect(layout.gap).toBe(8);
+    expect(layout.width).toBe(20);
+    expect(layout.gap).toBe(4);
+    expect(layout.labelOffset).toBe(24);
     expect(layout.height).toBe(32);
     expect(layout.iconTop).toBeGreaterThanOrEqual(layout.summaryTop);
     expect(layout.iconBottom).toBeLessThanOrEqual(layout.summaryBottom);
@@ -99,7 +112,7 @@ test("group icons resolve custom media without overlapping labels, and the creat
   await row.focus();
   await page.keyboard.press("Shift+F10");
   const move = page.getByRole("menuitem", {
-    name: "Move channel",
+    name: "Move to…",
     exact: true,
   });
   const icon = move.locator(".buzz-menu-icon svg");
@@ -110,7 +123,10 @@ test("group icons resolve custom media without overlapping labels, and the creat
   await expect(move.locator(".buzz-menu-submenu-arrow")).toBeVisible();
   await move.focus();
   await page.keyboard.press("ArrowRight");
-  const menu = page.getByRole("menu", { name: "Move channel", exact: true });
+  const menu = page.getByRole("menu", {
+    name: `Move ${channelName} to workspace`,
+    exact: true,
+  });
   const work = menu.getByRole("menuitemradio", { name: "Work", exact: true });
   await expect(work.locator("img")).toBeVisible();
   await expect
@@ -151,33 +167,35 @@ test("group icons resolve custom media without overlapping labels, and the creat
   await menu
     .getByRole("menuitem", { name: "Create new…", exact: true })
     .click();
-  const dialog = page.getByRole("dialog", { name: "Create new section" });
+  const dialog = page.getByRole("dialog", { name: "Move to new workspace" });
   const field = dialog.getByRole("textbox", {
-    name: "Section name",
+    name: "Name",
     exact: true,
   });
   await expect(field).toBeFocused();
-  await expect(dialog.locator("label")).toHaveCount(0);
-  await expect(dialog.locator("p")).toHaveText(
-    `Move ${channelName} into a new section.`,
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await dialog.evaluate(async (element) => {
+    await Promise.allSettled(
+      element.getAnimations().map((animation) => animation.finished),
+    );
+  });
+  await expect(field).toBeFocused();
+  await expect(dialog).toHaveAccessibleDescription(
+    "Set defaults for new conversations.",
   );
   for (const width of [1440, 360]) {
     await page.setViewportSize({ width, height: 950 });
-    const layout = await dialog.locator("p").evaluate((element) => {
-      const name = element.querySelector("span[title]");
-      const range = document.createRange();
-      range.selectNodeContents(name);
+    const layout = await dialog.evaluate((element) => {
       const box = element.getBoundingClientRect();
       return {
-        height: box.height,
-        nameHeight: range.getBoundingClientRect().height,
         width: element.clientWidth,
         scrollWidth: element.scrollWidth,
+        left: box.left,
         right: box.right,
         viewport: window.innerWidth,
       };
     });
-    expect(layout.height).toBeLessThan(layout.nameHeight * 2);
+    expect(layout.left).toBeGreaterThanOrEqual(0);
     expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width);
     expect(layout.right).toBeLessThanOrEqual(layout.viewport);
   }
@@ -186,7 +204,7 @@ test("group icons resolve custom media without overlapping labels, and the creat
   });
   await page.setViewportSize({ width: 1440, height: 950 });
   await dialog.screenshot({
-    path: testInfo.outputPath("create-section-single-line.png"),
+    path: testInfo.outputPath("move-section-wide.png"),
   });
   await page.keyboard.press("Escape");
   await expect(row).toBeFocused();
@@ -205,20 +223,18 @@ test("section labels fade on overflow and recover when widened", async ({
   );
   await open(page, app);
   const sidebar = page.getByRole("complementary", {
-    name: "Channel sidebar",
+    name: "Sidebar",
     exact: true,
   });
   const row = sidebar.locator('[data-channel-id="beta"]');
   await row.click({ button: "right" });
-  await page
-    .getByRole("menuitem", { name: "Move channel", exact: true })
-    .hover();
+  await page.getByRole("menuitem", { name: "Move to…", exact: true }).hover();
   await page
     .getByRole("menuitem", { name: "Create new…", exact: true })
     .click();
-  const dialog = page.getByRole("dialog", { name: "Create new section" });
+  const dialog = page.getByRole("dialog", { name: "Move to new workspace" });
   const name = "Interface gang collaboration";
-  const field = dialog.getByRole("textbox", { name: "Section name" });
+  const field = dialog.getByRole("textbox", { name: "Name" });
   // The menu-to-dialog handoff owns initial focus; mounting alone does not
   // mean WebKit's keyboard insertion has its final destination.
   await expect(field).toBeFocused();
@@ -239,8 +255,9 @@ test("section labels fade on overflow and recover when widened", async ({
         const rect = title.getBoundingClientRect();
         const labelRect = label.getBoundingClientRect();
         const actions = element
-          .closest("details")
-          .nextElementSibling.getBoundingClientRect();
+          .closest(".navigation-section-heading")
+          .querySelector(".navigation-section-heading-actions")
+          .getBoundingClientRect();
         return {
           wrapped:
             rect.height > Number.parseFloat(getComputedStyle(title).lineHeight),
@@ -271,8 +288,9 @@ test("section labels fade on overflow and recover when widened", async ({
           const chevron = element.lastElementChild.getBoundingClientRect();
           const buttons = [
             ...element
-              .closest("details")
-              .nextElementSibling.querySelectorAll("button"),
+              .closest(".navigation-section-heading")
+              .querySelector(".navigation-section-heading-actions")
+              .querySelectorAll("button"),
           ].map((button) => button.getBoundingClientRect());
           return {
             centered: [chevron, ...buttons].every(
@@ -299,4 +317,31 @@ test("section labels fade on overflow and recover when widened", async ({
   });
   await expect(title).not.toHaveAttribute("data-overflowing");
   await expect(title).toHaveCSS("mask-image", "none");
+
+  // Enlarging a narrow saved section must preserve useful text space without
+  // changing this same single-line fading contract.
+  // At rest: revealed actions take their width back from the label.
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => {
+    localStorage.setItem("buzz-font-scale.v1", "2");
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "buzz-font-scale.v1",
+        storageArea: localStorage,
+      }),
+    );
+  });
+  await expect(page.locator("html")).toHaveCSS("font-size", "32px");
+  await page.getByRole("separator", { name: "Resize sidebar" }).press("Home");
+  await expect(title).toHaveAttribute("data-overflowing", "true");
+  await expect
+    .poll(() =>
+      title.evaluate((element) => ({
+        readable: element.clientWidth >= 64,
+        wrapped:
+          element.getBoundingClientRect().height >
+          Number.parseFloat(getComputedStyle(element).lineHeight) + 1,
+      })),
+    )
+    .toEqual({ readable: true, wrapped: false });
 });

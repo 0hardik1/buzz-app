@@ -1,15 +1,18 @@
+import { PluginUpdatesMenu } from "../PluginUpdates";
 import { formatPublicKey } from "../../shared/identity/public-key";
 import { usePresenceStatus } from "../../features/presence/react";
 import { useRelayConnection } from "../../features/relay/react";
 import { avatarMedia, avatarSource } from "../../shared/avatar-source";
 import { useUserStatus } from "../../features/user-status/useUserStatus";
 import { useStatusEditor } from "../../features/user-status/useStatusEditor";
+import { statusShortcut } from "../../features/user-status/status-shortcut";
 import { StatusEmoji } from "../../features/user-status/StatusEmoji";
 import { Button } from "../../shared/design-system/ui/Button";
 import { StatusEditor } from "../../features/user-status/StatusEditor";
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useId,
   useRef,
   useState,
@@ -22,19 +25,30 @@ import {
   GearIcon,
   UserIcon,
   PlugIcon,
+  SunIcon,
+  MoonIcon,
+  MonitorIcon,
 } from "../../shared/design-system/icons/index";
+import type {
+  Appearance,
+  ColorModePreference,
+} from "../../shared/theme/service";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import {
   MenuRoot,
   MenuTrigger,
   MenuPopup,
+  MenuSubmenu,
+  MenuSubmenuTrigger,
+  MenuSubmenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
   MenuItem,
   MenuIcon,
   MenuSeparator,
   MenuTrailing,
+  MenuNote,
 } from "../../shared/design-system/ui/Menu";
 import type {
   AccountActionsService,
@@ -42,23 +56,38 @@ import type {
 } from "../../features/account-actions/service";
 import type { Communities } from "../../features/communities/service";
 import styles from "./ProfileButton.module.css";
+import * as communityApi from "../../features/communities/api";
+import {
+  deviceTimeZone,
+  shareDeviceTimeZone,
+} from "../../features/profiles/share-time-zone";
 
 const noSubscription = () => () => {};
-const noLiveSnapshot = () => undefined;
+// The parent row retains the icon for the saved appearance preference.
+const colorModes = {
+  light: { label: "Light", Icon: SunIcon },
+  dark: { label: "Dark", Icon: MoonIcon },
+  system: { label: "System", Icon: MonitorIcon },
+} as const satisfies Record<
+  ColorModePreference,
+  { label: string; Icon: typeof SunIcon }
+>;
 
 export function ProfileButton({
   communities,
   accountActions,
+  appearance,
   settingsSelected,
+  pluginRecommendations = 0,
   onSettings,
-  onProfile,
 }: {
   communities: Communities;
   accountActions: AccountActionsService;
+  appearance: Appearance;
   settingsSelected: boolean;
-  onSettings(): void;
-  /** Present only while a panel can show the viewer's own profile. */
-  onProfile?: ((trigger: HTMLButtonElement) => void) | undefined;
+  pluginRecommendations?: number;
+  /** Opens Settings, optionally at one of its own sections. */
+  onSettings(section?: "profile" | "plugins"): void;
 }) {
   const {
     profile: localProfile,
@@ -69,6 +98,12 @@ export function ProfileButton({
     communities.presence.subscribe,
     communities.presence.snapshot,
   );
+  const { preference, error: appearanceError } = useSyncExternalStore(
+    appearance.subscribe,
+    appearance.snapshot,
+  );
+  const colorMode = colorModes[preference];
+  const ColorModeIcon = colorMode.Icon;
   const connection = useRelayConnection(communities.relay);
   const session = connection.session;
   const observed = usePresenceStatus(
@@ -79,8 +114,11 @@ export function ProfileButton({
     online: "Online",
     away: "Away",
     offline: "Offline",
-    unknown: "Status unavailable",
+    unknown: "Availability unknown",
   }[observed];
+  // The unknown label already names the control.
+  const availabilityName =
+    observed === "unknown" ? label : `Availability: ${label}`;
   const [statusChange, setStatusChange] = useState<{
     target: "online" | "away" | "offline";
     session: typeof session;
@@ -124,13 +162,19 @@ export function ProfileButton({
     readProfile,
     readProfile,
   );
-  const live = useSyncExternalStore(
+  // Only the refresh inputs: live heads change on every message and prefetch.
+  const readRoster = () => session?.live.snapshot()?.roster;
+  const readLiveStatus = () => session?.live.snapshot()?.status;
+  const roster = useSyncExternalStore(
     session?.live.subscribe ?? noSubscription,
-    session?.live.snapshot ?? noLiveSnapshot,
-    session?.live.snapshot ?? noLiveSnapshot,
+    readRoster,
+    readRoster,
   );
-  const roster = live?.roster;
-  const liveStatus = live?.status;
+  const liveStatus = useSyncExternalStore(
+    session?.live.subscribe ?? noSubscription,
+    readLiveStatus,
+    readLiveStatus,
+  );
   useEffect(() => {
     if (
       !profiles ||
@@ -143,15 +187,37 @@ export function ProfileButton({
     // Roster setup can cancel earlier reads, and disk hydration can hold an old
     // profile. Refresh once at this authority boundary through the same session.
     const controller = new AbortController();
-    void session
-      .read([{ kinds: [0], authors: [viewer], limit: 5 }], {
-        priority: "background",
-        fresh: true,
+    const read = session.read([{ kinds: [0], authors: [viewer], limit: 5 }], {
+      priority: "background",
+      fresh: true,
+      signal: controller.signal,
+    });
+    read.catch(() => {});
+    // Local time is shared by default. This fresh read triggers it; a strong
+    // read just before publishing supplies what is published.
+    if (selected)
+      void shareDeviceTimeZone({
+        community: selected,
+        viewer,
+        communities,
+        read,
+        inspect: () => communityApi.inspectProfile(selected, session),
         signal: controller.signal,
-      })
-      .catch(() => {});
+        zone: deviceTimeZone(),
+        publish: (profile, existing) =>
+          communityApi.publishProfile(selected, profile, existing),
+      });
     return () => controller.abort();
-  }, [profiles, viewer, connection.status, session, roster, liveStatus]);
+  }, [
+    communities,
+    profiles,
+    viewer,
+    selected,
+    connection.status,
+    session,
+    roster,
+    liveStatus,
+  ]);
   const profile = selected ? communityProfile : localProfile;
   const displayName = profile?.name.trim();
   const name =
@@ -162,10 +228,23 @@ export function ProfileButton({
   const picture = selected ? avatarMedia(source, session?.media) : source;
   const status = useUserStatus(session?.statuses, viewer ?? "");
   const statusEditor = useStatusEditor(session, viewer ?? undefined);
+  // The Set status shortcut follows the menu item's availability.
+  const statusAvailable =
+    !!viewer && !!session?.statuses?.writable && !!connection.scope;
+  const openStatus = useEffectEvent(() => statusEditor.open());
+  useEffect(() => {
+    if (!statusAvailable) return;
+    const open = () => openStatus();
+    statusShortcut.current = open;
+    return () => {
+      if (statusShortcut.current === open) statusShortcut.current = undefined;
+    };
+  }, [statusAvailable]);
   const profileTrigger = useRef<HTMLButtonElement>(null);
+  const appearanceTrigger = useRef<HTMLDivElement>(null);
   const openingStatus = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  // Settings or the profile panel takes focus once the menu has closed.
+  // Settings takes focus once the menu has closed.
   const handoff = useRef(false);
   const actions = useSyncExternalStore(
     accountActions.subscribe,
@@ -176,6 +255,12 @@ export function ProfileButton({
   const ActionDialog = actions.find(
     (action) => action === selectedAction,
   )?.component;
+  const renderAction = (action: RegisteredAccountAction) => (
+    <MenuItem key={action.key} onClick={() => setSelectedAction(action)}>
+      <MenuIcon>{action.icon ?? <PlugIcon size={17} />}</MenuIcon>
+      {action.title}
+    </MenuItem>
+  );
   const accountLabel = useId();
   const statusUnavailable = useId();
   const avatar = (
@@ -199,7 +284,6 @@ export function ProfileButton({
             handoff.current = false;
             openingStatus.current = false;
           } else {
-            statusEditor.cancelOpening();
             openingStatus.current = false;
           }
         }}
@@ -210,7 +294,11 @@ export function ProfileButton({
             const main = document.getElementById("main-content");
             // A user may already be editing Settings, or the profile panel may
             // have focused itself, while the menu animates out.
-            if (!main?.contains(document.activeElement)) main?.focus();
+            if (
+              !document.querySelector('[aria-modal="true"]') &&
+              !main?.contains(document.activeElement)
+            )
+              main?.focus();
           }
         }}
       >
@@ -230,7 +318,7 @@ export function ProfileButton({
                   aria-label={
                     viewer
                       ? observed === "unknown"
-                        ? "Your status is unavailable"
+                        ? "Your availability is unknown"
                         : `Your status: ${label}`
                       : "Your avatar"
                   }
@@ -243,6 +331,8 @@ export function ProfileButton({
         />
         <MenuPopup
           data-profile-menu=""
+          side="right"
+          collisionAvoidance={{ fallbackAxisSide: "start" }}
           align="end"
           sideOffset={8}
           aria-labelledby={accountLabel}
@@ -253,28 +343,22 @@ export function ProfileButton({
           </span>
           <div className={styles.profileHeader}>
             <span className={styles.profileAvatar}>
-              {onProfile ? (
-                <MenuItem
-                  nativeButton
-                  onClick={() => {
-                    const trigger = profileTrigger.current;
-                    if (!trigger) return;
-                    handoff.current = true;
-                    onProfile(trigger);
-                  }}
-                  render={
-                    <IconButton
-                      type="button"
-                      aria-label="View your profile"
-                      variant="avatar"
-                      shape="round"
-                      icon={avatar}
-                    />
-                  }
-                />
-              ) : (
-                avatar
-              )}
+              <MenuItem
+                nativeButton
+                onClick={() => {
+                  handoff.current = true;
+                  onSettings("profile");
+                }}
+                render={
+                  <IconButton
+                    type="button"
+                    aria-label={`${name}, edit profile`}
+                    variant="avatar"
+                    shape="round"
+                    icon={avatar}
+                  />
+                }
+              />
             </span>
             <div className={styles.profileDetails}>
               <p className="m-0 truncate text-body">{name}</p>
@@ -282,7 +366,7 @@ export function ProfileButton({
                 <MenuRoot modal={false}>
                   <span className={styles.availability} data-status={observed}>
                     <MenuTrigger
-                      aria-label={`Availability: ${label}${pending ? `, updating to ${currentChange.target}` : ""}`}
+                      aria-label={`${availabilityName}${pending ? `, updating to ${currentChange.target}` : ""}`}
                       render={
                         <Button variant="subtle" size="xs">
                           {pending && (
@@ -302,7 +386,7 @@ export function ProfileButton({
                       }
                     />
                   </span>
-                  <MenuPopup align="start" data-profile-submenu>
+                  <MenuPopup align="start" size="compact">
                     <MenuRadioGroup
                       value={observed === "unknown" ? "" : observed}
                       onValueChange={(value) => {
@@ -348,7 +432,7 @@ export function ProfileButton({
               role="alert"
               className="mx-3 my-2 max-w-56 text-body-sm text-danger"
             >
-              Could not confirm your status. Try again.
+              Could not confirm your availability. Try again.
             </p>
           )}
           {presence.error && (
@@ -360,73 +444,110 @@ export function ProfileButton({
             </p>
           )}
           {viewer && session?.statuses && (
-            <>
-              <div className={styles.statusCard}>
-                <MenuItem
-                  aria-label={
-                    status
-                      ? `Set a status: ${[status.emoji, status.text].filter(Boolean).join(" ")}`
-                      : "Set a status"
+            <div className={styles.statusAction}>
+              <MenuItem
+                aria-label={
+                  status
+                    ? `Set a status: ${[status.emoji, status.text].filter(Boolean).join(" ")}`
+                    : "Set a status"
+                }
+                aria-describedby={
+                  !session.statuses.writable ? statusUnavailable : undefined
+                }
+                closeOnClick={false}
+                disabled={!session.statuses.writable}
+                onClick={() => {
+                  if (statusEditor.open()) {
+                    openingStatus.current = true;
+                    setMenuOpen(false);
                   }
-                  aria-describedby={
-                    !session.statuses.writable ? statusUnavailable : undefined
-                  }
-                  closeOnClick={false}
-                  disabled={statusEditor.loading || !session.statuses.writable}
-                  onClick={async () => {
-                    if (await statusEditor.open()) {
-                      openingStatus.current = true;
-                      setMenuOpen(false);
-                    }
-                  }}
-                >
-                  {status ? (
-                    <>
-                      <StatusEmoji session={session} value={status.emoji} />
-                      <span className="min-w-0 truncate text-body-sm">
-                        {status.text}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <MenuIcon>
-                        <SmileyIcon size={16} aria-hidden="true" />
-                      </MenuIcon>
-                      {statusEditor.loading
-                        ? "Loading status…"
-                        : "Set a status"}
-                    </>
-                  )}
-                </MenuItem>
-              </div>
-              {!session.statuses.writable && (
-                <p
-                  id={statusUnavailable}
-                  className="mx-3 my-2 max-w-56 text-body-sm text-muted"
-                >
-                  Status updates are unavailable in this community.
-                </p>
-              )}
-              {statusEditor.error && (
-                <p
-                  role="alert"
-                  className="mx-3 my-2 max-w-56 text-body-sm text-danger"
-                >
-                  {statusEditor.error}
-                </p>
-              )}
-            </>
+                }}
+              >
+                {status ? (
+                  <>
+                    <StatusEmoji
+                      session={session}
+                      value={status.emoji}
+                      url={status.emojiUrl}
+                      hint
+                    />
+                    <span className="min-w-0 truncate text-body-sm">
+                      {status.text}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <MenuIcon>
+                      <SmileyIcon size={16} aria-hidden="true" />
+                    </MenuIcon>
+                    Set a status
+                  </>
+                )}
+              </MenuItem>
+            </div>
+          )}
+          {session?.statuses && !session.statuses.writable && (
+            <p
+              id={statusUnavailable}
+              className="mx-3 my-2 max-w-56 text-body-sm text-muted"
+            >
+              Status updates are unavailable in this community.
+            </p>
           )}
           <MenuSeparator />
-          {actions.map((action) => (
-            <MenuItem
-              key={action.key}
-              onClick={() => setSelectedAction(action)}
+          <MenuSubmenu>
+            <MenuSubmenuTrigger ref={appearanceTrigger}>
+              <MenuIcon>
+                <ColorModeIcon size={16} aria-hidden="true" />
+              </MenuIcon>
+              Appearance
+            </MenuSubmenuTrigger>
+            <MenuSubmenuPopup
+              aria-label="Appearance"
+              finalFocus={appearanceTrigger}
             >
-              <MenuIcon>{action.icon ?? <PlugIcon size={17} />}</MenuIcon>
-              {action.title}
-            </MenuItem>
-          ))}
+              <MenuRadioGroup
+                value={preference}
+                onValueChange={(value) => {
+                  if (
+                    value === "light" ||
+                    value === "dark" ||
+                    value === "system"
+                  )
+                    appearance.setMode(value);
+                }}
+              >
+                {(["light", "dark", "system"] as const).map((value) => {
+                  const { label, Icon } = colorModes[value];
+                  return (
+                    <MenuRadioItem
+                      key={value}
+                      value={value}
+                      closeOnClick={false}
+                    >
+                      <MenuIcon>
+                        <Icon size={16} aria-hidden="true" />
+                      </MenuIcon>
+                      {label}
+                    </MenuRadioItem>
+                  );
+                })}
+              </MenuRadioGroup>
+              {appearanceError && (
+                <MenuNote role="alert">{appearanceError}</MenuNote>
+              )}
+            </MenuSubmenuPopup>
+          </MenuSubmenu>
+          <PluginUpdatesMenu
+            recommendations={pluginRecommendations}
+            onManage={() => {
+              handoff.current = true;
+              onSettings("plugins");
+            }}
+          />
+          {actions
+            .filter((action) => action.placement === "before-settings")
+            .map(renderAction)}
           <MenuItem
             aria-current={settingsSelected ? "page" : undefined}
             onClick={() => {
@@ -444,6 +565,12 @@ export function ProfileButton({
               </MenuTrailing>
             )}
           </MenuItem>
+          {actions.some((action) => action.placement !== "before-settings") && (
+            <MenuSeparator />
+          )}
+          {actions
+            .filter((action) => action.placement !== "before-settings")
+            .map(renderAction)}
         </MenuPopup>
       </MenuRoot>
       {ActionDialog && (
@@ -459,6 +586,7 @@ export function ProfileButton({
           session={session}
           scope={connection.scope}
           current={statusEditor.editor.current}
+          viewer={statusEditor.editor.viewer}
           close={statusEditor.close}
           finalFocus={profileTrigger}
         />

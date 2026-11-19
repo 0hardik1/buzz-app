@@ -1,12 +1,15 @@
 import { validateRecording, type VoiceRecording } from "../relay/voice-media";
 import { useState, useSyncExternalStore } from "react";
-import type { RelaySession } from "../relay/session";
+import type { ComposerSession } from "./composer-session";
 import {
   UPLOAD_MAX_BYTES,
   UploadError,
+  isUploadedAttachment,
   type UploadedAttachment,
+  type UploadProgress,
 } from "../relay/attachments";
 import { prepareAttachment } from "./prepare-attachment";
+import { clearView, readView, writeView } from "../../shared/view-state";
 
 export type DraftAttachment = Readonly<{
   id: string;
@@ -21,7 +24,10 @@ export type DraftAttachment = Readonly<{
 export type AttachmentDraft = {
   snapshot(): readonly DraftAttachment[];
   subscribe(listener: () => void): () => void;
-  add(files: readonly File[], recording?: VoiceRecording): void;
+  /** Admits the files that fit, in order. A lone file that does not fit throws
+   * why; otherwise one sentence per reason names the first files left out
+   * and counts the rest. */
+  add(files: readonly File[], recording?: VoiceRecording): readonly string[];
   addUploaded(attachment: UploadedAttachment): void;
   adopt(files: readonly DraftAttachment[]): boolean;
   prepareForSend(signal: AbortSignal): Promise<readonly UploadedAttachment[]>;
@@ -68,15 +74,63 @@ export function transferAttachmentDraft(
   to.receive(from.take());
 }
 
-const drafts = new WeakMap<RelaySession, Map<string, AttachmentDraft>>();
+const drafts = new WeakMap<ComposerSession, Map<string, AttachmentDraft>>();
+
+/** Files held for a composer `key`, without creating its draft. */
+export function attachmentDraftCount(session: ComposerSession, key: string) {
+  return drafts.get(session)?.get(key)?.snapshot().length ?? 0;
+}
+const countListeners = new WeakMap<ComposerSession, Set<() => void>>();
+/** Hear when any of the session's drafts gains or loses files, including
+ * drafts whose composer is no longer mounted. */
+export function subscribeAttachmentDraftCounts(
+  session: ComposerSession,
+  listener: () => void,
+) {
+  let listeners = countListeners.get(session);
+  if (!listeners) {
+    listeners = new Set();
+    countListeners.set(session, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 export const MAX_ATTACHMENT_FILES = 10;
 const MAX_RETAINED_BYTES = 2 * UPLOAD_MAX_BYTES;
+/** A refusal names this many files, then counts the rest. */
+const NAMED_REFUSALS = 3;
 
-/** Tab-local files survive navigation, not reload. Delivery remains outbox-owned. */
+/** A composer's view scope and key for its uploaded files. */
+type SavedFiles = readonly [scope: string, key: string];
+
+const uploadedItem = (attachment: UploadedAttachment): DraftAttachment => ({
+  id: crypto.randomUUID(),
+  file: new File([], attachment.name, { type: attachment.type }),
+  status: "ready",
+  uploaded: attachment,
+  ...(attachment.voice ? { voice: attachment.voice } : {}),
+});
+
+function restoreFiles([scope, key]: SavedFiles) {
+  const saved: unknown = readView(scope, key, []);
+  return (Array.isArray(saved) ? saved : [])
+    .filter(isUploadedAttachment)
+    .slice(0, MAX_ATTACHMENT_FILES)
+    .map(uploadedItem);
+}
+
+/** Tab-local files survive navigation. With `saved`, uploaded files also
+ * survive reload; local bytes still upload in this tab only. Delivery remains
+ * outbox-owned. A new chat's draft uploads before its channel exists. */
 export function attachmentDraft(
-  session: RelaySession,
+  session: ComposerSession,
   key: string,
   channelId: string,
+  newChat = false,
+  saved?: SavedFiles,
 ): AttachmentDraft {
   let partition = drafts.get(session);
   if (!partition) {
@@ -86,13 +140,35 @@ export function attachmentDraft(
   const existing = partition.get(key);
   if (existing) return existing;
   const owners = partition;
-  let items: readonly DraftAttachment[] = [];
+  let items: readonly DraftAttachment[] = saved ? restoreFiles(saved) : [];
   const listeners = new Set<() => void>();
   let paused = false;
   let active = new Map<string, UploadTask>();
   let pending = new Map<string, Promise<UploadedAttachment>>();
+  const uploadedFiles = () =>
+    items.flatMap((item) => (item.uploaded ? [item.uploaded] : []));
+  // Save only this store's changes, so a stale window cannot rewrite a clear.
+  let savedFiles = JSON.stringify(uploadedFiles());
+  const save = () => {
+    if (!saved) return;
+    const files = uploadedFiles();
+    const revision = JSON.stringify(files);
+    if (revision === savedFiles) return;
+    savedFiles = revision;
+    try {
+      if (files.length) writeView(...saved, files);
+      else clearView(...saved);
+    } catch {
+      /* Storage unavailable; the files remain in this tab. */
+    }
+  };
+  let count = items.length;
   const emit = () => {
     for (const listener of listeners) listener();
+    save();
+    if (items.length === count) return;
+    count = items.length;
+    for (const listener of countListeners.get(session) ?? []) listener();
   };
   const replace = (id: string, change: Partial<DraftAttachment>) => {
     items = items.map((item) =>
@@ -158,7 +234,12 @@ export function attachmentDraft(
   ): Promise<UploadedAttachment> {
     if (item.uploaded) return item.uploaded;
     const attachments = session.attachments;
-    if (!attachments) throw new UploadError("unavailable");
+    const upload = newChat
+      ? attachments?.uploadForNewChat
+      : attachments &&
+        ((file: File, signal: AbortSignal, progress: UploadProgress) =>
+          attachments.upload(file, channelId, signal, progress));
+    if (!attachments || !upload) throw new UploadError("unavailable");
     const controller = new AbortController();
     const combined = AbortSignal.any([signal, controller.signal]);
     const owner = active;
@@ -170,11 +251,14 @@ export function attachmentDraft(
       transfer: undefined,
     });
     try {
-      const prepared = await prepareAttachment(item.file, combined);
+      const prepared = await (attachments.prepare ?? prepareAttachment)(
+        item.file,
+        combined,
+      );
       combined.throwIfAborted();
       task.update(item.id, { status: "uploading" });
       const result = await abortable(
-        attachments.upload(prepared, channelId, combined, (sent, total) => {
+        upload(prepared, combined, (sent, total) => {
           if (
             !combined.aborted &&
             owner.get(item.id) === task &&
@@ -259,26 +343,48 @@ export function attachmentDraft(
           throw new Error("Invalid voice note attachment");
       }
       if (!session.attachments) throw new UploadError("unavailable");
-      if (items.length + files.length > MAX_ATTACHMENT_FILES)
-        throw new Error(
-          `Attach at most ${MAX_ATTACHMENT_FILES} files per message.`,
-        );
-      for (const file of files)
-        if (!file.size || file.size > UPLOAD_MAX_BYTES)
-          throw new UploadError("size");
-      const retained = [...owners.values()]
+      let retained = [...owners.values()]
         .flatMap((owner) => owner.snapshot())
         .reduce((sum, item) => sum + item.file.size, 0);
-      if (
-        retained + files.reduce((sum, file) => sum + file.size, 0) >
-        MAX_RETAINED_BYTES
-      )
-        throw new Error(
-          "Attachment drafts are full (1,000 MiB). Send or remove some files first.",
-        );
+      const admitted: File[] = [];
+      // Reason → the files it left out. Empty files share the "" reason.
+      const refused = new Map<string, string[]>();
+      for (const file of files) {
+        const reason = !file.size
+          ? new Error(`${file.name} is empty.`)
+          : items.length + admitted.length >= MAX_ATTACHMENT_FILES
+            ? new Error(
+                `Attach at most ${MAX_ATTACHMENT_FILES} files per message.`,
+              )
+            : file.size > UPLOAD_MAX_BYTES
+              ? new UploadError("size")
+              : retained + file.size > MAX_RETAINED_BYTES
+                ? new Error(
+                    "Attachment drafts are full (1,000 MiB). Send or remove some files first.",
+                  )
+                : undefined;
+        if (!reason) {
+          admitted.push(file);
+          retained += file.size;
+        } else if (files.length === 1) throw reason;
+        else {
+          const key = file.size ? reason.message : "";
+          refused.set(key, [...(refused.get(key) ?? []), file.name]);
+        }
+      }
+      const left = Array.from(refused, ([reason, names]) => {
+        const listed =
+          names.length > NAMED_REFUSALS
+            ? `${names.slice(0, NAMED_REFUSALS).join(", ")} and ${names.length - NAMED_REFUSALS} more`
+            : names.join(", ");
+        return reason
+          ? `${listed}: ${reason}`
+          : `${listed} ${names.length === 1 ? "is" : "are"} empty.`;
+      });
+      if (!admitted.length) return left;
       items = [
         ...items,
-        ...files.map(
+        ...admitted.map(
           (file): DraftAttachment => ({
             id: crypto.randomUUID(),
             file,
@@ -300,6 +406,7 @@ export function attachmentDraft(
       emit();
       paused = false;
       pump();
+      return left;
     },
     addUploaded(attachment: UploadedAttachment) {
       if (!session.attachments) throw new UploadError("unavailable");
@@ -309,15 +416,7 @@ export function attachmentDraft(
           `Attach at most ${MAX_ATTACHMENT_FILES} files per message.`,
         );
       // No local bytes are retained. Send reuses the already uploaded descriptor.
-      items = [
-        ...items,
-        {
-          id: crypto.randomUUID(),
-          file: new File([], attachment.name, { type: attachment.type }),
-          status: "ready",
-          uploaded: attachment,
-        },
-      ];
+      items = [...items, uploadedItem(attachment)];
       owners.set(key, store);
       emit();
     },
@@ -349,7 +448,10 @@ export function attachmentDraft(
       return uploaded;
     },
     remove(id: string) {
+      const uploaded = items.find((item) => item.id === id)?.uploaded;
+      if (uploaded) session.attachments?.release?.(uploaded);
       active.get(id)?.controller.abort();
+
       active.delete(id);
       pending.delete(id);
       items = items.filter((item) => item.id !== id);
@@ -369,6 +471,8 @@ export function attachmentDraft(
       pump();
     },
     clear() {
+      for (const item of items)
+        if (item.uploaded) session.attachments?.release?.(item.uploaded);
       cancelActive();
       items = [];
       emit();
@@ -402,7 +506,7 @@ export function attachmentDraft(
 
 /** A confirmed deletion discards only this session's exact scoped composer files.
  * A missing store is a no-op; do not allocate a draft merely to clear it. */
-export function clearAttachmentDraft(session: RelaySession, key: string) {
+export function clearAttachmentDraft(session: ComposerSession, key: string) {
   const owners = drafts.get(session);
   const store = owners?.get(key);
   if (!store) return;
@@ -411,12 +515,16 @@ export function clearAttachmentDraft(session: RelaySession, key: string) {
 }
 
 export function useAttachmentDraft(
-  session: RelaySession,
+  session: ComposerSession,
   key: string,
   channelId: string,
+  newChat = false,
+  saved?: SavedFiles,
 ) {
   // Composer's destination key remounts this hook on a session/channel/thread change.
-  const [store] = useState(() => attachmentDraft(session, key, channelId));
+  const [store] = useState(() =>
+    attachmentDraft(session, key, channelId, newChat, saved),
+  );
   const items = useSyncExternalStore(
     store.subscribe,
     store.snapshot,

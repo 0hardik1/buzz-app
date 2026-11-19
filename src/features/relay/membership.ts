@@ -3,9 +3,15 @@ import type { EventData } from "./events";
 import { objectBody } from "./body";
 
 /** Content rows retained by channel history/live windows, not the unread kind set. */
-export const CHANNEL_ROW_KINDS = [9, 40002, 40008, 40099];
+export const CHANNEL_ROW_KINDS = [9, 40002, 40008, 40099, 48100, 48103];
 export const channelRowKind = (kind: number) =>
   CHANNEL_ROW_KINDS.includes(kind);
+/** A content row has one channel home; ambiguous tags are not membership evidence. */
+export function channelRowChannel(event: EventData): string | undefined {
+  if (!channelRowKind(event.kind)) return undefined;
+  const channels = event.tags.filter((tag) => tag[0] === "h");
+  return channels.length === 1 && channels[0]?.[1] ? channels[0][1] : undefined;
+}
 const pubkey = (value: unknown): value is string =>
   typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 
@@ -49,15 +55,17 @@ export function rowProfileIds(row: ChannelMessage): readonly string[] {
       ];
 }
 
+/** One line naming a diff row, whose content is a raw patch rather than prose. */
+export const diffPreview = (diff: NonNullable<ChannelMessage["diff"]>) =>
+  `Diff: ${diff.filePath || "patch"}${diff.description ? ` — ${diff.description}` : ""}`;
+
 /** Activity never replaces the latest conversational sidebar preview. */
 export function messagePreview(
   rows: readonly ChannelMessage[] = [],
 ): string | undefined {
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i];
-    if (row && !row.membership)
-      return row.diff
-        ? `Diff: ${row.diff.filePath || "patch"}${row.diff.description ? ` — ${row.diff.description}` : ""}`
-        : row.content;
+    if (row && !row.membership && !row.huddle)
+      return row.diff ? diffPreview(row.diff) : row.content;
   }
 }

@@ -25,14 +25,70 @@
   position: relative;
   z-index: 1;
 }
-.row + div > [data-variant="row"] {
-  margin-bottom: var(--space-half);
+/* Keep the menu trigger compact enough for the row. */
+.row:has([data-solo-row-action]) {
+  --solo-row-action-size: calc(var(--space-6) + var(--space-1));
 }
-.row:hover:not([data-selected])::before {
+.row [data-solo-row-action] {
+  flex-shrink: 0;
+  width: var(--solo-row-action-size);
+  height: var(--solo-row-action-size);
+  min-height: 0;
+}
+@media (hover: hover) and (pointer: fine) {
+  .row [data-solo-row-action] {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .row:hover [data-solo-row-action],
+  .row:has(:focus-visible) [data-solo-row-action],
+  .row [data-solo-row-action][aria-expanded="true"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  /* Keep badges in their usual column until the trailing menu appears.
+     Move the badge visually so the title's layout stays fixed. */
+  .row:has([data-solo-row-action]) {
+    & [data-solo-row-action] {
+      position: absolute;
+      inset-inline-end: var(--channel-row-fill-end, 0%);
+    }
+    /* Shared keeps its hit area when the menu appears beside it. */
+    &:has([data-solo-shared]) [data-solo-row-action] {
+      inset-inline-end: var(--size-control-sm);
+    }
+    &:is(
+        :hover,
+        :has(:focus-visible),
+        :has([data-solo-row-action][aria-expanded="true"])
+      ) {
+      & .badges {
+        position: relative;
+        inset-inline-end: var(--solo-row-action-size);
+      }
+      & .select [class~="navigation-item-label"] {
+        mask-image: linear-gradient(
+          to left,
+          transparent var(--solo-row-action-size),
+          black calc(var(--solo-row-action-size) + var(--space-2))
+        );
+      }
+    }
+  }
+}
+.row:is(:hover, :has([data-context-menu-present])):not(
+  [data-selected]
+)::before {
   background: var(--affordance-panel-hover);
 }
+.row[data-selected] {
+  --text-row: var(--text-sidebar-selected);
+  --text-subtle: var(--text-sidebar-selected);
+  --text-metadata: var(--text-sidebar-selected);
+  color: var(--text-sidebar-selected);
+}
 .row[data-selected]::before {
-  background: var(--interaction-selected);
+  background: var(--surface-sidebar-selected);
 }
 .row .select [data-buzz-ui][data-variant="row"] {
   background: transparent;
@@ -42,16 +98,20 @@
   min-width: 0;
 }
 .row .select [data-variant="row"] {
+  display: flex;
   width: 100%;
   margin-inline: 0;
-  padding-inline: var(--space-2)
-    calc(var(--channel-row-fill-end, 0%) + var(--space-1) + var(--space-half));
+  padding-inline: calc(var(--space-2) + var(--space-half))
+    calc(var(--channel-row-fill-end, 0%) + var(--space-2));
 }
-.row .select [data-variant="row"]:has([data-channel-working]) {
-  padding-inline-end: calc(var(--channel-row-fill-end, 0%) + var(--space-1));
+.row .select [data-variant="row"][data-working] {
+  padding-inline-end: calc(
+    var(--channel-row-fill-end, 0%) +
+    var(--space-2) +
+    var(--space-half)
+  );
 }
-.select [class~="navigation-item-label"],
-.sessions [class~="navigation-item-label"] {
+.select [class~="navigation-item-label"] {
   text-overflow: clip;
 }
 .iconSpace {
@@ -82,8 +142,7 @@
   padding-inline-end: var(--space-1);
   gap: var(--space-2);
 }
-.badges:has([data-channel-working]) {
-  padding-block: var(--space-1);
+.badges[data-working] {
   padding-inline-end: 0;
 }
 .nameContent {
@@ -97,12 +156,16 @@
   width: fit-content;
   max-width: 100%;
 }
-.label,
-.childLabel {
+.label {
   display: block;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
+}
+.muted {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-metadata);
 }
 .label:only-child {
   width: 100%;
@@ -112,45 +175,16 @@
   max-width: 100%;
   flex: 0 1 auto;
 }
-.row:has([data-channel-ordinary="true"]) .label {
+.row[data-ordinary] .label {
   color: var(--text-navigation-unread);
   font-weight: var(--type-weight-semibold);
+}
+/* The selected destination carries its fill's ink, which may be white on a
+   saturated accent; the weight still marks it unread. */
+.row[data-selected][data-ordinary] .label {
+  color: var(--text-row-selected);
 }
 .menu {
   width: max-content;
   max-width: var(--available-width);
-}
-.row .disclosure {
-  position: absolute;
-  left: calc(var(--space-2) - ((var(--space-6) - 0.9375rem) / 2) - 1.5px);
-  z-index: 2;
-}
-.hashIcon {
-  display: flex;
-}
-.row .chevronIcon {
-  display: none;
-}
-.row:is(:hover, :has(:focus-visible)) .hashIcon {
-  display: none;
-}
-.row:is(:hover, :has(:focus-visible)) .chevronIcon {
-  display: block;
-}
-.childLabel {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: var(--space-2);
-}
-.childLabel > [data-channel-unread-title="true"] {
-  color: var(--text-navigation-unread);
-  font-weight: var(--type-weight-semibold);
-}
-/* Empty badge wrappers must not consume the navigation item's trailing gap. */
-.select span:has(> .badges:empty) {
-  display: none;
-}
-.sessions.sessions [data-buzz-ui][data-variant="row"] {
-  border-radius: var(--radius-row);
 }

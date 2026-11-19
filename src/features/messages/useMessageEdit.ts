@@ -8,10 +8,10 @@ import {
 } from "react";
 import type { ChannelMessage } from "../relay/contracts";
 import type { OutgoingEvent } from "../relay/outbox";
-import type { RelaySession } from "../relay/session";
+import type { ComposerSession } from "./composer-session";
 
 export function lastEditableMessage(
-  session: RelaySession,
+  session: ComposerSession,
   rows: readonly ChannelMessage[],
 ): ChannelMessage | undefined {
   if (!session.viewer || !session.outbox?.supports(40003)) return;
@@ -44,9 +44,33 @@ const empty: readonly OutgoingEvent[] = [];
 const snapshot = () => empty;
 const subscribe = () => () => {};
 
+export type DraftMessageEdit = {
+  id: string;
+  content: string;
+  saveDraft(body: string): Promise<void>;
+  cancelDraft(): void;
+};
+
+/** Closes a task after the next frame, so the optimistic row paints first. */
+export function useCloseAfterPaint(active: boolean, close: () => void) {
+  const finish = useEffectEvent(close);
+  useEffect(() => {
+    if (!active) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
+      timer = setTimeout(finish);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  }, [active]);
+}
+
 /** Edit delivery uses the session outbox; the composer owns input and draft restoration. */
-export function useMessageEdit(session: RelaySession, restore: () => void) {
-  const [target, setTarget] = useState<ChannelMessage>();
+export function useMessageEdit(session: ComposerSession, restore: () => void) {
+  const [target, setTarget] = useState<ChannelMessage | DraftMessageEdit>();
+  const [draftSaving, setDraftSaving] = useState(false);
   const [operation, setOperation] = useState<string>();
   const submitted = useRef<string | undefined>(undefined);
   const initial = useRef<string | undefined>(undefined);
@@ -57,10 +81,17 @@ export function useMessageEdit(session: RelaySession, restore: () => void) {
     session.outbox?.snapshot ?? snapshot,
   );
   const delivery = pending.find((item) => item.event.id === operation);
-  const busy = !!operation && delivery?.delivery === "sending";
+  const busy = draftSaving || (!!operation && delivery?.delivery === "sending");
   const retryable =
     delivery?.delivery === "failed" || delivery?.delivery === "unknown";
+  useEffect(
+    () => () => {
+      if (target && "cancelDraft" in target) target.cancelDraft();
+    },
+    [target],
+  );
   const close = () => {
+    if (target && "cancelDraft" in target) target.cancelDraft();
     restore();
     setTarget(undefined);
     setOperation(undefined);
@@ -68,36 +99,50 @@ export function useMessageEdit(session: RelaySession, restore: () => void) {
     initial.current = undefined;
     setError(undefined);
   };
-  const finish = useEffectEvent(close);
-  useEffect(() => {
-    if (
-      operation &&
-      (!delivery ||
-        delivery.delivery === "accepted" ||
-        delivery.delivery === "seen")
-    )
-      finish();
-  }, [operation, delivery]);
+  // The row shows the edit optimistically; MessageManagementStatus owns
+  // failures.
+  useCloseAfterPaint(!!operation && !retryable, close);
   return {
     target,
     busy,
-    locked: !!operation,
+    locked: !!operation || draftSaving,
     retryable,
     error: error ?? delivery?.error,
     close,
     clearError: () => setError(undefined),
-    start(row: ChannelMessage) {
+    start(
+      row: ChannelMessage,
+      normalize: (body: string) => string = (body) => body,
+    ) {
       setTarget(row);
       setError(undefined);
-      initial.current = messageEditText(
+      const body = messageEditText(
         row,
         session.profiles.snapshot(),
         session.agentLibrary.snapshot().identities,
       );
-      return initial.current;
+      initial.current = normalize(body);
+      return body;
+    },
+    startDraft(draft: DraftMessageEdit) {
+      setTarget(draft);
+      setError(undefined);
+      initial.current = draft.content;
+      return draft.content;
     },
     save(body: string, current: ChannelMessage | undefined) {
-      if (!target || submitted.current || !body.trim()) return;
+      if (!target || submitted.current || draftSaving) return;
+      if ("saveDraft" in target) {
+        setDraftSaving(true);
+        void target
+          .saveDraft(body)
+          .then(close, (reason) => {
+            setError(reason instanceof Error ? reason.message : String(reason));
+          })
+          .finally(() => setDraftSaving(false));
+        return;
+      }
+      if (!body.trim()) return;
       if (!current || !lastEditableMessage(session, [current])) {
         setError("This message is no longer available to edit.");
         return;

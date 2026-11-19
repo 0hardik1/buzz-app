@@ -1,12 +1,22 @@
 import {
-  BUBBLE_COLOR_KEY,
-  parseBubbleColor,
-  type BubbleColor,
-} from "./bubble-color";
+  ACCENT_KEY,
+  CONTRAST_KEY,
+  parseContrast,
+  type Contrast,
+  DEFAULT_ACCENT,
+  LEGACY_BUBBLE_KEY,
+  parseAccent,
+  parseLegacyBubbleColor,
+  type Accent,
+} from "./accent";
 /** Host-owned, device-local appearance. Never depends on plugin/relay readiness. */
 export type ColorMode = "light" | "dark";
 export type ColorModePreference = ColorMode | "system";
 export const APPEARANCE_KEY = "buzz-appearance.v1";
+export type MessageWidth = "narrow" | "wide";
+export const MESSAGE_WIDTH_KEY = "buzz-message-width.v1";
+export const parseMessageWidth = (value: unknown): MessageWidth =>
+  value === "wide" ? "wide" : "narrow";
 export const FONT_SCALE_KEY = "buzz-font-scale.v1";
 export const MIN_FONT_SCALE = 0.8;
 export const MAX_FONT_SCALE = 2;
@@ -26,14 +36,25 @@ export const parseColorModePreference = (
   value: unknown,
 ): ColorModePreference =>
   value === "light" || value === "dark" ? value : "system";
+/** Vertical rhythm of conversation rows; text size stays with the font scale. */
+export type MessageDensity = "default" | "compact";
+export const DENSITY_KEY = "buzz-message-density.v1";
+export const parseMessageDensity = (value: unknown): MessageDensity =>
+  value === "compact" ? "compact" : "default";
 
 export interface AppearanceSnapshot {
   readonly preference: ColorModePreference;
   readonly mode: ColorMode;
+  readonly messageWidth: MessageWidth;
+  readonly messageWidthError: string | null;
   readonly fontScale: number;
   readonly fontError: string | null;
-  readonly bubbleColor: BubbleColor;
-  readonly bubbleError: string | null;
+  readonly accent: Accent;
+  readonly accentError: string | null;
+  readonly contrast: Contrast;
+  readonly contrastError: string | null;
+  readonly density: MessageDensity;
+  readonly densityError: string | null;
   readonly error: string | null;
 }
 
@@ -51,42 +72,58 @@ export function createAppearance(
     preference: "system",
     mode: "light",
     error: null,
+    messageWidth: "narrow",
+    messageWidthError: null,
     fontScale: 1,
     fontError: null,
-    bubbleColor: "neutral",
-    bubbleError: null,
+    accent: DEFAULT_ACCENT,
+    accentError: null,
+    contrast: "low",
+    contrastError: null,
+    density: "default",
+    densityError: null,
   };
   let disposed = false;
+  let paletteGuard = 0;
   const listeners = new Set<() => void>();
   const apply = () => {
     if (!host) return;
     const root = host.document.documentElement;
-    const changingMode =
-      root.dataset.colorMode && root.dataset.colorMode !== state.mode;
-    const transitionGuard = changingMode
-      ? host.document.createElement("style")
-      : undefined;
-    if (transitionGuard) {
-      transitionGuard.textContent =
-        "*,*::before,*::after{transition:none !important}";
-      host.document.head.append(transitionGuard);
-    }
+    const changingPalette =
+      root.dataset.colorMode &&
+      (root.dataset.colorMode !== state.mode ||
+        root.dataset.accent !== state.accent ||
+        root.dataset.colorLevel !==
+          (state.contrast === "low" ? "touch" : state.contrast));
+    // A stylesheet removal rebuilds WebKit's style resolver; an attribute only restyles.
+    const guard = changingPalette ? ++paletteGuard : undefined;
+    if (guard) root.dataset.paletteChanging = "";
     root.dataset.colorMode = state.mode;
-    if (transitionGuard) {
+    root.dataset.accent = state.accent;
+    // Preserve the existing soft-bubble selector for Chillin’.
+    root.dataset.colorLevel =
+      state.contrast === "low" ? "touch" : state.contrast;
+    if (guard) {
       // Commit the new palette before restoring interactive transitions.
       void root.offsetHeight;
       host.requestAnimationFrame(() =>
-        host.requestAnimationFrame(() => transitionGuard.remove()),
+        host.requestAnimationFrame(() => {
+          if (guard === paletteGuard) delete root.dataset.paletteChanging;
+        }),
       );
     }
-    root.dataset.bubbleColor = state.bubbleColor;
+    root.style.setProperty(
+      "--buzz-message-width",
+      state.messageWidth === "wide" ? "78rem" : "52rem",
+    );
+    root.dataset.messageDensity = state.density;
     root.style.setProperty("--buzz-text-scale", String(state.fontScale));
     // CSS owns the palette; browser chrome derives from the same canvas token.
     host.document
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute(
         "content",
-        host.getComputedStyle(root).getPropertyValue("--workspace").trim(),
+        host.getComputedStyle(root).getPropertyValue("--bg-app").trim(),
       );
   };
   const notify = () => {
@@ -136,20 +173,74 @@ export function createAppearance(
     }
     notify();
   };
-  const restoreBubble = () => {
+  const restoreMessageWidth = () => {
     try {
       state = {
         ...state,
-        bubbleColor: parseBubbleColor(
-          host?.localStorage.getItem(BUBBLE_COLOR_KEY),
+        messageWidth: parseMessageWidth(
+          host?.localStorage.getItem(MESSAGE_WIDTH_KEY),
         ),
-        bubbleError: null,
+        messageWidthError: null,
       };
     } catch {
       state = {
         ...state,
-        bubbleError:
-          "Bubble color could not be restored. Choose a color to try saving it again.",
+        messageWidthError:
+          "Message width could not be restored. Choose a width to try saving it again.",
+      };
+    }
+    notify();
+  };
+  const restoreAccent = () => {
+    try {
+      const saved = host?.localStorage.getItem(ACCENT_KEY);
+      state = {
+        ...state,
+        accent:
+          saved != null
+            ? parseAccent(saved)
+            : parseLegacyBubbleColor(
+                host?.localStorage.getItem(LEGACY_BUBBLE_KEY),
+              ),
+        accentError: null,
+      };
+    } catch {
+      state = {
+        ...state,
+        accentError:
+          "Accent color could not be restored. Choose a color to try saving it again.",
+      };
+    }
+    notify();
+  };
+  const restoreContrast = () => {
+    try {
+      state = {
+        ...state,
+        contrast: parseContrast(host?.localStorage.getItem(CONTRAST_KEY)),
+        contrastError: null,
+      };
+    } catch {
+      state = {
+        ...state,
+        contrastError:
+          "Vibe level could not be restored. Choose a level to try saving it again.",
+      };
+    }
+    notify();
+  };
+  const restoreDensity = () => {
+    try {
+      state = {
+        ...state,
+        density: parseMessageDensity(host?.localStorage.getItem(DENSITY_KEY)),
+        densityError: null,
+      };
+    } catch {
+      state = {
+        ...state,
+        densityError:
+          "Message density could not be restored. Choose a density to try saving it again.",
       };
     }
     notify();
@@ -158,7 +249,11 @@ export function createAppearance(
     if (
       event.key !== APPEARANCE_KEY &&
       event.key !== FONT_SCALE_KEY &&
-      event.key !== BUBBLE_COLOR_KEY &&
+      event.key !== MESSAGE_WIDTH_KEY &&
+      event.key !== ACCENT_KEY &&
+      event.key !== CONTRAST_KEY &&
+      event.key !== DENSITY_KEY &&
+      event.key !== LEGACY_BUBBLE_KEY &&
       event.key !== null
     )
       return;
@@ -167,16 +262,37 @@ export function createAppearance(
       if (event.storageArea !== host?.localStorage) return;
       if (event.key === null || event.key === APPEARANCE_KEY) restore();
       if (event.key === null || event.key === FONT_SCALE_KEY) restoreFont();
-      if (event.key === null || event.key === BUBBLE_COLOR_KEY) restoreBubble();
+      if (event.key === null || event.key === MESSAGE_WIDTH_KEY)
+        restoreMessageWidth();
+      if (event.key === null || event.key === CONTRAST_KEY) restoreContrast();
+      if (event.key === null || event.key === DENSITY_KEY) restoreDensity();
+      if (
+        event.key === null ||
+        event.key === ACCENT_KEY ||
+        event.key === LEGACY_BUBBLE_KEY
+      )
+        restoreAccent();
     } catch {
       if (event.key === null || event.key === APPEARANCE_KEY) restore();
       if (event.key === null || event.key === FONT_SCALE_KEY) restoreFont();
-      if (event.key === null || event.key === BUBBLE_COLOR_KEY) restoreBubble();
+      if (event.key === null || event.key === MESSAGE_WIDTH_KEY)
+        restoreMessageWidth();
+      if (event.key === null || event.key === CONTRAST_KEY) restoreContrast();
+      if (event.key === null || event.key === DENSITY_KEY) restoreDensity();
+      if (
+        event.key === null ||
+        event.key === ACCENT_KEY ||
+        event.key === LEGACY_BUBBLE_KEY
+      )
+        restoreAccent();
     }
   };
   restore();
   restoreFont();
-  restoreBubble();
+  restoreMessageWidth();
+  restoreAccent();
+  restoreContrast();
+  restoreDensity();
   host?.addEventListener("storage", onStorage);
   systemScheme?.addEventListener("change", onSystemSchemeChange);
   return {
@@ -223,20 +339,64 @@ export function createAppearance(
       state = { ...state, fontScale, fontError };
       notify();
     },
-    setBubbleColor(value: BubbleColor) {
+    setMessageWidth(value: MessageWidth) {
       if (disposed) return;
-      const bubbleColor = parseBubbleColor(value);
-      let bubbleError: string | null = null;
+      const messageWidth = parseMessageWidth(value);
+      let messageWidthError: string | null = null;
       try {
         if (!host) throw new Error("No browser storage");
-        host.localStorage.setItem(BUBBLE_COLOR_KEY, bubbleColor);
+        host.localStorage.setItem(MESSAGE_WIDTH_KEY, messageWidth);
       } catch {
-        bubbleError =
-          "This bubble color is active, but could not be saved on this device. Try again.";
+        messageWidthError =
+          "This message width is active, but could not be saved on this device. Try again.";
       }
-      state = { ...state, bubbleColor, bubbleError };
+      state = { ...state, messageWidth, messageWidthError };
       notify();
     },
+    setAccent(value: Accent) {
+      if (disposed) return;
+      const accent = parseAccent(value);
+      let accentError: string | null = null;
+      try {
+        if (!host) throw new Error("No browser storage");
+        host.localStorage.setItem(ACCENT_KEY, accent);
+      } catch {
+        accentError =
+          "This accent color is active, but could not be saved on this device. Try again.";
+      }
+      state = { ...state, accent, accentError };
+      notify();
+    },
+    setContrast(value: Contrast) {
+      if (disposed) return;
+      const contrast = parseContrast(value);
+      let contrastError: string | null = null;
+      try {
+        if (!host) throw new Error("No browser storage");
+        host.localStorage.setItem(CONTRAST_KEY, contrast);
+      } catch {
+        contrastError =
+          "This vibe level is active, but could not be saved on this device. Try again.";
+      }
+      state = { ...state, contrast, contrastError };
+      notify();
+    },
+    setDensity(value: MessageDensity) {
+      if (disposed) return;
+      const density = parseMessageDensity(value);
+      let densityError: string | null = null;
+      try {
+        if (!host) throw new Error("No browser storage");
+        host.localStorage.setItem(DENSITY_KEY, density);
+      } catch {
+        densityError =
+          "This message density is active, but could not be saved on this device. Try again.";
+      }
+      state = { ...state, density, densityError };
+      notify();
+    },
+    /** After `dispose`, setters change nothing. */
+    isDisposed: () => disposed,
     dispose() {
       disposed = true;
       host?.removeEventListener("storage", onStorage);

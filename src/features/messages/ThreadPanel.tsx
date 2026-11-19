@@ -1,6 +1,19 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: The thread region supports keyboard scrolling and Escape.
+import { AgentConnectionSetup } from "../agents/AgentConnectionSetup";
+import { TypingIndicator, useLiveConversationAgents } from "./TypingIndicator";
+import { ActivityExpansion } from "./ActivityExpansion";
+import { ActivityGroupPreview } from "./ActivityGroupPreview";
+import {
+  activityPresentation,
+  useChannelActivitySnapshot,
+  useStableRowActivity,
+} from "./activity-presentation";
+import { activityRuns } from "./activity-groups";
+import { DayDivider } from "./MessageTimestamp";
 import { workflowLabel } from "../relay/workflow-attribution";
 import { usePanelTabHost } from "../panels/PanelWorkspace";
+import { moveMessageSelection } from "./message-selection";
+import { MessageSelection } from "./use-message-selection";
 import { MessageEditScope } from "./MessageEditScope";
 import { useMessageSelectionCopy } from "./selection-copy";
 import { ReplySummary } from "./ReplySummary";
@@ -9,6 +22,8 @@ import { replyTree } from "./reply-tree";
 import { useChannelIdentityNames } from "../identity-names/react";
 import { formatPublicKey } from "../../shared/identity/public-key";
 import { Button } from "../../shared/design-system/ui/Button";
+import { Avatar } from "../../shared/design-system/ui/Avatar";
+import { avatarMedia } from "../../shared/avatar-source";
 import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
@@ -25,19 +40,28 @@ import { XIcon } from "../../shared/design-system/icons/index";
 import type { ConversationExtensions } from "../conversation/contracts";
 import type { ChannelMessage } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
-import type { ThreadView } from "../relay/threads";
-import { useRowProfiles } from "../relay/react";
-import { rowProfileIds } from "../relay/membership";
+import {
+  threadFailure,
+  type ThreadRetarget,
+  type ThreadView,
+} from "../relay/threads";
+import { useProfileGeneration, useRowProfiles } from "../relay/react";
+import { diffPreview, rowProfileIds } from "../relay/membership";
+import { plainText } from "../notifications/content";
 import { MessageRow, type MessageLinkOrigin } from "./MessageRow";
-import { continuesMessageGroup } from "./message-grouping";
-import { MessageComposer } from "./MessageComposer";
+import { MessageContextMenus } from "./MessageActionBar";
+import {
+  continuesMessageGroup,
+  publicMessageNeighbor,
+} from "./message-grouping";
+import { MessageComposer, type MessageComposerProps } from "./MessageComposer";
 import { ChannelJoinNotice } from "./ChannelJoinNotice";
 import { useListedChannel } from "../relay/listed-channel";
 import type { CSSProperties } from "react";
 import styles from "./Messages.module.css";
-import { rejectUnhandledFileDrop } from "./use-file-drop";
 import { Reading, readingPositioned } from "./use-reading";
 import { useMessageReveal } from "./use-message-reveal";
+import { usePendingRequest } from "./use-pending-request";
 import type { PageNavigation } from "../navigation/service";
 import { messageViewKey } from "./view-key";
 import { useKnownAgentPubkeys } from "../agents/use-known";
@@ -45,14 +69,14 @@ import { JumpToLatestButton } from "./JumpToLatestButton";
 import { correctScrollTop } from "./scroll-correction";
 
 export type ThreadPanelProps = {
+  intro?: ReactNode;
   extensions?: ConversationExtensions | undefined;
   session: RelaySession;
   scope: string;
   channelName: string;
   channelId: string;
-  sessionConversation?: boolean | undefined;
-  personalConversation?: boolean | undefined;
-  activityClickOpensPanel?: boolean | undefined;
+  /** Solo agents answer at top level, so a Solo thread is read-only. */
+  soloConversation?: boolean | undefined;
   disabled?: boolean | undefined;
   messageId: string;
   /** Channel workspaces retain the editor across same-thread link navigation. */
@@ -66,25 +90,45 @@ export type ThreadPanelProps = {
   /** Retry a failed routed opening with fresh navigation authority. */
   onRetryNavigation?: (() => void) | undefined;
   replyRequest?: number | undefined;
+  /** Each new value focuses the reply box, keeping its target. */
+  focusRequest?: number | undefined;
+  /** A saved draft carries its cancellable target through a delayed root read. */
+  autoFocus?: MessageComposerProps["autoFocus"];
   /** Inline Inbox visit retains and reveals its exact selected message. */
   revealSelected?: boolean | undefined;
+  /** Reveal an inline target without taking focus from its host. */
+  revealFocus?: boolean | undefined;
+  /** With revealSelected: each new value reveals the selected message again. */
+  revealRequest?: number | undefined;
+  /** An opening that reads the thread as it opens it names the thread's read
+   * time from before that read; each new request decides the divider again. */
+  unreadRequest?: { readThrough: number } | undefined;
   headerActions?: ReactNode | undefined;
   /** Saved drafts may compose only against a verified matching root. */
   requireReadyRoot?: boolean | undefined;
   onDraftSaved?: (() => void) | undefined;
+  /** The hosting preview may track delivery of this exact outgoing message. */
+  onSend?: ((id: string) => void) | undefined;
   active?: boolean | undefined;
   navigation?: PageNavigation | undefined;
   /** Omit to embed the thread: no header or Escape dismissal; the owner supplies both. */
   close?: (() => void) | undefined;
+  /** The conversation this thread lives in, named as Inbox rows name it, when
+   * the host can show the thread there. */
+  parent?: { label: string; open(): void } | undefined;
   onOpenLink(url: string, origin?: MessageLinkOrigin): boolean;
   onOpenMediaReview?(
     messageId: string,
     attachment: ChannelMessage["attachments"][number],
     seconds: number,
     hasComments?: boolean,
+    attachments?: ChannelMessage["attachments"],
   ): void;
   canOpenLink?: ((target: string) => boolean) | undefined;
 };
+
+// Read errors are diagnostics, not copy; the notice says what happened.
+const THREAD_FAILED = "This thread didn’t load.";
 
 /** Safe to retarget through ordinary props; callers do not own internal remount keys. */
 export function ThreadPanel(props: ThreadPanelProps) {
@@ -105,13 +149,13 @@ export function ThreadPanel(props: ThreadPanelProps) {
       }
       data-attachment-drop-zone=""
       data-reading-surface=""
-      onDragOver={rejectUnhandledFileDrop}
-      onDrop={rejectUnhandledFileDrop}
       aria-label="Thread"
       onKeyDown={(event) => {
         // Portalled viewers bubble here through React but own their Escape.
         if (
           event.key === "Escape" &&
+          !event.shiftKey &&
+          !event.defaultPrevented &&
           !tabbed &&
           close &&
           event.currentTarget.contains(event.target as Node)
@@ -127,6 +171,14 @@ export function ThreadPanel(props: ThreadPanelProps) {
           close={close}
           actions={props.headerActions}
         />
+      )}
+      {props.parent && (
+        <p className={styles.threadParent}>
+          In{" "}
+          <Button variant="link" size="inline" onClick={props.parent.open}>
+            {props.parent.label}
+          </Button>
+        </p>
       )}
       {props.retainThread ? (
         <RetainedThreadPanel key={viewKey} {...props} />
@@ -170,12 +222,20 @@ type SelectionFailure = {
   pending: boolean;
   retry(): void;
 };
+/** Where the reader left a routed visit: a row's offset, or else the end. */
+type ThreadPlace = {
+  anchor?: { id: string; top: number; ancestors: readonly string[] };
+};
+const THREAD_PLACE = "thread";
 /** Reader lifetime follows the open thread; navigation owns only a reveal request. */
 function RetainedThreadPanel(props: ThreadPanelProps) {
   type Opening = {
     view: ThreadView;
     messageId: string;
     navigation: PageNavigation | undefined;
+    revealRequest: number | undefined;
+    // Settles with its selection, so a retarget's line is decided for it.
+    unreadRequest: ThreadPanelProps["unreadRequest"];
     revision: number;
   };
   const current = useRef<Opening | undefined>(undefined);
@@ -186,6 +246,8 @@ function RetainedThreadPanel(props: ThreadPanelProps) {
   const [pending, setPending] = useState(false);
   const retrying = useRef(false);
   const [attempt, retry] = useState(0);
+  // A route to the thread already shown waits while retarget confirms it.
+  const [routing, setRouting] = useState<PageNavigation>();
   useEffect(
     () => () => {
       current.current?.view.dispose();
@@ -195,8 +257,16 @@ function RetainedThreadPanel(props: ThreadPanelProps) {
   );
   const differentThread = useRef(props.onDifferentThread);
   differentThread.current = props.onDifferentThread;
-  const { session, channelId, messageId, navigation, onRetryNavigation } =
-    props;
+  const {
+    session,
+    channelId,
+    messageId,
+    navigation,
+    onRetryNavigation,
+    revealSelected,
+    revealRequest,
+    unreadRequest,
+  } = props;
   const retryNavigation = useCallback(() => {
     retrying.current = true;
     setPending(true);
@@ -227,18 +297,33 @@ function RetainedThreadPanel(props: ThreadPanelProps) {
         prior &&
         !navigation &&
         prior.messageId === messageId &&
+        prior.revealRequest === revealRequest &&
         !retrying.current
       ) {
-        const next = { ...prior, navigation: undefined };
+        const next = { ...prior, navigation: undefined, unreadRequest };
         current.current = next;
         setOpening(next);
         return;
       }
       if (prior?.view.snapshot().root) {
-        const result = await prior.view.retarget(messageId, signal);
+        if (navigation) setRouting(navigation);
+        let result: ThreadRetarget;
+        try {
+          result = await prior.view.retarget(messageId, signal);
+        } finally {
+          setRouting((routing) =>
+            routing === navigation ? undefined : routing,
+          );
+        }
         if (signal.aborted || current.current !== prior) return;
         if (result === "selected") {
-          const next = { ...prior, messageId, navigation };
+          const next = {
+            ...prior,
+            messageId,
+            navigation,
+            revealRequest,
+            unreadRequest,
+          };
           current.current = next;
           setOpening(next);
           settle();
@@ -257,14 +342,16 @@ function RetainedThreadPanel(props: ThreadPanelProps) {
           navigation?.complete({
             status: "failed",
             reason: result === "unavailable" ? "not-found" : "unavailable",
+            presented: true,
           });
           return;
         }
       }
       try {
         const exact =
-          navigation?.target.kind === "conversation" &&
-          navigation.target.threadRootId !== messageId;
+          revealSelected ||
+          (navigation?.target.kind === "conversation" &&
+            navigation.target.threadRootId !== messageId);
         const view = session.thread(
           channelId,
           messageId,
@@ -275,6 +362,8 @@ function RetainedThreadPanel(props: ThreadPanelProps) {
           view,
           messageId,
           navigation,
+          revealRequest,
+          unreadRequest,
           revision: (prior?.revision ?? 0) + 1,
         };
         current.current = next;
@@ -285,17 +374,30 @@ function RetainedThreadPanel(props: ThreadPanelProps) {
         // An existing thread stays usable; its notice owns the retry.
         if (prior) settle({ unavailable: false });
         else settle(undefined, String(error));
-        navigation?.complete({ status: "failed", reason: "unavailable" });
+        navigation?.complete({
+          status: "failed",
+          reason: "unavailable",
+          presented: true,
+        });
       }
     }
     void select();
     return () => request.abort();
-  }, [session, channelId, messageId, navigation, attempt]);
+  }, [
+    session,
+    channelId,
+    messageId,
+    navigation,
+    revealSelected,
+    revealRequest,
+    unreadRequest,
+    attempt,
+  ]);
   return (
     <>
       {error && !opening && (
         <div role="alert" className={styles.empty}>
-          <p>{error}</p>
+          <p>{THREAD_FAILED}</p>
           <Button loading={pending} onClick={retryNavigation}>
             Try again
           </Button>
@@ -308,6 +410,9 @@ function RetainedThreadPanel(props: ThreadPanelProps) {
           view={opening.view}
           messageId={opening.messageId}
           navigation={opening.navigation}
+          routePending={!!routing}
+          revealRequest={opening.revealRequest}
+          unreadRequest={opening.unreadRequest}
           selectionFailure={
             failure && { ...failure, pending, retry: retryNavigation }
           }
@@ -319,6 +424,7 @@ function RetainedThreadPanel(props: ThreadPanelProps) {
   );
 }
 function OwnedThreadPanel({
+  intro,
   session,
   extensions,
   scope,
@@ -329,15 +435,18 @@ function OwnedThreadPanel({
   onOpenLink,
   onOpenMediaReview,
   canOpenLink,
-  sessionConversation,
-  personalConversation,
-  activityClickOpensPanel,
+  soloConversation,
   disabled,
   replyRequest,
+  focusRequest,
+  autoFocus,
   active = true,
   revealSelected,
+  revealFocus,
+  unreadRequest,
   requireReadyRoot,
   onDraftSaved,
+  onSend,
 }: ThreadPanelProps) {
   const [view, setView] = useState<ThreadView>();
   const [error, setError] = useState<string>();
@@ -369,7 +478,11 @@ function OwnedThreadPanel({
       };
     } catch (error) {
       setError(String(error));
-      navigation?.complete({ status: "failed", reason: "unavailable" });
+      navigation?.complete({
+        status: "failed",
+        reason: "unavailable",
+        presented: true,
+      });
     }
   }, [
     session,
@@ -382,16 +495,15 @@ function OwnedThreadPanel({
   ]);
   return error ? (
     <div className={styles.empty} role="alert">
-      <p>{error}</p>
+      <p>{THREAD_FAILED}</p>
       <Button type="button" onClick={() => setAttempt((value) => value + 1)}>
-        Retry thread
+        Try again
       </Button>
     </div>
   ) : view ? (
     <ThreadMessages
-      sessionConversation={sessionConversation}
-      personalConversation={personalConversation}
-      activityClickOpensPanel={activityClickOpensPanel}
+      intro={intro}
+      soloConversation={soloConversation}
       disabled={disabled}
       extensions={extensions}
       session={session}
@@ -402,10 +514,15 @@ function OwnedThreadPanel({
       navigation={navigation}
       messageId={messageId}
       replyRequest={replyRequest}
+      focusRequest={focusRequest}
+      autoFocus={autoFocus}
       active={active}
       revealSelected={revealSelected}
+      revealFocus={revealFocus}
+      unreadRequest={unreadRequest}
       requireReadyRoot={requireReadyRoot}
       onDraftSaved={onDraftSaved}
+      onSend={onSend}
       onOpenLink={onOpenLink}
       onOpenMediaReview={onOpenMediaReview}
       canOpenLink={canOpenLink}
@@ -415,6 +532,7 @@ function OwnedThreadPanel({
   );
 }
 function ThreadMessages({
+  intro,
   session,
   extensions,
   scope,
@@ -426,24 +544,33 @@ function ThreadMessages({
   onOpenLink,
   onOpenMediaReview,
   canOpenLink,
-  sessionConversation,
-  personalConversation,
-  activityClickOpensPanel,
+  soloConversation,
   disabled,
   replyRequest,
+  focusRequest,
+  autoFocus,
   active,
   revealSelected,
+  revealFocus,
+  revealRequest,
+  unreadRequest,
   requireReadyRoot,
   onDraftSaved,
+  onSend,
   selectionFailure,
   onResolvedRoot,
+  routePending,
 }: {
+  intro?: ReactNode;
   onResolvedRoot?: ThreadPanelProps["onResolvedRoot"];
+  /** A route to this reader is on its way: until it lands, a reader not yet
+   * shown stays hidden and unread rather than showing a place the route
+   * replaces. */
+  routePending?: boolean | undefined;
   /** A same-thread link that couldn't open; the current thread stays usable. */
   selectionFailure?: SelectionFailure | undefined;
-  sessionConversation?: boolean | undefined;
-  personalConversation?: boolean | undefined;
-  activityClickOpensPanel?: boolean | undefined;
+  /** Solo agents answer at top level, so a Solo thread is read-only. */
+  soloConversation?: boolean | undefined;
   disabled?: boolean | undefined;
   extensions?: ConversationExtensions | undefined;
   session: RelaySession;
@@ -453,10 +580,17 @@ function ThreadMessages({
   messageId: string;
   view: ThreadView;
   replyRequest?: number | undefined;
+  focusRequest?: number | undefined;
+  autoFocus?: ThreadPanelProps["autoFocus"];
   active?: boolean | undefined;
   revealSelected?: boolean | undefined;
+  /** Reveal an inline target without taking focus from its host. */
+  revealFocus?: boolean | undefined;
+  revealRequest?: number | undefined;
+  unreadRequest?: ThreadPanelProps["unreadRequest"];
   requireReadyRoot?: boolean | undefined;
   onDraftSaved?: ThreadPanelProps["onDraftSaved"];
+  onSend?: ThreadPanelProps["onSend"];
   navigation?: PageNavigation | undefined;
   onOpenLink(url: string, origin?: MessageLinkOrigin): boolean;
   onOpenMediaReview?: ThreadPanelProps["onOpenMediaReview"];
@@ -467,18 +601,28 @@ function ThreadMessages({
     channelId,
     (listed) => {
       const channel = listed ?? session.channels?.get?.(channelId);
+      if (channel?.archived) return "archived";
+      if (channel?.viewerRole === "guest") return "guest";
       if (channel?.readOnly && !channel.cached) {
-        return !channel.archived &&
-          (channel.channelType === "stream" || channel.channelType === "forum")
+        return channel.channelType === "stream" ||
+          channel.channelType === "forum" ||
+          (channel.channelType === "solo" && channel.joinRole === "guest")
           ? "joinable"
           : "preview";
       }
-      return listed && !listed.readOnly && !listed.archived
-        ? "member"
-        : "other";
+      return listed && !listed.readOnly ? "member" : "other";
     },
   );
-  const preview = channelAccess === "joinable" || channelAccess === "preview";
+  const preview =
+    channelAccess === "joinable" ||
+    channelAccess === "preview" ||
+    channelAccess === "archived" ||
+    channelAccess === "guest";
+  const joinRole = useListedChannel(
+    session.channels,
+    channelId,
+    (listed) => (listed ?? session.channels?.get?.(channelId))?.joinRole,
+  );
   const [joinNoticeHeight, setJoinNoticeHeight] = useState(0);
   const [joining, setJoining] = useState(false);
   const snapshot = useSyncExternalStore(
@@ -486,6 +630,12 @@ function ThreadMessages({
     view.snapshot,
     view.snapshot,
   );
+  const threadChannels = useMemo(() => new Set([channelId]), [channelId]);
+  const activitySnapshot = useChannelActivitySnapshot(
+    session.agentActivity,
+    threadChannels,
+  );
+  const stableActivity = useStableRowActivity();
   const resolvedRoot = snapshot.root?.id;
   const reportRoot = useRef(onResolvedRoot);
   reportRoot.current = onResolvedRoot;
@@ -529,7 +679,30 @@ function ThreadMessages({
       }),
     [session.unread, channelId, snapshot.root?.id, messageId],
   );
-  useSyncExternalStore(subscribeUnread, unreadSnapshot, unreadSnapshot);
+  const threadUnread = useSyncExternalStore(
+    subscribeUnread,
+    unreadSnapshot,
+    unreadSnapshot,
+  );
+  const [expandedActivity, setExpandedActivity] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const activityVisit = useRef<unknown[]>([]);
+  useLayoutEffect(() => {
+    const request = [messageId, navigation?.signal, revealRequest];
+    if (
+      !messageId ||
+      request.every((part, index) => part === activityVisit.current[index]) ||
+      !snapshot.replies.some((row) => row.id === messageId)
+    )
+      return;
+    activityVisit.current = request;
+    const group = [...tree.children.values()]
+      .flatMap((rows) => activityRuns(rows))
+      .find((group) => group.some((row) => row.id === messageId));
+    const first = group?.[0]?.id;
+    if (first) setExpandedActivity((current) => new Set([...current, first]));
+  }, [messageId, navigation?.signal, revealRequest, snapshot.replies, tree]);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [replyParent, setReplyParent] = useState<string>();
   const resolveName = useChannelIdentityNames(session, channelId);
@@ -551,25 +724,41 @@ function ThreadMessages({
       snapshot.root ? [snapshot.root, ...snapshot.replies] : snapshot.replies,
     [snapshot.root, snapshot.replies],
   );
+  // Remembered agents follow the viewer's latest message here, not the root.
+  // Undefined until the first page lands: the seeded root is not yet the thread.
+  const threadSeed = useMemo(
+    () =>
+      snapshot.status === "ready"
+        ? rows.filter((row) => row.authorId === session.viewer).at(-1)
+        : undefined,
+    [snapshot.status, rows, session.viewer],
+  );
   const authors = [...new Set(rows.flatMap(rowProfileIds))].sort().join(":");
+  const profileGeneration = useProfileGeneration(session.profiles);
   useEffect(() => {
+    void profileGeneration;
     if (authors)
       void session.profiles
         .ensure(authors.split(":"), "background")
         .catch(() => {});
-  }, [session.profiles, authors]);
+  }, [session.profiles, authors, profileGeneration]);
   const profiles = useRowProfiles(session.profiles, rows);
   const agentPubkeys = useKnownAgentPubkeys(session, profiles);
   const scroller = useRef<HTMLElement>(null);
   const positioned = useRef(false);
+  const shown = useRef(active);
   const readingSettled = useRef(false);
   const [initialPositioned, setInitialPositioned] = useState(false);
   const follow = useRef(true);
+  // Where a placed unread line and the panel's own corrections since left the
+  // scroller; a scroll landing there is not the reader's.
+  const lineTop = useRef<number | undefined>(undefined);
   const resizePosition = useRef<
     | {
         width: number;
         height: number;
         contentHeight: number;
+        scrollTop: number;
         anchor?: { element: HTMLElement; top: number };
       }
     | undefined
@@ -585,6 +774,7 @@ function ThreadMessages({
       width: element.clientWidth,
       height: element.clientHeight,
       contentHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
       ...(row
         ? {
             anchor: {
@@ -615,6 +805,14 @@ function ThreadMessages({
     },
     [],
   );
+  // Back/Forward to a visit with a recorded place returns there instead of
+  // replaying its opening, unless that place can no longer be shown.
+  const [lostPlace, setLostPlace] = useState<AbortSignal>();
+  const returning =
+    !!navigation?.traversal &&
+    lostPlace !== navigation.signal &&
+    navigation.position(THREAD_PLACE) !== undefined;
+  const restoredVisit = useRef<AbortSignal | undefined>(undefined);
   const olderAnchor = useRef<
     { id: string; top: number; ancestors: readonly string[] } | undefined
   >(undefined);
@@ -623,7 +821,7 @@ function ThreadMessages({
   // biome-ignore lint/correctness/useExhaustiveDependencies: each new target request retires the previous reveal anchor, not the reader's state.
   useLayoutEffect(() => {
     targetAnchor.current = undefined;
-  }, [messageId, navigation?.signal]);
+  }, [messageId, navigation?.signal, revealRequest]);
   const selectedRow = useCallback(
     () =>
       [
@@ -637,7 +835,7 @@ function ThreadMessages({
   // within this commit/layout expansion; a later user expansion must not restore it.
   const selectedBranchRef = useMemo(() => {
     let restore = false;
-    return (branch: HTMLLIElement | null) => {
+    return (branch: HTMLElement | null) => {
       if (!branch) return;
       const row = branch.querySelector<HTMLElement>("[data-message-id]");
       if (
@@ -685,7 +883,12 @@ function ThreadMessages({
   const prepareTarget = useCallback(() => {
     follow.current = false;
   }, []);
-  const revealedAncestors = useRef(new Set<string>());
+  // Each request reveals its ancestors once; a branch the reader then
+  // collapses stays closed until the next request.
+  const revealedAncestors = useRef({
+    request: [] as unknown[],
+    ids: new Set<string>(),
+  });
   // A continuation may supply the parent of the visible reply. Commit its new
   // ancestors before restoring geometry; expanded branches stay open.
   useLayoutEffect(() => {
@@ -704,38 +907,243 @@ function ThreadMessages({
   // available ancestor as it arrives; missing parents remain visible at the top.
   useLayoutEffect(() => {
     if (navigation?.signal.aborted) return;
+    const request = [messageId, navigation?.signal, revealRequest];
+    if (
+      request.some(
+        (part, index) => part !== revealedAncestors.current.request[index],
+      )
+    )
+      revealedAncestors.current = { request, ids: new Set() };
     const ancestors = tree
       .ancestors(messageId)
-      .filter((id) => !revealedAncestors.current.has(id));
-    for (const id of ancestors) revealedAncestors.current.add(id);
+      .filter((id) => !revealedAncestors.current.ids.has(id));
+    for (const id of ancestors) revealedAncestors.current.ids.add(id);
     if (ancestors.length)
       setExpanded((current) => {
         if (ancestors.every((id) => current.has(id))) return current;
         return new Set([...current, ...ancestors]);
       });
-  }, [tree, messageId, navigation]);
+  }, [tree, messageId, navigation, revealRequest]);
   const rootTarget =
     navigation?.target.kind === "conversation" &&
     navigation.target.threadRootId === messageId;
+  // Ordinary opens are positioned, not revealed; so is a return to a saved place.
+  const positionedVisit = rootTarget || returning;
+  // Reopening an already-shown thread selects nothing new, so its reader needs
+  // a focus handoff to start reading. First positioning leaves the opening's
+  // tab/composer focus handoff alone.
+  // The signal identifies one request; the navigation object is re-bound per
+  // relay snapshot, so a re-render of the same request must not refocus.
+  const handledRequest = useRef(navigation?.signal);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new request moves focus; the others merely qualify it.
+  useLayoutEffect(() => {
+    if (handledRequest.current === navigation?.signal) return;
+    handledRequest.current = navigation?.signal;
+    const element = scroller.current;
+    if (
+      !navigation ||
+      navigation.signal.aborted ||
+      navigation.focus === "preserve" ||
+      !positionedVisit ||
+      !active ||
+      !positioned.current ||
+      !element
+    )
+      return;
+    // Only focus the opener left behind (its control unmounted) moves in.
+    // Focus the person has since placed anywhere, even a moment after a first
+    // opening whose request arrived late, is not stolen.
+    const focused = document.activeElement;
+    if (!focused || focused === document.body)
+      element.focus({ preventScroll: true });
+  }, [navigation?.signal]);
   // Ordinary opens follow the latest reply after bounded history finishes.
   // Keep that first positioning invisible; exact-message navigation reveals itself.
   const positioning =
     !revealSelected &&
     !initialPositioned &&
-    (!navigation || rootTarget) &&
+    (!navigation || positionedVisit) &&
     snapshot.status !== "error";
+  // Each ordinary opening starts at the first top-level reply with unread in
+  // its branch, decided once before positioning so reading it does not move
+  // the line. Undefined while deciding.
+  const opening =
+    (rootTarget && !returning ? navigation?.signal : undefined) ??
+    unreadRequest;
+  const [boundary, setBoundary] = useState<{
+    opening?: object | undefined;
+    id?: string | null;
+    failed?: true;
+  }>(() => ({ opening }));
+  if (opening && opening !== boundary.opening) setBoundary({ opening });
+  const unreadBoundary = boundary.id;
+  const placed = useRef<typeof boundary>(undefined);
+  // Focus as this panel opened, and whether pointer or keyboard input has
+  // come since: either way the person owns focus now.
+  const opened = useRef<{ focused: Element | null; interacted?: true }>({
+    focused: null,
+  });
+  useLayoutEffect(() => {
+    opened.current = { focused: document.activeElement };
+    const interact = () => {
+      opened.current.interacted = true;
+    };
+    document.addEventListener("pointerdown", interact, true);
+    document.addEventListener("keydown", interact, true);
+    return () => {
+      document.removeEventListener("pointerdown", interact, true);
+      document.removeEventListener("keydown", interact, true);
+    };
+  }, []);
+  useEffect(() => {
+    // Attention and read marks change without a new thread snapshot.
+    void threadUnread;
+    if (boundary.id !== undefined) {
+      // A failed read decided nothing: decide again once it recovers, unless
+      // the reader has left the latest reply since.
+      if (boundary.failed && snapshot.status === "ready")
+        setBoundary(
+          follow.current
+            ? { opening: boundary.opening }
+            : { opening: boundary.opening, id: null },
+        );
+      return;
+    }
+    if (
+      revealSelected ||
+      returning ||
+      (navigation && !rootTarget) ||
+      (snapshot.status === "ready" && snapshot.root?.id !== messageId)
+    ) {
+      setBoundary({ ...boundary, id: null });
+      return;
+    }
+    if (snapshot.status === "error") {
+      setBoundary({ ...boundary, id: null, failed: true });
+      return;
+    }
+    // Decide once positioning could proceed, but not while an older page this
+    // decision asked for is in flight.
+    if (
+      snapshot.readKind === "older" ||
+      (!(snapshot.root && snapshot.direction) &&
+        (snapshot.status !== "ready" ||
+          (snapshot.direction !== "older" && snapshot.canLoadMore)))
+    )
+      return;
+    // An inactive reader reads nothing. Shown, it is a preview and gets no
+    // line; in a covered tab, it decides once shown, so the line is measured.
+    if (!active) {
+      const shown =
+        scroller.current &&
+        (scroller.current.checkVisibility?.({ visibilityProperty: true }) ??
+          true) &&
+        !scroller.current.closest("[inert]");
+      if (shown) setBoundary({ ...boundary, id: null });
+      return;
+    }
+    // A requested read time outlasts the read that opened the thread: unread
+    // is judged as of that time.
+    const since = unreadRequest?.readThrough;
+    const unread = (row: ChannelMessage): boolean => {
+      const attention = session.unread.attention(channelId, row.id, since);
+      return (
+        attention.unread ||
+        attention.forced ||
+        (tree.children.get(row.id) ?? []).some(unread)
+      );
+    };
+    const first = (tree.children.get(undefined) ?? []).find(unread);
+    // A requested read time follows a read of the whole thread, so a nested
+    // unread reply shows no new count: reveal it, as a reply target is.
+    const nested = (row: ChannelMessage): ChannelMessage | undefined => {
+      for (const child of tree.children.get(row.id) ?? []) {
+        const attention = session.unread.attention(channelId, child.id, since);
+        if (attention.unread || attention.forced) return child;
+        const found = nested(child);
+        if (found) return found;
+      }
+    };
+    const revealed = since !== undefined && first && nested(first);
+    const known =
+      since !== undefined || !!first || (threadUnread?.observedCount ?? 0) > 0;
+    // Resumed rows show at once; with unread known, the line waits for this
+    // view's own rows.
+    if (known && snapshot.resumed) return;
+    // With unread known in the thread, only a thread-wide read reaching the
+    // oldest loaded reply shows that older replies are read: one read alone,
+    // or the viewer's own, does not. A legacy walk reads forward from the
+    // oldest reply.
+    const oldest = snapshot.replies[0];
+    // A reply marked unread is unread whatever the frontier says; one the
+    // store knows of outside the loaded rows is older than them.
+    const loadedUnread = [snapshot.root, ...snapshot.replies].filter(
+      (row) => row && session.unread.attention(channelId, row.id).unread,
+    ).length;
+    const unreadOlder = (threadUnread?.observedCount ?? 0) > loadedUnread;
+    const readThrough =
+      since ?? session.unread.threadReadThrough(channelId, messageId);
+    if (
+      known &&
+      snapshot.direction === "older" &&
+      (snapshot.canLoadMore || snapshot.limited) &&
+      oldest &&
+      (unreadOlder || oldest.createdAt > readThrough)
+    ) {
+      // Page to the frontier in one read, not one page per decision. Read
+      // per page: a read synced mid-load can move it.
+      if (snapshot.canLoadMore)
+        void view.loadMore(
+          () => since ?? session.unread.threadReadThrough(channelId, messageId),
+        );
+      // Past the page limit the first unread reply stays unknown.
+      else setBoundary({ ...boundary, id: null });
+      return;
+    }
+    if (revealed) {
+      const ancestors = tree.ancestors(revealed.id);
+      setExpanded((current) =>
+        ancestors.every((id) => current.has(id))
+          ? current
+          : new Set([...current, ...ancestors]),
+      );
+    }
+    setBoundary({ ...boundary, id: first?.id ?? null });
+  }, [
+    boundary,
+    active,
+    unreadRequest,
+    revealSelected,
+    returning,
+    navigation,
+    rootTarget,
+    snapshot,
+    messageId,
+    tree,
+    session.unread,
+    channelId,
+    view,
+    threadUnread,
+  ]);
   const [inlineReveal, setInlineReveal] = useState<AbortSignal>();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each reveal request needs its own signal.
   useEffect(() => {
     if (!revealSelected) return;
     const request = new AbortController();
     setInlineReveal(request.signal);
     return () => request.abort();
-  }, [revealSelected]);
+  }, [revealSelected, revealRequest]);
   const revealSignal =
-    inlineReveal ?? (rootTarget ? undefined : navigation?.signal);
+    inlineReveal ?? (positionedVisit ? undefined : navigation?.signal);
   const revealed = useMessageReveal({
     scroller,
-    focus: !(
+    focus:
+      revealFocus !== false &&
+      !(
+        navigation?.target.kind === "conversation" &&
+        navigation.target.panel === "members"
+      ),
+    mark: !(
       navigation?.target.kind === "conversation" &&
       navigation.target.panel === "members"
     ),
@@ -747,21 +1155,66 @@ function ThreadMessages({
     complete: completeTarget,
     prepare: prepareTarget,
   });
+  // Leaving a visit once it was presented, by navigating on, hiding or
+  // unmounting, records where the reader was. A return counts only once
+  // restored, so an unrestored return keeps the place it came back for. New
+  // replies don't record one; a relay rebind does, mid-visit, but restoring
+  // that place leaves the reader where they already are. A reader whose route
+  // is withdrawn records again when it leaves, is hidden, is shown again or
+  // the next route arrives, before that route can restore the place. No
+  // reading is captured while it is hidden, and showing it again restores the
+  // reading first, so an offset the browser dropped meanwhile is never saved.
+  const leftTree = useRef(tree);
+  leftTree.current = tree;
+  const withdrawn = useRef<() => void>(undefined);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: hiding or showing the reader again records its place too.
+  useLayoutEffect(() => {
+    if (!navigation) return withdrawn.current;
+    withdrawn.current = undefined;
+    return () => {
+      const presented = returning
+        ? restoredVisit.current === navigation.signal
+        : (rootTarget && positioned.current) ||
+          revealed.current === navigation.signal;
+      if (!presented) return;
+      const record = () => {
+        const reading = resizePosition.current;
+        if (!reading) return;
+        const id = reading.anchor?.element.dataset.messageId;
+        navigation.savePosition(
+          THREAD_PLACE,
+          follow.current || !reading.anchor || !id
+            ? {}
+            : {
+                anchor: {
+                  id,
+                  top: reading.anchor.top,
+                  ancestors: leftTree.current.ancestors(id),
+                },
+              },
+        );
+      };
+      record();
+      withdrawn.current = record;
+    };
+  }, [navigation, active, returning, rootTarget, revealed]);
+  const failure = threadFailure(snapshot, rootTarget);
   useEffect(() => {
-    if (!navigation || navigation.signal.aborted) return;
-    if (rootTarget && snapshot.status === "error")
-      navigation.complete({ status: "failed", reason: "unavailable" });
-    else if (snapshot.targetStatus === "unavailable")
-      navigation.complete({ status: "failed", reason: "not-found" });
-    else if (snapshot.targetStatus === "error")
-      navigation.complete({ status: "failed", reason: "unavailable" });
-  }, [navigation, rootTarget, snapshot.status, snapshot.targetStatus]);
+    if (!navigation || navigation.signal.aborted || !failure) return;
+    // Each failure is shown in the thread, next to its own Try again.
+    navigation.complete({ status: "failed", reason: failure, presented: true });
+  }, [navigation, failure]);
   const [sent, setSent] = useState<string>();
   const [replyFocus, setReplyFocus] = useState(0);
   useEffect(() => {
-    if (!joining || channelAccess !== "member") return;
+    if (!joining || (channelAccess !== "member" && channelAccess !== "guest"))
+      return;
     setJoining(false);
-    if (active) setReplyFocus((value) => value + 1);
+    if (active) {
+      if (channelAccess === "guest")
+        scroller.current?.focus({ preventScroll: true });
+      else setReplyFocus((value) => value + 1);
+    }
   }, [joining, channelAccess, active]);
   const focusReply = useCallback(() => {
     setReplyParent(undefined);
@@ -774,11 +1227,56 @@ function ThreadMessages({
   useEffect(() => {
     if (replyRequest) focusReply();
   }, [replyRequest, focusReply]);
+  useEffect(() => {
+    if (focusRequest) setReplyFocus((value) => value + 1);
+  }, [focusRequest]);
+  const pendingReplyFocus = usePendingRequest(replyFocus);
   const [mediaSeek, setMediaSeek] = useState<{
     seconds: number;
     request: number;
   }>();
   const rootId = snapshot.root?.id;
+  const rootPresentation = useMemo(
+    () =>
+      activityPresentation(
+        snapshot.root?.audience === "agents"
+          ? [snapshot.root, ...snapshot.replies]
+          : snapshot.replies,
+        activitySnapshot,
+        agentPubkeys,
+        rootId,
+      ),
+    [snapshot.root, snapshot.replies, activitySnapshot, agentPubkeys, rootId],
+  );
+  const rootActivity = rootId ? rootPresentation.byRow.get(rootId) : undefined;
+  // A stopped note may follow only a reply that is always shown: collapsed
+  // branches do not mount their rows.
+  // Each displayed level is projected alone, but a signed claim may name a
+  // request loaded at another level.
+  const loadedRows = useMemo(
+    () =>
+      snapshot.root ? [snapshot.root, ...snapshot.replies] : snapshot.replies,
+    [snapshot.root, snapshot.replies],
+  );
+  const rootReplies = useMemo(
+    () =>
+      activityPresentation(
+        tree.children.get(undefined) ?? [],
+        activitySnapshot,
+        agentPubkeys,
+        rootId,
+        undefined,
+        loadedRows,
+      ),
+    [tree, activitySnapshot, agentPubkeys, rootId, loadedRows],
+  );
+  const liveAgents = useLiveConversationAgents(session, channelId, rootId);
+  const lastMessage = publicMessageNeighbor(rows, rows.length, -1);
+  const joinsLive =
+    !!lastMessage &&
+    !lastMessage.membership &&
+    lastMessage.audience !== "agents" &&
+    lastMessage.authorId === liveAgents[0];
   const hasMediaComments =
     (snapshot.root?.replyCount ?? 0) > 0 ||
     snapshot.replies.length > 0 ||
@@ -788,9 +1286,17 @@ function ThreadMessages({
       _rowId: string,
       attachment: ChannelMessage["attachments"][number],
       seconds: number,
+      _hasComments?: boolean,
+      attachments?: ChannelMessage["attachments"],
     ) => {
       if (rootId)
-        onOpenMediaReview?.(_rowId, attachment, seconds, hasMediaComments);
+        onOpenMediaReview?.(
+          _rowId,
+          attachment,
+          seconds,
+          hasMediaComments,
+          attachments,
+        );
     },
     [rootId, onOpenMediaReview, hasMediaComments],
   );
@@ -817,10 +1323,9 @@ function ThreadMessages({
   const handleMediaTime = useCallback(
     (seconds: number) => {
       if (!videoOwner || !videoAttachment) return;
-      if (videoOwner.id !== rootId) {
-        // A reply's video may be inside a collapsed branch. Open its canonical
-        // viewer instead of seeking an absent preview or an unrelated root.
-        openRootMedia(videoOwner.id, videoAttachment, seconds);
+      if (onOpenMediaReview) {
+        // Open the connected video at the comment, including root attachments.
+        openRootMedia(videoOwner.id, videoAttachment, Math.max(0, seconds - 3));
         return;
       }
       setMediaSeek((current) => ({
@@ -828,7 +1333,7 @@ function ThreadMessages({
         request: (current?.request ?? 0) + 1,
       }));
     },
-    [videoOwner, videoAttachment, rootId, openRootMedia],
+    [videoOwner, videoAttachment, onOpenMediaReview, openRootMedia],
   );
   // Only legacy traversal is eager. Strict windows open at the newest page.
   useEffect(() => {
@@ -869,10 +1374,11 @@ function ThreadMessages({
   useLayoutEffect(() => {
     const element = scroller.current;
     if (!element || navigation?.signal.aborted) return;
-    // Restored background tabs verify their target without competing for focus.
+    // Restored background tabs and returning visits verify their target without
+    // revealing it.
     if (
       navigation &&
-      !active &&
+      (!active || returning) &&
       snapshot.targetStatus === "ready" &&
       snapshot.target?.id === messageId &&
       revealed.current !== navigation.signal
@@ -899,9 +1405,73 @@ function ThreadMessages({
       (!positioned.current &&
         !(snapshot.root && snapshot.direction) &&
         (snapshot.status !== "ready" ||
-          (snapshot.direction !== "older" && snapshot.canLoadMore)))
+          (snapshot.direction !== "older" && snapshot.canLoadMore))) ||
+      (!positioned.current && unreadBoundary === undefined)
     )
       return;
+    // Native scroll anchoring is off here, so this panel owns ordinary reading
+    // too. With no explicit anchor, keep the saved first visible row in place
+    // through this commit's layout shift. A scroll since that save is newer
+    // reader intent and wins. A drop in scrollTop while the scroll range shrank
+    // is the browser clamping it during this commit's layout, not the reader;
+    // nor is any change while the reader was hidden, where WebKit drops the
+    // offset under display: none and would show the reader at its top.
+    const reading = resizePosition.current;
+    const clamped =
+      reading !== undefined &&
+      element.scrollTop < reading.scrollTop &&
+      element.scrollHeight - element.clientHeight <
+        reading.contentHeight - reading.height;
+    const reshown = active && !shown.current;
+    shown.current = active;
+    // Back/Forward returns once to where this visit was left: its row, with
+    // the branch holding it reopened, or else its nearest ancestor shown.
+    // When neither is loaded the visit opens again as it first did.
+    if (
+      navigation &&
+      returning &&
+      restoredVisit.current !== navigation.signal
+    ) {
+      const { anchor } = navigation.position(THREAD_PLACE) as ThreadPlace;
+      const closed = anchor
+        ? tree.ancestors(anchor.id).filter((id) => !expanded.has(id))
+        : [];
+      if (closed.length) {
+        setExpanded((current) => new Set([...current, ...closed]));
+        return;
+      }
+      const row =
+        anchor &&
+        [anchor.id, ...anchor.ancestors]
+          .map((id) =>
+            element.querySelector<HTMLElement>(`[data-message-id="${id}"]`),
+          )
+          .find((row) => row);
+      if (anchor && !row) {
+        revealed.current = undefined;
+        setLostPlace(navigation.signal);
+        return;
+      }
+      restoredVisit.current = navigation.signal;
+      targetAnchor.current = undefined;
+      follow.current = !row;
+      if (row && anchor)
+        element.scrollTop += readingDrift(element, {
+          element: row,
+          top: anchor.top,
+        });
+    } else if (
+      !olderAnchor.current &&
+      targetAnchor.current === undefined &&
+      !follow.current &&
+      !jumpingToLatest.current &&
+      reading?.anchor &&
+      (reading.scrollTop === element.scrollTop || clamped || reshown) &&
+      element.contains(reading.anchor.element)
+    ) {
+      correctScrollTop(element, readingDrift(element, reading.anchor));
+      if (lineTop.current !== undefined) lineTop.current = element.scrollTop;
+    }
     if (olderAnchor.current) {
       const anchor = olderAnchor.current;
       const added = tree
@@ -911,11 +1481,14 @@ function ThreadMessages({
         const row = [
           ...element.querySelectorAll<HTMLElement>("[data-message-id]"),
         ].find((row) => row.dataset.messageId === anchor.id);
-        if (row)
+        if (row) {
           correctScrollTop(
             element,
             row.getBoundingClientRect().top - anchor.top,
           );
+          if (lineTop.current !== undefined)
+            lineTop.current = element.scrollTop;
+        }
         if (snapshot.status !== "loading") olderAnchor.current = undefined;
       }
     }
@@ -931,10 +1504,46 @@ function ThreadMessages({
     }
     // Initial positioning waits for one strict page or the legacy bounded walk.
     // subsequent live changes follow only while the reader is at the bottom.
+    // Each opening's line is placed once, when decided.
+    const placing = unreadBoundary !== undefined && placed.current !== boundary;
+    if (placing) placed.current = boundary;
+    const line =
+      placing && unreadBoundary
+        ? element.querySelector<HTMLElement>("[data-new-messages-boundary]")
+        : null;
+    if (line) {
+      correctScrollTop(
+        element,
+        line.getBoundingClientRect().top - element.getBoundingClientRect().top,
+      );
+      // Only a line that leaves the reader at the latest reply follows it.
+      follow.current =
+        element.scrollHeight - element.clientHeight - element.scrollTop < 1;
+      lineTop.current = element.scrollTop;
+      // Like a revealed message, the line is where a first opening's reading
+      // starts, so content-focused navigation moves focus in: from where the
+      // opening or navigation left it, not from where the person has since
+      // moved it. A reopening keeps its own focus handoff.
+      const focused = document.activeElement;
+      if (
+        active &&
+        navigation &&
+        navigation.focus !== "preserve" &&
+        !positioned.current &&
+        !opened.current.interacted &&
+        (!focused ||
+          focused === document.body ||
+          focused === opened.current.focused ||
+          focused === document.getElementById("main-content"))
+      )
+        element.focus({ preventScroll: true });
+    }
     if (follow.current) element.scrollTop = element.scrollHeight;
     positioned.current = true;
-    setInitialPositioned(true);
-    readingPositioned(element);
+    if (!routePending) {
+      setInitialPositioned(true);
+      readingPositioned(element);
+    }
     if (jumpingToLatest.current) {
       setShowJumpToLatest(false);
     } else {
@@ -961,34 +1570,42 @@ function ThreadMessages({
     profiles,
     sent,
     navigation,
+    routePending,
     rootTarget,
+    returning,
     revealed,
     selectedOffset,
     tree,
     expanded,
+    boundary,
   ]);
   // The effect above re-pins only when thread data changes. A growing composer
-  // shrinks this viewport and late media grows rows; keep a bottom reader there.
+  // shrinks this viewport, late media grows rows and a join error grows the end
+  // spacer's preview lane; keep a bottom reader there.
   useLayoutEffect(() => {
     const element = scroller.current;
     const content = element?.querySelector("[data-thread-rows]");
-    if (!element || !content || typeof ResizeObserver === "undefined") return;
+    const end = element?.querySelector("[data-thread-end]");
+    if (!element || !content || !end || typeof ResizeObserver === "undefined")
+      return;
     const observer = new ResizeObserver(() => {
       if (positioned.current && follow.current && !jumpingToLatest.current)
         element.scrollTop = element.scrollHeight;
     });
     observer.observe(element);
     observer.observe(content);
+    observer.observe(end);
     return () => observer.disconnect();
   }, []);
   // Main's retained presentation can be usable before the initial history walk
   // finishes. That is not yet automatic reading intent. Exact revealed targets
   // remain individually readable; later background refreshes keep earned readiness.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: active can complete an exact background visit in the preceding layout effect without changing the snapshot.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: active can complete an exact background visit, and a decided unread line can position one, in the preceding layout effect without changing the snapshot.
   useLayoutEffect(() => {
     if (
       !positioned.current ||
       readingSettled.current ||
+      routePending ||
       (navigation && !rootTarget && revealed.current !== navigation.signal)
     )
       return;
@@ -999,7 +1616,15 @@ function ThreadMessages({
       readingSettled.current = true;
       readingPositioned(scroller.current);
     }
-  }, [active, navigation, rootTarget, revealed, snapshot]);
+  }, [
+    active,
+    navigation,
+    routePending,
+    rootTarget,
+    revealed,
+    snapshot,
+    unreadBoundary,
+  ]);
   // An own send can land in the middle of a branch, not at the list bottom.
   // biome-ignore lint/correctness/useExhaustiveDependencies: Retry DOM lookup after history or branch visibility changes.
   useLayoutEffect(() => {
@@ -1020,7 +1645,8 @@ function ThreadMessages({
   useLayoutEffect(() => {
     const element = scroller.current;
     const content = element?.querySelector("[data-thread-rows]");
-    if (!active || !initialPositioned || !element || !content) return;
+    const end = element?.querySelector("[data-thread-end]");
+    if (!active || !initialPositioned || !element || !content || !end) return;
     const observer = new ResizeObserver(() => {
       const previous = resizePosition.current;
       if (!previous || !element.clientHeight || jumpingToLatest.current) return;
@@ -1033,16 +1659,8 @@ function ThreadMessages({
       if (follow.current) {
         element.scrollTop = element.scrollHeight;
       } else if (previous.anchor && element.contains(previous.anchor.element)) {
-        correctScrollTop(
-          element,
-          // WebKit quantizes scrollTop. Round the correction instead of letting
-          // tiny negative fractions lose a whole pixel on every animation frame.
-          Math.round(
-            previous.anchor.element.getBoundingClientRect().top -
-              element.getBoundingClientRect().top -
-              previous.anchor.top,
-          ),
-        );
+        correctScrollTop(element, readingDrift(element, previous.anchor));
+        if (lineTop.current !== undefined) lineTop.current = element.scrollTop;
       }
       // Exact-history restoration must start from this corrected geometry,
       // rather than applying the same child-only height delta a second time.
@@ -1058,6 +1676,7 @@ function ThreadMessages({
     });
     observer.observe(element);
     observer.observe(content);
+    observer.observe(end);
     return () => observer.disconnect();
   }, [active, initialPositioned, captureResizePosition, selectedOffset]);
   const jumpToLatest = () => {
@@ -1098,72 +1717,200 @@ function ThreadMessages({
   };
   let previousReply: ChannelMessage | undefined = snapshot.root;
   let previousParent: string | undefined;
+  let previousDay = snapshot.root
+    ? new Date(snapshot.root.createdAt * 1000).toDateString()
+    : undefined;
   function renderReplies(parent: string | undefined, depth = 0): ReactNode {
-    const siblings = tree.children.get(parent) ?? [];
+    const chronologicalSiblings = tree.children.get(parent) ?? [];
+    // Outcome captions stay within one displayed level, so a collapsed branch
+    // cannot hide the reply that owns a request's outcome.
+    const requestRows = new Map(
+      chronologicalSiblings.map((row) => [row.id, row]),
+    );
+    if (parent === undefined && snapshot.root)
+      requestRows.set(snapshot.root.id, snapshot.root);
+    const presentation = activityPresentation(
+      chronologicalSiblings,
+      activitySnapshot,
+      agentPubkeys,
+      parent ?? rootId,
+      // A failure with replies needs its own visible branch controls.
+      (failure) => !tree.children.get(failure.id)?.length,
+      loadedRows,
+    );
+    const groups = presentation.groups.filter((group) =>
+      group.ids.every((id) => !tree.children.get(id)?.length),
+    );
+    const siblings = chronologicalSiblings;
+    const groupsByFirst = new Map(groups.map((group) => [group.ids[0], group]));
+    const groupedIds = new Set(groups.flatMap((group) => group.ids));
+    const hidden = new Set(
+      groups.flatMap((group) =>
+        expandedActivity.has(group.ids[0] ?? "") ? [] : group.ids,
+      ),
+    );
     return siblings.map((row, index) => {
-      const nextRow = siblings[index + 1];
+      const group = groupsByFirst.get(row.id);
+      if (hidden.has(row.id) && !group) return null;
+      const nextRow =
+        row.audience === "agents"
+          ? siblings[index + 1]
+          : publicMessageNeighbor(siblings, index, 1);
       const children = tree.children.get(row.id);
       const continuation =
+        !!previousReply &&
         previousReply !== snapshot.root &&
         previousParent === parent &&
-        continuesMessageGroup(previousReply, row);
-      const day =
-        !previousReply ||
-        new Date(previousReply.createdAt * 1000).toDateString() !==
-          new Date(row.createdAt * 1000).toDateString();
+        continuesMessageGroup(
+          row.audience === "agents"
+            ? previousReply
+            : publicMessageNeighbor(siblings, index, -1),
+          row,
+        );
+      // A collapsed branch breaks bubble grouping, not calendar continuity.
+      const currentDay = new Date(row.createdAt * 1000).toDateString();
+      const day = previousDay !== currentDay;
+      previousDay = currentDay;
       previousReply =
         children?.length && !expanded.has(row.id) ? undefined : row;
       previousParent = parent;
       const descendants = branchReplies.get(row.id) ?? [];
       const unreadCount = descendants.filter(
-        (reply) => session.unread.attention(channelId, reply.id).unread,
+        (reply) =>
+          session.unread.attention(
+            channelId,
+            reply.id,
+            unreadRequest?.readThrough,
+          ).unread,
       ).length;
       const unreadLabel = unreadCount
         ? `${unreadCount} new in available replies`
         : undefined;
+      const renderMessage = (row: ChannelMessage, inside = false) => {
+        const recordedActivity = presentation.byRow.get(row.id);
+        const requestId = presentation.replyRequests.get(row.id);
+        return (
+          <MessageRow
+            representedAgents={stableActivity.agents(
+              row.id,
+              presentation.representedAgents.get(row.id),
+            )}
+            repliedAgents={stableActivity.agents(
+              `replied:${row.id}`,
+              presentation.repliedAgents.get(row.id),
+            )}
+            stoppedRequest={requestId ? requestRows.get(requestId) : undefined}
+            recordedActivity={stableActivity.activity(
+              row.id,
+              recordedActivity,
+              groupedIds.has(row.id) ? "history" : recordedActivity?.container,
+            )}
+            viewer={session.viewer}
+            extensions={extensions}
+            session={session}
+            scope={scope}
+            onReply={
+              snapshot.root && !soloConversation ? targetReply : undefined
+            }
+            row={row}
+            getThreadRoot={getThreadRoot}
+            stackPrevious={inside || continuation}
+            stackNext={
+              inside ||
+              presentation.bubbleAnchors.has(row.id) ||
+              (joinsLive && row.id === lastMessage?.id) ||
+              (!!nextRow &&
+                continuesMessageGroup(row, nextRow) &&
+                !children?.length)
+            }
+            profile={profiles.get(row.authorId)}
+            participantProfiles={profiles}
+            agentPubkeys={agentPubkeys}
+            media={session.media}
+            onOpenLink={onOpenLink}
+            canOpenLink={canOpenLink}
+            day={!inside && day}
+            layout={continuation ? "continuation" : "thread"}
+            compactAvatar={depth > 0}
+            retry={session.messages.retry}
+            {...(canSeekVideo ? { onMediaTime: handleMediaTime } : {})}
+            {...(onOpenMediaReview && rootId
+              ? { onOpenMediaReview: openRootMedia }
+              : {})}
+          />
+        );
+      };
       const message = (
-        <MessageRow
-          extensions={extensions}
-          session={session}
-          scope={scope}
-          onReply={snapshot.root ? targetReply : undefined}
-          row={row}
-          getThreadRoot={getThreadRoot}
-          stackPrevious={continuation}
-          stackNext={
-            !!nextRow &&
-            continuesMessageGroup(row, nextRow) &&
-            !children?.length
-          }
-          profile={profiles.get(row.authorId)}
-          participantProfiles={profiles}
-          agentPubkeys={agentPubkeys}
-          media={session.media}
-          onOpenLink={onOpenLink}
-          canOpenLink={canOpenLink}
-          day={day}
-          layout={continuation ? "continuation" : "thread"}
-          compactAvatar={depth > 0}
-          retry={session.messages.retry}
-          {...(canSeekVideo ? { onMediaTime: handleMediaTime } : {})}
-          {...(onOpenMediaReview && rootId
-            ? { onOpenMediaReview: openRootMedia }
-            : {})}
-        />
+        <ActivityExpansion
+          open={!hidden.has(row.id) && !groupedIds.has(row.id)}
+          enabled={row.audience === "agents"}
+        >
+          {renderMessage(row)}
+        </ActivityExpansion>
       );
       return (
         <li
           key={row.id}
-          ref={row.id === messageId ? selectedBranchRef : undefined}
+          ref={
+            row.id === messageId && !groupedIds.has(row.id)
+              ? selectedBranchRef
+              : undefined
+          }
           className={styles.replyItem}
           data-layout={continuation ? "continuation" : "thread"}
         >
-          {!parent && row.replyParentId && row.replyParentId !== rootId && (
-            <p className={styles.threadNote}>
-              Earlier reply unavailable in loaded history.
-            </p>
+          {!parent && row.id === unreadBoundary && (
+            <div className={styles.newMessages} data-new-messages-boundary>
+              <hr className="sr-only select-none" aria-label="New messages" />
+              <span className="select-none" aria-hidden="true">
+                New messages
+              </span>
+            </div>
           )}
+          {!parent &&
+            row.replyParentId &&
+            row.replyParentId !== rootId &&
+            !requestRows.has(row.replyParentId) && (
+              <p className={styles.threadNote}>
+                Earlier reply unavailable in loaded history.
+              </p>
+            )}
 
+          {group && (
+            <>
+              {day && hidden.has(row.id) && (
+                <DayDivider createdAt={row.createdAt} />
+              )}
+              <ActivityGroupPreview
+                session={session}
+                group={group}
+                openActivity={onOpenLink}
+                canOpenActivity={canOpenLink}
+                renderHistory={(entry) => (
+                  <div
+                    ref={entry.id === messageId ? selectedBranchRef : undefined}
+                  >
+                    {renderMessage(entry, true)}
+                  </div>
+                )}
+                profiles={profiles}
+                media={session.media}
+                layout="thread"
+                expanded={expandedActivity.has(group.ids[0] ?? "")}
+                onToggle={() => {
+                  follow.current = false;
+                  targetAnchor.current = undefined;
+                  setExpandedActivity((current) => {
+                    const next = new Set(current);
+                    const first = group.ids[0] ?? row.id;
+                    if (next.has(first)) next.delete(first);
+                    else next.add(first);
+                    return next;
+                  });
+                }}
+              />
+            </>
+          )}
           <ReplyBranch
             message={message}
             hasReplies={!!children?.length}
@@ -1173,7 +1920,9 @@ function ThreadMessages({
               <ReplySummary
                 count={descendants.length}
                 participants={[
-                  ...new Set(descendants.map((reply) => reply.authorId)),
+                  ...new Set(
+                    descendants.map((reply) => reply.authorId).reverse(),
+                  ),
                 ]}
                 profiles={profiles}
                 agentPubkeys={agentPubkeys}
@@ -1190,6 +1939,15 @@ function ThreadMessages({
               targetAnchor.current = undefined;
               setExpanded((current) => new Set([...current, row.id]));
             }}
+            collapseLabel={`Collapse ${descendants.length} ${descendants.length === 1 ? "reply" : "replies"}`}
+            onCollapse={() => {
+              follow.current = false;
+              targetAnchor.current = undefined;
+              setExpanded(
+                (current) =>
+                  new Set([...current].filter((id) => id !== row.id)),
+              );
+            }}
           >
             {expanded.has(row.id) && (
               <ol>{renderReplies(row.id, depth + 1)}</ol>
@@ -1200,6 +1958,20 @@ function ThreadMessages({
     });
   }
   const selectedParent = snapshot.replies.find((row) => row.id === replyParent);
+  // The banner's one line about its target. `plainText` flattens CommonMark,
+  // replaces control characters and cuts the result at 200 characters; GFM
+  // that the row renders (strikethrough, tables, task-list boxes) still
+  // reaches the banner as source. A diff's content is a raw patch, never
+  // Markdown, so it gets the sidebar's summary instead. `diffPreview` prints
+  // the diff's file and description tags as sent: no length bound and no
+  // control-character cleanup.
+  const selectedParentText = useMemo(
+    () =>
+      selectedParent?.diff
+        ? diffPreview(selectedParent.diff)
+        : plainText(selectedParent?.content ?? ""),
+    [selectedParent?.diff, selectedParent?.content],
+  );
   const captureOlderAnchor = (element: HTMLElement) => {
     follow.current = false;
     const row = [
@@ -1235,16 +2007,30 @@ function ThreadMessages({
   };
   const selectionNotice =
     selectionFailure && !snapshot.error ? selectionFailure : undefined;
-  // Match the channel's relay summary total. Without a positive total,
-  // stay neutral: visible rows and reader state cannot prove empty history.
-  const replyCount = snapshot.root?.replyCount ?? 0;
-  const replyLabel = replyCount
-    ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"}`
-    : "Replies";
   const showOlderPageStatus =
     snapshot.direction === "older" &&
     snapshot.readKind === "older" &&
     !!snapshot.root;
+  const targetUnavailable =
+    snapshot.targetStatus === "unavailable" && !selectionNotice;
+  const historyError = !!snapshot.error && !showOlderPageStatus;
+  const focusArchivedHistory = useCallback(() => {
+    const history = scroller.current;
+    if (
+      session.channels?.get?.(channelId)?.archived &&
+      history?.isConnected &&
+      !history.closest("[inert]")
+    )
+      history.focus({ preventScroll: true });
+  }, [session.channels, channelId]);
+  // The reply composer, and the activity lane its TypingIndicator needs.
+  const composerRoot =
+    !preview &&
+    !soloConversation &&
+    (!requireReadyRoot ||
+      (snapshot.root?.id === messageId && snapshot.targetStatus === "ready"))
+      ? snapshot.root
+      : undefined;
   const retryThread = () => {
     if (showOlderPageStatus) {
       if (scroller.current) captureOlderAnchor(scroller.current);
@@ -1258,7 +2044,10 @@ function ThreadMessages({
         channelId={channelId}
         scroller={scroller}
         settled={readingSettled}
-        rootId={snapshot.root?.id}
+        // The thread opened bounds DM reads even before its root resolves. An
+        // exact reply under an unavailable original shows alone, so it, not
+        // its signed root, is the thread: its hidden siblings stay unread.
+        rootId={snapshot.root?.id ?? messageId}
         // A visible exact reply can outlive its unavailable root. Until resolved,
         // observe rows individually; an absent root must not mean channel catch-up.
         latestMessageId={
@@ -1285,6 +2074,7 @@ function ThreadMessages({
         aria-label="Thread messages"
         aria-busy={positioning}
         data-positioning={positioning || undefined}
+        data-jump-visible={showJumpToLatest || undefined}
         onScroll={(event) => {
           if (!positioned.current) return;
           const element = event.currentTarget;
@@ -1310,7 +2100,10 @@ function ThreadMessages({
             80;
           if (jumpingToLatest.current) return;
           captureResizePosition();
-          follow.current = bottom;
+          if (element.scrollTop !== lineTop.current) {
+            follow.current = bottom;
+            lineTop.current = undefined;
+          }
           setShowJumpToLatest(!bottom);
           if (bottom) setNewMessageCount(0);
           loadOlder();
@@ -1325,6 +2118,8 @@ function ThreadMessages({
         }}
         onPointerDown={keepReadingPosition}
         onKeyDown={(event) => {
+          moveMessageSelection(event);
+          if (event.defaultPrevented) return;
           if (
             [
               "ArrowUp",
@@ -1351,54 +2146,103 @@ function ThreadMessages({
           newMessageCount={newMessageCount}
           onClick={jumpToLatest}
         />
-        <div data-thread-rows="" inert={positioning}>
-          {snapshot.root ? (
-            <MessageRow
-              extensions={extensions}
-              session={session}
-              scope={scope}
-              onReply={focusReply}
-              row={snapshot.root}
-              profile={profiles.get(snapshot.root.authorId)}
-              participantProfiles={profiles}
-              agentPubkeys={agentPubkeys}
-              media={session.media}
-              onOpenLink={onOpenLink}
-              canOpenLink={canOpenLink}
-              day={false}
-              layout="thread"
-              retry={session.messages.retry}
-              mediaMode="thread"
-              {...(mediaSeek
-                ? {
-                    mediaSeekTo: mediaSeek.seconds,
-                    mediaSeekRequest: mediaSeek.request,
-                  }
-                : {})}
-              {...(onOpenMediaReview
-                ? { onOpenMediaReview: openRootMedia }
-                : {})}
-            />
-          ) : snapshot.status !== "loading" ? (
-            <p className={styles.empty}>Original message unavailable.</p>
-          ) : null}
-          {snapshot.root && snapshot.replies.length > 0 && (
-            <div className={styles.replyDivider}>
-              <span>{replyLabel}</span>
-            </div>
-          )}
-          <ol>
-            {showOlderPageStatus && snapshot.error && (
-              <li className={styles.threadHistoryPageStatus}>
-                <p role="alert">{snapshot.error}</p>
-                <Button type="button" onClick={retryThread}>
-                  Retry thread
-                </Button>
-              </li>
+        <MessageContextMenus>
+          <div
+            data-thread-rows=""
+            data-activity-history-scope=""
+            inert={positioning}
+          >
+            {snapshot.root && intro}
+            {snapshot.root ? (
+              <MessageRow
+                viewer={session.viewer}
+                extensions={extensions}
+                session={session}
+                scope={scope}
+                onReply={soloConversation ? undefined : focusReply}
+                stackNext={joinsLive && snapshot.root.id === lastMessage?.id}
+                row={snapshot.root}
+                representedAgents={stableActivity.agents(
+                  snapshot.root.id,
+                  rootPresentation.representedAgents.get(snapshot.root.id),
+                )}
+                repliedAgents={stableActivity.agents(
+                  `replied:${snapshot.root.id}`,
+                  rootReplies.repliedAgents.get(snapshot.root.id),
+                )}
+                recordedActivity={stableActivity.activity(
+                  snapshot.root.id,
+                  rootActivity,
+                  "history",
+                )}
+                profile={profiles.get(snapshot.root.authorId)}
+                participantProfiles={profiles}
+                agentPubkeys={agentPubkeys}
+                media={session.media}
+                onOpenLink={onOpenLink}
+                canOpenLink={canOpenLink}
+                day={false}
+                layout="thread"
+                retry={session.messages.retry}
+                mediaMode="thread"
+                {...(mediaSeek
+                  ? {
+                      mediaSeekTo: mediaSeek.seconds,
+                      mediaSeekRequest: mediaSeek.request,
+                    }
+                  : {})}
+                {...(onOpenMediaReview
+                  ? { onOpenMediaReview: openRootMedia }
+                  : {})}
+              />
+            ) : snapshot.status !== "loading" ? (
+              targetUnavailable ? (
+                // One notice, with its recovery beside it, when nothing loaded.
+                <div className={styles.threadNotice}>
+                  <p role="status">This message isn’t available.</p>
+                  {!historyError && (
+                    <Button type="button" onClick={() => void view.refresh()}>
+                      Try again
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <p className={styles.empty}>Original message unavailable.</p>
+              )
+            ) : null}
+            <ol>
+              {showOlderPageStatus && snapshot.error && (
+                <li className={styles.threadHistoryPageStatus}>
+                  <p role="alert">{snapshot.error}</p>
+                  <Button type="button" onClick={retryThread}>
+                    Try again
+                  </Button>
+                </li>
+              )}
+              {renderReplies(undefined)}
+            </ol>
+            {!preview && !positioning && composerRoot && (
+              <AgentConnectionSetup
+                key={`${channelId}:${rootId}`}
+                session={session}
+                channel={session.channels?.get?.(channelId)}
+                rows={rows}
+              />
             )}
-            {renderReplies(undefined)}
-          </ol>
-        </div>
+            {!positioning && rootId && (
+              <TypingIndicator
+                audience="agents"
+                inFlow
+                session={session}
+                channelId={channelId}
+                threadRootId={rootId}
+                previousAuthor={joinsLive ? lastMessage?.authorId : undefined}
+                openActivity={onOpenLink}
+                canOpenActivity={canOpenLink}
+              />
+            )}
+          </div>
+        </MessageContextMenus>
         {requireReadyRoot &&
           snapshot.root &&
           snapshot.root.id !== messageId && (
@@ -1410,12 +2254,6 @@ function ThreadMessages({
         {positioning || (snapshot.status === "loading" && !rows.length) ? (
           <ThreadLoading />
         ) : null}
-        {snapshot.targetStatus === "unavailable" && !selectionNotice && (
-          <p role="status">Selected message unavailable.</p>
-        )}
-        {snapshot.error && !showOlderPageStatus && (
-          <p role="alert">{snapshot.error}</p>
-        )}
         {selectionNotice && (
           <p role="alert">
             {selectionNotice.unavailable
@@ -1426,11 +2264,14 @@ function ThreadMessages({
         {snapshot.limited && !snapshot.error && (
           <p className={styles.threadNote}>Thread history limit reached.</p>
         )}
-        {((snapshot.error && !showOlderPageStatus) ||
-          (snapshot.targetStatus === "unavailable" && !selectionNotice)) && (
-          <div className={styles.threadHistoryControls}>
+        {(historyError || (targetUnavailable && snapshot.root)) && (
+          <div className={styles.threadNotice}>
+            {targetUnavailable && snapshot.root && (
+              <p role="status">Selected message unavailable.</p>
+            )}
+            {historyError && <p role="alert">{THREAD_FAILED}</p>}
             <Button type="button" onClick={() => void view.refresh()}>
-              Retry thread
+              Try again
             </Button>
           </div>
         )}
@@ -1445,7 +2286,19 @@ function ThreadMessages({
             </Button>
           </div>
         )}
+        <div
+          className={styles.timelineEnd}
+          data-thread-end=""
+          aria-hidden="true"
+        />
       </section>
+      {/* After the scroller, so its ref is attached when this registers. */}
+      <MessageSelection
+        list={scroller}
+        rows={rows}
+        session={session}
+        conversationId={rootId}
+      />
       {preview && (
         <ChannelJoinNotice
           ready={
@@ -1455,91 +2308,117 @@ function ThreadMessages({
               !!rows.length)
           }
           channelId={channelId}
+          archived={channelAccess === "archived"}
+          place={soloConversation ? "chat" : "channel"}
+          guest={channelAccess === "guest"}
+          joinRole={joinRole}
           lifecycle={session.channelLifecycle}
           joinable={channelAccess === "joinable"}
           onJoin={() => setJoining(true)}
           onHeightChange={setJoinNoticeHeight}
         />
       )}
-      {!preview &&
-        snapshot.root &&
-        (!requireReadyRoot ||
-          (snapshot.root.id === messageId &&
-            snapshot.targetStatus === "ready")) && (
-          <MessageComposer
-            sessionConversation={sessionConversation}
-            personalConversation={personalConversation}
-            activityClickOpensPanel={activityClickOpensPanel}
-            key={`${scope}:${channelId}:${snapshot.root.id}`}
-            extensions={extensions}
-            session={session}
-            scope={scope}
-            channelId={channelId}
-            channelName={channelName}
-            placeholder={replyPlaceholder(snapshot.root)}
-            threadRootId={snapshot.root.id}
-            replyParentId={replyParent}
-            disabled={
-              disabled ||
-              (requireReadyRoot &&
-                (snapshot.status !== "ready" || !!snapshot.error)) ||
-              (!!replyParent && !selectedParent)
-            }
-            replyContext={
-              replyParent && !selectedParent ? (
+      {composerRoot && (
+        <MessageComposer
+          onFocusedRemoval={focusArchivedHistory}
+          key={`${scope}:${channelId}:${composerRoot.id}`}
+          extensions={extensions}
+          session={session}
+          scope={scope}
+          channelId={channelId}
+          channelName={channelName}
+          placeholder={replyPlaceholder(composerRoot)}
+          threadRootId={composerRoot.id}
+          threadSeed={threadSeed}
+          replyParentId={replyParent}
+          disabled={
+            disabled ||
+            (requireReadyRoot &&
+              (snapshot.status !== "ready" || !!snapshot.error)) ||
+            (!!replyParent && !selectedParent)
+          }
+          replyContext={
+            replyParent && !selectedParent ? (
+              <div className={styles.replyContext}>
+                <span>Reply target is no longer available.</span>
+                <Button size="sm" onClick={focusReply}>
+                  Cancel reply target
+                </Button>
+              </div>
+            ) : (
+              selectedParent && (
                 <div className={styles.replyContext}>
-                  <span>Reply target is no longer available.</span>
-                  <Button size="sm" onClick={focusReply}>
-                    Cancel reply target
-                  </Button>
-                </div>
-              ) : (
-                selectedParent && (
-                  <div className={styles.replyContext}>
-                    <div>
-                      <span>Replying to {senderName(selectedParent)}</span>
-                      <p>{selectedParent.content}</p>
-                    </div>
-                    <IconButton
-                      size="sm"
-                      aria-label="Cancel reply target"
-                      onClick={focusReply}
-                      icon={<XIcon size={16} aria-hidden="true" />}
-                    />
+                  <Avatar
+                    src={avatarMedia(
+                      profiles.get(selectedParent.authorId)?.picture,
+                      session.media,
+                    )}
+                    alt=""
+                    fallback={senderName(selectedParent)}
+                    size="default"
+                  />
+                  <div>
+                    <span>Replying to {senderName(selectedParent)}</span>
+                    {selectedParentText && <p>{selectedParentText}</p>}
                   </div>
-                )
+                  <IconButton
+                    size="sm"
+                    aria-label="Cancel reply target"
+                    onClick={focusReply}
+                    icon={<XIcon size={16} aria-hidden="true" />}
+                  />
+                </div>
               )
-            }
-            editMessages={rows}
-            focusRequest={replyFocus}
-            onOpenLink={onOpenLink}
-            canOpenLink={canOpenLink}
-            onDraftSaved={onDraftSaved}
-            onSend={(id) => {
-              targetAnchor.current = undefined;
-              positioned.current = true;
-              follow.current = !selectedParent;
-              if (selectedParent)
-                setExpanded(
-                  (current) =>
-                    new Set([
-                      ...current,
-                      selectedParent.id,
-                      ...tree.ancestors(selectedParent.id),
-                    ]),
-                );
-              // A background send may publish after the user picked a new target.
-              setReplyParent((current) =>
-                current === replyParent ? undefined : current,
+            )
+          }
+          editMessages={rows}
+          focusRequest={pendingReplyFocus ?? 0}
+          autoFocus={autoFocus ?? false}
+          onOpenLink={onOpenLink}
+          canOpenLink={canOpenLink}
+          onDraftSaved={onDraftSaved}
+          onSend={(id) => {
+            onSend?.(id);
+            targetAnchor.current = undefined;
+            positioned.current = true;
+            follow.current = !selectedParent;
+            // Never count this composer's own send as a new arrival.
+            previousReplies.current.ids.add(id);
+            if (selectedParent)
+              setExpanded(
+                (current) =>
+                  new Set([
+                    ...current,
+                    selectedParent.id,
+                    ...tree.ancestors(selectedParent.id),
+                  ]),
               );
-              setSent(id);
-            }}
-          />
-        )}
+            // A background send may publish after the user picked a new target.
+            setReplyParent((current) =>
+              current === replyParent ? undefined : current,
+            );
+            setSent(id);
+          }}
+        />
+      )}
     </MessageEditScope>
   );
 }
 /** Holds the thread's area with the Buzz mark until its first page can show. */
+// How far a saved reading row has moved from its saved viewport offset. WebKit
+// quantizes scrollTop: round instead of letting tiny negative fractions lose a
+// whole pixel on every animation frame.
+function readingDrift(
+  element: HTMLElement,
+  anchor: { element: HTMLElement; top: number },
+) {
+  return Math.round(
+    anchor.element.getBoundingClientRect().top -
+      element.getBoundingClientRect().top -
+      anchor.top,
+  );
+}
+
 function ThreadLoading() {
   return (
     <div className={styles.threadLoading} role="status">

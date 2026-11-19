@@ -5,11 +5,28 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { PluginManifest, PluginModule } from "./api";
 import { createModuleLoader } from "./modules";
 import { withTimeout } from "./timeout";
+import { createPluginRequests } from "./requests";
+import { providePluginManagement } from "./review-access";
 import type {
   StorageResult,
   ConfigurationState,
   ManagementAction,
+  PluginInfo,
 } from "./types";
+
+export function canRetryPlugin(
+  plugin: PluginInfo | undefined,
+  activation: ReturnType<PluginRuntime["snapshot"]>[string] | undefined,
+  externalPluginsPaused: boolean,
+) {
+  return (
+    !!plugin?.enabled &&
+    !plugin.error &&
+    !(externalPluginsPaused && plugin.source === "external") &&
+    activation?.status === "failed" &&
+    activation.revision === plugin.revision
+  );
+}
 
 export type BundledPlugin = {
   manifest: PluginManifest;
@@ -22,6 +39,7 @@ export function createPluginManager(
   ctx: Context,
   {
     bundled,
+    builtIn = [],
     storage = createPluginStorage(() =>
       bundled.map(({ manifest, enabledByDefault = true }) => ({
         manifest,
@@ -35,20 +53,41 @@ export function createPluginManager(
     ),
   }: {
     bundled: readonly BundledPlugin[];
+    /** Host-owned contributions, independent of optional-plugin storage. */
+    builtIn?: readonly BundledPlugin[];
     storage?: PluginStorage | undefined;
   },
 ) {
   ctx.provide("react", React);
+  const builtInPlugins: PluginInfo[] = builtIn.map(({ manifest }) => ({
+    manifest,
+    source: "bundled",
+    enabled: true,
+    revision: "bundled",
+    previous: null,
+    reloadable: false,
+    error: null,
+  }));
+  const builtInIds = new Set(builtIn.map(({ manifest }) => manifest.id));
+  let configuration: ConfigurationState = { status: "loading" };
   const runtime = new PluginRuntime(
     ctx,
     createModuleLoader(
       Object.fromEntries(
-        bundled.map(({ manifest, module }) => [manifest.id, module]),
+        [...bundled, ...builtIn].map(({ manifest, module }) => [
+          manifest.id,
+          module,
+        ]),
       ),
       storage.readModule,
     ),
+    undefined,
+    // Reading, or retrying a read that failed: recovery the user must act on
+    // is settled.
+    () =>
+      configuration.status === "loading" ||
+      (configuration.status === "recovery" && !configuration.canReset),
   );
-  let configuration: ConfigurationState = { status: "loading" };
   let busy = false;
   let catalogPending = false;
   let error: string | null = null;
@@ -77,16 +116,22 @@ export function createPluginManager(
       return;
     configuration = next;
     refreshError = null;
-    const desired =
-      next.status === "ready"
-        ? next.catalog.plugins.filter(
+    runtime.reconcile(desiredPlugins());
+    publish();
+  }
+  function desiredPlugins() {
+    const current = configuration;
+    const optional =
+      current.status === "ready"
+        ? current.catalog.plugins.filter(
             (plugin) =>
               plugin.enabled &&
-              !(next.externalPluginsPaused && plugin.source === "external"),
+              !plugin.error &&
+              !builtInIds.has(plugin.manifest.id) &&
+              !(current.externalPluginsPaused && plugin.source === "external"),
           )
         : [];
-    runtime.reconcile(desired);
-    publish();
+    return [...builtInPlugins, ...optional];
   }
   async function getCatalog() {
     if (catalogPending)
@@ -126,13 +171,14 @@ export function createPluginManager(
   async function update(
     operation: () => Promise<StorageResult>,
     timeoutMs = 10_000,
+    waitForSettlement = false,
   ) {
     if (busy || closed) return false;
     busy = true;
     changes++;
     error = null;
     publish();
-    // A watchdog ends the caller's wait, not the underlying native operation.
+    // Ordinary edits may end the caller's wait, never the underlying native operation.
     let settled = false;
     const pending = (async () => {
       try {
@@ -147,12 +193,26 @@ export function createPluginManager(
       publish();
     };
     try {
-      const next = await withTimeout(
-        pending,
-        `Plugin storage did not respond within ${timeoutMs / 1000} seconds`,
-        timeoutMs,
-      );
-      if (!closed) accept(next);
+      let next: StorageResult;
+      try {
+        next = await withTimeout(
+          pending,
+          `Plugin storage did not respond within ${timeoutMs / 1000} seconds`,
+          timeoutMs,
+        );
+      } catch (reason) {
+        if (!waitForSettlement || settled) throw reason;
+        if (!closed) {
+          error = String(reason);
+          publish();
+        }
+        // Import reviews own a confirmed operation until native actually settles.
+        next = await pending;
+      }
+      if (!closed) {
+        error = null;
+        accept(next);
+      }
       return !closed;
     } catch (reason) {
       if (!closed) {
@@ -165,8 +225,21 @@ export function createPluginManager(
       else void pending.then(finish, finish);
     }
   }
+  const change = (action: ManagementAction, id: string) =>
+    update(() => storage.changePlugin(action, id));
+  const requests = createPluginRequests({
+    catalog: () =>
+      configuration.status === "ready" ? configuration.catalog : undefined,
+    imports: storage.imports,
+    change,
+    error: () => error,
+    managed: () =>
+      configuration.status === "ready" ? configuration.managed : undefined,
+  });
+  ctx.provide("pluginRequests", requests);
+  runtime.reconcile(desiredPlugins());
   void refresh();
-  return {
+  const manager = {
     snapshot: () => snapshot,
     startup: () => configuration.status,
     subscribe(listener: () => void) {
@@ -177,15 +250,30 @@ export function createPluginManager(
     },
     imports: storage.imports,
     installImport: (token: string, path: string) =>
-      update(() => {
-        if (!storage.imports)
-          throw new Error("Plugin imports require the desktop app");
-        return storage.imports.install(token, path);
-      }),
-    change: (action: ManagementAction, id: string) =>
-      update(() => storage.changePlugin(action, id)),
+      update(
+        () => {
+          if (!storage.imports)
+            throw new Error("Plugin imports require the desktop app");
+          return storage.imports.install(token, path);
+        },
+        10_000,
+        true,
+      ),
+    change,
+    requests,
     reload: (id: string) => update(() => storage.reloadPlugin(id), 120_000),
+    retryPlugin: (id: string) => {
+      if (closed || busy) return false;
+      const desired = desiredPlugins();
+      const plugin = desired.find((item) => item.manifest.id === id);
+      const activation = runtime.snapshot()[id];
+      if (!canRetryPlugin(plugin, activation, false)) return false;
+      runtime.reconcile(desired, id);
+      return true;
+    },
     retry: () => update(getCatalog),
+    // The native fetch gives up after 30 seconds.
+    refreshManaged: () => update(storage.refreshManaged ?? getCatalog, 45_000),
     recover: () => update(storage.recoverSettings),
     dismissError: () => {
       error = null;
@@ -199,5 +287,7 @@ export function createPluginManager(
       await runtime.dispose();
     },
   };
+  providePluginManagement(ctx, manager);
+  return manager;
 }
 export type PluginManager = ReturnType<typeof createPluginManager>;

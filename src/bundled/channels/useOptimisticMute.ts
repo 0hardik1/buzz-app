@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RelaySession } from "../../features/relay/session";
 
 type MuteIntent = Readonly<{
@@ -30,7 +30,13 @@ export function useOptimisticMute(
     };
   }, [write]);
 
-  function change(channelId: string, name: string, muted: boolean) {
+  /** `onSaved` runs once this change is saved, and never when it fails. */
+  const change = useCallback(function change(
+    channelId: string,
+    name: string,
+    muted: boolean,
+    onSaved?: () => void,
+  ) {
     const active = lifetime.current;
     if (!active) return;
     const intent: MuteIntent = { channelId, name, muted, pending: true };
@@ -51,22 +57,24 @@ export function useOptimisticMute(
       try {
         // The session owns saving; leaving Messages must not cancel the intent.
         await active.write(channelId, muted);
-        finish();
       } catch (error) {
         finish(error instanceof Error ? error.message : String(error));
+        return;
       }
+      finish();
+      onSaved?.();
     })();
-  }
-  return {
-    intents,
-    change,
-    dismiss(channelId: string) {
-      setIntents((current) => {
-        if (current.get(channelId)?.pending) return current;
-        const next = new Map(current);
-        next.delete(channelId);
-        return next;
-      });
-    },
-  };
+  }, []);
+  const dismiss = useCallback((channelId: string) => {
+    setIntents((current) => {
+      if (current.get(channelId)?.pending) return current;
+      const next = new Map(current);
+      next.delete(channelId);
+      return next;
+    });
+  }, []);
+  return useMemo(
+    () => ({ intents, change, dismiss }),
+    [intents, change, dismiss],
+  );
 }

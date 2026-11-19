@@ -5,15 +5,22 @@ import type {
   WorkflowRunCursor,
   WorkflowReference,
 } from "../../features/workflows/types";
+import {
+  formatFullTimestamp,
+  formatItemTimestamp,
+} from "../../shared/datetime";
+import { useClockFormat } from "../../shared/clock-preference";
 import { Button } from "../../shared/design-system/ui/Button";
 import { useWorkflowView } from "./useWorkflowView";
 
 export function WorkflowRuns({
   capability,
   workflow,
+  heading = true,
 }: {
   capability: WorkflowCapability;
   workflow: WorkflowDefinition;
+  heading?: boolean;
 }) {
   const [cursor, setCursor] = useState<WorkflowRunCursor | undefined>();
   if (!capability.availability.history)
@@ -29,6 +36,7 @@ export function WorkflowRuns({
       workflow={workflow}
       cursor={cursor}
       onPage={setCursor}
+      heading={heading}
     />
   );
 }
@@ -37,12 +45,15 @@ function RunPage({
   workflow,
   cursor,
   onPage,
+  heading,
 }: {
   capability: WorkflowCapability;
   workflow: WorkflowReference;
   cursor: WorkflowRunCursor | undefined;
   onPage: (cursor: WorkflowRunCursor | undefined) => void;
+  heading: boolean;
 }) {
+  useClockFormat();
   const { snapshot, refresh } = useWorkflowView(
     useCallback(
       () => capability.runs(workflow, cursor),
@@ -53,7 +64,7 @@ function RunPage({
   return (
     <section aria-label="Workflow runs" className="workflow-runs">
       <div className="workflow-toolbar">
-        <h3 className="text-heading">Runs</h3>
+        {heading && <h3 className="text-heading">Runs</h3>}
         <Button
           disabled={snapshot.status === "loading"}
           onClick={() => void refresh()}
@@ -86,7 +97,12 @@ function RunPage({
         <article key={run.id} className="workflow-step">
           <p className="text-body">
             <strong>{run.status.replaceAll("_", " ")}</strong> ·{" "}
-            {new Date(run.createdAt * 1000).toISOString()}
+            <time
+              dateTime={new Date(run.createdAt * 1000).toISOString()}
+              title={formatFullTimestamp(run.createdAt)}
+            >
+              {formatItemTimestamp(run.createdAt, { withTime: true })}
+            </time>
           </p>
           <p className="text-body-sm text-secondary">
             Current step: {run.currentStep}

@@ -5,11 +5,15 @@ import {
 } from "prosemirror-model";
 import { parseBuzzLink } from "../navigation/buzz-links";
 import { profileKey, profileTarget } from "../profiles/target";
-import { scanMarkdown } from "../relay/message-content";
+import { safeLinkUrl, scanMarkdown } from "../relay/message-content";
 import { composerSchema, projectComposerDocument } from "./composer-document";
 import { composerMarkdown } from "./composer-markdown";
 import { messageLinkParts } from "./message-link-parts";
-import { serializeNode } from "./selection-copy";
+import {
+  copyDocument,
+  serializeNode,
+  spoilerDelimiter,
+} from "./selection-copy";
 
 /** The identity locator a whole source is: `[@Name](nostr:npub…)`. */
 export function identityLink(
@@ -49,6 +53,7 @@ function tokenLink(
   node: EditorNode,
 ): { href: string; label: string } | undefined {
   const { source, recipient, resource } = node.attrs;
+  if (node.attrs.semantic) return;
   if (recipient) {
     const href = profileTarget(recipient.pubkey);
     return href ? { href, label: source } : undefined;
@@ -93,10 +98,11 @@ const serializer = new DOMSerializer(
     ],
     list_item: () => ["li", 0],
     hard_break: () => ["br"],
-    text: (node) => node.text ?? "",
     token: (node) => {
       const link = tokenLink(node);
-      return link ? ["a", { href: link.href }, link.label] : node.attrs.source;
+      return link
+        ? ["a", { href: link.href }, link.label]
+        : ["span", node.attrs.source];
     },
   },
   {
@@ -112,6 +118,8 @@ const serializer = new DOMSerializer(
 /** Identity and channel locators read as their sigil-prefixed names outside the app. */
 function humanised(node: EditorNode): EditorNode {
   if (node.type.name === "token") {
+    if (node.attrs.semantic)
+      return composerSchema.text(node.attrs.source, node.marks);
     const link = node.attrs.recipient ? undefined : tokenLink(node);
     const buzz = link && parseBuzzLink(link.href);
     return link &&
@@ -130,12 +138,11 @@ function humanised(node: EditorNode): EditorNode {
  * handler and other rich editors. */
 export function composerClipboard(doc: EditorNode, document: Document) {
   const fragment = serializer.serializeFragment(doc.content, { document });
-  // Spoilers have no HTML; keep their delimiters as text.
-  for (const spoiler of [...fragment.querySelectorAll("[data-spoiler]")]) {
-    spoiler.prepend("||");
-    spoiler.append("||");
-    spoiler.replaceWith(...spoiler.childNodes);
-  }
+  // Spoilers have no HTML of their own: their delimiters stay visible inside
+  // the mark's span, marked so this app's paste reads the mark alone.
+  for (const spoiler of fragment.querySelectorAll("[data-spoiler]"))
+    for (const position of ["afterbegin", "beforeend"] as const)
+      spoiler.insertAdjacentHTML(position, spoilerDelimiter);
   // Line breaks inside prose are whitespace to HTML; code blocks keep theirs.
   const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT);
   const breaks: Text[] = [];
@@ -156,16 +163,118 @@ export function composerClipboard(doc: EditorNode, document: Document) {
   const container = document.createElement("div");
   container.appendChild(fragment);
   return {
-    text: composerMarkdown(projectComposerDocument(humanised(doc)).draft),
+    text: composerMarkdown(projectComposerDocument(humanised(doc)).draft, {
+      authored: true,
+    }),
     html: `<div data-buzz-copy="composer">${container.innerHTML}</div>`,
   };
 }
 
-/** Markdown for this app's own `text/html` payload; other HTML is never read. */
-export function buzzCopyMarkdown(html: string): string | undefined {
+/** This app's own `text/html` payload as editor content; other HTML is never
+ * read. Its blocks and marks paste as they are, while anchors and line breaks
+ * become source text: the host's decorations decide which links are chips, as
+ * for typed source, and paragraphs keep line breaks as text. */
+export function buzzCopyDocument(html: string): EditorNode | undefined {
   if (!html.includes("data-buzz-copy")) return;
   const copy = new DOMParser()
     .parseFromString(html, "text/html")
     .querySelector("[data-buzz-copy]");
-  return copy ? serializeNode(copy, "markdown") : undefined;
+  return (copy && sourced(copyDocument(copy))) ?? undefined;
+}
+
+function sourced(node: EditorNode): EditorNode | null {
+  if (node.isText) return node;
+  // The schema refuses empty text nodes; a leaf without text contributes none.
+  if (node.isLeaf)
+    return node.textContent
+      ? composerSchema.text(node.textContent, node.marks)
+      : null;
+  return node.copy(
+    Fragment.fromArray(
+      node.content.content.flatMap((child) => sourced(child) ?? []),
+    ),
+  );
+}
+
+/** The files a paste attaches. Office and iWork put a picture of copied text
+ * beside it, which WebKit offers as an image file; when the HTML flavor has
+ * text, those images render it and the paste is that text. Every text path,
+ * raw and code included, can fall back to plain text, so it must have some. */
+export function pastedFiles(data: DataTransfer | null): File[] {
+  const files = Array.from(data?.items ?? [])
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
+  const html =
+    files.length &&
+    files.every((file) => file.type.startsWith("image/")) &&
+    data?.getData("text/plain").trim()
+      ? data.getData("text/html")
+      : "";
+  return html &&
+    new DOMParser().parseFromString(html, "text/html").body.textContent?.trim()
+    ? []
+    : files;
+}
+
+/** External HTML contributes web links, never Buzz identity metadata or styling. */
+export function externalLinkMarkdown(
+  html: string,
+  plain?: string,
+): string | undefined {
+  if (!html) return;
+  const body = new DOMParser().parseFromString(html, "text/html").body;
+  // Rules and checkboxes would copy as Markdown source; they are styling here.
+  for (const node of body.querySelectorAll(
+    "script, style, template, iframe, object, hr, input",
+  ))
+    node.remove();
+  // Browser text/plain can include an inline image's alt text. Preserve it as
+  // literal text before stripping attributes, including inside link labels.
+  for (const image of body.querySelectorAll("img"))
+    image.replaceWith(
+      body.ownerDocument.createTextNode(image.getAttribute("alt") ?? ""),
+    );
+  let linked = false;
+  for (const element of body.querySelectorAll("*")) {
+    const href =
+      element.tagName === "A"
+        ? safeLinkUrl(element.getAttribute("href") ?? "")
+        : undefined;
+    for (const attribute of [...element.attributes])
+      element.removeAttribute(attribute.name);
+    if (href && element.textContent?.trim()) {
+      element.setAttribute("href", href);
+      linked = true;
+    }
+    // Keep text and line boundaries; importing other rich formatting is separate.
+    if (/^(STRONG|B|EM|I|S|DEL|CODE)$/.test(element.tagName))
+      element.replaceWith(...element.childNodes);
+    else if (/^(UL|OL|LI|BLOCKQUOTE|PRE|H[1-6])$/.test(element.tagName)) {
+      const block = body.ownerDocument.createElement("div");
+      block.append(...element.childNodes);
+      element.replaceWith(block);
+    }
+  }
+  if (!linked) return;
+  // External labels must fit one Markdown paragraph. Read child boundaries
+  // before collapsing whitespace so adjacent blocks and <br> do not join words.
+  for (const anchor of body.querySelectorAll("a[href]")) {
+    const label = body.ownerDocument.createElement("div");
+    label.append(...anchor.childNodes);
+    anchor.textContent = serializeNode(label, "text")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  if (plain !== undefined) {
+    // Compare the serializer's actual labels, not the source HTML's textContent:
+    // serialization can lose image emoji or boundaries inside an anchor.
+    const visible = body.ownerDocument.createElement("div");
+    visible.innerHTML = serializeNode(body, "html");
+    for (const anchor of visible.querySelectorAll("a"))
+      anchor.replaceWith(...anchor.childNodes);
+    const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+    if (normalize(serializeNode(visible, "text")) !== normalize(plain)) return;
+  }
+  return serializeNode(body, "markdown");
 }

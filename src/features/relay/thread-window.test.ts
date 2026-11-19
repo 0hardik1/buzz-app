@@ -6,6 +6,7 @@ import type { ReadFilter, RelayEvent } from "./events";
 import type { LiveCallbacks } from "./live";
 import { keypair, message, roster, signed } from "./testing";
 import { threadBinding, threadAuthority } from "./thread-window";
+import { createThreadView, type ThreadResume } from "./threads";
 
 const channel = "00000000-0000-0000-0000-000000000000";
 const origin = "https://relay.example:8443";
@@ -224,6 +225,136 @@ it("pages 303 tied replies newest-first, deduplicates live rows and repairs reta
     h.view.snapshot().replies.find((r) => r.id === oldest.id)?.content,
   ).toBe(oldest.content);
 });
+it("pages older to a read frontier in one read, revalidating the root once", async () => {
+  const newest = Array.from({ length: 303 }, (_, n) => reply(n)).sort(
+    (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
+  );
+  const h = await setup((f) => {
+    if (f.ids) return [root];
+    const eligible = newest.filter(
+      (e) =>
+        f.until === undefined ||
+        e.created_at < f.until ||
+        (e.created_at === f.until && e.id > (f.before_id ?? "")),
+    );
+    const page = eligible.slice(0, f.limit);
+    const last = page.at(-1);
+    assert.exists(last);
+    return [
+      ...page,
+      bounds(
+        f,
+        eligible.length > page.length
+          ? { created_at: last.created_at, id: last.id }
+          : null,
+      ),
+    ];
+  });
+  await h.view.refresh();
+  const before = h.requests.length;
+  await h.view.loadMore(() => 50);
+  const read = h.requests.slice(before);
+  expect(read[0]).toEqual([{ ids: [root.id], "#h": [channel], limit: 1 }]);
+  expect(read.slice(1).map(([f]) => f?.limit)).toEqual([50, 50, 50, 50]);
+  expect(h.view.snapshot()).toMatchObject({
+    status: "ready",
+    canLoadMore: true,
+  });
+  expect(h.view.snapshot().replies[0]?.createdAt).toBeLessThanOrEqual(50);
+});
+// A strict-window relay over `replies`, newest first.
+const pagedThread =
+  (replies: readonly RelayEvent[]) =>
+  (f: ReadFilter): readonly RelayEvent[] => {
+    if (f.ids) return [root];
+    const eligible = replies.filter(
+      (e) =>
+        f.until === undefined ||
+        e.created_at < f.until ||
+        (e.created_at === f.until && e.id > (f.before_id ?? "")),
+    );
+    const page = eligible.slice(0, f.limit);
+    const last = page.at(-1);
+    return [
+      ...page,
+      bounds(
+        f,
+        last && eligible.length > page.length
+          ? { created_at: last.created_at, id: last.id }
+          : null,
+      ),
+    ];
+  };
+it("reads a shallow frontier without loading large older replies", async () => {
+  const large = "x".repeat(30 * 1024);
+  const replies = Array.from({ length: 210 }, (_, n) =>
+    n < 150
+      ? message(author, channel, `${large}${n}`, 10 + n, [
+          ["e", root.id, "", "reply"],
+        ])
+      : message(author, channel, `reply ${n}`, 10 + n, [
+          ["e", root.id, "", "reply"],
+        ]),
+  ).reverse();
+  const h = await setup(pagedThread(replies));
+  await h.view.refresh();
+  const before = h.requests.length;
+  // Unread from the 40th newest reply: one 50-row continuation reaches it.
+  await h.view.loadMore(() => 10 + 170);
+  expect(h.requests.slice(before + 1).map(([f]) => f?.limit)).toEqual([50]);
+  expect(h.view.snapshot()).toMatchObject({
+    status: "ready",
+    canLoadMore: true,
+    limited: false,
+  });
+  expect(h.view.snapshot().replies).toHaveLength(60);
+});
+it("stops a frontier load when the frontier moves past the loaded replies", async () => {
+  const replies = Array.from({ length: 303 }, (_, n) =>
+    message(author, channel, `reply ${n}`, 10 + n, [
+      ["e", root.id, "", "reply"],
+    ]),
+  ).reverse();
+  const relay = pagedThread(replies);
+  let frontier = 0;
+  const h = await setup((f) => {
+    // A read synced from another device while the first older page loads.
+    if (f.until !== undefined) frontier = Infinity;
+    return relay(f);
+  });
+  await h.view.refresh();
+  const before = h.requests.length;
+  await h.view.loadMore(() => frontier);
+  expect(h.requests.slice(before + 1).map(([f]) => f?.limit)).toEqual([50]);
+  expect(h.view.snapshot().replies).toHaveLength(60);
+});
+it("resumes a failed frontier load from the page that failed", async () => {
+  const replies = Array.from({ length: 303 }, (_, n) =>
+    message(author, channel, `reply ${n}`, 10 + n, [
+      ["e", root.id, "", "reply"],
+    ]),
+  ).reverse();
+  const relay = pagedThread(replies);
+  let windows = 0;
+  let fail = true;
+  const h = await setup((f) => {
+    if (f.thread_window && f.until !== undefined && ++windows === 2 && fail)
+      return relay(f).filter((event) => event.kind !== 39007);
+    return relay(f);
+  });
+  await h.view.refresh();
+  await h.view.loadMore(() => 0);
+  expect(h.view.snapshot().status).toBe("error");
+  fail = false;
+  const retry = h.requests.length;
+  await h.view.loadMore();
+  const [window] =
+    h.requests.slice(retry).find(([f]) => f?.thread_window) ?? [];
+  // The retry reads the failed second page, not the first again.
+  expect(window?.until).toBe(10 + 303 - 60);
+  expect(h.view.snapshot()).toMatchObject({ status: "ready" });
+  expect(h.view.snapshot().replies).toHaveLength(110);
+});
 it("uses raw scan progress across empty pages without deriving cursors from rows", async () => {
   let pages = 0;
   const h = await setup((f) =>
@@ -377,7 +508,10 @@ it.each([401, 403, 429, 500])(
         ? Response.json({ error: "fixture failure" }, { status })
         : original(url, options);
     });
-    await h.view.refresh();
+    vi.useFakeTimers();
+    const pending = h.view.refresh();
+    await vi.advanceTimersByTimeAsync(7000);
+    await pending;
     if (status === 401 || status === 403) {
       expect(h.view.snapshot()).toMatchObject({
         status: "idle",
@@ -392,6 +526,7 @@ it.each([401, 403, 429, 500])(
       await h.view.refresh();
       expect(h.view.snapshot().status).toBe("ready");
     }
+    vi.useRealTimers();
   },
 );
 
@@ -470,6 +605,468 @@ it("refreshes retained strict pages after establishment while preserving live de
     [{ thread_window: true, until: two.created_at, before_id: two.id }],
   ]);
   expect(h.view.snapshot().replies.map((row) => row.id)).toEqual([one.id]);
+});
+
+const at = (n: number) =>
+  message(author, channel, `reply ${n}`, 10 * n, [["e", root.id, "", "reply"]]);
+const cursorOf = (row: RelayEvent) => ({
+  created_at: row.created_at,
+  id: row.id,
+});
+
+it("refresh after establishment pages past its re-read until it reaches a retained reply", async () => {
+  // Live replay covers minutes; a long disconnect can leave the newest page
+  // short of the retained replies. Pages continue until one is reached.
+  const one = at(1),
+    two = at(2),
+    three = at(3);
+  let reconnected = false;
+  const h = await setup((filter) => {
+    if (filter.ids) return [root];
+    if (!reconnected) return [one, bounds(filter, cursorOf(one))];
+    if (filter.until === undefined)
+      return [three, bounds(filter, cursorOf(three))];
+    if (filter.until === three.created_at)
+      return [two, bounds(filter, cursorOf(two))];
+    return [one, bounds(filter, cursorOf(one))];
+  });
+  await h.view.refresh();
+  expect(h.view.snapshot().replies.map((row) => row.id)).toEqual([one.id]);
+  reconnected = true;
+  const before = h.requests.length;
+  h.traffic.established(channel);
+  await vi.waitFor(() => {
+    const snapshot = h.view.snapshot();
+    expect(snapshot.replies.map((row) => row.id)).toEqual([
+      one.id,
+      two.id,
+      three.id,
+    ]);
+    expect(snapshot).toMatchObject({
+      status: "ready",
+      canLoadMore: true,
+      limited: false,
+    });
+  });
+  expect(h.requests.slice(before)).toMatchObject([
+    [{ ids: [root.id] }],
+    [{ thread_window: true }],
+    [{ thread_window: true, until: three.created_at, before_id: three.id }],
+    [{ thread_window: true, until: two.created_at, before_id: two.id }],
+  ]);
+});
+
+it("replies the re-established stream replays before refresh are not overlap with the replies kept across the drop", async () => {
+  const one = at(1),
+    two = at(2),
+    three = at(3);
+  let reconnected = false;
+  const h = await setup((filter) => {
+    if (filter.ids) return [root];
+    if (!reconnected) return [one, bounds(filter, cursorOf(one))];
+    if (filter.until === undefined)
+      return [three, two, bounds(filter, cursorOf(two))];
+    return [one, bounds(filter, cursorOf(one))];
+  });
+  await h.view.refresh();
+  expect(h.view.snapshot().replies.map((row) => row.id)).toEqual([one.id]);
+  reconnected = true;
+  h.traffic.state({ status: "connected", routes: [] });
+  h.traffic.state({ status: "retrying", routes: [] });
+  h.traffic.state({ status: "connected", routes: [] });
+  h.traffic.receive([three]);
+  expect(h.view.snapshot().replies.map((row) => row.id)).toEqual([
+    one.id,
+    three.id,
+  ]);
+  const before = h.requests.length;
+  h.traffic.established(channel);
+  await vi.waitFor(() => {
+    const snapshot = h.view.snapshot();
+    expect(snapshot.replies.map((row) => row.id)).toEqual([
+      one.id,
+      two.id,
+      three.id,
+    ]);
+    expect(snapshot).toMatchObject({ status: "ready", limited: false });
+  });
+  // The newest page overlaps the replayed reply; the fill still pages on to
+  // the reply kept across the drop.
+  expect(h.requests.slice(before)).toMatchObject([
+    [{ ids: [root.id] }],
+    [{ thread_window: true }],
+    [{ thread_window: true, until: two.created_at, before_id: two.id }],
+  ]);
+});
+
+it("refresh after establishment drops a retained reply it cannot reach within the page bound and settles on the range the reader had", async () => {
+  const old = at(1);
+  const fresh = Array.from({ length: 10 }, (_, index) => at(20 - index));
+  let reconnected = false;
+  const h = await setup((filter) => {
+    if (filter.ids) return [root];
+    if (!reconnected) return [old, bounds(filter, cursorOf(old))];
+    const row =
+      fresh[
+        filter.until === undefined
+          ? 0
+          : fresh.findIndex(
+              (candidate) => candidate.created_at === filter.until,
+            ) + 1
+      ];
+    assert(row);
+    return [row, bounds(filter, cursorOf(row))];
+  });
+  await h.view.refresh();
+  reconnected = true;
+  h.traffic.established(channel);
+  // Ten pages never reached `old`: it goes rather than sitting below a gap.
+  // The pages read stay, but the reader had one page, so the range settles
+  // on one: a later refresh re-reads one page, not ten, and older pages
+  // continue from its bound. The repair stays ready throughout, so wait on
+  // its rows.
+  const shown = fresh.map((row) => row.id).reverse();
+  await vi.waitFor(() => {
+    expect(h.view.snapshot().replies.map((row) => row.id)).toEqual(shown);
+    expect(h.view.snapshot()).toMatchObject({
+      status: "ready",
+      limited: false,
+      canLoadMore: true,
+    });
+  });
+  let before = h.requests.length;
+  await h.view.refresh();
+  expect(h.requests.slice(before)).toMatchObject([
+    [{ ids: [root.id] }],
+    [{ thread_window: true }],
+  ]);
+  expect(h.requests.at(-1)?.[0]).not.toHaveProperty("until");
+  expect(h.view.snapshot().replies.map((row) => row.id)).toEqual(shown);
+  before = h.requests.length;
+  await h.view.loadMore();
+  expect(h.requests.slice(before)).toMatchObject([
+    [{ ids: [root.id] }],
+    [
+      {
+        thread_window: true,
+        until: fresh[0]?.created_at,
+        before_id: fresh[0]?.id,
+      },
+    ],
+  ]);
+  expect(h.view.snapshot()).toMatchObject({
+    status: "ready",
+    canLoadMore: true,
+    limited: false,
+  });
+});
+
+/** Reconnect pages: `four` and `three` on the newest page, then `two`, then `one`. */
+const reconnectPages =
+  (reconnected: () => boolean) =>
+  (filter: ReadFilter): readonly RelayEvent[] => {
+    const [one, two, three, four] = [at(1), at(2), at(3), at(4)];
+    if (filter.ids) return [root];
+    if (!reconnected()) return [one, bounds(filter, cursorOf(one))];
+    if (filter.until === undefined)
+      return [four, three, bounds(filter, cursorOf(three))];
+    if (filter.until === three.created_at)
+      return [two, bounds(filter, cursorOf(two))];
+    return [one, bounds(filter, cursorOf(one))];
+  };
+
+it("a refresh completing while the stream is down keeps the replies held across the drop for the establishment refresh to reach", async () => {
+  const [one, two, three, four] = [at(1), at(2), at(3), at(4)];
+  let reconnected = false;
+  const h = await setup(reconnectPages(() => reconnected));
+  await h.view.refresh();
+  h.traffic.state({ status: "connected", routes: [] });
+  h.traffic.state({ status: "retrying", routes: [] });
+  // A user refresh while the stream is down re-reads the same page. Were it
+  // to clear the drop-time snapshot, the replayed reply would be the
+  // establishment refresh's overlap.
+  await h.view.refresh();
+  expect(h.view.snapshot().replies.map((row) => row.id)).toEqual([one.id]);
+  reconnected = true;
+  h.traffic.state({ status: "connected", routes: [] });
+  h.traffic.receive([four]);
+  const before = h.requests.length;
+  h.traffic.established(channel);
+  await vi.waitFor(() => {
+    const snapshot = h.view.snapshot();
+    expect(snapshot.replies.map((row) => row.id)).toEqual([
+      one.id,
+      two.id,
+      three.id,
+      four.id,
+    ]);
+    expect(snapshot).toMatchObject({ status: "ready", limited: false });
+  });
+  expect(h.requests.slice(before)).toMatchObject([
+    [{ ids: [root.id] }],
+    [{ thread_window: true }],
+    [{ thread_window: true, until: three.created_at, before_id: three.id }],
+    [{ thread_window: true, until: two.created_at, before_id: two.id }],
+  ]);
+});
+
+it("an establishment refresh queued before a drop runs as a plain refresh, keeping the replies held for the next establishment", async () => {
+  // A renewal EOSE while a read runs queues an establishment refresh. Run as
+  // one after the drop, it would clear the drop-time snapshot while offline.
+  const [one, two, three, four] = [at(1), at(2), at(3), at(4)];
+  let reconnected = false;
+  let gate: Promise<void> | undefined;
+  let release = () => {};
+  const pages = reconnectPages(() => reconnected);
+  const h = await setup(async (filter) => {
+    const held = filter.thread_window ? gate : undefined;
+    if (held) gate = undefined;
+    await held;
+    return pages(filter);
+  });
+  h.traffic.state({ status: "connected", routes: [] });
+  await h.view.refresh();
+  expect(h.view.snapshot().replies.map((row) => row.id)).toEqual([one.id]);
+  gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const refreshing = h.view.refresh();
+  let queued = 0;
+  try {
+    await vi.waitFor(() => expect(gate).toBeUndefined());
+    queued = h.requests.length;
+    h.traffic.established(channel);
+    h.traffic.state({ status: "retrying", routes: [] });
+  } finally {
+    release();
+  }
+  await refreshing;
+  await vi.waitFor(() => {
+    expect(h.requests.slice(queued)).toMatchObject([
+      [{ ids: [root.id] }],
+      [{ thread_window: true }],
+    ]);
+    expect(h.view.snapshot().status).toBe("ready");
+  });
+  reconnected = true;
+  h.traffic.state({ status: "connected", routes: [] });
+  h.traffic.receive([four]);
+  const before = h.requests.length;
+  h.traffic.established(channel);
+  await vi.waitFor(() => {
+    const snapshot = h.view.snapshot();
+    expect(snapshot.replies.map((row) => row.id)).toEqual([
+      one.id,
+      two.id,
+      three.id,
+      four.id,
+    ]);
+    expect(snapshot).toMatchObject({ status: "ready", limited: false });
+  });
+  expect(h.requests.slice(before)).toMatchObject([
+    [{ ids: [root.id] }],
+    [{ thread_window: true }],
+    [{ thread_window: true, until: three.created_at, before_id: three.id }],
+    [{ thread_window: true, until: two.created_at, before_id: two.id }],
+  ]);
+});
+
+it("a thread view opened while the stream is down keeps its first read for the establishment refresh to reach", async () => {
+  const [one, two, three, four] = [at(1), at(2), at(3), at(4)];
+  let reconnected = false;
+  const h = await setup(reconnectPages(() => reconnected));
+  h.traffic.state({ status: "connected", routes: [] });
+  h.traffic.state({ status: "retrying", routes: [] });
+  h.view.dispose();
+  const view = h.session.thread(channel, root.id);
+  cleanup.push(view.dispose);
+  await view.refresh();
+  expect(view.snapshot().replies.map((row) => row.id)).toEqual([one.id]);
+  reconnected = true;
+  h.traffic.state({ status: "connected", routes: [] });
+  h.traffic.receive([four]);
+  const before = h.requests.length;
+  h.traffic.established(channel);
+  await vi.waitFor(() => {
+    const snapshot = view.snapshot();
+    expect(snapshot.replies.map((row) => row.id)).toEqual([
+      one.id,
+      two.id,
+      three.id,
+      four.id,
+    ]);
+    expect(snapshot).toMatchObject({ status: "ready", limited: false });
+  });
+  expect(h.requests.slice(before)).toMatchObject([
+    [{ ids: [root.id] }],
+    [{ thread_window: true }],
+    [{ thread_window: true, until: three.created_at, before_id: three.id }],
+    [{ thread_window: true, until: two.created_at, before_id: two.id }],
+  ]);
+});
+
+it("a thread view opened before the first connection keeps its first read for the establishment refresh to reach", async () => {
+  // Replies the first connection replays before EOSE are newer than any gap
+  // between the pre-connect read and them, not overlap with it.
+  const [one, two, three, four] = [at(1), at(2), at(3), at(4)];
+  let reconnected = false;
+  const h = await setup(reconnectPages(() => reconnected));
+  await h.view.refresh();
+  expect(h.view.snapshot().replies.map((row) => row.id)).toEqual([one.id]);
+  reconnected = true;
+  h.traffic.state({ status: "connected", routes: [] });
+  h.traffic.receive([four]);
+  const before = h.requests.length;
+  h.traffic.established(channel);
+  await vi.waitFor(() => {
+    const snapshot = h.view.snapshot();
+    expect(snapshot.replies.map((row) => row.id)).toEqual([
+      one.id,
+      two.id,
+      three.id,
+      four.id,
+    ]);
+    expect(snapshot).toMatchObject({ status: "ready", limited: false });
+  });
+  expect(h.requests.slice(before)).toMatchObject([
+    [{ ids: [root.id] }],
+    [{ thread_window: true }],
+    [{ thread_window: true, until: three.created_at, before_id: three.id }],
+    [{ thread_window: true, until: two.created_at, before_id: two.id }],
+  ]);
+});
+
+it("keeps a root edit from a window that answers before an unretained root", async () => {
+  const row = reply(0);
+  const edit = signed(author, {
+    kind: 40003,
+    created_at: 50,
+    content: "edited root",
+    tags: [["e", root.id]],
+  });
+  // Like the session's verified reader, each answer is admitted as it
+  // resolves: an edit whose target is not known yet is dropped.
+  const known = new Set<string>();
+  let held: Promise<void> | undefined;
+  let release = () => {};
+  let rootPending = false;
+  const reader = {
+    async read(filters: readonly ReadFilter[]) {
+      const [f] = filters;
+      assert.exists(f);
+      let events: RelayEvent[];
+      if (f.ids?.includes(root.id)) {
+        rootPending = true;
+        await held;
+        rootPending = false;
+        events = [root];
+      } else if (f.ids) events = [row];
+      else if (f.thread_window) events = [row, edit, bounds(f)];
+      else events = [];
+      const admitted = events.filter(
+        (event) =>
+          event.kind !== 40003 ||
+          event.tags.every(([name, id]) => name !== "e" || known.has(id ?? "")),
+      );
+      for (const event of admitted) known.add(event.id);
+      return admitted;
+    },
+  };
+  // The root answers only once the test releases it, after any read started
+  // alongside it has answered.
+  const refresh = async (view: { refresh(): Promise<void> }) => {
+    held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const refreshing = view.refresh();
+    await vi.waitFor(() => expect(rootPending).toBe(true));
+    release();
+    await refreshing;
+    held = undefined;
+  };
+  const open = (resume?: ThreadResume) =>
+    createThreadView({
+      channelId: channel,
+      messageId: root.id,
+      relayAuthor: relay.pubkey,
+      reader,
+      seed: undefined,
+      resume,
+      local: undefined,
+      canAccess: () => true,
+      visible: (events) => events,
+      notify: () => {},
+    });
+  const first = open();
+  await first.view.refresh();
+  const resume = first.resume();
+  first.view.dispose();
+  assert(typeof resume === "object");
+  // The resume holds the root; the shared evidence no longer does.
+  known.clear();
+  const reopened = open(resume);
+  await refresh(reopened.view);
+  expect(reopened.view.snapshot()).toMatchObject({
+    status: "ready",
+    root: { id: root.id, content: "edited root" },
+  });
+  // A retarget makes this ordinary view exact; its reader still admits.
+  await expect(
+    reopened.view.retarget(row.id, new AbortController().signal),
+  ).resolves.toBe("selected");
+  reopened.purge(true);
+  known.clear();
+  await refresh(reopened.view);
+  expect(reopened.view.snapshot()).toMatchObject({
+    status: "ready",
+    root: { id: root.id, content: "edited root" },
+  });
+});
+
+it("stops an exact view's overlapped window when the root is missing", async () => {
+  let rootReads = 0;
+  let window:
+    | { filter: ReadFilter; signal: AbortSignal | undefined }
+    | undefined;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const reader = {
+    async read(
+      filters: readonly ReadFilter[],
+      settings?: { signal?: AbortSignal },
+    ) {
+      const [f] = filters;
+      assert.exists(f);
+      if (f.ids) return ++rootReads === 1 ? [root] : [];
+      if (!f.thread_window) return [];
+      window = { filter: f, signal: settings?.signal };
+      await held;
+      return [reply(0), bounds(f)];
+    },
+  };
+  const view = createThreadView({
+    channelId: channel,
+    messageId: root.id,
+    relayAuthor: relay.pubkey,
+    reader,
+    seed: undefined,
+    local: undefined,
+    exact: true,
+    canAccess: () => true,
+    visible: (events) => events,
+    notify: () => {},
+  });
+  // The target read finds the root; the root read that follows does not.
+  const loading = view.view.refresh();
+  await vi.waitFor(() => expect(rootReads).toBe(2));
+  await loading;
+  expect(view.view.snapshot()).toMatchObject({ status: "error" });
+  // The window read started with the root read and is stopped.
+  expect(window?.filter.thread_window).toBe(true);
+  expect(window?.signal?.aborted).toBe(true);
+  release();
 });
 
 it("revalidates a missing strict root before repair and preserves tombstones on retry", async () => {

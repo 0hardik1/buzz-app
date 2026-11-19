@@ -38,6 +38,7 @@ it("one bottom dwell in a DM reads only through the newest message it saw", asyn
   let commitHold: Promise<void> | undefined;
   let committed = () => {};
   const storage: ReadStateStorage = {
+    capture: async () => journal && readJournal(journal, viewer.pubkey),
     async update(change) {
       journal = readJournal(change(journal), viewer.pubkey);
       if (commitHold && journal.state.frontiers.dm !== undefined) {
@@ -70,6 +71,7 @@ it("one bottom dwell in a DM reads only through the newest message it saw", asyn
       },
     },
     {
+      readStateFloor: () => 0,
       readStateStorage: storage,
       readPublisherLock: async (_signal, work) => work(),
     },
@@ -152,6 +154,8 @@ it("one bottom dwell in a DM reads only through the newest message it saw", asyn
     release = resolve;
   });
   list.dispatchEvent(new Event("scroll"));
+  // A scroll measures rows in the next frame.
+  vi.advanceTimersToNextFrame();
   // Exactly one dwell: catchUp takes the cutoff and holds at commit.
   await vi.advanceTimersByTimeAsync(300);
   await reached;

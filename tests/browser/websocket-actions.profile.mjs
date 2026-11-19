@@ -159,7 +159,7 @@ test("profiles primary actions through production broker and built app", async (
   const start = performance.now();
   await page.goto(app.origin);
   const messages = page
-    .getByRole("button", { name: "Messages", exact: true })
+    .getByRole("tab", { name: "Messages", exact: true })
     .first();
   await messages.waitFor();
   samples.push({
@@ -176,8 +176,8 @@ test("profiles primary actions through production broker and built app", async (
   for (const channel of ["alpha", "beta"])
     await expect.poll(() => app.relay.hasRoute("primary", channel)).toBe(true);
   await expect(
-    page.getByRole("status", {
-      name: "Reconnecting to relay…",
+    page.getByRole("dialog", {
+      name: "Buzz is having trouble connecting",
       exact: true,
     }),
   ).toHaveCount(0);
@@ -352,7 +352,7 @@ test("profiles primary actions through production broker and built app", async (
   await page.getByText("Diagnostics", { exact: true }).click();
   await page
     .getByRole("button", {
-      name: "Mark read through loaded messages",
+      name: "Mark as read through loaded messages",
       exact: true,
     })
     .click();

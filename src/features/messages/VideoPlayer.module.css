@@ -179,11 +179,12 @@
     calc(
       var(--available-height) -
       var(--size-control-sm) -
-      var(--space-4) -
+      var(--space-6) -
       2px
     )
   );
-  margin: var(--space-1) 0;
+  /* Match the full-volume knob’s top inset to its centered side insets. */
+  margin: var(--space-3) 0 var(--space-1);
 }
 .volumeSlider input[type="range"] {
   position: relative;
@@ -305,7 +306,7 @@
   font-size: var(--text-caption);
 }
 @media (hover: hover) and (pointer: fine) {
-  .player:where(:has(.controls[data-playing])):is(
+  .player:not([data-controls-revealed]):where(:has(.controls[data-playing])):is(
       :not(:hover),
       [data-controls-idle]
     ):not(:has(:focus-visible)):not(:has([aria-expanded="true"]))

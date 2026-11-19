@@ -7,8 +7,17 @@ import {
 import { bulletList, orderedList, listItem } from "prosemirror-schema-list";
 import { composerLinkUrl } from "./composer-link";
 import { scanMarkdown } from "../relay/message-content";
-import type { MentionDraft, DraftRecipient } from "./mention-draft";
+import type {
+  MentionDraft,
+  DraftRecipient,
+  PendingMention,
+} from "./mention-draft";
 import type { ComposerResource } from "../conversation/contracts";
+import {
+  composerToken,
+  composerTokenText,
+  type ComposerToken,
+} from "./composer-token";
 
 /** The document owns editable marks and exact source tokens. Unimplemented
  * Markdown stays source text, never round-trips through an HTML serializer. */
@@ -95,6 +104,11 @@ export const composerSchema = new Schema<
         recipient: { default: null },
         /** Host-owned `{ uri, label }`; valid only while `source` is its link. */
         resource: { default: null },
+        /** A `ComposerToken` whose label is `source`; never a recipient. */
+        semantic: { default: null },
+        /** `{ id, name }` while the host resolves a mention Space committed
+         * before the chooser could decide. Never persists past the editor. */
+        pending: { default: null },
         editAsText: { default: false },
       },
       leafText: (node) => node.attrs.source,
@@ -117,7 +131,7 @@ export const composerSchema = new Schema<
     recipient: {
       attrs: { pubkey: {}, name: {} },
       inclusive: false,
-      toDOM: () => ["span", 0],
+      toDOM: () => ["span", { spellcheck: "false" }, 0],
     },
     literal: { inclusive: false, toDOM: () => ["span", 0] },
     link: {
@@ -227,10 +241,18 @@ export function readComposerDocument(
       );
       if (node.isText) return node.mark(marks);
       if (node.type.name === "token") {
+        // The resolver died with the previous editor; the typed text stands.
+        if (node.attrs.pending)
+          return composerSchema.text(node.attrs.source, marks);
         const resource = composerResource(node.attrs.resource);
+        const semantic = composerToken(node.attrs.semantic);
         return node.type.create(
           {
             ...node.attrs,
+            semantic:
+              semantic && composerTokenText(semantic) === node.attrs.source
+                ? semantic
+                : null,
             recipient:
               node.attrs.recipient && valid(node.attrs.recipient)
                 ? node.attrs.recipient
@@ -365,12 +387,40 @@ export function composerResource(
   return { resource: { uri, label: text }, source };
 }
 
+/** Semantic chips and their text spans. Host-internal: `MentionDraft`, which
+ * plugins see, never carries them. */
+export function composerChips(doc: EditorNode | undefined) {
+  const chips: Readonly<{
+    token: ComposerToken;
+    start: number;
+    end: number;
+  }>[] = [];
+  for (const { node, start, end } of doc
+    ? projectComposerDocument(doc).tokens
+    : []) {
+    const token = composerToken(node.attrs.semantic);
+    if (token) chips.push({ token, start, end });
+  }
+  return chips;
+}
+
 /** Document positions, editable text offsets, and serialized Markdown offsets
  * are distinct. No generated Markdown delimiter enters this map. */
 export function projectComposerDocument(doc: EditorNode) {
+  // A node is immutable, so one keystroke's several readers share a projection.
+  const cached = projections.get(doc);
+  if (cached) return cached;
+  const projection = project(doc);
+  projections.set(doc, projection);
+  return projection;
+}
+const projections = new WeakMap<EditorNode, ReturnType<typeof project>>();
+
+function project(doc: EditorNode) {
   let text = "";
   const positions = new Array<number>(doc.content.size + 1).fill(0);
   const recipients: DraftRecipient[] = [];
+  const pending: PendingMention[] = [];
   const carets: number[] = [];
   const blocks: { from: number; to: number; start: number; code: boolean }[] =
     [];
@@ -435,6 +485,8 @@ export function projectComposerDocument(doc: EditorNode) {
       });
       if (node.attrs.recipient)
         recipients.push({ ...node.attrs.recipient, start, end: text.length });
+      if (node.attrs.pending)
+        pending.push({ ...node.attrs.pending, start, end: text.length });
     }
   });
   for (let i = 1; i < positions.length; i++)
@@ -444,6 +496,7 @@ export function projectComposerDocument(doc: EditorNode) {
     draft: {
       text,
       recipients,
+      ...(pending.length ? { pending } : {}),
       document: { version: 1, content: doc.toJSON() },
     } satisfies MentionDraft,
     positions,
@@ -457,14 +510,22 @@ export function projectComposerDocument(doc: EditorNode) {
     },
     position(offset: number, bias = 1) {
       offset = Math.max(0, Math.min(offset, text.length));
-      let closest = carets[0] ?? 1;
-      for (const position of carets) {
-        const value = positions[position] ?? text.length;
-        if (value === offset) return position;
-        if (value > offset) return bias < 0 ? closest : position;
-        closest = position;
+      // Carets are in document order and their offsets never decrease, so
+      // binary search finds the first caret at or after the offset; every
+      // decoration resolves its range here on each keystroke.
+      let low = 0,
+        high = carets.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        if ((positions[carets[middle] ?? 0] ?? text.length) < offset)
+          low = middle + 1;
+        else high = middle;
       }
-      return closest;
+      const position = carets[low];
+      if (position === undefined) return carets.at(-1) ?? 1;
+      return (positions[position] ?? text.length) > offset && bias < 0
+        ? (carets[low - 1] ?? position)
+        : position;
     },
   };
 }
@@ -504,6 +565,14 @@ export function composerMarkdownContext(
 
 /** Local persistence envelope. The schema, not parallel mark ranges, owns shape. */
 export function readComposerSnapshot(value: unknown): EditorNode | undefined {
+  // Snapshots are never mutated, and validation plus parsing is O(draft).
+  if (typeof value !== "object" || !value) return read(value);
+  if (!snapshots.has(value)) snapshots.set(value, read(value));
+  return snapshots.get(value);
+}
+const snapshots = new WeakMap<object, EditorNode | undefined>();
+
+function read(value: unknown): EditorNode | undefined {
   if (
     !value ||
     typeof value !== "object" ||
@@ -541,6 +610,17 @@ export function readComposerSnapshot(value: unknown): EditorNode | undefined {
       )
         return;
       length += node.attrs.source.length;
+      if ("semantic" in node.attrs && node.attrs.semantic !== null) {
+        const token = composerToken(node.attrs.semantic);
+        if (
+          !token ||
+          composerTokenText(token) !== node.attrs.source ||
+          ("recipient" in node.attrs && node.attrs.recipient) ||
+          ("resource" in node.attrs && node.attrs.resource) ||
+          ("pending" in node.attrs && node.attrs.pending)
+        )
+          return;
+      }
     }
     if (length > 16000) return;
     if (node.content !== undefined) {

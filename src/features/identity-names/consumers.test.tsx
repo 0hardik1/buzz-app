@@ -4,7 +4,7 @@ stubAvatarBrowserApis();
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createRef } from "react";
+import { createRef, useSyncExternalStore } from "react";
 import { Context } from "@deepseek-ai/cordis";
 import userEvent from "@testing-library/user-event";
 import { PluginRuntime } from "../../plugins/runtime";
@@ -26,13 +26,13 @@ import type { PresenceStatus } from "../presence/presence";
 import { BuzzLinkPreview } from "../conversation/BuzzLinkPreview";
 import { SearchResults } from "../../app/shell/SearchResults";
 import { useChannelLabels } from "../../bundled/channels/useChannelLabels";
-import { AgentChoice } from "../sessions/AgentChoice";
 import { MessageRow } from "../messages/MessageRow";
 import type { ChannelMessage } from "../relay/contracts";
 import { TypingIndicator } from "../messages/TypingIndicator";
 
 const a = "a".repeat(64),
   b = "b".repeat(64);
+const noInbox = { status: "ready", items: [], freshness: "observed" };
 const stops: (() => void)[] = [];
 // jsdom lacks scrollIntoView; mention and search highlights reveal their rows.
 beforeEach(() => {
@@ -101,6 +101,7 @@ function fixture() {
       listeners.delete(listener);
     };
   };
+  const visibility = { status: "ready" as const, hidden: [] };
   const session = {
     presence: {
       status: () => presenceStatus,
@@ -131,6 +132,19 @@ function fixture() {
       refresh: async () => {},
     },
     agentActivity: { snapshot: () => activity, subscribe },
+    directMessages: { people: async () => ({ people: [] }) },
+    channelLifecycle: { snapshot: () => visibility, subscribe },
+    unread: {
+      snapshot: () => ({ manual: "none", observedCount: 0 }),
+      activity: () => ({ items: [] }),
+      subscribe: (_target: unknown, listener: () => void) =>
+        subscribe(listener),
+      subscribeActivity: (_id: string, listener: () => void) =>
+        subscribe(listener),
+      inbox: () => noInbox,
+      subscribeInbox: subscribe,
+    },
+    sidebarPreferences: { snapshot: () => ({ status: "ready" }), subscribe },
     typing: { snapshot: () => publicTyping, subscribe },
     thread: () => ({
       snapshot: () => thread,
@@ -149,6 +163,10 @@ function fixture() {
         tags: [["h", "c"]],
       },
     ],
+    async readPage() {
+      const events = await session.read([]);
+      return { events, relayCount: events.length };
+    },
   } as unknown as RelaySession;
   const names = bindNames(session, {
     snapshot: () => [createAgentDirectory()],
@@ -326,7 +344,7 @@ it.each(["live", "reconnect", "clear-cache"] as const)(
         screen.getByRole("button", { name: "Mention a member" }),
       );
       expect(
-        await screen.findByRole("button", { name: `GLM ${agent.pubkey}` }),
+        await screen.findByRole("button", { name: /^GLM\s*Agent/ }),
       ).toBeVisible();
 
       const oldRosterReads = rosterReads;
@@ -363,11 +381,11 @@ it.each(["live", "reconnect", "clear-cache"] as const)(
           view.container.querySelector('[data-message-id="message"]'),
         ).toHaveTextContent("Luna");
         expect(
-          screen.getByRole("button", { name: `Luna ${agent.pubkey}` }),
+          screen.getByRole("button", { name: /^Luna\s*Agent/ }),
         ).toBeVisible();
       });
       expect(
-        screen.queryByRole("button", { name: `GLM ${agent.pubkey}` }),
+        screen.queryByRole("button", { name: /^GLM\s*Agent/ }),
       ).not.toBeInTheDocument();
     } finally {
       owner.dispose();
@@ -379,8 +397,12 @@ it.each(["live", "reconnect", "clear-cache"] as const)(
 it("uses channel scope in link previews and activity, and participant scope in sidebar DMs", async () => {
   const f = fixture();
   function Sidebar() {
+    const list = useSyncExternalStore(
+      f.session.channels.subscribeList,
+      f.session.channels.list,
+    );
     const labels = useChannelLabels(
-      f.session.channels.list().channels,
+      list.channels,
       f.session.profiles,
       f.session.names,
     );
@@ -419,7 +441,7 @@ it("uses channel scope in link previews and activity, and participant scope in s
     "Larry · rcaj",
   );
   expect(screen.getByLabelText("DM label")).toHaveTextContent(
-    "Larry · rcaj, Larry · 04hu",
+    "Larry · 04hu, Larry · rcaj",
   );
   expect(
     screen.getByRole("button", {
@@ -436,6 +458,7 @@ it("scopes search DM labels and message authors to their own conversation", asyn
       onQueryChange={() => {}}
       input={createRef()}
       pages={[]}
+      openNewMessage={() => {}}
       openConversation={() => {}}
     />,
   );
@@ -445,16 +468,7 @@ it("scopes search DM labels and message authors to their own conversation", asyn
   act(() => f.join());
   expect(
     screen.getByRole("option", {
-      name: /hello.*Larry · rcaj, Larry · 04hu · Larry · rcaj/,
+      name: /hello.*Larry · 04hu, Larry · rcaj · Larry · rcaj/,
     }),
   ).toBeVisible();
-});
-it("keeps a unique selectable agent plain despite a cached namesake", async () => {
-  const f = fixture();
-  const change = vi.fn();
-  render(<AgentChoice session={f.session} value={a} onChange={change} />);
-  const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "Change agent: Larry" }));
-  await user.click(await screen.findByRole("button", { name: "Larry" }));
-  expect(change).toHaveBeenCalledWith(a);
 });

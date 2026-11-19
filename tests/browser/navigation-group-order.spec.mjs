@@ -16,7 +16,9 @@ const header = (page, id) =>
 const orders = (app) => {
   const { blob } = app.report.sidebarPublications.at(-1);
   return Object.fromEntries(
-    Object.entries(blob.meta.s).map(([id, node]) => [id, node.order[2]]),
+    blob.sectionOrder
+      .filter((key) => key.startsWith("group:"))
+      .map((key, index) => [key.slice("group:".length), index]),
   );
 };
 // Hold a real pointer drag over another group's header; the caller releases it.
@@ -44,6 +46,7 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   page,
   app,
 }) => {
+  await page.clock.install();
   await page.goto(app.origin);
   await openPage(page, "Messages");
   await expect
@@ -57,12 +60,19 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   // A cancelled drag shows its landing edge, then leaves everything unchanged.
   await pull(page, "laptop", "work");
   await expect(laptop).toHaveAttribute("data-section-dragging");
+  await expect(page.locator('[class*="channelDragOverlay"]')).toHaveCSS(
+    "translate",
+    "none",
+  );
   await expect(work).toHaveAttribute("data-drop-edge", "before");
   await expect(work).not.toHaveAttribute("data-drop-target");
   await page.keyboard.press("Escape");
   await page.mouse.up();
   await expect(page.locator("[data-drop-edge]")).toHaveCount(0);
   await expect(page.locator("[data-section-dragging]")).toHaveCount(0);
+  await page.clock.fastForward(51);
+  await header(page, "laptop").dispatchEvent("click", { detail: 1 });
+  await expect(laptop.locator("details")).not.toHaveAttribute("open");
   // Dropping a group on itself is not a move, and its header click is not a toggle.
   const own = await header(page, "laptop").boundingBox();
   const x = own.x + own.width / 2;
@@ -71,13 +81,51 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   await page.mouse.down();
   await page.mouse.move(x, y - 40, { steps: 4 });
   await expect(laptop).toHaveAttribute("data-section-dragging");
+  await expect(
+    page.locator('[data-sidebar-section="group:missing"]'),
+  ).toHaveAttribute("data-drop-edge", "before");
   await page.mouse.move(x, y, { steps: 4 });
+  // Deliver a click in the drop's event turn, before dnd-kit can remove its
+  // document guard. stopPropagation alone must not toggle the native summary.
+  await header(page, "laptop").evaluate((element) => {
+    element.ownerDocument.addEventListener(
+      "pointerup",
+      () =>
+        element.dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            detail: 1,
+          }),
+        ),
+      { once: true },
+    );
+  });
+  // Returning the pointer does not mean dnd-kit has rendered its new target.
+  // Release only after the old neighbour's insertion edge is gone.
+  await expect(page.locator("[data-drop-edge]")).toHaveCount(0);
   await page.mouse.up();
   await expect(page.locator("[data-section-dragging]")).toHaveCount(0);
   await expect(laptop.locator("details")).not.toHaveAttribute("open");
   expect(app.report.sidebarPublications ?? []).toHaveLength(0);
 
-  // Built-in sections are not group targets.
+  // A delayed post-drag click must remain suppressed after dnd-kit's cleanup.
+  await page.clock.fastForward(51);
+  await header(page, "laptop").dispatchEvent("click", { detail: 1 });
+  await expect(laptop.locator("details")).not.toHaveAttribute("open");
+  // Keyboard and assistive activation remain usable without a pointerdown.
+  await header(page, "laptop").focus();
+  await page.keyboard.press("Enter");
+  await expect(laptop.locator("details")).toHaveAttribute("open");
+  await header(page, "laptop").dispatchEvent("click", { detail: 0 });
+  await expect(laptop.locator("details")).not.toHaveAttribute("open");
+  // The next deliberate pointer action must still toggle normally.
+  await header(page, "laptop").click();
+  await expect(laptop.locator("details")).toHaveAttribute("open");
+  await header(page, "laptop").click();
+  await expect(laptop.locator("details")).not.toHaveAttribute("open");
+
+  // Built-in sections are valid reorder targets. Escape cancels the move.
   const channels = await page
     .locator('[data-sidebar-section="channels"] summary')
     .boundingBox();
@@ -90,16 +138,19 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   );
   await expect(laptop).toHaveAttribute("data-section-dragging");
   await expect(
-    page.locator("[data-drop-edge], [data-drop-target]"),
-  ).toHaveCount(0);
+    page.locator('[data-sidebar-section="channels"]'),
+  ).toHaveAttribute("data-drop-edge", "after");
+  await page.keyboard.press("Escape");
   await page.mouse.up();
   await expect
     .poll(() => groups(page))
     .toEqual(["group:work", "group:missing", "group:laptop"]);
   expect(app.report.sidebarPublications ?? []).toHaveLength(0);
 
-  // Collapsed last group upward to first.
+  // Collapsed last group upward to first. dnd-kit drops on the target it last
+  // rendered, so release only after the pointer's target is shown.
   await pull(page, "laptop", "work");
+  await expect(work).toHaveAttribute("data-drop-edge", "before");
   await page.mouse.up();
   await expect
     .poll(() => groups(page))
@@ -126,7 +177,7 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   await page.getByRole("button", { name: "More actions for Work" }).click();
   await expect(
     page.getByRole("menuitem", { name: "Move down", exact: true }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await page.getByRole("menuitem", { name: "Move up", exact: true }).click();
   await expect
     .poll(() => groups(page))
@@ -298,6 +349,10 @@ test("group landing edge follows list order when text size changes during a drag
   await page.evaluate(() => {
     document.documentElement.style.fontSize = "16px";
   });
+  // The pointer is still below the resized groups. Wait for collision geometry
+  // to catch up, or the old marker could satisfy the next assertion before the
+  // move is processed and let the drop race against remeasurement.
+  await expect(missing).not.toHaveAttribute("data-drop-edge");
   const target = await header(page, "missing").boundingBox();
   // The stale initial pixel comparison would now put the line on the wrong side.
   expect(initial.y).toBeGreaterThan(target.y);

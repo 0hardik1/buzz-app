@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { act, waitFor, renderHook } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { useAgent, useMentionModels, AgentsContext } from "./react";
-import type { Agent, Agents } from "./service";
+import type { Agent, Agents, Models } from "./service";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -33,7 +33,7 @@ const models = (current: string) => ({
 });
 
 it("loads models and their effort levels asynchronously before an agent runs", async () => {
-  const pending = deferred<ReturnType<typeof models>>();
+  const pending = deferred<Models>();
   const agent = { pubkey: "agent", type: "codex", name: "Codex" } as Agent;
   const snapshot = { status: "ready", agents: [agent] };
   const types = [{ key: "codex", models: () => pending.promise }];
@@ -52,14 +52,19 @@ it("loads models and their effort levels asynchronously before an agent runs", a
     { pubkey: "agent", name: "Codex", current: "", models: [], loading: true },
   ]);
   await act(async () => {
-    pending.resolve(models("GPT test"));
+    pending.resolve({ ...models("GPT test"), sendDefaults: true });
   });
   expect(result.current).toEqual([
-    { pubkey: "agent", name: "Codex", ...models("GPT test") },
+    {
+      pubkey: "agent",
+      name: "Codex",
+      ...models("GPT test"),
+      sendDefaults: true,
+    },
   ]);
 });
 
-it("offers nothing for a single model without effort levels", async () => {
+it("loads a single model without effort levels for saved-choice validation", async () => {
   const agents = ["fixed", "tunable"].map(
     (pubkey) => ({ pubkey, type: pubkey, name: pubkey }) as Agent,
   );
@@ -87,7 +92,10 @@ it("offers nothing for a single model without effort levels", async () => {
   });
   // Both lookups settle together, so the tunable one is the barrier.
   await waitFor(() =>
-    expect(result.current.map((choice) => choice.pubkey)).toEqual(["tunable"]),
+    expect(result.current.map((choice) => choice.current)).toEqual([
+      "only",
+      "Tunable",
+    ]),
   );
 });
 

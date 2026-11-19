@@ -20,12 +20,22 @@ Handled keys are prevented once, not also sent to the shell. Ordinary message
 editors retain their local-first bubbling behavior. The launcher tooltip still
 shows the registered default rather than the effective binding.
 
+The renderer pins xterm 6.0.0 and FitAddon 0.11.0. Buzz preserves xterm 5.5's
+Alt-arrow sequences after shortcut dispatch: Option+Left/Right send backward/forward
+word navigation on macOS, while Alt+arrows send the corresponding Ctrl-arrow
+sequences on Linux. Additional modifiers retain xterm's normal translation.
+Compatible terminal applications can use synchronized output (DEC mode 2026)
+to batch redraws; xterm recovers an unfinished frame after its safety timeout.
+The scrollbar is now xterm's own themed control. User input and parser replies
+still use the pinned private `coreService.onUserInput` signal for provenance;
+the public `onData` event does not expose that distinction.
+
 ## Run locally
 
 From the agreed feature worktree, use `bin/just desktop`. Native commands require
 a rebuilt/restarted desktop process; Vite HMR alone cannot install the PTY bridge.
-Use the normal public `BUZZ_DEV_VIEWER` development setup from README for live
-channels. Do not copy private keys into `.env.local`. The launcher derives this
+Use the normal public `BUZZ_DEV_VIEWER` [development setup](contributing.md#live-relay-development)
+for live channels. Do not copy private keys into `.env.local`. The launcher derives this
 worktree's port from its path; pass `--port` only if another server already owns
 it.
 
@@ -36,7 +46,7 @@ not establish Linux or packaged desktop acceptance.
 
 ## Appearance and welcome
 
-BuzzTerm follows the host's shared Light/Dark colors and interface-size preference,
+BuzzTerm follows the host's shared Light/Dark colors,
 including xterm's background, text, cursor and selection. Explicit ANSI colors retain
 xterm's distinct palette rather than collapsing CLI foreground/background pairs
 onto shared UI roles; xterm's minimum-contrast adjustment keeps ordinary text readable.
@@ -46,8 +56,22 @@ xterm may adjust foreground lightness for contrast. The launcher and drawer use
 the shared design system: Base UI-backed buttons, Tabler icons, `PanelHeader`,
 named text roles and the system mono face. The drawer is a precise `data-buzz-ui`
 boundary inside the otherwise legacy channel screen, not a second rounded Panel.
-Xterm reads `bg-panel`, `text-primary` and the purple selection tint; its mono
-size, leading and tracking follow the host's type ramp without double scaling.
+In **Settings → Plugins → Terminal**, choose an installed **Font family** and
+**Font size (px)**, then **Apply**. Nerd Fonts must be installed separately;
+use a Mono variant for cell alignment. Applying a new family requires a successful
+load check; failures show an inline error with Retry. The preview is a plain
+text sample and follows drafts; Apply updates open terminals without
+restarting their shells. Choices are saved on this device and sync across its
+Buzz windows. **Use default** resets both choices to JetBrains Mono at 12 CSS px.
+Size accepts 8–32 CSS px, including fractions, independently of interface text
+size. Terminal letter spacing is zero; its line-height multiplier is 1.0 for
+compact rows and closer prompt-glyph joins. The renderer remains xterm's DOM renderer.
+Missing bold and italic faces may be synthesized so ANSI text styles still work
+when an installed family has only one face.
+If storage fails, the active choice still applies; use Retry in the notice to
+repeat the failed restore or save.
+If a saved family later becomes unavailable, the terminal falls back to
+JetBrains Mono and its settings show a notice without clearing the saved name.
 The host still owns global styles, appearance and keyboard-only focus; no viewer
 preferences or second reset are imported. Decorative color stays confined to the
 welcome lettering, not terminal colors or ordinary controls.

@@ -10,16 +10,37 @@ test.use({
 
 // Do not let the shared fixture's legacy WebKit exception mask timeline reflow
 // errors. These journeys must preserve the reader without observer-loop errors.
-test.afterEach(async ({ app }) => {
-  expect(app.report.errors).toEqual([]);
+// Startup can report WebKit's ResizeObserver loop while the sidebar and search
+// palette replace their loading views, before any journey step. The fixture
+// still classifies those errors; the raw check starts once Messages is ready.
+let startupErrors = 0;
+test.beforeEach(() => {
+  startupErrors = 0;
 });
+test.afterEach(async ({ app }) => {
+  expect(app.report.errors.slice(startupErrors)).toEqual([]);
+});
+
+async function openMessages(page, app) {
+  await page.goto(app.origin);
+  await openPage(page, "Messages");
+  // Unread evidence can extend the row's name; its channel id is stable.
+  await expect(page.locator('button[data-channel-id="alpha"]')).toBeVisible();
+  // A loop error is reported in the frame that delivers the observations.
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      ),
+  );
+  startupErrors = app.report.errors.length;
+}
 
 test("Channels renders grouped history and live membership without turning activity into messages", async ({
   page,
   app,
 }, testInfo) => {
-  await page.goto(app.origin);
-  await openPage(page, "Messages");
+  await openMessages(page, app);
   await page.getByRole("button", { name: "Alpha", exact: true }).click();
   const feed = page.getByRole("region", { name: "Channel message history" });
   const groups = feed.locator("[data-membership-row]");
@@ -67,10 +88,19 @@ test("Channels renders grouped history and live membership without turning activ
     );
   });
   expect(centered).toBeLessThan(2);
+  // Pages leave notices out; the history activity came from its own read.
   expect(
     app.report.queries
       .filter(({ filter }) => filter.top_level)
-      .every(({ filter }) => filter.kinds.includes(40099)),
+      .some(({ filter }) => filter.kinds.includes(40099)),
+  ).toBe(false);
+  expect(
+    app.report.queries.some(
+      ({ filter }) =>
+        filter.kinds?.length === 1 &&
+        filter.kinds[0] === 40099 &&
+        filter["#h"]?.includes("alpha"),
+    ),
   ).toBe(true);
   await groups
     .first()
@@ -81,23 +111,33 @@ test("Channels renders grouped history and live membership without turning activ
   });
   // The real stream subscriber/filter/session must deliver additions and departures.
   await expect.poll(() => app.relay.hasRoute("primary", "alpha")).toBe(true);
+  app.membership("member_joined", 0, 0);
   app.membership("member_left", 0, 0);
   app.membership("member_left", 1, 1);
-  await expect(groups).toHaveCount(2);
+  await expect(groups).toHaveCount(1);
   await expect(groups.last()).toContainText(
-    "Pinky, along with Brain, left the channel",
+    "Pinky added by you, along with Brain",
   );
   app.membership("member_removed", 0);
-  await expect(groups).toHaveCount(3);
-  await expect(groups.last()).toContainText("Pinky was removed by you");
+  await expect(groups).toHaveCount(1);
+  await expect(groups.last()).toContainText(
+    "Brain was added · Pinky was removed",
+  );
+  await expect(groups.last().locator("p")).toHaveAttribute(
+    "title",
+    /Pinky was removed by you/,
+  );
+  await groups.last().screenshot({
+    path: testInfo.outputPath("latest-membership-change.png"),
+  });
   app.membership("member_joined", 0, -1, true);
   // Place a genuine message after the forgery: seeing it proves the batch was processed.
   const after = app.append("primary", "alpha", "After membership activity");
   await expect(feed.locator(`[data-message-id="${after.id}"]`)).toBeVisible();
-  await expect(groups).toHaveCount(3);
+  await expect(groups).toHaveCount(1);
   // A normal message is a grouping barrier, never swallowed by an activity cohort.
   app.membership("member_joined", 0);
-  await expect(groups).toHaveCount(4);
+  await expect(groups).toHaveCount(2);
   await expect(groups.last()).toContainText("Pinky added by you");
   await expect(groups.last()).toBeVisible();
   // Wait for the scheduled bottom-follow before leaving; an overscan count is
@@ -109,7 +149,7 @@ test("Channels renders grouped history and live membership without turning activ
     .toBeLessThan(2);
   await page.getByRole("button", { name: "Beta", exact: true }).click();
   await page.getByRole("button", { name: "Alpha", exact: true }).click();
-  await expect(groups).toHaveCount(4);
+  await expect(groups).toHaveCount(2);
   await expect(groups.last()).toBeVisible();
 });
 
@@ -119,13 +159,11 @@ const keyboardTest = test.extend({ tallMessages: true, readState: true });
 keyboardTest(
   "one keyboard scroll leaves bottom follow and live membership preserves the reader",
   async ({ page, app }) => {
-    await page.goto(app.origin);
-    await openPage(page, "Messages");
-    // Unread evidence contributes to the accessible name; channel identity does not change.
+    await openMessages(page, app);
+    // The open channel's row is quiet, and its identity locates it.
     const alpha = page.locator('button[data-channel-id="alpha"]');
-    await expect(alpha.getByRole("img")).toHaveAccessibleName(
-      /observed unread messages/,
-    );
+    await expect(alpha).toHaveAttribute("aria-current", "page");
+    await expect(alpha.getByRole("img")).toHaveCount(0);
     await alpha.click();
     const feed = page.getByRole("region", { name: "Channel message history" });
     const distance = () =>
@@ -183,8 +221,7 @@ test("a restored membership anchor follows delayed group growth through resize a
       false,
     );
   history.splice(history.indexOf(delayed), 1);
-  await page.goto(app.origin);
-  await openPage(page, "Messages");
+  await openMessages(page, app);
   await page.getByRole("button", { name: "Alpha", exact: true }).click();
   const feed = page.getByRole("region", { name: "Channel message history" });
   await settle(page);
@@ -257,3 +294,101 @@ test("a restored membership anchor follows delayed group growth through resize a
     .poll(async () => Math.abs((await y()) - beforeResize))
     .toBeLessThan(2);
 });
+
+// A burst of joins newer than every message must not hold messages back:
+// pages leave notices out, and the notices follow in their own reads.
+const burstTest = test.extend({ membershipBurst: 600 });
+burstTest(
+  "a join burst longer than a page shows the newest messages first, then its joins",
+  async ({ page, app }, testInfo) => {
+    await openMessages(page, app);
+    await page.getByRole("button", { name: "Alpha", exact: true }).click();
+    const feed = page.getByRole("region", { name: "Channel message history" });
+    const groups = feed.locator("[data-membership-row]");
+    await expect(
+      feed.getByText("primary alpha message 639", { exact: false }),
+    ).toBeInViewport();
+    await expect(
+      feed.getByText("primary alpha message 625", { exact: false }),
+    ).toBeVisible();
+    await expect(groups).toHaveCount(1);
+    await expect(groups).toContainText("and 499 others were added");
+    // The second notice read pages below the first by the composite cursor.
+    await expect.poll(() => app.pending.length).toBe(1);
+    const notices = app.pending.shift();
+    expect(notices.filter).toMatchObject({ kinds: [40099], "#h": ["alpha"] });
+    expect(notices.filter.until).toEqual(expect.any(Number));
+    notices.release();
+    await expect(groups).toContainText("Pinky and 601 others were added");
+    await expect(groups).toHaveCount(1);
+    await settle(page);
+    expect(app.pending).toHaveLength(0);
+    // A real hover surface must remain reachable and expose every member,
+    // including those beyond the scroll viewport; keyboard activation works too.
+    const others = groups.getByRole("button", {
+      name: "601 others",
+      exact: true,
+    });
+    await others.hover();
+    const popup = page.getByRole("dialog", {
+      name: "People who were added (602)",
+    });
+    await expect(popup).toBeVisible();
+    const people = popup.getByRole("region", {
+      name: "People who were added",
+      exact: true,
+    });
+    await expect(people.getByRole("listitem")).toHaveCount(602);
+    await expect(people.getByRole("listitem").first()).toHaveText("Pinky");
+    await expect(people.getByRole("listitem").nth(1)).toHaveText("Brain");
+    await people.hover();
+    await page.screenshot({
+      path: testInfo.outputPath("membership-people.png"),
+    });
+    await page.mouse.wheel(0, 100000);
+    await expect(people.getByRole("listitem").last()).toBeInViewport();
+    await page.keyboard.press("Escape");
+    await expect(popup).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await others.focus();
+    await others.press("Enter");
+    await expect(popup).toBeVisible();
+    await expect(people).toBeFocused();
+    await people.press("End");
+    await expect(people.getByRole("listitem").last()).toBeInViewport();
+    await page.keyboard.press("Escape");
+    await expect(popup).toHaveCount(0);
+    await expect(others).toBeFocused();
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.locator("html").evaluate((root) => {
+      root.dataset.colorMode = "dark";
+      root.style.setProperty("--buzz-text-scale", "1.5");
+    });
+    await others.hover();
+    await expect(popup).toBeVisible();
+    await expect
+      .poll(() =>
+        popup.evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          return (
+            rect.left >= 0 &&
+            rect.right <= innerWidth &&
+            rect.top >= 0 &&
+            rect.bottom <= innerHeight
+          );
+        }),
+      )
+      .toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath("membership-people-narrow-dark.png"),
+    });
+    await page.keyboard.press("Escape");
+    await expect(popup).toHaveCount(0);
+
+    await page.screenshot({ path: testInfo.outputPath("join-burst.png") });
+    await testInfo.attach("join-burst", {
+      path: testInfo.outputPath("join-burst.png"),
+      contentType: "image/png",
+    });
+  },
+);

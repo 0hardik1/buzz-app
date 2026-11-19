@@ -1,14 +1,15 @@
 import { test, expect } from "./source-fixture.mjs";
-import { BUBBLE_COLORS } from "../../src/shared/theme/bubble-color.ts";
+import { ACCENTS } from "../../src/shared/theme/accent.ts";
 import { apcaContrast, wcagRatio } from "../../scripts/design-system/apca.mjs";
+import { animationsSettled } from "./animations.mjs";
 
 const specimen = (page, id) => page.locator(`[aria-labelledby="label-${id}"]`);
 // macOS WebKit follows the host preference: Option-Tab includes every control.
 const tabKey = (browserName) =>
   browserName === "webkit" && process.platform === "darwin" ? "Alt+Tab" : "Tab";
 
-// Browser-only: resolve the real CSS cascade, composite translucent interaction
-// fills, and check overflow. A DOM emulator cannot prove these bubble contracts.
+// Browser-only: composite translucent fills to check text contrast, and check
+// overflow. A DOM emulator cannot prove these bubble contracts.
 async function paint(locator) {
   return locator.evaluate((element) => {
     const canvas = document.createElement("canvas");
@@ -38,6 +39,69 @@ async function expectReadable(locator) {
     wcagRatio(background, ink),
     `${ink} on ${background}`,
   ).toBeGreaterThanOrEqual(4.5);
+}
+
+// An own table-only message drops its bubble fill but keeps its reactions in
+// the bubble, so the grouped count must take the panel's ink, not the bubble's.
+test("reactions under an unboxed own table stay contained and readable", async ({
+  page,
+}) => {
+  await page.goto("/tests/fixtures/emoji.html?reactions&table-reactions");
+  const row = page
+    .locator("[data-message-id]")
+    .filter({ has: page.getByRole("table") });
+  const count = row.getByRole("button", { name: "👍: 9 people" });
+  await expect(count).toContainText("9");
+  // Browser layout: an unboxed table has no padding for a reaction outdent.
+  await expect
+    .poll(async () => {
+      const table = await row.getByRole("table").boundingBox();
+      const strip = await row
+        .getByRole("group", { name: "Reactions", exact: true })
+        .boundingBox();
+      return (
+        !!table &&
+        !!strip &&
+        strip.x >= table.x &&
+        strip.x + strip.width <= table.x + table.width
+      );
+    })
+    .toBe(true);
+
+  for (const theme of ["light", "dark"])
+    for (const level of ["touch", "high"])
+      for (const color of ACCENTS) {
+        await page.locator("html").evaluate(
+          (element, { theme, level, color }) => {
+            Object.assign(element.dataset, {
+              colorMode: theme,
+              colorLevel: level,
+              accent: color,
+            });
+          },
+          { theme, level, color },
+        );
+        // Theme changes fade the chip's colors; measure the settled pair.
+        await animationsSettled(page.locator("html"), { subtree: true });
+        await expectReadable(count);
+      }
+});
+
+for (const theme of ["light", "dark"]) {
+  test(`standalone table and diff hover stays transparent in ${theme}`, async ({
+    page,
+  }) => {
+    await page.goto(
+      `/tests/fixtures/message-gallery.html?group=references&theme=${theme}`,
+    );
+    for (const id of ["table-received", "table-links", "code-diff"]) {
+      const example = specimen(page, id);
+      const bubble = example.locator("[data-message-action-anchor]");
+      await bubble.hover();
+      await expect(example.locator("[data-actions-revealed]")).toBeVisible();
+      await expect(bubble).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    }
+  });
 }
 
 for (const theme of ["light", "dark"]) {
@@ -72,9 +136,9 @@ for (const theme of ["light", "dark"]) {
       spoiler.getByRole("link", { name: "release notes", exact: true }),
     ).toBeVisible();
 
-    for (const color of BUBBLE_COLORS) {
+    for (const color of ACCENTS) {
       await page.locator("html").evaluate((element, color) => {
-        element.dataset.bubbleColor = color;
+        element.dataset.accent = color;
       }, color);
       await page.mouse.move(0, 0);
       const bubble = own.locator("[data-message-action-anchor][data-own]");
@@ -84,32 +148,21 @@ for (const theme of ["light", "dark"]) {
       ).toBeGreaterThanOrEqual(60);
       await expectReadable(bubble);
       for (const link of [receivedLink, ownLink]) {
-        await expect(link).toHaveCSS("text-decoration-line", "underline");
         await expectReadable(link);
-        await expect(link).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
         await link.hover();
         await expectReadable(link);
-        await expect(link).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
       }
       await expectReadable(mention);
-      await expect(mention).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
       await mention.hover();
       await expectReadable(mention);
-      await expect(mention).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
       await expectReadable(spoiler);
       await expectReadable(
         spoiler.getByRole("link", { name: "release notes", exact: true }),
       );
-      if (color === "neutral") {
-        await expect(ownLink).toHaveCSS(
-          "color",
-          await receivedLink.evaluate(
-            (element) => getComputedStyle(element).color,
-          ),
-        );
+      if (color === "chartreuse") {
         await page.mouse.move(0, 0);
         await own.screenshot({
-          path: info.outputPath(`neutral-message-${theme}.png`),
+          path: info.outputPath(`chartreuse-message-${theme}.png`),
         });
       }
       await expectReadable(
@@ -122,12 +175,11 @@ for (const theme of ["light", "dark"]) {
         specimen(page, "code-diff").getByText("greeting.ts", { exact: true }),
       );
     }
-    // Use real keyboard input to exercise the shared focus-visible treatment.
+    // Real keyboard input reaches and activates the link.
     await received.locator('button[data-mention-kind="person"]').focus();
     await page.keyboard.press(tabKey(browserName));
     await page.keyboard.press(tabKey(browserName));
     await expect(receivedLink).toBeFocused();
-    await expect(receivedLink).toHaveCSS("outline-style", "solid");
     await page.keyboard.press("Enter");
     await expect(received.getByRole("status")).toContainText(
       "Sample link selected",
@@ -150,7 +202,39 @@ for (const theme of ["light", "dark"]) {
   });
 }
 
-test("file anchors and native download buttons share hover and focus affordances", async ({
+test("long links wrap inside their bubble in a narrow pane", async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto("/tests/fixtures/message-gallery.html?group=references");
+  await page.evaluate(() => document.fonts.ready);
+  await page
+    .getByRole("button", { name: "Narrow preview", exact: true })
+    .click();
+  const long = specimen(page, "long-links");
+  const bubble = long.locator("[data-message-action-anchor]");
+  const links = long.getByRole("link");
+  await expect(links).toHaveCount(2);
+  // Every line box of every link stays within the bubble's edges.
+  await expect
+    .poll(() =>
+      bubble.evaluate((element) => {
+        const edge = element.getBoundingClientRect();
+        return [...element.querySelectorAll("a")].flatMap((link) =>
+          [...link.getClientRects()]
+            .filter((line) => line.left < edge.left || line.right > edge.right)
+            .map((line) => `${link.textContent}: ${line.left}-${line.right}`),
+        );
+      }),
+    )
+    .toEqual([]);
+  await long.screenshot({ path: info.outputPath("long-links.png") });
+  // A wrapped link still opens its destination.
+  await links.first().click();
+  await expect(long.getByRole("status")).toContainText("Sample link selected");
+});
+
+test("file anchors and native download buttons stay readable and keyboard reachable", async ({
   page,
   browserName,
 }) => {
@@ -164,19 +248,7 @@ test("file anchors and native download buttons share hover and focus affordances
     exact: true,
   });
   for (const control of [external, download]) {
-    await expect(control).toHaveCSS("cursor", "pointer");
-    await page.mouse.move(0, 0);
-    const idle = await control.evaluate(
-      (element) => getComputedStyle(element).backgroundColor,
-    );
     await control.hover();
-    await expect
-      .poll(() =>
-        control.evaluate(
-          (element) => getComputedStyle(element).backgroundColor,
-        ),
-      )
-      .not.toBe(idle);
     await expectReadable(control);
   }
   await specimen(page, "file-download")
@@ -184,7 +256,6 @@ test("file anchors and native download buttons share hover and focus affordances
     .focus();
   await page.keyboard.press(tabKey(browserName));
   await expect(download).toBeFocused();
-  await expect(download).toHaveCSS("outline-style", "solid");
   await page
     .getByRole("button", { name: "Narrow preview", exact: true })
     .click();

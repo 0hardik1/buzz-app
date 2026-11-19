@@ -1,52 +1,53 @@
-import { memo, useEffect, useId, useLayoutEffect } from "react";
-import type { ConversationExtensions } from "../../features/conversation/contracts";
-import type { RelaySession } from "../../features/relay/session";
+import { memo, type ReactNode, useEffect, useId, useLayoutEffect } from "react";
+import {
+  ConversationTimeline,
+  useConversation,
+} from "../../features/conversation/Conversation";
+import type { ChannelTimelineProps } from "../../features/messages/ChannelTimeline";
 import type { PageNavigation } from "../../features/navigation/service";
-import type { Attachment } from "../../features/relay/contracts";
 import { useChannelWindow } from "../../features/relay/react";
-import { useRecoveryShown } from "../../features/relay/RecoveryNotice";
+import { useRecoveryOwns } from "../../features/relay/RecoveryNotice";
+import { headRecovering } from "../../features/relay/live-recovery";
 import { clientMetrics } from "../../features/developer/client-metrics";
-import { ChannelTimeline } from "../../features/messages/ChannelTimeline";
-import type { MessageLinkOrigin } from "../../features/messages/MessageRow";
 import { Button } from "../../shared/design-system/ui/Button";
 import styles from "./Channels.module.css";
 
 export const ChannelBody = memo(function ChannelBody({
   cached,
+  intro,
   viewer,
-  extensions,
-  scope,
-  queries,
-  channelId,
-  onOpenLink,
-  canOpenLink,
   revealMessageId,
+  openThreadRootId,
+  inlineTarget,
+  marksRead,
+  holding,
   onOpenThread,
-  onOpenMediaReview,
   navigation,
   onContentReady,
 }: {
   onContentReady?(channelId: string): void;
-  extensions?: ConversationExtensions | undefined;
-  scope: string;
-  queries: RelaySession;
   cached: boolean;
+  intro?: ReactNode;
   viewer?: string | undefined;
-  channelId: string;
   navigation?: PageNavigation | undefined;
-  onOpenLink(url: string, origin?: MessageLinkOrigin): boolean;
-  canOpenLink?: ((target: string) => boolean) | undefined;
   revealMessageId?: string | undefined;
+  openThreadRootId?: string | undefined;
+  /** One exact visit to a loaded message, without a page navigation. */
+  inlineTarget?: ChannelTimelineProps["inlineTarget"];
+  /** False: viewing rows marks nothing read. */
+  marksRead?: boolean | undefined;
+  /** Show the loading notice instead of the list, as while a message is sought. */
+  holding?: boolean | undefined;
   onOpenThread?:
     | ((messageId: string, threadRootId: string, intent?: "reply") => void)
     | undefined;
-  onOpenMediaReview(
-    messageId: string,
-    attachment: Attachment,
-    seconds: number,
-    hasComments?: boolean,
-  ): void;
 }) {
+  // The owner's Solo chat is a chat-style timeline that loads history on scroll.
+  const {
+    session: queries,
+    channelId,
+    ownSoloConversation: solo,
+  } = useConversation();
   // ChannelWorkspace already keys this lifetime by viewer/scope/generation.
   const continuityKey = useId();
   const window = useChannelWindow(queries.channels, channelId);
@@ -54,7 +55,9 @@ export const ChannelBody = memo(function ChannelBody({
     clientMetrics.channelMounted(channelId);
     return () => clientMetrics.channelUnmounted(channelId);
   }, [channelId]);
-  const recoveryShown = useRecoveryShown(queries.recovery);
+  const headRecovers = useRecoveryOwns(queries, (live) =>
+    headRecovering(live, channelId),
+  );
   const newest = window.rows.at(-1)?.id;
   const settled = window.status === "ready" || window.status === "error";
   useEffect(() => {
@@ -83,12 +86,17 @@ export const ChannelBody = memo(function ChannelBody({
     )
       return;
     if (window.status === "ready") navigation?.complete({ status: "opened" });
+    // The timeline shows this failure in place, beside its own Retry.
     else if (!cached && window.status === "error")
-      navigation?.complete({ status: "failed", reason: "unavailable" });
+      navigation?.complete({
+        status: "failed",
+        reason: "unavailable",
+        presented: true,
+      });
   }, [cached, navigation, window.status]);
-  // While the recovery notice shows, it owns the one Retry now; an empty
-  // failed timeline waits for it instead of offering a second Retry.
-  if (window.status === "error" && !window.rows.length && !recoveryShown)
+  // While recovery retries this timeline's head read, its notice is the one
+  // report, after the quiet delay; the empty timeline waits.
+  if (window.status === "error" && !window.rows.length && !headRecovers)
     return (
       <div
         className={`${styles.empty} ${styles.timelinePlaceholder}`}
@@ -103,7 +111,7 @@ export const ChannelBody = memo(function ChannelBody({
         </Button>
       </div>
     );
-  if (window.status !== "ready" && !window.rows.length)
+  if (holding || (window.status !== "ready" && !window.rows.length))
     return (
       <div
         className={`${styles.empty} ${styles.timelinePlaceholder}`}
@@ -114,13 +122,10 @@ export const ChannelBody = memo(function ChannelBody({
       </div>
     );
   return (
-    <ChannelTimeline
+    <ConversationTimeline
       continuityKey={continuityKey}
+      intro={intro}
       viewer={viewer}
-      extensions={extensions}
-      scope={scope}
-      channelId={channelId}
-      queries={queries}
       window={window}
       launchPending={
         !cached &&
@@ -129,12 +134,14 @@ export const ChannelBody = memo(function ChannelBody({
           window.status === "loading" ||
           (window.status === "ready" && window.freshness === "cached"))
       }
-      onOpenLink={onOpenLink}
-      canOpenLink={canOpenLink}
       {...(onOpenThread ? { onOpenThread } : {})}
-      onOpenMediaReview={onOpenMediaReview}
       revealMessageId={revealMessageId}
+      openThreadRootId={openThreadRootId}
+      inlineTarget={inlineTarget}
+      marksRead={marksRead}
       navigation={navigation}
+      chatPresentation={solo}
+      historyControl={solo ? "scroll" : "button"}
     />
   );
 });

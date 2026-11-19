@@ -1,4 +1,8 @@
 import {
+  ARTIFACT_INCREMENTAL_LIMITS,
+  ArtifactIncrementalError,
+} from "./artifact-incremental-reader";
+import {
   ReadStateTimestampRejected,
   READ_STATE_TIMESTAMP_REFUSAL,
 } from "./read-state-host";
@@ -15,11 +19,13 @@ import {
   nativeRelayRequest,
   nativeRelaySigner,
   nativeWriteKinds,
+  verifyNativeStored,
 } from "./native";
-import { keypair, message, signed } from "./testing";
+import { keypair, message, nativeSignatureChecks, signed } from "./testing";
 import { createOutbox, type OutgoingEvent, PublishRejected } from "./outbox";
 import { createMessages } from "./messages";
 import { createRelaySession } from "./session";
+import { NeedsHistoryChoice } from "./direct-messages";
 
 const progressChannels = new Map<string, (message: unknown) => void>();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -86,7 +92,11 @@ beforeEach(() => {
   preparedResponse = undefined;
   uploadResponse = () => ({ status: 500, body: "" });
   vi.mocked(invoke).mockImplementation(async (command, args, options) => {
+    if (command === "relay_socket_connect") return "public";
+    if (command === "relay_socket_close") return;
     if (command === "identity_restore") return viewer.pubkey;
+    if (command === "relay_verify_signatures")
+      return nativeSignatureChecks(args);
     if (command === "relay_sign") {
       expect(
         Object.keys((args as { event: EventTemplate }).event).sort(),
@@ -157,6 +167,21 @@ beforeEach(() => {
   });
 });
 
+it("verifies stored events through native signature checks without connecting", async () => {
+  vi.mocked(invoke).mockClear();
+  const profile = signed(viewer, { kind: 0, tags: [], content: "{}" });
+  const restored = await verifyNativeStored([
+    JSON.parse(JSON.stringify(profile)),
+  ]);
+  expect(restored.map((event) => event.id)).toEqual([profile.id]);
+  expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+    "relay_verify_signatures",
+  ]);
+  await expect(
+    verifyNativeStored([{ ...profile, content: "changed" }]),
+  ).rejects.toThrow();
+  expect(requests).toEqual([]);
+});
 it("requires the relay self key, never its operator contact pubkey", async () => {
   vi.mocked(invoke).mockResolvedValueOnce({
     status: 200,
@@ -221,6 +246,91 @@ it("reads back expired delivery with strong consistency without re-signing or pu
   expect(
     vi.mocked(invoke).mock.calls.some(([command]) => command === "relay_sign"),
   ).toBe(false);
+});
+it.each([
+  {},
+  { supported_extensions: null },
+  { supported_extensions: [] },
+  { supported_extensions: ["nip-cl"] },
+  { supported_extensions: "nip-ar" },
+])(
+  "does not offer artifact writes without NIP-AR advertisement: %o",
+  async (extensions) => {
+    discovery = extensions;
+    expect(
+      (await connectNativeTransport(community)).configArtifacts,
+    ).toBeUndefined();
+  },
+);
+it("publishes config artifacts straight to the relay, re-sending identical bytes and keeping typed refusals", async () => {
+  discovery = { supported_extensions: ["nip-ar"] };
+  const transport = await connectNativeTransport(community);
+  assert.exists(transport.configArtifacts);
+  expect(transport.configArtifacts.kinds).toEqual([45010]);
+  const signal = new AbortController().signal;
+  const template = {
+    kind: 45010,
+    created_at: 1700000000,
+    content: "{}",
+    tags: [["ar", "1"]],
+  };
+  const revision = await transport.configArtifacts.sign(template, signal);
+  expect(verifyEvent(revision)).toBe(true);
+  expect(revision.pubkey).toBe(viewer.pubkey);
+  await expect(
+    transport.configArtifacts.sign({ ...template, kind: 9 }, signal),
+  ).rejects.toThrow("Not an artifact");
+  // Older than the message writer's 15-minute retry block.
+  const event = signed(viewer, {
+    kind: 45010,
+    created_at: 1699990000,
+    content: "{}",
+    tags: [
+      ["h", "channel"],
+      ["d", "agent"],
+    ],
+  });
+  respond = () => ({
+    body: { accepted: true, event_id: event.id, message: "" },
+  });
+  await transport.configArtifacts.publish(event, signal);
+  await transport.configArtifacts.publish(event, signal);
+  const sent = requests.filter((request) => request.path === "/events");
+  expect(sent).toHaveLength(2);
+  expect(sent[0]?.body).toBe(sent[1]?.body);
+  expect(JSON.parse(sent[0]?.body ?? "null")).toEqual(
+    JSON.parse(JSON.stringify(event)),
+  );
+  respond = () => ({
+    body: {
+      accepted: false,
+      event_id: event.id,
+      message: "rate-limited: quota exceeded; retry in 9s",
+    },
+  });
+  const refused = await transport.configArtifacts
+    .publish(event, signal)
+    .catch((error: unknown) => error);
+  expect(refused).toBeInstanceOf(PublishRejected);
+  expect(transport.configArtifacts.isNotSent?.(refused)).toBe(true);
+  expect(
+    transport.configArtifacts.isNotSent?.(
+      new Error((refused as Error).message),
+    ),
+  ).toBe(false);
+  expect(
+    transport.configArtifacts.isNotSent?.(new PublishRejected("denied")),
+  ).toBe(false);
+  expect((refused as Error).message).toBe(
+    "rate-limited: quota exceeded; retry in 9s",
+  );
+  respond = () => ({ status: 409, body: { error: "conflict" } });
+  await expect(
+    transport.configArtifacts.publish(event, signal),
+  ).rejects.toThrow(/^conflict:/);
+  await expect(
+    transport.configArtifacts.publish({ ...event, kind: 9 }, signal),
+  ).rejects.toThrow("Not this viewer's artifact");
 });
 afterEach(() => {
   for (const owner of owners.splice(0)) owner.dispose();
@@ -292,7 +402,7 @@ it.each([true, false])(
         status: accepted ? 200 : 403,
         body: accepted
           ? { accepted: true, event_id: JSON.parse(request.body ?? "{}").id }
-          : { error: "Registration denied" },
+          : { error: "restricted: registration denied" },
       });
       expect(outbox.supports(30177)).toBe(true);
       const id = outbox.send({ kind: 30177, tags: [["d", agent]], content });
@@ -301,7 +411,7 @@ it.each([true, false])(
           outbox.snapshot().find((item) => item.event.id === id),
         ).toMatchObject({
           delivery: accepted ? "accepted" : "failed",
-          ...(accepted ? {} : { error: "Relay rejected the message (403)" }),
+          ...(accepted ? {} : { error: "Registration denied" }),
         }),
       );
       const publishes = requests.filter(
@@ -399,6 +509,10 @@ it("rejects tampered reads and keeps refusals distinct from uncertain receipts",
   const event = message(viewer, "channel", "original", 1700000000);
   respond = () => ({ body: [{ ...event, content: "tampered" }] });
   await expect(transport.query([{ kinds: [9], limit: 10 }])).rejects.toThrow();
+  respond = () => ({ body: [event, { ...event, sig: "0".repeat(128) }] });
+  await expect(transport.query([{ kinds: [9], limit: 10 }])).rejects.toThrow(
+    "invalidly signed",
+  );
   assert.exists(transport.writer);
   respond = () => ({ status: 403, body: { error: "denied" } });
   await expect(
@@ -426,6 +540,7 @@ it("authenticates live traffic with the native signer and verifies incoming chan
   const sockets: Socket[] = [];
   class Socket {
     readyState = 1;
+    onopen?: (event: Event) => unknown;
     onmessage?: (event: { data: string }) => Promise<void>;
     onclose?: () => void;
     sent: unknown[][] = [];
@@ -455,8 +570,10 @@ it("authenticates live traffic with the native signer and verifies incoming chan
   assert.exists(traffic);
   try {
     traffic.update(["channel"]);
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
     const socket = sockets[0];
     assert.exists(socket);
+    socket.onopen?.(new Event("open"));
     expect(socket.url).toBe("wss://packaged.test");
     await socket.receive(["AUTH", "nonce"]);
     const proof = socket.sent.find(
@@ -477,10 +594,19 @@ it("authenticates live traffic with the native signer and verifies incoming chan
     await socket.receive(["EOSE", route[1]]);
     const incoming = message(keypair(), "channel", "Live reply", 1700000002);
     await socket.receive(["EVENT", route[1], incoming]);
+    await vi.waitFor(() => expect(receive).toHaveBeenCalled());
     expect(receive).toHaveBeenCalledWith([incoming], {
       phase: "live",
       channelId: "channel",
     });
+    expect(vi.mocked(invoke).mock.calls).toContainEqual([
+      "relay_verify_signatures",
+      {
+        claims: [
+          { id: incoming.id, pubkey: incoming.pubkey, sig: incoming.sig },
+        ],
+      },
+    ]);
     expect(
       vi
         .mocked(invoke)
@@ -747,7 +873,9 @@ it.each(["message", "reaction"] as const)(
 
 it("exposes workflow history over the purpose-bound native route and workflow write kinds", async () => {
   const transport = await connectNativeTransport(community);
-  expect(nativeWriteKinds).toEqual(expect.arrayContaining([30620, 46020, 5]));
+  expect(nativeWriteKinds).toEqual(
+    expect.arrayContaining([30620, 46020, 5, 48103]),
+  );
   expect(transport.writer?.kinds).toEqual(nativeWriteKinds);
   assert.exists(transport.workflows);
   const id = "11111111-1111-4111-8111-111111111111";
@@ -980,6 +1108,8 @@ it("routes lifecycle sign/publish separately from the message writer and preserv
   const event = signed(viewer, template);
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     if (command === "identity_restore") return viewer.pubkey;
+    if (command === "relay_verify_signatures")
+      return nativeSignatureChecks(args);
     if (command === "relay_http")
       return {
         status: 200,
@@ -1099,10 +1229,54 @@ it("opens direct messages through a purpose-bound command and validates the resu
   ).rejects.toThrow("invalid direct message");
 });
 
+it("hands the command's refusal words to every caller as an Error, so an addition can ask", async () => {
+  const transport = await connectNativeTransport(community);
+  assert.exists(transport.openDirectMessage);
+  const channel = "11111111-1111-4111-8111-111111111111";
+  // The Tauri command rejects with a plain string.
+  vi.mocked(invoke).mockRejectedValueOnce("needs-choice: history");
+  const refusal = await transport
+    .openDirectMessage([relay.pubkey], new AbortController().signal, {
+      channelId: channel,
+      includeHistory: "ask",
+    })
+    .catch((error: unknown) => error);
+  expect(refusal).toBeInstanceOf(Error);
+  expect((refusal as Error).message).toBe("needs-choice: history");
+  const owner = createRelaySession(transport, {
+    outboxStorage: { load: () => [], save: () => {} },
+  });
+  try {
+    const { directMessages } = owner.session;
+    // The command words an old relay's refusal of "ask" as this question too.
+    vi.mocked(invoke).mockRejectedValueOnce("needs-choice: history");
+    await expect(
+      directMessages.add(
+        channel,
+        [relay.pubkey],
+        "ask",
+        new AbortController().signal,
+      ),
+    ).rejects.toBeInstanceOf(NeedsHistoryChoice);
+    vi.mocked(invoke).mockRejectedValueOnce("Couldn’t add them. Try again.");
+    await expect(
+      directMessages.add(
+        channel,
+        [relay.pubkey],
+        "ask",
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("Couldn’t add them. Try again.");
+  } finally {
+    owner.dispose();
+  }
+});
+
 it("discards a pending observer decode after disconnect and reconnect", async () => {
   const sockets: Socket[] = [];
   class Socket {
     readyState = 1;
+    onopen?: (event: Event) => unknown;
     onmessage?: (event: { data: string }) => Promise<void>;
     onclose?: () => void;
     sent: unknown[][] = [];
@@ -1138,6 +1312,8 @@ it("discards a pending observer decode after disconnect and reconnect", async ()
     }
     return original?.(command, args);
   });
+  // Draw no reconnect spread when the authenticated connection drops.
+  const random = vi.spyOn(Math, "random").mockReturnValue(0);
   const transport = await connectNativeTransport(community);
   const observer = vi.fn();
   const traffic = transport.subscribe?.({
@@ -1150,6 +1326,7 @@ it("discards a pending observer decode after disconnect and reconnect", async ()
   assert.exists(traffic);
   try {
     const authenticate = async (socket: Socket) => {
+      socket.onopen?.(new Event("open"));
       await socket.receive(["AUTH", "nonce"]);
       const proof = socket.sent.find(
         ([kind]) => kind === "AUTH",
@@ -1157,6 +1334,7 @@ it("discards a pending observer decode after disconnect and reconnect", async ()
       await socket.receive(["OK", proof.id, true]);
     };
     traffic.observe?.(1);
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
     const old = sockets[0];
     assert.exists(old);
     await authenticate(old);
@@ -1212,179 +1390,9 @@ it("discards a pending observer decode after disconnect and reconnect", async ()
     expect(observer.mock.calls[0]?.[0].id).toBe(fresh.id);
   } finally {
     traffic.dispose();
+    random.mockRestore();
   }
 });
-
-it.each([
-  { changed: false, kind: 24200, expected: "error" },
-  { changed: true, kind: 24200, expected: "off" },
-  { changed: false, kind: 44200, expected: "error" },
-])(
-  "archive capture without a plugin reports $kind failure as $expected (revision changed: $changed)",
-  async ({ changed, kind, expected }) => {
-    const sockets: Socket[] = [];
-    class Socket {
-      readyState = 1;
-      onmessage?: (event: { data: string }) => Promise<void>;
-      onclose?: () => void;
-      sent: unknown[][] = [];
-      constructor() {
-        sockets.push(this);
-      }
-      send(raw: string) {
-        this.sent.push(JSON.parse(raw));
-      }
-      close() {
-        this.readyState = 3;
-        this.onclose?.();
-      }
-      async receive(value: unknown) {
-        await this.onmessage?.({ data: JSON.stringify(value) });
-      }
-    }
-    vi.stubGlobal("WebSocket", Socket);
-    const dispatch = vi.mocked(invoke),
-      original = dispatch.getMockImplementation();
-    let reads = 0;
-    dispatch.mockImplementation(async (command, args) => {
-      if (command === "relay_archive") {
-        const { request } = args as { request: { action: string } };
-        if (request.action === "settings")
-          return {
-            observer: ++reads === 1 || !changed,
-            metrics: true,
-            observerDays: 30,
-            revision: changed ? reads - 1 : 0,
-            location: "device",
-            path: "/fixture.sqlite3",
-            bytes: 0,
-          };
-        throw new Error("Archive revision changed");
-      }
-      return original?.(command, args);
-    });
-    const transport = await connectNativeTransport(community),
-      captureState = vi.fn();
-    const traffic = transport.subscribe?.({
-      receive: vi.fn(),
-      state: vi.fn(),
-      established: vi.fn(),
-      denied: vi.fn(),
-      captureState,
-    });
-    assert.exists(traffic);
-    try {
-      await vi.waitFor(() =>
-        expect(captureState).toHaveBeenLastCalledWith("saving"),
-      );
-      const socket = sockets[0];
-      assert.exists(socket);
-      await socket.receive(["AUTH", "nonce"]);
-      const proof = socket.sent.find(
-        ([kind]) => kind === "AUTH",
-      )?.[1] as VerifiedEvent;
-      await socket.receive(["OK", proof.id, true]);
-      const route = socket.sent.find(
-        ([kind, , filter]) =>
-          kind === "REQ" &&
-          (filter as { kinds?: number[] }).kinds?.includes(24200),
-      );
-      assert.exists(route);
-      await socket.receive(["EOSE", route[1]]);
-      await socket.receive([
-        "EVENT",
-        route[1],
-        signed(keypair(), {
-          kind,
-          created_at: 1700000010,
-          tags: [["p", viewer.pubkey]],
-          content: "cipher",
-        }),
-      ]);
-      await vi.waitFor(() => expect(reads).toBe(2));
-      // Explicit settings read is also a barrier: readable settings alone must
-      // not hide a persistent write failure on a full/locked disk.
-      await transport.activityArchive?.settings(new AbortController().signal);
-      expect(captureState).toHaveBeenLastCalledWith(expected);
-      expect(captureState).toHaveBeenCalledWith("error");
-      expect(
-        dispatch.mock.calls.some(
-          ([command]) => command === "relay_agent_observer",
-        ),
-      ).toBe(false);
-    } finally {
-      traffic.dispose();
-    }
-  },
-);
-
-it.each(["recovers", "exhausts", "disposed", "late response"])(
-  "initial archive settings retry %s without plugin demand",
-  async (outcome) => {
-    vi.useFakeTimers();
-    const dispatch = vi.mocked(invoke),
-      original = dispatch.getMockImplementation();
-    const settings = {
-      observer: true,
-      metrics: true,
-      observerDays: 30,
-      revision: 0,
-      location: "device",
-      path: "/fixture.sqlite3",
-      bytes: 0,
-    };
-    const pending = deferred<typeof settings>();
-    let reads = 0;
-    dispatch.mockImplementation(async (command, args) => {
-      if (command === "relay_archive") {
-        reads++;
-        if (outcome === "late response") return pending.promise;
-        if (outcome !== "recovers" || reads === 1)
-          throw new Error("disk temporarily locked");
-        return settings;
-      }
-      return original?.(command, args);
-    });
-    const transport = await connectNativeTransport(community),
-      captureState = vi.fn();
-    const traffic = transport.subscribe?.({
-      receive: vi.fn(),
-      state: vi.fn(),
-      established: vi.fn(),
-      denied: vi.fn(),
-      captureState,
-    });
-    assert.exists(traffic);
-    try {
-      await vi.advanceTimersByTimeAsync(0);
-      expect(reads).toBe(1);
-      if (outcome === "disposed" || outcome === "late response") {
-        traffic.dispose();
-        const states = captureState.mock.calls.slice();
-        pending.resolve(settings);
-        await vi.advanceTimersByTimeAsync(10_000);
-        expect(reads).toBe(1);
-        expect(captureState.mock.calls).toEqual(states);
-        expect(transport.activityArchive).toBeDefined();
-      } else {
-        expect(captureState).toHaveBeenLastCalledWith("error");
-        await vi.advanceTimersByTimeAsync(999);
-        expect(reads).toBe(1);
-        await vi.advanceTimersByTimeAsync(1);
-        expect(reads).toBe(2);
-        await vi.advanceTimersByTimeAsync(6000);
-        expect(reads).toBe(outcome === "recovers" ? 2 : 4);
-        expect(captureState).toHaveBeenLastCalledWith(
-          outcome === "recovers" ? "saving" : "error",
-        );
-        await vi.advanceTimersByTimeAsync(10_000);
-        expect(reads).toBe(outcome === "recovers" ? 2 : 4);
-      }
-    } finally {
-      traffic.dispose();
-    }
-  },
-);
 
 it("sorts host memory projections with the same locale collation as the broker", async () => {
   const transport = await connectNativeTransport(community);
@@ -1408,14 +1416,86 @@ it("sorts host memory projections with the same locale collation as the broker",
   ).toEqual(["mem/b", "mem/b_c", "mem/b-c", "mem/b/c", "mem/bc"]);
 });
 
+it("streams memory pages as they land and cancels native paging on abort", async () => {
+  const transport = await connectNativeTransport(community);
+  const agent = keypair();
+  const entry = (slug: string, i: number) => ({
+    slug,
+    body: slug,
+    eventId: i.toString(16).padStart(64, "0"),
+    createdAt: 1,
+  });
+  let finish: (value: unknown) => void = () => {};
+  let readId = "";
+  const dispatch = vi.mocked(invoke);
+  dispatch.mockImplementationOnce(async (command, args) => {
+    expect(command).toBe("relay_agent_memories_read");
+    const { id, onPage } = args as { id: string; onPage: { id: string } };
+    readId = id;
+    progressChannels.get(onPage.id)?.({
+      entries: [entry("mem/a", 1)],
+      partial: false,
+    });
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  });
+  const pages: string[][] = [];
+  const controller = new AbortController();
+  const read = transport.readAgentMemories?.(
+    agent.pubkey,
+    controller.signal,
+    undefined,
+    (page) => pages.push(page.entries.map((e) => e.slug)),
+  );
+  await vi.waitFor(() => expect(pages).toEqual([["mem/a"]]));
+  // Leaving mid-stream cancels the native read by its ID.
+  dispatch.mockResolvedValueOnce(undefined);
+  controller.abort();
+  expect(dispatch).toHaveBeenLastCalledWith("relay_http_cancel", {
+    id: readId,
+  });
+  finish({ entries: [entry("mem/a", 1), entry("mem/b", 2)], partial: false });
+  await expect(read).rejects.toThrow();
+});
+
+it("skips a streamed Memory page that fails validation and still answers", async () => {
+  const transport = await connectNativeTransport(community);
+  const agent = keypair();
+  const entry = {
+    slug: "mem/a",
+    body: "a",
+    eventId: "1".padStart(64, "0"),
+    createdAt: 1,
+  };
+  vi.mocked(invoke).mockImplementationOnce(async (_command, args) => {
+    const { onPage } = args as { onPage: { id: string } };
+    const page = progressChannels.get(onPage.id);
+    expect(() => page?.({ entries: [null], partial: true })).not.toThrow();
+    page?.({ entries: [entry], partial: true });
+    return { entries: [entry], partial: false };
+  });
+  const pages: string[][] = [];
+  await expect(
+    transport.readAgentMemories?.(
+      agent.pubkey,
+      new AbortController().signal,
+      undefined,
+      (page) => pages.push(page.entries.map((e) => e.slug)),
+    ),
+  ).resolves.toEqual({ entries: [entry], partial: false });
+  expect(pages).toEqual([["mem/a"]]);
+});
+
 it("exposes purpose-bound agent readers and fences obsolete observer decoding", async () => {
   const transport = await connectNativeTransport(community);
   expect(transport.agentActivity).toBe(true);
   const signal = new AbortController().signal;
   const agent = keypair();
   const dispatch = vi.mocked(invoke);
-  dispatch.mockImplementationOnce(async (command) => {
+  dispatch.mockImplementationOnce(async (command, args) => {
     expect(command).toBe("relay_agent_library");
+    expect(args).toEqual({ community });
     return { definitions: [], identities: [] };
   });
   expect(await transport.readAgentLibrary?.(signal)).toEqual({
@@ -1424,7 +1504,13 @@ it("exposes purpose-bound agent readers and fences obsolete observer decoding", 
   });
   dispatch.mockImplementationOnce(async (command, args) => {
     expect(command).toBe("relay_agent_memories_read");
-    expect(args).toEqual({ community, agent: agent.pubkey });
+    expect(args).toEqual({
+      community,
+      agent: agent.pubkey,
+      slug: null,
+      id: expect.any(String),
+      onPage: null,
+    });
     return { entries: [], partial: true };
   });
   expect(await transport.readAgentMemories?.(agent.pubkey, signal)).toEqual({
@@ -1484,7 +1570,7 @@ it("routes relay media through the authenticated native scheme only", async () =
     `buzz-media://localhost/${encodeURIComponent(media)}`,
   );
   expect(transport.media(media, "small")).toBe(
-    `buzz-media://localhost/${encodeURIComponent(`${community}/media/${hash}.thumb.jpg`)}`,
+    `buzz-media://localhost/${encodeURIComponent(`${community}/media/${hash}.thumb.webp`)}`,
   );
   expect(transport.media("https://images.test/cat.png")).toBe(
     "https://images.test/cat.png",
@@ -2226,4 +2312,107 @@ it("routes assistive progress through its own community-bound host codec", async
     expect(args).toMatchObject({ community });
     expect(command).not.toBe("relay_sign");
   }
+});
+
+it.each([
+  { live: false, incremental: false },
+  { live: true, incremental: false },
+  { live: false, incremental: true },
+  { live: true, incremental: true },
+])(
+  "keeps live and incremental artifact capabilities separate: %j",
+  async ({ live, incremental }) => {
+    discovery = {
+      artifacts: {
+        ...(live ? { sync: { version: 1 } } : {}),
+        ...(incremental ? { incremental: ARTIFACT_INCREMENTAL_LIMITS } : {}),
+      },
+    };
+    const transport = await connectNativeTransport(community);
+    expect(transport.artifactSync).toBe(live ? true : undefined);
+    expect(transport.artifactIncremental !== undefined).toBe(incremental);
+  },
+);
+
+it.each([
+  "incremental_limit",
+  "incremental_reset",
+  "incremental_invalid",
+  "incremental_unsupported_scope",
+  "incremental_unavailable",
+])("preserves %s through native admission", async (code) => {
+  discovery = { artifacts: { incremental: ARTIFACT_INCREMENTAL_LIMITS } };
+  const transport = await connectNativeTransport(community);
+  respond = () => ({
+    status: 422,
+    body: { error: "scope or capacity", code },
+  });
+  assert.exists(transport.artifactIncremental);
+  const work = transport.artifactIncremental.delta(
+    { artifact: "current", kinds: [45010], "#type": ["task"] },
+    {},
+    new AbortController().signal,
+  );
+  await expect(work).rejects.toBeInstanceOf(ArtifactIncrementalError);
+  await expect(work).rejects.toMatchObject({ code });
+});
+
+it.each([
+  ["sign-in", 401, "authentication required\n"],
+  ["access", 403, "authorization denied\n"],
+  ["access", 403, JSON.stringify({ error: "relay_membership_required" })],
+])(
+  "a refused response reports its %s refusal to the community's observer without the window event",
+  async (kind, status, body) => {
+    // This test environment has no Tauri window, so the event listener never
+    // installs: only the response itself can report the refusal.
+    const transport = await connectNativeTransport(community);
+    const refusals: string[] = [];
+    const stop = transport.observeRefusal?.((refusal) =>
+      refusals.push(refusal),
+    );
+    const answer = vi.mocked(invoke).getMockImplementation();
+    vi.mocked(invoke).mockImplementation(async (command, args, options) =>
+      command === "relay_http" && (args as Request).path === "/query"
+        ? { status, headers: {}, body }
+        : answer?.(command, args, options),
+    );
+    await expect(
+      transport.query([{ kinds: [9], "#h": ["channel"], limit: 10 }]),
+    ).rejects.toThrow();
+    expect(refusals).toEqual([kind]);
+    stop?.();
+  },
+);
+
+it("an ordinary 403 reports no community refusal", async () => {
+  const transport = await connectNativeTransport(community);
+  const refusals: string[] = [];
+  const stop = transport.observeRefusal?.((refusal) => refusals.push(refusal));
+  respond = () => ({
+    status: 403,
+    body: { error: "restricted: not a channel member" },
+  });
+  await expect(
+    transport.query([{ kinds: [9], "#h": ["channel"], limit: 10 }]),
+  ).rejects.toThrow();
+  expect(refusals).toEqual([]);
+  stop?.();
+});
+
+it("a refused unsigned GET reports no community refusal", async () => {
+  // Native signs only POST and reports refusals only for signed requests.
+  const transport = await connectNativeTransport(community);
+  const refusals: string[] = [];
+  const stop = transport.observeRefusal?.((refusal) => refusals.push(refusal));
+  const answer = vi.mocked(invoke).getMockImplementation();
+  vi.mocked(invoke).mockImplementation(async (command, args, options) =>
+    command === "relay_http" && (args as Request).method === "GET"
+      ? { status: 401, headers: {}, body: "authentication required\n" }
+      : answer?.(command, args, options),
+  );
+  const response = await nativeRelayRequest(community, "/gated");
+  expect(response.status).toBe(401);
+  expect(refusals).toEqual([]);
+  stop?.();
 });

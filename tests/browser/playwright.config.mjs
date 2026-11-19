@@ -1,6 +1,10 @@
 import { defineConfig } from "@playwright/test";
 
-const measurementFiles = ["channel-opening.spec.mjs", "scroll.spec.mjs"];
+const measurementFiles = [
+  "channel-opening.spec.mjs",
+  "profile-roster-scale.spec.mjs",
+  "scroll.spec.mjs",
+];
 // Cases that need a scrollbar that takes space. Headless Chromium passes
 // --hide-scrollbars by default and only Linux guarantees classic scrollbars,
 // so they run in their own Chromium project and never in the engine projects.
@@ -42,6 +46,8 @@ if (
 export default defineConfig({
   testDir: ".",
   testMatch: "*.spec.mjs",
+  // Prepares the dependency cache that every Vite fixture server starts from.
+  globalSetup: "./vite-server.mjs",
   outputDir: "../../test-results/browser",
   // Functional journeys share two workers; measurements run first and alone.
   // Never hide failures with retries or measure opening under another browser's load.

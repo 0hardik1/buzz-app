@@ -5,6 +5,8 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef, useState } from "react";
 import { Button } from "./Button";
+import { SplitButton } from "./SplitButton";
+import { MenuItem } from "./Menu";
 import { IconButton } from "./IconButton";
 import { PlusIcon } from "../icons";
 import { Field } from "./Field";
@@ -17,21 +19,34 @@ import { Composer } from "./Composer";
 
 afterEach(cleanup);
 
-test("icon actions default to small while labelled actions remain medium", () => {
-  render(
-    <>
-      <IconButton aria-label="Add item" icon={<PlusIcon />} />
-      <Button>Continue</Button>
-    </>,
-  );
-  expect(screen.getByRole("button", { name: "Add item" })).toHaveAttribute(
-    "data-size",
-    "sm",
-  );
-  expect(screen.getByRole("button", { name: "Continue" })).toHaveAttribute(
-    "data-size",
-    "md",
-  );
+test("split actions keep separate activation, menu focus and pending gates", async () => {
+  const user = userEvent.setup();
+  const primary = vi.fn(),
+    alternative = vi.fn();
+  const props = {
+    menuLabel: "Add with other access",
+    onClick: primary,
+    menu: <MenuItem onClick={alternative}>View only</MenuItem>,
+    children: "Add",
+  };
+  const view = render(<SplitButton {...props} />);
+  const menu = screen.getByRole("button", { name: props.menuLabel });
+  await user.click(menu);
+  await user.click(await screen.findByRole("menuitem", { name: "View only" }));
+  expect(alternative).toHaveBeenCalledOnce();
+  expect(primary).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Add" }));
+  expect(primary).toHaveBeenCalledOnce();
+  menu.focus();
+  await user.keyboard("{Enter}{Escape}");
+  await waitFor(() => expect(menu).toHaveFocus());
+  view.rerender(<SplitButton {...props} menuDisabled />);
+  expect(menu).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Add" })).toBeEnabled();
+  view.rerender(<SplitButton {...props} loading />);
+  expect(menu).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Add" }));
+  expect(primary).toHaveBeenCalledOnce();
 });
 
 test.each([
@@ -48,6 +63,18 @@ test.each([
   const control = screen.getByRole("button", { name: "Add item" });
   expect(control).toHaveAttribute("data-size", resolved);
   expect(control).toHaveAttribute("data-icon-size", size);
+});
+
+test("an emoji icon button shows its glyph and keeps its label", () => {
+  render(<IconButton aria-label="Choose default skin tone" emoji="🤙🏽" />);
+  const control = screen.getByRole("button", {
+    name: "Choose default skin tone",
+  });
+  expect(control).toHaveTextContent("🤙🏽");
+  expect(control.querySelector(".buzz-icon-button-emoji")).toHaveAttribute(
+    "aria-hidden",
+    "true",
+  );
 });
 
 test("composer enables submission only for an available non-empty draft", async () => {
@@ -142,7 +169,7 @@ test("fields connect labels, help and errors and keep textarea edits controlled"
         <Field label="Title" description="A short name" error="Name required">
           <Input required />
         </Field>
-        <Field label="Description">
+        <Field label="Description" optional>
           <Textarea
             id="description-control"
             ref={ref}
@@ -161,12 +188,14 @@ test("fields connect labels, help and errors and keep textarea edits controlled"
   expect(screen.queryByText("A short name")).not.toBeInTheDocument();
   expect(title).toHaveAccessibleDescription(/Name required/);
   expect(title).toHaveAttribute("aria-invalid", "true");
-  const description = screen.getByRole("textbox", { name: "Description" });
+  const description = screen.getByRole("textbox", {
+    name: "Description Optional",
+  });
   expect(ref.current).toBe(description);
   expect(description).toHaveAttribute("id", "description-control");
   expect(description).toHaveAttribute("name", "description");
   expect(description).toHaveAttribute("rows", "4");
-  await user.click(screen.getByText("Description", { selector: "label" }));
+  await user.click(screen.getByText(/^Description/, { selector: "label" }));
   expect(description).toHaveFocus();
   await user.type(description, " notes");
   expect(screen.getByRole("status")).toHaveTextContent("Draft notes");
@@ -637,3 +666,42 @@ test("search and code fields suppress correction without changing prose or expli
     expect(field).toHaveAttribute("spellcheck", "true");
   }
 });
+
+test.each(["default", "capsule", "palette"] as const)(
+  "search %s keeps trailing actions separate from editing and clear",
+  async (variant) => {
+    const user = userEvent.setup();
+    const action = vi.fn();
+    function Example() {
+      const [value, setValue] = useState("design");
+      return (
+        <SearchField
+          variant={variant}
+          label="Search records"
+          value={value}
+          onValueChange={setValue}
+          trailing={
+            <IconButton
+              aria-label="Filter records"
+              icon={<PlusIcon />}
+              onClick={action}
+            />
+          }
+        />
+      );
+    }
+    render(<Example />);
+    const input = screen.getByRole("searchbox", { name: "Search records" });
+    const filter = screen.getByRole("button", { name: "Filter records" });
+    await user.click(filter);
+    expect(action).toHaveBeenCalledOnce();
+    expect(input).toHaveValue("design");
+    await user.click(
+      screen.getByRole("button", { name: "Clear search records" }),
+    );
+    expect(input).toHaveValue("");
+    expect(input).toHaveFocus();
+    await user.tab();
+    expect(filter).toHaveFocus();
+  },
+);

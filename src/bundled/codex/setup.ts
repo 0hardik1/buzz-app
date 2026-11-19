@@ -2,13 +2,14 @@
 // keeping that copy on the latest release. Each step runs as a declared
 // process; the copy lives apart from any `codex` the user installed, and
 // shares their `~/.codex` sign-in and settings.
+import { withProviderWords } from "../../features/agents/failure-words";
 import type {
   HostProcess,
   HostRequest,
   HostResponse,
 } from "../../features/host/service";
 import script from "./codex.sh?raw";
-import { AppServer, listModels, type Spawn } from "./rpc";
+import { AppServer, listModels, needsSignIn, type Spawn } from "./rpc";
 
 export type CodexStatus =
   | Readonly<{ state: "missing" }>
@@ -36,9 +37,15 @@ const STEPS: Readonly<Record<string, readonly string[]>> = {
   "app-server": ["run", "app-server"],
   install: ["install"],
   use: ["use"],
+  adopt: ["adopt"],
+  home: ["home"],
+  "read-from": ["read-from"],
+  login: ["login"],
+  review: ["review"],
 };
-/** Starts `codex`, `app-server`, `install` and `use` as steps of `codex.sh`,
- * which the manifest grants as `bash -c`; other processes start as declared. */
+/** Starts `codex`, `app-server`, `install`, `use`, `adopt`, `home`,
+ * `read-from`, `login` and `review` as steps of `codex.sh`, which the manifest grants as `bash -c`; other
+ * processes start as declared. */
 export const withScript =
   (spawn: Spawn): Spawn =>
   (id, options) => {
@@ -73,6 +80,37 @@ async function collect(spawn: Spawn, id: string, args: readonly string[]) {
 const message = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
+/** The `count` lines a `codex.sh` step prints, which must succeed. */
+async function printed(spawn: Spawn, id: string, count: number) {
+  const { code, stdout, stderr } = await collect(spawn, id, []);
+  const lines = stdout.trim().split("\n");
+  if (code !== 0 || lines.length < count || lines.some((line) => !line))
+    throw new Error(stderr.trim() || `Buzz's Codex ${id} is unavailable`);
+  return lines;
+}
+
+const homes = new WeakMap<Spawn, Promise<string>>();
+/** Buzz's Codex home, where protected agents run as `codex.sh run` does. Only
+ * a success is kept: a failure is looked up again. */
+export function buzzHome(spawn: Spawn) {
+  const known = homes.get(spawn);
+  if (known) return known;
+  const found = printed(spawn, "home", 1).then(([home = ""]) => home);
+  homes.set(spawn, found);
+  found.catch(() => {
+    if (homes.get(spawn) === found) homes.delete(spawn);
+  });
+  return found;
+}
+
+/** Makes Buzz's review home again, which holds only the sign-in and links to
+ * the state folder, and returns both with the ChatGPT workspace a Buzz sign-in
+ * recorded, while the sign-in still names it. Each review starts with it. */
+export async function reviewHome(spawn: Spawn) {
+  const [home = "", state = "", workspace] = await printed(spawn, "review", 2);
+  return { home, state, workspace };
+}
+
 export async function checkCodex(spawn: Spawn): Promise<CodexStatus> {
   let version: string;
   try {
@@ -91,10 +129,53 @@ export async function checkCodex(spawn: Spawn): Promise<CodexStatus> {
   }
   try {
     const { code } = await collect(spawn, "codex", ["login", "status"]);
-    return { state: code === 0 ? "ready" : "signed-out", version };
+    if (code === 0) return { state: "ready", version };
+    // `login status` ignores the model provider, which may need no OpenAI sign-in.
+    const rpc = new AppServer();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const signedOut = await Promise.race([
+        rpc.open(spawn).then(() => needsSignIn(rpc)),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Codex did not answer")),
+            CHECK_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      return { state: signedOut ? "signed-out" : "ready", version };
+    } finally {
+      clearTimeout(timer);
+      await rpc.close();
+    }
   } catch {
     return { state: "signed-out", version };
   }
+}
+
+/** A failed turn's notice as the conversation reads it, in Markdown: a
+ * missing or refused sign-in links to `settings`, where Codex signs in once
+ * for every Codex agent. Signed out, Codex reaches OpenAI with no credentials
+ * and is told "Missing bearer or basic authentication"; a refused API key ends
+ * in "Incorrect API key provided", and a ChatGPT sign-in that stopped working
+ * in one of Codex's "… could not be refreshed …. Please [log out and] sign in
+ * again" messages, read as one sentence and the next so that two errors can't
+ * join into one. An MCP server's OAuth refresh failing is not Codex's sign-in,
+ * and says otherwise. The explanation comes first, then Codex's own words,
+ * without the notice's "Codex could not finish: " and the period it adds. */
+export function explainTurn(notice: string, settings: string) {
+  const explanation = /Missing bearer or basic authentication/i.test(notice)
+    ? `Codex isn't signed in. Head to [Settings](${settings}) to sign in.`
+    : /Incorrect API key provided|could not be refreshed\b[^.\n]*\. Please (?:log out and )?sign in again/i.test(
+          notice,
+        )
+      ? `OpenAI rejected Codex's sign-in. It may have expired or been revoked. Head to [Settings](${settings}) to sign in again.`
+      : undefined;
+  if (!explanation) return notice;
+  const said =
+    /^Codex could not (?:start|finish): ([\s\S]*)\.$/.exec(notice)?.[1] ??
+    notice;
+  return withProviderWords(explanation, "Codex", said);
 }
 
 /** Runs `codex` as the given release rather than the one in use. */
@@ -285,7 +366,7 @@ export class CodexSetup {
     this.set({ running: step, ...(asked ? { output: "" } : {}) });
     try {
       if (step === "install") await this.install(spawn);
-      else await this.step(spawn, "codex", ["login"], "Sign-in");
+      else await this.step(spawn, "login", [], "Sign-in");
     } catch (error) {
       this.log(`\n${message(error)}`);
     } finally {

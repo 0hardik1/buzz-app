@@ -1,10 +1,13 @@
-# Virtua 0.51.0 scroll correction boundaries
+# Virtua 0.53.5 scroll correction boundaries
 
 The application imports the React ESM entry (`virtua` → `lib/index.js`) from
-`src/features/messages/ChannelTimeline.tsx`. Only that entry's element scroller
-and store are patched; CommonJS, window scrolling, and other-framework exports
-are untouched.
-Keep the dependency pinned to 0.51.0 and review the patch plus version-coupled
+`src/features/messages/ChannelTimeline.tsx`. Only that entry is patched;
+CommonJS and other-framework exports are untouched. Its store and element driver
+carry the changes below. The resize and scroll observers that entry shares with
+its window and grid drivers carry the frame-deferred item sizes, whole-edge
+rounding, the 1px absolute end path and the momentum flag passed to the
+overflow callback; the grid driver keeps its momentum-only overflow policy.
+Keep the dependency pinned to 0.53.5 and review the patch plus version-coupled
 installed-bundle tests before upgrading or adding a different import.
 
 ## Fractional end offsets
@@ -38,6 +41,21 @@ below the viewport are excluded, so a newly buffered row there that resizes (a
 video loading, say) cannot move the reading position. Rows above and in the
 viewport, including prepended history, are still corrected.
 
+A flushed correction holds the mounted range until that correction's own scroll
+event arrives. A correction that moves nothing, or that another write undoes in
+the same task, raises no such event, so the held range outlived idle. In CI run
+41120162311 (`history-loading.spec.mjs` "a held pointer keeps its place after
+the page's reader row unmounts") Linux WebKit went idle after a 91px correction
+with no buffer below the viewport, and a row just below it did not remount
+before the test failed; the trace does not show which write left the
+correction without its event. Scroll-end now releases the held range and
+re-renders, so idle buffers both sides as above. Before that release, the
+driver's scroll-end reads the native offset, as the viewport resize path does:
+a jump whose scroll event trails the 150ms timer is consumed as its own event,
+and the range is not re-rendered at the stale pre-jump offset. A correction
+flushed after scroll-end with no later scroll event still holds its range until
+the next one.
+
 In an isolated WKWebView over real channel history (images, video, live relay),
 fast alternating flicks were measured per frame. In two instrumented runs, all 46
 DOM-coverage gap frames moved downward while shift mode held an upward direction.
@@ -66,7 +84,7 @@ Instead, at each **nonzero automatic correction** on Mac WebKit:
 3. Restore the prior declaration value and priority in the next task.
 
 This extends the mechanism already used by
-[Virtua's iOS driver](https://github.com/inokawa/virtua/blob/0.51.0/src/core/driver.ts#L203-L248),
+[Virtua's iOS driver](https://github.com/inokawa/virtua/blob/0.53.5/src/core/driver.ts#L379-L391),
 without changing the iOS branch. Overlapping interventions cancel/restore their
 predecessor before capturing the original declaration. Disposal restores
 immediately; an observably changed later declaration is not overwritten.
@@ -128,9 +146,10 @@ correction. WebKit reports an integer `scrollTop`, which reads up to 1px short
 of a fractional end, so a reader at the bottom missed the end test there while
 Chromium's fractional offset met it.
 
-The element driver takes the absolute path when the target lies within 1px of
-the end, rounding outward as before, and when the last observed offset lies
-more than 1px beyond the new end, scrolling to the exact target. Interior
+Since 0.52.8 ([#984](https://github.com/inokawa/virtua/pull/984)) Virtua takes
+the absolute path when the last observed offset is at or beyond the new end,
+scrolling to the exact target. The patch also takes it when the target lies
+within 1px of the end, rounding outward as before. Interior
 corrections, growth and prepend shifts stay relative. The installed-driver
 regressions clamp the fake viewport like a browser and cover an integer offset
 at a fractional end and a shrink larger than the reader's gap to the end.
@@ -179,9 +198,10 @@ no pending jump cost a few milliseconds.
 The store moves the held range by the shift's item delta, so the rows it kept
 mounted stay mounted and the scroll event's live range is computed as before.
 A shift can also remove rows from the head, since the timeline reports one
-whenever the first row changes and the last does not; a removal past the held
-range's start would move the range above the list, so it then holds the same
-number of rows from the top instead. A partial removal holds a range wider
+whenever rows above the reader change and the rows from their first visible
+row to the end do not; a removal past the held range's start would move the
+range above the list, so it then holds the same number of rows from the top
+instead. A partial removal holds a range wider
 than the live one for that frame; a removal of every held row, which would
 otherwise leave an inverted range that renders no row, lands with the
 corrected offset at the top. Nothing changes when no jump is pending, for
@@ -202,7 +222,10 @@ sizes are still deferred.
 When the viewport size arrives, the driver also reads the native scroll offset
 first. A channel switch scrolls imperatively before its scroll event is
 dispatched; without that read, the first range is computed at the old offset
-and the correct rows render one frame later.
+and the correct rows render one frame later. Since 0.52.10
+([#986](https://github.com/inokawa/virtua/pull/986)) Virtua re-reads it only
+when a hidden viewport regains a size; the patch reuses that read whenever the
+native offset differs from the store's.
 
 Together these let the first rows of a warm channel switch paint one frame
 earlier (median three frames to two). On one Mac, the
@@ -291,3 +314,39 @@ bin/pnpm install --frozen-lockfile
 bin/pnpm exec vitest run src/shared/design-system/ui/controls.test.tsx
 bin/pnpm design:test:browser
 ```
+
+## Base UI 1.9.0: preview cards wait for a resting pointer
+
+The same patch makes PreviewCard.Trigger's hover open delay a rest delay, as
+Base UI's Tooltip.Trigger already does: the timer starts when the pointer stops
+on the trigger and restarts whenever it moves, so a pointer crossing an avatar
+on its way elsewhere opens nothing. Focus opens at once, as it does for
+Tooltip, so the delay is only the pointer's rest; a zero delay still opens on
+entry. Close timing is unchanged. The shared value lives in
+`src/shared/design-system/ui/hoverIntent.ts`.
+
+Remove this part when a pinned Base UI release rests before opening a preview
+card; `src/shared/design-system/ui/Tooltip.test.tsx` covers it.
+
+
+## Reader movement during height reconciliation
+
+The element driver's automatic correction emits a synchronous, non-bubbling
+`virtua-scroll-correction` event with normalized native `before` and `after`
+offsets. ChannelTimeline's existing anchor hold uses this boundary to distinguish
+reader movement from layout correction, even when the browser coalesces both into
+one scroll event. The notification adds no scrolling policy or scheduler. The
+hold consumes reader movement before reconciling list height and rebases after its
+own correction; browser range clamping remains layout movement. Mounted regressions
+cover both model/DOM orderings and coalesced movement, while installed-driver tests
+verify actual offsets, including fractional clamping.
+
+## dnd-kit core 6.3.1: stable idle transform
+
+`DndContext` passes its drag transform as `ActiveDraggableContext`'s value and
+rebuilds that object on every render, even with no drag. The sidebar renders its
+`DndContext` whenever channel state changes, so each live message changed the
+context value, and React searched the whole sidebar subtree for consumers. The
+patch keeps the previous transform object while its four numbers are unchanged.
+A drag still publishes each new transform; only identity of an equal value is
+kept. Only the ESM entry, which the application imports, is patched.

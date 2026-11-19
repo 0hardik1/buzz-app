@@ -71,6 +71,20 @@ it("takes the secret exactly once under StrictMode, masks it and reveals on requ
   expect(screen.queryByRole("alertdialog")).toBeNull();
 });
 
+it("an outside click never discards a revealed secret", async () => {
+  const { onContinue } = mount();
+  fireEvent.click(button("Reveal webhook secret"));
+  const backdrop = document.querySelector(".buzz-dialog-backdrop") as Element;
+  fireEvent.pointerDown(backdrop);
+  fireEvent.mouseDown(backdrop);
+  fireEvent.click(backdrop);
+  await Promise.resolve();
+  expect(onContinue).not.toHaveBeenCalled();
+  expect(screen.getByTestId("webhook-secret")).toHaveTextContent(
+    "one-time-secret",
+  );
+});
+
 it("asks before continuing with an unseen secret; copying the secret satisfies the guard", async () => {
   const { onContinue } = mount();
   fireEvent.click(button("Continue"));
@@ -78,6 +92,8 @@ it("asks before continuing with an unseen secret; copying the secret satisfies t
     name: "Continue without this secret?",
   });
   expect(confirm).toHaveTextContent("cannot be recovered");
+  // The secret is lost for good, so Enter goes back.
+  await waitFor(() => expect(button("Go back", confirm)).toHaveFocus());
   expect(onContinue).not.toHaveBeenCalled();
   fireEvent.click(button("Go back", confirm));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());

@@ -1,13 +1,19 @@
-import type { LocalAgentSource, LocalWork } from "../agents/local-activity";
+import type {
+  LocalAgentSource,
+  LocalDecline,
+  LocalWork,
+} from "./local-activity";
+import { activityPromptThread } from "./activity-transcript";
 import type { EventData } from "../relay/events";
 import { threadReference } from "../relay/thread-reference";
 import type { LiveSnapshot } from "../relay/live";
+import { freshTurnTriggers, turnTriggerIds } from "./turn-triggers";
 import {
   ACTIVITY_HISTORY_AGE_MS,
   observerFrame,
+  terminalOutcome,
   type ObserverFrame,
 } from "./observer";
-import type { ArchiveHost, ArchivePage } from "../archive/types";
 
 export const ACTIVITY_RECORD_LIMIT = 200;
 export const ACTIVITY_BYTE_LIMIT = 2 * 1024 * 1024;
@@ -16,7 +22,6 @@ export const ACTIVITY_FRESH_MS = 30_000;
 type RawRecord = ObserverFrame &
   Readonly<{
     receivedAt: number;
-    historical: boolean;
     kind: string;
     /** Recognized envelope/child channel metadata; plaintext stays unmodified. */
     channelIds: readonly string[];
@@ -24,9 +29,16 @@ type RawRecord = ObserverFrame &
 export type ActivityTurn = Readonly<{
   agent: string;
   turnId: string;
+  sessionId?: string;
+  threadRootId?: string;
   channelId: string | null;
   timestamp: number;
   state: "working" | "unknown" | "ended";
+  /** Retained independently of the bounded raw activity buffer. */
+  outcome?: ReturnType<typeof terminalOutcome>;
+  triggeringEventIds?: readonly string[];
+  /** Multiple distinct starts reused this turn ID; request identity is ambiguous. */
+  ambiguous?: boolean;
   /** Roots established from retained signed triggering messages, not typing. */
   requests?: readonly Readonly<{ messageId: string; threadRootId: string }>[];
 }>;
@@ -40,6 +52,8 @@ type Typing = Readonly<{
   working: boolean;
   expiresAt: number;
 }>;
+/** Published typing: a pulse that only refreshes its clock changes nothing. */
+type TypingEntry = Omit<Typing, "timestamp" | "expiresAt">;
 const TYPING_FRESH_MS = 8000;
 type Snapshot = Readonly<{
   status:
@@ -51,14 +65,12 @@ type Snapshot = Readonly<{
   records: readonly RawRecord[];
   turns: readonly ActivityTurn[];
   local?: readonly LocalWork[];
-  typing: readonly Typing[];
+  /** This device's agents' mentions declined for who sent them. */
+  declined?: readonly LocalDecline[];
+  typing: readonly TypingEntry[];
   trimmed: number;
-  history: "unavailable" | "loading" | "ready" | "error";
-  hasOlder: boolean;
-  historyOlder: boolean;
-  historySkipped: number;
-  historyAgents: readonly string[];
-  capture: "unknown" | "saving" | "off" | "error";
+  /** Unlike raw-record trimming, losing a turn can lose request completeness. */
+  turnsTrimmed?: boolean;
 }>;
 type Turn = Omit<ActivityTurn, "state" | "requests"> & {
   requests?: ActivityTurn["requests"];
@@ -66,6 +78,8 @@ type Turn = Omit<ActivityTurn, "state" | "requests"> & {
   ended: boolean;
   epoch: number;
   unresolvedTriggers?: readonly string[];
+  /** A turn_started frame set triggers; a second one makes the turn ambiguous. */
+  started?: boolean;
 };
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -75,23 +89,43 @@ const text = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= 256;
 const starts = new Set([
   "turn_started",
+  // A message the agent's harness added to this running turn (remote steering).
+  "turn_steered",
   "turn_liveness",
   "acp_read",
   "acp_write",
   "session_resolved",
 ]);
 const ends = new Set(["turn_completed", "turn_error", "agent_panic"]);
+/** A start's or steer's messages join the turn's triggers; nothing removes one. */
+function triggerFields(
+  previous: Turn | undefined,
+  added: readonly string[] | undefined,
+): Required<
+  Pick<Turn, "triggeringEventIds" | "requests" | "unresolvedTriggers">
+> {
+  const known = previous?.triggeringEventIds ?? [];
+  const fresh = freshTurnTriggers(known, added);
+  return {
+    triggeringEventIds: fresh.length ? [...known, ...fresh] : known,
+    requests: previous?.requests ?? [],
+    unresolvedTriggers: [...(previous?.unresolvedTriggers ?? []), ...fresh],
+  };
+}
+function withTriggers(previous: Turn, added: readonly string[]): Turn {
+  const fields = triggerFields(previous, added);
+  return fields.triggeringEventIds.length ===
+    (previous.triggeringEventIds?.length ?? 0)
+    ? previous
+    : { ...previous, ...fields };
+}
 
-/** Session-owned live evidence and bounded local history. Plugin activation owns demand, not sockets or keys. */
+/** Session-owned live evidence. Plugin activation owns demand, not sockets or keys. */
 export function createAgentActivity(
   available: boolean,
   observe: (generation: number | null) => void,
   canAccess: (channel: string) => boolean,
   notify = (listener: () => void) => listener(),
-  history?: {
-    host: ArchiveHost;
-    canRestore: (channel: string) => boolean;
-  },
   findMessage?: (id: string) => EventData | undefined,
   local?: { source: LocalAgentSource; scope: string },
 ) {
@@ -99,25 +133,13 @@ export function createAgentActivity(
     leases = 0,
     generation = 0,
     epoch = 0;
-  let historyStatus: Snapshot["history"] = history?.host
-    ? "loading"
-    : "unavailable";
-  let historyGeneration = 0;
-  let historyAbort = new AbortController();
-  let loaded = false;
-  let historyAgent: string | undefined;
-  let historyBefore: number | undefined;
-  let hasOlder = false;
-  let historyOlder = false;
-  let historyAgents: readonly string[] = [];
-  let captureStatus: Snapshot["capture"] = "unknown";
-  let historyPage: ArchivePage | undefined;
   const liveAgents = new Set<string>();
   let status: Snapshot["status"] = available ? "disabled" : "unavailable";
   let records: RawRecord[] = [],
     bytes = 0,
     trimmed = 0,
     evidenceFloor = 0;
+  let turnsTrimmed = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   const turns = new Map<string, Turn>();
   const typing = new Map<string, Typing>();
@@ -130,12 +152,6 @@ export function createAgentActivity(
     turns: [],
     typing: [],
     trimmed,
-    history: historyStatus,
-    hasOlder,
-    historyOlder,
-    historySkipped: historyPage?.skipped ?? 0,
-    historyAgents,
-    capture: captureStatus,
   });
   function associate(turn: Turn) {
     const unresolved: string[] = [];
@@ -162,6 +178,9 @@ export function createAgentActivity(
     turn.unresolvedTriggers = unresolved;
     turn.requests = Object.freeze(requests);
   }
+  function typingKey(entries: readonly TypingEntry[]) {
+    return JSON.stringify(entries.map((entry) => JSON.stringify(entry)).sort());
+  }
   function publish() {
     const localWork =
       local && !closed
@@ -170,6 +189,12 @@ export function createAgentActivity(
             .filter(
               (row) => row.scope === local.scope && canAccess(row.channelId),
             )
+        : [];
+    const declined =
+      local && !closed
+        ? (local.source.declined?.() ?? []).filter(
+            (row) => row.scope === local.scope && canAccess(row.channelId),
+          )
         : [];
     const now = Date.now();
     const fresh = records.filter(
@@ -180,31 +205,36 @@ export function createAgentActivity(
       records = fresh;
       bytes = records.reduce(
         (total, record) =>
-          total +
-          (record.historical
-            ? 0
-            : new TextEncoder().encode(record.plaintext).length),
+          total + new TextEncoder().encode(record.plaintext).length,
         0,
       );
     }
-    const retained = new Set(
-      records
-        .filter((record) => !record.historical)
-        .map((record) => record.agent),
-    );
+    const retained = new Set(records.map((record) => record.agent));
     for (const agent of liveAgents)
       if (!retained.has(agent)) liveAgents.delete(agent);
     const known = liveAgents;
     for (const [key, entry] of typing)
       if (now >= entry.expiresAt || !known.has(entry.agent)) typing.delete(key);
-    const typers = [...typing.values()].filter((entry) => entry.working);
+    const typers = [...typing.values()]
+      .filter((entry) => entry.working)
+      .map(
+        ({ agent, channelId, threadRootId, startedAt, working }): TypingEntry =>
+          Object.freeze({ agent, channelId, threadRootId, startedAt, working }),
+      );
     const visible = [...turns.values()].map(
       (turn): ActivityTurn =>
         Object.freeze({
           agent: turn.agent,
           turnId: turn.turnId,
+          ...(turn.sessionId ? { sessionId: turn.sessionId } : {}),
+          ...(turn.threadRootId ? { threadRootId: turn.threadRootId } : {}),
+          ...(turn.ambiguous ? { ambiguous: true } : {}),
           channelId: turn.channelId,
           timestamp: turn.timestamp,
+          ...(turn.outcome ? { outcome: turn.outcome } : {}),
+          ...(turn.triggeringEventIds
+            ? { triggeringEventIds: turn.triggeringEventIds }
+            : {}),
           ...(turn.triggeringEventIds ? { requests: turn.requests ?? [] } : {}),
           state: turn.ended
             ? "ended"
@@ -241,16 +271,15 @@ export function createAgentActivity(
       snapshot.status === status &&
       (snapshot.local ?? []).length === localWork.length &&
       (snapshot.local ?? []).every((row, index) => row === localWork[index]) &&
+      (snapshot.declined ?? []).length === declined.length &&
+      (snapshot.declined ?? []).every(
+        (row, index) => row === declined[index],
+      ) &&
       snapshot.records === records &&
       snapshot.trimmed === trimmed &&
-      snapshot.history === historyStatus &&
-      snapshot.hasOlder === hasOlder &&
-      snapshot.historyOlder === historyOlder &&
-      snapshot.historySkipped === (historyPage?.skipped ?? 0) &&
-      snapshot.historyAgents === historyAgents &&
-      snapshot.capture === captureStatus &&
       JSON.stringify(snapshot.turns) === JSON.stringify(visible) &&
-      JSON.stringify(snapshot.typing) === JSON.stringify(typers)
+      // Each pulse re-inserts its key for eviction recency: compare as a set.
+      typingKey(snapshot.typing) === typingKey(typers)
     )
       return;
     snapshot = Object.freeze({
@@ -258,14 +287,10 @@ export function createAgentActivity(
       records: Object.freeze(records),
       turns: Object.freeze(visible),
       local: Object.freeze(localWork),
+      declined: Object.freeze(declined),
       typing: Object.freeze(typers),
       trimmed,
-      history: historyStatus,
-      hasOlder,
-      historyOlder,
-      historySkipped: historyPage?.skipped ?? 0,
-      historyAgents,
-      capture: captureStatus,
+      turnsTrimmed,
     });
     for (const listener of listeners) notify(listener);
     if (workingChanged)
@@ -276,26 +301,17 @@ export function createAgentActivity(
     bytes = 0;
     trimmed = 0;
     evidenceFloor = 0;
+    turnsTrimmed = false;
     turns.clear();
     typing.clear();
     liveAgents.clear();
     epoch++;
   }
   function restart() {
-    historyGeneration++;
-    historyAbort.abort();
-    historyAbort = new AbortController();
-    loaded = false;
-    historyBefore = undefined;
-    historyPage = undefined;
-    hasOlder = false;
-    historyOlder = false;
-    historyAgents = [];
     generation++;
     reset();
     if (available && !closed && leases > 0) {
       status = "connecting";
-      void restore();
       observe(generation);
     } else status = closed || !available ? "unavailable" : "disabled";
     publish();
@@ -316,41 +332,74 @@ export function createAgentActivity(
     if (!Number.isFinite(timestamp) || timestamp > Date.now() + 5000) return;
     const key = `${agent}:${item.turnId}`;
     const previous = turns.get(key);
+    const payload = object(item.payload);
+    const added =
+      item.kind === "turn_started" || item.kind === "turn_steered"
+        ? turnTriggerIds(payload?.triggeringEventIds)
+        : undefined;
     // Terminal evidence wins even when a delayed earlier heartbeat arrives later.
     if (
       previous?.ended ||
       (previous && previous.timestamp > timestamp && !ends.has(item.kind))
-    )
+    ) {
+      // Membership is not progress: a late start or steer still names the
+      // messages its turn ran for, without reviving or refreshing it. A late
+      // second start makes the turn ambiguous, as one in order would.
+      if (!added || !previous) return;
+      let merged: Turn;
+      if (item.kind === "turn_steered") merged = withTriggers(previous, added);
+      else if (item.kind !== "turn_started") return;
+      else if (previous.started)
+        merged = previous.ambiguous
+          ? previous
+          : { ...previous, ambiguous: true };
+      else merged = { ...withTriggers(previous, added), started: true };
+      if (merged === previous) return;
+      associate(merged);
+      turns.set(key, merged);
       return;
+    }
     if (!previous && timestamp <= evidenceFloor) return;
-    const triggers =
-      item.kind === "turn_started"
-        ? object(item.payload)?.triggeringEventIds
-        : previous?.triggeringEventIds;
-    const triggeringEventIds =
-      Array.isArray(triggers) &&
-      triggers.length <= 64 &&
-      triggers.every(
-        (id) => typeof id === "string" && /^[0-9a-f]{64}$/.test(id),
-      )
-        ? (triggers as string[])
+    const root = payload?.threadRootEventId;
+    const legacyRoot =
+      item.kind === "acp_write" && !previous?.threadRootId
+        ? activityPromptThread(payload)
         : undefined;
+    const sessionId =
+      item.kind === "session_resolved" && text(payload?.sessionId)
+        ? payload.sessionId
+        : item.sessionId;
     const turn: Turn = {
-      ...(triggeringEventIds
-        ? {
-            triggeringEventIds,
-            requests: previous?.requests ?? [],
-            unresolvedTriggers:
-              previous?.unresolvedTriggers ?? triggeringEventIds,
-          }
+      ...(previous?.triggeringEventIds || added
+        ? triggerFields(previous, added)
+        : {}),
+      ...(previous?.started || (item.kind === "turn_started" && added)
+        ? { started: true }
         : {}),
       agent,
       turnId: item.turnId,
+      ...(previous?.ambiguous ||
+      (item.kind === "turn_started" && previous?.started)
+        ? { ambiguous: true }
+        : {}),
+      ...(typeof root === "string" && /^[0-9a-f]{64}$/.test(root)
+        ? { threadRootId: root }
+        : previous?.threadRootId
+          ? { threadRootId: previous.threadRootId }
+          : typeof legacyRoot === "string"
+            ? { threadRootId: legacyRoot }
+            : {}),
+      ...(text(sessionId)
+        ? { sessionId }
+        : previous?.sessionId
+          ? { sessionId: previous.sessionId }
+          : {}),
       channelId: item.channelId,
       // Completion may precede liveness on a rolled-back producer clock. Keep
       // the highest observed time so eventual eviction cannot weaken the fence.
       timestamp: Math.max(timestamp, previous?.timestamp ?? timestamp),
       ended: ends.has(item.kind),
+      outcome: terminalOutcome(item.kind, payload?.outcome),
       epoch,
     };
     associate(turn);
@@ -363,6 +412,7 @@ export function createAgentActivity(
         turns.delete(oldest[0]);
         // Forgetting a tombstone must not let older evidence resurrect that turn.
         evidenceFloor = Math.max(evidenceFloor, oldest[1].timestamp);
+        turnsTrimmed = true;
         trimmed++;
       }
     }
@@ -381,11 +431,7 @@ export function createAgentActivity(
       },
     );
   }
-  function admit(
-    input: ObserverFrame,
-    receivedAt: number,
-    historical: boolean,
-  ) {
+  function admit(input: ObserverFrame, receivedAt: number) {
     let frame: ObserverFrame, raw: unknown;
     try {
       frame = observerFrame(input);
@@ -396,37 +442,25 @@ export function createAgentActivity(
 
     const envelope = object(raw);
     // Management requests belong only to live owner review, never the activity
-    // display. In particular, restoring ciphertext must not disclose their
-    // payload-scoped channel or replay a request after reconnect.
+    // display.
     if (envelope?.kind === "agent_management_request") return;
     const children =
       envelope?.kind === "batch" ? object(envelope.payload)?.events : undefined;
     const items = Array.isArray(children) ? children : [raw];
     // A denied child cannot leak through an otherwise visible raw batch.
-    if (
-      !channelsAllowed(
-        raw,
-        historical && history ? history.canRestore : canAccess,
-      )
-    )
-      return;
-    if (!historical) {
-      liveAgents.add(frame.agent);
-      for (const item of items) fold(frame.agent, item);
-    }
-    const duplicate = records.find((record) => record.id === frame.id);
-    if (duplicate && (historical || !duplicate.historical)) {
-      if (!historical) publish();
+    if (!channelsAllowed(raw, canAccess)) return;
+    if (records.some((record) => record.id === frame.id)) {
+      publish();
       return;
     }
-    if (duplicate) records = records.filter((record) => record.id !== frame.id);
+    liveAgents.add(frame.agent);
+    for (const item of items) fold(frame.agent, item);
     const record = Object.freeze({
       id: frame.id,
       agent: frame.agent,
       createdAt: frame.createdAt,
       plaintext: frame.plaintext,
       receivedAt,
-      historical,
       kind: text(envelope?.kind) ? envelope.kind : "unknown",
       channelIds: Object.freeze([
         ...new Set(
@@ -438,114 +472,64 @@ export function createAgentActivity(
       ]),
     });
     records = [...records, record].sort((a, b) => a.receivedAt - b.receivedAt);
-    if (!historical) bytes += new TextEncoder().encode(frame.plaintext).length;
+    bytes += new TextEncoder().encode(frame.plaintext).length;
     while (
-      records.filter((record) => !record.historical).length >
-        ACTIVITY_RECORD_LIMIT ||
+      records.length > ACTIVITY_RECORD_LIMIT ||
       bytes > ACTIVITY_BYTE_LIMIT
     ) {
-      const index = records.findIndex((record) => !record.historical);
-      const [first] = records.splice(index, 1);
+      const first = records.shift();
       if (first) bytes -= new TextEncoder().encode(first.plaintext).length;
       trimmed++;
     }
-    if (!historical) publish();
+    publish();
   }
 
-  async function restore() {
-    if (!history?.host || closed || !leases || loaded) return;
-    loaded = true;
-    const token = historyGeneration;
-    const signal = historyAbort.signal;
-    historyStatus = "loading";
-    publish();
-    try {
-      const page = await history.host.read(
-        {
-          kind: 24200,
-          ...(historyAgent ? { agent: historyAgent } : {}),
-          ...(historyBefore ? { before: historyBefore } : {}),
-        },
-        signal,
-      );
-      if (closed || token !== historyGeneration) return;
-      historyOlder = historyBefore !== undefined;
-      historyBefore = page.before ?? undefined;
-      hasOlder = page.before !== null;
-      historyAgents = page.agents;
-      historyPage = page;
-      showHistoryPage();
-      historyStatus = "ready";
-    } catch {
-      if (closed || token !== historyGeneration) return;
-      historyStatus = "error";
-    }
-    publish();
-  }
-  function showHistoryPage() {
-    // Paging replaces only the archived display window. Unsaved live records and
-    // live ownership survive hydration, selection, and access-grant notifications.
-    records = records.filter((record) => !record.historical);
-    for (const frame of [...(historyPage?.records ?? [])].reverse())
-      admit(frame, frame.receivedAt, true);
-    publish();
-  }
-  async function clearHistory() {
-    // A failed delete must leave the visible evidence intact.
-    const token = historyGeneration;
-    await history?.host.clear(24200);
-    if (closed || token !== historyGeneration) return;
-    historyGeneration++;
-    historyAbort.abort();
-    historyAbort = new AbortController();
-    reset();
-    generation++;
-    if (available && leases > 0) observe(generation);
-    historyPage = undefined;
-    historyBefore = undefined;
-    hasOlder = false;
-    historyOlder = false;
-    historyAgents = [];
-    loaded = true;
-    historyStatus = history ? "ready" : "unavailable";
-    publish();
-  }
   const stopLocal = local?.source.subscribeWork(publish);
   return {
     queries: Object.freeze({
       snapshot: () => snapshot,
-      clearHistory,
+      /** Owner-authorized status readback for an exact retained remote task.
+       * Never invent raw telemetry or replace an already received terminal. */
+      reconcile(turn: ActivityTurn, outcome: "ended" | "error" | "stopped") {
+        if (closed || !leases || !turn.channelId || !canAccess(turn.channelId))
+          return;
+        const current = turns.get(`${turn.agent}:${turn.turnId}`);
+        if (
+          !current ||
+          current.ended ||
+          !turn.sessionId ||
+          current.sessionId !== turn.sessionId ||
+          current.channelId !== turn.channelId
+        )
+          return;
+        turns.set(`${turn.agent}:${turn.turnId}`, {
+          ...current,
+          ended: true,
+          outcome,
+        });
+        publish();
+      },
       /** Display-only local acknowledgement, scoped to this session and access. */
       dismissError(agent: string, channelId: string, messageId: string) {
         if (!local || closed || !canAccess(channelId)) return false;
         local.source.dismissError?.({ scope: local.scope, agent, messageId });
         return true;
       },
-      archive: history?.host,
-      selectHistory(agent: string) {
-        if (historyAgent === agent) return;
-        historyAgent = agent || undefined;
-        historyBefore = undefined;
-        historyPage = undefined;
-        hasOlder = false;
-        historyOlder = false;
-        records = records.filter((record) => !record.historical);
-        historyGeneration++;
-        historyAbort.abort();
-        historyAbort = new AbortController();
-        loaded = false;
-        void restore();
+      /** Stops the turn a local request is in, scoped to this session and access. */
+      interrupt(agent: string, channelId: string, messageId: string) {
+        if (!local?.source.interrupt || closed || !canAccess(channelId))
+          return Promise.reject(new Error("This work can't be stopped here"));
+        return local.source.interrupt({
+          scope: local.scope,
+          agent,
+          messageId,
+        });
       },
-      latestHistory() {
-        if (historyStatus === "loading") return Promise.resolve();
-        historyBefore = undefined;
-        loaded = false;
-        return restore();
-      },
-      loadOlder() {
-        if (historyStatus === "loading" || !hasOlder) return Promise.resolve();
-        loaded = false;
-        return restore();
+      /** Asks again for a failed local request, scoped to this session and access. */
+      retry(agent: string, channelId: string, messageId: string) {
+        if (!local?.source.retry || closed || !canAccess(channelId))
+          throw new Error("This request can't be retried here");
+        local.source.retry({ scope: local.scope, agent, messageId });
       },
       workingSnapshot: () => workingChannels,
       subscribeWorking(listener: () => void) {
@@ -578,10 +562,6 @@ export function createAgentActivity(
         };
       },
     }),
-    captureState(state: "saving" | "off" | "error") {
-      captureStatus = state;
-      publish();
-    },
     receive(input: ObserverFrame, current: number) {
       if (closed || !available || leases === 0 || current !== generation)
         return;
@@ -606,7 +586,7 @@ export function createAgentActivity(
         })
       )
         return;
-      if (leases > 0) admit(frame, Date.now(), false);
+      if (leases > 0) admit(frame, Date.now());
     },
     /** Trigger messages may arrive after telemetry. Resolve at content admission,
      * not on the freshness timer, without retaining or fetching more messages. */
@@ -626,6 +606,7 @@ export function createAgentActivity(
       if (closed || !leases || status !== "listening") return;
       const known = liveAgents;
       const now = Date.now();
+      let changed = false;
       for (const event of events) {
         if (![9, 20002].includes(event.kind) || !known.has(event.pubkey))
           continue;
@@ -645,38 +626,49 @@ export function createAgentActivity(
         // Malformed thread tags must not become channel-wide working evidence.
         if (event.tags.some(([name]) => name === "e") && !reference) continue;
         const threadRootId = reference?.rootId;
-        const key = JSON.stringify([event.pubkey, channelId, threadRootId]);
-        const previous = typing.get(key);
-        if (
-          previous &&
-          (timestamp < previous.timestamp ||
-            (event.kind === 20002 &&
-              !previous.working &&
-              timestamp <= previous.timestamp + 2000))
-        )
-          continue;
-        typing.delete(key);
-        typing.set(
-          key,
-          Object.freeze({
-            agent: event.pubkey,
-            channelId,
-            threadRootId,
-            timestamp,
-            startedAt:
-              previous?.working && now < previous.expiresAt
-                ? previous.startedAt
-                : timestamp,
-            working: event.kind === 20002,
-            expiresAt: Math.min(timestamp, now) + TYPING_FRESH_MS,
-          }),
-        );
-        if (typing.size > ACTIVITY_TURN_LIMIT) {
+        // A reply in a thread also ends the agent's channel-level typing: its
+        // pulses and replies can be filed apart for the same turn. Other
+        // threads keep theirs.
+        const scopes =
+          event.kind === 9 && threadRootId
+            ? [threadRootId, undefined]
+            : [threadRootId];
+        for (const threadRootId of scopes) {
+          const key = JSON.stringify([event.pubkey, channelId, threadRootId]);
+          const previous = typing.get(key);
+          if (
+            previous &&
+            (timestamp < previous.timestamp ||
+              (event.kind === 20002 &&
+                !previous.working &&
+                timestamp <= previous.timestamp + 2000))
+          )
+            continue;
+          changed = true;
+          typing.delete(key);
+          typing.set(
+            key,
+            Object.freeze({
+              agent: event.pubkey,
+              channelId,
+              threadRootId,
+              timestamp,
+              startedAt:
+                previous?.working && now < previous.expiresAt
+                  ? previous.startedAt
+                  : timestamp,
+              working: event.kind === 20002,
+              expiresAt: Math.min(timestamp, now) + TYPING_FRESH_MS,
+            }),
+          );
+        }
+        while (typing.size > ACTIVITY_TURN_LIMIT) {
           const oldest = typing.keys().next().value;
           if (oldest) typing.delete(oldest);
         }
       }
-      publish();
+      // Expiry and freshness ride the publish timer; other traffic changes nothing.
+      if (changed) publish();
     },
     state(live: LiveSnapshot) {
       if (closed || !available || !leases) return;
@@ -700,11 +692,6 @@ export function createAgentActivity(
         }
       status = next;
       publish();
-    },
-    restoreHistory() {
-      // Re-evaluate this page after access becomes known, without rereading or
-      // rewinding the user's cursor on unrelated channel-list notifications.
-      if (historyPage && !closed && leases) showHistoryPage();
     },
     accessChanged() {
       restart();

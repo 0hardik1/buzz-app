@@ -2,26 +2,53 @@ import { useConversationPresentation } from "../conversation/ConversationPresent
 import { prepareReviewEntrance } from "./use-review-entrance";
 import { useMediaCorners } from "./use-media-corners";
 import { MediaViewer } from "./MediaAttachment";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { MediaContextMenu } from "./MediaContextMenu";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import type { Attachment } from "../relay/contracts";
+import type { RelaySession } from "../relay/session";
+import { imageDimensions, rememberImageDimensions } from "./image-dimensions";
 import { validatedBlurhash } from "../relay/blurhash";
 import { BLURHASH_SIZE, paintBlurhash } from "./blurhash";
+import {
+  decodedImageCapture,
+  hasDecodedImage,
+  retainDecodedImage,
+  takeDecodedImage,
+} from "../relay/media";
 import styles from "./Messages.module.css";
 
 export function AttachmentImage({
   attachment,
+  session,
   source,
+  thumbnail,
   cached = false,
+  compact = false,
+  overlayCount = 0,
   onOpenReview,
+  onOpenLink,
   keepMounted,
   label = "Open image attachment",
 }: {
   label?: string;
   attachment: Attachment;
+  session?: RelaySession | undefined;
   source: string | undefined;
+  thumbnail?: string | undefined;
   cached?: boolean;
+  /** Square thumbnail geometry for a condensed image group. */
+  compact?: boolean;
+  /** Includes the covered image, matching the gallery's remaining count. */
+  overlayCount?: number;
   onOpenReview?: (attachment: Attachment, seconds: number) => void;
+  onOpenLink?: ((url: string) => boolean) | undefined;
   /** Pins the owning row in a virtualized list; returns the release. */
   keepMounted?: (() => () => void) | undefined;
 }) {
@@ -38,18 +65,26 @@ export function AttachmentImage({
   }, [viewerOpen, keepMounted]);
   const [decoded, setDecoded] = useState<{
     source: string | undefined;
+    session: RelaySession | undefined;
     dimensions?: NonNullable<Attachment["dimensions"]>;
-  }>({ source });
-  if (decoded.source !== source) setDecoded({ source });
+  }>({ source, session });
+  if (decoded.source !== source || decoded.session !== session)
+    setDecoded({ source, session });
   const onDecoded = useCallback(
     (dimensions: NonNullable<Attachment["dimensions"]>) => {
-      if (source) setDecoded({ source, dimensions });
+      if (source) {
+        rememberImageDimensions(session, source, dimensions);
+        setDecoded({ source, session, dimensions });
+      }
     },
-    [source],
+    [source, session],
   );
   const decodedDimensions =
-    decoded.source === source ? decoded.dimensions : undefined;
-  const dimensions = decodedDimensions ?? attachment.dimensions;
+    decoded.source === source && decoded.session === session
+      ? decoded.dimensions
+      : undefined;
+  const knownDimensions = decodedDimensions ?? imageDimensions(session, source);
+  const dimensions = knownDimensions ?? attachment.dimensions;
   const width = dimensions
     ? Math.min(
         360,
@@ -60,22 +95,29 @@ export function AttachmentImage({
   const height = dimensions
     ? (width * dimensions.height) / dimensions.width
     : 0;
-  const previewWidth = decodedDimensions ? Math.max(1, width) : width;
-  const previewHeight = decodedDimensions ? Math.max(1, height) : height;
-  const style =
-    dimensions &&
-    Number.isFinite(previewWidth) &&
-    Number.isFinite(previewHeight) &&
-    previewWidth >= 1 &&
-    previewHeight >= 1
+  const previewWidth = knownDimensions ? Math.max(1, width) : width;
+  const previewHeight = knownDimensions ? Math.max(1, height) : height;
+  const style = compact
+    ? // Percentage padding reserves square tracks in WebKit too, including when
+      // this grid is measured inside the virtualized, right-aligned message row.
+      { width: "100%", height: 0, paddingBottom: "100%", aspectRatio: "auto" }
+    : dimensions &&
+        Number.isFinite(previewWidth) &&
+        Number.isFinite(previewHeight) &&
+        previewWidth >= 1 &&
+        previewHeight >= 1
       ? {
           width: previewWidth,
-          aspectRatio: decodedDimensions
+          aspectRatio: knownDimensions
             ? `${previewWidth} / ${previewHeight}`
             : `${dimensions.width} / ${dimensions.height}`,
         }
       : undefined;
-  if (!source)
+  const viewImage = () => {
+    if (onOpenReview) onOpenReview(attachment, 0);
+    else if (!onOpenLink?.(attachment.url)) setViewerOpen(true);
+  };
+  if (!source && !overlayCount)
     return cached ? (
       <span
         ref={corners}
@@ -90,49 +132,65 @@ export function AttachmentImage({
         style={style}
         role="status"
       >
-        Image unavailable
+        <span>Image unavailable</span>
       </span>
     );
   return (
     <>
-      <a
-        ref={corners}
-        className={styles.attachmentImage}
-        style={style}
-        href={source}
-        target="_blank"
-        rel="noreferrer"
-        aria-label={label}
-        data-media-preview=""
-        data-image-ready={decodedDimensions ? true : undefined}
-        onClick={(event) => {
-          // Every activation stays in-app, modifiers included: the desktop
-          // opener treats an unprevented Ctrl/Shift or `_blank` click as browser
-          // intent, and no browser tab holds the app's credentials.
-          event.preventDefault();
-          prepareReviewEntrance(event);
-          if (onOpenReview) onOpenReview(attachment, 0);
-          else setViewerOpen(true);
-        }}
+      <MediaContextMenu
+        kind="image"
+        url={attachment.url}
+        source={source}
+        name={attachment.name}
+        onView={viewImage}
       >
-        {/* Retargeting retires both the DOM pixels and all pending callbacks before
-            the new source can paint. Session switches also remount the workspace. */}
-        <span className={styles.attachmentImagePixels}>
-          <ImagePixels
-            key={JSON.stringify([source, attachment.blurhash])}
-            source={source}
-            blurhash={attachment.blurhash}
-            onDecoded={onDecoded}
-          />
-        </span>
-        <svg
-          className={styles.imageOutline}
-          data-image-outline=""
-          aria-hidden="true"
+        <a
+          ref={corners}
+          className={styles.attachmentImage}
+          style={style}
+          href={source ?? attachment.url}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={label}
+          data-media-preview=""
+          data-image-ready={decodedDimensions ? true : undefined}
+          onClick={(event) => {
+            // Every activation stays in-app, modifiers included: the desktop
+            // opener treats an unprevented Ctrl/Shift or `_blank` click as browser
+            // intent, and no browser tab holds the app's credentials.
+            event.preventDefault();
+            prepareReviewEntrance(event);
+            viewImage();
+          }}
         >
-          <path />
-        </svg>
-      </a>
+          {/* Retargeting retires both the DOM pixels and all pending callbacks before
+            the new source can paint. Session switches also remount the workspace. */}
+          <span className={styles.attachmentImagePixels}>
+            {source && (
+              <ImagePixels
+                key={JSON.stringify([source, attachment.blurhash])}
+                session={session}
+                source={source}
+                thumbnail={thumbnail}
+                blurhash={attachment.blurhash}
+                onDecoded={onDecoded}
+              />
+            )}
+            {overlayCount > 0 && (
+              <span className={styles.imageOverflow} aria-hidden="true">
+                +{overlayCount}
+              </span>
+            )}
+          </span>
+          <svg
+            className={styles.imageOutline}
+            data-image-outline=""
+            aria-hidden="true"
+          >
+            <path />
+          </svg>
+        </a>
+      </MediaContextMenu>
       {active &&
         viewerOpen &&
         createPortal(
@@ -140,11 +198,18 @@ export function AttachmentImage({
             title="Image attachment"
             close={() => setViewerOpen(false)}
           >
-            <img
-              className={styles.mediaViewerImage}
-              src={source}
-              alt="Attachment preview"
-            />
+            <MediaContextMenu
+              kind="image"
+              url={attachment.url}
+              source={source}
+              name={attachment.name}
+            >
+              <img
+                className={styles.mediaViewerImage}
+                src={source}
+                alt="Attachment preview"
+              />
+            </MediaContextMenu>
           </MediaViewer>,
           document.body,
         )}
@@ -153,21 +218,48 @@ export function AttachmentImage({
 }
 
 function ImagePixels({
+  session,
   source,
+  thumbnail,
   blurhash,
   onDecoded,
 }: {
+  session: RelaySession | undefined;
   source: string;
+  thumbnail: string | undefined;
   blurhash: string | undefined;
   onDecoded: (dimensions: NonNullable<Attachment["dimensions"]>) => void;
 }) {
   const image = useRef<HTMLImageElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const host = useRef<HTMLSpanElement>(null);
+  // Only peeks: the layout effect claims the element before paint, and a
+  // concurrent mount of the same source falls back to its own original.
+  const [retained, setRetained] = useState(
+    () => !!session && hasDecodedImage(session, source),
+  );
   const [ready, setReady] = useState(false);
+  const [thumbnailLoaded, setThumbnailLoaded] = useState(false);
   const hash = validatedBlurhash(blurhash);
+  useLayoutEffect(() => {
+    if (!retained) return;
+    const capture = decodedImageCapture();
+    const original = session && takeDecodedImage(session, source);
+    if (!original) {
+      setRetained(false);
+      return;
+    }
+    host.current?.append(original);
+    onDecoded({ width: original.naturalWidth, height: original.naturalHeight });
+    return () => {
+      original.remove();
+      retainDecodedImage(session, source, original, capture);
+    };
+  }, [retained, session, source, onDecoded]);
   useEffect(() => {
     const original = image.current;
-    if (!original) return;
+    if (retained || !original) return;
+    const capture = decodedImageCapture();
     let active = true;
     let decoded = false;
     let painted = false;
@@ -219,8 +311,17 @@ function ImagePixels({
       active = false;
       original.removeEventListener("load", loaded);
       observer?.disconnect();
+      // Only a deleted row detaches its original; a rerun keeps it mounted.
+      // Unparent it so the pool retains the element, not the deleted row, and
+      // show it: the row can unmount before its ready state commits.
+      if (session && decoded && !original.isConnected) {
+        original.remove();
+        original.style.visibility = "visible";
+        retainDecodedImage(session, source, original, capture);
+      }
     };
-  }, [hash, onDecoded]);
+  }, [retained, session, source, hash, onDecoded]);
+  if (retained) return <span ref={host} />;
   return (
     <>
       {hash && !ready && (
@@ -239,6 +340,17 @@ function ImagePixels({
         loading="lazy"
         style={{ visibility: ready ? "visible" : "hidden" }}
       />
+      {/* After the original, so preview queries still find the original first. */}
+      {thumbnail && !ready && (
+        <img
+          src={thumbnail}
+          alt=""
+          loading="lazy"
+          data-thumbnail=""
+          style={{ visibility: thumbnailLoaded ? "visible" : "hidden" }}
+          onLoad={() => setThumbnailLoaded(true)}
+        />
+      )}
     </>
   );
 }

@@ -9,6 +9,7 @@ import {
   fireEvent,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { webcrypto } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   createRelaySession,
@@ -17,6 +18,11 @@ import {
 import type { Agents } from "../../features/agents/service";
 import type { AgentChoicesSnapshot } from "../../features/agents/choices";
 import { channelTemplates } from "../../features/channel-templates/local";
+import {
+  projectTemplateId,
+  workspaceCanvas,
+} from "../../features/solo/workspace";
+import type { KitEntry } from "../../features/channel-templates/model";
 import { CreateChannelDialog } from "./CreateChannelDialog";
 
 let store = createRelaySession(null);
@@ -29,10 +35,80 @@ const setupProps = () => ({
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   localStorage.clear();
   store.dispose();
   store = createRelaySession(null);
 });
+
+it.each([false, true])(
+  "shares standalone workspace instructions unless unticked (%s)",
+  async (share) => {
+    vi.stubGlobal("crypto", webcrypto);
+    const user = userEvent.setup();
+    const id = await projectTemplateId("work");
+    const entry: KitEntry = {
+      eventId: "head",
+      createdAt: 1,
+      record: {
+        version: 1,
+        community: "https://relay.example.org",
+        deleted: false,
+        value: {
+          type: "template",
+          id,
+          name: "Work defaults",
+          description: "",
+          teamIds: [],
+          agents: [],
+          canvas: workspaceCanvas({
+            folders: ["/local/project"],
+            worktree: { location: "/local/worktrees", baseBranch: "main" },
+            canvas: "Release checklist",
+          }),
+        },
+      },
+    };
+    const session = {
+      ...store.session,
+      channelKit: {
+        ...store.session.channelKit,
+        available: true,
+        snapshot: () => ({ status: "ready" as const, entries: [entry] }),
+        refresh: async () => {},
+      },
+    };
+    const onCreate = vi.fn(async () => {});
+    render(
+      <CreateChannelDialog
+        {...setupProps()}
+        session={session}
+        initialGroup="work"
+        destinations={[{ id: "work", name: "Work" }]}
+        open
+        onOpenChange={() => {}}
+        onCreate={onCreate}
+      />,
+    );
+    const checkbox = await screen.findByRole("checkbox", {
+      name: "Copy workspace instructions to the shared Canvas",
+    });
+    expect(checkbox).toBeChecked();
+    if (!share) await user.click(checkbox);
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Notes");
+    await user.click(screen.getByRole("button", { name: "Create channel" }));
+    expect(onCreate).toHaveBeenCalledExactlyOnceWith({
+      name: "Notes",
+      visibility: "open",
+      setup: {
+        agents: [],
+        groupId: "work",
+        templateId: id,
+        canvas: share ? "Release checklist" : "",
+      },
+    });
+  },
+);
 
 it("shows description immediately with Name focused and creates an ongoing open channel", async () => {
   const user = userEvent.setup();
@@ -121,31 +197,26 @@ it("creates a private temporary channel and reports a rejected request", async (
   expect(screen.getByRole("switch", { name: "Private" })).toBeChecked();
 });
 
-it("keeps the visible draft when a pending creation fails", async () => {
+it("keeps an editable draft after a failed creation, retries it, and forgets it on close", async () => {
   const user = userEvent.setup();
-  let rejectCreation!: (reason: Error) => void;
-  const onCreate = vi.fn(
-    () =>
-      new Promise<void>((_resolve, reject) => {
-        rejectCreation = reject;
-      }),
-  );
+  const onCreate = vi
+    .fn<() => Promise<void>>()
+    .mockRejectedValueOnce(new Error("Creation rejected"))
+    .mockResolvedValueOnce(undefined);
   const onOpenChange = vi.fn();
-  const dialog = (pending?: {
-    name: string;
-    description: string;
-    visibility: "private";
-    ttlSeconds: number;
-  }) => (
+  const forget = vi.fn();
+  const view = render(
     <CreateChannelDialog
       {...setupProps()}
+      session={{
+        ...store.session,
+        channelCreation: { ...store.session.channelCreation, forget },
+      }}
       open
-      pending={pending}
       onOpenChange={onOpenChange}
       onCreate={onCreate}
-    />
+    />,
   );
-  const view = render(dialog());
   await user.type(screen.getByRole("textbox", { name: "Name" }), "ops");
   await user.type(
     screen.getByRole("textbox", { name: "Description" }),
@@ -155,28 +226,31 @@ it("keeps the visible draft when a pending creation fails", async () => {
   await user.click(screen.getByText("Private", { selector: "label" }));
   await user.click(screen.getByRole("button", { name: "Continue" }));
   await user.click(screen.getByRole("button", { name: "Create channel" }));
-  await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
-
-  view.rerender(
-    dialog({
-      name: "ops",
-      description: "Incident response",
-      visibility: "private",
-      ttlSeconds: 604800,
-    }),
-  );
-  view.rerender(dialog());
-  rejectCreation(new Error("Creation rejected"));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Creation rejected",
   );
+  expect(screen.getByRole("textbox", { name: "Name" })).toBeEnabled();
   expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("ops");
   expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
     "Incident response",
   );
   expect(screen.getByRole("radio", { name: /Temporary/ })).toBeChecked();
   expect(screen.getByRole("switch", { name: "Private" })).toBeChecked();
+  expect(onOpenChange).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: "Create channel" }));
+  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  const request = {
+    name: "ops",
+    description: "Incident response",
+    visibility: "private",
+    ttlSeconds: 604800,
+  };
+  expect(onCreate.mock.calls).toEqual([[request], [request]]);
+  expect(forget).not.toHaveBeenCalled();
+  view.unmount();
+  expect(forget).toHaveBeenCalledOnce();
 });
 
 it("blocks edits during creation without applying disabled control styles", async () => {
@@ -226,96 +300,6 @@ it("blocks edits during creation without applying disabled control styles", asyn
   await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
 });
 
-it("restores an unconfirmed channel draft after closing and reopening", () => {
-  const pending = {
-    name: "release-notes",
-    description: "Updates for the team",
-    visibility: "private" as const,
-    ttlSeconds: 604800,
-  };
-  const onOpenChange = vi.fn();
-  const onCreate = vi.fn(async () => {});
-  const { rerender } = render(
-    <CreateChannelDialog
-      {...setupProps()}
-      open
-      pending={pending}
-      onOpenChange={onOpenChange}
-      onCreate={onCreate}
-    />,
-  );
-  expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue(
-    "release-notes",
-  );
-  expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
-    "Updates for the team",
-  );
-  expect(screen.getByRole("radio", { name: /Temporary/ })).toBeChecked();
-  expect(screen.getByRole("switch", { name: "Private" })).toBeChecked();
-
-  rerender(
-    <CreateChannelDialog
-      {...setupProps()}
-      open={false}
-      pending={pending}
-      onOpenChange={onOpenChange}
-      onCreate={onCreate}
-    />,
-  );
-  rerender(
-    <CreateChannelDialog
-      {...setupProps()}
-      open
-      pending={pending}
-      onOpenChange={onOpenChange}
-      onCreate={onCreate}
-    />,
-  );
-  expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue(
-    "release-notes",
-  );
-  expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
-    "Updates for the team",
-  );
-});
-
-it("resumes frozen setup with the plugin off and unavailable catalogs without recalculating it", async () => {
-  const user = userEvent.setup();
-  const pending = {
-    name: "Recovery",
-    visibility: "private" as const,
-    setup: {
-      agents: ["ab".repeat(32)],
-      canvas: "# Frozen plan",
-      groupId: "removed-group",
-      templateId: "unavailable",
-    },
-  };
-  const onCreate = vi.fn(async () => {});
-  render(
-    <CreateChannelDialog
-      {...setupProps()}
-      groupsReady={false}
-      open
-      pending={pending}
-      onOpenChange={() => {}}
-      onCreate={onCreate}
-    />,
-  );
-  expect(
-    screen.getByRole("region", { name: "Channel setup summary" }),
-  ).toHaveTextContent("1 selected agent.");
-  expect(document.body.textContent).not.toContain("ab".repeat(32));
-  expect(screen.getByRole("textbox", { name: "Name" })).toBeDisabled();
-  expect(
-    screen.queryByRole("button", {
-      name: "Review / customize teams, agents & Canvas",
-    }),
-  ).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Retry channel" }));
-  await waitFor(() => expect(onCreate).toHaveBeenCalledWith(pending));
-});
-
 it.each([
   ["\u0085# \u0085#Release\u0085", "Release"],
   ["\ufeffRelease\ufeff", "\ufeffRelease\ufeff"],
@@ -347,7 +331,7 @@ it.each([
     });
   },
 );
-it("uses connected description validation without confusing the reserved marker with length", async () => {
+it("caps the description at 1,000 characters", async () => {
   const user = userEvent.setup();
   render(
     <CreateChannelDialog
@@ -359,13 +343,6 @@ it("uses connected description validation without confusing the reserved marker 
   );
   await user.type(screen.getByRole("textbox", { name: "Name" }), "notes");
   const description = screen.getByRole("textbox", { name: "Description" });
-  fireEvent.change(description, {
-    target: { value: "Buzz session (reserved)" },
-  });
-  expect(description).toHaveAccessibleDescription(
-    /that text is used by Buzz for work sessions/,
-  );
-  expect(screen.getByRole("button", { name: "Create channel" })).toBeDisabled();
   fireEvent.change(description, { target: { value: "x".repeat(1001) } });
   expect(description).toHaveValue("x".repeat(1000));
   expect(description).toHaveAccessibleDescription("1,000 of 1,000 characters");
@@ -388,7 +365,7 @@ it("steps the temporary duration, preserves it across Ongoing, and submits only 
   ).not.toBeInTheDocument();
   expect(
     screen.getByRole("radio", { name: "Temporary" }),
-  ).toHaveAccessibleDescription("Cleans up without activity.");
+  ).toHaveAccessibleDescription("Archives without activity.");
   await user.type(screen.getByRole("textbox", { name: "Name" }), "Short lived");
   await user.click(screen.getByRole("radio", { name: "Temporary" }));
   await waitFor(() =>
@@ -442,38 +419,6 @@ it("steps the temporary duration, preserves it across Ongoing, and submits only 
     visibility: "open",
     ttlSeconds: 86400,
   });
-});
-
-it("shows the exact frozen custom duration without allowing adjustment or changing retry", async () => {
-  const user = userEvent.setup();
-  const pending = {
-    name: "Recovery",
-    visibility: "open" as const,
-    ttlSeconds: 3600,
-  };
-  const onCreate = vi.fn(async () => {});
-  render(
-    <CreateChannelDialog
-      {...setupProps()}
-      open
-      pending={pending}
-      onOpenChange={() => {}}
-      onCreate={onCreate}
-    />,
-  );
-  await waitFor(() =>
-    expect(
-      screen.getByText("after 1 hour", { selector: "strong" }),
-    ).toBeVisible(),
-  );
-  const longer = screen.getByRole("button", { name: "Increase duration" });
-  expect(longer).toBeDisabled();
-  expect(
-    screen.getByRole("button", { name: "Decrease duration" }),
-  ).toBeDisabled();
-  await user.click(longer);
-  await user.click(screen.getByRole("button", { name: "Retry channel" }));
-  expect(onCreate).toHaveBeenCalledExactlyOnceWith(pending);
 });
 
 it("confirms both privacy directions in the same modal and preserves the entire creation draft", async () => {
@@ -548,9 +493,7 @@ it("confirms both privacy directions in the same modal and preserves the entire 
       );
       expect(
         screen.getByRole("radio", { name: "Temporary" }),
-      ).toHaveAccessibleDescription(
-        "Cleans up after 2 weeks without activity.",
-      );
+      ).toHaveAccessibleDescription("Archives after 2 weeks without activity.");
       expect(onOpenChange).not.toHaveBeenCalled();
     }
     await user.click(screen.getByRole("switch", { name: "Private" }));
@@ -569,33 +512,6 @@ it("confirms both privacy directions in the same modal and preserves the entire 
     visibility: "open",
     ttlSeconds: 1209600,
   });
-});
-
-it("drops confirmation when frozen recovery arrives and retries only its original request", async () => {
-  const user = userEvent.setup();
-  const onCreate = vi.fn(async () => {});
-  const pending = {
-    name: "Frozen",
-    visibility: "open" as const,
-    ttlSeconds: 3600,
-  };
-  const props = {
-    ...setupProps(),
-    open: true,
-    onOpenChange: vi.fn(),
-    onCreate,
-  };
-  const view = render(<CreateChannelDialog {...props} />);
-  await user.click(screen.getByRole("switch", { name: "Private" }));
-  view.rerender(<CreateChannelDialog {...props} pending={pending} />);
-  expect(screen.getByRole("dialog")).toHaveAccessibleName("Create a channel");
-  const privacy = screen.getByRole("switch", { name: "Private" });
-  expect(privacy).toHaveAttribute("aria-disabled", "true");
-  await user.click(privacy);
-  expect(screen.getByRole("dialog")).toHaveAccessibleName("Create a channel");
-  expect(privacy).not.toBeChecked();
-  await user.click(screen.getByRole("button", { name: "Retry channel" }));
-  expect(onCreate).toHaveBeenCalledExactlyOnceWith(pending);
 });
 
 it("discards the unsaved privacy step and draft when creation closes and reopens", async () => {
@@ -617,8 +533,8 @@ it("discards the unsaved privacy step and draft when creation closes and reopens
   expect(props.onCreate).not.toHaveBeenCalled();
 });
 
-it.each(["work", ""])(
-  "derives the title and fixed destination from the opening group %j",
+it.each(["work", "", "starred"])(
+  "prefills the title and destination from the opening group %j",
   async (initialGroup) => {
     const user = userEvent.setup();
     const onCreate = vi.fn(async () => {});
@@ -628,18 +544,30 @@ it.each(["work", ""])(
         open
         onOpenChange={() => {}}
         onCreate={onCreate}
-        initialGroup={initialGroup}
+        initialGroup={initialGroup === "starred" ? "" : initialGroup}
+        initialStarred={initialGroup === "starred"}
         destinations={[{ id: "work", name: "Work", icon: "📚" }]}
       />,
     );
-    const title = initialGroup
-      ? "Create a channel in Work"
-      : "Create a channel";
+    const title =
+      initialGroup === "starred"
+        ? "Create a channel in Starred"
+        : initialGroup
+          ? "Create a channel in Work"
+          : "Create a channel";
     expect(screen.getByRole("dialog")).toHaveAccessibleName(title);
-    expect(
-      screen.queryByRole("combobox", { name: "Destination group" }),
-    ).not.toBeInTheDocument();
-    if (initialGroup)
+    const workspace = screen.queryByRole("combobox", {
+      name: "Destination workspace",
+    });
+    if (initialGroup === "work") expect(workspace).toHaveTextContent("Work");
+    else expect(workspace).not.toBeInTheDocument();
+    if (initialGroup === "starred")
+      expect(
+        screen
+          .getByRole("dialog")
+          .querySelector("[data-sidebar-group-icon] svg"),
+      ).toBeInTheDocument();
+    else if (initialGroup)
       expect(
         screen
           .getByRole("dialog")
@@ -659,7 +587,8 @@ it.each(["work", ""])(
               agents: [],
               canvas: "",
               templateId: "",
-              groupId: initialGroup,
+              groupId: initialGroup === "starred" ? "" : initialGroup,
+              ...(initialGroup === "starred" ? { starred: true } : {}),
             },
           }
         : {}),
@@ -685,8 +614,8 @@ it.each([true, false])(
     await user.click(screen.getByRole("button", { name: "Create channel" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       groupsReady
-        ? "This group is no longer available. Close this dialog and create from another sidebar group or Channels."
-        : "Wait for saved sidebar groups to load, then try again.",
+        ? "This workspace is no longer available. Choose another workspace or Team."
+        : "Wait for saved workspaces to load, then try again.",
     );
     expect(onCreate).not.toHaveBeenCalled();
     view.rerender(
@@ -707,26 +636,6 @@ it.each([true, false])(
     );
   },
 );
-
-it("does not relabel an ungrouped frozen retry with the group used to reopen it", async () => {
-  const user = userEvent.setup();
-  const onCreate = vi.fn(async () => {});
-  const pending = { name: "Frozen", visibility: "open" as const };
-  render(
-    <CreateChannelDialog
-      {...setupProps()}
-      open
-      onOpenChange={() => {}}
-      onCreate={onCreate}
-      pending={pending}
-      initialGroup="work"
-      destinations={[{ id: "work", name: "Work" }]}
-    />,
-  );
-  expect(screen.getByRole("dialog")).toHaveAccessibleName("Create a channel");
-  await user.click(screen.getByRole("button", { name: "Retry channel" }));
-  expect(onCreate).toHaveBeenCalledExactlyOnceWith(pending);
-});
 
 it.each(["backdrop", "Escape", "Close"])(
   "guards dirty Create dismissal via %s and only discards explicitly",
@@ -827,26 +736,6 @@ it.each(["Name", "Description", "Private", "Temporary"])(
     expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
   },
 );
-
-it("does not offer to discard frozen recovery when it arrives during confirmation", async () => {
-  const user = userEvent.setup();
-  const props = {
-    ...setupProps(),
-    open: true,
-    onOpenChange: vi.fn(),
-    onCreate: vi.fn(async () => {}),
-  };
-  const view = render(<CreateChannelDialog {...props} />);
-  await user.type(screen.getByRole("textbox", { name: "Name" }), "Draft");
-  await user.keyboard("{Escape}");
-  expect(screen.getByRole("dialog")).toHaveAccessibleName("Discard changes?");
-  const pending = { name: "Frozen", visibility: "open" as const };
-  view.rerender(<CreateChannelDialog {...props} pending={pending} />);
-  expect(screen.getByRole("dialog")).toHaveAccessibleName("Create a channel");
-  await user.click(document.querySelector(".buzz-dialog-backdrop") as Element);
-  expect(props.onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
-  expect(props.onCreate).not.toHaveBeenCalled();
-});
 
 const ada = "a".repeat(64);
 const bo = "b".repeat(64);
@@ -1270,6 +1159,13 @@ it("creates a plain channel from a template whose members are all elsewhere once
     expect(onCreate).toHaveBeenCalledWith({
       name: "plain",
       visibility: "open",
+      // Kept so a retry still matches once the template resolves differently.
+      setup: {
+        agents: [],
+        canvas: "",
+        groupId: "",
+        templateId: expect.any(String),
+      },
     }),
   );
 });
@@ -1318,6 +1214,13 @@ it("creates a plain channel from a template that adds nothing here", async () =>
     expect(onCreate).toHaveBeenCalledWith({
       name: "plain",
       visibility: "open",
+      // Kept so a retry still matches once the template resolves differently.
+      setup: {
+        agents: [],
+        canvas: "",
+        groupId: "",
+        templateId: expect.any(String),
+      },
     }),
   );
 });

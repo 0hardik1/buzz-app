@@ -1,7 +1,11 @@
+import type { ReactNode } from "react";
 import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
+import { PencilSimpleIcon } from "../../shared/design-system/icons/index";
 import type { Profile } from "../relay/contracts";
 import styles from "./Messages.module.css";
 import { avatarMedia } from "../../shared/avatar-source";
+
+const SHOWN_PARTICIPANTS = 3;
 
 /** Shared summary contents for channel threads and collapsed reply branches. */
 export function ReplySummary({
@@ -13,8 +17,22 @@ export function ReplySummary({
   media,
   unreadLabel,
   unreadCount,
+  workingParticipants = [],
+  activity,
+  hideEmptyLabel = false,
+  draft = false,
+  replied = count > 0,
 }: {
+  workingParticipants?: readonly string[];
+  activity?: ReactNode;
+  /** Activity-only triggers already have an accessible thread action label. */
+  hideEmptyLabel?: boolean;
+  /** An unsent reply waits in this thread; it names an empty thread itself. */
+  draft?: boolean;
+  /** The thread has replies, even when an activity line hides their count. */
+  replied?: boolean;
   count: number;
+  /** Newest replier first. */
   participants: readonly string[];
   profiles?: ReadonlyMap<string, Profile> | undefined;
   agentPubkeys?: ReadonlySet<string> | undefined;
@@ -23,11 +41,21 @@ export function ReplySummary({
   unreadLabel?: string | undefined;
   unreadCount?: number;
 }) {
+  const newest = [...new Set(participants)].filter(
+    (id) => !workingParticipants.includes(id),
+  );
+  // Later avatars overlap earlier ones, so the newest replier renders last:
+  // on top, beside the count.
+  const stacked = [
+    ...newest.slice(0, SHOWN_PARTICIPANTS).reverse(),
+    ...newest.slice(SHOWN_PARTICIPANTS),
+  ];
   return (
     <>
       <AvatarStack
         size="small"
-        items={participants.map((id) => {
+        max={SHOWN_PARTICIPANTS}
+        items={stacked.map((id) => {
           const profile = profiles?.get(id);
           return {
             id,
@@ -37,9 +65,14 @@ export function ReplySummary({
           };
         })}
       />
-      <span>
-        {count} {count === 1 ? "reply" : "replies"}
-      </span>
+      {activity}
+      {(count > 0 || !(hideEmptyLabel || draft)) && (
+        <span>
+          {count > 0
+            ? `${count} ${count === 1 ? "reply" : "replies"}`
+            : "View thread"}
+        </span>
+      )}
       {unreadCount ? (
         <span>({unreadCount} new)</span>
       ) : unreadLabel ? (
@@ -49,6 +82,13 @@ export function ReplySummary({
           title={unreadLabel}
         />
       ) : null}
+      {draft && (
+        <span className={styles.threadDraft} data-thread-draft="">
+          {replied && <span aria-hidden="true">·</span>}
+          <PencilSimpleIcon size={14} aria-hidden="true" />
+          {replied ? "Draft" : "Draft reply"}
+        </span>
+      )}
     </>
   );
 }

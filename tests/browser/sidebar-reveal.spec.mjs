@@ -1,5 +1,5 @@
 import { expect, test } from "./playwright-test.mjs";
-import { build, preview } from "vite";
+import { build, preview } from "./vite-server.mjs";
 import react from "@vitejs/plugin-react";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -42,6 +42,13 @@ test.afterAll(async () => {
 });
 
 const key = `buzz-view.v1:${JSON.stringify(["fixture", "channel-sidebar"])}`;
+const open = async (page) => {
+  await page.goto(url);
+  // Navigation can finish before React's first render publishes the fixture API.
+  await page.waitForFunction(
+    () => typeof window.sidebar?.update === "function",
+  );
+};
 // Scroll events dispatch in the rendering step, before animation frames.
 const settle = (page) =>
   page.evaluate(
@@ -58,16 +65,42 @@ const rows = (page, count) =>
     count,
   );
 
+// jsdom does not reject focus inside hidden/inert content. Use the real row
+// and disclosure owners here; preference-refresh permutations stay in Vitest.
+test("focus skips a row relocated into a collapsed section", async ({
+  page,
+}) => {
+  const { errors } = watchPageErrors(page);
+  await open(page);
+  await update(page, { relocated: false });
+  const beta = page.locator('button[data-channel-id="beta"]');
+  await beta.focus();
+  await expect(beta).toBeFocused();
+
+  await update(page, { relocated: true });
+
+  await expect(
+    page.locator('[data-sidebar-section="starred"] [data-channel-id="beta"]'),
+  ).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "gamma", exact: true }),
+  ).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
 test("restoring the saved position does not cancel a delayed entry's reveal", async ({
   page,
 }) => {
   const { errors } = watchPageErrors(page);
-  await page.goto(url);
+  await open(page);
   await page.evaluate(
     ([key, value]) => localStorage.setItem(key, JSON.stringify(value)),
     [key, { collapsed: [], scrollTop: 800, width: 260, location: "row:5" }],
   );
-  const sidebar = page.getByRole("navigation", { name: "Sidebar" });
+  const sidebar = page.getByRole("navigation", {
+    name: "Sidebar",
+    exact: true,
+  });
   // Remount at another destination whose entry is still being looked up.
   await page.evaluate(() =>
     window.sidebar.update({
@@ -92,8 +125,11 @@ test("a user scroll before a delayed entry renders keeps that position for its d
   page,
 }) => {
   const { errors } = watchPageErrors(page);
-  await page.goto(url);
-  const sidebar = page.getByRole("navigation", { name: "Sidebar" });
+  await open(page);
+  const sidebar = page.getByRole("navigation", {
+    name: "Sidebar",
+    exact: true,
+  });
   await rows(page, 45);
   await update(page, { mounted: true });
   await expect(sidebar.locator('[data-row="0"]')).toHaveAttribute(
@@ -125,5 +161,71 @@ test("a user scroll before a delayed entry renders keeps that position for its d
   );
   await settle(page);
   expect(await sidebar.evaluate((element) => element.scrollTop)).toBe(200);
+  expect(errors).toEqual([]);
+});
+
+test("late contributed rows retry the sidebar reveal without moving the owner", async ({
+  page,
+}) => {
+  const { errors } = watchPageErrors(page);
+  await open(page);
+  const sidebar = page.getByRole("navigation", {
+    name: "Sidebar",
+    exact: true,
+  });
+  await page.evaluate(() =>
+    window.sidebar.update({
+      mounted: true,
+      at: "conversation:late",
+      rows: window.sidebar.rows(50),
+    }),
+  );
+  const contributedRow = sidebar.getByRole("button", { name: "Late item" });
+  await expect(contributedRow).toHaveCount(0);
+
+  // This external-store publication rerenders SectionContents, not Sidebar.
+  await page.evaluate(() =>
+    window.sidebar.publishContributionRows([
+      { id: "late", label: "Late item" },
+    ]),
+  );
+  await expect(contributedRow).toBeInViewport({ ratio: 0.9 });
+  await expect(contributedRow).toHaveAttribute("aria-current", "page");
+  expect(errors).toEqual([]);
+});
+
+test("a user scroll before contributed rows arrive cancels their reveal", async ({
+  page,
+}) => {
+  const { errors } = watchPageErrors(page);
+  await open(page);
+  const sidebar = page.getByRole("navigation", {
+    name: "Sidebar",
+    exact: true,
+  });
+  await page.evaluate(() =>
+    window.sidebar.update({
+      mounted: true,
+      at: "conversation:late",
+      rows: window.sidebar.rows(50),
+    }),
+  );
+  await sidebar.hover();
+  await page.mouse.wheel(0, 200);
+  await expect
+    .poll(() => sidebar.evaluate((element) => element.scrollTop))
+    .toBe(200);
+  await settle(page);
+
+  await page.evaluate(() =>
+    window.sidebar.publishContributionRows([
+      { id: "late", label: "Late item" },
+    ]),
+  );
+  const contributedRow = sidebar.getByRole("button", { name: "Late item" });
+  await expect(contributedRow).toHaveAttribute("aria-current", "page");
+  await settle(page);
+  expect(await sidebar.evaluate((element) => element.scrollTop)).toBe(200);
+  await expect(contributedRow).not.toBeInViewport();
   expect(errors).toEqual([]);
 });

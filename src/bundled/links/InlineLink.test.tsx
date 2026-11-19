@@ -1,6 +1,11 @@
+// @vitest-environment jsdom
 import { expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { LockIcon, TableIcon } from "../../shared/design-system/icons/index";
+import {
+  HashIcon,
+  LockIcon,
+  TableIcon,
+} from "../../shared/design-system/icons/index";
 import styles from "../../shared/InlineReference.module.css";
 import { InlineLink, LinkLabel, linkKind } from "./InlineLink";
 import { apply } from "./index";
@@ -8,8 +13,14 @@ import type { LinkRenderer } from "../../features/conversation/contracts";
 import {
   LinkLabelContext,
   LinkContentContext,
-  LinkChannelPrivateContext,
+  LinkChannelKindContext,
 } from "../../features/conversation/LinkLabelContext";
+
+function textOf(markup: string) {
+  const container = document.createElement("div");
+  container.innerHTML = markup;
+  return container.textContent;
+}
 
 it("claims recognised services and Buzz entities by default and unknown websites as a catch-all", () => {
   let renderer: LinkRenderer | undefined;
@@ -33,38 +44,97 @@ it("identifies exact GitHub hosts, ordinary websites, and Buzz entity links", ()
 });
 
 it.each([
-  ["buzz://channel/general", "channel", "Channel"],
-  [`buzz://message?channel=general&id=${"a".repeat(64)}`, "message", "Message"],
+  ["buzz://channel/general", "channel", "Channel", "hash"],
+  [
+    `buzz://message?channel=general&id=${"a".repeat(64)}`,
+    "message",
+    "Message",
+    "message-2",
+  ],
   [
     `buzz://message?channel=general&id=${"a".repeat(64)}&thread=${"b".repeat(64)}`,
     "thread",
     "Thread",
+    "message-2",
   ],
-])("renders semantic Buzz labels for %s", (href, kind, label) => {
-  const html = renderToStaticMarkup(<InlineLink href={href} />);
-  expect(html).toContain(`data-link-kind="${kind}"`);
-  expect(html.replace(/<[^>]+>/g, "")).toBe(label);
-  expect(html).toContain('href="buzz://');
-});
+])(
+  "renders semantic Buzz labels and icons for %s",
+  (href, kind, label, icon) => {
+    const html = renderToStaticMarkup(<InlineLink href={href} />);
+    expect(html).toContain(`data-link-kind="${kind}"`);
+    expect(html).toContain(`tabler-icon-${icon}`);
+    expect(textOf(html)).toBe(label);
+    expect(html).toContain('href="buzz://');
+  },
+);
 
 it("renders private channel links with the design-system lock icon", () => {
   const markup = renderToStaticMarkup(
-    <LinkChannelPrivateContext value>
+    <LinkChannelKindContext value="private">
       <InlineLink href="buzz://channel/private">#private</InlineLink>
-    </LinkChannelPrivateContext>,
+    </LinkChannelKindContext>,
+  );
+  // A little apart from the name, where a public channel's hash sits flush.
+  expect(markup).toContain(
+    renderToStaticMarkup(
+      <LockIcon className={`${styles.icon} ${styles.snug}`} />,
+    ),
+  );
+  expect(textOf(markup)).toBe("private");
+});
+
+it("uses the Solo bubble and keeps the full authored chat title", () => {
+  const markup = renderToStaticMarkup(
+    <LinkChannelKindContext value="chat">
+      <InlineLink href="buzz://channel/solo">#Design notes</InlineLink>
+    </LinkChannelKindContext>,
+  );
+  expect(markup).toContain('data-link-kind="chat"');
+  expect(markup).toContain("tabler-icon-message-circle");
+  expect(textOf(markup)).toBe("#Design notes");
+});
+
+it("renders public channel links with the hash flush against the name", () => {
+  const markup = renderToStaticMarkup(
+    <InlineLink href="buzz://channel/public">#public</InlineLink>,
   );
   expect(markup).toContain(
-    renderToStaticMarkup(<LockIcon className={styles.icon} />),
+    renderToStaticMarkup(
+      <HashIcon className={`${styles.icon} ${styles.flush}`} />,
+    ),
   );
-  expect(markup.replace(/<[^>]+>/g, "")).toBe("private");
+  expect(textOf(markup)).toBe("public");
+});
+
+it("shows a supplied icon in place of the service's, with the label intact", () => {
+  const href = "https://github.com/block/buzz/pull/1234";
+  const icon = <TableIcon data-supplied="" className={styles.icon} />;
+  const markup = renderToStaticMarkup(
+    <LinkLabel href={href} label="Fix the lab" icon={icon} />,
+  );
+  expect(markup).toContain(renderToStaticMarkup(icon));
+  expect(markup).not.toContain("tabler-icon-brand-github");
+  expect(textOf(markup)).toBe("Fix the lab");
+  // Authored formatting takes the supplied icon too.
+  const formatted = renderToStaticMarkup(
+    <LinkContentContext value={<em>Fix</em>}>
+      <LinkLabel href={href} label="Fix" icon={icon} />
+    </LinkContentContext>,
+  );
+  expect(formatted).toContain(renderToStaticMarkup(icon));
+  expect(formatted).toContain("<em>Fix</em>");
 });
 
 it.each([
   "javascript:alert(1)",
+  "JaVaScRiPt:alert(1)",
+  "java\tscript:alert(1)",
   "data:text/html,hello",
+  "//github.com/block/buzz",
   "buzz://unknown",
   "not a URL",
 ])("leaves unsupported destinations as plain text: %s", (href) => {
+  expect(linkKind(href)).toBeNull();
   expect(
     renderToStaticMarkup(<InlineLink href={href}>Reference</InlineLink>),
   ).toBe("Reference");
@@ -78,7 +148,7 @@ it("preserves the destination and readable full label", () => {
   expect(markup).toContain(`href="${href}"`);
   expect(markup).toContain('data-kind="github"');
   expect(markup).toContain('aria-hidden="true"');
-  expect(markup.replace(/<[^>]+>/g, "")).toBe(href);
+  expect(textOf(markup)).toBe(href);
 });
 
 it.each([
@@ -124,11 +194,37 @@ it.each([45, 46])(
   (length) => {
     const href = "https://figma.com/design/".padEnd(length, "a");
     const markup = renderToStaticMarkup(<InlineLink href={href} />);
-    const text = markup.replace(/<[^>]+>/g, "");
+    const text = textOf(markup);
     expect(markup).toContain(`href="${href}"`);
-    expect(text).toBe(length <= 45 ? href : `${href.slice(0, 44)}…`);
+    expect(text).toBe(
+      length <= 45 ? href : `${href.slice(0, 34)}…${href.slice(-10)}`,
+    );
   },
 );
+
+it("distinguishes long raw URLs by their final ten characters", () => {
+  const prefix = "https://example.test/appsecreporter/dashboard/bundles/";
+  const suffixes = ["0123456789", "abcdefghij", "klmnopqrst"];
+  const labels = suffixes.map((suffix) => {
+    const href = `${prefix}${"a".repeat(48)}${suffix}`;
+    const markup = renderToStaticMarkup(<InlineLink href={href} />);
+    expect(markup).toContain(`href="${href}"`);
+    const text = textOf(markup) ?? "";
+    expect(Array.from(text)).toHaveLength(45);
+    expect(text).toBe(`https://example.test/appsecreporte…${suffix}`);
+    return text;
+  });
+  expect(new Set(labels).size).toBe(3);
+});
+
+it("keeps whole Unicode code points at both ends of a shortened URL", () => {
+  const href = `https://example.test/${"a".repeat(12)}😀${"b".repeat(20)}😀123456789`;
+  const markup = renderToStaticMarkup(<InlineLink href={href} />);
+  expect(textOf(markup)).toBe(
+    `https://example.test/${"a".repeat(12)}😀…😀123456789`,
+  );
+  expect(Array.from(textOf(markup) ?? "")).toHaveLength(45);
+});
 
 it("preserves authored labels on long URLs", () => {
   const href = `https://figma.com/design/${"a".repeat(100)}`;
@@ -136,13 +232,13 @@ it("preserves authored labels on long URLs", () => {
   const markup = renderToStaticMarkup(
     <InlineLink href={href}>{label}</InlineLink>,
   );
-  expect(markup.replace(/<[^>]+>/g, "")).toBe(label);
+  expect(textOf(markup)).toBe(label);
   expect(markup).toContain(`href="${href}"`);
 });
 
 it("truncates a Unicode URL when Markdown encodes its destination", () => {
   const label =
-    "https://www.figma.com/design/example/Builderlab-—-Branding?node-id=1119-21207";
+    "https://www.figma.com/design/example/Builderlab-Café-Branding?node-id=1119-21207";
   const href = new URL(label).href;
   const markup = renderToStaticMarkup(
     <LinkLabelContext value={label}>
@@ -151,7 +247,7 @@ it("truncates a Unicode URL when Markdown encodes its destination", () => {
       </LinkContentContext>
     </LinkLabelContext>,
   );
-  expect(markup.replace(/<[^>]+>/g, "")).toBe(`${label.slice(0, 44)}…`);
+  expect(textOf(markup)).toBe(`${label.slice(0, 34)}…${label.slice(-10)}`);
 });
 
 it.each(["figma.com", "teams.microsoft.com"])(
@@ -183,6 +279,20 @@ it.each([false, true])(
       renderToStaticMarkup(<TableIcon className={styles.icon} />),
     );
     expect(markup).toContain(`href="${href}"`);
-    expect(markup.replace(/<[^>]+>/g, "")).toBe("the tracker");
+    expect(textOf(markup)).toBe("the tracker");
   },
 );
+
+it("keeps the icon with the whole first character of a label", () => {
+  const markup = renderToStaticMarkup(
+    <LinkLabelContext value="👩🏽‍💻-builders">
+      <LinkLabel href="buzz://channel/builders" />
+    </LinkLabelContext>,
+  );
+  const container = document.createElement("div");
+  container.innerHTML = markup;
+  expect(container.querySelector(`.${styles.lead}`)?.textContent).toBe(
+    "👩🏽‍💻",
+  );
+  expect(container.textContent).toBe("👩🏽‍💻-builders");
+});

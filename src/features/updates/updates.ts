@@ -26,7 +26,7 @@ export type UpdatePlatform = {
   relaunch(): Promise<void>;
 };
 
-export const BACKGROUND_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+export const BACKGROUND_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 // Native request deadlines, so a stalled server cannot pin a check or download.
 // The updater does not carry the check timeout over to the download.
 export const UPDATE_CHECK_TIMEOUT_MS = 30 * 1000;
@@ -67,7 +67,6 @@ export function createUpdates(platform: UpdatePlatform = tauriPlatform) {
   let installInFlight = false;
   let manualResultRequested = false;
   let inlineViews = 0;
-  let noticeDismissed = false;
   let noticeRecovery = false;
   const listeners = new Set<() => void>();
   const notify = () => {
@@ -76,8 +75,6 @@ export function createUpdates(platform: UpdatePlatform = tauriPlatform) {
   const setStatus = (next: UpdateStatus) => {
     status = next;
     if (next.state === "ready") noticeRecovery = false;
-    if (next.state !== "ready" && next.state !== "installing")
-      noticeDismissed = false;
     notify();
   };
 
@@ -185,13 +182,10 @@ export function createUpdates(platform: UpdatePlatform = tauriPlatform) {
       };
     },
     inlineVisible: () => inlineViews > 0,
-    /** The ready notice stays dismissed across remounts until the update resolves. */
     dismissNotice() {
-      noticeDismissed = true;
       noticeRecovery = false;
       notify();
     },
-    noticeDismissed: () => noticeDismissed,
     /** Keep failed installs and their retry results reachable outside Settings. */
     noticeRecovery: () => noticeRecovery,
     checkForUpdate: () => runCheck(false),
