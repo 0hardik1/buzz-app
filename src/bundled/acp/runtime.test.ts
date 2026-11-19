@@ -401,6 +401,24 @@ describe("AcpRuntime", () => {
     expect(two?.text).not.toContain(INSTRUCTIONS);
   });
 
+  it("ends a turn's prompt with its conversation's instructions", async () => {
+    const config = await confirmed();
+    const { fake, deliver, sync, agent } = setup();
+    sync(config);
+    const conversationInstructions = vi.fn(() => ({
+      plugin: "acme.tasks",
+      text: "Review only.",
+    }));
+    Object.assign(agent, { conversationInstructions });
+    const mention = message("1", "@Opal hi");
+    await deliver(mention, config).run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+    expect(fake.harnesses[0]?.turns[0]?.text).toMatch(
+      /<owner-instructions source="acme\.tasks">\n[\s\S]*\n\nReview only\.\n<\/owner-instructions>/,
+    );
+    expect(conversationInstructions).toHaveBeenCalledWith(channel, mention.id);
+  });
+
   it("sends the instructions as ACP's appended system prompt when advertised", async () => {
     const config = await confirmed();
     const { fake, deliver, sync } = setup({

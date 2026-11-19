@@ -401,6 +401,7 @@ export class AcpRuntime {
         return {
           text: this.review(
             entry,
+            context,
             turnPrompt({
               ...turn,
               agent: agent.pubkey,
@@ -492,9 +493,11 @@ export class AcpRuntime {
       .finally(() => this.notify());
   }
 
-  /** `text` with the Buzz tools' end-of-turn note, when they have one. */
-  private review(entry: Entry, text: string) {
-    const note = turnNote(entry.handle);
+  /** `text` with the Buzz tools' end-of-turn note for conversation
+   * `context`, when they have one. ACP has no community session, so no
+   * instructions are cleared when absent. */
+  private review(entry: Entry, { channel, root }: Context, text: string) {
+    const note = turnNote(entry.handle, channel, root);
     return note ? `${text}\n\n${note}` : text;
   }
 
