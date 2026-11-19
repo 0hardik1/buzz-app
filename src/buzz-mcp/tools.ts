@@ -1770,10 +1770,7 @@ function audienceOf(args: Args): string[][] {
 
 /** Whether message content supplies recipients in addition to explicit mentions. */
 function inferMentionsOf(args: Args): boolean {
-  if (
-    Object.hasOwn(args, "infer_mentions") &&
-    typeof args.infer_mentions !== "boolean"
-  )
+  if (args.infer_mentions != null && typeof args.infer_mentions !== "boolean")
     throw new Error("infer_mentions must be a boolean.");
   return args.infer_mentions !== false;
 }

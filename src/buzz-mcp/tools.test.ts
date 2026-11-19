@@ -299,6 +299,8 @@ describe.each(["send", "reply_in_subthread"])(
     describe.each([
       ["omitted", {}],
       ["explicit true", { infer_mentions: true }],
+      ["explicit null", { infer_mentions: null }],
+      ["explicit undefined", { infer_mentions: undefined }],
     ])("%s inference", (_, option) => {
       it.each([
         ["profile link", `nostr:${npubEncode(alice)}`],
@@ -424,13 +426,53 @@ describe.each(["send", "reply_in_subthread"])(
       ["protected", true],
     ] as const)("%s session", (_, protectedSession) => {
       it.each([
-        ["null", null],
+        ["omitted", {}],
+        ["explicit true", { infer_mentions: true }],
+        ["explicit null", { infer_mentions: null }],
+        ["explicit undefined", { infer_mentions: undefined }],
+      ])(
+        "infers recipients from file text with %s inference",
+        async (_, option) => {
+          const { client, published } = fake(community);
+          const text = `@Alice Smith nostr:${npubEncode(alice)}`;
+          client.read = vi.fn(async () => new TextEncoder().encode(text));
+          if (protectedSession) client.protect = vi.fn(async () => {});
+          await callSessionTool(client, { channel: "chan", root }, name, {
+            parent: root,
+            audience: "everyone",
+            path: "body.md",
+            ...option,
+          });
+          expect(client.read).toHaveBeenCalledExactlyOnceWith("body.md");
+          expect(published).toHaveLength(1);
+          expect(published[0]?.content).toBe(text);
+          expect(published[0]?.tags.filter(([tag]) => tag === "p")).toEqual([
+            ["p", alice],
+          ]);
+          if (protectedSession)
+            expect(client.protect).toHaveBeenCalledWith(
+              expect.objectContaining({
+                kind: "tool",
+                content: {
+                  title: name,
+                  arguments: {
+                    parent: root,
+                    audience: "everyone",
+                    text,
+                    ...option,
+                  },
+                },
+              }),
+            );
+        },
+      );
+
+      it.each([
         ["string false", "false"],
         ["zero", 0],
         ["one", 1],
         ["array", []],
         ["object", {}],
-        ["explicit undefined", undefined],
       ])("rejects %s inference before file I/O", async (_, value) => {
         const { client, published } = fake(community);
         if (protectedSession) client.protect = vi.fn(async () => {});
