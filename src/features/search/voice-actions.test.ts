@@ -438,6 +438,39 @@ describe("buildActionDecision & decideVoiceAction", () => {
     });
   });
 
+  it("fills an empty slot from the place only at the step-2 bar", () => {
+    const built = buildActionDecision({
+      spoken: "add buzz community",
+      hovered: hoveredSection,
+      actions: channelVoiceActions.slice(2, 3),
+      entities,
+      places,
+    });
+    const move =
+      "Put a channel in here, into section Work (move it to this section)";
+    const resolved = built.resolve({
+      action: {
+        type: "choice",
+        choice: move,
+        confidence: 0.77,
+        probabilities: { [move]: 0.77 },
+      },
+      channel: {
+        type: "choice",
+        choice: "none",
+        confidence: 0.79,
+        probabilities: { none: 0.79 },
+      },
+      place: {
+        type: "choice",
+        choice: "#buzz-security",
+        confidence: 0.52,
+        probabilities: { "#buzz-security": 0.52 },
+      },
+    });
+    expect(resolved.kind).toBe("none");
+  });
+
   it("returns none when action or slot confidence is below threshold", () => {
     const built = buildActionDecision({
       spoken: "move this",

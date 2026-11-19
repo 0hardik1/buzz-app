@@ -654,9 +654,12 @@ export function buildActionDecision(
         const fallbackFromPlace = ():
           | { entity: VoiceEntity; prob: number }
           | undefined => {
+          // Stands in for an empty find, so it clears the same bar as
+          // step 2: a silent action never gets in through a weaker place.
           if (
             placeResolved.outcome !== "found" ||
-            placeResolved.probability < threshold
+            placeResolved.probability <
+              Math.max(threshold, NAVIGATE_OVERRIDE_PLACE_THRESHOLD)
           ) {
             return undefined;
           }
