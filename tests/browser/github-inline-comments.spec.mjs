@@ -32,6 +32,7 @@ async function line(page, value = "Old line 5000") {
   await file.focus();
   for (let index = 0; index < (value === "New line 5001" ? 3 : 1); index++)
     await file.press("ArrowDown");
+  await expect(file.getByRole("status")).toHaveText(value);
   await file.press("Enter");
   const field = page.getByRole("textbox", { name: "Comment", exact: true });
   await expect(field).toBeFocused();
@@ -81,12 +82,24 @@ for (const layout of ["Unified", "Split"]) {
     await expect(
       page.getByText(/Posting as|Read with your gh sign-in/),
     ).toHaveCount(0);
+    const file = page.getByRole("region", {
+      name: "src/example.ts",
+      exact: true,
+    });
+    await file.focus();
+    for (let index = 0; index < 4; index++) await file.press("ArrowDown");
+    await expect(file.getByRole("status")).toHaveText(
+      "Context: Old line 5001 or New line 5002. Press Enter to choose a side.",
+    );
+    await file.press("Escape");
+    await expect(file.getByRole("status")).toBeEmpty();
     const field = await line(page);
     await field.fill("Synthetic inline feedback");
     await field.press("Escape");
     await expect(
       page.getByRole("region", { name: "src/example.ts", exact: true }),
     ).toBeFocused();
+    await expect(file.getByRole("status")).toBeEmpty();
     await line(page);
     await field.fill("Discard when leaving Changes");
     await page.getByRole("tab", { name: "Summary", exact: true }).click();

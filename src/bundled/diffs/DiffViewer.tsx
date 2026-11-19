@@ -242,6 +242,13 @@ function PierreFile({
   const instructions = useId();
   const rows = useMemo(() => (source ? commentLines(source) : []), [source]);
   const choices = rows.flat();
+  const keyboardRow = rows.find((row) =>
+    row.some(
+      (line) =>
+        line.side === keyboardLine?.side &&
+        line.lineNumber === keyboardLine.lineNumber,
+    ),
+  );
   const path = file.name;
   const select = (line: DiffLine, element: HTMLElement) => {
     const candidates = rows.find((row) =>
@@ -319,6 +326,15 @@ function PierreFile({
       {comments && !comments.readOnly && (
         <span id={instructions} className="sr-only">
           Use Up and Down arrows to select a diff line, then Enter to comment.
+        </span>
+      )}
+      {comments && !comments.readOnly && (
+        <span className="sr-only" role="status">
+          {keyboardRow?.length === 2
+            ? `Context: Old line ${keyboardRow[0]?.lineNumber} or New line ${keyboardRow[1]?.lineNumber}. Press Enter to choose a side.`
+            : keyboardLine
+              ? `${keyboardLine.side === "deletions" ? "Old" : "New"} line ${keyboardLine.lineNumber}`
+              : ""}
         </span>
       )}
       <ReactFileDiff
