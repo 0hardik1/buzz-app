@@ -4,6 +4,7 @@ import {
   validActiveWindow,
   DEFAULT_ACTIVE_WINDOW_SECONDS,
   HOME_SIDEBAR_SECTIONS,
+  LEGACY_DEVICE_SECTION_ORDER,
   MAX_WORKSPACES,
   MAX_WORKSPACE_ASSIGNMENTS,
   validWorkspaceSectionOrder,
@@ -106,7 +107,8 @@ export function editSidebarSectionOrder(
     const live = workspaceSectionOrder(groups);
     const wanted = new Set(sectionIds.filter((id) => live.includes(id)));
     const order = [...wanted, ...live.filter((id) => !wanted.has(id))];
-    return order.every((key, index) => key === live[index])
+    return (groups.sectionOrder?.length || !wanted.size) &&
+      order.every((key, index) => key === live[index])
       ? current
       : { ...current, sectionOrder: order };
   }
@@ -156,7 +158,10 @@ export function validSidebarAssignment(
         (createSection.icon === undefined ||
           validSidebarSectionIcon(createSection.icon)) &&
         (createSection.position === undefined ||
-          createSection.position === "first")))
+          createSection.position === "first") &&
+        (createSection.soloFirst === undefined ||
+          (createSection.soloFirst === true &&
+            createSection.position === "first"))))
   );
 }
 
@@ -296,16 +301,19 @@ export function editSidebarAssignment(
   )
     return next;
   const key = `group:${createSection.id}`;
+  const groups = projectSidebarPreferences(
+    current,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true,
+  );
   const previous = workspaceSectionOrder(
-    projectSidebarPreferences(
-      current,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      true,
-    ),
+    createSection.soloFirst && !groups.sectionOrder?.length
+      ? { ...groups, sectionOrder: LEGACY_DEVICE_SECTION_ORDER }
+      : groups,
   );
   const first = previous.findIndex((entry) => entry.startsWith("group:"));
   const order = [...previous];

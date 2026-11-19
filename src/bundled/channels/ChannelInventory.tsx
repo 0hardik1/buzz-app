@@ -50,6 +50,7 @@ import {
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import {
   SIDEBAR_PAGES_SECTION,
+  LEGACY_DEVICE_SECTION_ORDER,
   workspaceSectionOrder,
 } from "../../features/relay/sidebar-preferences";
 import type { RelayData } from "../../features/relay/service";
@@ -264,7 +265,7 @@ export function ChannelInventory({
     return data &&
       !data.sectionOrder?.length &&
       readView<unknown>(scope, "navigation-scope", null) !== null
-      ? { ...data, sectionOrder: [SIDEBAR_PAGES_SECTION, "solo", "starred"] }
+      ? { ...data, sectionOrder: LEGACY_DEVICE_SECTION_ORDER }
       : data;
   }, [preferences.data, scope]);
   const sectionSort = useCallback(
@@ -2593,7 +2594,13 @@ export function ChannelInventory({
               return preferences.createAndAssign(creatingFor.channel.id, {
                 ...section,
                 ...(creatingFor.position
-                  ? { position: creatingFor.position }
+                  ? {
+                      position: creatingFor.position,
+                      ...(layoutPreferences?.sectionOrder ===
+                      LEGACY_DEVICE_SECTION_ORDER
+                        ? { soloFirst: true }
+                        : {}),
+                    }
                   : {}),
               });
             }}

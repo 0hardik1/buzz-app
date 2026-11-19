@@ -120,6 +120,12 @@ it("preserves both sets of filings, template coordinates and ordering when legac
   expect(workspaceSectionOrder(workspaceBaseRecord(decoded))).toEqual(
     sectionOrder,
   );
+  const alreadyUnified = workspaceBaseRecord({ ...legacy, sectionOrder: [] });
+  expect(importWorkspaceFallback(alreadyUnified, decoded).sectionOrder).toEqual(
+    sectionOrder,
+  );
+  const reordered = { ...alreadyUnified, sectionOrder: ["starred", "solo"] };
+  expect(importWorkspaceFallback(reordered, decoded)).toBe(reordered);
 });
 
 it("puts Solo before Starred and existing Team sections even without Solo workspaces", () => {

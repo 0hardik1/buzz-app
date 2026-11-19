@@ -486,6 +486,60 @@ async function revealCreate(page) {
     .toBe("auto");
 }
 
+test.describe("when a device falls back to its old sidebar", () => {
+  test.use({ savedSidebar: "unified" });
+
+  test("dragging into a new workspace keeps Solo above Starred after reload", async ({
+    page,
+    app,
+  }) => {
+    await page.addInitScript((viewer) => {
+      const key = JSON.stringify([
+        `https://primary.example:${viewer}`,
+        "navigation-scope",
+      ]);
+      localStorage.setItem(
+        `buzz-view.v1:${key}`,
+        JSON.stringify({ filter: "all" }),
+      );
+    }, app.viewer);
+    await page.goto(app.origin);
+    await openPage(page, "Messages");
+    const beta = page.locator(
+      '[data-sidebar-section="group:work"] [data-channel-id="beta"]',
+    );
+    await expect(beta).toBeVisible();
+    const readOrder = () =>
+      page
+        .locator(
+          '[data-sidebar-section="solo"], [data-sidebar-section="starred"], [data-sidebar-section^="group:"]',
+        )
+        .evaluateAll((sections) =>
+          sections.map((section) => section.dataset.sidebarSection),
+        );
+    await expect.poll(readOrder).toEqual(["solo", "starred", "group:work"]);
+
+    await startDrag(page, beta);
+    await dropOnCreate(page);
+    const dialog = page.getByRole("dialog", { name: "Move to new workspace" });
+    const name = dialog.getByRole("textbox", { name: "Name" });
+    await expect(name).toBeFocused();
+    await name.fill("Launch");
+    await dialog.getByRole("button", { name: "Create and move" }).click();
+    await expect(dialog).toHaveCount(0);
+    const destination = page
+      .locator('[data-sidebar-section^="group:"]')
+      .filter({ hasText: "Launch" });
+    const key = await destination.getAttribute("data-sidebar-section");
+    const order = ["solo", "starred", key, "group:work"];
+    await expect.poll(readOrder).toEqual(order);
+    await page.reload();
+    await openPage(page, "Messages");
+    await expect.poll(readOrder).toEqual(order);
+    await expect(destination.locator('[data-channel-id="beta"]')).toBeVisible();
+  });
+});
+
 test("only the top channel-section boundary reveals creation, latches, cancels and saves first", async ({
   page,
   app,

@@ -92,6 +92,19 @@ it("validates bounded unique section orders", () => {
   ).toBe(false);
 });
 
+it("saves an explicit move to the host default when the saved order is empty", () => {
+  const current = {
+    version: 1,
+    sections: [],
+    assignments: {},
+    sectionOrder: [],
+  };
+  const order = ["pages", "starred", "solo", "channels", "forums", "dms"];
+  const next = editSidebarSectionOrder(current, 0, order);
+  expect(next.sectionOrder).toEqual(order);
+  expect(editSidebarSectionOrder(next, 0, order)).toBe(next);
+});
+
 it("bounds sidebar identifiers without normalizing their wire value", () => {
   for (const id of ["c", " c ", "x".repeat(256), "😀".repeat(128)])
     expect(validSidebarChannelId(id)).toBe(true);

@@ -29,6 +29,12 @@ export const HOME_SIDEBAR_SECTIONS = [
 ] as const;
 /** Sidebar-placed pages, such as Activity, ordered among the sections. */
 export const SIDEBAR_PAGES_SECTION = "pages";
+/** Default for devices that saved the sidebar before workspaces were unified. */
+export const LEGACY_DEVICE_SECTION_ORDER = [
+  SIDEBAR_PAGES_SECTION,
+  "solo",
+  "starred",
+] as const;
 export const SIDEBAR_COORDINATES = [
   "channel-sections",
   "channel-stars",
@@ -487,7 +493,11 @@ export type SidebarAssignmentIntent = Readonly<{
   /** Omit only when creating an empty section. */
   channelId?: string;
   sectionId?: string;
-  createSection?: SidebarSectionDraft & Readonly<{ position?: "first" }>;
+  createSection?: SidebarSectionDraft &
+    Readonly<{
+      position?: "first";
+      soloFirst?: true;
+    }>;
   /** A verified archived chat filing that may make room for one new filing. */
   reclaim?: Readonly<{ channelId: string; sectionId: string }>;
 }>;

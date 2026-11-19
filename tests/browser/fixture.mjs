@@ -415,9 +415,12 @@ export const test = base.extend({
         const records = readEvents.get(community);
         for (const [coordinate, value] of [
           [
-            "channel-sections",
+            savedSidebar === "unified"
+              ? "channel-workspaces"
+              : "channel-sections",
             {
               version: 1,
+              ...(savedSidebar === "unified" ? { sectionOrder: [] } : {}),
               sections: [
                 {
                   id: "work",

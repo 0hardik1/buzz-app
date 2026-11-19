@@ -305,11 +305,17 @@ export function encodeWorkspaceUnifiedOnly(
 
 /** Cross-version catch-up owns only leaves the unified record has never seen. */
 export function importWorkspaceFallback(
-  current: Record<string, unknown>,
+  record: Record<string, unknown>,
   legacy: SidebarGroups | undefined,
 ): Record<string, unknown> {
-  if (current.legacyImportClosed === true || !legacy?.sections.length)
-    return current;
+  if (record.legacyImportClosed === true || !legacy?.sections.length)
+    return record;
+  const current =
+    Array.isArray(record.sectionOrder) &&
+    !record.sectionOrder.length &&
+    legacy.sectionOrder?.length
+      ? { ...record, sectionOrder: legacy.sectionOrder }
+      : record;
   const removed = new Set(workspaceTombstones(current, "removedSections"));
   const unfiled = new Set(workspaceTombstones(current, "unfiled"));
   const sections = [...(current.sections as SidebarGroups["sections"])];

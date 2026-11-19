@@ -125,7 +125,7 @@ function validAssignmentIntent(intent) {
         (intent.createSection.icon === undefined ||
           typeof intent.createSection.icon === "string") &&
         Object.keys(intent.createSection).every((key) =>
-          ["id", "name", "icon", "position"].includes(key),
+          ["id", "name", "icon", "position", "soloFirst"].includes(key),
         ))) &&
     validSidebarAssignment(intent) &&
     Object.keys(intent).every((key) =>
