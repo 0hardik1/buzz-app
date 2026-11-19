@@ -66,7 +66,7 @@ it("follows the pointer, settles on a whole row, and remembers it", () => {
   ).toBe(`${3 * ROW}px`);
 });
 
-it("steps a row with the keyboard and shows every row again on double-click", () => {
+it("steps a row with the keyboard and goes back to the default on double-click", () => {
   render(<Card rows={5} />);
   const list = layOut();
   const grip = screen.getByLabelText("Resize Work");
@@ -74,4 +74,43 @@ it("steps a row with the keyboard and shows every row again on double-click", ()
   expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
   fireEvent.doubleClick(grip);
   expect(list.style.maxHeight).toBe("");
+});
+
+/** Lay rows out before the first render, so the default clip can measure. */
+function layOutAhead() {
+  const rect = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      if (!this.hasAttribute("data-card-row")) return { top: 0 } as DOMRect;
+      const index = [...(this.parentElement?.children ?? [])].indexOf(this);
+      return { top: index * ROW, bottom: (index + 1) * ROW } as DOMRect;
+    });
+  const height = vi
+    .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+    .mockImplementation(function (this: HTMLElement) {
+      return this.querySelectorAll("[data-card-row]").length * ROW;
+    });
+  return () => {
+    rect.mockRestore();
+    height.mockRestore();
+  };
+}
+
+it("shows the first ten rows until dragged, and every row once dragged to the bottom", () => {
+  const restore = layOutAhead();
+  try {
+    render(<Card rows={12} />);
+    const list = document.querySelector<HTMLElement>("[data-card-row]")
+      ?.parentElement as HTMLElement;
+    expect(list.style.maxHeight).toBe(`${10 * ROW}px`);
+    const grip = screen.getByLabelText("Resize Work");
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 320 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: 900 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientY: 900 });
+    expect(list.style.maxHeight).toBe("");
+    fireEvent.doubleClick(grip);
+    expect(list.style.maxHeight).toBe(`${10 * ROW}px`);
+  } finally {
+    restore();
+  }
 });
