@@ -34,7 +34,6 @@ import {
   ChatUnreadIcon,
   DotsThreeIcon,
   Filter2Icon,
-  GripHorizontalIcon,
   PlusIcon,
   TextAaIcon,
   TimerIcon,
@@ -186,17 +185,6 @@ export function SidebarSection({
       data-section-dragging={dragging || undefined}
       data-menu-open={menuOpen || undefined}
     >
-      {dragHandle && (
-        // The heading is the drag handle; the dots only show that the card moves.
-        // Menus keep the keyboard path (Move up / Move down).
-        <span
-          className={styles.sectionGrabber}
-          aria-hidden="true"
-          {...dragHandle.listeners}
-        >
-          <GripHorizontalIcon size={20} fill="currentColor" />
-        </span>
-      )}
       <NavigationSectionHeading
         disclosure
         revealActions
