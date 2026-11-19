@@ -1383,7 +1383,7 @@ function Composer({
       ? "Edit message"
       : (customLabel ?? "Reply to thread");
   const alsoSendLabel =
-    channelType === "dm"
+    channelType === "dm" || channelType === "solo" || solo
       ? "Also send to conversation"
       : `Also send to ${ChannelIcon === LockIcon ? "" : "#"}${channelName}`;
   const gifPreview = useGifDraftPreview(extensions?.tools);

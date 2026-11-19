@@ -541,6 +541,12 @@ export function createMessages(
         throw new Error("Load a thread reply before sending it to the channel");
       if (!ownedMessage(original) || row.authorId !== viewer)
         throw new Error("Only your own messages can be sent to the channel");
+      if (
+        original.tags.some(
+          ([name, value]) => name === "broadcast" && value === "1",
+        )
+      )
+        throw new Error("This reply is already in the channel");
       const channelId = original.tags.find(([name]) => name === "h")?.[1];
       if (
         !channelId ||

@@ -10267,32 +10267,35 @@ describe("Also send to channel", () => {
     expect(pressed.onPressedChange).toHaveBeenLastCalledWith(false);
   });
 
-  it("names the conversation in a DM", () => {
-    const h = mount({ threadRootId: root, alsoSendToChannel: toggle() });
-    const list = {
-      status: "ready" as const,
-      channels: [
-        {
-          id: "channel",
-          name: "Honey DM",
-          channelType: "dm" as const,
-          members: [first.pubkey, second.pubkey],
+  it.each(["dm", "solo"] as const)(
+    "names the conversation in a %s",
+    (channelType) => {
+      const h = mount({ threadRootId: root, alsoSendToChannel: toggle() });
+      const list = {
+        status: "ready" as const,
+        channels: [
+          {
+            id: "channel",
+            name: "Honey DM",
+            channelType,
+            members: [first.pubkey, second.pubkey],
+          },
+        ],
+      };
+      h.retarget({
+        session: {
+          ...h.session,
+          channels: {
+            ...h.session.channels,
+            list: () => list,
+            get: () => list.channels[0],
+          },
         },
-      ],
-    };
-    h.retarget({
-      session: {
-        ...h.session,
-        channels: {
-          ...h.session.channels,
-          list: () => list,
-          get: () => list.channels[0],
-        },
-      },
-    });
-    expect(button("Also send to conversation")).toBeVisible();
-    expect(button("Also send to #General")).toBeNull();
-  });
+      });
+      expect(button("Also send to conversation")).toBeVisible();
+      expect(button("Also send to #General")).toBeNull();
+    },
+  );
 
   it("sends a pressed reply to the thread's opening message once, with the broadcast flag", () => {
     const h = mount({ threadRootId: root, alsoSendToChannel: toggle(true) });
