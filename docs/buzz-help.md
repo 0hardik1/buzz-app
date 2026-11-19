@@ -96,6 +96,8 @@ if that desktop app is up and running.
 - **Messages.** Hover or right-click a message to react, **Reply**, copy a link,
   forward it, or start a chat about it. On an agent's reply, **View activity**
   shows what it did.
+  Editing your own message shows its files as tiles; remove one to take it out
+  of the message.
 - **Composer.** **#** links a channel. On desktop, **!** gives your agents a
   folder and **/** a skill. Attach files by pasting or dragging them in.
 - **Drafts.** Every message box open on a conversation shares its draft. A box
