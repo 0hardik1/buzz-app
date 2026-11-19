@@ -33,6 +33,14 @@ function subscribe(listener: () => void) {
 export function useLeanBasePromptPreference() {
   return useSyncExternalStore(subscribe, leanBasePromptPreference);
 }
+function saveError(): string | null {
+  return unsavedPreference === undefined
+    ? null
+    : "This choice is active, but could not be saved on this device. Try again.";
+}
+export function useLeanBasePromptSaveError() {
+  return useSyncExternalStore(subscribe, saveError);
+}
 export function setLeanBasePromptPreference(enabled: boolean): string | null {
   let error: string | null = null;
   unsavedPreference = enabled;
@@ -52,14 +60,11 @@ export function setLeanBasePromptPreference(enabled: boolean): string | null {
 export const leanBasePromptSetting: DeviceSetting = {
   key: "agents.lean_base_prompt",
   description:
-    "Device-wide for all agents; any connected agent with settings access can change it. On (default) omits optional workflow guidance; off includes full guidance. Claude/Codex need a new session; Goose/Pi apply it next turn.",
+    "Device-wide for agents using the shared Buzz prompt; any connected agent with settings access can change it. On (default) omits optional workflow guidance; off includes full guidance. Claude/Codex need a new session; Goose/Pi apply it next turn.",
   schema: { type: "boolean" },
   read: () => ({
     value: leanBasePromptPreference(),
-    unsaved:
-      unsavedPreference === undefined
-        ? null
-        : "This choice is active, but could not be saved on this device.",
+    unsaved: saveError(),
   }),
   write: (value) => {
     setLeanBasePromptPreference(value as boolean);

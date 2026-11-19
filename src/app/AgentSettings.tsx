@@ -1,6 +1,7 @@
 import {
   setLeanBasePromptPreference,
   useLeanBasePromptPreference,
+  useLeanBasePromptSaveError,
 } from "../features/agent-harness/lean-base-prompt-preference";
 import { useState } from "react";
 import type { PageNavigation } from "../features/navigation/service";
@@ -54,9 +55,7 @@ export function AgentSettings({
   keepAwakeAvailable?: boolean;
 }) {
   const leanBasePrompt = useLeanBasePromptPreference();
-  const [leanPromptError, setLeanPromptError] = useState<string | null>(null);
-  const changeLeanBasePrompt = (enabled: boolean) =>
-    setLeanPromptError(setLeanBasePromptPreference(enabled));
+  const leanPromptError = useLeanBasePromptSaveError();
   const rememberAgents = useRememberAgentsPreference();
   const keepAwake = useKeepAwakePreference();
   const keepAwakeApplyError = useKeepAwakeApplyError();
@@ -81,9 +80,9 @@ export function AgentSettings({
         <SettingsGroup>
           <SwitchPreferenceRow
             label="Use lean base prompt"
-            description="Omit optional workflow guidance for all agents on this device. On by default; turn off for full guidance. Claude Code and Codex need a new session; Goose and Pi apply changes next turn. Agents with settings access can also change this."
+            description="Omit optional workflow guidance for agents using the shared Buzz prompt on this device. On by default; turn off for full guidance. Claude Code and Codex need a new session; Goose and Pi apply changes next turn. Agents with settings access can also change this."
             checked={leanBasePrompt}
-            onCheckedChange={changeLeanBasePrompt}
+            onCheckedChange={setLeanBasePromptPreference}
           />
           <SwitchPreferenceRow
             label="Remember mentioned agents"
@@ -142,7 +141,7 @@ export function AgentSettings({
           <Button
             type="button"
             size="sm"
-            onClick={() => changeLeanBasePrompt(leanBasePrompt)}
+            onClick={() => setLeanBasePromptPreference(leanBasePrompt)}
           >
             Retry saving base prompt preference
           </Button>

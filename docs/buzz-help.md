@@ -1215,7 +1215,7 @@ Agents use the lean base prompt by default: Buzz's contract without optional
 memory-hygiene, engineering, commit-identity and autonomy guidance. Turn off
 **Use lean base prompt** in **Settings → Agent setup → Agent behavior** to include
 full guidance. Explicit saved choices are preserved. Agents with settings access
-can also change `agents.lean_base_prompt`. This affects **all agents on this
+can also change `agents.lean_base_prompt`. This affects **agents using the shared Buzz prompt on this
 device**. Claude Code and Codex need a new session; Goose and Pi apply the change
 on their next turn.
 

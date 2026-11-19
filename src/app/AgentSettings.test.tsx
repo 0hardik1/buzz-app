@@ -226,7 +226,7 @@ it("defaults to lean guidance, persists the toggle, and follows settings tools a
     screen.getByRole("switch", { name: "Use lean base prompt" });
   expect(toggle()).toBeChecked();
   expect(toggle()).toHaveAccessibleDescription(
-    /all agents on this device.*new session.*next turn/,
+    /shared Buzz prompt on this device.*new session.*next turn/,
   );
   await user.click(toggle());
   expect(leanBasePromptPreference()).toBe(false);
@@ -292,3 +292,47 @@ it("keeps an unsaved prompt choice active and retries saving without changing it
     unsaved: null,
   });
 });
+
+it.each(["tool", "window"])(
+  "follows failed tool saves and %s recovery while mounted",
+  async (recovery) => {
+    render(<AgentSettings />, { wrapper: ToastProvider });
+    const settings = createDeviceSettings([leanBasePromptSetting]);
+    const write = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("storage unavailable");
+      });
+    act(() => {
+      settings.set("agents.lean_base_prompt", false);
+    });
+    expect(
+      screen.getByRole("switch", { name: "Use lean base prompt" }),
+    ).not.toBeChecked();
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "could not be saved",
+    );
+    write.mockRestore();
+    act(() => {
+      if (recovery === "tool") settings.set("agents.lean_base_prompt", false);
+      else {
+        localStorage.setItem("buzz-agents-lean-base-prompt.v1", "off");
+        window.dispatchEvent(
+          new StorageEvent("storage", {
+            key: "buzz-agents-lean-base-prompt.v1",
+          }),
+        );
+      }
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("switch", { name: "Use lean base prompt" }),
+    ).not.toBeChecked();
+    expect(leanBasePromptSetting.read()).toMatchObject({
+      value: false,
+      unsaved: null,
+    });
+  },
+);
