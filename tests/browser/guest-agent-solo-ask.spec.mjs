@@ -480,21 +480,13 @@ test("a second ask while the first chat is still starting keeps both questions",
     .getByRole("button", { name: "Launch channel", exact: true })
     .click();
   const composer = page.getByRole("textbox", { name: "Message launch" });
-  await mention(page, composer, "FIRST question ");
-  // A staged chat card goes with the question, outside its plain text.
-  const card = `[Chat: Launch plans](buzz://channel/${"5".repeat(8)}-5555-4555-8555-${"5".repeat(12)})`;
-  await composer.evaluate((node, text) => {
-    const data = new DataTransfer();
-    data.setData("text/plain", text);
-    node.dispatchEvent(
-      new ClipboardEvent("paste", {
-        clipboardData: data,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-  }, card);
-  await expect(page.getByText("Launch plans")).toBeVisible();
+  await mention(page, composer, "FIRST question, ");
+  // Formatting is a mark on the editor's text, absent from its plain text.
+  const bold = process.platform === "darwin" ? "Meta+b" : "Control+b";
+  await page.keyboard.press(bold);
+  await page.keyboard.type("urgent");
+  await page.keyboard.press(bold);
+  await expect(composer.locator("strong")).toHaveText("urgent");
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", { name: "Pollen can’t reply here" });
   await dialog.getByRole("button", { name: "Ask in a Solo chat" }).click();
@@ -534,7 +526,7 @@ test("a second ask while the first chat is still starting keeps both questions",
   ).toBeVisible();
   const [copied] = await page.evaluate(() => window.copiedText);
   expect(copied).toContain("FIRST question");
-  expect(copied).toContain(card);
+  expect(copied).toContain("**urgent**");
   await expect(composer).toContainText("SECOND question");
   expect(errors.unexplained()).toEqual([]);
 });
