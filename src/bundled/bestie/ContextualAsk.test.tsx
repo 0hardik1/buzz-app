@@ -661,6 +661,11 @@ it("offers the exact saved Bestie and seeds an automatic whole-thread catch-up",
   );
   fireEvent.click(await screen.findByRole("menuitem", { name: "Catch me up" }));
   expect(resume).toHaveBeenCalledOnce();
+  expect(
+    await screen.findByText(
+      "Opening your earlier catch-up. Ask Bestie to check again for new replies.",
+    ),
+  ).toBeVisible();
   expect(readView(scope, `${key}:new-draft`, null)).toBeNull();
   expect(readView(scope, `${key}:settings`, null)).toBeNull();
   expect(readView(scope, `${key}:submit-draft`, null)).toBeNull();

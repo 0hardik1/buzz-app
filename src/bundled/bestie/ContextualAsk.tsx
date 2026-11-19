@@ -662,13 +662,14 @@ export function AskBestieAction({
       });
       if (!canOpen(target))
         throw new Error("Your Bestie chat couldn’t open. Try again.");
+      const resuming = hasResumableStartedChat(
+        session.scope,
+        sourceId,
+        activeBestie,
+        channels,
+      );
       if (
-        !hasResumableStartedChat(
-          session.scope,
-          sourceId,
-          activeBestie,
-          channels,
-        ) &&
+        !resuming &&
         !seedContextualRequest(
           session.scope,
           sourceId,
@@ -685,6 +686,11 @@ export function AskBestieAction({
         );
       if (!open(target))
         throw new Error("Your Bestie chat couldn’t open. Try again.");
+      if (resuming)
+        notify(
+          "Opening your earlier catch-up. Ask Bestie to check again for new replies.",
+          "info",
+        );
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error), "error");
       setBusy(false);
