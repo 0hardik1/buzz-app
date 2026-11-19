@@ -16,7 +16,10 @@ import {
 } from "../../shared/design-system/icons";
 import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
 import { ProviderDialogActions } from "../../features/agents/ProviderDialogActions";
-import { AgentSaveButton } from "../../features/agents/AgentSaveButton";
+import {
+  AgentSaveButton,
+  ClearModelOverrides,
+} from "../../features/agents/AgentSaveButton";
 // The type's tabs: Codex's setup on this computer, and the agent's settings;
 // and its part of the New agent dialog.
 import {
@@ -1488,6 +1491,40 @@ export function createTabs(
         });
         if (!validWorkspace(settings.workspace))
           throw new Error("Enter an absolute or ~/… workspace path.");
+        // A verified execution target accepts custom model IDs. Its runtime
+        // checks the overrides against its own catalog when it starts a turn.
+        if (
+          !bound &&
+          settingsHost?.proposedModelOrEffort &&
+          (settings.model || settings.effort)
+        ) {
+          if (!data)
+            throw new Error(
+              "Check Codex models or clear the model and thinking overrides before saving.",
+            );
+          const model = catalogModel(provider.resolve(settings).model, data);
+          if (!model)
+            throw new Error(
+              "Choose an available Codex model or Codex default before saving.",
+            );
+          if (
+            settings.effort &&
+            !model.supportedReasoningEfforts.some(
+              (choice) => choice.reasoningEffort === settings.effort,
+            )
+          )
+            throw new Error(
+              "Choose a thinking level this Codex model supports or use Default.",
+            );
+        }
+        if (settingsHost?.proposedVoice && settings.voice) {
+          if (!data?.voices)
+            throw new Error(
+              "Check Huddle voices or choose Codex default before saving.",
+            );
+          if (!data.voices.includes(settings.voice))
+            throw new Error("Choose an available Huddle voice.");
+        }
         // A Custom agent's save drops a mark left from before, which a later
         // blank synced model would otherwise turn back on.
         await save(
@@ -1732,6 +1769,15 @@ export function createTabs(
             )}
           </>
         )}
+        {settingsHost?.proposedModelOrEffort &&
+          (draft.model || draft.effort) && (
+            <ClearModelOverrides
+              disabled={saving}
+              onClick={() =>
+                setDraft(offRecommended({ ...draft, model: "", effort: "" }))
+              }
+            />
+          )}
         <AgentSaveButton form={form} saving={saving} disabled={!changed} />
         {settingsSection !== "identity" && settingsContent}
       </form>
