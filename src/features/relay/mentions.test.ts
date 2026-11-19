@@ -269,6 +269,40 @@ it("raw outbox writes cannot bypass the pre-sign membership check", async () => 
   expect(h.publish).not.toHaveBeenCalled();
   expect(h.session.outbox?.snapshot()[0]?.delivery).toBe("failed");
 });
+it("an edit's added recipients get the same signing and publication membership checks", async () => {
+  const h = setup();
+  await h.members([viewer.pubkey]);
+  assert.exists(h.session.outbox);
+  const edit = {
+    kind: 40003,
+    content: "Ask @Honey",
+    tags: [
+      ["h", "c"],
+      ["e", "a".repeat(64)],
+      ["p", honey.pubkey],
+    ],
+  };
+  h.session.outbox.send(edit);
+  await flush();
+  expect(h.sign).not.toHaveBeenCalled();
+  expect(h.session.outbox.snapshot()[0]?.delivery).toBe("failed");
+  // Membership lost after signing still stops the queued edit.
+  await h.members();
+  h.hold();
+  const id = h.session.outbox.send(edit);
+  await flush();
+  await h.members([viewer.pubkey, namesake.pubkey], 1700000001);
+  h.release();
+  await flush();
+  expect(h.publish).not.toHaveBeenCalled();
+  expect(
+    h.session.outbox.snapshot().find((item) => item.event.id === id),
+  ).toMatchObject({ delivery: "failed" });
+  await h.members(undefined, 1700000002);
+  h.session.messages.retry(id);
+  await vi.waitFor(() => expect(h.publish).toHaveBeenCalledOnce());
+  expect(h.publish.mock.calls[0]?.[0].tags).toContainEqual(["p", honey.pubkey]);
+});
 it("disposal during signing fences publication to a retired session", async () => {
   const h = setup();
   await h.members();
