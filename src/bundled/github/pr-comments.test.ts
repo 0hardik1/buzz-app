@@ -290,3 +290,32 @@ it("retains receipts for coalesced operation aliases while allowing a fresh draf
   ).toBe("sent");
   expect(state.comments).toHaveLength(2);
 });
+
+it("allows merged-PR inline comments and replies while retaining snapshot checks", async () => {
+  const fixture = githubCommentHost();
+  fixture.state.merged = true;
+  const api = createPrComments(fixture.host);
+  if (!api) throw new Error("Missing adapter");
+  const snapshot = await api.loadSnapshot(fixturePull);
+  const anchor = {
+    ...snapshot,
+    path: "src/example.ts",
+    side: "RIGHT",
+    line: 5001,
+  } as const;
+  expect(
+    (await api.create(snapshot, anchor, "After merge", "merged-comment"))
+      .status,
+  ).toBe("sent");
+  expect(
+    (await api.reply(snapshot, 1, "Reply after merge", "merged-reply")).status,
+  ).toBe("sent");
+  fixture.state.head = "c".repeat(40);
+  expect(
+    (await api.create(snapshot, anchor, "Old coordinate", "stale-merged"))
+      .status,
+  ).toBe("stale");
+  expect(fixture.state.calls.filter((c) => c.args[0] === "POST")).toHaveLength(
+    2,
+  );
+});

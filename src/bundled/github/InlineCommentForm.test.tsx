@@ -16,7 +16,7 @@ it("focuses its labelled field and delegates Escape dismissal", () => {
       onCancel={onCancel}
     />,
   );
-  const field = screen.getByRole("textbox", { name: "GitHub comment" });
+  const field = screen.getByRole("textbox", { name: "Comment" });
   expect(document.activeElement).toBe(field);
   fireEvent.keyDown(field, { key: "Escape" });
   expect(onCancel).toHaveBeenCalledOnce();

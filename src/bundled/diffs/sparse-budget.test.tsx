@@ -56,6 +56,9 @@ it.each([
     await vi.waitFor(() => {
       const root = container.querySelector("diffs-container")?.shadowRoot;
       expect(root?.querySelector(`pre [data-line="${lastLine}"]`)).toBeTruthy();
+      expect(root?.querySelector("pre")?.getAttribute("data-indicators")).toBe(
+        "bars",
+      );
       expect(
         root?.querySelectorAll("pre [data-line]").length,
       ).toBeLessThanOrEqual(4);

@@ -17,7 +17,7 @@ async function open(page) {
   );
   await expect(page.getByText("STUB MODE — no GitHub requests")).toBeVisible();
   await expect(
-    page.getByRole("combobox", { name: "Comment location in src/example.ts" }),
+    page.getByRole("region", { name: "src/example.ts", exact: true }),
   ).toBeVisible();
 }
 async function select(page, name, value) {
@@ -25,24 +25,28 @@ async function select(page, name, value) {
   await page.getByRole("option", { name: value, exact: true }).click();
 }
 async function line(page, value = "Old line 5000") {
-  await select(page, "Comment location in src/example.ts", value);
-  const trigger = page.getByRole("button", {
-    name: "Comment on line",
+  const file = page.getByRole("region", {
+    name: "src/example.ts",
     exact: true,
   });
-  await trigger.focus();
-  await trigger.press("Enter");
-  const field = page.getByRole("textbox", { name: "GitHub comment" });
+  await file.focus();
+  for (let index = 0; index < (value === "New line 5001" ? 3 : 1); index++)
+    await file.press("ArrowDown");
+  await file.press("Enter");
+  const field = page.getByRole("textbox", { name: "Comment", exact: true });
   await expect(field).toBeFocused();
   return field;
 }
 async function lineBlocked(page) {
-  await select(page, "Comment location in src/example.ts", "New line 5001");
-  await page
-    .getByRole("button", { name: "Comment on line", exact: true })
-    .click();
+  const file = page.getByRole("region", {
+    name: "src/example.ts",
+    exact: true,
+  });
+  await file.focus();
+  await file.press("ArrowDown");
+  await file.press("Enter");
   await expect(
-    page.getByRole("textbox", { name: "GitHub comment" }),
+    page.getByRole("textbox", { name: "Comment", exact: true }),
   ).toHaveCount(0);
 }
 const posts = (page) =>
@@ -57,12 +61,31 @@ for (const layout of ["Unified", "Split"]) {
   }, testInfo) => {
     const errors = watchPageErrors(page);
     await open(page);
+    await page.evaluate(() => {
+      const state = window.inlineFixture.state;
+      state.files.push({ filename: "src/second.ts" });
+      state.patch +=
+        "diff --git a/src/second.ts b/src/second.ts\n--- a/src/second.ts\n+++ b/src/second.ts\n@@ -7 +7 @@\n-const before = false;\n+const after = true;\n";
+    });
+    await page.getByRole("button", { name: "Refresh changes" }).click();
+    await expect(
+      page.getByRole("region", { name: "src/second.ts", exact: true }),
+    ).toBeVisible();
     if (layout === "Split") await select(page, "Diff layout", "Split");
+    await expect(
+      page.locator('diffs-container pre[data-indicators="bars"]').first(),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "aaaaaaa", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText(/Posting as|Read with your gh sign-in/),
+    ).toHaveCount(0);
     const field = await line(page);
     await field.fill("Synthetic inline feedback");
     await field.press("Escape");
     await expect(
-      page.getByRole("button", { name: "Comment on line", exact: true }),
+      page.getByRole("region", { name: "src/example.ts", exact: true }),
     ).toBeFocused();
     await line(page);
     await field.fill("Discard when leaving Changes");
@@ -77,9 +100,7 @@ for (const layout of ["Unified", "Split"]) {
     await page.getByRole("button", { name: "Comment on hovered line" }).click();
     await expect(field).toHaveValue("");
     await field.fill("Synthetic inline feedback");
-    await expect(
-      page.getByText(/src\/example.ts · New line 5001/),
-    ).toBeVisible();
+    await expect(field.locator("..")).not.toContainText("src/example.ts");
     await page.screenshot({
       animations: "disabled",
       path: testInfo.outputPath(`inline-${layout}-light.png`),
@@ -107,6 +128,45 @@ for (const layout of ["Unified", "Split"]) {
     await page.evaluate(() => {
       document.documentElement.dataset.colorMode = "dark";
     });
+    await page
+      .locator(
+        'diffs-container [data-column-number="5001"][data-line-type="change-addition"]',
+      )
+      .hover();
+    await page.getByRole("button", { name: "Comment on hovered line" }).click();
+    await expect(field).toBeFocused();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh changes" }).hover();
+    await expect(
+      page.getByRole("button", { name: "Comment on hovered line" }),
+    ).toHaveCount(0);
+    await page
+      .locator(
+        'diffs-container [data-column-number="5000"][data-line-type="change-deletion"]',
+      )
+      .hover();
+    await page.getByRole("button", { name: "Comment on hovered line" }).click();
+    await expect(field).toBeFocused();
+    await field.press("Escape");
+    const second = page.getByRole("region", {
+      name: "src/second.ts",
+      exact: true,
+    });
+    await second
+      .locator('[data-column-number="7"][data-line-type="change-addition"]')
+      .hover();
+    await page.getByRole("button", { name: "Comment on hovered line" }).click();
+    await expect(
+      second.getByRole("textbox", { name: "Comment", exact: true }),
+    ).toBeFocused();
+    await field.press("Escape");
+    await expect(second).toBeFocused();
+    await second.press("ArrowDown");
+    await second.press("Enter");
+    await expect(
+      second.getByRole("textbox", { name: "Comment", exact: true }),
+    ).toBeFocused();
+    await field.press("Escape");
     await page.screenshot({
       animations: "disabled",
       path: testInfo.outputPath(`inline-${layout}-dark.png`),
@@ -145,6 +205,13 @@ for (const [mode, message] of [
 ]) {
   test(`keeps text in the open composer on ${mode}`, async ({ page }) => {
     await open(page);
+    await page.evaluate(() => {
+      window.inlineFixture.state.merged = true;
+    });
+    await page.getByRole("button", { name: "Refresh changes" }).click();
+    await expect(
+      page.getByRole("region", { name: "src/example.ts", exact: true }),
+    ).toBeVisible();
     await select(page, "Stub scenario", mode);
     const input = await line(page);
     await input.fill("Refused comment");
@@ -169,9 +236,7 @@ test("reconciles timeout-after-success across panel remount without reposting", 
     page.getByRole("button", { name: "Check delivery" }),
   ).toBeEnabled();
   await page.getByRole("button", { name: "Remount panel" }).click();
-  await expect(
-    page.getByRole("textbox", { name: "GitHub comment" }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Comment" })).toHaveCount(0);
   await lineBlocked(page);
   await page.screenshot({
     animations: "disabled",
@@ -227,13 +292,18 @@ test("context hover requires an explicit old/new choice", async ({ page }) => {
     )
     .hover();
   await page.getByRole("button", { name: "Comment on hovered line" }).click();
-  await expect(
-    page.getByRole("textbox", { name: "GitHub comment" }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Comment" })).toHaveCount(0);
   await page
     .getByRole("button", { name: "Old line 5001", exact: true })
     .click();
-  await expect(page.getByText(/src\/example.ts · Old line 5001/)).toBeVisible();
+  await page
+    .getByRole("textbox", { name: "Comment", exact: true })
+    .fill("Context side");
+  await page.getByRole("button", { name: "Post to GitHub" }).click();
+  await expect(page.getByText("Context side", { exact: true })).toBeVisible();
+  expect(
+    await page.evaluate(() => window.inlineFixture.state.comments[0]),
+  ).toMatchObject({ side: "LEFT", line: 5001 });
 });
 test("refresh into raw fallback discards composer and removes posting authority", async ({
   page,
@@ -246,7 +316,7 @@ test("refresh into raw fallback discards composer and removes posting authority"
   await expect(page.getByRole("region", { name: "Raw diff" })).toBeVisible();
   await expect(input).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Comment on line", exact: true }),
+    page.getByRole("region", { name: "src/example.ts", exact: true }),
   ).toHaveCount(0);
   expect(await posts(page)).toBe(0);
 });
@@ -292,7 +362,7 @@ test("failed snapshot refresh discards composer and invalidates posting authorit
   await page.getByRole("button", { name: "Toggle snapshot failure" }).click();
   await page.getByRole("button", { name: "Refresh changes" }).click();
   await expect(
-    page.getByRole("combobox", { name: "Comment location in src/example.ts" }),
+    page.getByRole("region", { name: "src/example.ts", exact: true }),
   ).toBeVisible();
   await expect(input).toHaveCount(0);
   await line(page, "New line 5001");

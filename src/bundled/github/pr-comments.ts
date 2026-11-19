@@ -18,8 +18,6 @@ export type Snapshot = PullRef &
     head: string;
     base: string;
     diff: string;
-    /** Open/unmerged only; GitHub still checks write permission. */
-    writable: boolean;
     files: readonly { path: string; previousPath?: string | undefined }[];
   }>;
 export type Anchor = Readonly<{
@@ -278,7 +276,6 @@ export function createPrComments(
   ): Promise<WriteResult> {
     if (
       !body.trim() ||
-      !snapshot.writable ||
       (anchor && !anchorInSnapshot(snapshot, anchor)) ||
       (root !== undefined && (!Number.isSafeInteger(root) || root < 1))
     )
@@ -350,9 +347,7 @@ export function createPrComments(
       if (
         current.node_id !== snapshot.pullId ||
         current.head.sha !== snapshot.head ||
-        current.base.sha !== snapshot.base ||
-        current.state !== "open" ||
-        current.merged
+        current.base.sha !== snapshot.base
       ) {
         finish({ status: "stale" });
         keys.delete(key);
@@ -417,39 +412,46 @@ export function createPrComments(
     async loadSnapshot(pull, signal) {
       try {
         const before = await meta(pull, signal);
-        const identity = await viewer();
-        const files: { path: string; previousPath?: string | undefined }[] = [];
-        for (let page = 1; page <= 30; page++) {
-          const rows = await rest<
-            { filename: string; previous_filename?: string }[]
-          >(
-            "GET",
-            `${endpoint(pull)}/files?per_page=100&page=${page}`,
-            undefined,
-            signal,
-          );
-          files.push(
-            ...rows.map((row) => ({
-              path: row.filename,
-              previousPath: row.previous_filename,
-            })),
-          );
-          if (rows.length < 100) break;
-          if (page === 30)
-            throw new PrCommentError(
-              "PR has too many files to verify anchors",
-              "validation",
+        const readFiles = async () => {
+          const files: { path: string; previousPath?: string | undefined }[] =
+            [];
+          for (let page = 1; page <= 30; page++) {
+            const rows = await rest<
+              { filename: string; previous_filename?: string }[]
+            >(
+              "GET",
+              `${endpoint(pull)}/files?per_page=100&page=${page}`,
+              undefined,
+              signal,
             );
-        }
-        const content = await diff(
-          {
-            repository: pull.repository,
-            head: before.head.sha,
-            base: before.base.sha,
-            merged: pull.number,
-          },
-          signal,
-        );
+            files.push(
+              ...rows.map((row) => ({
+                path: row.filename,
+                previousPath: row.previous_filename,
+              })),
+            );
+            if (rows.length < 100) break;
+            if (page === 30)
+              throw new PrCommentError(
+                "PR has too many files to verify anchors",
+                "validation",
+              );
+          }
+          return files;
+        };
+        const [identity, content, files] = await Promise.all([
+          viewer(),
+          diff(
+            {
+              repository: pull.repository,
+              head: before.head.sha,
+              base: before.base.sha,
+              merged: pull.number,
+            },
+            signal,
+          ),
+          readFiles(),
+        ]);
         const after = await meta(pull, signal);
         if (
           before.node_id !== after.node_id ||
@@ -468,7 +470,6 @@ export function createPrComments(
           base: before.base.sha,
           diff: content,
           files,
-          writable: before.state === "open" && !before.merged,
         };
       } catch (error) {
         signal?.throwIfAborted();

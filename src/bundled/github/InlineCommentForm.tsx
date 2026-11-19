@@ -40,7 +40,7 @@ export function InlineCommentForm({
         }
       }}
     >
-      <Field label="GitHub comment">
+      <Field label="Comment" labelVisibility="hidden">
         <Textarea
           ref={input}
           rows={3}

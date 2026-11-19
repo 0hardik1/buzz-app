@@ -1826,11 +1826,15 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   GitHub plugin off and on forgets all of this. Supported code files in
   **Changes** use syntax highlighting, including Kotlin, even for small changes
   deep in large files. Oversized, unsupported or unparseable patches remain
-  readable without syntax colors.
-- In GitHub **Changes**, use the line gutter or **Comment location** selector to
+  readable without syntax colors. Added and deleted lines use colored bars.
+- In GitHub **Changes**, use the line gutter to
   post a single-line comment, or **Reply** in an existing thread. Context lines
   require an explicit old/new side. Comments post immediately with your signed-in
-  `gh` account. Raw or unmapped patches cannot accept new line comments.
+  `gh` account. Verified changes are interactive while comments continue loading.
+  Focus a diff file and use Up/Down then Enter to comment with the keyboard.
+  Closed and merged PRs also offer commenting;
+  GitHub checks whether the submission is allowed. Raw or unmapped patches cannot
+  accept new line comments.
   Unsent text exists only in the open composer; cancel, refresh or leaving the
   panel discards it. After a PR changes, select the line again. If delivery is unknown,
   use **Check delivery** before another submission; Buzz never automatically

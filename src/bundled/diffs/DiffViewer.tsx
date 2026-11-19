@@ -1,4 +1,11 @@
-import { useEffect, useRef, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useMemo,
+  useState,
+  useId,
+  type ReactNode,
+} from "react";
 import {
   getFiletypeFromFileName,
   getHighlighterIfLoaded,
@@ -11,8 +18,6 @@ import { FileDiff as ReactFileDiff } from "@pierre/diffs/react";
 import { bundledLanguages } from "./grammars";
 import { gitPatch, type FileData } from "./parse";
 import styles from "./Diffs.module.css";
-import { Button } from "../../shared/design-system/ui/Button";
-import { Select } from "../../shared/design-system/ui/Select";
 
 export type DiffLine = { side: "deletions" | "additions"; lineNumber: number };
 export type DiffComments = {
@@ -233,7 +238,8 @@ function PierreFile({
     availability?.(file.name, true);
     return () => availability?.(file.name, false);
   }, [availability, file.name]);
-  const [chosen, setChosen] = useState("");
+  const [keyboardLine, setKeyboardLine] = useState<DiffLine>();
+  const instructions = useId();
   const rows = useMemo(() => (source ? commentLines(source) : []), [source]);
   const choices = rows.flat();
   const path = file.name;
@@ -244,7 +250,11 @@ function PierreFile({
           entry.side === line.side && entry.lineNumber === line.lineNumber,
       ),
     );
-    if (candidates) comments?.onSelect(path, candidates, () => element.focus());
+    if (candidates)
+      comments?.onSelect(path, candidates, () => {
+        setKeyboardLine(undefined);
+        element.focus();
+      });
   };
   const annotations: DiffLineAnnotation<ReactNode>[] =
     comments?.annotations
@@ -266,52 +276,69 @@ function PierreFile({
       ref={section}
       className={styles.file}
       aria-label={filePath || file.name}
+      aria-describedby={
+        comments && !comments.readOnly ? instructions : undefined
+      }
+      onKeyDown={(event) => {
+        if (
+          event.target !== event.currentTarget ||
+          !comments ||
+          comments.readOnly
+        )
+          return;
+        const index = rows.findIndex((row) =>
+          row.some(
+            (line) =>
+              line.side === keyboardLine?.side &&
+              line.lineNumber === keyboardLine.lineNumber,
+          ),
+        );
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const next =
+            index < 0
+              ? 0
+              : Math.max(
+                  0,
+                  Math.min(
+                    rows.length - 1,
+                    index + (event.key === "ArrowDown" ? 1 : -1),
+                  ),
+                );
+          setKeyboardLine(rows[next]?.[0]);
+        } else if (event.key === "Enter" && keyboardLine) {
+          event.preventDefault();
+          select(keyboardLine, event.currentTarget);
+        } else if (event.key === "Escape") {
+          setKeyboardLine(undefined);
+        }
+      }}
       // biome-ignore lint/a11y/noNoninteractiveTabindex: File-level keyboard focus precedes inner code scrollports.
       tabIndex={0}
     >
       {comments && !comments.readOnly && (
-        <div className={styles.lineActions}>
-          <Select
-            label={`Comment location in ${path}`}
-            variant="compact"
-            value={chosen}
-            placeholder="Choose a line"
-            size="sm"
-            groups={[
-              {
-                label: "Diff lines",
-                options: choices.map((line) => ({
-                  value: `${line.side}:${line.lineNumber}`,
-                  label: `${line.side === "deletions" ? "Old" : "New"} line ${line.lineNumber}`,
-                })),
-              },
-            ]}
-            onValueChange={setChosen}
-          />
-          <Button
-            size="sm"
-            disabled={!chosen}
-            onClick={(event) => {
-              const line = choices.find(
-                (line) => `${line.side}:${line.lineNumber}` === chosen,
-              );
-              const button = event.currentTarget;
-              if (line) comments.onSelect(path, [line], () => button.focus());
-            }}
-          >
-            Comment on line
-          </Button>
-        </div>
+        <span id={instructions} className="sr-only">
+          Use Up and Down arrows to select a diff line, then Enter to comment.
+        </span>
       )}
       <ReactFileDiff
         fileDiff={file}
+        selectedLines={
+          keyboardLine
+            ? {
+                start: keyboardLine.lineNumber,
+                end: keyboardLine.lineNumber,
+                side: keyboardLine.side,
+              }
+            : null
+        }
         lineAnnotations={annotations}
         renderAnnotation={(annotation) => annotation.metadata}
         options={{
           theme,
           themeType,
           diffStyle: viewType,
-          diffIndicators: "classic",
+          diffIndicators: "bars",
           enableGutterUtility: !!comments && !comments.readOnly,
           onLineEnter: ({ numberElement }) => {
             const root = numberElement.getRootNode();
@@ -327,6 +354,7 @@ function PierreFile({
                   side?: "deletions" | "additions";
                 }) => {
                   if (!range.side || !section.current) return;
+                  setKeyboardLine(undefined);
                   select(
                     { side: range.side, lineNumber: range.start },
                     section.current,

@@ -8,6 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import type { DiffComments } from "../diffs/DiffViewer";
 import { PrFiles } from "./PrFiles";
 import { createInlineDelivery } from "./inline-delivery";
 import { createPrComments, type Comment, type Thread } from "./pr-comments";
@@ -19,7 +20,22 @@ import {
 afterEach(cleanup);
 
 // Keep thread rows outside the renderer: this test exercises async panel ownership.
-vi.mock("../diffs/DiffViewer", () => ({ DiffViewer: () => null }));
+vi.mock("../diffs/DiffViewer", () => ({
+  DiffViewer: ({ comments }: { comments?: DiffComments }) => (
+    <button
+      type="button"
+      onClick={() =>
+        comments?.onSelect(
+          "src/example.ts",
+          [{ side: "additions", lineNumber: 5001 }],
+          () => {},
+        )
+      }
+    >
+      Select line
+    </button>
+  ),
+}));
 
 it("discards a reply page that completes after a new snapshot replaces its owner", async () => {
   const fixture = githubCommentHost();
@@ -120,7 +136,7 @@ async function setupComposer() {
   );
   const open = async () => {
     fireEvent.click(await screen.findByRole("button", { name: "Reply" }));
-    return screen.getByRole("textbox", { name: "GitHub comment" });
+    return screen.getByRole("textbox", { name: "Comment" });
   };
   return { ...fixture, panel, open, delivery };
 }
@@ -174,4 +190,103 @@ it("keeps an in-flight lock and unknown receipt after cancel and remount", async
   await screen.findByRole("link", { name: "View on GitHub" });
   expect(state.calls.filter((call) => call.args[0] === "POST")).toHaveLength(2); // seed + one submission
   expect(delivery.get().unknown).toBe(false);
+});
+
+it("opens a composer before the pending thread read finishes", async () => {
+  const fixture = githubCommentHost();
+  const transport = createPrComments(fixture.host);
+  if (!transport) throw new Error("Missing adapter");
+  const snapshot = await transport.loadSnapshot(fixturePull);
+  let release!: (value: {
+    items: Thread[];
+    head: string;
+    base: string;
+    nextCursor: null;
+  }) => void;
+  const pending = new Promise<{
+    items: Thread[];
+    head: string;
+    base: string;
+    nextCursor: null;
+  }>((resolve) => {
+    release = resolve;
+  });
+  const api = { ...transport, loadThreads: vi.fn().mockReturnValue(pending) };
+  render(
+    <PrFiles
+      api={api}
+      pull={fixturePull}
+      head={snapshot.head}
+      base={snapshot.base}
+      delivery={createInlineDelivery()}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Select line" }));
+  expect(screen.getByRole("textbox", { name: "Comment" })).toBeTruthy();
+  expect(screen.queryByText(/Posting as/)).toBeNull();
+  await act(async () =>
+    release({
+      items: [],
+      head: snapshot.head,
+      base: snapshot.base,
+      nextCursor: null,
+    }),
+  );
+});
+
+it("keeps a reconciled thread when the older initial read completes later", async () => {
+  const fixture = githubCommentHost();
+  const transport = createPrComments(fixture.host);
+  if (!transport) throw new Error("Missing adapter");
+  const snapshot = await transport.loadSnapshot(fixturePull);
+  const sent = await transport.create(
+    snapshot,
+    {
+      ...snapshot,
+      path: "src/example.ts",
+      side: "RIGHT",
+      line: 5001,
+    },
+    "Confirmed while loading",
+    "seed",
+  );
+  if (sent.status !== "sent") throw new Error("Expected receipt");
+  const empty = {
+    items: [],
+    head: snapshot.head,
+    base: snapshot.base,
+    nextCursor: null,
+  };
+  let release!: (value: typeof empty) => void;
+  const pending = new Promise<typeof empty>((resolve) => {
+    release = resolve;
+  });
+  const loadThreads = vi
+    .fn()
+    .mockReturnValueOnce(pending)
+    .mockImplementation(transport.loadThreads);
+  const api = {
+    ...transport,
+    loadThreads,
+    reconcile: vi.fn().mockResolvedValue(sent),
+  };
+  const delivery = createInlineDelivery();
+  delivery.update({ unknown: true, attempt: "uncertain" });
+  render(
+    <PrFiles
+      api={api}
+      pull={fixturePull}
+      head={snapshot.head}
+      base={snapshot.base}
+      delivery={delivery}
+    />,
+  );
+  await waitFor(() => expect(loadThreads).toHaveBeenCalledOnce());
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Check delivery" }));
+    await screen.findByText("Confirmed while loading");
+  } finally {
+    await act(async () => release(empty));
+  }
+  expect(screen.getByText("Confirmed while loading")).toBeTruthy();
 });

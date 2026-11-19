@@ -52,11 +52,13 @@ export function PrFiles({
   const [composer, setComposer] = useState<Composer>();
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const snapshotRef = useRef<Snapshot | undefined>(undefined);
+  const threadVersion = useRef(0);
   const [threads, setThreads] = useState<readonly Thread[]>([]);
   const [error, setError] = useState<string>();
   const [threadError, setThreadError] = useState<string>();
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [commentsLoading, setCommentsLoading] = useState(true);
   const [layout, setLayout] = useState<"unified" | "split">("unified");
   const [choice, setChoice] = useState<{ path: string; lines: DiffLine[] }>();
   const [available, setAvailable] = useState<ReadonlySet<string>>(new Set());
@@ -108,12 +110,14 @@ export function PrFiles({
   // biome-ignore lint/correctness/useExhaustiveDependencies: PR revisions and explicit refresh invalidate the remote snapshot.
   useEffect(() => {
     const controller = new AbortController();
+    const version = ++threadVersion.current;
     snapshotRef.current = undefined;
     setSnapshot(undefined);
     setAvailable(new Set());
     setChoice(undefined);
     setComposer(undefined);
     setLoading(true);
+    setCommentsLoading(true);
     setError(undefined);
     setThreads([]);
     void api
@@ -123,14 +127,18 @@ export function PrFiles({
           if (controller.signal.aborted) return;
           snapshotRef.current = current;
           setSnapshot(current);
+          setLoading(false);
           try {
             const rows = await readThreads(current, controller.signal);
-            if (!controller.signal.aborted) {
+            if (
+              !controller.signal.aborted &&
+              threadVersion.current === version
+            ) {
               setThreads(rows);
               setThreadError(undefined);
             }
           } catch (failure) {
-            if (!controller.signal.aborted)
+            if (!controller.signal.aborted && threadVersion.current === version)
               setThreadError(readable(failure).message);
           }
         },
@@ -139,7 +147,10 @@ export function PrFiles({
         },
       )
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+          if (threadVersion.current === version) setCommentsLoading(false);
+        }
       });
     return () => controller.abort();
   }, [api, repository, number, head, base, revision, readThreads]);
@@ -210,18 +221,34 @@ export function PrFiles({
         setComposer(undefined);
         restoreFocus();
       }
-      if (!current) return;
+      if (!current || !alive.current || snapshotRef.current !== current) return;
+      const version = ++threadVersion.current;
       try {
         const rows = await readThreads(current);
-        if (alive.current && snapshotRef.current === current) {
+        if (
+          alive.current &&
+          snapshotRef.current === current &&
+          threadVersion.current === version
+        ) {
           setThreads(rows);
           setThreadError(undefined);
         }
       } catch (failure) {
-        if (alive.current && snapshotRef.current === current)
+        if (
+          alive.current &&
+          snapshotRef.current === current &&
+          threadVersion.current === version
+        )
           setThreadError(
             `Comment sent. Refresh failed: ${readable(failure).message}`,
           );
+      } finally {
+        if (
+          alive.current &&
+          snapshotRef.current === current &&
+          threadVersion.current === version
+        )
+          setCommentsLoading(false);
       }
     } else if (result.status === "unknown") {
       delivery.update({
@@ -282,16 +309,10 @@ export function PrFiles({
         !!stale ||
         loading ||
         status.unknown ||
-        !snapshot?.writable ||
+        !snapshot ||
         (!targetMapped && !composer?.target.replyTo)
       }
-      notice={
-        stale
-          ? "Select a line again in the latest diff."
-          : composer?.target
-            ? `${composer?.target.path} · ${composer?.target.side === "LEFT" ? "Old" : "New"} line ${composer?.target.line} · ${composer.target.head.slice(0, 7)}`
-            : undefined
-      }
+      notice={stale ? "Select a line again in the latest diff." : undefined}
       onChange={(body) => {
         if (!delivery.get().busy && !delivery.get().unknown)
           setComposer((current) => current && { ...current, body });
@@ -384,7 +405,7 @@ export function PrFiles({
         <Button
           size="sm"
           disabled={
-            !snapshot?.writable ||
+            !snapshot ||
             loading ||
             status.busy ||
             status.unknown ||
@@ -484,11 +505,6 @@ export function PrFiles({
           }
         />
       </div>
-      {snapshot && (
-        <p>
-          Posting as {snapshot.viewer} · commit {snapshot.head.slice(0, 7)}
-        </p>
-      )}
       {choice && (
         <section className={styles.actions} aria-label="Choose comment side">
           {choice.lines.map((line) => (
@@ -535,24 +551,21 @@ export function PrFiles({
       {composer && !targetMapped && form}
       {error && <p role="alert">{error}</p>}
       {threadError && <p role="alert">{threadError}</p>}
-      <LoadingRegion
-        pending={loading}
-        label="Loading GitHub changes and comments…"
-      >
+      <LoadingRegion pending={loading} label="Loading GitHub changes…">
         {parts?.map((part) => (
           <DiffViewer
             key={part.content.split("\n", 1)[0]}
             content={part.content}
             files={part.files}
             viewType={layout}
-            comments={
-              snapshot?.writable ? comments : { ...comments, readOnly: true }
-            }
+            comments={comments}
           />
         ))}
         {parts?.length === 0 && <p>No file changes.</p>}
       </LoadingRegion>
-      {threads.filter((thread) => !mapped(thread)).map(threadView)}
+      <LoadingRegion pending={commentsLoading} label="Loading comments…">
+        {threads.filter((thread) => !mapped(thread)).map(threadView)}
+      </LoadingRegion>
     </div>
   );
 }

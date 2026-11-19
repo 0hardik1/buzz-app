@@ -50,6 +50,7 @@ export function githubCommentHost() {
       args: readonly string[];
       input: unknown;
     }) => {},
+    merged: false,
     snapshotFailed: false,
     refreshFailed: false,
     release: () => {},
@@ -231,8 +232,8 @@ export function githubCommentHost() {
               node_id: "pull-fixture",
               head: { sha: state.head },
               base: { sha: state.base },
-              state: "open",
-              merged: false,
+              state: state.merged ? "closed" : "open",
+              merged: state.merged,
             });
           return;
         }

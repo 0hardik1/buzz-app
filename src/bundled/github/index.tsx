@@ -842,11 +842,10 @@ function ObjectPanel({
           )}
         </>
       )}
-      {typeof loaded === "object" && (
+      {typeof loaded === "object" && !loaded.signedIn && (
         <p className={styles.note}>
-          {loaded.signedIn
-            ? "Read with your gh sign-in."
-            : "Public GitHub data · Sign in to the gh CLI to see private repositories and merge from here."}
+          Public GitHub data · Sign in to the gh CLI to see private repositories
+          and merge from here.
         </p>
       )}
       {openFailed && (
