@@ -74,7 +74,9 @@ function privateWith(chat: ChannelSummary, viewer: string, agent: string) {
         !chat.cached)) &&
     members.length === 2 &&
     members.includes(viewer) &&
-    members.includes(agent)
+    members.includes(agent) &&
+    // A Viewing-only agent there could read the question but never answer.
+    !chat.guests?.includes(agent)
   );
 }
 

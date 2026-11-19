@@ -199,6 +199,11 @@ it.each([
     "private only in saved metadata",
     (chat: ChannelSummary) => ({ ...chat, metadataCached: true as const }),
   ],
+  // A Guest there can read the question but never answer it.
+  [
+    "Viewing only for the agent",
+    (chat: ChannelSummary) => ({ ...chat, guests: [agent] }),
+  ],
 ])("starts a new chat when the earlier one is %s", (_, change) => {
   const f = fakeSession();
   const first = askInSolo(f.session, ask());
