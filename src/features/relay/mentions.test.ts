@@ -282,23 +282,31 @@ it("an edit's added recipients get the same signing and publication membership c
       ["p", honey.pubkey],
     ],
   };
-  h.session.outbox.send(edit);
-  await flush();
+  const rejectedId = h.session.outbox.send(edit);
+  const delivery = (id: string) =>
+    h.session.outbox?.snapshot().find((item) => item.event.id === id);
+  await vi.waitFor(() =>
+    expect(delivery(rejectedId)).toMatchObject({ delivery: "failed" }),
+  );
   expect(h.sign).not.toHaveBeenCalled();
-  expect(h.session.outbox.snapshot()[0]?.delivery).toBe("failed");
-  // Membership lost after signing still stops the queued edit.
-  await h.members();
+  // Wait until the signer is paused, so the removal cannot fail pre-sign.
+  await h.members(undefined, 1700000001);
   h.hold();
   const id = h.session.outbox.send(edit);
-  await flush();
-  await h.members([viewer.pubkey, namesake.pubkey], 1700000001);
-  h.release();
-  await flush();
+  try {
+    await vi.waitFor(() => expect(h.sign).toHaveBeenCalledOnce());
+    await h.members([viewer.pubkey, namesake.pubkey], 1700000002);
+  } finally {
+    h.release();
+  }
+  await vi.waitFor(() =>
+    expect(delivery(id)).toMatchObject({
+      delivery: "failed",
+      signed: expect.objectContaining({ id }),
+    }),
+  );
   expect(h.publish).not.toHaveBeenCalled();
-  expect(
-    h.session.outbox.snapshot().find((item) => item.event.id === id),
-  ).toMatchObject({ delivery: "failed" });
-  await h.members(undefined, 1700000002);
+  await h.members(undefined, 1700000003);
   h.session.messages.retry(id);
   await vi.waitFor(() => expect(h.publish).toHaveBeenCalledOnce());
   expect(h.publish.mock.calls[0]?.[0].tags).toContainEqual(["p", honey.pubkey]);
