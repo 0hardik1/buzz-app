@@ -23,6 +23,7 @@ const a = (
   sentence: ActionDef["sentence"],
   confirm: ActionDef["confirm"] = "none",
   global = false,
+  whenHovered?: ActionDef["whenHovered"],
 ): ActionDef => ({
   id,
   ...(owner ? { owner } : {}),
@@ -30,7 +31,19 @@ const a = (
   sentence,
   confirm,
   ...(global ? { global } : {}),
+  ...(whenHovered ? { whenHovered } : {}),
 });
+
+// drone02's named forms: offered unless the hovered thing is already of
+// that kind, so a hovered and a named form never both bind.
+const NOT_SECTION = ["channel", "message", "person", "nothing"] as const;
+const NOT_PERSON = ["channel", "message", "section", "nothing"] as const;
+const named = (
+  id: string,
+  target: SlotKind,
+  sentence: string,
+  whenHovered: ActionDef["whenHovered"],
+) => a(id, undefined, target, () => sentence, "none", true, whenHovered);
 
 export const ACTIONS: readonly ActionDef[] = [
   // Channels (drone01 M1 + drone02).
@@ -111,6 +124,62 @@ export const ACTIONS: readonly ActionDef[] = [
   // People.
   a("person.profile", "person", undefined, (o) => `Open ${o}'s profile`),
   a("person.dm", "person", undefined, (o) => `Send ${o} a direct message`),
+  // Named forms and self (drone02): the no-hover menu.
+  named(
+    "section.filter_unreads.named",
+    "section",
+    "Show only unread channels in a section",
+    NOT_SECTION,
+  ),
+  named(
+    "section.filter_all.named",
+    "section",
+    "Show every channel in a section",
+    NOT_SECTION,
+  ),
+  named(
+    "section.collapse.named",
+    "section",
+    "Collapse a sidebar section (hide its channels)",
+    NOT_SECTION,
+  ),
+  named(
+    "section.expand.named",
+    "section",
+    "Expand a sidebar section (show its channels)",
+    NOT_SECTION,
+  ),
+  named(
+    "person.dm.named",
+    "person",
+    "Send someone a direct message",
+    NOT_PERSON,
+  ),
+  named("person.profile.named", "person", "Show someone's profile", NOT_PERSON),
+  a(
+    "self.set_away",
+    undefined,
+    undefined,
+    () => "Set my availability to away",
+    "none",
+    true,
+  ),
+  a(
+    "self.set_active",
+    undefined,
+    undefined,
+    () => "Set my availability to active (I'm back)",
+    "none",
+    true,
+  ),
+  a(
+    "self.set_offline",
+    undefined,
+    undefined,
+    () => "Set my availability to appear offline",
+    "none",
+    true,
+  ),
   // Community.
   a(
     "community.mark_all_read",

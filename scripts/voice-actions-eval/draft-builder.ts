@@ -37,6 +37,9 @@ export type ActionDef = Readonly<{
   target?: SlotKind;
   /** Offered whatever is hovered, or when nothing is. */
   global?: boolean;
+  /** A global action is offered only while one of these is hovered
+   * (`nothing` for no hover); omitted means always. */
+  whenHovered?: readonly (Thing["kind"] | "nothing")[];
   sentence: (owner: string, target: string) => string;
   confirm: "none" | "confirm";
 }>;
@@ -121,7 +124,12 @@ export function bindings(
         ),
       });
     }
-    if (action.global && !action.owner)
+    if (
+      action.global &&
+      !action.owner &&
+      (!action.whenHovered ||
+        action.whenHovered.includes(hovered?.kind ?? "nothing"))
+    )
       out.push({
         action,
         role: "global",

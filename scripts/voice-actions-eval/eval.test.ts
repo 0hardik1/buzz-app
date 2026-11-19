@@ -4,16 +4,18 @@ import { describe, expect, it } from "vitest";
 import { checkRequest } from "../../src/features/decisions/service";
 import { ACTIONS, ENTITIES, PLACES, hover } from "./catalog";
 import { CASES } from "./cases";
+import { HELDOUT } from "./cases-heldout";
 import { bindings, buildActionDecision, spokenName } from "./draft-builder";
 import { score } from "./eval";
 
 describe("voice actions eval", () => {
   it("builds a valid request for every case, with its answer offered", () => {
     expect(CASES.length).toBeGreaterThanOrEqual(60);
+    expect(HELDOUT.length).toBeGreaterThanOrEqual(30);
     const keys = new Set(
       Object.values(ENTITIES).flatMap((list) => list.map((e) => e.key)),
     );
-    for (const c of CASES) {
+    for (const c of [...CASES, ...HELDOUT]) {
       const hovered = hover(c.hover);
       const { request } = buildActionDecision({
         spoken: c.spoken,

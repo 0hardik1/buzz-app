@@ -9,7 +9,9 @@ import {
   type DecisionRequest,
 } from "../../src/features/decisions/service";
 import { ACTIONS, CONFIRM, ENTITIES, PLACES, hover } from "./catalog";
+import { PEOPLE } from "./world";
 import { CASES, type Case, type Category, type Expected } from "./cases";
+import { HELDOUT } from "./cases-heldout";
 import { buildActionDecision, type ResolvedAction } from "./draft-builder";
 
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
@@ -94,8 +96,21 @@ export const typesafe =
     return { model: body.model, answers, ms };
   };
 
-/** A move into Starred is starring, as the sidebar's own menu does it. */
+/** Messaging someone opens the DM or agent chat, as jumping to it does. */
+const DM_PLACE = new Map(
+  PEOPLE.filter((p) => p.dm).map((p) => [
+    p.id,
+    `${p.agent ? "chat" : "dm"}:d-${p.name}`,
+  ]),
+);
+
+/** A move into Starred is starring, as the sidebar's own menu does it.
+ * Messaging someone with a DM open is going to that DM. */
 function normalize(got: ResolvedAction): ResolvedAction {
+  if (got.kind === "action" && got.actionId.startsWith("person.dm")) {
+    const place = DM_PLACE.get(got.owner ?? got.target ?? "");
+    if (place) return { kind: "navigate", place, probability: got.probability };
+  }
   if (
     got.kind === "action" &&
     got.actionId === "channel.move_to_section" &&
@@ -284,10 +299,16 @@ export function summarize(results: readonly CaseResult[]) {
 
 export async function main(
   key: string,
-  options: { repeat?: number; filter?: string } = {},
+  options: { repeat?: number; filter?: string; set?: string } = {},
 ): Promise<{ results: CaseResult[]; summary: ReturnType<typeof summarize> }> {
   const decide = typesafe(key);
-  const cases = CASES.filter(
+  const set =
+    options.set === "heldout"
+      ? HELDOUT
+      : options.set === "all"
+        ? [...CASES, ...HELDOUT]
+        : CASES;
+  const cases = set.filter(
     (c) =>
       !options.filter ||
       c.id.includes(options.filter) ||

@@ -16,7 +16,8 @@ export type Category =
   | "new-name"
   | "stt"
   | "none"
-  | "global";
+  | "global"
+  | "no-hover";
 
 export type Expected =
   | Readonly<{
