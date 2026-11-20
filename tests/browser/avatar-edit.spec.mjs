@@ -803,7 +803,33 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   await expect(ring).toBeVisible();
   await page.evaluate(() => window.finishAvatarRecording());
   await expect(ring).toHaveCount(0);
+  const tools = ["You", "Background", "Frame", "Retake the recording"];
+  const widths = await Promise.all(
+    tools.map((name) =>
+      page
+        .getByRole("button", { name, exact: true })
+        .evaluate(
+          (button) => button.parentElement.getBoundingClientRect().width,
+        ),
+    ),
+  );
+  expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(1);
+  const outline = page.getByRole("button", { name: "Outline", exact: true });
+  await outline.click();
+  await expect(outline).toHaveAttribute("aria-pressed", "false");
   await page.getByRole("button", { name: "Background", exact: true }).click();
+  const swatches = page
+    .getByRole("group", { name: "Background colors" })
+    .getByRole("button");
+  await expect(swatches).toHaveCount(25);
+  const preset = page.getByRole("button", { name: "#FFE75C", exact: true });
+  await preset.click();
+  await expect(preset).toHaveAttribute("aria-pressed", "true");
+  await expect(swatches.last()).toHaveAccessibleName("Custom background color");
+  await swatches.last().click();
+  await expect(page.getByLabel("Color spectrum")).toBeVisible();
+  await page.getByRole("button", { name: "Use color" }).click();
+  await expect(swatches.last()).toBeFocused();
   await page.getByRole("button", { name: "Transparent background" }).click();
   await page.getByRole("button", { name: "Frame", exact: true }).click();
   await page.getByRole("button", { name: "Choose frame 2" }).click();

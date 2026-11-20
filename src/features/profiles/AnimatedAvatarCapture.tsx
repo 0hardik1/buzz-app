@@ -9,6 +9,8 @@ import {
   UserIcon,
   VideoCameraIcon,
 } from "../../shared/design-system/icons";
+import { avatarColors } from "./avatar-colors";
+import { AvatarCustomColor } from "./AvatarCustomColor";
 import editorStyles from "./AvatarEditor.module.css";
 import { uploadAvatar } from "./avatar-upload";
 import { animatedAvatarUrl } from "./animated-avatar";
@@ -80,6 +82,8 @@ export function AnimatedAvatarCapture({
   const [error, setError] = useState("");
   const [segmented, setSegmented] = useState(true);
   const [progress, setProgress] = useState(0);
+  const [customColorOpen, setCustomColorOpen] = useState(false);
+  const restoreCustomFocus = useRef(false);
   const [section, setSection] = useState<"You" | "Background" | "Frame">("You");
   const [poster, setPoster] = useState(0);
   const reducedMotion = useReducedMotion();
@@ -190,6 +194,7 @@ export function AnimatedAvatarCapture({
       });
       frames.current = bitmaps;
       setSegmented(recording.backgroundRemoved);
+      setCustomColorOpen(false);
       setSection("You");
       setPoster(0);
       setPlaying(!reducedMotion);
@@ -424,9 +429,12 @@ export function AnimatedAvatarCapture({
                   variant={section === label ? "solid" : "subtle"}
                   aria-pressed={section === label}
                   icon={<Icon />}
-                  onClick={() => setSection(label)}
+                  onClick={() => {
+                    setCustomColorOpen(false);
+                    setSection(label);
+                  }}
                 />
-                <span className="text-label-sm">{label}</span>
+                <span className="text-caption">{label}</span>
               </div>
             ))}
             <div>
@@ -439,55 +447,67 @@ export function AnimatedAvatarCapture({
                 onClick={() => void start()}
                 disabled={disabled}
               />
-              <span className="text-label-sm">Retake</span>
+              <span className="text-caption">Retake</span>
             </div>
           </div>
           {section === "Background" && (
             <div className={styles.controls}>
-              <fieldset
-                className={editorStyles.swatches}
-                aria-label="Background colors"
-              >
-                {[
-                  "#FFE75C",
-                  "#FF8652",
-                  "#FF6B9A",
-                  "#7C5CFF",
-                  "#FFFFFF",
-                  null,
-                ].map((color) => (
-                  <button
-                    key={color ?? "clear"}
-                    type="button"
-                    className={editorStyles.swatch}
-                    aria-label={color ?? "Transparent background"}
-                    aria-pressed={composition.backdropColor === color}
-                    style={{ backgroundColor: color ?? "transparent" }}
-                    onClick={() =>
-                      setComposition({ ...composition, backdropColor: color })
-                    }
-                  >
-                    {color ? null : "∅"}
-                  </button>
-                ))}
-              </fieldset>
-              <label className="text-label-sm">
-                Background color
-                <input
-                  type="color"
-                  value={composition.backdropColor ?? "#FFE75C"}
-                  onChange={(event) =>
-                    setComposition({
-                      ...composition,
-                      backdropColor: event.target.value,
-                    })
+              {customColorOpen ? (
+                <AvatarCustomColor
+                  color={composition.backdropColor ?? "#FFE75C"}
+                  disabled={disabled}
+                  onChange={(backdropColor) =>
+                    setComposition({ ...composition, backdropColor })
                   }
+                  onClose={() => {
+                    restoreCustomFocus.current = true;
+                    setCustomColorOpen(false);
+                  }}
                 />
-              </label>
+              ) : (
+                <fieldset
+                  className={editorStyles.swatches}
+                  aria-label="Background colors"
+                >
+                  {[null, ...avatarColors].map((color) => (
+                    <button
+                      key={color ?? "clear"}
+                      type="button"
+                      className={editorStyles.swatch}
+                      aria-label={color ?? "Transparent background"}
+                      aria-pressed={composition.backdropColor === color}
+                      style={{ backgroundColor: color ?? "transparent" }}
+                      onClick={() =>
+                        setComposition({ ...composition, backdropColor: color })
+                      }
+                    >
+                      {color ? null : "∅"}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    ref={(button) => {
+                      if (button && restoreCustomFocus.current) {
+                        restoreCustomFocus.current = false;
+                        button.focus();
+                      }
+                    }}
+                    className={editorStyles.customColor}
+                    aria-label="Custom background color"
+                    aria-pressed={
+                      !!composition.backdropColor &&
+                      !avatarColors.includes(
+                        composition.backdropColor.toUpperCase(),
+                      )
+                    }
+                    onClick={() => setCustomColorOpen(true)}
+                  />
+                </fieldset>
+              )}
             </div>
           )}
           {section === "You" && (
-            <div className={styles.controls}>
+            <div className={styles.framing}>
               <label className="text-label-sm">
                 Size
                 <input
@@ -504,19 +524,27 @@ export function AnimatedAvatarCapture({
                   }
                 />
               </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={composition.personOutline}
-                  onChange={(event) =>
-                    setComposition({
-                      ...composition,
-                      personOutline: event.target.checked,
-                    })
-                  }
-                />{" "}
-                Outline
-              </label>
+              <IconButton
+                shape="round"
+                variant="outline"
+                size="large"
+                aria-label="Outline"
+                title={
+                  composition.personOutline
+                    ? "Turn outline off"
+                    : "Turn outline on"
+                }
+                aria-pressed={composition.personOutline}
+                icon={
+                  <span aria-hidden="true" className={styles.outlineGlyph} />
+                }
+                onClick={() =>
+                  setComposition({
+                    ...composition,
+                    personOutline: !composition.personOutline,
+                  })
+                }
+              />
             </div>
           )}
           {section === "Frame" && (

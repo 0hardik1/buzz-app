@@ -27,6 +27,7 @@ import {
   uploadAvatar,
 } from "./avatar-upload";
 import { useAvatarPreview } from "./use-avatar-preview";
+import { avatarColors as colors } from "./avatar-colors";
 import { AvatarCustomColor } from "./AvatarCustomColor";
 import type { EmojiSearchSelection } from "../../bundled/emoji/emoji-mart";
 
@@ -65,32 +66,6 @@ type DraftPreview = {
   pulse?: number;
   move?: (update: (offset: number) => number) => void;
 };
-
-const colors = [
-  "#FFFFFF",
-  "#FFF4CC",
-  "#FFE75C",
-  "#FFB84D",
-  "#FF8652",
-  "#F6534F",
-  "#FF6B9A",
-  "#FB60C4",
-  "#D66BFF",
-  "#B141FF",
-  "#7C5CFF",
-  "#476CFF",
-  "#3399FF",
-  "#63C6F2",
-  "#41EBC1",
-  "#2ED3A2",
-  "#73EF75",
-  "#9FE870",
-  "#C7D36F",
-  "#CCCCCC",
-  "#8A8F98",
-  "#4B5563",
-  "#000000",
-];
 
 /** Not the popup, nor the emoji preview it moves from outside the popup. */
 const outsideEditor = (popup: HTMLElement | null, target: EventTarget | null) =>
