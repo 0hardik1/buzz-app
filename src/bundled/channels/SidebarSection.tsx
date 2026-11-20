@@ -658,9 +658,12 @@ function SectionNameEditor({
   const saving = useRef(false);
   // Escape or a save ends the edit; the blur that follows must not save again.
   const done = useRef(false);
-  const end = () => {
+  const owns = () => !!form.current?.contains(document.activeElement);
+  // `owned`: the edit held focus when it ended, or when its save began and
+  // focus was only lost (to the page body) while saving, not moved elsewhere.
+  const end = (owned = owns()) => {
     done.current = true;
-    stopThis(!!form.current?.contains(document.activeElement));
+    stopThis(owned);
   };
   const finish = async (keep: boolean) => {
     const next = name.trim();
@@ -668,9 +671,15 @@ function SectionNameEditor({
     if (!keep || !next || next === openedWith) return end();
     saving.current = true;
     setError("");
+    const owned = owns();
     try {
       await save(next, openedWith);
-      end();
+      end(
+        owns() ||
+          (owned &&
+            (!document.activeElement ||
+              document.activeElement === document.body)),
+      );
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {

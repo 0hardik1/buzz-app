@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -540,7 +541,10 @@ function RenamableSection({
   save,
   toggle,
   title: remoteTitle,
+  stopped,
 }: {
+  /** How the edit ended: with focus still its own, or not. */
+  stopped?(focus: boolean): void;
   save(name: string, openedWith: string): Promise<unknown>;
   toggle(open: boolean): void;
   /** A name the workspace took elsewhere, such as on another device. */
@@ -562,7 +566,10 @@ function RenamableSection({
           await save(name, openedWith);
           setTitle(name);
         },
-        stop: () => setEditing(false),
+        stop: (focus) => {
+          stopped?.(focus);
+          setEditing(false);
+        },
       }}
     >
       <button type="button">General</button>
@@ -643,4 +650,31 @@ it("compares a rename with the name it opened with, not a newer one from elsewhe
   await user.dblClick(screen.getByLabelText("Research"));
   await user.keyboard("Design{Enter}");
   expect(save).toHaveBeenCalledExactlyOnceWith("Design", "Research");
+});
+
+it("returns focus to the header after a save that loses it, but not after a deliberate move", async () => {
+  const user = userEvent.setup();
+  const stopped = vi.fn();
+  let release = () => {};
+  const save = vi.fn(
+    () => new Promise<void>((done) => (release = () => done())),
+  );
+  render(
+    <>
+      <RenamableSection save={save} toggle={vi.fn()} stopped={stopped} />
+      <button type="button">Elsewhere</button>
+    </>,
+  );
+  await user.dblClick(screen.getByLabelText("Untitled workspace"));
+  await user.keyboard("Design{Enter}");
+  // The sidebar re-renders while saving and the input loses focus.
+  act(() => (document.activeElement as HTMLElement).blur());
+  await act(async () => release());
+  expect(stopped).toHaveBeenLastCalledWith(true);
+  await user.dblClick(screen.getByLabelText("Design"));
+  await user.keyboard("Research{Enter}");
+  // Someone moves on to something else while it saves.
+  act(() => screen.getByText("Elsewhere").focus());
+  await act(async () => release());
+  expect(stopped).toHaveBeenLastCalledWith(false);
 });
