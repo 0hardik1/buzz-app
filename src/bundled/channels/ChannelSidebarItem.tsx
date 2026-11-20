@@ -5,6 +5,7 @@ import { useIsPresent } from "motion/react";
 import {
   memo,
   useCallback,
+  useContext,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -35,6 +36,8 @@ import { ChannelActivityPopover } from "./ChannelActivityPopover";
 import { channelDurationLabel } from "./ChannelDurationField";
 import { ChatSharedMark, soloSharedMarkId } from "./ChatSharedMark";
 import { ChannelSidebarRow } from "./ChannelSidebarRow";
+import { ChannelSidebarTile } from "./ChannelSidebarTile";
+import { SidebarCardDisplayContext } from "./SidebarCardDisplay";
 import { DmTypingBadge } from "./DmTypingBadge";
 import { usePresenceStatus } from "../../features/presence/react";
 import { UnreadBadge, ordinaryUnread, useConfirmedMute } from "./UnreadBadge";
@@ -213,9 +216,23 @@ function ChannelSidebarItemCore({
     if (menuContent !== undefined) lastMenuContent.current = menuContent;
   }, [menuContent]);
   const Icon = channelIcon(channel);
+  // Solo chats are told apart by their titles, so they stay a list.
+  const tiled =
+    useContext(SidebarCardDisplayContext) === "icons" &&
+    channel.channelType !== "solo";
   const row = (
     <ChannelSidebarRow
       channel={channel}
+      tile={
+        tiled && (
+          <ChannelSidebarTile
+            channel={channel}
+            profile={profile}
+            presence={presence === "unknown" ? undefined : presence}
+            session={session}
+          />
+        )
+      }
       title={
         channel.channelType === "solo" ? (
           // Incoming renames animate; a rename saved here shows at once.

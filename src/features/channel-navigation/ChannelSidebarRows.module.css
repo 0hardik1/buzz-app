@@ -10,3 +10,10 @@
   border-radius: var(--radius-row);
   background: var(--surface-panel);
 }
+
+/* Inside a card shown as icons, rows are tiles that wrap. */
+[data-card-display="icons"] .rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-half);
+}

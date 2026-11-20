@@ -10,9 +10,10 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { SidebarSection } from "./SidebarSection";
+import { SidebarCardDisplayContext } from "./SidebarCardDisplay";
 import { MenuItem } from "../../shared/design-system/ui/Menu";
 afterEach(cleanup);
 
@@ -713,4 +714,70 @@ it("returns focus to the header after a save that loses it, but not after a deli
   act(() => screen.getByText("Elsewhere").focus());
   await act(async () => release());
   expect(stopped).toHaveBeenLastCalledWith(false);
+});
+it("switches a card between a list and icons from its menu, remembered on this device", async () => {
+  const user = userEvent.setup();
+  function Rows() {
+    return <p>Display: {useContext(SidebarCardDisplayContext)}</p>;
+  }
+  const card = () => (
+    <SidebarSection
+      sectionKey="dms"
+      title="Direct messages"
+      open
+      onToggle={() => {}}
+      heightScope="icon-view-test"
+      iconView
+    >
+      <Rows />
+    </SidebarSection>
+  );
+  const view = render(card());
+  expect(screen.getByText("Display: list")).toBeInTheDocument();
+  const rows = () => document.querySelector("[data-card-rows]");
+  expect(rows()).toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: "More actions for Direct messages" }),
+  );
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Show as icons" }),
+  );
+  expect(screen.getByText("Display: icons")).toBeInTheDocument();
+  // Icons wrap and show every row, so the card isn't resizable.
+  expect(rows()).not.toBeInTheDocument();
+  expect(
+    document.querySelector('[data-card-display="icons"]'),
+  ).toBeInTheDocument();
+  view.unmount();
+  render(card());
+  expect(screen.getByText("Display: icons")).toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: "More actions for Direct messages" }),
+  );
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Show as list" }),
+  );
+  expect(screen.getByText("Display: list")).toBeInTheDocument();
+});
+it("offers no icon view to a card that keeps its names", async () => {
+  const user = userEvent.setup();
+  render(
+    <SidebarSection
+      sectionKey="solo"
+      title="Solo chats"
+      open
+      onToggle={() => {}}
+      heightScope="icon-view-test"
+      newMessage={() => {}}
+    >
+      <p>Rows</p>
+    </SidebarSection>,
+  );
+  await user.click(
+    screen.getByRole("button", { name: "More actions for Solo chats" }),
+  );
+  await screen.findByRole("menu");
+  expect(
+    screen.queryByRole("menuitem", { name: "Show as icons" }),
+  ).not.toBeInTheDocument();
 });

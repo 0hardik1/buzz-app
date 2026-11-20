@@ -188,3 +188,26 @@
   width: max-content;
   max-width: var(--available-width);
 }
+
+/* A row drawn as an identity tile in a card shown as icons. */
+.tileRow {
+  position: relative;
+  display: inline-flex;
+}
+.tileTarget {
+  display: inline-flex;
+}
+.tile {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+/* Unread sits on the tile's top-right corner, clear of the artwork's centre. */
+.tileBadge {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  display: flex;
+  pointer-events: none;
+}

@@ -2054,6 +2054,7 @@ export function ChannelInventory({
                           ) : null
                         }
                         heightScope={scope}
+                        iconView={section.key !== "solo"}
                         removalFocus={() =>
                           sidebar.list.current?.querySelector<HTMLButtonElement>(
                             '[data-sidebar-section="channels"] button',

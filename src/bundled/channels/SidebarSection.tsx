@@ -35,7 +35,9 @@ import {
   ChatUnreadIcon,
   DotsThreeIcon,
   Filter2Icon,
+  ListBulletsIcon,
   PlusIcon,
+  SquaresFourIcon,
   TextAaIcon,
   TimerIcon,
   TrashIcon,
@@ -54,6 +56,10 @@ import { SidebarGroupIcon } from "./SidebarGroupIcon";
 import { SidebarStarIcon } from "./SidebarStarIcon";
 import { ChannelSidebarMenuItem } from "./ChannelSidebarMenuItem";
 import { SidebarCardResize, useSidebarCardHeight } from "./SidebarCardResize";
+import {
+  SidebarCardDisplayContext,
+  useSidebarCardDisplay,
+} from "./SidebarCardDisplay";
 import styles from "./Channels.module.css";
 
 export function SidebarSection({
@@ -83,6 +89,7 @@ export function SidebarSection({
   channelCount,
   removalFocus,
   heightScope,
+  iconView = false,
   rename,
   children,
 }: {
@@ -107,6 +114,8 @@ export function SidebarSection({
   removalFocus?: (() => HTMLElement | null | undefined) | undefined;
   /** Where a card remembers the height its grip was left at; omit to fit. */
   heightScope?: string | undefined;
+  /** Offer showing the card's rows as identity tiles instead of names. */
+  iconView?: boolean;
   createChannel?:
     | { available: boolean; open: (trigger: HTMLButtonElement) => void }
     | undefined;
@@ -172,6 +181,10 @@ export function SidebarSection({
   const cancelRemove = useRef<HTMLButtonElement>(null);
   const actionsTrigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [display, setDisplay] = useSidebarCardDisplay(
+    iconView ? heightScope : undefined,
+    sectionKey,
+  );
   // The menu unmounts while hidden, so it must not reopen when shown again.
   if (hideMoreActions && menuOpen) setMenuOpen(false);
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -379,9 +392,26 @@ export function SidebarSection({
                       </MenuSubmenuPopup>
                     </MenuSubmenu>
                   )}
+                  {iconView && heightScope && (
+                    <MenuItem
+                      onClick={() => {
+                        setDisplay(display === "icons" ? "list" : "icons");
+                        setMenuOpen(false);
+                      }}
+                    >
+                      <MenuIcon>
+                        {display === "icons" ? (
+                          <ListBulletsIcon size={14} />
+                        ) : (
+                          <SquaresFourIcon size={14} />
+                        )}
+                      </MenuIcon>
+                      {display === "icons" ? "Show as list" : "Show as icons"}
+                    </MenuItem>
+                  )}
                   {createSection && (
                     <>
-                      {(filter || sort) && <MenuSeparator />}
+                      {(filter || sort || iconView) && <MenuSeparator />}
                       <MenuItem
                         disabled={!createSection.available}
                         onClick={() => {
@@ -595,7 +625,14 @@ export function SidebarSection({
         inert={!open}
         hidden={!open}
       >
-        {heightScope ? (
+        {display === "icons" ? (
+          // Tiles wrap, so a card of them shows every row and has no grip.
+          <div className={styles.cardTiles} data-card-display="icons">
+            <SidebarCardDisplayContext.Provider value="icons">
+              {children}
+            </SidebarCardDisplayContext.Provider>
+          </div>
+        ) : heightScope ? (
           <ResizableRows scope={heightScope} card={sectionKey} label={title}>
             {children}
           </ResizableRows>

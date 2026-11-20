@@ -1075,6 +1075,10 @@ html[data-keyboard-navigation]
   overflow: clip;
 }
 /* Holds the rows and the line for unread past the edge. */
+/* A card shown as icons: every row as an identity tile, wrapping. */
+.cardTiles {
+  padding-block: var(--space-half);
+}
 .cardBody {
   display: flow-root;
 }

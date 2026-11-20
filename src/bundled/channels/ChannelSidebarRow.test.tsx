@@ -88,3 +88,28 @@ it("skips an exiting neighbor when removing a DM", async () => {
   );
   expect(screen.getByRole("button", { name: "Bob" })).toHaveFocus();
 });
+it("draws a tile as its identity alone, named and selectable, with its unread on top", async () => {
+  const onSelect = vi.fn();
+  render(
+    <ChannelSidebarRow
+      channel={{ id: "eng", name: "engineering", channelType: "stream" }}
+      icon={<svg />}
+      tile={<span data-testid="monogram">ENG</span>}
+      badge={<span data-testid="unread" />}
+      onSelect={onSelect}
+      onPrepare={() => {}}
+      onHideDm={() => {}}
+    />,
+  );
+  const tile = screen.getByRole("button", { name: "engineering" });
+  expect(tile).toHaveAttribute("data-variant", "avatar");
+  expect(tile).toContainElement(screen.getByTestId("monogram"));
+  // The unread mark sits beside the button, not inside its name.
+  expect(tile).not.toContainElement(screen.getByTestId("unread"));
+  expect(screen.getByTestId("unread")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /^Remove / }),
+  ).not.toBeInTheDocument();
+  await userEvent.setup().click(tile);
+  expect(onSelect).toHaveBeenCalledWith("eng");
+});

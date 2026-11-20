@@ -144,8 +144,14 @@ export function Avatar({
   alt: string;
   fallback: string;
   fallbackContent?: ReactNode;
-  /** Panel-colored monogram for avatars displayed on an inset surface. */
-  fallbackSurface?: "subtle" | "panel";
+  /** Neutral monograms, or a stable categorical fill for a channel's identity. */
+  fallbackSurface?:
+    | "subtle"
+    | "panel"
+    | "categorical-purple"
+    | "categorical-blue"
+    | "categorical-green"
+    | "categorical-amber";
   size?: AvatarSize;
   shape?: "circle" | "squircle";
   statusBadge?: "online" | "away" | "offline" | undefined;
