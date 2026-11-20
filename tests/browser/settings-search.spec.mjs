@@ -85,3 +85,69 @@ test("settings search opens and focuses controls across themes, widths and enlar
     dialog.getByRole("button", { name: "Decrease interface size" }),
   ).toBeFocused();
 });
+
+// A result in another section must land there through the host's navigation,
+// and a hidden dependent must land on its prerequisite without changing it.
+test("settings search opens other sections and lands on prerequisites without changing them", async ({
+  page,
+  app,
+}) => {
+  await page.goto(app.origin);
+  await openSettings(page);
+  const dialog = settingsDialog(page);
+  const sections = settingsSections(page);
+  const search = dialog.getByRole("searchbox", { name: "Search settings" });
+  const open = async (section, query, result) => {
+    await search.fill("");
+    await sections.getByRole("button", { name: section, exact: true }).click();
+    await search.fill(query);
+    await sections.getByRole("button", { name: result }).click();
+  };
+  const alerts = dialog.getByRole("switch", {
+    name: "Desktop alerts",
+    exact: true,
+  });
+  const sound = dialog.getByRole("switch", { name: "Sound", exact: true });
+
+  await open("Appearance", "sound", /^Sound/);
+  await expect(
+    page.getByRole("region", { name: "Notifications", exact: true }),
+  ).toBeVisible();
+  await expect(alerts).toBeChecked();
+  await expect(sound).toBeFocused();
+  await expect(sound).toBeInViewport();
+
+  await search.fill("");
+  await alerts.click();
+  await expect(alerts).not.toBeChecked();
+  await open("Appearance", "sound", /^Sound/);
+  await expect(alerts).toBeFocused();
+  await expect(alerts).not.toBeChecked();
+  await expect(sound).toHaveCount(0);
+
+  await search.fill("");
+  await sections
+    .getByRole("button", { name: "Appearance", exact: true })
+    .click();
+  const density = dialog.getByRole("combobox", {
+    name: "Message density",
+    exact: true,
+  });
+  await density.click();
+  await page.getByRole("option", { name: "Compact", exact: true }).click();
+  await expect(density).toHaveText("Compact");
+  await open("Notifications", "message width", /^Message width/);
+  await expect(density).toBeFocused();
+  await expect(density).toHaveText("Compact");
+  await expect(
+    dialog.getByRole("combobox", { name: "Message width", exact: true }),
+  ).toHaveCount(0);
+
+  // Escape clears a query first; on an empty field it is the dialog's again.
+  await search.fill("thread");
+  await search.press("Escape");
+  await expect(search).toHaveValue("");
+  await expect(dialog).toBeVisible();
+  await search.press("Escape");
+  await expect(dialog).toHaveCount(0);
+});
