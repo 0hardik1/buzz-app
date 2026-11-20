@@ -50,6 +50,7 @@ import { Field } from "../../shared/design-system/ui/Field";
 import { Input } from "../../shared/design-system/ui/Input";
 import { NavigationSectionHeading } from "../../shared/design-system/ui/NavigationSection";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
+import { Tabs } from "../../shared/design-system/ui/Tabs";
 import {
   setSidebarSeeAll,
   useSidebarSeeAll,
@@ -682,6 +683,41 @@ export function SidebarSection({
           </details>
         )}
       </NavigationSectionHeading>
+      {seeingAll && filter && open && (
+        // See all keeps the card's filter and shows it in the open, so the
+        // list always matches what's selected. Choices change the card too.
+        <div className={styles.seeAllFilter}>
+          <Tabs
+            label={`Filter ${title}`}
+            variant="segmented"
+            size="sm"
+            value={filter.value}
+            items={[
+              { value: "all", label: "All", disabled: !!filter.disabled },
+              {
+                value: "unreads",
+                label: "Unreads",
+                disabled: !!filter.disabled,
+              },
+              {
+                value: "active",
+                label: "Active",
+                disabled: !!filter.disabled,
+                ...(filter.value === "active" && {
+                  trailing: activeWindowLabel(filter.activeWindowSeconds),
+                }),
+              },
+            ]}
+            onValueChange={(mode) => {
+              if (mode === "active") setActiveOpen(true);
+              else void Promise.resolve(filter.change(mode)).catch(() => {});
+            }}
+            onReselect={(mode) => {
+              if (mode === "active") setActiveOpen(true);
+            }}
+          />
+        </div>
+      )}
       {headerNotice}
       <div
         id={id}

@@ -11,7 +11,6 @@ import { ConvertToChannel } from "../../features/solo/ConvertToChannel";
 import { useChatConversions } from "../../features/solo/conversion";
 import { canEditLifetime } from "../../features/solo/Lifetime";
 import { TeamSidebarSections, TeamSidebarSection } from "./TeamSidebarSource";
-import { useSidebarSeeAll } from "./useSidebarSeeAll";
 import {
   setSidebarFilterAll,
   useSidebarFilterAll,
@@ -998,7 +997,6 @@ export function ChannelInventory({
         : sections,
     [sections, rowSortModes, sectionSort, rowUnread, queries.unread],
   );
-  const seeAll = useSidebarSeeAll();
   // Conversations that wait on you lead each card that shows unreads first.
   const showsUnreadsFirst = useSidebarUnreadsFirst(scope);
   const waitingChannels = useWaitingChannels(
@@ -1032,8 +1030,8 @@ export function ChannelInventory({
     Object.fromEntries(
       sortedSections.map(({ key }) => [
         key,
-        // A card opened with "See all" lists every conversation it has.
-        key === seeAll ? ("all" as const) : sectionFilter(key),
+        // See all shares the card's filter and shows it in its sub nav.
+        sectionFilter(key),
       ]),
     ),
     current?.id,
