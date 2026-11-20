@@ -28,7 +28,7 @@ test("Team offers empty-workspace creation with keyboard focus, emoji and confir
     page
       .getByRole("menu", { name: "More actions for Team", exact: true })
       .getByRole("menuitem"),
-  ).toHaveText(["Create workspace", "Move up", "Move down"]);
+  ).toHaveText(["Filter", "Sort", "Create workspace", "Move up", "Move down"]);
   await page
     .getByRole("menuitem", { name: "Create workspace", exact: true })
     .click();
