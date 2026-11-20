@@ -105,6 +105,8 @@ Signed metadata that hides the channel drops its retained mentions, since no rea
 settles their edits or deletions; the next addressed read lists them again. There
 is no live route for these channels; a running session lists their mentions on
 its next addressed history read, or live while the viewer has the channel open.
+That read also checks every retained mention for edits and deletions, since the
+relay leaves a deleted one out of the next page.
 A dwell in the channel reads the mentions it shows and skips its other rows.
 
 Channel-archived rooms are excluded from the shared Inbox projection in every

@@ -32,6 +32,7 @@ export function createInboxFeed({
   addressedRead,
   retainedEvent,
   retainedEditIds,
+  retainedOutsideIds,
   notify = (listener) => listener(),
 }: {
   viewer: string;
@@ -43,6 +44,7 @@ export function createInboxFeed({
   /** Private lookups in the existing bounded unread evidence owner. */
   retainedEvent: (id: string) => RelayEvent | undefined;
   retainedEditIds: (ids: readonly string[]) => readonly string[];
+  retainedOutsideIds: () => readonly string[];
   /** Verified session admission calls prepare before publishing unread evidence. */
   addressedRead: (
     filter: ReadFilter,
@@ -181,6 +183,7 @@ export function createInboxFeed({
           ...new Set([
             ...snapshot.incomplete,
             ...project(mentions).map((event) => event.id),
+            ...retainedOutsideIds(),
           ]),
         ];
         const updates = await overlays(targets, [40003, 5, 9005], owned.signal);

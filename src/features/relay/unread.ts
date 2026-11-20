@@ -4039,6 +4039,19 @@ export function createUnread({
           : [];
       });
     },
+    /** Outside channels get no repair read, so the feed rechecks these for
+     * deletions the next addressed read may leave out. */
+    outsideMentionIds() {
+      if (closed) return [];
+      return [...events.values()].flatMap((event) =>
+        contentKind(event) &&
+        mentionsViewer(event) &&
+        !deleted(event) &&
+        outside(channelOf(event) ?? "")
+          ? [event.id]
+          : [],
+      );
+    },
     accept,
     purge,
     /** `covered`: the membership route's replay was continuous, so read state

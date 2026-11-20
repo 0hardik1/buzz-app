@@ -1387,6 +1387,7 @@ it.each(["events", "bytes"] as const)(
       },
       retainedEvent: (id) => (id === target.id ? target : undefined),
       retainedEditIds: () => [],
+      retainedOutsideIds: () => [],
     });
     try {
       await feed.ensure();
@@ -1884,6 +1885,36 @@ it.each([
     expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
   },
 );
+it("a retained outside mention deleted later leaves Activity on a refresh that no longer lists it", async () => {
+  const h = setup();
+  h.admit([h.viewer.pubkey]);
+  outside(h, "lobby", PUBLIC_STREAM);
+  const mention = mentionIn(h, "lobby", "outside mention", 20);
+  const first = h.session.inboxFeed.ensure();
+  (await take(h, 9)).resolve([mention]);
+  await first;
+  expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
+  const deletion = signed(h.alice, {
+    kind: 5,
+    created_at: 30,
+    content: "",
+    tags: [
+      ["h", "lobby"],
+      ["e", mention.id],
+    ],
+  });
+  const read = h.query.getMockImplementation();
+  h.query.mockImplementation((filters) =>
+    filters[0]?.["#e"]?.includes(mention.id) && filters[0]?.kinds?.includes(5)
+      ? Promise.resolve([deletion])
+      : (read?.(filters) ?? Promise.resolve([])),
+  );
+  // The relay leaves the deleted mention out of the next addressed read.
+  const again = h.session.inboxFeed.refresh();
+  (await take(h, 9)).resolve([]);
+  await again;
+  expect(rows(h)).toEqual([]);
+});
 it("a deep outside edit chain with repeated targets settles without walking each path", () => {
   const h = setup();
   h.admit([h.viewer.pubkey]);

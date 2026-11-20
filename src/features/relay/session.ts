@@ -1466,6 +1466,7 @@ export function createRelaySession(
     },
     retainedEvent: unread.event,
     retainedEditIds: unread.retainedEditIds,
+    retainedOutsideIds: unread.outsideMentionIds,
     addressedRead: (filter, signal, prepare) =>
       finiteRead([filter], { signal }, (signal) =>
         readVerified([filter], { signal }, true, prepare),
