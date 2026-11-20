@@ -2177,18 +2177,11 @@ export function createUnread({
       ),
     );
     const nextOutside = outsideEligibility(nextTypes);
-    // A hidden outside channel's edits and deletions are not read, so signed
-    // ineligibility drops its mentions; a later read lists them afresh.
+    // A hidden or unconfirmed outside channel's edits and deletions are not
+    // read, so ineligibility drops its mentions; a later read lists them afresh.
     const delisted = [...nextOutside].some(([id, eligible]) => {
       const channel = channels.get?.(id);
-      return (
-        !eligible &&
-        !!channel &&
-        !channel.members?.includes(viewer) &&
-        !channel.cached &&
-        !channel.metadataCached &&
-        !channel.metadataPending
-      );
+      return !eligible && !!channel && !channel.members?.includes(viewer);
     });
     for (const [id, eligible] of nextOutside)
       if (outsideChannels.get(id) !== eligible) changed.add(id);
@@ -2242,9 +2235,11 @@ export function createUnread({
     if (!parentId || event.pubkey === viewer) return;
     // Activity groups unread thread replies by root, so fetch a root the
     // sampled window dropped for a followed thread or an unread reply in it.
+    // An outside channel never retains the root, so its mentions always ask.
     const structuralRootId =
       !entry.rootId &&
       (chosen(entry) === true ||
+        (entry.mentioned && outside(channelId)) ||
         ((entry.mentioned || entry.broadcast || conversation(entry)) &&
           isUnread(entry, reads.state(), dm)))
         ? threadRootId
@@ -2389,10 +2384,17 @@ export function createUnread({
     resolving = true;
     try {
       while (!closed && queued.size) {
-        const channelId = queued.values().next().value?.channelId;
+        const first = queued.values().next().value;
+        const channelId = first?.channelId;
         if (!channelId) return;
+        // Structural-only roots ask for no viewer replies, so one read serves
+        // several channels; each root is still kept only in its own channel.
         const chunk = [...queued]
-          .filter(([, item]) => item.channelId === channelId)
+          .filter(([, item]) =>
+            first.structuralOnly
+              ? item.structuralOnly
+              : item.channelId === channelId,
+          )
           .slice(0, 50);
         for (const [key] of chunk) queued.delete(key);
         const parents = chunk.map(([, item]) => item);
@@ -2456,32 +2458,47 @@ export function createUnread({
           requeue();
           continue;
         }
-        if (!allowed(channelId)) continue;
+        const homes = new Set(
+          parents.flatMap((parent) =>
+            allowed(parent.channelId) ? [parent.channelId] : [],
+          ),
+        );
+        if (!homes.size) continue;
         const removed = new Set<string>();
         for (const event of [...fetched, ...replies])
           if (event.kind === 5 || event.kind === 9005)
             for (const [name, id] of event.tags)
               if (name === "e" && id) removed.add(`${event.pubkey}:${id}`);
-        const live = (event: RelayEvent) =>
+        const live = (event: RelayEvent, home = channelId) =>
           contentKind(event) &&
-          channelOf(event) === channelId &&
+          channelOf(event) === home &&
           !removed.has(`${event.pubkey}:${event.id}`) &&
           !(event.pubkey === viewer && retracted.has(event.id));
-        for (const event of fetched) if (live(event)) keep(event);
+        for (const event of fetched)
+          if (
+            parents.some(
+              (parent) =>
+                parent.ids.has(event.id) &&
+                homes.has(parent.channelId) &&
+                live(event, parent.channelId),
+            )
+          )
+            keep(event);
         const mine = replies.filter(
           (event) => event.pubkey === viewer && live(event),
         );
         for (const target of parents) {
           if (target.structuralOnly) {
-            remember(
-              `${conversationKey(channelId, target.parentId)}:structure`,
-              {
-                channelId,
-                done: true,
-                evidence: undefined,
-                more: false,
-              },
-            );
+            if (homes.has(target.channelId))
+              remember(
+                `${conversationKey(target.channelId, target.parentId)}:structure`,
+                {
+                  channelId: target.channelId,
+                  done: true,
+                  evidence: undefined,
+                  more: false,
+                },
+              );
             continue;
           }
           const found = mine.filter((event) => decides(event, target));
@@ -2510,7 +2527,7 @@ export function createUnread({
           if (chosen) witness(lookup, chosen);
         }
         indexed = false;
-        publish(new Set([channelId]));
+        publish(homes);
         // Live notifications wait on pending replies; let them re-check.
         for (const listener of [...membershipListeners]) listener();
       }
@@ -3230,12 +3247,9 @@ export function createUnread({
             await dm;
             return;
           }
-          let event: RelayEvent;
-          try {
-            event = requireMessage(target, id);
-          } catch {
-            return; // Outside a channel, its bottom row may not be retained.
-          }
+          // Outside a channel, a dwell reads only the mentions it shows.
+          if (outside(channelId)) return;
+          const event = requireMessage(target, id);
           // A broadcast reply is shown in the channel but never its cutoff.
           if (!rootId && threadReference(event)) return;
           // Catch-up moves the main read mark: a channel's to its newest

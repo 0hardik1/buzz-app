@@ -7742,6 +7742,96 @@ it("a dwell in a public channel the viewer has not joined reads its mentions amo
   lease.dispose();
 });
 
+it("a dwell at a bottom mention in a channel the viewer has not joined leaves older unshown mentions unread", async () => {
+  const h = setup();
+  h.emit([
+    roster(h.relay, "lobby", [h.alice.pubkey], 10),
+    metadata(h.relay, "lobby", "lobby", 10, [["t", "stream"], ["public"]]),
+  ]);
+  const older = message(h.alice, "lobby", "older mention", 20, [
+    ["p", h.viewer.pubkey],
+  ]);
+  const bottom = message(h.alice, "lobby", "bottom mention", 30, [
+    ["p", h.viewer.pubkey],
+  ]);
+  h.emit([older, bottom]);
+  const lease = h.session.unread.reading("lobby");
+  await lease.catchUp(bottom.id);
+  await lease.observe([bottom.id]);
+  expect(h.session.unread.attention("lobby", bottom.id).unread).toBe(false);
+  expect(h.session.unread.attention("lobby", older.id).unread).toBe(true);
+  expect(h.journal()?.state.frontiers.lobby).toBeUndefined();
+  lease.dispose();
+});
+
+const outsideReply = (
+  h: ReturnType<typeof setup>,
+  channelId: string,
+  at: number,
+) => {
+  h.emit([
+    roster(h.relay, channelId, [h.alice.pubkey], 10),
+    metadata(h.relay, channelId, channelId, 10, [["t", "stream"], ["public"]]),
+  ]);
+  const root = message(h.alice, channelId, `${channelId} root`, at);
+  const reply = message(h.alice, channelId, `${channelId} reply`, at + 1, [
+    ["e", root.id, "", "reply"],
+    ["p", h.viewer.pubkey],
+  ]);
+  return { root, reply };
+};
+const rootReads = (h: ReturnType<typeof setup>) =>
+  h.query.mock.calls.filter(([filters]) => filters.some((f) => f.ids)).length;
+
+it("missing roots of outside replies in several channels share one read", async () => {
+  const h = setup();
+  const threads = ["north", "south", "west"].map((id, index) =>
+    outsideReply(h, id, 20 + index * 10),
+  );
+  h.query.mockImplementation(async (filters) =>
+    threads
+      .map(({ root }) => root)
+      .filter((root) =>
+        filters.some((filter) => filter.ids?.includes(root.id)),
+      ),
+  );
+  h.emit(threads.map(({ reply }) => reply));
+  h.session.unread.inbox();
+  await vi.waitFor(() =>
+    expect(
+      h.session.unread
+        .inbox()
+        .items.map((item) => item.rootId)
+        .sort(),
+    ).toEqual(threads.map(({ root }) => root.id).sort()),
+  );
+  expect(rootReads(h)).toBe(1);
+});
+
+it("read outside mentions in one thread group under its root after a restart", async () => {
+  const h = setup({}, true, (journal) => ({
+    ...journal,
+    state: { frontiers: { lobby: 100 }, overrides: {} },
+  }));
+  const { root, reply } = outsideReply(h, "lobby", 20);
+  const second = message(h.alice, "lobby", "second reply", 30, [
+    ["e", root.id, "", "reply"],
+    ["p", h.viewer.pubkey],
+  ]);
+  h.query.mockImplementation(async (filters) =>
+    filters.some((filter) => filter.ids?.includes(root.id)) ? [root] : [],
+  );
+  await h.session.unread.ensure();
+  h.emit([reply, second]);
+  expect(h.session.unread.attention("lobby", reply.id).unread).toBe(false);
+  h.session.unread.inbox();
+  await vi.waitFor(() =>
+    expect(
+      h.session.unread.inbox().items.map((item) => [...item.messageIds].sort()),
+    ).toEqual([[reply.id, second.id].sort()]),
+  );
+});
+
 it("a reading lease is fenced by a synced mark unread another window saved", async () => {
   const h = setup();
   h.grant("room");

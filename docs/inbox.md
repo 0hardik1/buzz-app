@@ -100,14 +100,19 @@ feed-owned reconciliation buffer and deletion-count abort.
 One exception to membership: a listed public stream or forum the viewer reads
 without joining (`outsideChannel`) contributes only messages that `p`-tag the
 viewer. Addressed history reads an unknown or stale channel's metadata first,
-once discovery is ready, and its signed metadata alone decides eligibility.
-Signed metadata that hides the channel drops its retained mentions, since no read
-settles their edits or deletions; the next addressed read lists them again. There
+once discovery is ready, and its signed metadata alone decides eligibility. A
+read that skipped an unknown channel because discovery was not ready runs again
+once it is. Signed metadata that hides the channel, or a disconnect that leaves
+its metadata unconfirmed, drops its retained mentions, since no read settles
+their edits or deletions; the next addressed read lists them again. There
 is no live route for these channels; a running session lists their mentions on
 its next addressed history read, or live while the viewer has the channel open.
 That read also checks every retained mention for edits and deletions, since the
 relay leaves a deleted one out of the next page.
-A dwell in the channel reads the mentions it shows and skips its other rows.
+A dwell in the channel reads the mentions it shows and skips its other rows. It
+never moves the channel's read mark, which would read older mentions it did not
+show. The channel's thread roots are never retained, so a reply mention's root
+is fetched for grouping even once it is read, in one read across channels.
 
 Channel-archived rooms are excluded from the shared Inbox projection in every
 activity view. Signed archive/unarchive metadata invalidates that projection even

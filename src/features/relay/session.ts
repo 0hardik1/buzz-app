@@ -645,6 +645,8 @@ export function createRelaySession(
   /** Solo chats this device is starting; set once channel writes exist. */
   let startingChannel: (id: string) => Promise<void> | undefined = () =>
     undefined;
+  /** An addressed read skipped unknown channels because discovery was not ready. */
+  let outsideDeferred = false;
   // Keep ordinary reads on their existing promise chain; page metadata is opt-in.
   function readVerified(
     filters: readonly ReadFilter[],
@@ -845,7 +847,7 @@ export function createRelaySession(
         settings?.signal?.throwIfAborted();
         if (closed || epoch !== accessEpoch)
           throw new DOMException("Stale relay read", "AbortError");
-      }
+      } else if (unknown.length) outsideDeferred = true;
     }
     const visible = accept(
       events,
@@ -4348,6 +4350,12 @@ export function createRelaySession(
     refreshChannelActivity,
   );
   const stopInterests = channels.queries.subscribeList(updateInterests);
+  // Activity ensures a stale feed when the list becomes ready, so it reads again.
+  const stopDeferredOutside = channels.queries.subscribeList(() => {
+    if (!outsideDeferred || channels.queries.list().status !== "ready") return;
+    outsideDeferred = false;
+    inboxFeed.stale();
+  });
   updateInterests();
   refreshChannelActivity();
 
@@ -4427,6 +4435,7 @@ export function createRelaySession(
       details.dispose();
       memberAdministration.dispose();
       stopInterests();
+      stopDeferredOutside();
       stopHintGuard();
       stopWarmPreferences();
       for (const view of [...artifactSyncs]) view.dispose();

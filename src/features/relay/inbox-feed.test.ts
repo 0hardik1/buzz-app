@@ -1708,6 +1708,24 @@ it("Activity history never reads an unknown channel's metadata before discovery 
   expect(h.session.channels.list().status).not.toBe("ready");
   expect(rows(h)).toEqual([]);
 });
+it("an Activity read that skipped an unknown channel before discovery was ready reads again once the list is ready", async () => {
+  const h = setup();
+  const mention = mentionIn(h, "lobby", "too early", 20);
+  const work = h.session.inboxFeed.ensure();
+  (await take(h, 9)).resolve([mention]);
+  await work;
+  expect(rows(h)).toEqual([]);
+  h.admit([h.viewer.pubkey]);
+  expect(h.session.channels.list().status).toBe("ready");
+  // Activity ensures the feed when the list becomes ready.
+  const again = h.session.inboxFeed.ensure();
+  (await take(h, 9)).resolve([mention]);
+  (await take(h, 39000)).resolve([
+    metadata(h.relay, "lobby", "Lobby", 10, PUBLIC_STREAM),
+  ]);
+  await again;
+  expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
+});
 it("addressed history from an unknown public stream reads its metadata, then lists the mention", async () => {
   const h = setup();
   h.admit([h.viewer.pubkey]);
@@ -1805,6 +1823,23 @@ it("an unlisted public stream the viewer has not joined is not outside, so its m
   expect(rows(h)).toEqual([]);
   expect(h.session.unread.attention("hush", mention.id).status).toBe("unknown");
 });
+it("a disconnect drops an outside channel's retained mention, so confirmed metadata cannot reveal it unchecked", async () => {
+  const h = setup();
+  h.admit([h.viewer.pubkey]);
+  outside(h, "lobby", PUBLIC_STREAM);
+  const mention = mentionIn(h, "lobby", "OLD BODY", 20);
+  h.live.receive([mention], liveIn("lobby"));
+  expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
+  h.live.state({ status: "connected", routes: [] });
+  h.live.state({ status: "retrying", routes: [] });
+  expect(h.session.channels.get?.("lobby")?.metadataCached).toBe(true);
+  expect(rows(h)).toEqual([]);
+  // Offline edits or deletions were never read, so fresh metadata alone
+  // must not bring the retained body back.
+  h.live.state({ status: "connected", routes: [] });
+  outside(h, "lobby", PUBLIC_STREAM, undefined, 40);
+  expect(rows(h)).toEqual([]);
+});
 it("archiving a public stream the viewer has not joined removes its mention from Activity at once", () => {
   const h = setup();
   h.admit([h.viewer.pubkey]);
@@ -1819,6 +1854,7 @@ it("archiving a public stream the viewer has not joined removes its mention from
 it.each([
   ["archived", ["archived", "true"]],
   ["unlisted", ["unlisted"]],
+  ["private", ["private"]],
 ] as const)(
   "a mention hidden while its outside channel is %s returns only from a fresh read",
   async (_, tag) => {
