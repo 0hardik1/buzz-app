@@ -12,6 +12,10 @@ import { useChatConversions } from "../../features/solo/conversion";
 import { canEditLifetime } from "../../features/solo/Lifetime";
 import { TeamSidebarSections, TeamSidebarSection } from "./TeamSidebarSource";
 import { useSidebarSeeAll } from "./useSidebarSeeAll";
+import {
+  setSidebarFilterAll,
+  useSidebarFilterAll,
+} from "./SidebarFilterChoice";
 import type { WorkspaceSidebarComposition } from "./sidebar-environment";
 import { revealCreatedChannel } from "../../features/channel-navigation/created-channel";
 import {
@@ -282,15 +286,18 @@ export function ChannelInventory({
     },
     [preferences.data, rowSortModes],
   );
-  // Unsaved cards show the last 30 days, so the most active rise into view;
-  // Favorites and Plugins are picked by hand and always show everything.
+  // Unsaved cards show the last 30 days, so the most active rise into view,
+  // unless All was chosen here; Favorites and Plugins always show everything.
+  const filterAll = useSidebarFilterAll(scope);
   const sectionFilter = useCallback(
     (key: string): "all" | "unreads" | "active" =>
       preferences.data?.filters?.[
         key.startsWith("group:") ? `section:${key.slice(6)}` : key
       ] ??
-      (key === "starred" || key === SIDEBAR_PAGES_SECTION ? "all" : "active"),
-    [preferences.data],
+      (key === "starred" || key === SIDEBAR_PAGES_SECTION || filterAll(key)
+        ? "all"
+        : "active"),
+    [preferences.data, filterAll],
   );
   const appliedSorts = Object.keys(preferences.data?.sort ?? {}).map((key) =>
     sectionSort(key.startsWith("section:") ? `group:${key.slice(8)}` : key),
@@ -1184,6 +1191,7 @@ export function ChannelInventory({
     mode: "all" | "unreads" | "active",
     activeWindowSeconds?: number | null,
   ) => {
+    setSidebarFilterAll(scope, key, mode === "all");
     return preferences.setFilter(
       key.startsWith("group:") ? `section:${key.slice(6)}` : key,
       mode,

@@ -4,6 +4,7 @@ import { test as base, expect } from "./fixture.mjs";
 import { streamEvidence } from "./stream-evidence.mjs";
 import { open } from "./timeline.mjs";
 import { holdReadingFocus, releaseReadingFocus } from "./reading.mjs";
+import { fixtureAliases } from "../relay-config.ts";
 
 // Preserve the failing handoff and capture original-reader delivery on Linux.
 const test = base.extend({
@@ -15,6 +16,21 @@ test.use({
   largeSidebar: true,
   sidebarUnread: true,
   historyCounts: { alpha: 20, beta: 20 },
+  // These journeys follow unread past the viewport and cards' edges in A to Z
+  // order, so unread stays in place rather than rising to each card's top.
+  initialSidebarSort: { channels: "alpha", dms: "alpha" },
+});
+test.beforeEach(async ({ page, app }) => {
+  await page.addInitScript(
+    ({ scopes, viewer }) => {
+      for (const relay of scopes)
+        localStorage.setItem(
+          `buzz-view.v1:${JSON.stringify([`${relay}:${viewer}`, "sidebar:unreads-first"])}`,
+          JSON.stringify({ channels: false, dms: false, solo: false }),
+        );
+    },
+    { scopes: Object.values(JSON.parse(fixtureAliases)), viewer: app.viewer },
+  );
 });
 const sidebar = (page) =>
   page.getByRole("complementary", { name: "Sidebar", exact: true });
