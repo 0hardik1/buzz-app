@@ -41,6 +41,12 @@ export const outsider = "b".repeat(64);
 export const viewer = "c".repeat(64);
 export const root = "d".repeat(64);
 export const scope = `https://relay.test:${viewer}`;
+const emptyInbox = Object.freeze({
+  status: "ready" as const,
+  items: [],
+  freshness: "unknown" as const,
+});
+
 export function fixture(
   combined = false,
   canCreate = false,
@@ -187,11 +193,8 @@ export function fixture(
       },
       subscribe: (_target, listener) => subscribe(listener),
       activity: () => threads,
-      inbox: () => ({
-        status: "ready" as const,
-        items: [],
-        freshness: "unknown" as const,
-      }),
+      // Like the real store, the same snapshot until the inbox changes.
+      inbox: () => emptyInbox,
       subscribeInbox: () => () => {},
       subscribeActivity: (_id, listener) => subscribe(listener),
       markThrough,

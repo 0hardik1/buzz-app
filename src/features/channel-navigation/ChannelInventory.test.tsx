@@ -985,15 +985,17 @@ it("opens an Activity mention at its message, with no thread root", async () => 
       },
     ]),
   );
+  const inbox = {
+    status: "ready" as const,
+    items: [],
+    freshness: "unknown" as const,
+  };
   const unread = h.session.unread;
   h.session.unread = {
     ...unread,
     activity: (id) => snapshots.get(id) ?? unread.activity(id),
-    inbox: () => ({
-      status: "ready" as const,
-      items: [],
-      freshness: "unknown" as const,
-    }),
+    // The same snapshot each read, as the real store keeps it.
+    inbox: () => inbox,
     subscribeInbox: () => () => {},
     subscribeActivity: () => () => {},
   };
