@@ -290,6 +290,14 @@ test.describe("nearby motion after layout changes", () => {
           "--buzz-text-scale",
           "1.3",
         );
+        // Headings re-measure on resize observation, which lands a frame after
+        // the scale; a heading above Team may gain its actions row then.
+        await page.evaluate(
+          () =>
+            new Promise((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve)),
+            ),
+        );
       }
       const target = section.locator(`[data-channel-id="${promoted}"]`);
       await target.focus();
@@ -857,7 +865,7 @@ test.describe("section sort persistence", () => {
     expect(startupActivity.length).toBeGreaterThan(2);
     expect(new Set(startupActivity).size).toBe(startupActivity.length);
     const popup = page.getByRole("dialog", {
-      name: "Filter & sort",
+      name: "Filter & sort for Team",
       exact: true,
     });
     async function openSort() {
