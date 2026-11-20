@@ -59,7 +59,7 @@ import styles from "./ProfileButton.module.css";
 import * as communityApi from "../../features/communities/api";
 import {
   deviceTimeZone,
-  shareDeviceTimeZone,
+  followDeviceTimeZone,
 } from "../../features/profiles/share-time-zone";
 
 const noSubscription = () => () => {};
@@ -193,31 +193,53 @@ export function ProfileButton({
       signal: controller.signal,
     });
     read.catch(() => {});
-    // Local time is shared by default. This fresh read triggers it; a strong
-    // read just before publishing supplies what is published.
-    if (selected)
-      void shareDeviceTimeZone({
-        community: selected,
+    return () => controller.abort();
+  }, [profiles, viewer, connection.status, session, roster, liveStatus]);
+  const relayReady = connection.status === "ready";
+  useEffect(() => {
+    if (!viewer || !relayReady) return;
+    // Profiles follow this device's zone: check every community once
+    // connected, and again whenever the zone or the joined communities
+    // change. A failed check waits for the next of these.
+    const controller = new AbortController();
+    let checked: string | undefined;
+    const check = () => {
+      const zone = deviceTimeZone();
+      const joined = communities
+        .snapshot()
+        .memberships.map(({ id }) => id)
+        .join("\n");
+      if (`${zone}\n${joined}` === checked) return;
+      checked = `${zone}\n${joined}`;
+      void followDeviceTimeZone({
         viewer,
         communities,
-        read,
-        inspect: () => communityApi.inspectProfile(selected, session),
+        zone,
         signal: controller.signal,
-        zone: deviceTimeZone(),
-        publish: (profile, existing) =>
-          communityApi.publishProfile(selected, profile, existing),
-      });
-    return () => controller.abort();
-  }, [
-    communities,
-    profiles,
-    viewer,
-    selected,
-    connection.status,
-    session,
-    roster,
-    liveStatus,
-  ]);
+        inspect: (id) => {
+          // The selected community reads through its session, so its profile
+          // directory sees the result.
+          const relay = communities.relay.snapshot();
+          return relay.status === "ready" &&
+            relay.viewer === viewer &&
+            communities.snapshot().selected === id
+            ? communityApi.inspectProfile(id, relay.session)
+            : communityApi.inspectProfile(id);
+        },
+        publish: communityApi.publishProfile,
+      }).catch(() => {});
+    };
+    check();
+    const unsubscribe = communities.subscribe(check);
+    window.addEventListener("focus", check);
+    const timer = setInterval(check, 60_000);
+    return () => {
+      controller.abort();
+      unsubscribe();
+      window.removeEventListener("focus", check);
+      clearInterval(timer);
+    };
+  }, [communities, viewer, relayReady]);
   const profile = selected ? communityProfile : localProfile;
   const displayName = profile?.name.trim();
   const name =

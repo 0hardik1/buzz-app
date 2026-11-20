@@ -20,6 +20,11 @@ import type {
 import * as communityApi from "../features/communities/api";
 import { trackBackgroundProfileWrite } from "../features/communities/profile-saves";
 import * as avatarUpload from "../features/profiles/avatar-upload";
+import {
+  resetFollowedTimeZones,
+  setTimeZonePinned,
+  timeZonePinned,
+} from "../features/profiles/share-time-zone";
 import { ToastProvider } from "../shared/design-system/ui/Toast";
 import { ProfileSettings } from "./ProfileSettings";
 import { stubAvatarBrowserApis } from "../features/agents/avatar-testing";
@@ -60,6 +65,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  resetFollowedTimeZones();
 });
 
 it("loads and publishes the selected community profile before updating the local seed", async () => {
@@ -1087,7 +1093,8 @@ it("shows a profile without a time zone as sharing this device's, and records un
   });
 });
 
-it("keeps a shared time zone through an unrelated save", async () => {
+it("keeps a picked time zone through an unrelated save", async () => {
+  setTimeZonePinned("community-id", viewer, true);
   const inspect = vi.spyOn(communityApi, "inspectProfile").mockResolvedValue({
     exists: true,
     existing: { tz: "Asia/Kolkata" },
@@ -1119,6 +1126,7 @@ it("keeps a shared time zone through an unrelated save", async () => {
 });
 
 it("records clearing a shared time zone as an opt-out", async () => {
+  setTimeZonePinned("community-id", viewer, true);
   const inspect = vi.spyOn(communityApi, "inspectProfile").mockResolvedValue({
     exists: true,
     existing: { website: "https://example.test", tz: "Asia/Kolkata" },
@@ -1266,6 +1274,7 @@ it("a time zone only save keeps fields another client changed since Settings ope
 });
 
 it("unchecking then checking a saved zone offers the saved zone again", async () => {
+  setTimeZonePinned("community-id", viewer, true);
   vi.spyOn(communityApi, "inspectProfile").mockResolvedValue({
     exists: true,
     existing: { tz: "Pacific/Kiritimati" },
@@ -1289,4 +1298,130 @@ it("unchecking then checking a saved zone offers the saved zone again", async ()
     "Pacific/Kiritimati",
   );
   expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+});
+
+function renderSavedZone(tz: string) {
+  const inspect = vi.spyOn(communityApi, "inspectProfile").mockResolvedValue({
+    exists: true,
+    existing: { tz },
+    profile: { name: "Community name", picture: "", about: "" },
+  });
+  const publish = vi
+    .spyOn(communityApi, "publishProfile")
+    .mockImplementation(async (_id, profile, existing) => {
+      inspect.mockResolvedValue({ exists: true, existing, profile });
+    });
+  render(
+    <ProfileSettings
+      communities={communities()}
+      community={{ id: "community-id", name: "Acme" }}
+    />,
+    { wrapper: ToastProvider },
+  );
+  return publish;
+}
+
+it("follows this computer's time zone by default, without an unsaved change", async () => {
+  renderSavedZone("Pacific/Kiritimati");
+  const follow = await screen.findByRole("checkbox", {
+    name: "Use this computer’s time zone",
+  });
+  await waitFor(() => expect(follow).toBeChecked());
+  const zone = screen.getByRole("combobox", { name: "Time zone" });
+  // The stale saved zone is the background's to fix.
+  expect(zone).toHaveTextContent(device.replaceAll("_", " "));
+  expect(zone).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+});
+
+it("pins the saved zone when following is turned off, so it is never overwritten", async () => {
+  const publish = renderSavedZone("Pacific/Kiritimati");
+  const user = userEvent.setup();
+  const follow = await screen.findByRole("checkbox", {
+    name: "Use this computer’s time zone",
+  });
+  await waitFor(() => expect(follow).toBeChecked());
+  await user.click(follow);
+  const zone = screen.getByRole("combobox", { name: "Time zone" });
+  expect(zone).toBeEnabled();
+  expect(zone).toHaveTextContent("Pacific/Kiritimati");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(publish).toHaveBeenCalledWith(
+      "community-id",
+      { name: "Community name", picture: "", about: "" },
+      { tz: "Pacific/Kiritimati" },
+    ),
+  );
+  expect(await screen.findByText("Profile updated")).toBeVisible();
+  expect(timeZonePinned("community-id", viewer)).toBe(true);
+  expect(follow).not.toBeChecked();
+});
+
+it("leaves nothing to save after turning following off and on again", async () => {
+  renderSavedZone("Pacific/Kiritimati");
+  const user = userEvent.setup();
+  const follow = await screen.findByRole("checkbox", {
+    name: "Use this computer’s time zone",
+  });
+  await waitFor(() => expect(follow).toBeChecked());
+  await user.click(follow);
+  expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
+  await user.click(follow);
+  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+});
+
+it("keeps following when publishing a pick fails", async () => {
+  const publish = renderSavedZone("Pacific/Kiritimati");
+  publish.mockRejectedValueOnce(new Error("Relay unavailable"));
+  const user = userEvent.setup();
+  const follow = await screen.findByRole("checkbox", {
+    name: "Use this computer’s time zone",
+  });
+  await waitFor(() => expect(follow).toBeChecked());
+  await user.click(follow);
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Relay unavailable",
+  );
+  expect(timeZonePinned("community-id", viewer)).toBe(false);
+});
+
+it("shares this computer's zone with any save while following", async () => {
+  const publish = renderSavedZone("Pacific/Kiritimati");
+  const user = userEvent.setup();
+  const about = await screen.findByLabelText("Profile description (optional)");
+  await user.type(about, "Hello");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(publish).toHaveBeenCalledWith(
+      "community-id",
+      { name: "Community name", picture: "", about: "Hello" },
+      { tz: device },
+    ),
+  );
+});
+
+it("follows again from a pinned zone, sharing this computer's zone", async () => {
+  setTimeZonePinned("community-id", viewer, true);
+  const publish = renderSavedZone("Pacific/Kiritimati");
+  const user = userEvent.setup();
+  const follow = await screen.findByRole("checkbox", {
+    name: "Use this computer’s time zone",
+  });
+  const zone = screen.getByRole("combobox", { name: "Time zone" });
+  await waitFor(() => expect(zone).toHaveTextContent("Pacific/Kiritimati"));
+  expect(follow).not.toBeChecked();
+  await user.click(follow);
+  expect(zone).toHaveTextContent(device.replaceAll("_", " "));
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(publish).toHaveBeenCalledWith(
+      "community-id",
+      { name: "Community name", picture: "", about: "" },
+      { tz: device },
+    ),
+  );
+  expect(await screen.findByText("Profile updated")).toBeVisible();
+  expect(timeZonePinned("community-id", viewer)).toBe(false);
 });

@@ -17,7 +17,7 @@ import type { Communities } from "../../features/communities/service";
 import { APPEARANCE_KEY, createAppearance } from "../../shared/theme/service";
 import { ProfileButton } from "./ProfileButton";
 import * as communityApi from "../../features/communities/api";
-import { resetSharedTimeZones } from "../../features/profiles/share-time-zone";
+import { resetFollowedTimeZones } from "../../features/profiles/share-time-zone";
 
 const testAppearance = createAppearance(window);
 
@@ -33,6 +33,7 @@ it("keeps the header cutout and menu status in sync with presence", () => {
     profile: { name: "", picture: "" },
     viewer: "a".repeat(64),
     selected: "https://relay.test",
+    memberships: [],
   };
   const connection = {
     status: "ready",
@@ -136,6 +137,7 @@ it("checks observed Away despite automatic Online intent and dispatches checked-
     profile: { name: "", picture: "" },
     viewer,
     selected: "https://relay.test",
+    memberships: [],
   };
   const intent = { status: "online", preference: "auto", error: undefined };
   const setPreference = vi.fn();
@@ -407,6 +409,7 @@ it("shows the selected community name and authenticated avatar without saving a 
     profile: { name: "Local name", picture: "" },
     viewer,
     selected: "https://community.test",
+    memberships: [],
   };
   const presence = { status: "online", preference: "auto", error: null };
   const subscribe = () => () => {};
@@ -652,6 +655,7 @@ it.each(["online", "offline"] as const)(
       profile: { name: "Fixture", picture: "" },
       viewer: "fixture",
       selected: "https://relay.test",
+      memberships: [],
     };
     const presence = {
       status,
@@ -746,6 +750,7 @@ it("drops the previous community profile on switching and uses local defaults on
   let state = {
     viewer,
     selected: "https://alpha.test" as string | null,
+    memberships: [],
     profile: {
       name: "Personal name",
       picture: "https://public.test/local.png",
@@ -852,7 +857,7 @@ it("refreshes the viewer through the real session after roster setup, not a stal
   owner.session.channels.ensureList();
   const initialRoster = wire.next();
   const read = vi.fn(owner.session.read);
-  resetSharedTimeZones();
+  resetFollowedTimeZones();
   const publish = vi
     .spyOn(communityApi, "publishProfile")
     .mockResolvedValue(undefined);
@@ -873,6 +878,7 @@ it("refreshes the viewer through the real session after roster setup, not a stal
   const snapshot = {
     viewer: viewer.pubkey,
     selected: "https://community.test",
+    memberships: [{ id: "https://community.test" }],
     profile: { name: "Local only", picture: "" },
   };
   const presence = { status: "online", preference: "auto", error: null };
@@ -951,7 +957,7 @@ it("refreshes the viewer through the real session after roster setup, not a stal
       await screen.findByRole("menu", { name: "Current community name" }),
     ).toBeVisible();
     expect(snapshot.profile.name).toBe("Local only");
-    // That fresh read shows no `tz`, so this device's zone is shared once,
+    // The profile has no `tz`, so it follows this device's zone, written
     // into what a strong read of the same session holds just before.
     await waitFor(() =>
       expect(publish).toHaveBeenCalledWith(
@@ -1075,6 +1081,7 @@ async function statusFeedbackFixture(disconnected = false) {
   let state = {
     viewer: "a".repeat(64),
     selected: "https://first.test",
+    memberships: [],
     profile: { name: "Fixture" },
   };
   const subscribe = (fn: () => void) => {
@@ -1252,3 +1259,98 @@ it.each([
     else expect(item).not.toHaveTextContent("recommended");
   },
 );
+
+it("follows this device's zone in every joined community and rechecks after a join", async () => {
+  resetFollowedTimeZones();
+  const device = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const listeners = new Set<() => void>();
+  let state = {
+    viewer: "a".repeat(64),
+    selected: null,
+    memberships: [{ id: "https://first.test" }],
+    profile: { name: "Fixture", picture: "" },
+  };
+  const subscribe = (fn: () => void) => {
+    listeners.add(fn);
+    return () => {
+      listeners.delete(fn);
+    };
+  };
+  const connection = {
+    status: "ready",
+    viewer: state.viewer,
+    session: { live: { subscribe: () => () => {}, snapshot: () => undefined } },
+  };
+  const presence = { status: "online", preference: "auto", error: null };
+  const stale = {
+    exists: true,
+    existing: { name: "Fixture", tz: "Pacific/Kiritimati" },
+    profile: { name: "Fixture", picture: "", about: "" },
+  };
+  const inspect = vi
+    .spyOn(communityApi, "inspectProfile")
+    .mockResolvedValue(stale);
+  const publish = vi
+    .spyOn(communityApi, "publishProfile")
+    .mockResolvedValue(undefined);
+  const communities = {
+    subscribe,
+    snapshot: () => state,
+    presence: { subscribe: () => () => {}, snapshot: () => presence },
+    relay: { subscribe: () => () => {}, snapshot: () => connection },
+  } as unknown as Communities;
+  const actions: readonly [] = [];
+  render(
+    <ProfileButton
+      communities={communities}
+      accountActions={
+        {
+          subscribe: () => () => {},
+          snapshot: () => actions,
+        } as unknown as AccountActionsService
+      }
+      appearance={testAppearance}
+      settingsSelected={false}
+      onSettings={() => {}}
+    />,
+  );
+  try {
+    await waitFor(() =>
+      expect(publish).toHaveBeenCalledWith(
+        "https://first.test",
+        stale.profile,
+        {
+          ...stale.existing,
+          tz: device,
+        },
+      ),
+    );
+    // Not selected, so it reads without a session.
+    expect(inspect).toHaveBeenCalledWith("https://first.test");
+    act(() => {
+      state = {
+        ...state,
+        memberships: [...state.memberships, { id: "https://second.test" }],
+      };
+      for (const listener of listeners) listener();
+    });
+    await waitFor(() =>
+      expect(publish).toHaveBeenCalledWith(
+        "https://second.test",
+        stale.profile,
+        { ...stale.existing, tz: device },
+      ),
+    );
+    // A notification that changes neither the zone nor the communities reads
+    // nothing.
+    const reads = inspect.mock.calls.length;
+    act(() => {
+      for (const listener of listeners) listener();
+    });
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(inspect).toHaveBeenCalledTimes(reads);
+  } finally {
+    inspect.mockRestore();
+    publish.mockRestore();
+  }
+});
