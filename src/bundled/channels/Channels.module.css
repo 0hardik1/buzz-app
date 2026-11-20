@@ -1078,11 +1078,12 @@ html[data-keyboard-navigation]
 .cardBody {
   display: flow-root;
 }
-/* Unread that waits on you past the edge: its own line under the last row
+/* Unread that waits on you past the edge: its own centered line under the last row
    that shows, so it reads as the card's, not a row's. It only comes and goes
    as the card settles, never mid-drag. */
 .cardWaiting {
   display: flex;
+  justify-content: center;
   padding-block-start: var(--space-half);
 }
 /* Releases and key steps settle onto a whole row; the drag itself follows the
