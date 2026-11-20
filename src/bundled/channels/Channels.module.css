@@ -333,6 +333,20 @@
 }
 /* A moved card's header, drawn as a collapsed card around the header's own
    box (the overlay takes the header's size); it lifts with the panel shadow. */
+/* Faces of unread DMs a card's cut hides, centred above the grip (or under a
+   collapsed header). Showing only them keeps the open conversation too. */
+.cardDms {
+  display: flex;
+  justify-content: center;
+  padding-block: var(--space-1);
+}
+.cardDms[hidden] {
+  display: none;
+}
+.channelSection[data-only-unread-dms]
+  [data-card-row]:not([data-unread-dm-row], :has([data-selected])) {
+  display: none;
+}
 .cardDragOverlay {
   block-size: calc(100% + 2 * var(--space-1));
   margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-2));

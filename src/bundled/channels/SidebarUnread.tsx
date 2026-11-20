@@ -6,6 +6,7 @@ import {
   ArrowUpIcon,
 } from "../../shared/design-system/icons/index";
 import {
+  createContext,
   useEffect,
   useRef,
   useState,
@@ -20,6 +21,11 @@ export type UnreadDmPreview = {
   src?: string | undefined;
   isAgent?: boolean | undefined;
 };
+
+/** One-person DMs by channel, for faces on unread cues inside the sidebar. */
+export const UnreadDmPreviews = createContext<
+  ReadonlyMap<string, UnreadDmPreview> | undefined
+>(undefined);
 
 type EdgeTarget = {
   row: HTMLButtonElement;
@@ -351,7 +357,9 @@ export function SidebarUnread({
       contentRef={content}
       overlay={edgeCues}
     >
-      {children}
+      <UnreadDmPreviews.Provider value={dmPreviews}>
+        {children}
+      </UnreadDmPreviews.Provider>
     </SidebarList>
   );
 }

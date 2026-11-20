@@ -1,6 +1,7 @@
 import { SidebarActiveDialog, activeWindowLabel } from "./SidebarActiveDialog";
 import { FadingLabel } from "./FadingLabel";
 import {
+  useCallback,
   useEffect,
   useId,
   useRef,
@@ -54,6 +55,7 @@ import { SidebarGroupIcon } from "./SidebarGroupIcon";
 import { SidebarStarIcon } from "./SidebarStarIcon";
 import { ChannelSidebarMenuItem } from "./ChannelSidebarMenuItem";
 import { SidebarCardResize, useSidebarCardHeight } from "./SidebarCardResize";
+import { SidebarCardDms } from "./SidebarCardDms";
 import styles from "./Channels.module.css";
 
 export function SidebarSection({
@@ -176,6 +178,24 @@ export function SidebarSection({
   if (hideMoreActions && menuOpen) setMenuOpen(false);
   const [removeOpen, setRemoveOpen] = useState(false);
   const pendingToggle = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Showing only unread DMs; `closed` when the card was collapsed before.
+  const [onlyDms, setOnlyDms] = useState<{ closed: boolean }>();
+  const endOnlyDms = useCallback(() => setOnlyDms(undefined), []);
+  const dms = heightScope && (
+    <SidebarCardDms
+      open={open}
+      filtering={!!onlyDms}
+      onShow={() => {
+        setOnlyDms({ closed: !open });
+        if (!open) onToggle(true);
+      }}
+      onShowAll={() => {
+        if (onlyDms?.closed) onToggle(false);
+        setOnlyDms(undefined);
+      }}
+      onNoneLeft={endOnlyDms}
+    />
+  );
   useEffect(() => () => clearTimeout(pendingToggle.current), []);
   const [activeOpen, setActiveOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -204,6 +224,7 @@ export function SidebarSection({
       data-drop-edge={dropEdge}
       data-section-dragging={dragging || undefined}
       data-menu-open={menuOpen || undefined}
+      data-only-unread-dms={onlyDms ? "" : undefined}
     >
       <NavigationSectionHeading
         disclosure
@@ -588,6 +609,7 @@ export function SidebarSection({
         )}
       </NavigationSectionHeading>
       {headerNotice}
+      {!open && dms}
       <div
         id={id}
         className={styles.sectionContent}
@@ -595,7 +617,13 @@ export function SidebarSection({
         hidden={!open}
       >
         {heightScope ? (
-          <ResizableRows scope={heightScope} card={sectionKey} label={title}>
+          <ResizableRows
+            scope={heightScope}
+            card={sectionKey}
+            label={title}
+            unclipped={!!onlyDms}
+            footer={open && dms}
+          >
             {children}
           </ResizableRows>
         ) : (
@@ -610,11 +638,15 @@ function ResizableRows({
   scope,
   card,
   label,
+  unclipped,
+  footer,
   children,
 }: {
   scope: string;
   card: string;
   label: string;
+  unclipped: boolean;
+  footer: ReactNode;
   children: ReactNode;
 }) {
   const [height, resize, toggle] = useSidebarCardHeight(scope, card);
@@ -624,6 +656,8 @@ function ResizableRows({
       height={height}
       onResize={resize}
       onToggle={toggle}
+      unclipped={unclipped}
+      footer={footer}
     >
       {children}
     </SidebarCardResize>
