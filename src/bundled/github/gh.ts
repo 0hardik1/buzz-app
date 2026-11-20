@@ -215,16 +215,15 @@ export type GitHubThread = Readonly<{
 
 /** The person's unread notifications, or `unchanged` when they are the same
  * as the read `etag` names. GitHub answers that with a 304, which costs none of
- * the rate limit. `poll` is how many seconds GitHub asks clients to wait. */
+ * the rate limit. */
 export type GitHubNotifications = (
   etag: string | undefined,
   signal?: AbortSignal,
 ) => Promise<
-  | Readonly<{ status: "unchanged"; poll: number | undefined }>
+  | Readonly<{ status: "unchanged" }>
   | Readonly<{
       status: "changed";
       etag: string | undefined;
-      poll: number | undefined;
       threads: readonly GitHubThread[];
     }>
 >;
@@ -251,10 +250,7 @@ export function gitHubNotifications(
     const status = Number(/^HTTP\/[\d.]+ (\d{3})/.exec(head)?.[1]);
     const header = (name: string) =>
       new RegExp(`^${name}:[ \\t]*(.*?)\\r?$`, "im").exec(head)?.[1];
-    const interval = Number(header("X-Poll-Interval"));
-    const poll =
-      Number.isFinite(interval) && interval > 0 ? interval : undefined;
-    if (status === 304) return { status: "unchanged", poll };
+    if (status === 304) return { status: "unchanged" };
     const reason = stderr.trim().replace(/^gh: /, "");
     if (status === 200 && code === 0) {
       let threads: unknown;
@@ -266,26 +262,11 @@ export function gitHubNotifications(
       return {
         status: "changed",
         etag: header("ETag"),
-        poll,
-        threads: threads.filter(isThread),
+        threads: threads as GitHubThread[],
       };
     }
     if (!status) throw new GhUnavailable(reason || "gh did not answer");
     if (status === 401) throw new GhUnavailable(reason);
     throw new GitHubError(reason || `HTTP ${status}`);
   };
-}
-
-function isThread(value: unknown): value is GitHubThread {
-  const thread = value as GitHubThread | null;
-  return (
-    !!thread &&
-    typeof thread.id === "string" &&
-    typeof thread.reason === "string" &&
-    typeof thread.updated_at === "string" &&
-    typeof thread.subject?.title === "string" &&
-    typeof thread.subject.type === "string" &&
-    (thread.subject.url === null || typeof thread.subject.url === "string") &&
-    typeof thread.repository?.full_name === "string"
-  );
 }

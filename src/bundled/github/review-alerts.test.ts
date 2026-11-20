@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, type Mock, vi } from "vitest";
+import { setAlertChoice } from "./alert-preferences";
 import type { GitHubNotifications, GitHubThread } from "./gh";
 import {
-  ATTEMPTS,
+  GITHUB_ALERTS,
   MAX_BACKOFF_MS,
-  MENTIONED,
-  MIN_POLL_MS,
-  REVIEW_REQUESTED,
+  POLL_MS,
   STALE_MS,
   watchReviewAlerts,
 } from "./review-alerts";
@@ -52,11 +51,10 @@ function github() {
   const reviewers = new Map<number, string[]>();
   const read = vi.fn<GitHubNotifications>(async (etag) =>
     etag === `"${inbox.etag}"`
-      ? { status: "unchanged", poll: 60 }
+      ? { status: "unchanged" }
       : {
           status: "changed",
           etag: `"${inbox.etag}"`,
-          poll: 60,
           threads: [...inbox.threads],
         },
   );
@@ -71,8 +69,8 @@ function github() {
                 // "@team", or "owner:login" for a code owner's request.
                 asCodeOwner: login.startsWith("owner:"),
                 requestedReviewer: login.startsWith("@")
-                  ? {}
-                  : { login: login.replace(/^owner:/, "") },
+                  ? { __typename: "Team" }
+                  : { __typename: "User", login: login.replace(/^owner:/, "") },
               }),
             ),
           },
@@ -89,39 +87,29 @@ function github() {
 }
 
 function notifications() {
-  const submitted: { category: string; title?: string; body?: string }[] = [];
+  const submitted: { title: string | undefined; body: string | undefined }[] =
+    [];
   return {
     submitted,
-    register: vi.fn((category: { id: string }) => ({
-      submit: vi.fn(async (input: { title?: string; body?: string }) => {
-        submitted.push({ category: category.id, ...input });
-        return true;
-      }),
+    register: vi.fn((_category: { id: string; label: string }) => ({
+      submit: vi.fn(
+        async ({ title, body }: { title?: string; body?: string }) => {
+          submitted.push({ title, body });
+          return true;
+        },
+      ),
     })),
   };
 }
 
-const tick = (ms = MIN_POLL_MS) => vi.advanceTimersByTimeAsync(ms);
+const tick = (ms = POLL_MS) => vi.advanceTimersByTimeAsync(ms);
 
-it("alerts for reviews requested from the person and their mentions, not their teams' or code owners'", async () => {
-  const hub = github();
-  const shown = notifications();
-  hub.reviewers.set(1, ["octocat"]);
-  hub.post(thread("1", "review_requested", 1));
-  const stop = watchReviewAlerts(shown, hub.read, hub.gh);
-  expect(shown.register.mock.calls.map(([category]) => category)).toEqual([
-    REVIEW_REQUESTED,
-    MENTIONED,
-  ]);
-  await tick(0);
-  // The first read only notes what is already there.
-  expect(shown.submitted).toEqual([]);
-
+/** Every kind of review request and mention, once each. */
+function everyKind(hub: ReturnType<typeof github>) {
   hub.reviewers.set(2, ["octocat", "@example-team"]);
   hub.reviewers.set(3, ["@example-team"]);
   hub.reviewers.set(12, ["owner:octocat"]);
   hub.post(
-    thread("1", "review_requested", 1),
     thread("2", "review_requested", 2),
     thread("3", "review_requested", 3),
     thread("12", "review_requested", 12),
@@ -129,18 +117,25 @@ it("alerts for reviews requested from the person and their mentions, not their t
     thread("5", "team_mention", 5),
     thread("6", "author", 6),
   );
+}
+
+it("by default alerts for reviews requested from the person and their mentions, not their teams' or code owners'", async () => {
+  const hub = github();
+  const shown = notifications();
+  hub.reviewers.set(1, ["octocat"]);
+  hub.post(thread("1", "review_requested", 1));
+  const stop = watchReviewAlerts(shown, hub.read, hub.gh);
+  expect(shown.register.mock.calls).toEqual([[GITHUB_ALERTS]]);
+  await tick(0);
+  // The first read only notes what is already there, without lookups.
+  expect(shown.submitted).toEqual([]);
+  expect(hub.gh).not.toHaveBeenCalled();
+
+  everyKind(hub);
   await tick();
   expect(shown.submitted).toEqual([
-    expect.objectContaining({
-      category: REVIEW_REQUESTED.id,
-      title: "Review requested",
-      body: "example-repo#2 · Change 2",
-    }),
-    expect.objectContaining({
-      category: MENTIONED.id,
-      title: "Mentioned on GitHub",
-      body: "example-repo#4 · Change 4",
-    }),
+    { title: "Review requested", body: "example-repo#2 · Change 2" },
+    { title: "Mentioned on GitHub", body: "example-repo#4 · Change 4" },
   ]);
 
   // Nothing new: a 304, and no GraphQL read.
@@ -149,6 +144,53 @@ it("alerts for reviews requested from the person and their mentions, not their t
   expect(hub.read).toHaveBeenLastCalledWith(`"2"`, expect.any(AbortSignal));
   expect(hub.gh.mock.calls.length).toBe(asked);
   expect(shown.submitted).toHaveLength(2);
+  stop();
+});
+
+it("alerts for the kinds the person chose", async () => {
+  setAlertChoice("review", false);
+  setAlertChoice("mention", false);
+  setAlertChoice("teamReview", true);
+  setAlertChoice("codeOwnerReview", true);
+  setAlertChoice("teamMention", true);
+  const hub = github();
+  const shown = notifications();
+  hub.post();
+  const stop = watchReviewAlerts(shown, hub.read, hub.gh);
+  await tick(0);
+  everyKind(hub);
+  await tick();
+  expect(shown.submitted).toEqual([
+    {
+      title: "Review requested from your team",
+      body: "example-repo#2 · Change 2",
+    },
+    {
+      title: "Review requested from your team",
+      body: "example-repo#3 · Change 3",
+    },
+    {
+      title: "Review requested from a code owner",
+      body: "example-repo#12 · Change 12",
+    },
+    { title: "Your team was mentioned", body: "example-repo#5 · Change 5" },
+  ]);
+  stop();
+});
+
+it("asks nothing about review requests when no review kind is chosen", async () => {
+  setAlertChoice("review", false);
+  const hub = github();
+  const shown = notifications();
+  hub.post();
+  const stop = watchReviewAlerts(shown, hub.read, hub.gh);
+  await tick(0);
+  everyKind(hub);
+  await tick();
+  expect(hub.gh).not.toHaveBeenCalled();
+  expect(shown.submitted.map((item) => item.title)).toEqual([
+    "Mentioned on GitHub",
+  ]);
   stop();
 });
 
@@ -209,21 +251,26 @@ it("remembers what it alerted across a restart, and skips stale notifications", 
   stop();
 });
 
-it("asks again after a failed lookup, and backs off while reads fail", async () => {
+it("asks about a failed lookup again only when it is updated, and backs off while reads fail", async () => {
   const hub = github();
   const shown = notifications();
   hub.post();
   const stop = watchReviewAlerts(shown, hub.read, hub.gh);
   await tick(0);
   hub.reviewers.set(11, ["octocat"]);
-  hub.post(thread("11", "review_requested", 11));
+  hub.post(thread("11", "review_requested", 11), thread("13", "mention", 13));
   hub.gh.mockRejectedValueOnce(new Error("HTTP 502"));
   await tick();
-  expect(shown.submitted).toEqual([]);
-  // The next read is not a 304, so the request is asked about again.
+  // Other alerts still come.
+  expect(shown.submitted.map((item) => item.body)).toEqual([
+    "example-repo#13 · Change 13",
+  ]);
   await tick();
-  expect(hub.read).toHaveBeenLastCalledWith(undefined, expect.any(AbortSignal));
-  expect(shown.submitted).toHaveLength(1);
+  expect(hub.gh).toHaveBeenCalledTimes(1);
+  vi.setSystemTime(NOW + 5 * 60_000);
+  hub.post(thread("11", "review_requested", 11), thread("13", "mention", 13));
+  await tick();
+  expect(shown.submitted).toHaveLength(2);
 
   hub.read.mockRejectedValue(new Error("gh is signed out"));
   const reads = () => hub.read.mock.calls.length;
@@ -234,7 +281,7 @@ it("asks again after a failed lookup, and backs off while reads fail", async () 
   await tick();
   expect(reads()).toBe(before + 2);
   before = reads();
-  await tick(MIN_POLL_MS * 2 - 1);
+  await tick(POLL_MS * 2 - 1);
   expect(reads()).toBe(before);
   await tick(1);
   expect(reads()).toBe(before + 1);
@@ -245,81 +292,6 @@ it("asks again after a failed lookup, and backs off while reads fail", async () 
   stop();
   await tick(MAX_BACKOFF_MS);
   expect(reads()).toBe(before + 1);
-});
-
-it("notes the first read without lookups, and gives up on a lookup that keeps failing", async () => {
-  const hub = github();
-  const shown = notifications();
-  hub.reviewers.set(13, ["octocat"]);
-  hub.post(thread("13", "review_requested", 13));
-  const stop = watchReviewAlerts(shown, hub.read, hub.gh);
-  await tick(0);
-  expect(hub.gh.mock.calls).toHaveLength(0);
-
-  // A pull request the token can't read: asked about ATTEMPTS times, then
-  // reads are 304s again, and other alerts still come.
-  hub.gh.mockRejectedValue(new Error("Could not resolve to a Repository"));
-  hub.post(
-    thread("13", "review_requested", 13),
-    thread("14", "review_requested", 14),
-  );
-  for (let read = 0; read < ATTEMPTS + 2; read++) await tick();
-  expect(hub.gh.mock.calls).toHaveLength(ATTEMPTS);
-  expect(hub.read).toHaveBeenLastCalledWith(`"2"`, expect.any(AbortSignal));
-  hub.post(
-    thread("13", "review_requested", 13),
-    thread("14", "review_requested", 14),
-    thread("15", "mention", 15),
-  );
-  await tick();
-  expect(shown.submitted.map((item) => item.body)).toEqual([
-    "example-repo#15 · Change 15",
-  ]);
-  stop();
-});
-
-it("alerts again when Buzz refused the alert, as before an account is chosen", async () => {
-  const hub = github();
-  let accepting = false;
-  const submitted: string[] = [];
-  const shown = {
-    register: vi.fn(() => ({
-      submit: vi.fn(async (input: { body?: string }) => {
-        if (accepting) submitted.push(input.body ?? "");
-        return accepting;
-      }),
-    })),
-  };
-  hub.post();
-  const stop = watchReviewAlerts(shown, hub.read, hub.gh);
-  await tick(0);
-  hub.post(thread("16", "mention", 16));
-  await tick();
-  expect(submitted).toEqual([]);
-  accepting = true;
-  await tick();
-  await tick();
-  expect(submitted).toEqual(["example-repo#16 · Change 16"]);
-  stop();
-});
-
-it("keeps what it decided about notifications past GitHub's first page", async () => {
-  const hub = github();
-  const shown = notifications();
-  hub.post();
-  const stop = watchReviewAlerts(shown, hub.read, hub.gh);
-  await tick(0);
-  hub.post(thread("17", "mention", 17));
-  await tick();
-  const page = Array.from({ length: 50 }, (_, index) =>
-    thread(`page-${index}`, "author", index),
-  );
-  hub.post(...page);
-  await tick();
-  hub.post(thread("17", "mention", 17), ...page.slice(1));
-  await tick();
-  expect(shown.submitted).toHaveLength(1);
-  stop();
 });
 
 it("reads nothing where gh cannot run", () => {

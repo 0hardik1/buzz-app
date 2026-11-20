@@ -1,4 +1,5 @@
 import { Header } from "../../shared/design-system/ui/Header";
+import { AlertSettings } from "./AlertSettings";
 import { AuthorSettings } from "./AuthorSettings";
 import type { GitHubCli } from "./gh";
 import { LinkSettings } from "./LinkSettings";
@@ -15,6 +16,7 @@ export function GitHubSettings({
       <Header title="GitHub" />
       <div className="grid grid-cols-1 gap-section-gap">
         <LinkSettings active={active} />
+        <AlertSettings active={active} />
         <AuthorSettings active={active} gh={gh} />
       </div>
     </section>

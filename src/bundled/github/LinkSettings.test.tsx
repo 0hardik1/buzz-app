@@ -98,13 +98,16 @@ it("preserves the default when storage cannot be read or has an unknown value", 
   expect(openGitHubLinksInBuzz()).toBe(true);
 });
 
-it("groups links and comment authors under a single GitHub heading", async () => {
+it("groups links, alerts and comment authors under a single GitHub heading", async () => {
   render(<GitHubSettings active={() => true} />);
   expect(
     screen.getByRole("heading", { level: 2, name: "GitHub" }),
   ).toBeInTheDocument();
   expect(
     screen.getByRole("heading", { level: 3, name: "Links" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", { level: 3, name: "Alerts" }),
   ).toBeInTheDocument();
   expect(
     screen.getByRole("heading", { level: 3, name: "Comment authors" }),

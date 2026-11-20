@@ -259,16 +259,12 @@ it("reads notifications with the last ETag, and a 304 as unchanged", async () =>
   expect(gitHubNotifications({})).toBeUndefined();
   // gh prints the status line, headers, a blank line, then the body.
   let { spawn } = diffSpawn(
-    [
-      'HTTP/2.0 200 OK\nEtag: W/"abc"\r\nX-Poll-Interval: 90\r\n\r\n',
-      JSON.stringify([thread, { id: 2 }]),
-    ],
+    ['HTTP/2.0 200 OK\nEtag: W/"abc"\r\n\r\n', JSON.stringify([thread])],
     0,
   );
   await expect(gitHubNotifications({ spawn })?.(undefined)).resolves.toEqual({
     status: "changed",
     etag: 'W/"abc"',
-    poll: 90,
     threads: [thread],
   });
   expect(spawn).toHaveBeenCalledWith("notifications", expect.any(Object));
@@ -276,13 +272,12 @@ it("reads notifications with the last ETag, and a 304 as unchanged", async () =>
 
   // gh exits 1 on a 304, which costs none of the rate limit.
   ({ spawn } = diffSpawn(
-    ["HTTP/2.0 304 Not Modified\nX-Poll-Interval: 60\r\n\r\n"],
+    ["HTTP/2.0 304 Not Modified\r\n\r\n"],
     1,
     "gh: HTTP 304",
   ));
   await expect(gitHubNotifications({ spawn })?.('W/"abc"')).resolves.toEqual({
     status: "unchanged",
-    poll: 60,
   });
   expect(spawn).toHaveBeenCalledWith(
     "notifications",
