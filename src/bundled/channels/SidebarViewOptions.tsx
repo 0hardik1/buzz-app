@@ -1,6 +1,10 @@
 import { DEFAULT_ACTIVE_WINDOW_SECONDS } from "../../features/relay/sidebar-preferences";
 import type { SidebarSortMode } from "../../features/relay/sidebar-sort";
-import { Filter2Icon } from "../../shared/design-system/icons";
+import {
+  Filter2Icon,
+  ListBulletsIcon,
+  SquaresFourIcon,
+} from "../../shared/design-system/icons";
 import { Field } from "../../shared/design-system/ui/Field";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
@@ -9,16 +13,17 @@ import {
   PopoverTrigger,
 } from "../../shared/design-system/ui/Popover";
 import { Radio, RadioGroup } from "../../shared/design-system/ui/RadioGroup";
-import { Switch } from "../../shared/design-system/ui/Switch";
+import { PreferenceRow } from "../../shared/design-system/ui/PreferenceRow";
+import { Select } from "../../shared/design-system/ui/Select";
+import { SwitchPreferenceRow } from "../../shared/design-system/ui/SwitchPreferenceRow";
 import type { SidebarFilter } from "./useSidebarFilters";
 import styles from "./Channels.module.css";
 
 const day = 86400;
-/** Show choices: All and Unreads, then Active windows picked in place. */
-const shows = [
+const dates = [
   { value: "all", label: "All" },
-  { value: "unreads", label: "Unreads" },
   { value: String(day), label: "Today" },
+  { value: String(3 * day), label: "3 days" },
   { value: String(7 * day), label: "7 days" },
   { value: String(30 * day), label: "30 days" },
 ] as const;
@@ -29,7 +34,8 @@ export type SidebarViewFilter = {
   filtered?: boolean;
   disabled?: boolean;
   activeWindowSeconds?: number | undefined;
-  change: (mode: SidebarFilter, seconds?: number) => unknown;
+  /** `null` seconds clears the saved date window. */
+  change: (mode: SidebarFilter, seconds: number | null) => unknown;
 };
 
 /**
@@ -57,10 +63,26 @@ export function SidebarViewOptions({
     | { value: "list" | "icons"; set: (value: "list" | "icons") => void }
     | undefined;
 }) {
-  const show =
+  const unreads = filter?.value === "unreads";
+  // Active defaults to 30 days; Unreads spans all dates until one is saved.
+  const seconds =
     filter?.value === "active"
-      ? String(filter.activeWindowSeconds ?? DEFAULT_ACTIVE_WINDOW_SECONDS)
-      : filter?.value;
+      ? (filter.activeWindowSeconds ?? DEFAULT_ACTIVE_WINDOW_SECONDS)
+      : unreads
+        ? filter.activeWindowSeconds
+        : undefined;
+  const date = seconds === undefined ? "all" : String(seconds);
+  // A saved window this menu doesn't offer stays visible and selected.
+  const dateOptions = dates.some((option) => option.value === date)
+    ? dates
+    : [...dates, { value: date, label: `${(seconds ?? 0) / day} days` }];
+  const change = (nextUnreads: boolean, nextDate: string) =>
+    void Promise.resolve(
+      filter?.change(
+        nextUnreads ? "unreads" : nextDate === "all" ? "all" : "active",
+        nextDate === "all" ? null : Number(nextDate),
+      ),
+    ).catch(() => {});
   const label = `View options for ${title}`;
   return (
     <PopoverRoot>
@@ -77,74 +99,106 @@ export function SidebarViewOptions({
       <PopoverPopup size="compact" align="end" aria-label={label}>
         <div className={styles.viewOptions}>
           {filter && (
-            <Field label="Show" nativeLabel={false}>
-              <RadioGroup
-                layout="wrap"
-                aria-label="Show"
-                value={show}
+            <>
+              <SwitchPreferenceRow
+                label="Unreads"
+                checked={unreads}
                 disabled={filter.disabled}
-                onValueChange={(next) => {
-                  const choice = String(next);
-                  void Promise.resolve(
-                    choice === "all" || choice === "unreads"
-                      ? filter.change(choice)
-                      : filter.change("active", Number(choice)),
-                  ).catch(() => {});
-                }}
-              >
-                {shows.map((choice) => (
-                  <Radio
-                    key={choice.value}
-                    value={choice.value}
-                    label={choice.label}
-                    variant="chip"
-                  />
-                ))}
-              </RadioGroup>
-            </Field>
+                onCheckedChange={(on) => change(on, date)}
+              />
+              <Select
+                variant="preference"
+                label="Date"
+                align="end"
+                value={date}
+                disabled={filter.disabled === true}
+                groups={[{ label: "", options: dateOptions }]}
+                onValueChange={(next) => change(unreads, next)}
+              />
+            </>
           )}
           {sort && (
-            <Field label="Sort" nativeLabel={false}>
-              <RadioGroup
-                layout="wrap"
-                aria-label="Sort"
-                value={sort.value}
-                onValueChange={(mode) => sort.change(mode as SidebarSortMode)}
-              >
-                <Radio value="recent" label="Recent" variant="chip" />
-                <Radio value="alpha" label="A–Z" variant="chip" />
-                {sort.modes?.map((mode) => (
-                  <Radio
-                    key={mode.id}
-                    value={mode.id}
-                    label={mode.label}
-                    variant="chip"
-                  />
-                ))}
-              </RadioGroup>
-            </Field>
+            <PreferenceRow
+              title="Sort"
+              trailing={
+                <Field
+                  label="Sort"
+                  labelVisibility="hidden"
+                  nativeLabel={false}
+                >
+                  <RadioGroup
+                    layout="wrap"
+                    aria-label="Sort"
+                    value={sort.value}
+                    onValueChange={(mode) =>
+                      sort.change(mode as SidebarSortMode)
+                    }
+                  >
+                    <Radio value="recent" label="Recent" variant="chip" />
+                    <Radio value="alpha" label="A–Z" variant="chip" />
+                    {sort.modes?.map((mode) => (
+                      <Radio
+                        key={mode.id}
+                        value={mode.id}
+                        label={mode.label}
+                        variant="chip"
+                      />
+                    ))}
+                  </RadioGroup>
+                </Field>
+              }
+            />
           )}
           {unreadsFirst && (
-            <Switch
+            // Unreads already leaves only unread conversations to order.
+            <SwitchPreferenceRow
               label="Unreads first"
               checked={unreadsFirst.on}
+              disabled={unreads}
               onCheckedChange={unreadsFirst.set}
             />
           )}
           {display && (
-            <Field label="Layout" nativeLabel={false}>
-              <RadioGroup
-                layout="wrap"
-                aria-label="Layout"
-                value={display.value}
-                onValueChange={(value) =>
-                  display.set(value === "icons" ? "icons" : "list")
-                }
-              >
-                <Radio value="list" label="List" variant="chip" />
-                <Radio value="icons" label="Icons" variant="chip" />
-              </RadioGroup>
-            </Field>
+            <PreferenceRow
+              title="Layout"
+              trailing={
+                <Field
+                  label="Layout"
+                  labelVisibility="hidden"
+                  nativeLabel={false}
+                >
+                  <RadioGroup
+                    layout="wrap"
+                    aria-label="Layout"
+                    value={display.value}
+                    onValueChange={(value) =>
+                      display.set(value === "icons" ? "icons" : "list")
+                    }
+                  >
+                    <Radio
+                      value="list"
+                      variant="chip"
+                      label={
+                        <>
+                          <ListBulletsIcon size={14} aria-hidden="true" />
+                          <span className="sr-only">List</span>
+                        </>
+                      }
+                    />
+                    <Radio
+                      value="icons"
+                      variant="chip"
+                      label={
+                        <>
+                          <SquaresFourIcon size={14} aria-hidden="true" />
+                          <span className="sr-only">Icons</span>
+                        </>
+                      }
+                    />
+                  </RadioGroup>
+                </Field>
+              }
+            />
           )}
         </div>
       </PopoverPopup>

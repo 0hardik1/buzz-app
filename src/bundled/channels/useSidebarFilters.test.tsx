@@ -367,3 +367,42 @@ it("keeps known-inactive rows hidden through refreshes while new rows remain vis
   unmount();
   owner.dispose();
 });
+
+it("applies a saved date window alongside Unreads, and all dates without one", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-16T12:00:00Z"));
+  const owner = createRelaySession(null);
+  const now = Date.now() / 1000;
+  const sections = sidebarSections(
+    [
+      { id: "recent", name: "Recent", lastActivityAt: now - 3600 },
+      { id: "old", name: "Old", lastActivityAt: now - 10 * 86400 },
+      { id: "quiet", name: "Quiet", lastActivityAt: now - 3600 },
+    ],
+    { sections: [], assignments: {}, starred: [], muted: [] },
+  );
+  const needsYou = new Set(["recent", "old"]);
+  const { result, rerender, unmount } = renderHook(
+    ({ windows }: { windows: Record<string, number> }) =>
+      useSidebarFilters(
+        sections,
+        { channels: "unreads" },
+        undefined,
+        owner.session.unread,
+        windows,
+        true,
+        needsYou,
+      ),
+    { initialProps: { windows: {} } },
+  );
+  const channels = () =>
+    result.current
+      .find(({ key }) => key === "channels")
+      ?.rows.map(({ id }) => id)
+      .sort();
+  expect(channels()).toEqual(["old", "recent"]);
+  rerender({ windows: { channels: 7 * 86400 } });
+  expect(channels()).toEqual(["recent"]);
+  unmount();
+  owner.dispose();
+});

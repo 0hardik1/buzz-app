@@ -1,5 +1,10 @@
 import { test, expect } from "./fixture.mjs";
-import { chooseViewOption, openPage, openViewOptions } from "./navigation.mjs";
+import {
+  chooseViewOption,
+  expectViewOption,
+  openPage,
+  openViewOptions,
+} from "./navigation.mjs";
 
 test.use({
   pluginFixtures: true,
@@ -94,9 +99,7 @@ test("a replacement sidebar unmounts Messages and returning restores its view", 
   await expect(work.locator("details").first()).not.toHaveAttribute("open");
   await page.screenshot({ path: info.outputPath("messages-after-return.png") });
   const workOptions = await openViewOptions(page, "Work");
-  await expect(
-    workOptions.getByRole("radio", { name: "Unreads", exact: true }),
-  ).toHaveAttribute("aria-checked", "true");
+  await expectViewOption(workOptions, "Unreads");
   await page.keyboard.press("Escape");
   await expect(workOptions).toHaveCount(0);
   const team = await openViewOptions(page, "Team");

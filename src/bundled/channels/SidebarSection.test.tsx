@@ -26,6 +26,7 @@ it("picks a filter and its window in place from the view options popover", async
       title="Channels"
       open
       onToggle={() => {}}
+      heightScope="view-options-filter-test"
       filter={{ value: "unreads", filtered: true, change }}
     >
       <p>No channels match this filter.</p>
@@ -47,12 +48,23 @@ it("picks a filter and its window in place from the view options popover", async
     more.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   await user.click(trigger);
-  const show = await screen.findByRole("radiogroup", { name: "Show" });
-  expect(within(show).getByRole("radio", { name: "Unreads" })).toBeChecked();
-  await user.click(within(show).getByRole("radio", { name: "7 days" }));
-  expect(change).toHaveBeenCalledExactlyOnceWith("active", 7 * 86400);
-  await user.click(within(show).getByRole("radio", { name: "All" }));
-  expect(change).toHaveBeenLastCalledWith("all");
+  // Unreads and Date are separate: Unreads alone spans all dates, and
+  // picking a date keeps Unreads on.
+  const unreads = await screen.findByRole("switch", { name: "Unreads" });
+  expect(unreads).toBeChecked();
+  const date = screen.getByRole("combobox", { name: "Date" });
+  expect(date).toHaveTextContent("All");
+  await user.click(date);
+  await user.click(await screen.findByRole("option", { name: "7 days" }));
+  expect(change).toHaveBeenCalledExactlyOnceWith("unreads", 7 * 86400);
+  await user.click(unreads);
+  expect(change).toHaveBeenLastCalledWith("all", null);
+  // Unreads leads; Unreads first has nothing to reorder while it's on.
+  const switches = screen.getAllByRole("switch");
+  expect(switches.map((control) => control.getAttribute("aria-label"))).toEqual(
+    ["Unreads", "Unreads first"],
+  );
+  expect(switches[1]).toHaveAttribute("aria-disabled", "true");
   // The menu keeps only card actions.
   await user.keyboard("{Escape}");
   await user.click(
@@ -462,7 +474,7 @@ it("never offers moves without a move capability", async () => {
   expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull();
 });
 
-it("disables Show choices when filters are read-only", async () => {
+it("disables Unreads and Date when filters are read-only", async () => {
   const user = userEvent.setup();
   const change = vi.fn();
   render(
@@ -479,8 +491,10 @@ it("disables Show choices when filters are read-only", async () => {
   await user.click(
     screen.getByRole("button", { name: "View options for Channels, filtered" }),
   );
-  const show = await screen.findByRole("radiogroup", { name: "Show" });
-  await user.click(within(show).getByText("All"));
+  const unreads = await screen.findByRole("switch", { name: "Unreads" });
+  expect(unreads).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByRole("combobox", { name: "Date" })).toBeDisabled();
+  await user.click(unreads);
   expect(change).not.toHaveBeenCalled();
 });
 

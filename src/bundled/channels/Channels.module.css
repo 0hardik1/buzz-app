@@ -1190,5 +1190,4 @@ html[data-keyboard-navigation]
 /* The card's view options popover: labelled choice groups, stacked. */
 .viewOptions {
   display: grid;
-  gap: var(--space-3);
 }

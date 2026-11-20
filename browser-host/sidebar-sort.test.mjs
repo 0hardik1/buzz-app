@@ -508,3 +508,35 @@ it("atomically confirms custom windows, preserves other sections and clears remo
   }
   expect(read).not.toHaveBeenCalled();
 });
+
+it("saves a date window beside Unreads, including the 30-day default, and clears it for all dates", () => {
+  const h = harness();
+  const choice = { group: "channels", mode: "unreads", sectionIds: [] };
+  const plain = prepareSidebarFilter([], choice, h.secret);
+  expect(h.decode(plain.event).activeWindowSeconds).toBeUndefined();
+  const month = prepareSidebarFilter(
+    [plain.event],
+    { ...choice, activeWindowSeconds: 30 * 86400 },
+    h.secret,
+  );
+  expect(h.decode(month.event)).toMatchObject({
+    groups: { channels: "unreads" },
+    activeWindowSeconds: { channels: 30 * 86400 },
+  });
+  const cleared = prepareSidebarFilter(
+    [month.event],
+    { ...choice, activeWindowSeconds: null },
+    h.secret,
+  );
+  expect(h.decode(cleared.event)).toMatchObject({
+    groups: { channels: "unreads" },
+    activeWindowSeconds: {},
+  });
+  expect(() =>
+    prepareSidebarFilter(
+      [],
+      { ...choice, mode: "active", activeWindowSeconds: null },
+      h.secret,
+    ),
+  ).toThrow("Invalid sidebar filter intent");
+});

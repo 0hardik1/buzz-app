@@ -289,10 +289,47 @@ export async function openViewOptions(page, title, scope = page) {
   return popup;
 }
 
-/** Picks one View options choice, such as Unreads or A–Z, then closes it. */
+const DATES = new Set(["All", "Today", "3 days", "7 days", "30 days"]);
+
+/** View options' Unreads switch, which combines with its Date. */
+export function unreadsSwitch(popup) {
+  return popup.getByRole("switch", { name: "Unreads", exact: true });
+}
+
+/** View options' Date dropdown. */
+export function dateChoice(popup) {
+  return popup.getByRole("combobox", { name: "Date", exact: true });
+}
+
+/** Picks a Date in an open View options popover. */
+export async function chooseDate(page, popup, name) {
+  await dateChoice(popup).click();
+  await page.getByRole("option", { name, exact: true }).click();
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+}
+
+/** Expects View options to show `name`: Unreads, a Date, or a choice. */
+export async function expectViewOption(popup, name) {
+  if (name === "Unreads") await expect(unreadsSwitch(popup)).toBeChecked();
+  else if (DATES.has(name)) await expect(dateChoice(popup)).toContainText(name);
+  else
+    await expect(
+      popup.getByRole("radio", { name, exact: true }),
+    ).toHaveAttribute("aria-checked", "true");
+}
+
+/** Picks one View options choice, such as Unreads, a Date or A–Z, then closes
+ * it. All shows every conversation: Unreads off, all dates. */
 export async function chooseViewOption(page, title, name, scope = page) {
   const popup = await openViewOptions(page, title, scope);
-  await popup.getByRole("radio", { name, exact: true }).click();
+  // Click rather than check: a failed save puts the switch back.
+  const unreads = unreadsSwitch(popup);
+  if (name === "Unreads") {
+    if (!(await unreads.isChecked())) await unreads.click();
+  } else if (DATES.has(name)) {
+    await chooseDate(page, popup, name);
+    if (name === "All" && (await unreads.isChecked())) await unreads.click();
+  } else await popup.getByRole("radio", { name, exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(popup).toHaveCount(0);
 }

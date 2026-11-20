@@ -20,7 +20,8 @@ export const SIDEBAR_ACTIVE_WINDOW = DEFAULT_ACTIVE_WINDOW_SECONDS * 1000;
 /** Filter only the existing section roster; the current destination always stays.
  * Unreads keeps what needs you, the same set Unreads first leads with: DMs,
  * mentions and replies in threads you follow (`needsYou`), plus conversations
- * you marked unread. Other new messages don't count. */
+ * you marked unread. Other new messages don't count. A date window applies
+ * with Active, or alongside Unreads when one is saved. */
 export function useSidebarFilters(
   sections: ReturnType<typeof sidebarSections>,
   filters: Readonly<Record<string, SidebarFilter>>,
@@ -45,22 +46,28 @@ export function useSidebarFilters(
   // failed read; a successful read can establish that a channel has no activity.
   const visible = sections.map((section) => {
     const mode = filters[section.key] ?? "all";
-    const activeWindow =
-      (windows[section.key] ?? DEFAULT_ACTIVE_WINDOW_SECONDS) * 1000;
+    // Unreads keeps any saved date window too; without one, it spans all dates.
+    const seconds =
+      mode === "active"
+        ? (windows[section.key] ?? DEFAULT_ACTIVE_WINDOW_SECONDS)
+        : mode === "unreads"
+          ? windows[section.key]
+          : undefined;
+    const activeWindow = seconds === undefined ? undefined : seconds * 1000;
     const rows = section.rows.filter((channel) => {
-      if (mode === "active" && channel.lastActivityAt !== undefined) {
+      if (activeWindow !== undefined && channel.lastActivityAt !== undefined) {
         const expiry = channel.lastActivityAt * 1000 + activeWindow;
         if (expiry > now) nextExpiry = Math.min(nextExpiry, expiry);
       }
       return (
         channel.id === current ||
-        mode === "all" ||
-        (mode === "unreads" &&
-          (needsYou.has(channel.id) || marked.has(channel.id))) ||
-        (mode === "active" &&
-          (channel.lastActivityAt === undefined
-            ? !channel.activityKnown && !activityReady
-            : channel.lastActivityAt * 1000 + activeWindow > now))
+        ((mode !== "unreads" ||
+          needsYou.has(channel.id) ||
+          marked.has(channel.id)) &&
+          (activeWindow === undefined ||
+            (channel.lastActivityAt === undefined
+              ? !channel.activityKnown && !activityReady
+              : channel.lastActivityAt * 1000 + activeWindow > now)))
       );
     });
     const visibleIds = new Set(rows.map(({ id }) => id));

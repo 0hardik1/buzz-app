@@ -1,5 +1,14 @@
 import { test, expect } from "./fixture.mjs";
-import { openPage } from "./navigation.mjs";
+import {
+  chooseDate,
+  chooseViewOption,
+  dateChoice,
+  expectViewOption,
+  openPage,
+  openViewOptions,
+  unreadsSwitch,
+  viewOptionsButton,
+} from "./navigation.mjs";
 import { join } from "node:path";
 import { fixtureRelayUrl } from "../relay-config.ts";
 
@@ -18,28 +27,8 @@ test.use({
 
 // A card's view options popover holds its filter, sort and layout. Its button
 // names the card and says when the card is filtered.
-const viewOptionsButton = (scope, title) =>
-  scope.getByRole("button", {
-    name: new RegExp(`^View options for ${title}(, filtered)?$`),
-  });
-const viewOptions = async (page, title, scope = page) => {
-  const button = viewOptionsButton(scope, title);
-  // An unfiltered card reveals the button with its heading's other actions.
-  await button.focus();
-  await button.click();
-  const popup = page.getByRole("dialog", {
-    name: `View options for ${title}`,
-    exact: true,
-  });
-  await expect(popup).toBeVisible();
-  return popup;
-};
-const show = async (page, title, name, scope = page) => {
-  const popup = await viewOptions(page, title, scope);
-  await popup.getByRole("radio", { name, exact: true }).click();
-  await page.keyboard.press("Escape");
-  await expect(popup).toHaveCount(0);
-};
+const viewOptions = openViewOptions;
+const show = chooseViewOption;
 
 // Browser-only contract: popover choices, save recovery and the real broker's
 // encrypted preference readback must agree after a document reload.
@@ -99,17 +88,13 @@ test("section filters save activity windows from the view options popover", asyn
     });
   };
   const trigger = viewOptionsButton(page, "Team");
-  const checked = (popup, name) =>
-    expect(popup.getByRole("radio", { name, exact: true })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+  const checked = expectViewOption;
   await shot("01-all");
   let popup = await viewOptions(page, "Team");
   await checked(popup, "All");
   await expect(trigger).toHaveAttribute("data-icon-variant", "ghost");
   await shot("02-view-options");
-  await popup.getByRole("radio", { name: "Unreads", exact: true }).click();
+  await unreadsSwitch(popup).click();
   await expect
     .poll(() => app.report.sidebarPublications?.at(-1)?.blob.groups.channels)
     .toBe("unreads");
@@ -130,19 +115,30 @@ test("section filters save activity windows from the view options popover", asyn
     });
   await expect.poll(iconColor).toBe(true);
   await shot("03-unreads");
-  // Activity windows are picked in place; there is no dialog step.
-  await popup.getByRole("radio", { name: "7 days", exact: true }).click();
+  // Date combines with Unreads: both are saved together.
+  await chooseDate(page, popup, "7 days");
   await expect
-    .poll(
-      () =>
-        app.report.sidebarPublications.at(-1)?.blob.activeWindowSeconds
-          ?.channels,
-    )
-    .toBe(7 * 86400);
+    .poll(() => app.report.sidebarPublications.at(-1)?.blob)
+    .toMatchObject({
+      groups: { channels: "unreads" },
+      activeWindowSeconds: { channels: 7 * 86400 },
+    });
+  await checked(popup, "Unreads");
+  await checked(popup, "7 days");
+  // Unreads first has nothing to reorder while Unreads is on.
+  await expect(
+    popup.getByRole("switch", { name: "Unreads first", exact: true }),
+  ).toBeDisabled();
+  await shot("04-unreads-seven-days");
+  // Turning Unreads off keeps the date.
+  await unreadsSwitch(popup).click();
+  await expect
+    .poll(() => app.report.sidebarPublications.at(-1)?.blob.groups.channels)
+    .toBe("active");
   await checked(popup, "7 days");
   await expect(section.locator('[data-channel-id="gamma"]')).toBeVisible();
   await expect(section.locator('[data-channel-id="delta"]')).toHaveCount(0);
-  await shot("04-seven-days");
+  await shot("05-seven-days");
   await page.keyboard.press("Escape");
   await expect(popup).toHaveCount(0);
   await expect(trigger).toBeFocused();
@@ -169,7 +165,7 @@ test("section filters save activity windows from the view options popover", asyn
   expect(xs.indexOf("View options for Team, filtered")).toBe(
     xs.indexOf("More actions for Team") + 1,
   );
-  await shot("05-filtered-button");
+  await shot("06-filtered-button");
   await page.reload();
   await expect(section.locator('[data-channel-id="gamma"]')).toBeVisible();
   await expect(section.locator('[data-channel-id="delta"]')).toHaveCount(0);
@@ -186,11 +182,11 @@ test("section filters save activity windows from the view options popover", asyn
       body: JSON.stringify({ error: "Filter could not be saved. Try again." }),
     });
   });
-  await popup.getByRole("radio", { name: "30 days", exact: true }).click();
+  await chooseDate(page, popup, "30 days");
   const retry = page.getByRole("button", { name: "Retry filter", exact: true });
   await expect(retry).toBeVisible();
   await page.keyboard.press("Escape");
-  await shot("06-save-error");
+  await shot("06b-save-error");
   await page.unroute(pattern);
   await retry.click();
   await expect(retry).toHaveCount(0);
@@ -241,12 +237,8 @@ test("section filters save activity windows from the view options popover", asyn
   });
   await page.reload();
   popup = await viewOptions(page, "Work");
-  await expect(
-    popup.getByRole("radio", { name: "All", exact: true }),
-  ).toBeDisabled();
-  await expect(
-    popup.getByRole("radio", { name: "Today", exact: true }),
-  ).toBeDisabled();
+  await expect(unreadsSwitch(popup)).toBeDisabled();
+  await expect(dateChoice(popup)).toBeDisabled();
   await checked(popup, "Today");
   await shot("11-read-only");
 });
@@ -312,7 +304,7 @@ test("failed activity reads explain the filter and recover on Retry", async ({
   ).toBeVisible();
   const popup = await viewOptions(page, "Team");
   try {
-    await popup.getByRole("radio", { name: "30 days", exact: true }).click();
+    await chooseDate(page, popup, "30 days");
     await requested;
     await expect(unknown).toBeVisible();
   } finally {
@@ -465,9 +457,7 @@ test.describe("with no saved Team filter", () => {
     await choose("All");
     await expect(retry).toHaveCount(0);
     const popup = await viewOptions(page, "Team");
-    await expect(
-      popup.getByRole("radio", { name: "All", exact: true }),
-    ).toHaveAttribute("aria-checked", "true");
+    await expectViewOption(popup, "All");
     expect(app.report.sidebarPublications?.length ?? 0).toBe(published);
   });
 });
@@ -488,8 +478,14 @@ test.describe("with a saved workspace filter", () => {
       ).length;
     await page.goto(app.origin);
     await openPage(page, "Messages");
+    // Unreads keeps the card's 30 days; clearing the date leaves All one
+    // step away, so the failed save below is All alone.
     await choose("Unreads");
     await expect.poll(filterSaves).toBe(1);
+    const popup = await viewOptions(page, "Work");
+    await chooseDate(page, popup, "All");
+    await page.keyboard.press("Escape");
+    await expect.poll(filterSaves).toBe(2);
 
     const pattern = "**/sidebar-filter";
     await page.route(pattern, (route) => {
@@ -526,10 +522,9 @@ test.describe("with a saved workspace filter", () => {
 
     await page.reload();
     await openPage(page, "Messages");
-    const popup = await viewOptions(page, "Work");
-    await expect(
-      popup.getByRole("radio", { name: "All", exact: true }),
-    ).toHaveAttribute("aria-checked", "true");
+    const options = await viewOptions(page, "Work");
+    await expectViewOption(options, "All");
+    await expect(unreadsSwitch(options)).not.toBeChecked();
   });
 });
 
@@ -609,7 +604,7 @@ test("See all shares the card's view options and filter", async ({
     await page.mouse.move(0, 0);
   };
   let popup = await viewOptions(page, "Team");
-  await popup.getByRole("radio", { name: "7 days", exact: true }).click();
+  await chooseDate(page, popup, "7 days");
   await page.keyboard.press("Escape");
   await expect(rowFor("delta")).toHaveCount(0);
   await capture("card-default");
@@ -655,7 +650,7 @@ test("See all shares the card's view options and filter", async ({
   await resize.press("End");
 
   popup = await viewOptions(page, "Team");
-  await popup.getByRole("radio", { name: "All", exact: true }).click();
+  await chooseDate(page, popup, "All");
   await page.keyboard.press("Escape");
   await expect(rowFor("delta")).toBeVisible();
   await expect(viewOptionsButton(page, "Team")).toHaveAccessibleName(

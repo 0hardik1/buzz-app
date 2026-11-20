@@ -218,8 +218,8 @@ export function validSidebarFilter(
     ["all", "unreads", "active"].includes(mode) &&
     (activeWindowSeconds === undefined ||
       (activeWindowSeconds === null
-        ? mode === "all"
-        : mode === "active" && validActiveWindow(activeWindowSeconds))) &&
+        ? mode !== "active"
+        : mode !== "all" && validActiveWindow(activeWindowSeconds))) &&
     validSidebarSort(group, "alpha", sectionIds)
   );
 }
@@ -334,7 +334,11 @@ export function editSidebarFilter(
   const windows = {
     ...(current.activeWindowSeconds as Record<string, number> | undefined),
   };
-  const previous = windows[group] ?? DEFAULT_ACTIVE_WINDOW_SECONDS;
+  // Active defaults to 30 days. Unreads has no date limit until one is saved,
+  // so a window beside it, even 30 days, is always stored.
+  const previous =
+    windows[group] ??
+    (mode === "active" ? DEFAULT_ACTIVE_WINDOW_SECONDS : undefined);
   const changed =
     activeWindowSeconds === null
       ? Object.hasOwn(windows, group)
