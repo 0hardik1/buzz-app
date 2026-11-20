@@ -3,6 +3,25 @@ export const CONVERSATION_LIST_LABEL = "Subscribed channels";
 /** What a row shows when it has unread messages or thread activity. */
 export const UNREAD_MARKERS = "[data-channel-unread], [data-channel-activity]";
 
+/**
+ * Whether a row's unread waits on you: a DM, a mention of you or a reply in a
+ * thread you follow. Ordinary channel backlog does not.
+ */
+export function waitsOnYou(row: Element) {
+  return (
+    row.getAttribute("data-channel-type") === "dm" ||
+    row.querySelector('[data-priority="true"]') !== null ||
+    row.querySelector("[data-channel-activity]") !== null
+  );
+}
+
+/** Whether a row shows unread that has not been muted. */
+export function hasUnmutedUnread(row: Element) {
+  return [...row.querySelectorAll(UNREAD_MARKERS)].some(
+    (marker) => !marker.hasAttribute("data-channel-muted"),
+  );
+}
+
 /** Team rows and Solo rows carry different id attributes; both are buttons. */
 const ROWS = "button[data-channel-id], button[data-solo-channel-id]";
 const rowId = (row: HTMLElement) =>

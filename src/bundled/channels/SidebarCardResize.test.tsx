@@ -14,7 +14,16 @@ beforeEach(() => {
   });
 });
 
-function Card({ rows }: { rows: number }) {
+type Mark = "dm" | "mention" | "channel";
+
+function Card({
+  rows,
+  marks = {},
+}: {
+  rows: number;
+  /** Unread on a row: a DM, a mention of you, or ordinary channel backlog. */
+  marks?: Record<number, Mark>;
+}) {
   const [height, resize, toggle] = useSidebarCardHeight("scope", "group:work");
   return (
     <SidebarCardResize
@@ -25,7 +34,21 @@ function Card({ rows }: { rows: number }) {
     >
       {Array.from({ length: rows }, (_, index) => `Row ${index}`).map((row) => (
         <div key={row} data-card-row="">
-          {row}
+          <button
+            type="button"
+            data-channel-id={row}
+            data-channel-type={
+              marks[Number(row.slice(4))] === "dm" ? "dm" : "stream"
+            }
+          >
+            {row}
+            {marks[Number(row.slice(4))] && (
+              <span
+                data-channel-unread=""
+                data-priority={marks[Number(row.slice(4))] !== "channel"}
+              />
+            )}
+          </button>
         </div>
       ))}
     </SidebarCardResize>
@@ -116,6 +139,41 @@ it("keeps the grip showing while rows are past the card's edge", () => {
   expect(grip).toHaveAttribute("data-more");
   fireEvent.keyDown(grip, { key: "Enter" });
   expect(grip).not.toHaveAttribute("data-more");
+});
+
+it("counts unread that waits on you past the edge, and opens to the lowest", () => {
+  render(<Card rows={6} marks={{ 3: "dm", 4: "channel", 5: "mention" }} />);
+  const list = layOut();
+  const grip = screen.getByRole("separator", { name: "Resize Work" });
+  expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
+  for (const _ of [1, 2, 3]) fireEvent.keyDown(grip, { key: "ArrowUp" });
+  expect(list.style.maxHeight).toBe(`${3 * ROW}px`);
+  // The DM and the mention count; ordinary channel backlog does not.
+  const badge = screen.getByRole("button", {
+    name: "Show 2 unread conversations below in Work",
+  });
+  expect(badge).toHaveTextContent("2");
+  const beside = document.querySelectorAll("[data-card-beside-badge]");
+  expect([...beside].map((row) => row.textContent)).toEqual(["Row 2"]);
+  fireEvent.click(badge);
+  // The mention is the last row, so the card opens full.
+  expect(list.style.maxHeight).toBe("");
+  expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
+  expect(document.querySelector("[data-card-beside-badge]")).toBeNull();
+});
+
+it("opens only as far as the lowest unread that waits on you", () => {
+  render(<Card rows={6} marks={{ 3: "mention", 5: "channel" }} />);
+  const list = layOut();
+  const grip = screen.getByRole("separator", { name: "Resize Work" });
+  for (const _ of [1, 2, 3]) fireEvent.keyDown(grip, { key: "ArrowUp" });
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Show 1 unread conversation below in Work",
+    }),
+  );
+  expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
+  expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
 });
 
 it("hints at the grip until it has been dragged or double-clicked once", () => {

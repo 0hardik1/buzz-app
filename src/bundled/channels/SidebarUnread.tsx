@@ -12,7 +12,11 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { CONVERSATION_LIST_LABEL, UNREAD_MARKERS } from "./conversation-rows";
+import {
+  CONVERSATION_LIST_LABEL,
+  UNREAD_MARKERS,
+  waitsOnYou,
+} from "./conversation-rows";
 import styles from "./Channels.module.css";
 
 export type UnreadDmPreview = {
@@ -54,10 +58,7 @@ function unreadEdges(list: HTMLElement): Edges {
     const anchor = closed?.querySelector("summary") ?? row;
     const rect = anchor.getBoundingClientRect();
     if (!rect.height || !rect.width) continue;
-    const attention =
-      row.getAttribute("data-channel-type") === "dm" ||
-      row.querySelector('[data-priority="true"]') !== null ||
-      row.querySelector("[data-channel-activity]") !== null;
+    const attention = waitsOnYou(row);
     const target = { row, channelId, attention };
     if (rect.bottom <= viewport.top) edges.above.push(target);
     else if (rect.top >= viewport.top + list.clientHeight)

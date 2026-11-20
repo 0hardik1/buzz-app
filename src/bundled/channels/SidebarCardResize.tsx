@@ -9,6 +9,9 @@ import {
 } from "react";
 import { readView, subscribeView, writeView } from "../../shared/view-state";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
+import { Button } from "../../shared/design-system/ui/Button";
+import { ArrowDownIcon } from "../../shared/design-system/icons/index";
+import { hasUnmutedUnread, waitsOnYou } from "./conversation-rows";
 import styles from "./Channels.module.css";
 
 const heightsKey = "sidebar:card-heights";
@@ -95,11 +98,25 @@ export function SidebarCardResize({
   const [count, setCount] = useState(0);
   // Rows the card shows now, for assistive technology.
   const [shown, setShown] = useState(0);
-  const apply = useCallback(
-    (rows: HTMLElement, height: number | undefined) =>
-      setShown(clip(rows, height)),
-    [],
-  );
+  // Conversations past the edge that wait on you, and the lowest one's row.
+  const [waiting, setWaiting] = useState<Waiting>(none);
+  const apply = useCallback((rows: HTMLElement, height: number | undefined) => {
+    setShown(clip(rows, height));
+    const next = waitingPastEdge(rows);
+    setWaiting((previous) =>
+      previous.count === next.count && previous.lowest === next.lowest
+        ? previous
+        : next,
+    );
+  }, []);
+  // The badge's width, so the last row that shows can make room beside it.
+  const badge = useCallback((node: HTMLSpanElement | null) => {
+    if (node)
+      list.current?.style.setProperty(
+        "--card-badge-width",
+        `${node.offsetWidth}px`,
+      );
+  }, []);
   const saved = useRef(height);
   // The hint explains the grip until it has been used once.
   const learned = useSyncExternalStore(
@@ -121,7 +138,19 @@ export function SidebarCardResize({
     };
     update();
     const added = new MutationObserver(update);
-    added.observe(rows, { childList: true, subtree: true });
+    // Unread markers come and go as rows change, so the badge stays current.
+    added.observe(rows, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: [
+        "data-channel-unread",
+        "data-channel-muted",
+        "data-channel-activity",
+        "data-channel-type",
+        "data-priority",
+      ],
+    });
     const sized =
       typeof ResizeObserver === "undefined"
         ? undefined
@@ -137,8 +166,35 @@ export function SidebarCardResize({
 
   return (
     <>
-      <div ref={list} className={styles.cardRows} data-card-rows="">
-        {children}
+      <div className={styles.cardBody}>
+        <div ref={list} className={styles.cardRows} data-card-rows="">
+          {children}
+        </div>
+        {waiting.count > 0 && (
+          <span ref={badge} className={styles.cardWaiting}>
+            <Button
+              variant="prominent"
+              size="xs"
+              shape="capsule"
+              type="button"
+              aria-label={`Show ${waiting.count} unread ${waiting.count === 1 ? "conversation" : "conversations"} below in ${label}`}
+              onClick={(event) => {
+                const rows = list.current;
+                if (!rows) return;
+                // Open just far enough to show the lowest one, like a drag.
+                const ends = stops(rows);
+                const end = ends[waiting.lowest];
+                if (end === undefined) return;
+                onResize(waiting.lowest === ends.length - 1 ? ALL_ROWS : end);
+                // From the keyboard, keep focus on the card as the badge goes.
+                if (event.detail === 0) handle.current?.focus();
+              }}
+            >
+              {waiting.count}
+              <ArrowDownIcon size={15} aria-hidden="true" />
+            </Button>
+          </span>
+        )}
       </div>
       {/* Only a card with more than one row has anything to hide. */}
       {count > 1 && (
@@ -304,6 +360,38 @@ function clip(list: HTMLElement, height: number | undefined): number {
       if (!hidden) shown++;
     });
   return shown;
+}
+
+type Waiting = { count: number; lowest: number };
+const none: Waiting = { count: 0, lowest: -1 };
+
+/**
+ * Conversations past the card's edge whose unread waits on you, counted once
+ * each, and the index of the lowest one's row. Marks the last row that
+ * shows when there are any.
+ */
+function waitingPastEdge(list: HTMLElement): Waiting {
+  const seen = new Set<string>();
+  let lowest = -1;
+  list
+    .querySelectorAll<HTMLElement>("[data-card-row]")
+    .forEach((row, index) => {
+      if (!row.hasAttribute("data-card-clipped")) return;
+      const button = row.querySelector<HTMLElement>(
+        "button[data-channel-id], button[data-solo-channel-id]",
+      );
+      if (!button || !hasUnmutedUnread(button) || !waitsOnYou(button)) return;
+      seen.add(button.dataset.channelId ?? button.dataset.soloChannelId ?? "");
+      lowest = index;
+    });
+  // The last row that shows narrows to make room for the badge.
+  let last: Element | undefined;
+  for (const row of list.querySelectorAll("[data-card-row]")) {
+    row.removeAttribute("data-card-beside-badge");
+    if (!row.hasAttribute("data-card-clipped")) last = row;
+  }
+  if (seen.size) last?.setAttribute("data-card-beside-badge", "");
+  return seen.size ? { count: seen.size, lowest } : none;
 }
 
 /** Where the list ends after each of its rows. */
