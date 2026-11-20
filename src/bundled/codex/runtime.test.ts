@@ -44,12 +44,13 @@ import type {
   McpHandler,
   HostProcessOptions,
 } from "../../features/host/service";
-import { BUZZ_PROMPT, TOP_LEVEL_PROMPT } from "../../buzz-mcp/prompt";
+import { TOP_LEVEL_PROMPT } from "../../buzz-mcp/prompt";
 import { CodexRuntime, codexStep, HANDOVER_MS, programs } from "./runtime";
 import { codexRun } from "./run";
 import { config } from "./config";
 import type { AddedTool } from "../../buzz-mcp/session-tools";
 import { wake } from "../../features/agent-harness/wakes";
+import { workspaceCanvas } from "../../features/solo/workspace";
 import type { Wire } from "./rpc";
 
 vi.mock("./voice", () => ({
@@ -743,7 +744,12 @@ it("hands over promptly and runs conversations independently on one server", asy
   expect(started.developerInstructions).toContain(
     "Never publish a bare acknowledgement.",
   );
-  expect(started.developerInstructions).toContain(BUZZ_PROMPT);
+  expect(started.developerInstructions).toContain("## Audience");
+  expect(started.developerInstructions).toContain("## Product help");
+  // The agent's session scope picks its Session Model.
+  expect(started.developerInstructions).toContain(
+    "## Session Model\n\nYou are one session of your agent identity",
+  );
   expect(f.starts()[0]?.params).toMatchObject({
     additionalContext: {
       "buzz.instructions": {
@@ -1256,6 +1262,42 @@ it("rejects failed terminal cleanup and retries the same agent without ending th
     "SERVER RUNNING",
     "BACK",
   ]);
+});
+it("retires an agent whose idle thread Codex closed and resumes that thread on its return", async () => {
+  const f = fixture();
+  const b = second(f);
+  await f.runtime.run(f.delivery("work"));
+  await f.runtime.run(b.delivery("answer"));
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+  const thread = (f.starts()[1]?.params as { threadId: string } | undefined)
+    ?.threadId;
+  await f.complete(1, "ANSWERED");
+  await vi.waitFor(() =>
+    expect(
+      f.runtime.sessionState(
+        { ...b.agent, config: f.delivery("unused").config } as unknown as Agent,
+        { channelId: "channel", root: "7".repeat(64) },
+      ),
+    ).toBe("idle"),
+  );
+  // As Codex answers for a thread it unloaded after its last turn.
+  f.failures.set(
+    "thread/backgroundTerminals/clean",
+    `thread not found: ${thread}`,
+  );
+  const driver = codexRun(f.runtime);
+  if (!driver.retire) throw new Error("Codex cannot retire its agents");
+  await driver.retire(b.agent.key);
+  f.failures.delete("thread/backgroundTerminals/clean");
+  await f.runtime.run(b.delivery("back"));
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
+  expect(
+    f.sent.find((wire) => wire.method === "thread/resume")?.params,
+  ).toMatchObject({ threadId: thread });
+  await f.complete(2, "BACK");
+  await vi.waitFor(() => expect(b.agent.publish).toHaveBeenCalledTimes(2));
+  expect(contents(b.agent.publish as never)).toEqual(["ANSWERED", "BACK"]);
+  expect(f.process.end).not.toHaveBeenCalled();
 });
 it("does not clean or log a cleanup error after the last agent closes the server", async () => {
   const f = fixture([{ processId: "dev-server" }]);
@@ -3660,6 +3702,37 @@ it("reports a failed huddle text mention without a reply tag", async () => {
     ],
   });
 });
+it("describes the session that started: a huddle's room, and a watch's run", async () => {
+  const f = fixture();
+  f.huddleChannels.add("channel");
+  await f.runtime.run(f.delivery("@Codex work", root));
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  const started = (ephemeral: boolean) =>
+    f.sent.find(
+      (wire) =>
+        wire.method === "thread/start" &&
+        ((wire.params as { ephemeral?: boolean }).ephemeral === true) ===
+          ephemeral,
+    )?.params as { developerInstructions: string } | undefined;
+  // A thread-scoped agent's huddle is one conversation, not a thread.
+  expect(started(false)?.developerInstructions).toContain(
+    "This session is one whole conversation",
+  );
+  await f.complete(0, "");
+  const running = f.runtime.runOnce({
+    delivery: f.delivery("check"),
+    key: "source/check",
+    signal: new AbortController().signal,
+    prompt: async () => "check",
+  });
+  await vi.waitFor(() => expect(started(true)).toBeDefined());
+  expect(started(true)?.developerInstructions).toContain(
+    "This run joins no conversation",
+  );
+  await f.complete(1, "");
+  await running;
+  f.runtime.dispose();
+});
 /** A plugin's wake; its id is its own, which nothing may publish. */
 const WAKE_ID = "8".repeat(64);
 const pluginWake = (
@@ -6037,6 +6110,13 @@ it("finishes a Solo turn under its policy when the chat is converted mid-turn", 
   });
   await f.runtime.run(channelScope(f.delivery("@Codex first")));
   await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  expect(
+    f.sent.find((wire) => wire.method === "thread/start")?.params,
+  ).toMatchObject({
+    developerInstructions: expect.stringContaining(
+      "## Session Model\n\nYou are one per-channel session",
+    ),
+  });
   soloChannels.delete("channel");
   await f.runtime.run(channelScope(f.delivery("@Codex after share")));
   // The converted chat's request waits for the Solo turn instead of steering in.
@@ -8698,6 +8778,129 @@ describe("a conversation given its own folder", () => {
     return f;
   };
 
+  it("tells a Solo chat that works there to read its Canvas's folders, not to make a worktree", async () => {
+    const f = await withFolder(folders(), "/repos/worktree", "channel");
+    asSoloChat(f);
+    f.snapshot.session.canvas.available = true;
+    f.snapshot.session.canvas.read.mockResolvedValue(
+      canvasHead(
+        workspaceCanvas({
+          folders: ["/repos/app"],
+          worktree: { location: "/repos/trees", baseBranch: "main" },
+          canvas: "Use tokens.",
+        }),
+      ),
+    );
+    await f.runtime.run(f.delivery("@Codex solo", root));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    expect(
+      String(
+        (
+          f.sent.find((wire) => wire.method === "thread/start")?.params as
+            | { developerInstructions?: string }
+            | undefined
+        )?.developerInstructions,
+      ),
+    ).toContain(
+      "This conversation has its own folder, and it is your working directory.",
+    );
+    const turn = inputText(f.starts()[0]);
+    expect(turn).toContain(
+      "These folders hold code that is relevant to this chat: `/repos/app`, `/repos/trees`. They are for reading.",
+    );
+    expect(turn).not.toContain("create a new worktree");
+  });
+
+  it("states the Canvas's rule from a folder that the chat's admission assigned", async () => {
+    // Another conversation's folder: this chat has none when its Canvas is read.
+    const f = await withFolder(folders(), "/repos/other", `other/${root}`);
+    asSoloChat(f);
+    f.snapshot.session.canvas.available = true;
+    f.snapshot.session.canvas.read.mockResolvedValue(
+      canvasHead(
+        workspaceCanvas({
+          folders: ["/repos/app"],
+          worktree: { location: "/repos/trees", baseBranch: "main" },
+          canvas: "Use tokens.",
+        }),
+      ),
+    );
+    await f.runtime.run({
+      ...f.delivery("@Codex solo", root),
+      prepareSession: async () => {
+        await assignConversationFolder(
+          f.store,
+          scope,
+          pubkey,
+          "channel",
+          "/repos/worktree",
+        );
+        return undefined;
+      },
+    });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    const turn = inputText(f.starts()[0]);
+    expect(turn).toContain(
+      "These folders hold code that is relevant to this chat: `/repos/app`, `/repos/trees`. They are for reading.",
+    );
+    expect(turn).not.toContain("create a new worktree");
+  });
+
+  it("steers a Solo chat's running turn with the Canvas rule of where it works", async () => {
+    // Another conversation's folder: this chat has none as its turn starts.
+    const f = await withFolder(folders(), "/repos/other", `other/${root}`);
+    asSoloChat(f);
+    f.snapshot.session.canvas.available = true;
+    f.snapshot.session.canvas.read.mockResolvedValue(
+      canvasHead(
+        workspaceCanvas({
+          folders: ["/repos/app"],
+          worktree: { location: "/repos/trees", baseBranch: "main" },
+          canvas: "Use tokens.",
+        }),
+      ),
+    );
+    await f.runtime.run(f.delivery("@Codex first", root));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    expect(inputText(f.starts()[0])).toContain("create a new worktree");
+    // Assigned while that turn runs in the agent's workspace.
+    await assignConversationFolder(
+      f.store,
+      scope,
+      pubkey,
+      "channel",
+      "/repos/worktree",
+    );
+    await f.runtime.run(f.delivery("@Codex more", root));
+    const steer = () => f.sent.find((wire) => wire.method === "turn/steer");
+    await vi.waitFor(() => expect(steer()).toBeDefined());
+    expect(inputText(steer())).toContain("create a new worktree");
+    expect(inputText(steer())).not.toContain("They are for reading.");
+  });
+
+  it("keeps the Canvas's worktree rule for a community session when the chat kept a folder", async () => {
+    // Assigned while the agent's sessions were per conversation: a community
+    // session works in the agent's workspace instead.
+    const f = await withFolder(folders(), "/repos/worktree", "channel");
+    asSoloChat(f);
+    f.snapshot.session.canvas.available = true;
+    f.snapshot.session.canvas.read.mockResolvedValue(
+      canvasHead(
+        workspaceCanvas({
+          folders: ["/repos/app"],
+          worktree: { location: "/repos/trees", baseBranch: "main" },
+          canvas: "Use tokens.",
+        }),
+      ),
+    );
+    const d = f.delivery("@Codex solo", root);
+    await f.runtime.run({ ...d, config: scoped(d).config });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    const turn = inputText(f.starts()[0]);
+    expect(turn).toContain("create a new worktree");
+    expect(turn).not.toContain("They are for reading.");
+  });
+
   it("starts its thread there and names the agent's workspace", async () => {
     const resolveDirectory = folders();
     const f = await withFolder(resolveDirectory, "/repos/worktree");
@@ -9245,6 +9448,287 @@ it.each(["attention", "plugin"] as const)(
     await f.complete(0);
   },
 );
+
+it.each(["channel", "thread"] as const)(
+  "steers a top-level plugin wake into an active %s session only when they share it",
+  async (scope) => {
+    const f = fixture();
+    const first = f.delivery("Threaded work");
+    if (first.trigger.type !== "mention") throw new Error("Expected a mention");
+    const config = { ...(first.config as object), scope };
+    const wake = pluginWake(f);
+    if (wake.trigger.type !== "plugin")
+      throw new Error("Expected a plugin wake");
+    try {
+      await f.runtime.run({ ...first, config });
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      await f.runtime.run({
+        ...wake,
+        config,
+        trigger: { ...wake.trigger, topLevel: true },
+      });
+      if (scope === "thread") {
+        await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+        expect(f.sent.filter((wire) => wire.method === "turn/steer")).toEqual(
+          [],
+        );
+        await Promise.all([f.complete(0), f.complete(1)]);
+        return;
+      }
+      await vi.waitFor(() =>
+        expect(
+          f.sent.filter((wire) => wire.method === "turn/steer").map(inputText),
+        ).toEqual([expect.stringContaining("CI failed: lint")]),
+      );
+      expect(f.starts()).toHaveLength(1);
+      await f.tool("send", {
+        request: first.trigger.event.id,
+        audience: "everyone",
+        text: "Thread reply",
+      });
+      await f.tool("send", {
+        channel: "channel",
+        audience: "everyone",
+        text: "Channel reply",
+      });
+      expect(tagsOf(f)).toEqual([
+        [
+          ["h", "channel"],
+          ["e", root, "", "reply"],
+          ["buzz:request", first.trigger.event.id],
+        ],
+        [["h", "channel"]],
+      ]);
+      await f.complete(0);
+    } finally {
+      f.runtime.dispose();
+    }
+  },
+);
+
+it("attributes a single-request send to an earlier message outside the turn", async () => {
+  const f = fixture();
+  const delegating = "d".repeat(64);
+  try {
+    await f.runtime.run(f.delivery("Delegated work"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await f.tool("send", {
+      request: delegating,
+      audience: "agents",
+      text: "Done",
+    });
+    expect(tagsOf(f)).toEqual([
+      expect.arrayContaining([["buzz:request", delegating]]),
+    ]);
+    await f.complete(0);
+  } finally {
+    f.runtime.dispose();
+  }
+});
+
+it("keeps an unaddressed send on the turn's thread after a top-level wake steers in", async () => {
+  const f = fixture();
+  const first = f.delivery("Threaded work");
+  const config = { ...(first.config as object), scope: "channel" };
+  const wake = pluginWake(f);
+  if (wake.trigger.type !== "plugin") throw new Error("Expected a plugin wake");
+  try {
+    await f.runtime.run({ ...first, config });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await f.runtime.run({
+      ...wake,
+      config,
+      trigger: { ...wake.trigger, topLevel: true },
+    });
+    await vi.waitFor(() =>
+      expect(
+        f.sent.filter((wire) => wire.method === "turn/steer"),
+      ).toHaveLength(1),
+    );
+    await f.tool("send", { audience: "everyone", text: "Thread reply" });
+    expect(tagsOf(f)[0]).toContainEqual(["e", root, "", "reply"]);
+    await f.complete(0);
+  } finally {
+    f.runtime.dispose();
+  }
+});
+
+it("settles only the destination a final reply answers in a mixed channel turn", async () => {
+  const f = fixture();
+  const first = f.delivery("Threaded work");
+  if (first.trigger.type !== "mention") throw new Error("Expected a mention");
+  const config = { ...(first.config as object), scope: "channel" };
+  const wake = pluginWake(f);
+  if (wake.trigger.type !== "plugin") throw new Error("Expected a plugin wake");
+  const pending = Symbol("pending");
+  const state = async (index: number) => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return Promise.race([
+      f.workingUntil.mock.calls[index]?.[0],
+      Promise.resolve(pending),
+    ]);
+  };
+  try {
+    await f.runtime.run({ ...first, config });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await f.runtime.run({
+      ...wake,
+      config,
+      trigger: { ...wake.trigger, topLevel: true },
+    });
+    await vi.waitFor(() =>
+      expect(
+        f.sent.filter((wire) => wire.method === "turn/steer"),
+      ).toHaveLength(1),
+    );
+    await f.tool("send", {
+      request: first.trigger.event.id,
+      audience: "everyone",
+      text: "Thread reply",
+      final: true,
+    });
+    expect(await state(1)).toBe(pending);
+    await f.tool("send", {
+      channel: "channel",
+      audience: "everyone",
+      text: "Channel reply",
+      final: true,
+    });
+    expect(await state(1)).not.toBe(pending);
+    await f.complete(0);
+  } finally {
+    f.runtime.dispose();
+  }
+});
+
+it.each([
+  ["send", "reply"],
+  ["reply_in_subthread", "parent"],
+])(
+  "settles a thread a final %s answers under one of its messages",
+  async (tool, field) => {
+    const f = fixture();
+    const first = f.delivery("Threaded work");
+    if (first.trigger.type !== "mention") throw new Error("Expected a mention");
+    const config = { ...(first.config as object), scope: "channel" };
+    const wake = pluginWake(f);
+    if (wake.trigger.type !== "plugin")
+      throw new Error("Expected a plugin wake");
+    const pending = Symbol("pending");
+    const state = async (index: number) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return Promise.race([
+        f.workingUntil.mock.calls[index]?.[0],
+        Promise.resolve(pending),
+      ]);
+    };
+    try {
+      await f.runtime.run({ ...first, config });
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      await f.runtime.run({
+        ...wake,
+        config,
+        trigger: { ...wake.trigger, topLevel: true },
+      });
+      await vi.waitFor(() =>
+        expect(
+          f.sent.filter((wire) => wire.method === "turn/steer"),
+        ).toHaveLength(1),
+      );
+      await f.tool(tool, {
+        // reply_in_subthread takes no channel: its parent's is used.
+        ...(tool === "send" ? { channel: "channel" } : {}),
+        [field]: first.trigger.event.id,
+        audience: "everyone",
+        text: "Thread reply",
+        final: true,
+      });
+      expect(await state(0)).not.toBe(pending);
+      expect(await state(1)).toBe(pending);
+      await f.tool("send", {
+        channel: "channel",
+        audience: "everyone",
+        text: "Channel reply",
+        final: true,
+      });
+      expect(await state(1)).not.toBe(pending);
+      await f.complete(0);
+    } finally {
+      f.runtime.dispose();
+    }
+  },
+);
+
+it("settles the thread a parent-only subthread answers in a two-thread channel turn", async () => {
+  const f = fixture();
+  const first = f.delivery("Thread A work");
+  if (first.trigger.type !== "mention") throw new Error("Expected a mention");
+  const config = { ...(first.config as object), scope: "channel" };
+  const second = f.delivery("Thread B work", "b".repeat(64));
+  const pending = Symbol("pending");
+  const state = async (index: number) => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return Promise.race([
+      f.workingUntil.mock.calls[index]?.[0],
+      Promise.resolve(pending),
+    ]);
+  };
+  try {
+    await f.runtime.run({ ...first, config });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await f.runtime.run({ ...second, config });
+    await vi.waitFor(() =>
+      expect(
+        f.sent.filter((wire) => wire.method === "turn/steer"),
+      ).toHaveLength(1),
+    );
+    // The tool takes no channel: the parent says where it goes, padded as
+    // a model may send it.
+    await f.tool("reply_in_subthread", {
+      parent: ` ${first.trigger.event.id} `,
+      audience: "everyone",
+      text: "Thread A reply",
+      final: true,
+    });
+    expect(await state(0)).not.toBe(pending);
+    expect(await state(1)).toBe(pending);
+    await f.complete(0);
+  } finally {
+    f.runtime.dispose();
+  }
+});
+
+it("settles a community DM whose final send replies to its message", async () => {
+  const f = fixture();
+  f.snapshot.session.channels.list = () => ({
+    status: "ready",
+    channels: [{ id: "channel", name: "DM", channelType: "dm" }],
+  });
+  const base = f.delivery("DM work");
+  if (base.trigger.type !== "mention") throw new Error("Expected a mention");
+  base.trigger.event.tags = [["h", "channel"]];
+  const pending = Symbol("pending");
+  try {
+    await f.runtime.run({ ...base, config: scoped(base).config });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await f.tool("send", {
+      reply: base.trigger.event.id,
+      audience: "everyone",
+      text: "DM reply",
+      final: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(
+      await Promise.race([
+        f.workingUntil.mock.calls[0]?.[0],
+        Promise.resolve(pending),
+      ]),
+    ).not.toBe(pending);
+    await f.complete(0);
+  } finally {
+    f.runtime.dispose();
+  }
+});
 
 it("keeps community sessions apart for memberships of the same identity", async () => {
   const f = fixture();

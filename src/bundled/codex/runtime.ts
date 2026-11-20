@@ -65,7 +65,8 @@ import { threadReference } from "../../features/relay/thread-reference";
 import type { ChannelLabel } from "../../features/channels/channel-icon";
 import { appClient, readFile } from "../../buzz-mcp/app-client";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
-import { readProject } from "../../features/agent-harness/project";
+import { project, readCanvas } from "../../features/agent-harness/project";
+import type { Facts } from "../../features/agent-harness/sections/index";
 import {
   referencedFolders,
   referencedSkills,
@@ -110,6 +111,7 @@ import {
   developerInstructions,
   rootOf,
   sessionName,
+  sessionPlace,
   turnContext,
   turnInput,
   type Conversation,
@@ -158,6 +160,8 @@ type Request = {
   sessionContext?: string;
   /** The Solo chat's workspace Canvas section, if it has one. */
   project?: string;
+  /** `project` for a turn that works where `elsewhere` says. */
+  projectAt?: (elsewhere: boolean) => string | undefined;
   canvas?: Project;
   solo?: boolean;
   /** The model and effort the owner picked for this turn. */
@@ -221,6 +225,8 @@ type Active = {
   model?: string;
   effort?: string;
   workspace: string;
+  /** Whether it works elsewhere, which its Canvas states the rule from. */
+  elsewhere?: boolean;
   signal: AbortSignal;
   tools: AbortController;
   /** Every request this turn has taken in, the first and each steered one. */
@@ -286,20 +292,23 @@ type Entry = {
 function addressed(
   args: Record<string, unknown>,
   answering: readonly Request[],
+  strict: boolean,
+  place: Place,
 ) {
   const id =
     typeof args.request === "string" ? args.request.trim().toLowerCase() : "";
   const named = id && answering.find((pending) => pending.event?.id === id);
   if (named) return named;
-  const { channel, reply } = args;
+  const channel =
+    typeof args.channel === "string" ? args.channel : place.channel;
   if (typeof channel !== "string") {
-    if (id)
+    if (id && strict)
       throw new Error(
         `Request ${id} is not part of this turn. Pass channel, and reply for a thread, to say where this goes.`,
       );
     return undefined;
   }
-  const scope = typeof reply === "string" ? reply : channel;
+  const scope = place.thread ?? channel;
   return (
     answering.find(
       (pending) =>
@@ -309,6 +318,40 @@ function addressed(
     answering.find((pending) => pending.unaddressed) ??
     null
   );
+}
+
+type Place = { channel?: string; thread?: string };
+
+/** Where a send's `reply` or `parent` posts: a reply to any message in a
+ * thread is in the thread, and a subthread in its parent's channel, as the
+ * tools post them. */
+async function placeOf(
+  agent: AgentHandle,
+  args: Record<string, unknown>,
+  answering: readonly Request[],
+): Promise<Place> {
+  const id = [args.reply, args.parent]
+    .find((id): id is string => typeof id === "string")
+    ?.trim()
+    .toLowerCase();
+  if (!id) return {};
+  // A reply to a request's own message, or in its thread, answers it there,
+  // a DM's at its top level included.
+  const known = answering.find(
+    ({ activityScope, event }) => activityScope === id || event?.id === id,
+  );
+  if (known)
+    return {
+      channel: known.conversation.channelId,
+      thread: known.activityScope,
+    };
+  const [event] = await agent.query([{ ids: [id], limit: 1 }]).catch(() => []);
+  if (!event) return { thread: id };
+  const channel = event.tags.find(([name]) => name === "h")?.[1];
+  return {
+    ...(channel ? { channel } : {}),
+    thread: threadReference(event)?.rootId ?? event.id,
+  };
 }
 
 /** The conversation's lane. A new community lane waits for every other lane. */
@@ -848,15 +891,16 @@ export class CodexRuntime {
       const server = this.open(this.handle(agent.key));
       const rpc = await server.opening;
       const settings = this.resolveConfig(agent.config);
+      const conversation = {
+        channelId: place.channelId,
+        ...(settings.scope === "channel" || !place.root
+          ? {}
+          : { root: place.root }),
+      };
       const { cwd: workspace, home } = await this.conversationPlace(
         reads.scope,
         agent.key,
-        {
-          channelId: place.channelId,
-          ...(settings.scope === "channel" || !place.root
-            ? {}
-            : { root: place.root }),
-        },
+        conversation,
         settings,
       );
       if (workspace !== thread.workspace)
@@ -873,6 +917,7 @@ export class CodexRuntime {
         {},
         undefined,
         home,
+        sessionPlace(conversation),
       );
       try {
         signal.throwIfAborted();
@@ -1197,9 +1242,13 @@ export class CodexRuntime {
             this.protectedServers.get(agent) !== server
           )
             return;
-          await server.rpc.request("thread/backgroundTerminals/clean", {
-            threadId,
-          });
+          await server.rpc
+            .request("thread/backgroundTerminals/clean", { threadId })
+            .catch((error) => {
+              // Codex closes a thread left idle, which ends its shells.
+              if (message(error) !== `thread not found: ${threadId}`)
+                throw error;
+            });
           server.threads.delete(threadId);
         }
     })();
@@ -2090,20 +2139,35 @@ export class CodexRuntime {
     if (wake && !wakeLands(wake, topLevel)) return delivery.ignored?.();
     // Only a Solo chat's Canvas is handed over.
     const canvas = reads.canvas?.bind(reads);
-    const [canvasProject, folders] = await Promise.all([
+    const [canvasRead, folders] = await Promise.all([
       solo
-        ? readProject(canvas && (() => canvas(channelId, agent.owner)))
+        ? readCanvas(canvas && (() => canvas(channelId, agent.owner)))
         : undefined,
       referencedFolders(event, agent.owner, reads.scope),
     ]);
-    const project =
+    const skills = referencedSkills(event, agent.owner, agent.pubkey);
+    // The Canvas states the rule for its folders from whether the
+    // conversation has one of its own, which a plugin can assign as its
+    // session is admitted. A turn renders it again for where it works.
+    // A community session works in the agent's workspace, as
+    // `conversationPlace` has it, whatever folder the chat kept.
+    const canvasProjectOf = (
+      elsewhere = settings.scope !== "community" &&
+        // A Solo chat is one conversation, with no thread root.
+        Boolean(this.folder(reads.scope, agent.key, channelId)),
+    ) => canvasRead && project(canvasRead.text, elsewhere);
+    const projectOf = (elsewhere?: boolean) =>
       [
-        settings.scope === "community" ? undefined : canvasProject?.section,
+        settings.scope === "community"
+          ? undefined
+          : canvasProjectOf(elsewhere)?.section,
         folders.section,
-        referencedSkills(event, agent.owner, agent.pubkey),
+        skills,
       ]
         .filter(Boolean)
         .join("\n\n") || undefined;
+    const canvasProject = canvasProjectOf();
+    const projectText = projectOf();
     // A stop during the reads deleted this agent's entry; recreating it would
     // reopen the agent.
     delivery.signal.throwIfAborted();
@@ -2226,7 +2290,11 @@ export class CodexRuntime {
         : {}),
       ...(canvasProject ? { canvas: canvasProject } : {}),
       ...(solo ? { solo: true } : {}),
-      ...(project ? { project: `${project}\n` } : {}),
+      ...(projectText ? { project: `${projectText}\n` } : {}),
+      projectAt: (elsewhere: boolean) => {
+        const text = projectOf(elsewhere);
+        return text && `${text}\n`;
+      },
       answered,
       failActivity,
       ...(delivery.accepted ? { accepted: delivery.accepted } : {}),
@@ -2290,6 +2358,12 @@ export class CodexRuntime {
             request.sessionContext = admitted.context;
           else delete request.sessionContext;
         }
+        const admittedProject = projectOf();
+        if (admittedProject) request.project = `${admittedProject}\n`;
+        else delete request.project;
+        const admittedCanvas = canvasProjectOf();
+        if (admittedCanvas) request.canvas = admittedCanvas;
+        else delete request.canvas;
         if (queueCommunity) return;
         const text = textOf(request.event, agent.name);
         const lane = laneFor(entry, key, false);
@@ -2311,15 +2385,13 @@ export class CodexRuntime {
               // differing pick waits for this turn and runs as the next one.
               // Messages after it join that turn instead: steering would run
               // them first. A turn keeps the posting policy it was admitted
-              // with, so a request under the other policy waits for it too. A
-              // turn the owner stopped takes nothing more.
+              // with, so a request in a Solo chat shared since, or the
+              // reverse, waits for it too. A turn the owner stopped takes
+              // nothing more.
               if (
                 active.finished ||
                 active.stopped ||
-                (!communityLane &&
-                  (current.queued ||
-                    request.conversation.topLevel !==
-                      active.reply.conversation.topLevel)) ||
+                (!communityLane && !request.solo !== !active.reply.solo) ||
                 (request.model && request.model !== active.model) ||
                 (request.effort && request.effort !== active.effort)
               ) {
@@ -2355,7 +2427,7 @@ export class CodexRuntime {
                 threadId: active.threadId,
                 expectedTurnId: active.turnId,
                 input: input(
-                  `${context}${project ? `${project}\n\n` : ""}${request.project ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, true, noteOf(request), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
+                  `${context}${project ? `${project}\n\n` : ""}${(active.elsewhere === undefined ? request.project : request.projectAt?.(active.elsewhere)) ?? ""}${turnInput(request.agent.key, request.event, request.conversation, text, true, noteOf(request), wake, this.reads(request.agent.key)?.authorNames?.(request.event.pubkey))}`,
                 ),
               });
               request.steering = steered.then(
@@ -2368,7 +2440,16 @@ export class CodexRuntime {
                   request.conversation.channelId,
                   request.solo ? request.canvas : NO_PROJECT,
                 );
-              active.reply = request;
+              // A wake steering in from elsewhere leaves unaddressed sends
+              // answering the turn's destination; a message moves them.
+              if (
+                communityLane ||
+                !request.wake ||
+                (request.conversation.channelId ===
+                  active.reply.conversation.channelId &&
+                  request.replyRoot === active.reply.replyRoot)
+              )
+                active.reply = request;
               active.requests.push(request);
               entry.waiting.delete(request);
               this.touch(request, entry, key);
@@ -2640,6 +2721,8 @@ export class CodexRuntime {
         workspace,
         {},
         delivery.synced,
+        undefined,
+        "standalone",
       );
       hookBridge = bridge;
       const text = await prompt();
@@ -2996,10 +3079,13 @@ export class CodexRuntime {
    * conversation gets `content`; another a community turn took in gets a
    * generic retry notice, so one conversation's details stay out of it. */
   private async publishOwed(active: Active, content: string) {
-    if (!active.reply.conversation.community)
-      return void (await this.publish(active.reply, content));
     const where = (taken: Request) =>
       `${taken.conversation.channelId}/${taken.replyRoot ?? ""}`;
+    if (
+      !active.reply.conversation.community &&
+      active.requests.every((taken) => where(taken) === where(active.reply))
+    )
+      return void (await this.publish(active.reply, content));
     const owed = new Map<string, Request>();
     for (const taken of active.requests)
       if (taken.finalDelivery !== true) owed.set(where(taken), taken);
@@ -3065,58 +3151,72 @@ export class CodexRuntime {
     const answering = active ? [...active.requests] : [];
     // Undefined uses the default destination; null is an explicit one that
     // answers no request in this turn.
+    const community = active?.reply.settings.scope === "community";
+    // Only a community turn or one spanning destinations picks a request by
+    // its routing arguments; elsewhere a request ID only attributes the send.
+    const spanning =
+      community ||
+      new Set(answering.map((taken) => taken.activityScope)).size > 1;
     const target =
-      active?.reply.settings.scope === "community" &&
+      active &&
+      spanning &&
       (call.tool === "send" || call.tool === "reply_in_subthread")
-        ? addressed(args, answering)
+        ? addressed(
+            args,
+            answering,
+            community,
+            await placeOf(active.reply.agent, args, answering),
+          )
         : undefined;
     const request = target ?? active?.reply;
     const owner = request ?? (once as Once);
     const { agent } = owner;
-    const client = appClient(agent, {
-      // Its tool registry reviews every call, Buzz's dynamic tools included.
-      ...(!this.target ? { nativeCall: check } : {}),
-      nativeToolGate: true,
-      // Execution-target reads come from somewhere other than this desktop;
-      // suppress managed-attachment hints at publish so a remote source cannot
-      // trigger local managed cleanup. No remote deletion is added.
-      localAttachments: !this.target,
-      protectionContext: async () => {
-        const rpc =
-          active?.rpc ??
-          this.protectedServers.get(agent.key)?.rpc ??
-          this.server?.rpc;
-        if (!rpc) throw new Error("The protected Codex session is unavailable");
-        return rpc.request("thread/read", {
-          threadId: call.threadId,
-          includeTurns: true,
-        });
-      },
-      relayAuthor: this.reads(agent.key)?.relayAuthor?.(),
-      signingAuthority: this.reads(agent.key)?.workflowAuthority(),
-      read: (path) =>
-        this.target
-          ? this.target.readFile(path, { cwd: turn.workspace })
-          : readFile(
-              this.spawn,
-              turn.workspace,
-              path,
-              signal,
-              agent.protection?.processProtection,
-            ),
-      check,
-      signal,
-      callSignal: signal,
-      memories: async (slug) => {
-        const listing = await this.memories(owner, signal, slug);
-        check();
-        return listing;
-      },
-      remembered: () => {
-        const reads = this.reads(agent.key);
-        if (reads) this.memoryReads.forget(reads.connection, agent.pubkey);
-      },
-    });
+    const client = () =>
+      appClient(agent, {
+        // Its tool registry reviews every call, Buzz's dynamic tools included.
+        ...(!this.target ? { nativeCall: check } : {}),
+        nativeToolGate: true,
+        // Execution-target reads come from somewhere other than this desktop;
+        // suppress managed-attachment hints at publish so a remote source cannot
+        // trigger local managed cleanup. No remote deletion is added.
+        localAttachments: !this.target,
+        protectionContext: async () => {
+          const rpc =
+            active?.rpc ??
+            this.protectedServers.get(agent.key)?.rpc ??
+            this.server?.rpc;
+          if (!rpc)
+            throw new Error("The protected Codex session is unavailable");
+          return rpc.request("thread/read", {
+            threadId: call.threadId,
+            includeTurns: true,
+          });
+        },
+        relayAuthor: this.reads(agent.key)?.relayAuthor?.(),
+        signingAuthority: this.reads(agent.key)?.workflowAuthority(),
+        read: (path) =>
+          this.target
+            ? this.target.readFile(path, { cwd: turn.workspace })
+            : readFile(
+                this.spawn,
+                turn.workspace,
+                path,
+                signal,
+                agent.protection?.processProtection,
+              ),
+        check,
+        signal,
+        callSignal: signal,
+        memories: async (slug) => {
+          const listing = await this.memories(owner, signal, slug);
+          check();
+          return listing;
+        },
+        remembered: () => {
+          const reads = this.reads(agent.key);
+          if (reads) this.memoryReads.forget(reads.connection, agent.pubkey);
+        },
+      });
     // A watch or timer turn has no default destination.
     const context: Context =
       request && !request.unaddressed
@@ -3134,26 +3234,28 @@ export class CodexRuntime {
           }
         : {};
     const final = isFinalMessage(call.tool, args);
-    // A community turn answers each conversation with its own final send.
-    const settling = request?.conversation.community
-      ? target === null
-        ? []
-        : answering.filter(
-            (taken) => taken.activityScope === request.activityScope,
-          )
-      : answering;
+    // A turn spanning destinations answers each with its own final send.
+    const settling =
+      request?.conversation.community || spanning
+        ? target === null
+          ? []
+          : answering.filter(
+              (taken) => taken.activityScope === request?.activityScope,
+            )
+        : answering;
     const reply = await callSessionTool(
-      this.target
-        ? {
-            ...client,
-            media: async () => {
-              this.target?.signal.throwIfAborted();
-              throw new Error(
-                "Media download is unavailable for remote Codex agents.",
-              );
-            },
-          }
-        : client,
+      () =>
+        this.target
+          ? {
+              ...client(),
+              media: async () => {
+                this.target?.signal.throwIfAborted();
+                throw new Error(
+                  "Media download is unavailable for remote Codex agents.",
+                );
+              },
+            }
+          : client(),
       context,
       call.tool,
       args,
@@ -3375,6 +3477,8 @@ export class CodexRuntime {
     synced?: Delivery["synced"],
     /** The agent's workspace, when `workspace` is the conversation's folder. */
     home?: string,
+    /** What the thread is, for its Session Model. */
+    place?: Facts["place"],
   ) {
     const normalized = await rpc.request<{
       config: {
@@ -3416,7 +3520,12 @@ export class CodexRuntime {
     const params = {
       model,
       cwd: workspace,
-      developerInstructions: developerInstructions(agent, home),
+      developerInstructions: developerInstructions(
+        agent,
+        settings.scope,
+        home,
+        place,
+      ),
       approvalPolicy: "never",
       // Matches Claude's bypassPermissions; only the owner's mentions and the
       // agent's own watches and timers start work.
@@ -3473,6 +3582,7 @@ export class CodexRuntime {
       request,
       request.synced,
       home,
+      sessionPlace(request.conversation),
     );
     if (voiceInstructions) {
       Object.assign(params.config, {
@@ -3555,6 +3665,8 @@ export class CodexRuntime {
       return {
         threadId,
         workspace,
+        // Where it works, which its Canvas states the rule from.
+        elsewhere: Boolean(home),
         params,
         model,
         effort,
@@ -3688,6 +3800,7 @@ export class CodexRuntime {
       // A refusal outside this turn does not explain how it ends.
       explain = server.explainer?.(threadId);
       active.workspace = workspace;
+      active.elsewhere = loaded.elsewhere;
       active.model = model;
       active.effort = effort;
       // The seat owns its retained bridge; individual turns must not close it.
@@ -3757,6 +3870,13 @@ export class CodexRuntime {
         }
         signal.throwIfAborted();
         request.accepted?.();
+        // A folder assigned since it was admitted can differ from where
+        // its thread works, which its Canvas states the rule from.
+        if (active.elsewhere !== undefined && request.projectAt) {
+          const placed = request.projectAt(active.elsewhere);
+          if (placed) request.project = placed;
+          else delete request.project;
+        }
         if (settings.scope === "community")
           request.project =
             [
