@@ -35,6 +35,7 @@ type InlineTarget = Anchor & { viewer: string; replyTo?: number | undefined };
 type Composer = {
   target: InlineTarget;
   operation: string;
+  draft: { body: string };
   focusRequest: number;
   restoreFocus(): void;
 };
@@ -238,6 +239,7 @@ export function PrFiles({
               ...previous,
               {
                 operation: crypto.randomUUID(),
+                draft: { body: "" },
                 target,
                 focusRequest: 0,
                 restoreFocus: returnFocus,
@@ -364,6 +366,7 @@ export function PrFiles({
     <InlineCommentForm
       key={composer.operation}
       operation={composer.operation}
+      draft={composer.draft}
       focusRequest={composer.focusRequest}
       busy={status.busy}
       blocked={

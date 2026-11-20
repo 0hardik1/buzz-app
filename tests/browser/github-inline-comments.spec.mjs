@@ -57,6 +57,72 @@ const posts = (page) =>
       window.inlineFixture.state.calls.filter((call) => call.args[0] === "POST")
         .length,
   );
+// Pierre's annotation wrappers can remount sibling forms when a slot is removed.
+for (const layout of ["Unified", "Split"]) {
+  test(`preserves same-file drafts when another composer closes in ${layout}`, async ({
+    page,
+  }) => {
+    await open(page);
+    if (layout === "Split") await select(page, "Diff layout", "Split");
+    const file = page.getByRole("region", {
+      name: "src/example.ts",
+      exact: true,
+    });
+    async function compose(number, type) {
+      await file
+        .locator(`[data-column-number="${number}"][data-line-type="${type}"]`)
+        .hover();
+      await page
+        .getByRole("button", { name: "Comment on hovered line" })
+        .click();
+      const field = file
+        .getByRole("textbox", { name: "Comment", exact: true })
+        .last();
+      const operation = await field.evaluate(
+        (node) => node.form.dataset.operation,
+      );
+      return file.locator(`form[data-operation="${operation}"]`);
+    }
+    const first = await compose(5000, "change-deletion");
+    await first.getByRole("textbox").fill("Discard this draft");
+    const second = await compose(5001, "change-addition");
+    await second.getByRole("textbox").fill("Keep the second draft");
+    await first.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(first).toHaveCount(0);
+    await expect(second.getByRole("textbox")).toHaveValue(
+      "Keep the second draft",
+    );
+    const reopened = await compose(5000, "change-deletion");
+    await expect(reopened.getByRole("textbox")).toHaveValue("");
+    await reopened.getByRole("textbox").fill("Keep the reopened draft");
+    await second.getByRole("button", { name: "Post to GitHub" }).click();
+    await expect(second).toHaveCount(0);
+    await expect(
+      page.getByText("Keep the second draft", { exact: true }),
+    ).toBeVisible();
+    await expect(reopened.getByRole("textbox")).toHaveValue(
+      "Keep the reopened draft",
+    );
+    await reopened.getByRole("button", { name: "Post to GitHub" }).click();
+    await expect(reopened).toHaveCount(0);
+    await expect(
+      page.getByText("Keep the reopened draft", { exact: true }),
+    ).toBeVisible();
+    expect(await posts(page)).toBe(2);
+    expect(
+      await page.evaluate(() =>
+        window.inlineFixture.state.comments.map(({ body, side, line }) => ({
+          body,
+          side,
+          line,
+        })),
+      ),
+    ).toEqual([
+      { body: "Keep the second draft", side: "RIGHT", line: 5001 },
+      { body: "Keep the reopened draft", side: "LEFT", line: 5000 },
+    ]);
+  });
+}
 for (const layout of ["Unified", "Split"]) {
   test(`real PR panel posts and replies through stub transport in ${layout}`, async ({
     page,

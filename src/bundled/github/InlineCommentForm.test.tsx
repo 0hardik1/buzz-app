@@ -9,6 +9,7 @@ it("focuses its labelled field and delegates Escape dismissal", () => {
   const onCancel = vi.fn();
   render(
     <InlineCommentForm
+      draft={{ body: "" }}
       busy={false}
       blocked={false}
       onSubmit={vi.fn()}
@@ -26,8 +27,10 @@ it.each(["busy", "blocked"] as const)(
   (state) => {
     const onSubmit = vi.fn();
     const onCancel = vi.fn();
+    const draft = { body: "" };
     const view = (blocked: boolean) => (
       <InlineCommentForm
+        draft={draft}
         busy={blocked && state === "busy"}
         blocked={blocked && state === "blocked"}
         onSubmit={onSubmit}

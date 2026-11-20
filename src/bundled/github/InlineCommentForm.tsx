@@ -6,6 +6,7 @@ import styles from "./InlineComments.module.css";
 
 export function InlineCommentForm({
   operation,
+  draft,
   focusRequest = 0,
   busy,
   blocked,
@@ -14,6 +15,7 @@ export function InlineCommentForm({
   onCancel,
 }: {
   operation?: string;
+  draft: { body: string };
   focusRequest?: number;
   busy: boolean;
   blocked: boolean;
@@ -21,7 +23,7 @@ export function InlineCommentForm({
   onSubmit(body: string): void;
   onCancel(): void;
 }) {
-  const [body, setBody] = useState("");
+  const [body, setBody] = useState(draft.body);
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     void focusRequest;
@@ -51,7 +53,11 @@ export function InlineCommentForm({
           disabled={busy}
           readOnly={blocked}
           onChange={(event) => {
-            if (!busy && !blocked) setBody(event.target.value);
+            if (!busy && !blocked) {
+              // Retain text through annotation remounts without rerendering the file list.
+              draft.body = event.target.value;
+              setBody(draft.body);
+            }
           }}
         />
       </Field>
