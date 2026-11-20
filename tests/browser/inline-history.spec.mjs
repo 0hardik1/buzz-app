@@ -432,6 +432,12 @@ test("a visit to another message within the page closes the open reader", async 
   await expect(sheets(page)).toContainText("The end.");
 });
 
+// A press on a row lands only once the rows around it stop moving.
+const threadIdle = (page, thread) =>
+  virtuaIdle(
+    page,
+    thread.getByRole("region", { name: "Thread messages", exact: true }),
+  );
 // A thread of another channel, opened as a tab beside this one from its link.
 async function openOtherChannelTab(page, app, reply) {
   const root = app.append("primary", "beta", "Beta root", false, false);
@@ -449,6 +455,7 @@ async function openOtherChannelTab(page, app, reply) {
     exact: true,
   });
   await expect(thread.locator(`[data-message-id="${inner.id}"]`)).toBeVisible();
+  await threadIdle(page, thread);
   return { thread, inner, link };
 }
 async function staysOnAlpha(page) {
@@ -630,10 +637,12 @@ test("a visit naming a reader in a thread keeps that thread and closes the rest"
     [["audience", "details"]],
   );
   const sheet = await openThread(page, root);
+  await threadIdle(page, sheet);
   await sheet.getByRole("button", { name: "Show more" }).click();
   const nested = sheet.locator("[data-details-sheet-surface]");
   await expect(nested).toContainText("Alpha end.");
   const named = await hashTarget(page);
+  await threadIdle(page, tab);
   await tab.getByRole("button", { name: "Show more" }).click();
   const other = tab.locator("[data-details-sheet-surface]");
   await expect(other).toContainText("The end.");
