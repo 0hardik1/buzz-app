@@ -2923,7 +2923,18 @@ function Composer({
             )
           : capturedRecipients,
       );
-      const old = lookup instanceof Promise ? await lookup : lookup;
+      let old = lookup instanceof Promise ? await lookup : lookup;
+      const notYours = (key: string) =>
+        !yours?.some((agent) => agent.pubkey === key);
+      if (solo && !submission && old.some((agent) => notYours(agent.pubkey))) {
+        // Only the cached roster made these candidates; a fresh one decides.
+        const fresh = await session.channelWrites.refreshMembership(channelId);
+        attempt.signal.throwIfAborted();
+        old = old.filter(
+          (agent) =>
+            !notYours(agent.pubkey) || fresh.members?.includes(agent.pubkey),
+        );
+      }
       let declinedImports: readonly string[] = [];
       if (old.length) {
         setSending(true);

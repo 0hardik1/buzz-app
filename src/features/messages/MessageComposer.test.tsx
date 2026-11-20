@@ -4137,6 +4137,39 @@ it("asks again after a new chat's opening send without importing", async () => {
   expect(port).not.toHaveBeenCalled();
 });
 
+it.each([
+  ["still lists", true],
+  ["no longer lists", false],
+])(
+  "offers to import a Solo member that is not yours only while the fresh roster %s it",
+  async (_, listed) => {
+    const outsider = { pubkey: "9a".repeat(32), name: "Outsider" };
+    const { agents, port } = oldBuzzAgents([outsider]);
+    const { h } = mountSoloAgents({
+      agents,
+      members: [first.pubkey, outsider.pubkey],
+      refreshed: listed ? [first.pubkey, outsider.pubkey] : [first.pubkey],
+    });
+    act(() => {
+      h.commands().insertMention(outsider);
+      h.commands().insertText("ask them");
+    });
+    await choicesLoaded();
+    h.submit();
+    if (listed) {
+      await screen.findByRole("dialog", { name: "Import Outsider?" });
+      expect(h.messages.send).not.toHaveBeenCalled();
+      return;
+    }
+    // Freshly a reference, it addresses nobody, as admission already says.
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Tag an agent to send.",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(port).not.toHaveBeenCalled();
+  },
+);
+
 it("never offers to import someone a Solo chat only references", async () => {
   const outsider = { pubkey: "9a".repeat(32), name: "Outsider" };
   const { agents, port } = oldBuzzAgents([outsider]);
