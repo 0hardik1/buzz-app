@@ -115,6 +115,8 @@ export function sidebarSections<T extends ChannelSummary>(
   );
   const stars = new Set(preferences?.starred);
   const rowsBySection = new Map<string, T[]>();
+  // A forum filed elsewhere can still be dropped back into Forums.
+  let forums = false;
   for (const channel of channels) {
     if (
       channel.archived ||
@@ -124,6 +126,7 @@ export function sidebarSections<T extends ChannelSummary>(
       (chatsOnly && channel.channelType !== "solo")
     )
       continue;
+    if (sidebarHome(channel) === "forums") forums = true;
     const destination = dormantAssignments.has(channel.id)
       ? undefined
       : preferences?.assignments[channel.id];
@@ -141,11 +144,17 @@ export function sidebarSections<T extends ChannelSummary>(
     const group = groups.get(key.slice(6));
     const rows = rowsBySection.get(key) ?? [];
     // The Solo heading owns New and its keyboard shortcut, even when every
-    // chat is filed in a workspace.
-    if (chatsOnly && key !== "solo" && !rows.length && !draftSections.has(key))
+    // chat is filed in a workspace. Plugins stay reachable in Focus.
+    if (
+      chatsOnly &&
+      key !== "solo" &&
+      key !== SIDEBAR_PAGES_SECTION &&
+      !rows.length &&
+      !draftSections.has(key)
+    )
       return [];
-    // Forums are rare; their section appears only once there is one to show.
-    if (key === "forums" && !rows.length && !draftSections.has(key)) return [];
+    // Forums are rare; their section appears only once there is a forum.
+    if (key === "forums" && !forums && !draftSections.has(key)) return [];
     const mode = preferences?.sort?.[group ? `section:${group.id}` : key];
     rows.sort(
       mode === "recent" || (mode === undefined && key === "solo")

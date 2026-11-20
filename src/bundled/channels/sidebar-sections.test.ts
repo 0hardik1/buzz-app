@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import type { ChannelSummary } from "../../features/relay/contracts";
+import { SIDEBAR_PAGES_SECTION } from "../../features/relay/sidebar-preferences";
 import {
   orderContributedSidebarSections,
   isChannelSectionKey,
@@ -122,6 +123,8 @@ it("intersects groups/stars with active authorized streams and movable DMs", () 
     { key: "group:channels", ids: ["grouped-dm", "work"] },
     { key: "solo", ids: [] },
     { key: "channels", ids: ["other"] },
+    // The only forum is starred, and Forums stays to take it back.
+    { key: "forums", ids: [] },
     { key: "dms", ids: ["home-dm"] },
   ];
   expect(project(roster, new Set(["hidden-dm"]))).toEqual(expectedProjection);
@@ -321,3 +324,17 @@ it.each(["starred", "section:work", "channels", "forums", "dms"])(
     );
   },
 );
+
+it("keeps the Plugins section when only Solo chats show", () => {
+  expect(
+    sidebarSections(
+      [],
+      undefined,
+      new Set(),
+      true,
+      new Set(),
+      new Set(),
+      true,
+    ).map((section) => section.key),
+  ).toEqual([SIDEBAR_PAGES_SECTION, "solo"]);
+});
