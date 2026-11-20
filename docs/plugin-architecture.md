@@ -217,7 +217,10 @@ The CLI prints readable results and reports errors with a nonzero exit code.
 `disable`, `remove`, and
 `rollback` take a plugin ID. New installs start disabled; updates preserve their
 existing enabled state. `recover` backs up management settings and resets to
-bundled defaults, preserving artifacts for reinstallation. `managed` prints the
+bundled defaults, preserving artifacts for reinstallation. Once `remove` or
+`recover` saves its change it exits zero, printing a separate warning when this
+CLI can't confirm saved-credential cleanup; that is never a claim of deletion.
+`cleanup-retry` exits nonzero unless cleanup is confirmed complete. `managed` prints the
 [managed plugin policy](managed-plugins.md) and how each recommendation stands.
 `access [URL]` prints the [repository access rules](repository-access.md) and, for a
 URL, the rule, clone URL and agent socket a Git import would use.
@@ -3934,6 +3937,35 @@ binding survives provider Clear, sign-out and app-home wipe; it is not a namespa
 membership digest or rollback detector. Changing the declared scope refuses the
 old pair. Typed established observations use the same complete filesystem walker
 and strict registry validation, not root/store availability.
+
+The release and development builds each own one fixed inventory and OS service
+beside the same app-data homes. Fresh, established and sign-out inspection share
+one classification: the other build's inventory qualifies only as a committed
+record with that build's variant, matched by its own OS witness. That read is
+bounded, read-only and outside metadata locks, and runs once per peer
+installation, including for a peer that appears after boot. Each v3 registry must
+then belong to the namespace of the inventory that indexes it, under that
+inventory's variant. An uncommitted peer, a missing, denied or mismatched peer
+witness, or an unindexed registry stays unknown. On macOS, reading the other
+build's witness can show a Keychain prompt; denying it leaves custody unknown.
+Authority covers this build's inventory only. A plain sign-out journals and
+cleans only its own accounts and never changes the other build's. Erase refuses
+before revoking anything while the other build indexes unretired credentials in
+a home it would wipe, because this build's journal can't discharge them; there is
+no cross-build wipe.
+
+When this build's own fresh setup stopped after its intent, the sign-out refusal
+offers **Finish credential setup**. It applies only to the exact uncommitted
+intent (original installation ID, root, variant and scope), with no listed or
+unlisted namespace, v3 lineage or generation evidence, sign-out journal or count
+anywhere in scope. A positively absent witness gets the original bytes
+create-only; an exactly matching one gets no OS write. It then revalidates the
+whole scope and commits the same record. Anything else refuses without adopting,
+resuming, deleting or overwriting, and never makes a new installation ID. It
+holds the enrollment's completion-owned lease until its OS work actually
+finishes, takes no metadata lock across OS access, and leaves the launch's
+unknown state and unwired Manager as they are. Success restarts Buzz; only the
+next launch's independent qualification enables saved credentials.
 
 Boot attempts readable committed journal cleanup before continuity qualification.
 The bounded-wait native qualification worker retains K/A/other-build ownership

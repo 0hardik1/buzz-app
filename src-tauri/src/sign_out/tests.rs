@@ -2088,10 +2088,12 @@ pub(super) mod slots {
             if *self.add_denied.lock().unwrap() {
                 return Err(StoreError::Denied);
             }
-            self.items
-                .lock()
-                .unwrap()
-                .insert(account.into(), value.to_vec());
+            // Create-only, as the OS adapter is: an overwrite must not pass.
+            let mut items = self.items.lock().unwrap();
+            if items.contains_key(account) {
+                return Err(StoreError::Occupied);
+            }
+            items.insert(account.into(), value.to_vec());
             Ok(())
         }
         fn delete(&self, account: &str) -> Result<(), StoreError> {
@@ -2168,6 +2170,7 @@ pub(super) mod slots {
             let journal = Journal {
                 commit: &commit,
                 pending: &pending,
+                admit: &|| Ok(()),
             };
             run(attempt(
                 &instance,
@@ -2191,6 +2194,7 @@ pub(super) mod slots {
                 (self.root.clone(), self.store.clone(), self.attempts.clone());
             Slots {
                 continuity: None,
+                finish: None,
                 inventory: Some(&self.root),
                 pending: Box::new(|| secrets::sign_out_pending(&self.root)),
                 cleanup: Some(Box::new(move || {
@@ -2276,6 +2280,7 @@ pub(super) mod slots {
         let journal = Journal {
             commit: &commit,
             pending: &pending,
+            admit: &|| Ok(()),
         };
         {
             let mut signing_out = std::pin::pin!(attempt(
@@ -2331,6 +2336,7 @@ pub(super) mod slots {
                 let journal = Journal {
                     commit: &commit,
                     pending: &pending,
+                    admit: &|| Ok(()),
                 };
                 let before = (native(dir.path()), finished(&paths.finished).unwrap());
                 let (closes, stopped, exited) = (Cell::new(0), Cell::new(false), Cell::new(false));
@@ -2405,6 +2411,7 @@ pub(super) mod slots {
         let journal = Journal {
             commit: &commit,
             pending: &pending,
+            admit: &|| Ok(()),
         };
         let mut exiting = std::pin::pin!(attempt(
             &running,
@@ -2515,6 +2522,7 @@ pub(super) mod slots {
         let journal = Journal {
             commit: &commit,
             pending: &pending,
+            admit: &|| Ok(()),
         };
         let closes = Cell::new(0);
         let result = run(attempt(
@@ -2569,6 +2577,7 @@ pub(super) mod slots {
             let (root, store, cleaned) = (vault.root.clone(), vault.store.clone(), order.clone());
             let slots = Slots {
                 continuity: None,
+                finish: None,
                 inventory: Some(&vault.root),
                 pending: Box::new(|| secrets::sign_out_pending(&vault.root)),
                 cleanup: Some(Box::new(move || {

@@ -95,6 +95,7 @@ fn creators_and_plain_journals_try_the_other_variant_before_metadata() {
         let journal = Journal {
             commit: &commit,
             pending: &pending,
+            admit: &|| Ok(()),
         };
         assert_eq!(
             run(attempt(
@@ -176,6 +177,7 @@ fn boot_plain_cleanup_always_owns_all_buzz_shared() {
             &paths,
             Some(Slots {
                 continuity: None,
+                finish: None,
                 inventory: None,
                 pending: Box::new(pending),
                 cleanup: Some(Box::new(cleanup)),
@@ -201,6 +203,7 @@ fn erase_journal_borrows_exclusive_all_without_acquiring_other_key() {
     let journal = Journal {
         commit: &commit,
         pending: &pending,
+        admit: &|| Ok(()),
     };
     instance.begin(WIPE, Some(&journal)).unwrap();
     // It is legal to open the other K independently while A is exclusive;
@@ -274,6 +277,7 @@ fn migration_observes_only_under_all_exclusive_without_taking_key() {
         &paths,
         Some(Slots {
             continuity: None,
+            finish: None,
             inventory: None,
             pending: Box::new(pending),
             cleanup: None,

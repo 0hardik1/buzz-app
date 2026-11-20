@@ -142,7 +142,8 @@ fn validate(namespace: &Namespace, raw: &Raw) -> Result<()> {
     }
     Ok(())
 }
-fn registry(bytes: &[u8]) -> Result<(Registry, Raw)> {
+/// A registry whose secret lineage belongs to `variant`'s inventory.
+fn registry(bytes: &[u8], variant: &str) -> Result<(Registry, Raw)> {
     let text = std::str::from_utf8(bytes).map_err(|_| UNREADABLE)?;
     let raw: Raw = serde_json::from_str(text).map_err(|_| UNREADABLE)?;
     for (id, plugin) in &raw.installed {
@@ -163,7 +164,9 @@ fn registry(bytes: &[u8]) -> Result<(Registry, Raw)> {
         }
     }
     let _ = &raw.bundled_overrides; // Deserialized through the same unique-key pass.
-    let registry = crate::parse_registry(text).map_err(|_| UNREADABLE)?;
+    let registry =
+        crate::parse_owned_registry(text, &|lineage| check_owned_lineage(lineage, variant))
+            .map_err(|_| UNREADABLE)?;
     Ok((registry, raw))
 }
 
@@ -172,8 +175,9 @@ pub(super) fn inspect_namespace(
     namespace: &Namespace,
     home: &Path,
     profile: &str,
+    variant: &str,
 ) -> Result<()> {
-    let (registry, raw) = registry(bytes)?;
+    let (registry, raw) = registry(bytes, variant)?;
     if !namespace.valid()
         || namespace.home != home_hash(home)?
         || namespace.profile != profile
@@ -183,7 +187,7 @@ pub(super) fn inspect_namespace(
         return Err(UNREADABLE.into());
     }
     if let Some(lineage) = &registry.secrets {
-        check_lineage(lineage)?;
+        check_owned_lineage(lineage, variant)?;
     }
     validate(namespace, &raw)
 }
@@ -225,7 +229,7 @@ pub(super) fn with_structural<T>(
     let _g = existing_lock(&inventory.root.join("state.lock"))?;
     let _i = existing_lock(&inventory.root.join(format!("ns-{id}.lock")))?;
     let registry_bytes = bytes(&manager.root.join("registry.json"), crate::LIMIT as usize)?;
-    let (registry, raw) = registry(&registry_bytes)?;
+    let (registry, raw) = registry(&registry_bytes, VARIANT)?;
     let state: State =
         serde_json::from_slice(&bytes(&inventory.root.join(STATE), MAX_RECORD_BYTES)?)
             .map_err(|_| UNREADABLE)?;

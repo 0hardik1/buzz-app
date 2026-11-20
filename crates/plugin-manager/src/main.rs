@@ -45,8 +45,9 @@ Saved-credential cleanup:
   cleanup-retry is explicit; there is no automatic retry or status alias.
   remove and recover save the plugin change before attempting cleanup.
   Their mutation output is separate from the saved-credential cleanup result.
-  Unconfirmed cleanup exits nonzero even when the plugin change was saved.
-  A confirmed complete batch exits zero unless the mutation reported a problem.
+  A saved change exits zero unless the mutation reported a problem; unconfirmed
+  cleanup after it is a separate warning, not confirmed deletion.
+  cleanup-retry exits nonzero unless its batch is confirmed complete.
   Each attempt waits at most 30 seconds; timeout is not OS cancellation.
   Process exit or a timed-out wait does not prove credentials were deleted.
   Durable pending records remain until actual deletion is confirmed.
@@ -270,7 +271,11 @@ pub(crate) fn dispatch(
         if let Some(problem) = outcome.problem {
             writeln!(out, "{problem}").map_err(|e| e.to_string())?;
         }
-        wait_cleanup(manager, out, budget)?;
+        // The change is saved: cleanup this CLI can't confirm is a separate
+        // warning, never a failed change or a confirmed deletion.
+        if let Err(cleanup) = wait_cleanup(manager, out, budget) {
+            eprintln!("Warning: {cleanup}");
+        }
         outcome
             .problem
             .map_or(Ok(()), |problem| Err(problem.into()))
@@ -548,6 +553,35 @@ mod tests {
         assert!(text.contains("buzz.channels"));
         assert!(text.contains("not observed"));
         assert!(!text.contains("confirmed complete"));
+    }
+
+    #[test]
+    fn saved_recovery_succeeds_while_unconfirmed_retry_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = Manager::open(Some(temp.path().into()), "test", false).unwrap();
+        let mut out = Vec::new();
+        dispatch(&manager, "recover", &[], "test", &mut out, Duration::ZERO)
+            .unwrap()
+            .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("Reset profile test"));
+        assert!(!text.contains("confirmed complete"));
+        let mut out = Vec::new();
+        assert_eq!(
+            dispatch(
+                &manager,
+                "cleanup-retry",
+                &[],
+                "test",
+                &mut out,
+                Duration::ZERO
+            )
+            .unwrap(),
+            Err(CLEANUP_UNKNOWN.into())
+        );
+        assert!(!String::from_utf8(out)
+            .unwrap()
+            .contains("confirmed complete"));
     }
 
     #[test]

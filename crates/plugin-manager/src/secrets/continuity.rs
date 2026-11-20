@@ -1,11 +1,35 @@
 //! Installation continuity in the existing inventory and build-specific OS store.
 //! A matching pair is a completed observation, not rollback detection or use authority.
+//! The other supported build's committed pair is other-owned evidence: it never
+//! qualifies, enrolls or cleans anything for this build.
 use super::*;
 use preflight::{Observation, Scope};
 use std::collections::BTreeSet;
+use std::sync::Mutex;
 
 pub(super) const ACCOUNT: &str = "installation-continuity-v1";
 const FAILED: &str = "Saved credential installation continuity could not be established";
+/// How long an admission waits for the other build's witness read.
+const PEER_WAIT: Duration = Duration::from_secs(10);
+
+/// Exactly the two supported builds' variants: this one and its peer.
+#[derive(Clone, Copy)]
+pub(super) struct Build {
+    this: &'static str,
+    peer: &'static str,
+}
+impl Build {
+    pub(super) const THIS: Self = Self {
+        this: VARIANT,
+        peer: PEER_VARIANT,
+    };
+    /// The other build's view, so one test binary exercises both orders.
+    #[cfg(test)]
+    pub(super) const OTHER: Self = Self {
+        this: PEER_VARIANT,
+        peer: VARIANT,
+    };
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -16,10 +40,10 @@ struct Installation {
     scope: String,
 }
 impl Installation {
-    fn valid(&self) -> bool {
+    fn valid_for(&self, variant: &str) -> bool {
         self.version == 1
             && valid_uuid(&self.id).is_ok()
-            && self.variant == VARIANT
+            && self.variant == variant
             && hex64(&self.scope)
     }
 }
@@ -31,16 +55,36 @@ pub(super) struct Record {
     committed: bool,
 }
 impl Record {
-    pub(super) fn valid(&self) -> bool {
-        self.installation.valid()
+    pub(super) fn valid_for(&self, variant: &str) -> bool {
+        self.installation.valid_for(variant)
+    }
+}
+
+/// The other supported build's fixed inventory root and read-only witness store.
+pub struct Peer {
+    root: PathBuf,
+    store: Arc<dyn SecretStore>,
+    /// The peer installation whose witness this observer last read and matched.
+    /// Only that exact committed installation skips a fresh read.
+    qualified: Mutex<Option<Installation>>,
+}
+impl Peer {
+    pub fn new(root: PathBuf, store: Arc<dyn SecretStore>) -> Self {
+        Self {
+            root,
+            store,
+            qualified: Mutex::new(None),
+        }
     }
 }
 
 /// An OS-witness-qualified installation observation. Reinspect the declared scope
 /// at native destructive/admission boundaries; retaining this is not a snapshot.
 pub struct Established {
+    build: Build,
     root: PathBuf,
     installation: Installation,
+    peer: Peer,
 }
 impl Established {
     pub fn inspect(&self, scope: &Scope) -> Result<()> {
@@ -48,14 +92,52 @@ impl Established {
             return Err(FAILED.into());
         }
         inspect(
+            self.build,
             scope,
             &self.root,
-            &Record {
+            Some(&Record {
                 installation: self.installation.clone(),
                 committed: true,
-            },
+            }),
+            &self.peer,
         )
     }
+    /// Whether the other build indexes unretired custody under any of `homes`.
+    /// This build's journal cannot discharge it, so erasing them must refuse.
+    pub fn peer_custody_in(&self, homes: &[PathBuf]) -> Result<bool> {
+        let Some(state) = state(&self.peer.root, self.build.peer)? else {
+            return Ok(false);
+        };
+        let wiped = homes
+            .iter()
+            .map(|home| home_hash(home))
+            .collect::<Result<BTreeSet<_>>>()?;
+        let inventory = Inventory {
+            root: &self.peer.root,
+        };
+        for id in inventory.members(&state.namespaces)? {
+            let namespace = namespace(&self.peer.root, &id)?;
+            if wiped.contains(&namespace.home)
+                && namespace
+                    .entries
+                    .iter()
+                    .any(|entry| entry.phase != Phase::Retired)
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+/// Whether this build's inventory holds an uncommitted setup intent. Read-only
+/// and not eligibility: [`finish`] proves that afresh.
+pub fn unfinished(root: &Path) -> bool {
+    state(root, Build::THIS.this)
+        .ok()
+        .flatten()
+        .and_then(|state| state.installation)
+        .is_some_and(|record| !record.committed)
 }
 
 fn binding(scope: &Scope, root: &Path) -> Result<String> {
@@ -91,14 +173,14 @@ fn binding(scope: &Scope, root: &Path) -> Result<String> {
     Ok(digest(&parts))
 }
 
-fn state(root: &Path) -> Result<Option<State>> {
+fn state(root: &Path, variant: &str) -> Result<Option<State>> {
     match preflight::checked(root).map_err(|_| FAILED)? {
         None => Ok(None),
         Some(meta) if meta.is_dir() => {
             let state: State =
                 serde_json::from_slice(&read::bytes(&root.join(STATE), MAX_RECORD_BYTES)?)
                     .map_err(|_| FAILED)?;
-            if !state.valid()
+            if !state.valid_for(variant)
                 || state.namespaces.iter().collect::<BTreeSet<_>>().len() != state.namespaces.len()
             {
                 return Err(FAILED.into());
@@ -109,51 +191,75 @@ fn state(root: &Path) -> Result<Option<State>> {
     }
 }
 
+fn witness(bytes: &[u8]) -> Result<Installation> {
+    if bytes.len() > MAX_VALUE_BYTES {
+        return Err(FAILED.into());
+    }
+    serde_json::from_slice(bytes).map_err(|_| FAILED.into())
+}
+
 /// Read/create-only OS work is synchronous so its caller can retain the existing
 /// native creator lease through worker completion, even after a bounded wait.
 /// No R/G/I metadata lock spans either OS call. Never repairs partial evidence.
-pub fn establish(scope: &Scope, root: &Path, store: &dyn SecretStore) -> Result<Established> {
+pub fn establish(
+    scope: &Scope,
+    root: &Path,
+    store: &dyn SecretStore,
+    peer: Peer,
+) -> Result<Established> {
+    establish_as(Build::THIS, scope, root, store, peer)
+}
+
+pub(super) fn establish_as(
+    build: Build,
+    scope: &Scope,
+    root: &Path,
+    store: &dyn SecretStore,
+    peer: Peer,
+) -> Result<Established> {
     if cfg!(not(unix)) {
         return Err(UNSUPPORTED.into());
     }
     let expected_scope = binding(scope, root)?;
-    let witness = match store.read(ACCOUNT) {
-        Ok(bytes) if bytes.len() <= MAX_VALUE_BYTES => {
-            Some(serde_json::from_slice::<Installation>(&bytes).map_err(|_| FAILED)?)
-        }
+    let found = match store.read(ACCOUNT) {
+        Ok(bytes) => Some(witness(&bytes)?),
         Err(Error::Absent) => None,
         _ => return Err(FAILED.into()),
     };
-    let existing = state(root)?;
-    match (existing, witness) {
-        (Some(state), Some(witness)) => {
+    let existing = state(root, build.this)?;
+    match (existing, found) {
+        (Some(state), Some(found)) => {
             let record = state.installation.ok_or(FAILED)?;
             if !record.committed
-                || !witness.valid()
-                || record.installation != witness
-                || witness.scope != expected_scope
+                || !found.valid_for(build.this)
+                || record.installation != found
+                || found.scope != expected_scope
             {
                 return Err(FAILED.into());
             }
             let observed = Established {
+                build,
                 root: root.to_owned(),
-                installation: witness,
+                installation: found,
+                peer,
             };
             observed.inspect(scope)?;
             Ok(observed)
         }
         (None, None) => {
-            preflight::inspect(scope)?;
+            // Positive absence of this build's custody evidence; a qualified
+            // peer may coexist, anything else refuses.
+            inspect(build, scope, root, None, &peer)?;
             let inventory = Inventory { root };
             inventory.establish()?;
             // Stable completion ownership, not a structural lock. A competing
             // initializer refuses; it cannot replace an in-flight OS witness.
             let _writer = try_lock(&root.join("installation.lock"))?.ok_or(BUSY)?;
-            let mut record = Record {
+            let record = Record {
                 installation: Installation {
                     version: 1,
                     id: fresh(),
-                    variant: VARIANT.into(),
+                    variant: build.this.into(),
                     scope: expected_scope,
                 },
                 committed: false,
@@ -176,53 +282,127 @@ pub fn establish(scope: &Scope, root: &Path, store: &dyn SecretStore) -> Result<
             let bytes =
                 Zeroizing::new(serde_json::to_vec(&record.installation).map_err(|_| FAILED)?);
             store.add(ACCOUNT, &bytes).map_err(|_| FAILED)?;
-            inspect(scope, root, &record)?;
-            {
-                let _g = inventory.global()?;
-                let mut state = state(root)?.ok_or(FAILED)?;
-                if state.installation.as_ref() != Some(&record)
-                    || !state.namespaces.is_empty()
-                    || state.signed_out_seen.is_some()
-                    || state.journal.is_some()
-                    || inventory.has_records()?
-                {
-                    return Err(FAILED.into());
-                }
-                record.committed = true;
-                state.installation = Some(record.clone());
-                inventory.save_state(&mut state)?;
-            }
-            let observed = Established {
-                root: root.to_owned(),
-                installation: record.installation,
-            };
-            observed.inspect(scope)?;
-            Ok(observed)
+            commit(build, scope, root, record, peer)
         }
         _ => Err(FAILED.into()),
     }
 }
 
-fn inspect(scope: &Scope, root: &Path, expected: &Record) -> Result<()> {
-    let current = state(root)?.ok_or(FAILED)?;
-    if current.installation.as_ref() != Some(expected) {
+/// Explicitly finish this build's own fresh setup intent, never anything else:
+/// the exact original record, with no namespace, journal, count or custody
+/// evidence anywhere in the declared scope. A positively absent witness gets
+/// the original bytes create-only; an exactly matching one gets no OS write.
+/// Uncertainty, denial, mismatch or change refuses and leaves the intent as it
+/// is. Success is a committed pair for the next launch to qualify independently.
+pub fn finish(scope: &Scope, root: &Path, store: &dyn SecretStore, peer: Peer) -> Result<()> {
+    finish_as(Build::THIS, scope, root, store, peer)
+}
+
+pub(super) fn finish_as(
+    build: Build,
+    scope: &Scope,
+    root: &Path,
+    store: &dyn SecretStore,
+    peer: Peer,
+) -> Result<()> {
+    if cfg!(not(unix)) {
+        return Err(UNSUPPORTED.into());
+    }
+    let expected_scope = binding(scope, root)?;
+    let record = intent(build, root, &expected_scope)?;
+    // The initializer holds this through its OS add; a late one refuses here.
+    let _writer = try_lock(&root.join("installation.lock"))?.ok_or(BUSY)?;
+    if intent(build, root, &expected_scope)? != record {
         return Err(FAILED.into());
     }
-    let inventory = Inventory { root };
+    inspect(build, scope, root, Some(&record), &peer)?;
+    match store.read(ACCOUNT) {
+        Ok(bytes) if witness(&bytes)? == record.installation => {}
+        Err(Error::Absent) => {
+            let bytes =
+                Zeroizing::new(serde_json::to_vec(&record.installation).map_err(|_| FAILED)?);
+            store.add(ACCOUNT, &bytes).map_err(|_| FAILED)?;
+        }
+        _ => return Err(FAILED.into()),
+    }
+    commit(build, scope, root, record, peer).map(drop)
+}
+
+/// This build's exact uncommitted record, with nothing else indexed.
+fn intent(build: Build, root: &Path, expected_scope: &str) -> Result<Record> {
+    let state = state(root, build.this)?.ok_or(FAILED)?;
+    let record = state.installation.clone().ok_or(FAILED)?;
+    if record.committed
+        || record.installation.scope != expected_scope
+        || !state.namespaces.is_empty()
+        || state.signed_out_seen.is_some()
+        || state.journal.is_some()
+        || (Inventory { root }).has_records()?
+    {
+        return Err(FAILED.into());
+    }
+    Ok(record)
+}
+
+/// Revalidate the whole scope, then commit exactly `record` if nothing changed.
+fn commit(
+    build: Build,
+    scope: &Scope,
+    root: &Path,
+    mut record: Record,
+    peer: Peer,
+) -> Result<Established> {
+    inspect(build, scope, root, Some(&record), &peer)?;
+    {
+        let inventory = Inventory { root };
+        let _g = inventory.global()?;
+        let mut state = state(root, build.this)?.ok_or(FAILED)?;
+        if state.installation.as_ref() != Some(&record)
+            || !state.namespaces.is_empty()
+            || state.signed_out_seen.is_some()
+            || state.journal.is_some()
+            || inventory.has_records()?
+        {
+            return Err(FAILED.into());
+        }
+        record.committed = true;
+        state.installation = Some(record.clone());
+        inventory.save_state(&mut state)?;
+    }
+    let observed = Established {
+        build,
+        root: root.to_owned(),
+        installation: record.installation,
+        peer,
+    };
+    observed.inspect(scope)?;
+    Ok(observed)
+}
+
+fn namespace(root: &Path, id: &str) -> Result<Namespace> {
+    let namespace: Namespace = serde_json::from_slice(&read::bytes(
+        &root.join(format!("ns-{id}.json")),
+        MAX_RECORD_BYTES,
+    )?)
+    .map_err(|_| FAILED)?;
+    if !namespace.valid() {
+        return Err(FAILED.into());
+    }
+    Ok(namespace)
+}
+
+/// The namespace records an inventory indexes, each validated against its id
+/// and the declared homes.
+fn namespaces(scope: &Scope, root: &Path, state: &State) -> Result<BTreeMap<String, Namespace>> {
     let mut namespaces = BTreeMap::new();
-    for id in inventory.members(&current.namespaces)? {
-        let namespace: Namespace = serde_json::from_slice(&read::bytes(
-            &root.join(format!("ns-{id}.json")),
-            MAX_RECORD_BYTES,
-        )?)
-        .map_err(|_| FAILED)?;
+    for id in (Inventory { root }).members(&state.namespaces)? {
+        let namespace = namespace(root, &id)?;
         if id
             != digest(&[
                 b"buzz-plugin-secret-namespace-v1",
                 namespace.home.as_bytes(),
                 namespace.profile.as_bytes(),
             ])
-            || !namespace.valid()
             || valid_id(&namespace.profile).is_err()
             || !scope
                 .homes
@@ -233,25 +413,123 @@ fn inspect(scope: &Scope, root: &Path, expected: &Record) -> Result<()> {
         }
         namespaces.insert(id, namespace);
     }
-    if !expected.committed
-        && (!namespaces.is_empty()
-            || current.signed_out_seen.is_some()
-            || current.journal.is_some())
-    {
+    Ok(namespaces)
+}
+
+/// One owner's indexed evidence: its variant, record and validated namespaces.
+struct Owner {
+    variant: &'static str,
+    record: Option<Record>,
+    namespaces: BTreeMap<String, Namespace>,
+}
+
+/// A present peer inventory qualifies only as the other build's committed
+/// pair; its witness is read afresh unless this exact installation matched.
+fn qualify_peer(build: Build, scope: &Scope, peer: &Peer) -> Result<Option<Owner>> {
+    let Some(state) = state(&peer.root, build.peer)? else {
+        return Ok(None);
+    };
+    if !scope.inventories.contains(&peer.root) {
         return Err(FAILED.into());
     }
+    let record = state.installation.as_ref().ok_or(FAILED)?;
+    if !record.committed {
+        return Err(FAILED.into());
+    }
+    let cached = peer
+        .qualified
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    if cached.as_ref() != Some(&record.installation) {
+        if read_peer(peer)? != record.installation {
+            return Err(FAILED.into());
+        }
+        *peer.qualified.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(record.installation.clone());
+    }
+    Ok(Some(Owner {
+        variant: build.peer,
+        record: state.installation.clone(),
+        namespaces: namespaces(scope, &peer.root, &state)?,
+    }))
+}
+
+/// Bounded so a stalled or prompting read cannot hold admission; read-only, so
+/// a late completion changes nothing.
+fn read_peer(peer: &Peer) -> Result<Installation> {
+    let store = peer.store.clone();
+    let (done, result) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("plugin peer continuity".into())
+        .spawn(move || {
+            let _ = done.send(store.read(ACCOUNT));
+        })
+        .map_err(|_| FAILED)?;
+    let bytes = result
+        .recv_timeout(PEER_WAIT)
+        .map_err(|_| FAILED)?
+        .map_err(|_| FAILED)?;
+    witness(&bytes)
+}
+
+/// The one owner-aware classification of the declared scope. `expected` is
+/// this build's record at `root`, or `None` when its inventory must be absent.
+/// Every v3 registry must validate against the namespace of the inventory that
+/// indexes it, under that inventory's variant; unobserved namespaces may hold
+/// only retired debt. Unknown, partial or unowned evidence refuses.
+fn inspect(
+    build: Build,
+    scope: &Scope,
+    root: &Path,
+    expected: Option<&Record>,
+    peer: &Peer,
+) -> Result<()> {
+    if peer.root == root {
+        return Err(FAILED.into());
+    }
+    let current = match expected {
+        Some(expected) => {
+            let current = state(root, build.this)?.ok_or(FAILED)?;
+            if current.installation.as_ref() != Some(expected) {
+                return Err(FAILED.into());
+            }
+            Some(current)
+        }
+        None if state(root, build.this)?.is_some() => return Err(FAILED.into()),
+        None => None,
+    };
+    let own = Owner {
+        variant: build.this,
+        record: expected.cloned(),
+        namespaces: match &current {
+            Some(current) => namespaces(scope, root, current)?,
+            None => BTreeMap::new(),
+        },
+    };
+    if let (Some(expected), Some(current)) = (expected, &current) {
+        if !expected.committed
+            && (!own.namespaces.is_empty()
+                || current.signed_out_seen.is_some()
+                || current.journal.is_some())
+        {
+            return Err(FAILED.into());
+        }
+    }
+    let other = qualify_peer(build, scope, peer)?;
     let mut home = None;
-    let mut seen_inventory = false;
     let mut observed = BTreeSet::new();
     preflight::walk(scope, |observation| {
         let mut validate = || -> Result<()> {
             match observation {
-                Observation::InventoryPresent(path) if path == root => {
-                    seen_inventory = true;
+                Observation::InventoryPresent(path) if path == root && current.is_some() => {}
+                Observation::InventoryAbsent(path) if path == root && current.is_none() => {}
+                Observation::InventoryPresent(path) if path == peer.root && other.is_some() => {}
+                Observation::InventoryAbsent(path)
+                    if path != root && (path != peer.root || other.is_none()) => {}
+                Observation::InventoryPresent(_) | Observation::InventoryAbsent(_) => {
+                    return Err(FAILED.into())
                 }
-                Observation::InventoryPresent(_) => return Err(FAILED.into()),
-                Observation::InventoryAbsent(path) if path == root => return Err(FAILED.into()),
-                Observation::InventoryAbsent(_) => {}
                 Observation::Profiles(path) => {
                     home = Some(path.to_owned());
                 }
@@ -273,12 +551,19 @@ fn inspect(scope: &Scope, root: &Path, expected: &Record) -> Result<()> {
                         home_hash(home)?.as_bytes(),
                         profile.as_bytes(),
                     ]);
-                    if !current.namespaces.contains(&id) {
-                        return Err(FAILED.into());
-                    }
-                    let namespace = namespaces.get(&id).ok_or(FAILED)?;
-                    read::inspect_namespace(bytes, namespace, home, profile)?;
-                    observed.insert(id);
+                    let owner = [Some(&own), other.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .find(|owner| owner.namespaces.contains_key(&id))
+                        .ok_or(FAILED)?;
+                    read::inspect_namespace(
+                        bytes,
+                        &owner.namespaces[&id],
+                        home,
+                        profile,
+                        owner.variant,
+                    )?;
+                    observed.insert((owner.variant, id));
                 }
                 Observation::Unresolved => return Err(FAILED.into()),
             }
@@ -287,18 +572,26 @@ fn inspect(scope: &Scope, root: &Path, expected: &Record) -> Result<()> {
         validate().map_err(std::io::Error::other)
     })
     .map_err(|_| FAILED)?;
-    if !seen_inventory {
-        return Err(FAILED.into());
-    }
-    for (id, namespace) in &namespaces {
-        if !observed.contains(id) {
-            // Lost/erased homes may leave only retired cleanup debt. Neither
-            // those nor unlisted records can qualify a live generation.
-            read::inspect_retired(namespace)?;
+    for owner in [Some(&own), other.as_ref()].into_iter().flatten() {
+        for (id, namespace) in &owner.namespaces {
+            if !observed.contains(&(owner.variant, id.clone())) {
+                // Lost/erased homes may leave only retired cleanup debt. Neither
+                // those nor unlisted records can qualify a live generation.
+                read::inspect_retired(namespace)?;
+            }
         }
     }
-    if state(root)?.ok_or(FAILED)?.installation.as_ref() != Some(expected) {
-        return Err(FAILED.into());
+    // Neither owner's installation may have changed during the walk.
+    for (path, variant, before) in [
+        (root, build.this, Some(&own)),
+        (peer.root.as_path(), build.peer, other.as_ref()),
+    ] {
+        let still = state(path, variant)?;
+        if still.is_some() != before.is_some_and(|owner| owner.record.is_some())
+            || still.and_then(|state| state.installation) != before.and_then(|o| o.record.clone())
+        {
+            return Err(FAILED.into());
+        }
     }
     Ok(())
 }

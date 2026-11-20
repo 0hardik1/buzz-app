@@ -35,6 +35,13 @@ const H1_UNKNOWN: &str =
 const SAVING: &str = "A saved-key operation is still finishing. Try signing out again in a moment.";
 const LINKED: &str = "Erasing is unavailable because a Buzz storage folder is a link or couldn't be checked; nothing was removed";
 const DEV_WIPE: &str = "Erasing is unavailable in development builds because they share agent keys with the installed Buzz";
+// Named from this build's side: the other build is the one that keeps custody.
+const PEER_CUSTODY: &str = if cfg!(debug_assertions) {
+    "Erasing is unavailable because the installed Buzz keeps saved plugin credentials in this data; nothing was removed. Clear them there first."
+} else {
+    "Erasing is unavailable because a development build of Buzz keeps saved plugin credentials in this data; nothing was removed. Clear them in that build first."
+};
+const SETUP_UNAVAILABLE: &str = "Saved-credential setup can't be finished here.";
 pub(crate) mod legacy_identifier;
 mod preflight;
 // TEMPORARY agents rename: remove after 2026-10-18; see the migration module.
@@ -160,21 +167,51 @@ impl Paths {
             .ok_or_else(|| H1_UNKNOWN.to_owned())
     }
 
+    /// The other supported build's fixed inventory: other-owned evidence only.
+    fn plugin_peer_inventory(&self) -> Result<PathBuf, String> {
+        self.lock
+            .parent()
+            .map(|data| data.join(format!(".{}", buzzodz_plugins::secrets::PEER_SERVICE)))
+            .ok_or_else(|| H1_UNKNOWN.to_owned())
+    }
+
     pub(crate) fn plugin_slots<'a>(
         &self,
         root: &'a Path,
         store: Arc<dyn buzzodz_plugins::SecretStore>,
     ) -> Result<Slots<'a>, String> {
+        self.plugin_slots_with_peer(root, store, Arc::new(buzzodz_plugins::secrets::PeerStore))
+    }
+
+    pub(crate) fn plugin_slots_with_peer<'a>(
+        &self,
+        root: &'a Path,
+        store: Arc<dyn buzzodz_plugins::SecretStore>,
+        peer_store: Arc<dyn buzzodz_plugins::SecretStore>,
+    ) -> Result<Slots<'a>, String> {
+        use buzzodz_plugins::secrets::continuity::{self, Peer};
         let scope = self.inspection_scope(Some(root))?;
+        let peer_root = self.plugin_peer_inventory()?;
+        let peer = {
+            let (root, store) = (peer_root.clone(), peer_store.clone());
+            move || Peer::new(root.clone(), store.clone())
+        };
         let (witness_root, witness_store) = (root.to_owned(), store.clone());
+        let (finish_scope, finish_root, finish_store) =
+            (scope.clone(), root.to_owned(), store.clone());
+        let finish_peer = peer.clone();
         let cleanup_root = root.to_owned();
         Ok(Slots {
             inventory: Some(root),
             continuity: Some(Box::new(move || {
-                buzzodz_plugins::secrets::continuity::establish(
-                    &scope,
-                    &witness_root,
-                    witness_store.as_ref(),
+                continuity::establish(&scope, &witness_root, witness_store.as_ref(), peer())
+            })),
+            finish: Some(Arc::new(move || {
+                continuity::finish(
+                    &finish_scope,
+                    &finish_root,
+                    finish_store.as_ref(),
+                    finish_peer(),
                 )
             })),
             pending: Box::new(move || buzzodz_plugins::secrets::sign_out_pending(root)),
@@ -187,6 +224,18 @@ impl Paths {
             })),
             wait: buzzodz_plugins::secrets::CLEANUP_BUDGET,
         })
+    }
+
+    /// Every folder an erase empties, with its trash.
+    fn wiped_homes(&self) -> Vec<PathBuf> {
+        let erase = Choices {
+            wipe: true,
+            remove_agents: false,
+        };
+        self.targets(erase)
+            .into_iter()
+            .flat_map(|(path, _)| [path.to_owned(), trash(path)])
+            .collect()
     }
 
     /// Each wiped folder, and the children it keeps (the agent registries) unless agents go too.
@@ -258,7 +307,10 @@ pub(crate) struct Instance {
         buzzodz_plugins::secrets::preflight::Scope,
         buzzodz_plugins::secrets::continuity::Established,
     )>,
+    finish: Option<FinishSetup>,
+    wait: Duration,
 }
+type FinishSetup = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 struct Shared {
     locks: Mutex<Locks>,
     gate: Mutex<Gate>,
@@ -307,8 +359,13 @@ impl Instance {
     /// inherited K/A handles. The lease pins those handles through completion.
     fn creator(&self) -> Result<Creator, String> {
         self.inspect_continuity()?;
+        self.lease(true)
+    }
+
+    /// `creator` without continuity: setup recovery runs while custody is unknown.
+    fn lease(&self, unknown_refuses: bool) -> Result<Creator, String> {
         let mut gate = self.shared.gate.lock().unwrap_or_else(|e| e.into_inner());
-        if self.h1_unknown || gate.h1_unknown {
+        if unknown_refuses && (self.h1_unknown || gate.h1_unknown) {
             return Err(H1_UNKNOWN.into());
         }
         if gate.closed {
@@ -320,6 +377,40 @@ impl Instance {
             shared: self.shared.clone(),
             other: Some(other),
         })
+    }
+
+    /// Whether this unqualified launch found its own unfinished setup intent.
+    fn setup_unfinished(&self) -> bool {
+        self.continuity.is_none()
+            && self.finish.is_some()
+            && self
+                .inventory
+                .as_deref()
+                .is_some_and(buzzodz_plugins::secrets::continuity::unfinished)
+    }
+
+    /// Explicit recovery of this build's failed fresh setup, under the same
+    /// completion-owned lease as enrollment. It never qualifies this launch:
+    /// custody stays unknown until a restart qualifies the committed pair.
+    /// A timeout is outcome-unknown; the lease lasts until the work finishes.
+    pub(crate) fn finish_credential_setup(&self) -> Result<(), String> {
+        let finish = match (&self.continuity, &self.finish) {
+            (None, Some(finish)) if cfg!(unix) => finish.clone(),
+            _ => return Err(SETUP_UNAVAILABLE.into()),
+        };
+        let lease = self.lease(false)?;
+        let (done, result) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("plugin installation setup".into())
+            .spawn(move || {
+                let outcome = finish();
+                drop(lease);
+                let _ = done.send(outcome);
+            })
+            .map_err(|_| SAVING.to_owned())?;
+        result
+            .recv_timeout(self.wait)
+            .map_err(|_| SAVING.to_owned())?
     }
 
     fn inspect_continuity(&self) -> Result<(), String> {
@@ -570,6 +661,8 @@ pub(crate) struct Slots<'a> {
                 + Send,
         >,
     >,
+    /// Explicit completion of this build's own failed fresh setup; never run at boot.
+    finish: Option<FinishSetup>,
     /// Whether a journaled sign-out still owes cleanup; reads only.
     pending: Box<dyn Fn() -> Result<bool, String> + 'a>,
     /// This launch's one attempt, which may ask for secure storage access.
@@ -869,6 +962,8 @@ pub(crate) fn boot(
         seen: finished(&paths.finished).map_err(failed)?,
         h1_unknown: h1_unknown.get(),
         inventory: slots.as_ref().and_then(|s| s.inventory.map(Path::to_owned)),
+        finish: slots.as_ref().and_then(|s| s.finish.clone()),
+        wait: slots.as_ref().map_or(WAIT, |s| s.wait),
         continuity: continuity
             .map(|established| {
                 paths
@@ -1189,21 +1284,27 @@ fn write_marker(path: &Path, choices: Choices) -> std::io::Result<()> {
 /// locks or agents are in an unknown state): Buzz exits natively instead, and
 /// it never reaches the dialog.
 #[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Failure {
     message: String,
     #[serde(skip)]
     fenced: bool,
+    /// This build's own setup is unfinished; offer the explicit recovery.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    finish_setup: bool,
 }
 fn refuse(message: &str) -> Failure {
     Failure {
         message: message.into(),
         fenced: false,
+        finish_setup: false,
     }
 }
 fn fenced() -> Failure {
     Failure {
         message: FENCED.into(),
         fenced: true,
+        finish_setup: false,
     }
 }
 
@@ -1213,6 +1314,8 @@ struct Journal<'a> {
     commit: &'a (dyn Fn() -> Result<(), String> + Sync),
     /// Whether any committed sign-out still owes cleanup; reads only.
     pending: &'a (dyn Fn() -> Result<bool, String> + Sync),
+    /// A refusal this journal's scope can't discharge; checked before revoking.
+    admit: &'a (dyn Fn() -> Result<(), String> + Sync),
 }
 
 /// Revoke paired tools, journal plugin cleanup, commit intent, close signing,
@@ -1233,8 +1336,9 @@ where
         eprintln!("buzz: sign out refused: {error}");
         return Err(refuse(LINKED));
     }
-    if journal.is_none() {
-        paths.preflight().map_err(|_| refuse(H1_UNKNOWN))?;
+    match journal {
+        None => paths.preflight().map_err(|_| refuse(H1_UNKNOWN))?,
+        Some(journal) => (journal.admit)().map_err(|message| refuse(&message))?,
     }
     // After every refusal, so a refusal keeps paired tools, and before the
     // journal: once it may have committed, only fenced failures remain.
@@ -1377,9 +1481,21 @@ where
         )
     };
     let pending = || buzzodz_plugins::secrets::sign_out_pending(root.ok_or(SAVING)?);
+    // This journal covers only this build's root; erase refuses rather than
+    // wipe homes where the other build keeps custody.
+    let admit = || match &instance.continuity {
+        Some((_, established)) if choices.wipe => {
+            match established.peer_custody_in(&paths.wiped_homes()) {
+                Ok(false) => Ok(()),
+                _ => Err(PEER_CUSTODY.to_owned()),
+            }
+        }
+        _ => Ok(()),
+    };
     let journal = Journal {
         commit: &commit,
         pending: &pending,
+        admit: &admit,
     };
     attempt(
         instance,
@@ -1392,6 +1508,11 @@ where
         exit,
     )
     .await
+    .map_err(|mut failure| {
+        failure.finish_setup =
+            !failure.fenced && failure.message == H1_UNKNOWN && instance.setup_unfinished();
+        failure
+    })
 }
 
 /// Tear down as Quit does, however that goes, then explain and exit. Agent
@@ -1520,6 +1641,26 @@ pub(crate) async fn sign_out<R: tauri::Runtime>(
         || exit_fenced(app.clone()),
     )
     .await?;
+    crate::relaunch::request(&app);
+    Ok(())
+}
+
+/// Finish this build's own failed fresh saved-credential setup, then restart:
+/// only the next launch can qualify it and enable saved credentials.
+#[tauri::command]
+pub(crate) async fn finish_credential_setup<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<(), Failure> {
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .try_state::<Instance>()
+            .ok_or_else(|| SETUP_UNAVAILABLE.to_owned())?
+            .finish_credential_setup()
+    })
+    .await
+    .map_err(|_| refuse(SAVING))?
+    .map_err(|message| refuse(&message))?;
     crate::relaunch::request(&app);
     Ok(())
 }

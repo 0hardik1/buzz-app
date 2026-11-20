@@ -32,6 +32,17 @@ const VARIANT: &str = if cfg!(debug_assertions) {
 } else {
     "release"
 };
+/// The other supported build: its fixed service, read only for its continuity witness.
+pub const PEER_SERVICE: &str = if cfg!(debug_assertions) {
+    "xyz.block.buzz.desktop.plugin-secret"
+} else {
+    "xyz.block.buzz.desktop.plugin-secret.debug"
+};
+const PEER_VARIANT: &str = if cfg!(debug_assertions) {
+    "release"
+} else {
+    "debug"
+};
 pub const MAX_SLOTS: usize = 16;
 pub const MAX_VALUE_BYTES: usize = 512;
 pub const MAX_NAMESPACES: usize = 32;
@@ -207,6 +218,38 @@ impl SecretStore for OsStore {
         Err(Error::Unavailable)
     }
 }
+/// The other supported build's continuity witness under [`PEER_SERVICE`], read
+/// only: every other account, and every add or delete, refuses.
+pub struct PeerStore;
+impl SecretStore for PeerStore {
+    fn read(&self, account: &str) -> std::result::Result<Zeroizing<Vec<u8>>, Error> {
+        if account != continuity::ACCOUNT {
+            return Err(Error::Denied);
+        }
+        peer_read(account)
+    }
+    fn add(&self, _: &str, _: &[u8]) -> std::result::Result<(), Error> {
+        Err(Error::Denied)
+    }
+    fn delete(&self, _: &str) -> std::result::Result<(), Error> {
+        Err(Error::Denied)
+    }
+}
+#[cfg(all(
+    not(test),
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
+fn peer_read(account: &str) -> std::result::Result<Zeroizing<Vec<u8>>, Error> {
+    buzz_credential_store::read(PEER_SERVICE, account)
+}
+#[cfg(any(
+    test,
+    not(any(target_os = "macos", target_os = "windows", target_os = "linux"))
+))]
+fn peer_read(_: &str) -> std::result::Result<Zeroizing<Vec<u8>>, Error> {
+    let _ = PEER_SERVICE;
+    Err(Error::Unavailable)
+}
 /// Absent until a caller wires an inventory root and store: plugin-facing calls
 /// then fail closed, and lifecycle changes to enrolled plugins are refused.
 #[derive(Clone, Default)]
@@ -250,7 +293,11 @@ pub(crate) struct Lineage {
     variant: String,
 }
 pub(crate) fn check_lineage(lineage: &Lineage) -> Result<()> {
-    if lineage.variant != VARIANT {
+    check_owned_lineage(lineage, VARIANT)
+}
+/// Structural lineage owned by exactly `variant`; owning is not use authority.
+fn check_owned_lineage(lineage: &Lineage, variant: &str) -> Result<()> {
+    if lineage.variant != variant {
         return Err(
             "Plugin settings belong to another Buzz build; use that build or recover settings"
                 .into(),
@@ -284,13 +331,17 @@ struct State {
     installation: Option<continuity::Record>,
 }
 impl State {
-    /// Namespace ids name files; a journal must target something.
     fn valid(&self) -> bool {
+        self.valid_for(VARIANT)
+    }
+    /// Namespace ids name files; a journal must target something. An
+    /// installation record must belong to exactly `variant`'s inventory.
+    fn valid_for(&self, variant: &str) -> bool {
         self.version == 1
             && self
                 .installation
                 .as_ref()
-                .is_none_or(continuity::Record::valid)
+                .is_none_or(|record| record.valid_for(variant))
             && self.namespaces.len() <= MAX_NAMESPACES
             && self.namespaces.iter().all(|id| hex64(id))
             && self.journal.as_ref().is_none_or(|journal| {

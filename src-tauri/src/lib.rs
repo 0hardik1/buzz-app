@@ -999,7 +999,8 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         terminal_close_owner,
         update_restart,
         sign_out::sign_out,
-        sign_out::sign_out_wipe_refusal
+        sign_out::sign_out_wipe_refusal,
+        sign_out::finish_credential_setup
     ]
 }
 

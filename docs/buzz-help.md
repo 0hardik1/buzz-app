@@ -1843,6 +1843,14 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   sign-out is already pending, Buzz can exit before opening its window.
   Linked storage or unrelated files in a profiles folder do not, by themselves,
   stop an ordinary launch or the existing storage migration/copy.
+  If the stop comes from this build's own unfinished saved-credential setup,
+  the dialog offers **Finish credential setup**. After a confirmation, Buzz
+  finishes that setup and restarts; nothing is signed out or removed. Saved
+  credentials work again only after that restart, and other causes stay refused.
+- The installed and development builds of Buzz keep separate saved plugin
+  credentials in the same data. Each signs out only its own; erasing is refused
+  while the other build still keeps credentials in data it would erase. On macOS,
+  Keychain may ask to let one build check the other's setup.
 - Experimental macOS plugins may offer native-private credential entry. Where
   supported, Buzz saves that credential in this build's OS secure storage, not
   chat or plugin JavaScript. Provider **Clear** retires that provider's key;

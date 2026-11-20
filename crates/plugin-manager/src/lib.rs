@@ -1029,6 +1029,14 @@ fn default_home() -> Result<PathBuf> {
 /// A registry as every reader must accept it, checked in memory only: reading
 /// it saves nothing.
 fn parse_registry(text: &str) -> Result<Registry> {
+    parse_owned_registry(text, &secrets::check_lineage)
+}
+
+/// `owned` decides which supported build's secret lineage the registry may carry.
+pub(crate) fn parse_owned_registry(
+    text: &str,
+    owned: &dyn Fn(&secrets::Lineage) -> Result<()>,
+) -> Result<Registry> {
     let mut r: Registry = serde_json::from_str(text).map_err(err)?;
     let v3 = r.version == 3;
     if !matches!(r.version, 1..=3)
@@ -1040,7 +1048,7 @@ fn parse_registry(text: &str) -> Result<Registry> {
         );
     }
     if let Some(lineage) = &r.secrets {
-        secrets::check_lineage(lineage)?;
+        owned(lineage)?;
     }
     // These shipped as installable plugins before being bundled. The bundled copy
     // replaces the installed one; a disabled install keeps the bundled copy off.
