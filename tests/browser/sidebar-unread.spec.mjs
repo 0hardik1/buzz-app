@@ -242,6 +242,9 @@ test("channel establishment preserves an in-flight unread batch and its sidebar 
     app.relay.releaseUnread();
     await expect(row(page, "dm-030").getByRole("img")).toHaveCount(1);
     await expect(row(page, "dm-090").getByRole("img")).toHaveCount(1);
+    // At default card heights the far DMs are past the card's edge, so no cue.
+    await expectCueHidden(page, "below");
+    await showAllRows(page);
     await expect(cue(page, "below")).toBeVisible();
     await expect(cue(page, "below")).toHaveCSS("border-radius", "34px");
     await expect(cue(page, "below").locator("..")).toHaveCSS(
