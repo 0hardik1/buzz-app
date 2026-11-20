@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { DEFAULT_ACTIVE_WINDOW_SECONDS } from "../../features/relay/sidebar-preferences";
 import type { SidebarSortMode } from "../../features/relay/sidebar-sort";
 import {
@@ -7,21 +6,17 @@ import {
   ListBulletsIcon,
   SquaresFourIcon,
 } from "../../shared/design-system/icons";
-import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
   MenuCheckboxItem,
   MenuGroup,
   MenuGroupLabel,
   MenuIcon,
-  MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
-  MenuRoot,
   MenuSeparator,
   MenuSubmenu,
   MenuSubmenuPopup,
   MenuSubmenuTrigger,
-  MenuTrigger,
 } from "../../shared/design-system/ui/Menu";
 import type { SidebarFilter } from "./useSidebarFilters";
 
@@ -36,8 +31,6 @@ const dates = [
 
 export type SidebarViewFilter = {
   value: SidebarFilter;
-  /** Unreads only or a time range is on, unlike the default All. */
-  filtered?: boolean;
   disabled?: boolean;
   activeWindowSeconds?: number | undefined;
   /** `null` seconds clears the saved date window. */
@@ -214,36 +207,5 @@ export function SidebarViewMenuItems({
         </>
       )}
     </>
-  );
-}
-
-/** The card's filter icon: a shortcut to the same choices as its Filter
- * submenu. It keeps the card's other actions' color whether or not a filter
- * is on; its accessible name says when one is. */
-export function SidebarFilterButton({
-  title,
-  filter,
-}: {
-  title: string;
-  filter: SidebarViewFilter;
-}) {
-  const [open, setOpen] = useState(false);
-  const label = `Filter ${title}`;
-  return (
-    <MenuRoot open={open} onOpenChange={setOpen}>
-      <MenuTrigger
-        render={(props) => (
-          <IconButton
-            {...props}
-            size="compact"
-            aria-label={filter.filtered ? `${label}, filtered` : label}
-            icon={<Filter2Icon size={14} />}
-          />
-        )}
-      />
-      <MenuPopup align="end" aria-label={label}>
-        <FilterItems filter={filter} />
-      </MenuPopup>
-    </MenuRoot>
   );
 }

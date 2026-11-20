@@ -1682,7 +1682,6 @@
   --affordance-accent: var(--affordance-subtle);
   --affordance-accent-hover: var(--affordance-subtle-hover);
   --surface-message-highlight: var(--accent-3);
-  --surface-navigation-arrival: var(--surface-message-highlight);
   /* A reaction you made swaps bubble fills: your bubble's fill on a received
      message and the panel, and the received fill inside your own bubble. */
   --affordance-reaction-self: var(--surface-message-own);
@@ -1732,7 +1731,6 @@
   --affordance-accent: var(--affordance-subtle);
   --affordance-accent-hover: var(--affordance-subtle-hover);
   --surface-message-highlight: var(--accent-3);
-  --surface-navigation-arrival: var(--surface-message-highlight);
   /* A reaction you made swaps bubble fills: your bubble's fill on a received
      message and the panel, and the received fill inside your own bubble. */
   --affordance-reaction-self: var(--surface-message-own);

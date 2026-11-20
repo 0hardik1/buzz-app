@@ -303,9 +303,6 @@ export function ChannelInventory({
         ] !== undefined)
     );
   };
-  // The filters are Unreads only and Time range; sort and layout aren't.
-  // A card is filtered when either narrows it: Unreads only, or any range.
-  const sectionFiltered = (key: string) => sectionFilter(key) !== "all";
   const appliedSorts = Object.keys(preferences.data?.sort ?? {}).map((key) =>
     sectionSort(key.startsWith("section:") ? `group:${key.slice(8)}` : key),
   );
@@ -1003,11 +1000,7 @@ export function ChannelInventory({
           : section,
       ),
     Object.fromEntries(
-      sortedSections.map(({ key }) => [
-        key,
-        // See all shares the card's filter and shows it in its sub nav.
-        sectionFilter(key),
-      ]),
+      sortedSections.map(({ key }) => [key, sectionFilter(key)]),
     ),
     current?.id,
     queries.unread,
@@ -2012,17 +2005,11 @@ export function ChannelInventory({
                                       ? `section:${section.key.slice(6)}`
                                       : section.key
                                   ],
-                                filtered: sectionFiltered(section.key),
                                 change: (mode, seconds) =>
                                   setSectionFilter(section.key, mode, seconds),
                               }
                             : undefined
                         }
-                        channels={{
-                          rows: section.hiddenRows,
-                          selected: preserveSidebar ? undefined : current?.id,
-                          select,
-                        }}
                         onRemove={
                           preferences.removeSectionWritable &&
                           section.key.startsWith("group:")

@@ -1,5 +1,4 @@
 import {
-  SidebarFilterButton,
   SidebarViewMenuItems,
   type SidebarViewFilter,
   type SidebarViewSort,
@@ -8,7 +7,6 @@ import { FadingLabel } from "./FadingLabel";
 import {
   useEffect,
   useId,
-  useLayoutEffect,
   useRef,
   useState,
   type DOMAttributes,
@@ -28,7 +26,6 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   CaretDownIcon,
-  CaretLeftIcon,
   DotsThreeIcon,
   PlusIcon,
   TrashIcon,
@@ -39,18 +36,7 @@ import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Field } from "../../shared/design-system/ui/Field";
 import { Input } from "../../shared/design-system/ui/Input";
 import { NavigationSectionHeading } from "../../shared/design-system/ui/NavigationSection";
-import {
-  NavigationItem,
-  markNavigationArrival,
-} from "../../shared/design-system/ui/NavigationItem";
-import {
-  setSidebarSeeAll,
-  takeSidebarSeeAllScroll,
-  useSidebarSeeAll,
-  useSidebarSeeAllReturning,
-} from "./useSidebarSeeAll";
 import type { RelaySession } from "../../features/relay/session";
-import type { ChannelSummary } from "../../features/relay/contracts";
 import { SidebarGroupIcon } from "./SidebarGroupIcon";
 import { SidebarStarIcon } from "./SidebarStarIcon";
 import { SidebarCardResize, useSidebarCardHeight } from "./SidebarCardResize";
@@ -79,7 +65,6 @@ export function SidebarSection({
   newMessage,
   sort,
   filter,
-  channels,
   dropRef,
   dropTarget = false,
   dropEdge,
@@ -127,13 +112,6 @@ export function SidebarSection({
     | undefined;
   sort?: SidebarViewSort | undefined;
   filter?: SidebarViewFilter | undefined;
-  channels?:
-    | {
-        rows: readonly ChannelSummary[];
-        selected?: string | undefined;
-        select: (id: string) => void;
-      }
-    | undefined;
   dropRef?: Ref<HTMLDivElement> | undefined;
   dropTarget?: boolean;
   /** Where a dragged group would land relative to this one. */
@@ -189,29 +167,6 @@ export function SidebarSection({
   const showMenu = !hideMoreActions || viewChoices;
   if (!showMenu && menuOpen) setMenuOpen(false);
   const [removeOpen, setRemoveOpen] = useState(false);
-  const seeingAll = useSidebarSeeAll() === sectionKey;
-  const returning = useSidebarSeeAllReturning();
-  const back = useRef<HTMLButtonElement>(null);
-  // Going in or back, focus follows to the other level's control.
-  const focusBack = useRef(false);
-  useEffect(() => {
-    if (seeingAll && focusBack.current) back.current?.focus();
-    focusBack.current = false;
-  }, [seeingAll]);
-  // Going in starts the card at its top; Back returns the main level to where
-  // it was scrolled, then marks the See all the reader came from.
-  const wasSeeingAll = useRef(seeingAll);
-  useLayoutEffect(() => {
-    const was = wasSeeingAll.current;
-    wasSeeingAll.current = seeingAll;
-    if (was === seeingAll) return;
-    const scroller = sidebarScroller(sectionKey);
-    if (seeingAll) {
-      if (scroller) scroller.scrollTop = 0;
-      return;
-    }
-    return arriveFromSeeAll(sectionKey, scroller, takeSidebarSeeAllScroll());
-  }, [seeingAll, sectionKey]);
   const pendingToggle = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(pendingToggle.current), []);
   const [removing, setRemoving] = useState(false);
@@ -232,24 +187,6 @@ export function SidebarSection({
   };
   return (
     <>
-      {/* Back is its own card above the one it returns from. */}
-      {seeingAll && (
-        <div
-          className={styles.channelSection}
-          data-sidebar-card=""
-          data-see-all=""
-          data-see-all-returning={returning || undefined}
-        >
-          <NavigationItem
-            ref={back}
-            data-see-all-back=""
-            icon={<CaretLeftIcon size={14} />}
-            label="Back"
-            aria-label="Back to all cards"
-            onClick={() => setSidebarSeeAll(undefined)}
-          />
-        </div>
-      )}
       <div
         ref={dropRef}
         className={styles.channelSection}
@@ -259,8 +196,6 @@ export function SidebarSection({
         data-drop-edge={dropEdge}
         data-section-dragging={dragging || undefined}
         data-menu-open={menuOpen || undefined}
-        data-see-all={seeingAll || undefined}
-        data-see-all-returning={returning || undefined}
       >
         <NavigationSectionHeading
           disclosure
@@ -363,7 +298,6 @@ export function SidebarSection({
                   </MenuPopup>
                 </MenuRoot>
               )}
-              {filter && <SidebarFilterButton title={title} filter={filter} />}
               {headerActions}
               {newMessage && (
                 <IconButton
@@ -508,22 +442,7 @@ export function SidebarSection({
               </SidebarCardDisplayContext.Provider>
             </div>
           ) : heightScope ? (
-            <ResizableRows
-              scope={heightScope}
-              card={sectionKey}
-              label={title}
-              seeAll={{
-                full: seeingAll,
-                hidden: !!channels?.rows.length,
-                open: () => {
-                  focusBack.current = true;
-                  setSidebarSeeAll(
-                    sectionKey,
-                    sidebarScroller(sectionKey)?.scrollTop,
-                  );
-                },
-              }}
-            >
+            <ResizableRows scope={heightScope} card={sectionKey} label={title}>
               {children}
             </ResizableRows>
           ) : (
@@ -539,13 +458,11 @@ function ResizableRows({
   scope,
   card,
   label,
-  seeAll,
   children,
 }: {
   scope: string;
   card: string;
   label: string;
-  seeAll: { full: boolean; hidden: boolean; open(): void };
   children: ReactNode;
 }) {
   const [height, resize, toggle] = useSidebarCardHeight(scope, card);
@@ -555,7 +472,6 @@ function ResizableRows({
       height={height}
       onResize={resize}
       onToggle={toggle}
-      seeAll={seeAll}
     >
       {children}
     </SidebarCardResize>
@@ -651,60 +567,4 @@ function SectionNameEditor({
       </Field>
     </form>
   );
-}
-
-function sidebarCard(sectionKey: string) {
-  return document.querySelector<HTMLElement>(
-    `[data-sidebar-section="${CSS.escape(sectionKey)}"]`,
-  );
-}
-
-function sidebarScroller(sectionKey: string) {
-  return (
-    sidebarCard(sectionKey)?.closest<HTMLElement>("[data-scroll-fade]") ?? null
-  );
-}
-
-/** How long Back waits for the card's See all row before focusing its heading. */
-const ARRIVAL_WAIT_MS = 1000;
-
-/**
- * Back on the main level: restore the scroll position from before See all,
- * then focus and mark the card's See all row. Rows and the card's edge settle
- * over the first frames, so the position is held until the row appears.
- * Returns a cancel.
- */
-function arriveFromSeeAll(
-  sectionKey: string,
-  scroller: HTMLElement | null,
-  top: number | undefined,
-) {
-  const hold = () => {
-    if (scroller && top !== undefined) scroller.scrollTop = top;
-  };
-  hold();
-  let frame = 0;
-  let clear = () => {};
-  const start = performance.now();
-  const tick = (now: number) => {
-    hold();
-    const card = sidebarCard(sectionKey);
-    const row = card?.querySelector<HTMLElement>("[data-card-see-all]");
-    if (row) {
-      row.focus({ preventScroll: true });
-      clear = markNavigationArrival(row);
-      return;
-    }
-    if (now - start < ARRIVAL_WAIT_MS) {
-      frame = requestAnimationFrame(tick);
-      return;
-    }
-    // The card no longer cuts anything short, so its heading takes focus.
-    card?.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
-  };
-  frame = requestAnimationFrame(tick);
-  return () => {
-    cancelAnimationFrame(frame);
-    clear();
-  };
 }

@@ -993,14 +993,6 @@ channel is still loading, then holds about a second and fades over about a
 second. A repeat arrival restarts the cue. Reduced motion holds the tint the
 same time and removes it without fading.
 
-Coming back to a navigation row, such as Back from a sidebar card's See all,
-marks the row that opened the level you left with the same cue:
-`markNavigationArrival` sets `data-arrived` on a NavigationItem, which takes
-`surface-navigation-arrival` for about a second, then fades, replacing hover
-while it shows. Reduced motion holds and removes it without fading. Pair it
-with restoring the scroll position the reader left, so the row is where they
-expect it.
-
 The horizontal message hover toolbar sits above the bubble, with reaction,
 reply, copy-link and overflow icon actions. It uses `popover-surface` with
 a 12px control radius and 2px inset. While closed it is invisible and drops the

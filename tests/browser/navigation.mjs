@@ -278,13 +278,6 @@ export function moreActionsButton(scope, title) {
   });
 }
 
-/** A card's filter icon button. Its name says when the card is filtered. */
-export function filterButton(scope, title) {
-  return scope.getByRole("button", {
-    name: new RegExp(`^Filter ${title}(, filtered)?$`),
-  });
-}
-
 /** A menu by name, skipping one still closing. */
 export function openMenu(page, name) {
   return page
@@ -292,29 +285,28 @@ export function openMenu(page, name) {
     .and(page.locator(":not([data-closed])"));
 }
 
-/** Opens a card's Filter menu from its header icon. Focus reveals its
- * hover-only button. Choosing in it keeps the menu open. */
+/** Opens a card's ••• menu, then its Filter submenu, which holds Unreads
+ * only and the time range. Choosing in it keeps the menus open. */
 export async function openFilterMenu(page, title, scope = page) {
-  const button = filterButton(scope, title);
-  await button.focus();
-  await button.click();
-  const menu = openMenu(page, `Filter ${title}`);
-  await expect(menu).toBeVisible();
-  return menu;
+  return openSubmenu(page, title, scope, "Filter");
 }
 
 /** Opens a card's ••• menu, then its Sort submenu, which holds the sort
  * choices and Unreads first. Choosing in it keeps the menus open. */
 export async function openSortMenu(page, title, scope = page) {
+  return openSubmenu(page, title, scope, "Sort");
+}
+
+async function openSubmenu(page, title, scope, name) {
   const button = moreActionsButton(scope, title);
   await button.focus();
   await button.click();
   await expect(openMenu(page, `More actions for ${title}`)).toBeVisible();
   await page
-    .getByRole("menuitem", { name: "Sort", exact: true })
+    .getByRole("menuitem", { name, exact: true })
     .and(page.locator(":not([data-closed])"))
     .click();
-  const menu = openMenu(page, `Sort ${title}`);
+  const menu = openMenu(page, `${name} ${title}`);
   await expect(menu).toBeVisible();
   return menu;
 }

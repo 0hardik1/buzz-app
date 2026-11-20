@@ -74,23 +74,3 @@ export function NavigationItem({
     </BaseButton>
   );
 }
-
-/**
- * Briefly marks a row the reader has just come back to, such as the control
- * that opened the level they left. Held about a second, then faded; a repeat
- * restarts it. Returns a clear for an early retire.
- */
-export function markNavigationArrival(item: HTMLElement): () => void {
-  const clear = () => {
-    item.removeAttribute("data-arrived");
-    item.removeEventListener("animationend", finish);
-  };
-  const finish = (event: AnimationEvent) => {
-    if (event.target === item) clear();
-  };
-  clear();
-  void item.offsetWidth;
-  item.setAttribute("data-arrived", "");
-  item.addEventListener("animationend", finish);
-  return clear;
-}

@@ -98,7 +98,7 @@
     )
     var(--space-2);
 }
-/* Text-only rows such as See all keep their label clear of the pill's rounded
+/* Text-only rows keep their label clear of the pill's rounded
    edge. The label's design-system class is matched by attribute so the module
    doesn't scope it. */
 .channelList

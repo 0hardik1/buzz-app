@@ -1,5 +1,5 @@
 import { test, expect } from "./fixture.mjs";
-import { filterButton, newChat } from "./navigation.mjs";
+import { newChat } from "./navigation.mjs";
 
 const chat = "33333333-3333-4333-8333-333333333333";
 test.use({
@@ -82,8 +82,6 @@ test("workspace settings rename preserves filing in ordinary and composed headin
           exact: true,
         }),
       ).toHaveCount(0);
-      // The card's own menu: its heading also offers Filter.
-      if (!composed) await expect(filterButton(header, name)).toHaveCount(1);
       await expect(
         page.getByRole("menuitem", { name: "Rename workspace", exact: true }),
       ).toHaveCount(0);

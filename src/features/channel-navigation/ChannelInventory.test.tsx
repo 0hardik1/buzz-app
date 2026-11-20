@@ -137,16 +137,15 @@ const defaultPages = (
   </nav>
 );
 
-/** Opens a card's Filter menu from its header button. */
+/** Opens a card's ••• menu, then its Filter submenu. */
 async function filterMenu(
   user: ReturnType<typeof userEvent.setup>,
   title: string,
 ) {
   await user.click(
-    screen.getByRole("button", {
-      name: new RegExp(`^Filter ${title}(, filtered)?$`),
-    }),
+    screen.getByRole("button", { name: `More actions for ${title}` }),
   );
+  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
   return screen.findByRole("menu", { name: `Filter ${title}` });
 }
 /** Opens a card's ••• menu, then its Sort submenu. */

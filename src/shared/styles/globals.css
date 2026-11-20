@@ -356,9 +356,9 @@
   .shell-sidebar,
   .shell-sidebar-default {
     @apply flex min-h-0 shrink-0;
-    /* The sidebar sits on the window's tint, a panel gap from the
-       conversation's card. */
-    margin-inline-end: var(--space-panel-gap);
+    /* The sidebar sits on the window's tint, a small gap from the
+       conversation's card, tighter than the panel gap at the app's edge. */
+    margin-inline-end: var(--space-1);
     /* Coupled to the sidebar's persisted pixel width and resize limits. */
     width: 260px;
     min-width: 220px;
