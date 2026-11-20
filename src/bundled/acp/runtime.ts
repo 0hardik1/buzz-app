@@ -1087,6 +1087,8 @@ export class AcpRuntime {
           sessionId,
           signal,
           threadOf: (prefix) => root ?? threadIn(prefix),
+          name: (pubkey) =>
+            ownerReads(this.relay(agent), pubkeyOf(agent))?.name(pubkey),
         });
       } catch (error) {
         signal.throwIfAborted();

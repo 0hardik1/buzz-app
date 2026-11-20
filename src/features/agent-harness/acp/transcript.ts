@@ -43,7 +43,7 @@ export async function readTranscript(
     } finally {
       stop();
     }
-    return rebuild.result(read.threadOf);
+    return rebuild.result(read.threadOf, read.name);
   });
 }
 
@@ -134,7 +134,10 @@ class Rebuild {
     if (at) turn.endedAt = at;
   }
 
-  result(threadOf: TranscriptRead["threadOf"]): Transcript {
+  result(
+    threadOf: TranscriptRead["threadOf"],
+    name?: TranscriptRead["name"],
+  ): Transcript {
     const turns = this.turns.map(({ size: _size, prefix, ...turn }, index) => {
       const threadRootId = prefix ? threadOf(prefix) : undefined;
       let triggeringEventIds = turn.triggeringEventIds;
@@ -143,7 +146,7 @@ class Rebuild {
       const items = turn.items.map((item) => {
         if (item.type !== "prompt") return item;
         const sections = promptSections(item.text);
-        const message = promptMessage(sections);
+        const message = promptMessage(sections, name);
         if (!triggeringEventIds.length)
           triggeringEventIds = promptEventIds(sections);
         return {

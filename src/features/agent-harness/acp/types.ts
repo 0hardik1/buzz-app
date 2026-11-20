@@ -141,6 +141,8 @@ export type TranscriptRead = Readonly<{
    * for the channel itself, undefined when unknown. Stored as the turn's
    * `threadRootId`. */
   threadOf(promptPrefix: string): string | null | undefined;
+  /** A person's display name, if known, for a request's author. */
+  name?: (pubkey: string) => string | undefined;
 }>;
 
 /** A conversation route `route` matched: `exact` is a route naming exactly

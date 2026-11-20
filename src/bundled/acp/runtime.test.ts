@@ -2181,6 +2181,36 @@ describe("AcpRuntime", () => {
     expect(loaded).toEqual(["session-1"]);
   });
 
+  it("names a replayed request's author as the community knows them", async () => {
+    const prompt = [
+      "<buzz-event>",
+      JSON.stringify({ id: "e".repeat(64), pubkey: alice, content: "Ship it" }),
+      `Request: ${JSON.stringify("Ship it")}`,
+      "</buzz-event>",
+    ].join("\n");
+    const { runtime, storage, sync } = setup({
+      capabilities: { mcpCapabilities: { http: true }, loadSession: true },
+      replay: [
+        {
+          sessionUpdate: "user_message_chunk",
+          content: { type: "text", text: prompt },
+        },
+      ],
+    });
+    sync(await confirmed());
+    localSessions(storage, self).set(channel, { at: 1, id: "old" });
+    const read = await runtime.transcript(
+      self,
+      channel,
+      new AbortController().signal,
+    );
+    expect(
+      read?.turns
+        .flatMap((turn) => turn.items)
+        .find((i) => i.type === "prompt"),
+    ).toMatchObject({ author: "Alice", authorPubkey: alice });
+  });
+
   it("shows the sessions it can still load when an older one is gone", async () => {
     const said = (text: string) => ({
       sessionUpdate: "user_message_chunk",
