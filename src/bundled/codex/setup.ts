@@ -2,7 +2,10 @@
 // keeping that copy on the latest release. Each step runs as a declared
 // process; the copy lives apart from any `codex` the user installed, and
 // shares their `~/.codex` sign-in and settings.
-import { withProviderWords } from "../../features/agents/failure-words";
+import {
+  interceptedWords,
+  withProviderWords,
+} from "../../features/agents/failure-words";
 import type {
   HostProcess,
   HostRequest,
@@ -170,7 +173,7 @@ export function explainTurn(notice: string, settings: string) {
           notice,
         )
       ? `OpenAI rejected Codex's sign-in. It may have expired or been revoked. Head to [Settings](${settings}) to sign in again.`
-      : undefined;
+      : interceptedWords("Codex", notice);
   if (!explanation) return notice;
   const said =
     /^Codex could not (?:start|finish): ([\s\S]*)\.$/.exec(notice)?.[1] ??

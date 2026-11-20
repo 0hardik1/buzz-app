@@ -8,7 +8,10 @@ import { isTauri } from "@tauri-apps/api/core";
 import { type ComponentType, createElement } from "react";
 import { pubkeyOf } from "../../features/agents/membership";
 import { ownerReads, readyOwnerReads } from "../../features/agents/reads";
-import { withProviderWords } from "../../features/agents/failure-words";
+import {
+  interceptedWords,
+  withProviderWords,
+} from "../../features/agents/failure-words";
 import { refusedByBuzz } from "./auth";
 import type { PluginModule } from "../../plugins/api";
 import { ClaudeLogoIcon } from "../../shared/design-system/icons";
@@ -199,11 +202,17 @@ export const apply: PluginModule["apply"] = (ctx) => {
     void ctx.navigation.open({ version: 1, kind: "settings", ...destination });
   // Failed turns' reports link to the same place, then quote Claude. Buzz's
   // own refusal to start Claude isn't Claude's words, and the link says it.
+  // A gateway answering in Anthropic's place is said plainly, not as a dump.
   runtime.explain = (error) => {
     const explained = setup.auth.explainTurn(error, settingsLink);
-    return explained === error || refusedByBuzz(error)
-      ? explained
-      : withProviderWords(explained, "Claude", error);
+    if (explained !== error)
+      return refusedByBuzz(error)
+        ? explained
+        : withProviderWords(explained, "Claude", error);
+    const intercepted = interceptedWords("Claude", error);
+    return intercepted
+      ? withProviderWords(intercepted, "Claude", error)
+      : error;
   };
   const {
     Create,

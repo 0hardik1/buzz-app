@@ -1015,6 +1015,13 @@ describe("explainTurn", () => {
       "Internal error: Tool failed. Authentication required by repo";
     expect(explainTurn(error, settings)).toBe(error);
   });
+
+  it("says a lapsed WARP session answered when Cloudflare Access did", () => {
+    const error = "Request failed: redirected to Cloudflare Access login";
+    expect(explainTurn(error, settings)).toBe(
+      `Cloudflare answered instead of goose's provider, so the request never reached it. Cloudflare WARP has likely disconnected or needs you to sign in again. Reconnect it, then mention me again.\n\ngoose said:\n> ${error}`,
+    );
+  });
 });
 
 it("checks Goose config readiness and writes defaults through Goose", async () => {

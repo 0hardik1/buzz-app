@@ -510,6 +510,14 @@ it("quotes at most 500 characters of Codex's words, marking the cut", () => {
   );
 });
 
+it("says a lapsed WARP session answered when Cloudflare Access did", () => {
+  const words =
+    "unexpected status 302 Found, url: https://example.cloudflareaccess.com/cdn-cgi/access/login";
+  expect(explainTurn(`Codex could not finish: ${words}.`, SETTINGS)).toBe(
+    `Cloudflare answered instead of Codex's provider, so the request never reached it. Cloudflare WARP has likely disconnected or needs you to sign in again. Reconnect it, then mention me again.\n\nCodex said:\n> ${words}`,
+  );
+});
+
 it("leaves a notice it can't explain exactly as Codex's runtime wrote it", () => {
   const notice = "Codex could not finish: model busy.";
   expect(explainTurn(notice, SETTINGS)).toBe(notice);

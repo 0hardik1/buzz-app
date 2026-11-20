@@ -3,7 +3,10 @@
 // call runs a short-lived `goose-acp`; keys go to goose's secret store, never
 // into Buzz.
 import type { ModelChoice } from "../../features/agents/ModelPicker";
-import { withProviderWords } from "../../features/agents/failure-words";
+import {
+  interceptedWords,
+  withProviderWords,
+} from "../../features/agents/failure-words";
 import type {
   ProtectedSpawn,
   ReviewPrompt,
@@ -766,7 +769,7 @@ export function explainTurn(error: string, settings: string) {
     ? `Goose is missing an API key (${missing[1]}). Head to [Settings](${settings}) to add it.`
     : /(?:^|: )Authentication required\b/.test(error)
       ? `Goose's provider rejected its API key or sign-in. Head to [Settings](${settings}) to check its provider.`
-      : undefined;
+      : interceptedWords("goose", error);
   return explanation ? withProviderWords(explanation, "goose", error) : error;
 }
 
