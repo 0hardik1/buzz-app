@@ -539,11 +539,15 @@ it("keeps the actions menu closed after it is hidden and shown again", async () 
 function RenamableSection({
   save,
   toggle,
+  title: remoteTitle,
 }: {
-  save(name: string): Promise<unknown>;
+  save(name: string, openedWith: string): Promise<unknown>;
   toggle(open: boolean): void;
+  /** A name the workspace took elsewhere, such as on another device. */
+  title?: string;
 }) {
-  const [title, setTitle] = useState("Untitled workspace");
+  const [localTitle, setTitle] = useState("Untitled workspace");
+  const title = remoteTitle ?? localTitle;
   const [editing, setEditing] = useState(false);
   return (
     <SidebarSection
@@ -554,8 +558,8 @@ function RenamableSection({
       rename={{
         editing,
         start: () => setEditing(true),
-        save: async (name) => {
-          await save(name);
+        save: async (name, openedWith) => {
+          await save(name, openedWith);
           setTitle(name);
         },
         stop: () => setEditing(false),
@@ -575,7 +579,7 @@ it("renames a workspace in place on double-click without toggling it", async () 
   const input = screen.getByRole("textbox", { name: "Workspace name" });
   expect(input).toHaveFocus();
   await user.keyboard("Design{Enter}");
-  expect(save).toHaveBeenCalledExactlyOnceWith("Design");
+  expect(save).toHaveBeenCalledExactlyOnceWith("Design", "Untitled workspace");
   expect(await screen.findByLabelText("Design")).toBeInTheDocument();
   await new Promise((done) => setTimeout(done, 300));
   expect(toggle).not.toHaveBeenCalled();
@@ -621,4 +625,22 @@ it("toggles a renamable workspace on a single click after a beat, and at once fr
   // Keyboard activation is a click with no click count.
   fireEvent.click(summary, { detail: 0 });
   expect(toggle).toHaveBeenCalledTimes(2);
+});
+
+it("compares a rename with the name it opened with, not a newer one from elsewhere", async () => {
+  const user = userEvent.setup();
+  const save = vi.fn(async () => {});
+  const { rerender } = render(
+    <RenamableSection save={save} toggle={vi.fn()} title="Work" />,
+  );
+  await user.dblClick(screen.getByLabelText("Work"));
+  // Another device renames it while this editor is open and untouched.
+  rerender(<RenamableSection save={save} toggle={vi.fn()} title="Research" />);
+  await user.keyboard("{Enter}");
+  expect(save).not.toHaveBeenCalled();
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  // An edit is checked against the name it started from.
+  await user.dblClick(screen.getByLabelText("Research"));
+  await user.keyboard("Design{Enter}");
+  expect(save).toHaveBeenCalledExactlyOnceWith("Design", "Research");
 });

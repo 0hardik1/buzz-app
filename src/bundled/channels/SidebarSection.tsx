@@ -157,7 +157,7 @@ export function SidebarSection({
     | {
         editing: boolean;
         start(): void;
-        save(name: string): Promise<unknown>;
+        save(name: string, openedWith: string): Promise<unknown>;
         /** `focus` when the edit ended with focus still in it. */
         stop(focus: boolean): void;
       }
@@ -644,10 +644,15 @@ function SectionNameEditor({
   stop,
 }: {
   title: string;
-  save(name: string): Promise<unknown>;
+  save(name: string, openedWith: string): Promise<unknown>;
   stop(focus: boolean): void;
 }) {
   const form = useRef<HTMLFormElement>(null);
+  // The title this edit started from: a rename from another device while it
+  // is open must not count as a change here, nor be overwritten unawares.
+  const [openedWith] = useState(title);
+  // The edit's own stop, so a late save closes only this edit.
+  const [stopThis] = useState(() => stop);
   const [name, setName] = useState(title);
   const [error, setError] = useState("");
   const saving = useRef(false);
@@ -655,16 +660,16 @@ function SectionNameEditor({
   const done = useRef(false);
   const end = () => {
     done.current = true;
-    stop(!!form.current?.contains(document.activeElement));
+    stopThis(!!form.current?.contains(document.activeElement));
   };
   const finish = async (keep: boolean) => {
     const next = name.trim();
     if (saving.current || done.current) return;
-    if (!keep || !next || next === title) return end();
+    if (!keep || !next || next === openedWith) return end();
     saving.current = true;
     setError("");
     try {
-      await save(next);
+      await save(next, openedWith);
       end();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));

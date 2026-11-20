@@ -633,7 +633,13 @@ export function ChannelInventory({
   const [creatingSection, setCreatingSection] = useState(false);
   const createSectionTrigger = useRef<HTMLButtonElement>(null);
   // The workspace whose name is being edited in its card header.
-  const [namingWorkspace, setNamingWorkspace] = useState<string>();
+  // One inline rename at a time. Each edit gets its own number so a late save
+  // from an earlier edit cannot close a newer one.
+  const [namingWorkspace, setNamingWorkspace] = useState<{
+    key: string;
+    edit: number;
+  }>();
+  const workspaceEdits = useRef(0);
   const [creatingFor, setCreatingFor] = useState<{
     channel: ChannelSummary;
     surface?: ChannelMenuSurface;
@@ -1864,19 +1870,31 @@ export function ChannelInventory({
                           renamingSection === section.key
                         }
                         rename={
-                          preferences.sectionRenameWritable &&
-                          section.key.startsWith("group:")
+                          section.key.startsWith("group:") &&
+                          // An open editor keeps its draft while writes are
+                          // briefly unavailable; its save reports why.
+                          (preferences.sectionRenameWritable ||
+                            namingWorkspace?.key === section.key)
                             ? {
-                                editing: namingWorkspace === section.key,
-                                start: () => setNamingWorkspace(section.key),
-                                save: (name) =>
+                                editing: namingWorkspace?.key === section.key,
+                                start: () =>
+                                  setNamingWorkspace({
+                                    key: section.key,
+                                    edit: ++workspaceEdits.current,
+                                  }),
+                                save: (name, openedWith) =>
                                   preferences.renameSection(
                                     section.key.slice("group:".length),
                                     name,
-                                    section.title,
+                                    openedWith,
                                   ),
                                 stop: (focus) => {
-                                  setNamingWorkspace(undefined);
+                                  const edit = namingWorkspace?.edit;
+                                  setNamingWorkspace((current) =>
+                                    current?.edit === edit
+                                      ? undefined
+                                      : current,
+                                  );
                                   if (focus)
                                     requestAnimationFrame(() =>
                                       sidebar.list.current
