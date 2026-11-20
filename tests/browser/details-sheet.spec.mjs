@@ -1,5 +1,6 @@
 import { hoverMessage } from "./message-actions.mjs";
 import { test, expect } from "./fixture.mjs";
+import { holdReadingFocusNow, releaseReadingFocus } from "./reading.mjs";
 import { open, virtuaIdle } from "./timeline.mjs";
 
 test.use({
@@ -354,6 +355,10 @@ test("thread sheet keeps its reply composer usable and restores the channel draf
   await page.screenshot({
     path: test.info().outputPath("thread-sheet-short.png"),
   });
+  // Keep reading focus out of the thread until the sheet reopens, so the
+  // reading dwell cannot mark the long reply read before the reopen checks
+  // where an unread reply places the thread.
+  await holdReadingFocusNow(page);
   const longReply = app.append(
     "primary",
     "alpha",
@@ -417,6 +422,7 @@ test("thread sheet keeps its reply composer usable and restores the channel draf
   await expect(history).toHaveAttribute("aria-busy", "false");
   // Reopening starts at the first unread reply, as a side-pane thread does:
   // the long reply begins in view instead of the thread scrolling past it.
+  await expect(history.locator("[data-new-messages-boundary]")).toBeAttached();
   await expect
     .poll(() =>
       history.evaluate((element, id) => {
@@ -428,6 +434,7 @@ test("thread sheet keeps its reply composer usable and restores the channel draf
       }, longReply.id),
     )
     .toBe(true);
+  await releaseReadingFocus(page);
   // A sheet belongs to this conversation, not to the whole application.
   // Real clicks prove the sidebar and global controls remain reachable.
   await page.getByRole("button", { name: "Beta", exact: true }).click();
@@ -882,6 +889,9 @@ test("long thread sheet keeps an expanded branch mounted after collapsed activit
   });
   await expect(history.locator("[data-thread-window]")).toBeVisible();
   await expect(history).not.toHaveAttribute("data-positioning");
+  // Virtua drops pointer events while the opening scroll settles; a click
+  // then lands on the window instead of the branch's button.
+  await virtuaIdle(page, history);
   await history
     .locator(`[data-message-id="${branch.id}"]`)
     .locator("xpath=ancestor::*[@data-thread-window-index][1]")
