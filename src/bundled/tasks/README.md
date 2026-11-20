@@ -1,6 +1,18 @@
-# Tasks (Task v2)
+# Tasks
 
-A shared, synced task record for agent work. Tasks are **NIP-AR artifacts**,
+Track shared agent work with completion conditions, evidence links and dated progress notes.
+
+## Getting started
+
+1. Enable **Tasks** in your plugin settings, then open **Tasks** in the app dock.
+2. Choose **New task**, explain why it matters and what "done" means, then add any useful links.
+3. Ask your agent to find, update or add progress to a task. Its latest log note is the summary.
+
+---
+
+## Details
+
+Tasks are **NIP-AR artifacts**,
 not process-local todos or a new SQL table. The page reads the plugin's durable
 IndexedDB artifact collection; the host synchronizes that collection with the
 relay. Where incremental sync is unavailable, the table makes a bounded current
