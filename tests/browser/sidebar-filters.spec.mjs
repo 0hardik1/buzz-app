@@ -498,3 +498,52 @@ test.describe("filter action focus", () => {
     await expect(work.locator("details > summary")).toBeFocused();
   });
 });
+
+test.describe("with no saved Team filter", () => {
+  test.use({ showAllCards: [] });
+
+  // Choosing All after a failed choice retires it: Retry must not bring the
+  // failed choice back, and All needs no relay write when none is saved.
+  test("All after a failed Unreads save leaves nothing to retry", async ({
+    page,
+    app,
+  }) => {
+    await page.goto(app.origin);
+    await openPage(page, "Messages");
+    const choose = async (name) => {
+      await page
+        .getByRole("button", { name: "More actions for Team", exact: true })
+        .click();
+      await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+      await page.getByRole("menuitemradio", { name, exact: true }).click();
+    };
+    const pattern = "**/sidebar-filter";
+    await page.route(pattern, (route) => {
+      app.report.sidebarPreferenceFailures ??= [];
+      app.report.sidebarPreferenceFailures.push(route.request().url());
+      return route.fulfill({
+        status: 502,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Filter could not be saved." }),
+      });
+    });
+    await choose("Unreads");
+    const retry = page.getByRole("button", {
+      name: "Retry filter",
+      exact: true,
+    });
+    await expect(retry).toBeVisible();
+    await page.unroute(pattern);
+    const published = app.report.sidebarPublications?.length ?? 0;
+    await choose("All");
+    await expect(retry).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "More actions for Team", exact: true })
+      .click();
+    await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+    await expect(
+      page.getByRole("menuitemradio", { name: "All", exact: true }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(app.report.sidebarPublications?.length ?? 0).toBe(published);
+  });
+});

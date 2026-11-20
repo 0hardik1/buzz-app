@@ -1194,9 +1194,11 @@ export function ChannelInventory({
     setSidebarFilterAll(scope, key, mode === "all");
     const saved = key.startsWith("group:") ? `section:${key.slice(6)}` : key;
     // All lives on this device; with no saved filter to clear, the relay
-    // already says All.
-    if (mode === "all" && preferences.data?.filters?.[saved] === undefined)
+    // already says All. A failed choice it replaces is retired either way.
+    if (mode === "all" && preferences.data?.filters?.[saved] === undefined) {
+      preferences.dismissFilterError(saved);
       return Promise.resolve();
+    }
     return preferences.setFilter(
       saved,
       mode,
