@@ -2830,6 +2830,11 @@
     background: var(--interaction-row-hover);
     outline-offset: -2px;
   }
+  /* A compact popover is narrow, so its preference rows keep a tighter gap
+     and a short title beside its choice, such as Time range, stays on one line. */
+  .buzz-popover-popup[data-size="compact"] .buzz-preference-row {
+    gap: var(--space-3);
+  }
   .buzz-popover-popup[data-size="wide"] {
     width: 24rem;
   }
