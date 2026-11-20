@@ -64,6 +64,7 @@ export function useChannelRoster(
       previous.ignored === ignored &&
       previous.activityFilter === activityFilter &&
       previous.list.activityStatus === next.activityStatus &&
+      previous.list.activityTransient === next.activityTransient &&
       previous.list.error === next.error &&
       sameRoster(previous.list, next, (channel) =>
         activityFilter?.(channel) ? ignoredWithActivity : ignored,

@@ -1253,6 +1253,7 @@ export function createRelaySession(
   let activityChannelList: ChannelList = Object.freeze({
     ...sourceChannelList,
     activityStatus: channelActivity.status(),
+    ...(channelActivity.transient() && { activityTransient: true as const }),
   });
   let channelActivityRevision = channelActivity.revision();
   const projectedChannels = new WeakMap<ChannelSummary, ChannelSummary>();
@@ -1301,6 +1302,9 @@ export function createRelaySession(
       activityChannelList = Object.freeze({
         ...snapshot,
         activityStatus: channelActivity.status(),
+        ...(channelActivity.transient() && {
+          activityTransient: true as const,
+        }),
         channels: projected.every(
           (channel, index) => channel === snapshot.channels[index],
         )
@@ -2659,6 +2663,19 @@ export function createRelaySession(
           sidebarPreferences.queries.subscribe,
           () => loadState(sidebarPreferences.queries.snapshot()),
           () => void sidebarPreferences.queries.refresh(),
+        ),
+        // Recent sorting and the 30-day filter's activity read.
+        recoverable(
+          channelActivity.subscribe,
+          () =>
+            loadState({
+              status: channelActivity.status(),
+              transient: channelActivity.transient() || undefined,
+            }),
+          () => {
+            activityRosterKey = undefined;
+            refreshChannelActivity();
+          },
         ),
         // Threads a person reads; see createThreadView's `recover`.
         recoverable(
