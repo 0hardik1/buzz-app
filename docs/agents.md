@@ -1035,7 +1035,7 @@ unavailable; anything that acts on an agent's absence (automatic-recipient
 inference, Bestie promotion, telling an outside reference from your agent) must
 honor `current`, since a kept list can lack an agent made since. A failed read
 retries on its own with jittered backoff while the list is needed, unless reading
-again cannot fix it (the library snapshot then has `retry: false`); explicit Retry
+again cannot fix it (the reader then reports `retry: false`); explicit Retry
 and reconnect still reread. `retrying` marks a failure that will read again on its
 own: the agent menu then says so instead of offering Retry, and a pill with no
 agent yet keeps loading.
