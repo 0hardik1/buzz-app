@@ -804,16 +804,16 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   await page.evaluate(() => window.finishAvatarRecording());
   await expect(ring).toHaveCount(0);
   const tools = ["You", "Background", "Photo", "Retake the recording"];
-  const widths = await Promise.all(
+  const circles = await Promise.all(
     tools.map((name) =>
-      page
-        .getByRole("button", { name, exact: true })
-        .evaluate(
-          (button) => button.parentElement.getBoundingClientRect().width,
-        ),
+      page.getByRole("button", { name, exact: true }).boundingBox(),
     ),
   );
-  expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(1);
+  const gaps = circles.slice(1).map((circle, index) => {
+    const previous = circles[index];
+    return circle.x - (previous.x + previous.width);
+  });
+  expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(1);
   const captionTops = await Promise.all(
     tools.map((name) =>
       page.getByRole("button", { name, exact: true }).evaluate((button) => {
