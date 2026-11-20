@@ -1,6 +1,6 @@
 import { generateSecretKey } from "nostr-tools";
 import { test, expect } from "./fixture.mjs";
-import { newChat } from "./navigation.mjs";
+import { newChat, showAllInCard } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 
 const solo = "33333333-3333-4333-8333-333333333333";
@@ -530,13 +530,7 @@ test("the unified sidebar fills its rows and keeps heading actions in their row 
   const workspace = sidebar.locator('[data-sidebar-section^="group:"]').filter({
     has: page.locator('summary[aria-label="Work"]'),
   });
-  // A new card starts on the last 30 days, and fixture history is from 2023.
-  await workspace
-    .getByRole("button", { name: "More actions for Work", exact: true })
-    .click();
-  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-  await page.getByRole("menuitemradio", { name: "All", exact: true }).click();
-  await page.keyboard.press("Escape");
+  await showAllInCard(page, "Work");
   const chat = workspace.locator(`button[data-channel-id="${solo}"]`);
   await chat.click();
   await expect(chat).toHaveAttribute("aria-current", "page");

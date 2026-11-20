@@ -268,3 +268,15 @@ export function pageChoice(group, name) {
     .getByRole("option", { name, exact: true })
     .or(group.getByRole("row", { name, exact: true }));
 }
+
+/** A card made during a test starts on the last 30 days, and fixture history
+ * is from 2023: show the card's every conversation, as its menu's All does. */
+export async function showAllInCard(page, title) {
+  await page
+    .getByRole("button", { name: `More actions for ${title}`, exact: true })
+    .click();
+  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+  await page.getByRole("menuitemradio", { name: "All", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+}
