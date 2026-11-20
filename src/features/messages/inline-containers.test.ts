@@ -21,7 +21,7 @@ import {
   opened,
   type Placed,
   placement,
-  sent,
+  closedOnSend,
 } from "./inline-containers";
 
 const channel = createComposerHandle(channelComposer("C"));
@@ -88,9 +88,9 @@ it("closes the details over a composer that sends, only there", () => {
   const box = replyBox("R");
   const other = createComposerHandle(channelComposer("D"));
   const list = open([], thread("R"), details("M", box), details("N", other));
-  expect(shown(sent(list, box))).toEqual(["thread:C:R", "details:N"]);
+  expect([...closedOnSend(list, box)]).toEqual(["details:M"]);
   // A thread is not closed by a send from the composer under it.
-  expect(shown(sent(list, channel))).toEqual(shown(list));
+  expect([...closedOnSend(list, channel)]).toEqual([]);
 });
 
 it("closes what is over a composer that is gone, as a closed tab's", () => {

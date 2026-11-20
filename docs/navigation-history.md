@@ -60,13 +60,18 @@ retire the sheet's visits, and those of the sheets open on it, so neither Back
 nor Forward shows it again; so does a send that closes the details over its
 composer. Open as tab keeps the address, adding no visit. Arriving at a visit
 the sheets have not seen, as from a link or another address in the same
-channel, keeps only the sheets that address names and what they are open on.
+channel, keeps only the sheets that address names and what they are open on;
+a reader it names that is already open stays as it is.
 Media viewers are not addresses: they dismiss only themselves.
 
 A sheet never selects another channel. Over another channel's thread tab, its
 address stays this conversation's: a reader names its message's channel as
 `reader.channelId`, a link panel drops that channel's thread root, and a
-thread of that channel adds no visit.
+thread of that channel adds no visit. Such a sheet belongs to that tab, not to
+the selected channel: selecting another channel leaves it open while the tab
+is, Back to details there waits for the tab's composer, and closing the tab
+retires their visits with the tab's own, wherever they are in history. A diff
+keeps its visits: it can still open in its own tab.
 
 A `reader` address holds the message's kind (`details` or `diff`), its id,
 and the root of its thread when it is a reply, which names the composer it

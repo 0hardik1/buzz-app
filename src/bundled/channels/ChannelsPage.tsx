@@ -1486,6 +1486,14 @@ function ChannelWorkspace({
     useMemo(() => ({ navigator, address: inlineAddress }), [navigator]),
   );
   inlineOpener.current = containers.opener;
+  // Closing a thread's tab retires the visits that selected it, and those of
+  // readers over its composer, wherever they are in history.
+  const threadTabVisits = (
+    tab: Extract<ConversationTab, { kind: "thread" }>,
+  ) => [
+    ...tabState.threadVisits(tab.channelId, rootOfTab(tab)),
+    ...containers.opener.retire(threadComposer(tab.channelId, rootOfTab(tab))),
+  ];
   const presentedVisit =
     !!pageNavigation && containers.opener.presents(pageNavigation.entryId);
   // A visit to a reader's address (a reload, a link) reads as its message's;
@@ -1570,9 +1578,7 @@ function ChannelWorkspace({
       if (!navigator || !fallback) return;
       const visits = [
         ...tabs.flatMap((tab) =>
-          tab.kind === "thread"
-            ? tabState.threadVisits(tab.channelId, rootOfTab(tab))
-            : [],
+          tab.kind === "thread" ? threadTabVisits(tab) : [],
         ),
         ...entries.flatMap((entry) =>
           historyPanel(entry)
@@ -1604,11 +1610,7 @@ function ChannelWorkspace({
       // Retire this tab's addressed visits, including ones behind the cursor.
       const fallback = closeTarget(tabPane(tab));
       if (navigator && fallback) {
-        dismissContent(
-          tabState.threadVisits(tab.channelId, rootOfTab(tab)),
-          fallback,
-          tabPane(tab),
-        );
+        dismissContent(threadTabVisits(tab), fallback, tabPane(tab));
       }
       const trigger = threadTrigger.current;
       // While tabs remain, the opener takes focus only from within their pane.

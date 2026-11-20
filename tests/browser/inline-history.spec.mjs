@@ -518,3 +518,192 @@ test("a link panel over another channel's thread tab keeps the selected channel"
   await expect(panel()).toContainText("A PR");
   await staysOnAlpha(page);
 });
+
+// Named for its root once Beta's messages have loaded.
+const betaTab = (page) =>
+  page.getByRole("tab", { name: /^(Thread · Beta|Beta root)$/ });
+async function openOtherChannelDetails(page, app) {
+  const opened = await openOtherChannelTab(page, app, (root) =>
+    app.append(
+      "primary",
+      "beta",
+      longDetails,
+      false,
+      false,
+      root.id,
+      undefined,
+      [["audience", "details"]],
+    ),
+  );
+  await opened.thread.getByRole("button", { name: "Show more" }).click();
+  const reader = () => opened.thread.locator("[data-details-sheet-surface]");
+  await expect(reader()).toContainText("The end.");
+  return { ...opened, reader };
+}
+
+test("Back to details over another channel's thread tab opens them again", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const { inner, reader } = await openOtherChannelDetails(page, app);
+  const at = await hashTarget(page);
+  expect(at.reader).toMatchObject({ messageId: inner.id, channelId: "beta" });
+  await channel(page, "Beta").first().click();
+  await expect(
+    page.getByRole("textbox", { name: "Message #Beta" }),
+  ).toBeVisible();
+  await back(page);
+  await expect(
+    page.getByRole("textbox", { name: "Message #Alpha" }),
+  ).toBeVisible();
+  await expect(betaTab(page)).toBeVisible();
+  await expect(reader()).toContainText("The end.");
+  expect(await hashTarget(page)).toEqual(at);
+});
+
+test("closing another channel's thread tab retires the details over it", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  await channel(page, "Beta").first().click();
+  await expect(
+    page.getByRole("textbox", { name: "Message #Beta" }),
+  ).toBeVisible();
+  await channel(page, "Alpha").first().click();
+  await expect(
+    page.getByRole("textbox", { name: "Message #Alpha" }),
+  ).toBeVisible();
+  const { reader } = await openOtherChannelDetails(page, app);
+  const tab = betaTab(page);
+  await back(page);
+  await expect(reader()).toHaveCount(0);
+  await tab.click({ button: "middle" });
+  await expect(tab).toHaveCount(0);
+  await back(page);
+  // No step lands on the closed reader's address, which has neither its tab
+  // nor its sheet.
+  for (;;) {
+    const target = await hashTarget(page);
+    if (target.reader?.channelId === "beta")
+      throw new Error(
+        `Forward reached the closed reader ${JSON.stringify(target)}`,
+      );
+    if (await forward(page).isDisabled()) break;
+    await forward(page).click();
+    await expect.poll(() => hashTarget(page)).not.toEqual(target);
+  }
+  await expect(tab).toHaveCount(0);
+  await expect(sheets(page)).toHaveCount(0);
+});
+
+test("a visit naming a reader in a thread keeps that thread and closes the rest", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const { thread, inner } = await openOtherChannelTab(page, app, (root) =>
+    app.append(
+      "primary",
+      "beta",
+      longDetails,
+      false,
+      false,
+      root.id,
+      undefined,
+      [["audience", "details"]],
+    ),
+  );
+  // The inline thread is a Thread too.
+  const tab = thread.filter({
+    has: page.locator(`[data-message-id="${inner.id}"]`),
+  });
+  const root = app.append("primary", "alpha", "Alpha root", true);
+  app.append(
+    "primary",
+    "alpha",
+    `Brief alpha\n\n${"Alpha detail. ".repeat(60)}\n\nAlpha end.`,
+    false,
+    false,
+    root.id,
+    undefined,
+    [["audience", "details"]],
+  );
+  const sheet = await openThread(page, root);
+  await sheet.getByRole("button", { name: "Show more" }).click();
+  const nested = sheet.locator("[data-details-sheet-surface]");
+  await expect(nested).toContainText("Alpha end.");
+  const named = await hashTarget(page);
+  await tab.getByRole("button", { name: "Show more" }).click();
+  const other = tab.locator("[data-details-sheet-surface]");
+  await expect(other).toContainText("The end.");
+  await visitWithin(page, named);
+  await expect(other).toHaveCount(0);
+  // Only the thread and its reader remain, once the rest has closed.
+  await expect(sheets(page)).toHaveCount(2);
+  await expect(sheet).toBeVisible();
+  await expect(nested).toContainText("Alpha end.");
+});
+
+test("closing another channel's thread tab keeps a diff over it, for its own tab", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  let change;
+  const { thread, inner } = await openOtherChannelTab(page, app, (root) => {
+    change = app.append(
+      "primary",
+      "beta",
+      diff,
+      false,
+      false,
+      root.id,
+      undefined,
+      [["file", "a.ts"]],
+      undefined,
+      40008,
+    );
+    return app.append(
+      "primary",
+      "beta",
+      longDetails,
+      false,
+      false,
+      root.id,
+      undefined,
+      [["audience", "details"]],
+    );
+  });
+  const tab = betaTab(page);
+  await thread.getByRole("button", { name: "Show more" }).click();
+  const reader = () => thread.locator("[data-details-sheet-surface]");
+  await expect(reader()).toContainText("The end.");
+  const details = await hashTarget(page);
+  expect(details.reader.messageId).toBe(inner.id);
+  // The diff over the same thread, as a link to it opens.
+  await visitWithin(page, {
+    ...details,
+    reader: { ...details.reader, kind: "diff", messageId: change.id },
+  });
+  await expect(reader()).toHaveCount(1);
+  await expect(reader()).not.toContainText("The end.");
+  await back(page);
+  // Once the diff has closed.
+  await expect(reader()).toHaveCount(1);
+  await expect(reader()).toContainText("The end.");
+  await back(page);
+  await expect(reader()).toHaveCount(0);
+  await tab.click({ button: "middle" });
+  await expect(tab).toHaveCount(0);
+  // Forward skips the details, retired with the tab, and opens the diff in
+  // its own tab.
+  await forward(page).click();
+  await expect(page.getByRole("tab", { name: /a\.ts/ })).toBeVisible();
+  expect((await hashTarget(page)).reader).toMatchObject({
+    kind: "diff",
+    messageId: change.id,
+  });
+  await expect(sheets(page)).toHaveCount(0);
+});

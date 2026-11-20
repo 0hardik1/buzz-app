@@ -222,14 +222,14 @@ export function opened(
 /** Closing an entry closes everything open on it. */
 export const closed = (list: readonly Placed[], id: string) =>
   closeAll(list, new Set([id]));
-/** A send from `composer` closes the details over it. */
-export const sent = (list: readonly Placed[], composer: ComposerHandle) =>
-  closeAll(
+/** What a send from `composer` closes: the details over it. */
+export const closedOnSend = (
+  list: readonly Placed[],
+  composer: ComposerHandle,
+) =>
+  openIds(
     list,
-    openIds(
-      list,
-      (item) => item.composer === composer && !!behavior(item).closesOnSend,
-    ),
+    (item) => item.composer === composer && !!behavior(item).closesOnSend,
   );
 /** A composer that is gone for good, as a closed tab's, closes what is over
  * it. */
@@ -251,11 +251,16 @@ export function movedToTab(list: readonly Placed[], id: string) {
   if (!moving) return list as Placed[];
   return closed(list, id).filter((item) => item.key !== moving.key);
 }
-/** Leaving a channel closes what is over its composers. */
-export const left = (list: readonly Placed[], channelId: string | undefined) =>
-  list.some((item) => channelOf(item) !== channelId)
-    ? list.filter((item) => channelOf(item) === channelId)
-    : (list as Placed[]);
+/** Leaving a channel closes what is over its composers, except what `stays`,
+ * as over another channel's side tab that is still open. */
+export function left(
+  list: readonly Placed[],
+  channelId: string | undefined,
+  stays: (item: Placed) => boolean = () => false,
+) {
+  const keeps = (item: Placed) => channelOf(item) === channelId || stays(item);
+  return list.every(keeps) ? (list as Placed[]) : list.filter(keeps);
+}
 const channelOf = (item: Placed) => composerChannel(item.composer?.name ?? "");
 /** Navigating inside an open entry replaces what it reads, in place. */
 export const updated = (
@@ -433,6 +438,10 @@ export type InlineOpener = Readonly<{
   outlet(handle: ComposerHandle): () => void;
   sent(composer: ComposerHandle): void;
   composerGone(composer: ComposerHandle): void;
+  /** A tab closing for good takes what was ever open over its composer, at
+   * any visit, that has nowhere else to open: returns their visits, for the
+   * tab's dismissal to retire. */
+  retire(name: ComposerName): string[];
   store: Store;
   /** The workspace draws its panels. */
   renderPanel: PanelRenderer;
@@ -522,11 +531,14 @@ export function createOpener(
       const again = live(item.composer?.name);
       if (again) return { ...item, composer: again, waiting: false };
       const name = item.composer?.name;
+      const target = history?.navigator.snapshot().entry.target;
       const returning =
         !!name &&
         (picture.some((other) => provides(other) === name) ||
-          name ===
-            channelComposerOf(history?.navigator.snapshot().entry.target));
+          name === channelComposerOf(target) ||
+          // With nowhere else to open, it waits for the thread its address
+          // names, as another channel's side tab.
+          (!item.openAsTab && name === readerComposerOf(target)));
       if (returning) return { ...item, waiting: true };
     }
     if (item.openAsTab) {
@@ -633,7 +645,18 @@ export function createOpener(
       store.set((items) => updated(items, id, target, at));
     },
     presents: (id) => made.has(id),
-    requestReader: (target) => request(target && entryId(target)),
+    // A reader already open stays as it is.
+    requestReader: (target) =>
+      request(
+        target &&
+          !store
+            .get()
+            .some(
+              (item) => item.open && entryId(item.target) === entryId(target),
+            )
+          ? entryId(target)
+          : undefined,
+      ),
     requestedReader: {
       get: () => requested,
       subscribe: (listener) => {
@@ -685,10 +708,7 @@ export function createOpener(
     },
     // A send closes the details over its composer as ✕ does, visits and all.
     sent: (composer) => {
-      for (const id of openIds(
-        store.get(),
-        (item) => item.composer === composer && !!behavior(item).closesOnSend,
-      ))
+      for (const id of closedOnSend(store.get(), composer))
         if (
           store.get().some((item) => item.open && entryId(item.target) === id)
         )
@@ -696,6 +716,30 @@ export function createOpener(
     },
     composerGone: (composer) =>
       store.set((items) => composerGone(items, composer)),
+    retire: (name) => {
+      const over = (list: readonly Placed[]) => {
+        const ids = withStack(
+          list,
+          openIds(list, (item) => item.composer?.name === name),
+        );
+        return list.filter(
+          (item) =>
+            item.open &&
+            ids.has(entryId(item.target)) &&
+            // A reader with its own tab can still open after its thread's tab closes.
+            !item.openAsTab,
+        );
+      };
+      const items = [store.get(), ...pictures.values()].flatMap(over);
+      store.set((list) =>
+        closeAll(
+          list,
+          openIds(list, (item) => item.composer?.name === name),
+        ),
+      );
+      forget(new Set(items.map((item) => item.opening ?? item.key)));
+      return [...new Set(items.flatMap((item) => item.visits ?? []))];
+    },
     store,
     renderPanel: (target, controls) => renderPanel.current?.(target, controls),
   };
@@ -704,6 +748,14 @@ export function createOpener(
 const channelComposerOf = (target: OpenTarget | undefined) =>
   target?.kind === "conversation"
     ? channelComposer(target.channelId)
+    : undefined;
+/** The thread a reader's address reads over. */
+const readerComposerOf = (target: OpenTarget | undefined) =>
+  target?.kind === "conversation" && target.reader?.rootId
+    ? threadComposer(
+        target.reader.channelId ?? target.channelId,
+        target.reader.rootId,
+      )
     : undefined;
 
 /** The opener rows use: their workspace's, or one of their own that opens
@@ -751,8 +803,14 @@ export function useInlineContainerList(
     [opener, navigator],
   );
   useEffect(() => {
-    store.set((items) => left(items, channelId));
-  }, [store, channelId]);
+    store.set((items) =>
+      left(
+        items,
+        channelId,
+        (item) => !!item.waiting || (inline && !!overlayHost(item.composer)),
+      ),
+    );
+  }, [store, channelId, inline]);
   // Closes them all, as when their conversation is hidden.
   const closeEverything = useCallback(
     () => store.set((items) => left(items, undefined)),
