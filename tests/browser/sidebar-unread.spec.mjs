@@ -337,30 +337,21 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
   await expect(cue(page, "below")).toHaveAccessibleName(
     /^\d+ unread conversations? below$/,
   );
-  await expect(cue(page, "below")).toHaveAttribute("data-attention", "true");
+  await expect(cue(page, "below")).toHaveAttribute("data-variant", "prominent");
   const transitionProperties = await cue(page, "below").evaluate((el) =>
     getComputedStyle(el).transitionProperty.split(", "),
   );
   expect(transitionProperties).toEqual(["background-color", "color"]);
   await expectCueHidden(page, "above");
   await releaseReadingFocus(page);
-  // Keep actionable DMs below while moving only ordinary unread above: priority
-  // is derived from the destinations on each edge, not from the whole roster.
+  // Keep actionable DMs below while moving only ordinary unread above: each
+  // edge counts only its own destinations that wait on you.
   await scrollRowAbove(page, "beta");
   await expect.poll(() => inView(page, "beta")).toBe(false);
-  await expect(cue(page, "above")).toBeVisible();
-  await expect(cue(page, "above")).toHaveText(/\d+ unread$/);
-  await expect(cue(page, "above").locator("..")).toHaveCSS("top", "12px");
-  await expect(cue(page, "above")).toHaveAccessibleName(
-    /^\d+ unread conversations? above$/,
-  );
-  await expect(cue(page, "above")).toHaveAttribute("data-attention", "false");
-  await expect(cue(page, "below")).toHaveAttribute("data-attention", "true");
-  // Only attention earns the strong fill; ordinary unread is the quiet cue.
-  await expect(cue(page, "above")).toHaveAttribute("data-variant", "subtle");
+  // Ordinary backlog earns no cue; only what waits on you does.
+  await expectCueHidden(page, "above");
   await expect(cue(page, "below")).toHaveAttribute("data-variant", "prominent");
   await scroll(page, 0);
-  await expect(cue(page, "below")).toHaveAttribute("data-attention", "true");
   await scroll(page, 1800);
   await expect(cue(page, "above")).toBeVisible();
   await expect(cue(page, "below")).toBeVisible();
@@ -439,7 +430,7 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
   await expect(row(page, "dm-030")).toHaveAttribute("aria-current", "page");
 });
 
-test("at default card heights the edge cues count only rows they can reach", async ({
+test("at default card heights the edge cue leads to the card's badge for rows past its edge", async ({
   page,
   app,
 }) => {
@@ -450,27 +441,22 @@ test("at default card heights the edge cues count only rows they can reach", asy
   await expect(dm.locator("xpath=ancestor::*[@data-card-clipped]")).toHaveCount(
     1,
   );
-  // Scrolling can't reach it, so no cue points at it.
-  await scroll(page, 1e6);
-  await expectCueHidden(page, "below");
-  await scroll(page, 0);
-  // Once the card shows it, the cue reveals it: visible, live and focused.
-  const grip = sidebar(page).getByRole("separator", {
-    name: "Resize Direct messages",
+  // The card's badge stands in for it, and the edge cue leads there.
+  const badge = sidebar(page).getByRole("button", {
+    name: /^Show \d+ unread conversations? below in Direct messages$/,
   });
-  await grip.focus();
-  await grip.press("Enter");
+  await expect(badge).toBeAttached();
+  await scroll(page, 0);
+  await expect(cue(page, "below")).toBeVisible();
+  await cue(page, "below").click();
+  await expect(badge).toBeFocused();
+  await expect(badge).toBeInViewport();
+  // The badge opens the card to the lowest of them, then goes away.
+  await badge.click();
   await expect(dm.locator("xpath=ancestor::*[@data-card-clipped]")).toHaveCount(
     0,
   );
-  await expect(cue(page, "below")).toBeVisible();
-  await cue(page, "below").click();
-  await expect.poll(() => inView(page, "dm-030")).toBe(true);
-  const focused = page.locator("button[data-channel-id]:focus");
-  await expect(focused).toBeInViewport();
-  expect(
-    await focused.evaluate((element) => element.closest("[inert]") === null),
-  ).toBe(true);
+  await expect(badge).toHaveCount(0);
 });
 
 test("resizing, collapsed groups and new unread evidence update only the displayed roster", async ({
@@ -489,17 +475,16 @@ test("resizing, collapsed groups and new unread evidence update only the display
   await channelsSummary.click();
   await cue(page, "below").click();
   await expect.poll(() => inView(page, "dm-030")).toBe(true);
-  // Collapse the preceding group without scrolling it into view first.
+  // Collapse the preceding group without scrolling it into view first. Its
+  // rows carry only ordinary backlog, which earns no cue.
   await channelsSummary.evaluate((element) => element.click());
-  await expect(cue(page, "above")).toBeVisible();
-  await cue(page, "above").click();
-  await expect.poll(() => inView(page, "Beta")).toBe(true);
+  await expectCueHidden(page, "above");
+  await channelsSummary.evaluate((element) => element.click());
   await expect(team.locator("details")).toHaveAttribute("open", "");
   const controlledContent = await channelsSummary.getAttribute("aria-controls");
   await expect(page.locator(`[id="${controlledContent}"]`)).not.toHaveAttribute(
     "inert",
   );
-  await expect(row(page, "Beta")).toBeFocused();
   await expect(row(page, "Beta")).toBeEnabled();
   await channelsSummary.focus();
   await page.keyboard.press("Tab");
@@ -563,7 +548,7 @@ test("resizing, collapsed groups and new unread evidence update only the display
   await expectCueHidden(page, "below");
 });
 
-test("session changes discard the previous sidebar targets and manual unread still participates", async ({
+test("session changes discard the previous sidebar targets, and manual unread alone earns no cue", async ({
   page,
   app,
 }) => {
@@ -613,7 +598,8 @@ test("session changes discard the previous sidebar targets and manual unread sti
     ).toHaveCount(0);
     await showAllRows(page);
     await scroll(page, 1800);
-    await expect(cue(page, "above")).toBeVisible();
+    // Marked unread is ordinary backlog here: bold, but not a cue.
+    await expectCueHidden(page, "above");
     // Completing delayed preferences must not replace the user's newer viewport.
     const refreshed = page.waitForResponse(
       (response) =>
@@ -626,8 +612,6 @@ test("session changes discard the previous sidebar targets and manual unread sti
     expect(await list(page).evaluate((element) => element.scrollTop)).toBe(
       1800,
     );
-    await cue(page, "above").click();
-    await expect.poll(() => inView(page, "alpha")).toBe(true);
     await expect(
       row(page, "alpha").locator(
         '[data-channel-unread][data-priority="false"]',

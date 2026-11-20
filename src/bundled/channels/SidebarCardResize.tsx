@@ -166,12 +166,12 @@ export function SidebarCardResize({
 
   return (
     <>
-      <div className={styles.cardBody}>
+      <div className={styles.cardBody} data-card-body="">
         <div ref={list} className={styles.cardRows} data-card-rows="">
           {children}
         </div>
         {waiting.count > 0 && (
-          <span ref={badge} className={styles.cardWaiting}>
+          <span ref={badge} className={styles.cardWaiting} data-card-waiting="">
             <Button
               variant="prominent"
               size="xs"

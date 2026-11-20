@@ -128,7 +128,7 @@ it("reveals the heading for an unread chat in a closed Solo workspace", async ()
             data-solo-destination-id="chat"
           >
             Solo chat
-            <span data-channel-unread="" />
+            <span data-channel-unread="" data-priority="true" />
           </button>
         </SidebarSection>
       </SidebarUnread>
@@ -231,12 +231,23 @@ it("counts each destination once and suppresses any with a partly visible copy",
   expect(screen.getAllByRole("button", { name: "duplicate" })[0]).toHaveFocus();
 });
 
-it("leaves rows past a resized card's edge out of the edge cues", async () => {
+it("leads to a card's badge for rows past its edge, and skips cards without one", async () => {
   render(
     <SidebarUnread>
-      {row("reachable", 340)}
-      <div data-card-row="" data-card-clipped="">
-        {row("clipped", 380)}
+      <div data-card-body="">
+        <div data-card-row="" data-card-clipped="">
+          {row("clipped", 380)}
+        </div>
+        <span data-card-waiting="">
+          <button type="button" data-top={360}>
+            badge
+          </button>
+        </span>
+      </div>
+      <div data-card-body="">
+        <div data-card-row="" data-card-clipped="">
+          {row("no-badge", 420)}
+        </div>
       </div>
     </SidebarUnread>,
   );
@@ -246,7 +257,22 @@ it("leaves rows past a resized card's edge out of the edge cues", async () => {
   });
   fireEvent.click(pill);
   await measure();
-  expect(screen.getByRole("button", { name: "reachable" })).toHaveFocus();
+  expect(screen.getByRole("button", { name: "badge" })).toHaveFocus();
+});
+
+it("gives ordinary channel backlog no cue", async () => {
+  render(
+    <SidebarUnread>
+      <button type="button" data-channel-id="plain" data-top={340}>
+        plain
+        <span data-channel-unread="" data-priority="false" />
+      </button>
+    </SidebarUnread>,
+  );
+  await measure();
+  expect(
+    screen.queryByRole("button", { name: /unread conversation/ }),
+  ).toBeNull();
 });
 
 it("refreshes artwork and shapes without waiting for geometry or adding unread state", async () => {

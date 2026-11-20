@@ -26,9 +26,9 @@ export type UnreadDmPreview = {
 };
 
 type EdgeTarget = {
+  /** The row to reveal, or the card's badge when the row is past its edge. */
   row: HTMLButtonElement;
   channelId: string;
-  attention: boolean;
 };
 type Edges = { above: EdgeTarget[]; below: EdgeTarget[] };
 
@@ -52,14 +52,21 @@ function unreadEdges(list: HTMLElement): Edges {
     const closed = row
       .closest("[data-sidebar-section]")
       ?.querySelector("details:not([open])");
-    // Rows past a resized card's edge can't be scrolled to, so they never
-    // count toward the above or below cue.
-    if (!closed && row.closest("[data-card-clipped]")) continue;
-    const anchor = closed?.querySelector("summary") ?? row;
+    // Only unread that waits on you earns a cue; ordinary backlog stays bold.
+    if (!waitsOnYou(row)) continue;
+    // A row past a resized card's edge can't be scrolled to; the card's badge
+    // stands in for it, so the cue leads there.
+    const clipped = !closed && row.closest("[data-card-clipped]") !== null;
+    const badge = clipped
+      ? row
+          .closest("[data-card-body]")
+          ?.querySelector<HTMLButtonElement>("[data-card-waiting] button")
+      : undefined;
+    if (clipped && !badge) continue;
+    const anchor = closed?.querySelector("summary") ?? badge ?? row;
     const rect = anchor.getBoundingClientRect();
     if (!rect.height || !rect.width) continue;
-    const attention = waitsOnYou(row);
-    const target = { row, channelId, attention };
+    const target = { row: badge ?? row, channelId };
     if (rect.bottom <= viewport.top) edges.above.push(target);
     else if (rect.top >= viewport.top + list.clientHeight)
       edges.below.push(target);
@@ -112,8 +119,7 @@ export function SidebarUnread({
             previous[edge].every(
               (target, i) =>
                 target.row === next[edge][i]?.row &&
-                target.channelId === next[edge][i]?.channelId &&
-                target.attention === next[edge][i]?.attention,
+                target.channelId === next[edge][i]?.channelId,
             ),
         )
           ? previous
@@ -294,25 +300,20 @@ export function SidebarUnread({
       })
       .slice(0, 3);
     const Icon = edge === "above" ? ArrowUpIcon : ArrowDownIcon;
-    // Spend the strong fill only when a DM, a mention of you or a thread
-    // reply waits past this edge; ordinary unread uses the quiet gray fill.
-    const attention = edges[edge].some((target) => target.attention);
     return (
       <div
         ref={edge === "below" ? lowerCue : upperCue}
         className={styles.unreadEdge}
         data-edge={edge}
         key={edge}
-        data-attention={attention}
         data-visible={count > 0}
         inert={count === 0}
         aria-hidden={count === 0}
       >
         <Button
-          variant={attention ? "prominent" : "subtle"}
+          variant="prominent"
           aria-label={`${count} unread ${count === 1 ? "conversation" : "conversations"} ${edge}`}
           data-edge={edge}
-          data-attention={attention}
           size="xs"
           shape="capsule"
           type="button"
