@@ -148,6 +148,10 @@ In a Codex agent’s settings, open **Huddle voice** in the **Settings** tab to 
   This lets the key direct your Buzz coding agents to run commands as you.
   Authorize only keys you recognize: the proof has no time or event-kind limits. Your private key stays
   in Buzz. This does not join the agent to a community or sign it in to an organization.
+- **Settings → Buzz → Software updates** shows the app version and, on desktop,
+  separate native-image and loaded-frontend source revisions under **Build details**.
+  Their clean, dirty, or unknown labels describe build-time source state; they do
+  not attest to files or APIs currently running on a host.
 - The back of your Identity badge shows known backup and recovery details below
   the private-key strip and scrolls when its details run long. Buzz starts checking
   when the Identity page opens. The back always explains that the key is stored
@@ -479,6 +483,17 @@ Quitting Buzz also turns it off.
   that message's author and time on one line above its text. The time is left
   out where message timestamps are hidden. A selection inside a message's text
   copies that text alone.
+
+- A plugin can relay one of your agents' messages into another conversation
+  as you. When the message names the agent and its verified owner is the
+  sender, it shows as that agent's collapsed line instead of the sender's own
+  message: the agent's avatar and name, the chat it came from if you are in that
+  chat, a one-line preview and the time. Select the line to read the whole
+  message and who it was sent as and to; select the chat name to open that
+  chat. Two or more in a row fold into one line showing the latest one and how
+  many more there are; it names their chat when they all came from the same
+  one, or says they came from other chats. Select it to list each one. A claim
+  that cannot be verified shows as the sender's ordinary message.
 
 - Only explicit additions by another member and removals appear as centered
   channel notices; self-joins and voluntary leaves are hidden.
@@ -822,7 +837,10 @@ Quitting Buzz also turns it off.
     none, says so instead of searching. Searching one conversation, by `in:`
     or ⌘F, shows the same Messages results; where the relay supports it,
     **Sort messages** in the field orders text matches by most relevant or
-    most recent.
+    most recent for that search. **Sort messages by** in Settings →
+    Appearance → Conversations sets the order each new search starts with on
+    this device; unset, it is most relevant. Text searches across
+    conversations, and on relays without sorting, stay most relevant.
   - `after:`, `before:`, `on:` a date (`YYYY-MM-DD`, `today`, `yesterday`), and
     `during:` a day, month (`2026-10`, `october`), or year, in local time, or a
     rolling period ending today (`7d`, `4w`, `3m`, `1y`). `after:` includes its
@@ -1784,6 +1802,15 @@ If an agent reports incompatible synced settings, choose the **Previous Versions
 - **Activity**, where the agent type provides it, shows sessions and their
   transcripts in the agent's profile. An open transcript updates by itself
   while the agent works; **Refresh transcript** stays at the top as you scroll.
+  Once goose agents run through the agent gateway, a goose turn woken in a
+  conversation by a plugin, watch or timer that ran without the gateway shows
+  "Ran without the agent gateway" beside its prompt only while the app keeps
+  running; goose compacting the conversation can remove the prompt and its
+  note. A wake run outside a conversation shows no note.
+  If Buzz routes a Goose turn through the gateway, choose Thread or Channel
+  session scope. A gateway-routed Goose turn in Community scope shows an error.
+  While goose uses the gateway, compaction requires gateway access. If access
+  is still being checked, try again once the check finishes.
   A turn's **Thread** or **Channel** label
   opens that conversation. Choosing an agent in the activity under a message,
   or a Working now agent whose conversation is known, opens that
