@@ -817,11 +817,11 @@ test("the inline portrait stays still while the open profile preview plays", asy
     "background-color",
     "rgba(0, 0, 0, 0)",
   );
-  await expect(
-    page
-      .getByLabel("Sample person profile preview")
-      .locator('[style*="background-image"]'),
-  ).toHaveCount(0);
+  const backdrop = page
+    .getByLabel("Sample person profile preview")
+    .locator('[style*="background-image"]');
+  await expect(backdrop).toHaveCSS("background-image", /still\.png/);
+  await expect(backdrop).toHaveCSS("filter", /blur\(/);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(portrait).toHaveAttribute("src", /still\.png$/);
 });

@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { profileAvatarSources } from "./ProfileAvatarArtwork";
 import styles from "./ProfileHero.module.css";
 
 /** Decorative artwork; callers resolve images through their existing media owner. */
@@ -10,7 +9,7 @@ export function ProfileBackdrop({
   src: string | null | undefined;
   children?: ReactNode;
 }) {
-  if (!src || profileAvatarSources(src)) return null;
+  if (!src) return null;
   return (
     <div className={styles.avatarBackdrop} aria-hidden="true">
       <div
