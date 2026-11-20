@@ -249,6 +249,14 @@ appTest.describe("workspace composition", () => {
     soloChannels: ["beta"],
     ownSoloChannels: ["beta"],
     savedSidebar: [{ id: "mixed", name: "Mixed", order: 1 }],
+    showAllCards: [
+      "solo",
+      "channels",
+      "forums",
+      "dms",
+      "group:work",
+      "group:mixed",
+    ],
   });
 
   // Real pointer collision across the contribution portal and the host's

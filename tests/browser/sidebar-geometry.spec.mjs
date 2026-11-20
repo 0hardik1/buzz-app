@@ -530,6 +530,13 @@ test("the unified sidebar fills its rows and keeps heading actions in their row 
   const workspace = sidebar.locator('[data-sidebar-section^="group:"]').filter({
     has: page.locator('summary[aria-label="Work"]'),
   });
+  // A new card starts on the last 30 days, and fixture history is from 2023.
+  await workspace
+    .getByRole("button", { name: "More actions for Work", exact: true })
+    .click();
+  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+  await page.getByRole("menuitemradio", { name: "All", exact: true }).click();
+  await page.keyboard.press("Escape");
   const chat = workspace.locator(`button[data-channel-id="${solo}"]`);
   await chat.click();
   await expect(chat).toHaveAttribute("aria-current", "page");
