@@ -109,21 +109,6 @@ export function SidebarCardResize({
         : next,
     );
   }, []);
-  // The badge's width, so the last row that shows can make room beside it.
-  // It grows with another digit or a larger text size, so keep it measured.
-  const badge = useCallback((node: HTMLSpanElement | null) => {
-    if (!node) return;
-    const measure = () =>
-      list.current?.style.setProperty(
-        "--card-badge-width",
-        `${node.offsetWidth}px`,
-      );
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const sized = new ResizeObserver(measure);
-    sized.observe(node);
-    return () => sized.disconnect();
-  }, []);
   const saved = useRef(height);
   // The hint explains the grip until it has been used once.
   const learned = useSyncExternalStore(
@@ -176,7 +161,7 @@ export function SidebarCardResize({
           {children}
         </div>
         {waiting.count > 0 && (
-          <span ref={badge} className={styles.cardWaiting} data-card-waiting="">
+          <div className={styles.cardWaiting} data-card-waiting="">
             <Button
               variant="prominent"
               size="xs"
@@ -196,9 +181,9 @@ export function SidebarCardResize({
               }}
             >
               <ArrowDownIcon aria-hidden="true" />
-              {waiting.count}
+              {waiting.count} unread
             </Button>
-          </span>
+          </div>
         )}
       </div>
       {/* Only a card with more than one row has anything to hide. */}
@@ -372,8 +357,7 @@ const none: Waiting = { count: 0, lowest: -1 };
 
 /**
  * Conversations past the card's edge whose unread waits on you, counted once
- * each, and the index of the lowest one's row. Marks the last row that
- * shows when there are any.
+ * each, and the index of the lowest one's row.
  */
 function waitingPastEdge(list: HTMLElement): Waiting {
   const seen = new Set<string>();
@@ -389,13 +373,6 @@ function waitingPastEdge(list: HTMLElement): Waiting {
       seen.add(button.dataset.channelId ?? button.dataset.soloChannelId ?? "");
       lowest = index;
     });
-  // The last row that shows narrows to make room for the badge.
-  let last: Element | undefined;
-  for (const row of list.querySelectorAll("[data-card-row]")) {
-    row.removeAttribute("data-card-beside-badge");
-    if (!row.hasAttribute("data-card-clipped")) last = row;
-  }
-  if (seen.size) last?.setAttribute("data-card-beside-badge", "");
   return seen.size ? { count: seen.size, lowest } : none;
 }
 

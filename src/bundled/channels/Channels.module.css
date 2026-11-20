@@ -1074,20 +1074,16 @@ html[data-keyboard-navigation]
      inside the card, by focus or otherwise. */
   overflow: clip;
 }
-/* Holds the rows and the badge for unread past the edge. */
+/* Holds the rows and the line for unread past the edge. */
 .cardBody {
-  position: relative;
+  display: flow-root;
 }
-/* Unread that waits on you past the edge: a count in the bottom-right corner.
-   The last row that shows narrows to make room, so neither covers the other. */
+/* Unread that waits on you past the edge: its own line under the last row
+   that shows, so it reads as the card's, not a row's. It only comes and goes
+   as the card settles, never mid-drag. */
 .cardWaiting {
-  position: absolute;
-  inset-block-end: var(--space-half);
-  inset-inline-end: 0;
   display: flex;
-}
-.cardRows [data-card-beside-badge] {
-  margin-inline-end: calc(var(--card-badge-width) + var(--space-1));
+  padding-block-start: var(--space-half);
 }
 /* Releases and key steps settle onto a whole row; the drag itself follows the
    pointer exactly. */

@@ -169,14 +169,11 @@ it("counts unread that waits on you past the edge, and opens to the lowest", () 
   const badge = screen.getByRole("button", {
     name: "Show 2 unread conversations below in Work",
   });
-  expect(badge).toHaveTextContent("2");
-  const beside = document.querySelectorAll("[data-card-beside-badge]");
-  expect([...beside].map((row) => row.textContent)).toEqual(["Row 2"]);
+  expect(badge).toHaveTextContent("2 unread");
   fireEvent.click(badge);
   // The mention is the last row, so the card opens full.
   expect(list.style.maxHeight).toBe("");
   expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
-  expect(document.querySelector("[data-card-beside-badge]")).toBeNull();
 });
 
 it("opens only as far as the lowest unread that waits on you", () => {
@@ -258,98 +255,6 @@ it("remembers full, not a pixel height, when the badge opens to the last row", (
     "data-height",
     String(Number.MAX_SAFE_INTEGER),
   );
-});
-
-/** Stand in for layout: the badge's width, and the observers watching it. */
-function measureBadge() {
-  let width = 24;
-  const observers: { run: () => void; target?: Element | undefined }[] = [];
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      entry: { run: () => void; target?: Element | undefined };
-      constructor(run: () => void) {
-        this.entry = { run };
-        observers.push(this.entry);
-      }
-      observe(target: Element) {
-        this.entry.target = target;
-      }
-      unobserve() {}
-      disconnect() {
-        this.entry.target = undefined;
-      }
-    },
-  );
-  const spy = vi
-    .spyOn(HTMLElement.prototype, "offsetWidth", "get")
-    .mockImplementation(function (this: HTMLElement) {
-      return this.hasAttribute("data-card-waiting") ? width : 0;
-    });
-  return {
-    resize(next: number) {
-      width = next;
-      act(() => {
-        for (const observer of observers)
-          if (observer.target?.hasAttribute("data-card-waiting"))
-            observer.run();
-      });
-    },
-    restore() {
-      spy.mockRestore();
-      vi.unstubAllGlobals();
-    },
-  };
-}
-
-const nine = {
-  2: "dm",
-  3: "dm",
-  4: "dm",
-  5: "dm",
-  6: "dm",
-  7: "dm",
-  8: "dm",
-  9: "dm",
-  10: "dm",
-} as const;
-
-it("makes more room beside the badge when its count gains a digit", async () => {
-  const badge = measureBadge();
-  try {
-    const { rerender } = render(<Card rows={12} marks={nine} />);
-    const list = layOut();
-    const grip = screen.getByRole("separator", { name: "Resize Work" });
-    for (const _ of Array.from({ length: 10 }))
-      fireEvent.keyDown(grip, { key: "ArrowUp" });
-    expect(list.style.getPropertyValue("--card-badge-width")).toBe("24px");
-    rerender(<Card rows={12} marks={{ ...nine, 11: "mention" }} />);
-    await act(async () => {});
-    expect(
-      screen.getByRole("button", {
-        name: "Show 10 unread conversations below in Work",
-      }),
-    ).toHaveTextContent("10");
-    badge.resize(32);
-    expect(list.style.getPropertyValue("--card-badge-width")).toBe("32px");
-  } finally {
-    badge.restore();
-  }
-});
-
-it("makes more room beside the badge when the text gets larger", () => {
-  const badge = measureBadge();
-  try {
-    render(<Card rows={5} marks={{ 4: "dm" }} />);
-    const list = layOut();
-    const grip = screen.getByRole("separator", { name: "Resize Work" });
-    for (const _ of [1, 2]) fireEvent.keyDown(grip, { key: "ArrowUp" });
-    expect(list.style.getPropertyValue("--card-badge-width")).toBe("24px");
-    badge.resize(40);
-    expect(list.style.getPropertyValue("--card-badge-width")).toBe("40px");
-  } finally {
-    badge.restore();
-  }
 });
 
 it("hints at the grip until it has been dragged or double-clicked once", () => {
