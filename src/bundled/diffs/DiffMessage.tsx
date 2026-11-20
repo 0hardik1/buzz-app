@@ -101,7 +101,8 @@ export function DiffMessage({
             aria-label="Expand diff"
             icon={<ArrowsOutIcon size={16} aria-hidden="true" />}
             onClick={() => {
-              setViewType("unified");
+              // A reader already open, as a tab, keeps its layout.
+              if (!retained) setViewType("unified");
               setRetained(true);
               setHost(overlayHostFor(expand.current));
               setOpen(true);

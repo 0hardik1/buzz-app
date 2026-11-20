@@ -102,6 +102,54 @@ it("keeps a reader's edited state through promotion, releases it on close, and r
   ).toHaveValue("");
 });
 
+it("closes its tab as Close would when its owner unmounts", async () => {
+  const pane = document.createElement("div");
+  const composer = document.createElement("form");
+  pane.append(composer);
+  document.body.append(pane);
+  const host = { pane, composer, viewport: pane, container: pane };
+  const calls: string[] = [];
+  function Owner() {
+    const [open, setOpen] = useState(true);
+    return (
+      <DetailsSheet
+        open={open}
+        onOpenChange={setOpen}
+        title="Diff"
+        host={host}
+        readerOnly
+      >
+        <p>Reader</p>
+      </DetailsSheet>
+    );
+  }
+  function Workspace() {
+    const [source, setSource] = useState(true);
+    return (
+      <DetailTabContext
+        value={(next) => ({
+          release: () => calls.push("release"),
+          close: () => {
+            calls.push("close");
+            next.close();
+          },
+          select: () => {},
+        })}
+      >
+        <button type="button" onClick={() => setSource(false)}>
+          Collapse source
+        </button>
+        {source && <Owner />}
+      </DetailTabContext>
+    );
+  }
+  render(<Workspace />);
+  fireEvent.click(await screen.findByRole("button", { name: "Open as tab" }));
+  fireEvent.click(screen.getByRole("button", { name: "Collapse source" }));
+  // Close goes through the tab host, which also moves selection and history.
+  expect(calls[0]).toBe("close");
+});
+
 it("closes the other readers over its composer when one opens as a tab", async () => {
   const pane = document.createElement("div");
   const composer = document.createElement("form");

@@ -124,6 +124,63 @@ test("Open as tab hands the reply target, draft and focus to the thread tab", as
   await expect(editor).toHaveText("Nested draft continues");
 });
 
+// Only the app's tab host shows a promoted reader outliving a collapsed row.
+test("a promoted diff keeps its layout on Expand and closes with its branch", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const row = page
+    .getByRole("region", { name: "Channel message history" })
+    .locator("[data-message-id]")
+    .first();
+  const rootId = await row.getAttribute("data-message-id");
+  const branch = app.append("primary", "alpha", "Branch", true, false, rootId);
+  app.append(
+    "primary",
+    "alpha",
+    "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n",
+    true,
+    false,
+    rootId,
+    branch.id,
+    [["file", "a.ts"]],
+    undefined,
+    40008,
+  );
+  await hoverMessage(row);
+  await row.getByRole("button", { name: "Reply", exact: true }).click();
+  const sheet = page.getByRole("dialog");
+  await sheet.getByRole("button", { name: /^View 1 reply/ }).click();
+  await sheet.getByRole("button", { name: "Open as tab", exact: true }).click();
+  await expect(sheet).toBeHidden();
+  const tabs = page.getByRole("tablist", { name: "Panel tabs" });
+  const threadTab = tabs.getByRole("tab", { name: /primary alpha message 0/ });
+  await page.getByRole("button", { name: /^View 1 reply/ }).click();
+  const expand = page
+    .getByRole("region", { name: "Diff: a.ts" })
+    .getByRole("button", { name: "Expand diff" });
+  await expand.click();
+  const reader = page.getByRole("dialog");
+  await reader.getByRole("button", { name: "Split", exact: true }).click();
+  await reader
+    .getByRole("button", { name: "Open as tab", exact: true })
+    .click();
+  const diffTab = tabs.getByRole("tab", { name: "a.ts" });
+  await expect(diffTab).toHaveAttribute("aria-selected", "true");
+  await threadTab.click();
+  await expand.click();
+  // Expand selects the open reader as it was, not reset to Unified.
+  await expect(diffTab).toHaveAttribute("aria-selected", "true");
+  await expect(
+    page.getByRole("button", { name: "Split", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await threadTab.click();
+  await page.getByRole("button", { name: "Collapse 1 reply" }).click();
+  await expect(diffTab).toHaveCount(0);
+  await expect(threadTab).toHaveAttribute("aria-selected", "true");
+});
+
 test("thread sheet keeps its reply composer usable and restores the channel draft", async ({
   page,
   app,

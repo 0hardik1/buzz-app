@@ -3209,10 +3209,11 @@ export const test = base.extend({
           parent,
           attachmentTags = [],
           createdAt,
+          kind = 9,
         ) {
           const history = histories.get(`${community}/${channel}`);
           const event = sign(
-            9,
+            kind,
             [
               ["h", channel],
               ...attachmentTags,

@@ -368,7 +368,9 @@ export function DetailsSheet({
   const tab = useRef<ReturnType<NonNullable<typeof promote>> | undefined>(
     undefined,
   );
-  useEffect(() => () => tab.current?.release(), []);
+  // A promoted reader whose source unmounts, such as a row under a branch
+  // that collapsed, closes its tab as the tab's Close would.
+  useEffect(() => () => tab.current?.close(), []);
   const handing = useRef(false);
   useEffect(() => {
     if (showRequest) tab.current?.select();
