@@ -121,7 +121,9 @@ export function MentionPicker({
       current = false;
     };
   }, [session, open, memberKey, draftRoster, profileGeneration]);
-  // A pill with no agent yet: silent for a second, then the shared spinner.
+  // A pill with no agent yet: silent for a second, then "Loading agents". It
+  // stays a working trigger: Button's `loading` would disable it, and a list
+  // that keeps retrying would then leave no way to pick an agent.
   const awaiting = !!audience?.loading && !audience.recipients.length;
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -248,7 +250,6 @@ export function MentionPicker({
                 variant="subtle"
                 size="sm"
                 disabled={disabled}
-                loading={awaiting && slow}
                 aria-busy={awaiting}
                 ref={trigger}
                 type="button"

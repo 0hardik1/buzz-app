@@ -505,7 +505,7 @@ it("an agents-only audience pill replaces the mention button and never inserts a
   test.library.dispose();
 });
 
-it("an empty audience pill stays silent for a second, then shows the shared spinner", () => {
+it("an empty audience pill stays silent for a second, then says it is loading and still opens", async () => {
   vi.useFakeTimers();
   const test = setup();
   const view = render(
@@ -528,15 +528,16 @@ it("an empty audience pill stays silent for a second, then shows the shared spin
   );
   const pill = screen.getByRole("button", { name: "Loading agents" });
   expect(pill).toHaveAttribute("aria-busy", "true");
-  expect(pill).not.toHaveAttribute("data-loading");
   expect(pill).toHaveTextContent(/^$/);
   act(() => vi.advanceTimersByTime(1000));
-  expect(pill).toHaveAttribute("data-loading");
   expect(pill).toHaveTextContent("Loading agents");
+  expect(pill).toBeEnabled();
   expect(screen.queryByRole("button", { name: "Choose agent" })).toBeNull();
+  vi.useRealTimers();
+  await userEvent.setup().click(pill);
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
   view.unmount();
   test.library.dispose();
-  vi.useRealTimers();
 });
 
 it.each([
