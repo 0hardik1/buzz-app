@@ -1898,7 +1898,8 @@ function ChannelWorkspace({
       channelId: string,
       messageId: string,
       threadRootId: string,
-      intent?: "reply",
+      intent?: "reply" | "reveal",
+      replyParent?: string,
     ) => {
       setSettings(undefined);
       threadTrigger.current =
@@ -1919,6 +1920,8 @@ function ChannelWorkspace({
         threadRootId,
         intent,
         threadPane,
+        undefined,
+        replyParent,
       );
       const target = navigator?.snapshot().entry.target;
       if (
@@ -1956,9 +1959,20 @@ function ChannelWorkspace({
     ],
   );
   const openThread = useCallback(
-    (messageId: string, threadRootId: string, intent?: "reply") => {
+    (
+      messageId: string,
+      threadRootId: string,
+      intent?: "reply" | "reveal",
+      replyParent?: string,
+    ) => {
       if (currentId)
-        openChannelThread(currentId, messageId, threadRootId, intent);
+        openChannelThread(
+          currentId,
+          messageId,
+          threadRootId,
+          intent,
+          replyParent,
+        );
     },
     [currentId, openChannelThread],
   );
@@ -3082,7 +3096,7 @@ function ChannelWorkspace({
   );
   const page = (
     // The review reads thread-tab links like the workspace.
-    <DetailTabContext value={secondary.openDetailTab}>
+    <DetailTabContext value={secondary.detailTabs}>
       <LinkThreadTabContext value={openLinkedThread}>
         <ConversationChannel
           session={queries}

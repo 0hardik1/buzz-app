@@ -7,8 +7,14 @@ export type DetailTab = {
   title: string;
   content: ReactNode;
 };
-/** Opens a reader in a tab the conversation workspace owns. The tab mounts its
- * own copy of the content, so it doesn't depend on the row that opened it. */
-export const DetailTabContext = createContext<
-  ((tab: DetailTab) => void) | undefined
->(undefined);
+/** Reader tabs the conversation workspace owns. */
+export type DetailTabs = Readonly<{
+  /** Opens a reader in a tab. The tab mounts its own copy of the content, so
+   * it doesn't depend on the row that opened it. */
+  open(tab: DetailTab): void;
+  /** Whether `id` already has a tab, which shows instead of a new reader. */
+  has(id: string): boolean;
+}>;
+export const DetailTabContext = createContext<DetailTabs | undefined>(
+  undefined,
+);

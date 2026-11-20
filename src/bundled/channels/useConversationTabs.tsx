@@ -180,6 +180,16 @@ export function useConversationTabs({
     },
     [currentId, tabState.select],
   );
+  const openDetailTabs = useRef(detailTabs);
+  openDetailTabs.current = detailTabs;
+  // Stable, so rows that open readers never re-render as tabs change.
+  const detailTabControls = useMemo(
+    () => ({
+      open: openDetailTab,
+      has: (id: string) => openDetailTabs.current.some((tab) => tab.id === id),
+    }),
+    [openDetailTab],
+  );
   // A reader tab reads a message in its channel; another channel leaves it.
   useEffect(() => {
     setDetailTabs((tabs) =>
@@ -754,6 +764,7 @@ export function useConversationTabs({
     rootId: string,
     intent?: "reply" | "reveal" | "focus",
     unreadSince?: number,
+    replyParent?: string,
   ) => {
     if (!currentVisit()) return;
     // Flat sessions keep their side-only host; channels support both panes.
@@ -764,6 +775,7 @@ export function useConversationTabs({
       intent,
       threadPane ?? (mainPane ? undefined : "side"),
       unreadSince,
+      replyParent,
     );
     if (
       opening.current &&
@@ -975,8 +987,15 @@ export function useConversationTabs({
               openConversationLink(target.id, url, origin)
             }
             canOpenLink={canOpenLink}
-            openThread={(id, root, intent) =>
-              openConversationThread(target.id, id, root, intent)
+            openThread={(id, root, intent, replyParent) =>
+              openConversationThread(
+                target.id,
+                id,
+                root,
+                intent,
+                undefined,
+                replyParent,
+              )
             }
             close={() => closeConversationTab(tab.id)}
             parent={parentOf(tab, target)}
@@ -1090,7 +1109,7 @@ export function useConversationTabs({
   return {
     open,
     openDetail,
-    openDetailTab,
+    detailTabs: detailTabControls,
     renderInlinePanel,
     opened,
     panel,
@@ -1182,8 +1201,15 @@ export function useConversationTabs({
                 openConversationLink(target.id, url, origin)
               }
               canOpenLink={canOpenLink}
-              openThread={(id, root, intent) =>
-                openConversationThread(target.id, id, root, intent)
+              openThread={(id, root, intent, replyParent) =>
+                openConversationThread(
+                  target.id,
+                  id,
+                  root,
+                  intent,
+                  undefined,
+                  replyParent,
+                )
               }
               close={() => closeConversationTab(tab.id)}
               parent={parentOf(tab, target)}

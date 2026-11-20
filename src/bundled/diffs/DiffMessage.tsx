@@ -62,7 +62,7 @@ function DiffReader({
 }
 
 export function DiffMessage({ message }: { message: ChannelMessage }) {
-  const openTab = useContext(DetailTabContext);
+  const tabs = useContext(DetailTabContext);
   const { opener, dialogs } = useInlineContainers();
   const composer = useComposerScope();
   const target = { kind: "diff", messageId: message.id } as const;
@@ -104,10 +104,12 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
       target,
       composer,
       trigger: expand.current,
+      // A diff already in a tab shows there, as it was left.
+      hasTab: tabs?.has(`diff:${message.id}`),
       openAsTab:
-        openTab &&
+        tabs &&
         (() =>
-          openTab({
+          tabs.open({
             id: `diff:${message.id}`,
             title,
             content: reader,

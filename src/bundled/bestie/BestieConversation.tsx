@@ -372,14 +372,27 @@ export function BestieConversation({
   useEffect(() => {
     if (!presented) containers.closeAll();
   }, [presented, containers.closeAll]);
-  const openThread = (messageId: string, rootId: string, intent?: "reply") => {
+  const openThread = (
+    messageId: string,
+    rootId: string,
+    intent?: "reply" | "reveal",
+    replyParent?: string,
+  ) => {
     if (!ownsCurrentVisit()) return;
     trigger.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
     state.leaveVisit();
-    state.openThreadTab(channel.id, messageId, rootId, intent);
+    state.openThreadTab(
+      channel.id,
+      messageId,
+      rootId,
+      intent,
+      undefined,
+      undefined,
+      replyParent,
+    );
     if (navigation?.target.kind === "page")
       void navigator.open(
         bestieThreadTarget(navigation.target, {

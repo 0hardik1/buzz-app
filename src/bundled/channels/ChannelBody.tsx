@@ -1,6 +1,9 @@
 import { MessageLoading } from "../../features/messages/MessageLoading";
 import { useComposerScope } from "../../features/messages/composer-overlay";
-import { InlineContainers } from "../../features/messages/inline-containers";
+import {
+  InlineContainers,
+  type ThreadHandoff,
+} from "../../features/messages/inline-containers";
 import {
   memo,
   type ReactNode,
@@ -54,8 +57,15 @@ export const ChannelBody = memo(function ChannelBody({
   marksRead?: boolean | undefined;
   /** Show the loading notice instead of the list, as while a message is sought. */
   holding?: boolean | undefined;
+  /** Opens the thread's tab. A thread handed over from its sheet asks it to
+   * reveal the reply it was read at, or to reply to its reply target. */
   onOpenThread?:
-    | ((messageId: string, threadRootId: string, intent?: "reply") => void)
+    | ((
+        messageId: string,
+        threadRootId: string,
+        intent?: "reply" | "reveal",
+        replyParent?: string,
+      ) => void)
     | undefined;
   /** Whether a thread already has a tab, which it selects instead of reading
    * inline. */
@@ -88,8 +98,17 @@ export const ChannelBody = memo(function ChannelBody({
       intent?: "reply",
     ) => {
       const { channelId, composer, onOpenThread, hasThreadTab } = live.current;
+      // A thread handed over from its sheet opens its tab at its reply
+      // target's editor, else at the reply it was read at.
       const openAsTab =
-        onOpenThread && (() => onOpenThread(messageId, rootId, intent));
+        onOpenThread &&
+        ((handoff?: ThreadHandoff) => {
+          if (handoff?.replyParent)
+            onOpenThread(messageId, rootId, "reply", handoff.replyParent);
+          else if (handoff?.anchor)
+            onOpenThread(handoff.anchor, rootId, "reveal");
+          else onOpenThread(messageId, rootId, intent);
+        });
       if (!opener) {
         openAsTab?.();
         return;

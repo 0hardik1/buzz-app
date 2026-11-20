@@ -125,8 +125,8 @@ test("Open as tab hands the reply target, draft and focus to the thread tab", as
   await expect(editor).toHaveText("Nested draft continues");
 });
 
-// Only the app's tab host shows a promoted reader outliving a collapsed row.
-test("a promoted diff keeps its layout on Expand and closes with its branch", async ({
+// Only the app's tab host shows a reader tab outliving a collapsed row.
+test("a diff tab keeps its layout on Expand and outlives its branch", async ({
   page,
   app,
 }) => {
@@ -163,23 +163,26 @@ test("a promoted diff keeps its layout on Expand and closes with its branch", as
     .getByRole("button", { name: "Expand diff" });
   await expand.click();
   const reader = page.getByRole("dialog");
-  await reader.getByRole("button", { name: "Split", exact: true }).click();
   await reader
     .getByRole("button", { name: "Open as tab", exact: true })
     .click();
+  await expect(reader).toBeHidden();
   const diffTab = tabs.getByRole("tab", { name: "a.ts" });
   await expect(diffTab).toHaveAttribute("aria-selected", "true");
+  const split = page.getByRole("button", { name: "Split", exact: true });
+  await split.click();
   await threadTab.click();
   await expand.click();
-  // Expand selects the open reader as it was, not reset to Unified.
+  // Expand selects the diff's tab as it was, not a new reader at Unified.
   await expect(diffTab).toHaveAttribute("aria-selected", "true");
-  await expect(
-    page.getByRole("button", { name: "Split", exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(split).toHaveAttribute("aria-pressed", "true");
+  // The tab reads its own copy of the diff, so the branch can collapse.
   await threadTab.click();
   await page.getByRole("button", { name: "Collapse 1 reply" }).click();
-  await expect(diffTab).toHaveCount(0);
   await expect(threadTab).toHaveAttribute("aria-selected", "true");
+  await diffTab.click();
+  await expect(split).toHaveAttribute("aria-pressed", "true");
 });
 
 test("thread sheet keeps its reply composer usable and restores the channel draft", async ({

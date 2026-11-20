@@ -28,6 +28,7 @@ import { channelComposer } from "../messages/composer-overlay";
 import {
   ComposerScopeProvider,
   type InlineTarget,
+  type ThreadHandoff,
   useComposerHandle,
 } from "../messages/inline-containers";
 import { ThreadPanel, type ThreadPanelProps } from "../messages/ThreadPanel";
@@ -275,9 +276,13 @@ function Provider({
 }
 
 /** A thread read over its channel's composer, inside its conversation. */
-const inlineThread = (target: Extract<InlineTarget, { kind: "thread" }>) => (
+const inlineThread = (
+  target: Extract<InlineTarget, { kind: "thread" }>,
+  handoff: { current: (() => ThreadHandoff) | undefined },
+) => (
   <ConversationThread
     messageId={target.messageId}
+    handoff={handoff}
     replyRequest={target.reply ? 1 : undefined}
     revealSelected={target.messageId !== target.rootId}
     initialScroll="latest"

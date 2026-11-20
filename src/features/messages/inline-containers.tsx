@@ -58,6 +58,13 @@ export type InlineTarget =
     }>
   | Readonly<{ kind: "details" | "diff"; messageId: string }>;
 
+/** What a thread read inline hands its tab: the reply it reads at, unless it
+ * follows the latest, and the reply it is answering. */
+export type ThreadHandoff = Readonly<{
+  anchor?: string | undefined;
+  replyParent?: string | undefined;
+}>;
+
 /** One request to open `target`, from the row whose composer it reads over. */
 export type InlineRequest = Readonly<{
   target: InlineTarget;
@@ -67,8 +74,9 @@ export type InlineRequest = Readonly<{
   trigger: HTMLElement | null;
   /** It already has a tab, which shows instead. */
   hasTab?: boolean | undefined;
-  /** Shows it in a tab: without an inline place, and from its Open as tab. */
-  openAsTab?: (() => void) | undefined;
+  /** Shows it in a tab: without an inline place, and from its Open as tab,
+   * where a thread hands over where it was read and its reply target. */
+  openAsTab?: ((handoff?: ThreadHandoff) => void) | undefined;
 }>;
 
 /** Something open: inline over its composer, or in a dialog when there is
@@ -855,6 +863,8 @@ function ReaderDialog({
 
 type ThreadRenderer = (
   target: Extract<InlineTarget, { kind: "thread" }>,
+  /** Filled by the thread with what its tab takes over on Open as tab. */
+  handoff: { current: (() => ThreadHandoff) | undefined },
 ) => ReactNode;
 
 /** A scope's composer handle, one per name for the scope's lifetime. */
@@ -998,11 +1008,12 @@ function OutletEntry({
   const id = entryId(target);
   const rules = behavior(entry);
   const slot = useSlotElements(entry);
+  const handoff = useRef<() => ThreadHandoff>(undefined);
   // Close, Escape and the scrim dismiss it: history retires its visits.
   const close = () => opener.dismiss(id);
   const content =
     target.kind === "thread"
-      ? renderThread?.(target)
+      ? renderThread?.(target, handoff)
       : target.kind === "panel"
         ? opener.renderPanel(target, {
             close,
@@ -1044,10 +1055,14 @@ function OutletEntry({
         entry.openAsTab &&
         (() => {
           if (spotlight !== undefined) finishIntro();
+          // Read before it leaves: the tab opens where the thread was read,
+          // answering the reply it was answering.
+          const carried =
+            target.kind === "thread" ? handoff.current?.() : undefined;
           // Its tab places focus.
           entry.focus.current = null;
           opener.moveToTab(id);
-          entry.openAsTab?.();
+          entry.openAsTab?.(carried);
         })
       }
     >
