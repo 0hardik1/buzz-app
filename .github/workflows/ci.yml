@@ -560,8 +560,8 @@ jobs:
           path: test-results/browser
           retention-days: 7
   required:
-    name: ${{ github.event_name == 'workflow_dispatch' && 'Automatic CI (not requested)' || 'CI required' }}
-    if: "true"
+    name: CI required
+    if: always()
     needs:
       - javascript_checks
       - javascript
