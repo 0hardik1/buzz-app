@@ -72,8 +72,9 @@ measurements in the default gate. The explicit measurement command above uses
 `--no-deps` so all selected measurements repeat, with `--workers=1` to retain
 isolation and one invocation to preserve both engines' evidence.
 
-Compiled frontend assets are shared by build configuration within one Playwright
-run. Every build option, including injected fixtures, selects a separate build.
+In CI, compiled frontend assets are shared by build configuration within one
+Playwright run. Local workers build fresh assets so UI/watch reruns see source edits.
+Every build option, including injected fixtures, selects a separate build.
 Workers publish only complete builds; concurrent first builds may duplicate work.
 The runner removes the assets after all workers finish. They are never reused across
 invocations. Every built-app test still gets a fresh preview server/port, ephemeral
@@ -492,7 +493,8 @@ Keep import failures visible; retries or longer UI waits do not repair module
 loading.
 
 A server must not scan or bundle dependencies inside a test's navigation budget.
-Playwright's `globalSetup` runs `vite-server.mjs` once per run: it scans
+Playwright's `globalSetup` runs `setup.mjs`, which prepares dependencies through
+`vite-server.mjs`: it scans
 `index.html` and every HTML page under `tests/` and `src/`, and bundles their
 dependencies. A Playwright config that runs fixture servers must use the same
 `globalSetup`. Each fixture server starts from its own copy of that cache. Vite
