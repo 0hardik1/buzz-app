@@ -143,6 +143,18 @@ test("settings search opens other sections and lands on prerequisites without ch
     dialog.getByRole("combobox", { name: "Message width", exact: true }),
   ).toHaveCount(0);
 
+  // ⌘F / Ctrl+F returns to the search from a control, selecting its query.
+  await page.keyboard.press("ControlOrMeta+f");
+  await expect(search).toBeFocused();
+  await expect
+    .poll(() =>
+      search.evaluate((input) => [input.selectionStart, input.selectionEnd]),
+    )
+    .toEqual([0, "message width".length]);
+  await expect(
+    page.getByRole("search", { name: "Find on screen" }),
+  ).toHaveCount(0);
+
   // Escape clears a query first; on an empty field it is the dialog's again.
   await search.fill("thread");
   await search.press("Escape");

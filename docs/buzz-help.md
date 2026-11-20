@@ -75,7 +75,8 @@ if that desktop app is up and running.
 - **Search settings**, above the Settings section list, finds individual
   settings by name or related words (for example "font size") and opens them.
   If a setting is hidden behind another option, it lands on that option
-  without changing it.
+  without changing it. ⌘F (Ctrl+F elsewhere) focuses it while Settings is
+  open.
 
 ## Getting started
 

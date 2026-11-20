@@ -1,4 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { matches } from "../features/shortcuts/bindings";
+import { isApplePlatform } from "../features/shortcuts/format";
+import { activeModal } from "../shared/design-system/overlayLayer";
 import { SearchField } from "../shared/design-system/ui/SearchField";
 import { NavigationItem } from "../shared/design-system/ui/NavigationItem";
 import { NavigationSection } from "../shared/design-system/ui/NavigationSection";
@@ -21,10 +24,39 @@ export function SettingsSearchNavigation({
   const [query, setQuery] = useState("");
   const searching = !!query.trim();
   const results = searchSettings(groups, query);
+  const field = useRef<HTMLElement>(null);
+  // ⌘F / Ctrl+F finds within Settings, as it searches a conversation
+  // elsewhere. Settings' modal leaves the conversation shortcut ineligible,
+  // and handling it before the window dispatcher keeps it local.
+  useEffect(() => {
+    const find = (event: KeyboardEvent) => {
+      const input = field.current;
+      const modal = activeModal(document);
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        !input?.isConnected ||
+        (modal && !modal.contains(input)) ||
+        input.closest("[hidden], [inert]") ||
+        !matches(
+          [{ key: "f", mod: true }],
+          event,
+          isApplePlatform(navigator.platform),
+        )
+      )
+        return;
+      event.preventDefault();
+      input.focus();
+      if (input instanceof HTMLInputElement) input.select();
+    };
+    document.addEventListener("keydown", find);
+    return () => document.removeEventListener("keydown", find);
+  }, []);
   return (
     <SidebarNavigation wrapSections>
       <div className="w-full min-w-0">
         <SearchField
+          inputRef={field}
           label="Search settings"
           placeholder="Search settings…"
           value={query}
