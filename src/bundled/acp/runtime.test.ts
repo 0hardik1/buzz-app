@@ -1951,6 +1951,37 @@ describe("AcpRuntime", () => {
     expect(two?.sessionId).not.toBe(one?.sessionId);
   });
 
+  it("keeps a replaced session's transcript beside the resume pointer", async () => {
+    const config = await confirmed({ scope: "channel" });
+    const { fake, deliver, sync, runtime, agent, storage } = setup({
+      capabilities: { mcpCapabilities: { http: true }, loadSession: true },
+    });
+    sync(config);
+    const subject = { ...agent, config } as unknown as Parameters<
+      AcpRuntime["session"]
+    >[0];
+    const place = { channelId: channel };
+    await deliver(message("1", "@Opal one"), config).run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+    await vi.waitFor(() =>
+      expect(runtime.sessionState(subject, place)).toBe("idle"),
+    );
+    await runtime.session(subject, place, "new");
+    await deliver(message("2", "@Opal two"), config).run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(2));
+    await flush(20);
+    const saved = localSessions(storage, self).get(channel);
+    expect(saved?.id).toBe("session-2");
+    expect(saved?.sessions).toEqual(["session-2", "session-1"]);
+    const before = fake.harnesses.length;
+    await runtime.transcript(self, channel, new AbortController().signal);
+    const loaded = fake.harnesses
+      .slice(before)
+      .flatMap((h) => h.sent("session/load"))
+      .map((m) => m.params?.sessionId);
+    expect(loaded).toEqual(["session-1", "session-2"]);
+  });
+
   it("retires an agent once its sessions and processes have stopped", async () => {
     const config = await confirmed();
     const { fake, deliver, sync, runtime } = setup({

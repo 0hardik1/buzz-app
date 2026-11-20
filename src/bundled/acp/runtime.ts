@@ -64,7 +64,11 @@ import {
   systemPrompt,
   turnPrompt,
 } from "../claude-code/prompt";
-import { digest } from "../../features/agent-harness/acp/agent-sessions";
+import {
+  digest,
+  type SavedConversation,
+  savedConversation,
+} from "../../features/agent-harness/acp/agent-sessions";
 import { RESUMED_PROMPT } from "../../buzz-mcp/prompt";
 import { standalonePrompt } from "../goose/runtime";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
@@ -898,6 +902,8 @@ export class AcpRuntime {
       // Only a new session's prompt is its own: a resumed one started with
       // whatever it was sent then.
       started: (session, text, title, conversation, resumed) => {
+        if (conversation !== undefined)
+          entry.store.remember(conversation, session);
         if (resumed) return;
         void this.prompts(agent).save(session, [{ label: "", text }], {
           at: Date.now(),
@@ -989,7 +995,7 @@ export class AcpRuntime {
             ...(root ? { root } : {}),
             at,
             ...(view ? { status: view.busy ? "Working" : "Idle" } : {}),
-            replayable: Boolean(saved.get(key)?.id),
+            replayable: replayable(saved.get(key)).length > 0,
           },
         ];
       })
@@ -1015,19 +1021,25 @@ export class AcpRuntime {
     signal: AbortSignal,
   ): Promise<Transcript | undefined> {
     const entry = this.agents.get(agent);
-    const sessionId = entry?.store.load(key)?.id;
-    if (!entry || !sessionId) return undefined;
+    const ids = replayable(entry?.store.load(key));
+    if (!entry || !ids.length) return undefined;
     const launch = entry.config;
     const { generation } = entry;
     const cwd = await this.resolveDirectory(launch.workspace);
     const [channelId, root] = key.split("/");
-    const transcript = await readTranscript({
-      start: (o) => start(this.spawn, launch, o),
-      cwd,
-      sessionId,
-      signal,
-      threadOf: (prefix) => root ?? threadIn(prefix),
-    });
+    // Each of its sessions in turn, oldest first.
+    let transcript: Transcript | undefined;
+    for (const sessionId of ids) {
+      const read = await readTranscript({
+        start: (o) => start(this.spawn, launch, o),
+        cwd,
+        sessionId,
+        signal,
+        threadOf: (prefix) => root ?? threadIn(prefix),
+      });
+      if (!read) break;
+      transcript = { turns: [...(transcript?.turns ?? []), ...read.turns] };
+    }
     // A read for an older launch says nothing about the current one.
     if (entry.generation === generation) {
       entry.replays = transcript !== undefined;
@@ -1066,6 +1078,13 @@ export class AcpRuntime {
     if (reads) this.memoryReads.forget(reads.connection, pubkey);
   }
 }
+
+/** The sessions of a saved conversation a transcript replays, oldest first:
+ * its history and its resume pointer. */
+const replayable = (saved: SavedConversation | undefined): string[] => {
+  const history = savedConversation(saved)?.sessions ?? [];
+  return [...new Set([...history].reverse().concat(saved?.id ?? []))];
+};
 
 /** Newest event ids a mark remembers; an id that falls out can only repeat. */
 const COVERED_IDS = 256;

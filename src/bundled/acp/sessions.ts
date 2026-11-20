@@ -1,9 +1,11 @@
 // Each ACP agent's saved conversations on this device: when each was last
 // active and, once its first prompt succeeded, the harness session to resume
 // and how far it has seen. Resume pointers never sync.
-import type {
-  SavedConversation,
-  SessionStore,
+import {
+  SAVED_SESSIONS,
+  type SavedConversation,
+  savedConversation,
+  type SessionStore,
 } from "../../features/agent-harness/acp/agent-sessions";
 
 export const SESSIONS_KEY = "buzz.acp.sessions.v1";
@@ -19,6 +21,9 @@ export function localSessions(
 ): Required<SessionStore> & {
   /** Saved conversations, most recently used first. */
   list(): [string, SavedConversation][];
+  /** Adds a session opened for `key` to its history, newest first. The
+   * history is only for reading back: it never moves the resume pointer. */
+  remember(key: string, id: string): void;
 } {
   const readAll = (): All => {
     try {
@@ -44,6 +49,11 @@ export function localSessions(
     }
   };
   const load = (key: string) => readAll()[agent]?.[key];
+  /** `saved`'s history, validated and bounded. */
+  const history = (saved: SavedConversation | undefined) => {
+    const sessions = savedConversation(saved)?.sessions;
+    return sessions?.length ? { sessions } : {};
+  };
   return {
     list: () => sorted(readAll()[agent]),
     get: load,
@@ -51,6 +61,19 @@ export function localSessions(
     set: (key, conversation) =>
       write((saved) => {
         saved[key] = conversation;
+      }),
+    remember: (key, id) =>
+      write((saved) => {
+        const old = saved[key];
+        const kept = history(old).sessions ?? [];
+        saved[key] = {
+          ...old,
+          at: old?.at ?? Date.now(),
+          sessions: [id, ...kept.filter((other) => other !== id)].slice(
+            0,
+            SAVED_SESSIONS,
+          ),
+        };
       }),
     touch: (key, at) =>
       write((saved) => {
@@ -73,13 +96,14 @@ export function localSessions(
                   effort: Boolean(old.overridden?.effort || overridden.effort),
                 },
               }
-            : { at, id, covered, context, overridden };
+            : { at, id, covered, context, overridden, ...history(old) };
       }),
     drop: (key) =>
       write((saved) => {
         const old = saved[key];
-        // The conversation stays listed; only its pointer goes.
-        if (old) saved[key] = { at: old.at };
+        // The conversation stays listed with its history; only its pointer
+        // goes.
+        if (old) saved[key] = { at: old.at, ...history(old) };
       }),
   };
 }
