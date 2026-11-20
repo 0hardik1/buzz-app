@@ -12,7 +12,13 @@ import type { SessionAction } from "../../agents/service";
 import { offers } from "./options";
 import type { AcpProcess } from "./process";
 import type { AcpSession, Parity, Turn } from "./session";
-import { AUTH_REQUIRED, authMethodsOf, codeOf, HintedError } from "./steps";
+import {
+  AUTH_REQUIRED,
+  authMethodsOf,
+  codeOf,
+  errorMessage,
+  HintedError,
+} from "./steps";
 import {
   type ActivityReceipt,
   type BuildPrompt,
@@ -237,8 +243,9 @@ export type SessionsOptions<S = unknown> = Readonly<{
   process: ProcessSource;
   /** The servers its sessions hold: the shared pool unless given. */
   pool?: ServerPool;
-  /** The agent's current settings, for a new session. */
-  launch(): Promise<Launch>;
+  /** The agent's current settings, for a new session or a session's next
+   * turn in `conversation`: none for a one-off turn. */
+  launch(conversation?: string): Promise<Launch>;
   /** The agent's provider, model and thinking level now, which each new
    * turn runs on. */
   choice(): Choice;
@@ -462,8 +469,9 @@ export class AgentSessions<S = unknown> {
   }
 
   /** Sends `text` into the conversation `key`, and resolves when the session
-   * has answered it. `steer` replaces `text` when the session is mid-turn;
-   * `fresh` builds it again when the session it was built for was closed;
+   * has answered it; the activity's `refresh`, if any, builds it again as
+   * it is handed over, and `fresh` when the session it was built for was
+   * closed;
    * `title` names a session opened for it, except that the conversation's
    * first one is left for the harness to name, if it names sessions, when `named`
    * takes that name;
@@ -477,7 +485,6 @@ export class AgentSessions<S = unknown> {
     text: string,
     seen: number,
     {
-      steer = text,
       current,
       fresh,
       title,
@@ -492,7 +499,6 @@ export class AgentSessions<S = unknown> {
       /** With `pin`: builds the turn's prompt when it is sent, from the
        * session's boundary, in place of `text`. */
       build?: BuildPrompt<S>;
-      steer?: string;
       current?: () => boolean;
       fresh?: () => Promise<string>;
       title?: string;
@@ -595,7 +601,7 @@ export class AgentSessions<S = unknown> {
               read = {
                 live,
                 ...(await abortable(
-                  abortable(this.launchOf(live.claim), signal),
+                  abortable(this.launchOf(live.claim, key), signal),
                   stop,
                 )),
               };
@@ -616,7 +622,7 @@ export class AgentSessions<S = unknown> {
           key,
           live,
           seen,
-          live.session.busy ? steer : text,
+          text,
           { ...activity, ...(current ? { current } : {}) },
           turn.model,
           turn.effort,
@@ -735,6 +741,11 @@ export class AgentSessions<S = unknown> {
     return started.settled ?? this.late;
   }
 
+  /** Resolves once each session opening now has taken its message or
+   * failed, so that `snapshot` lists every conversation that has one. */
+  async opened() {
+    await Promise.allSettled([...this.opening.values()]);
+  }
   /** Stops the turn running in conversation `key`, if any, once a session
    * opening for it has taken its message. */
   async interrupt(key: string) {
@@ -1242,11 +1253,11 @@ export class AgentSessions<S = unknown> {
 
   /** Opened with old settings, which only a new session runs on. */
   /** The launch a session runs on now: its claim's snapshot, read afresh. */
-  private launchOf(claim: Claim<unknown> | undefined) {
+  private launchOf(claim: Claim<unknown> | undefined, conversation?: string) {
     const { launchFor } = this.options;
     return claim && launchFor
       ? launchFor(claim.pinned.snapshot as S)
-      : this.options.launch();
+      : this.options.launch(conversation);
   }
   private stale(live: Live) {
     const { pin } = this.options;
@@ -1424,7 +1435,8 @@ export class AgentSessions<S = unknown> {
     const claim = pinned?.claim;
     // Read before `launch` reads the settings, so it never describes newer ones.
     const fingerprint = claim ? "" : this.options.fingerprint();
-    const launch = await this.launchOf(claim);
+    const conversation = this.once.has(key) ? undefined : key;
+    const launch = await this.launchOf(claim, conversation);
     if (claim) claim.prompt = digest(launch.systemPrompt);
     // Removed meanwhile: a process started now would outlive it.
     if (this.disposed) throw new Error(`${this.options.label} was stopped`);
@@ -1445,7 +1457,7 @@ export class AgentSessions<S = unknown> {
     const slot: Slot = { idle: () => false, evict: async () => undefined };
     const room = pool.take(slot);
     let opened: AcpSession | undefined;
-    const tags = this.options.tags?.(this.once.has(key) ? undefined : key);
+    const tags = this.options.tags?.(conversation);
     const start = (resume?: string) =>
       process.open({
         ...(tags ? { tags } : {}),
@@ -1510,22 +1522,25 @@ export class AgentSessions<S = unknown> {
       at: Date.now(),
     };
     // Each turn runs on the current prompt. The session runs these one at a
-    // time, so an older prompt never lands after a newer one; a failure keeps
-    // the session and is tried again at the next turn.
+    // time, so an older prompt never lands after a newer one. A failure fails
+    // that turn undelivered, as a rule it no longer has would not hold for it,
+    // and keeps the session to try again at the next turn.
     if (process.repromptable)
       session.beforeTurn = async () => {
-        const { systemPrompt } = await this.launchOf(claim);
+        const { systemPrompt } = await this.launchOf(claim, conversation);
         if (systemPrompt === live.systemPrompt) return;
         try {
           await process.reprompt(session, systemPrompt);
-          live.systemPrompt = systemPrompt;
-          if (claim) {
-            claim.prompt = digest(systemPrompt);
-            // Its saved record resumes only on the prompt it now runs on.
-            session.parity?.commit(session.covered);
-          }
         } catch (error) {
-          console.warn(`${this.options.label} kept its old prompt`, error);
+          throw new Error(
+            `${this.options.label} could not update its instructions: ${errorMessage(error)}`,
+          );
+        }
+        live.systemPrompt = systemPrompt;
+        if (claim) {
+          claim.prompt = digest(systemPrompt);
+          // Its saved record resumes only on the prompt it now runs on.
+          session.parity?.commit(session.covered);
         }
       };
     if (claim) {
