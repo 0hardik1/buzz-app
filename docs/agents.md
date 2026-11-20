@@ -1666,8 +1666,11 @@ A session the harness can no longer load is left out, and the transcript says
 its history is incomplete. Standalone turns, such as a watch's or a timer's,
 are listed on their own. A session's system prompt shows only when Buzz kept
 it when the session started, so sessions saved before that show none. A
-session is marked as started only when its replay keeps its first prompt. A
-harness that trims its replay shows that session as continued. Sessions
+session is marked as started when its replay begins with a prompt and Buzz
+cut none of its turns. A replay Buzz cut to its limits, or one that begins
+partway through a turn, shows as continued. Buzz can't tell when a harness
+leaves whole early turns out of its replay, so such a session can still show
+as started. Sessions
 another build or device started aren't listed.
 
 The shared Claude, Goose, and Pi turn formatter sends conversation history and
