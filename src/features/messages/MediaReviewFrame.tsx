@@ -208,7 +208,6 @@ export function MediaReviewFrame(
       onOpenChange={setOpen}
       onClosed={props.close}
       // Media stays on its sheet or goes fullscreen; it never becomes a tab.
-      promotable={false}
       host={props.placement.host}
       containsComposer
       height="stable"

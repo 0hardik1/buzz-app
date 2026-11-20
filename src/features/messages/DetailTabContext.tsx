@@ -1,58 +1,14 @@
-import { createContext, useLayoutEffect, useRef } from "react";
+import { createContext, type ReactNode } from "react";
 
+/** A reader opened as a tab: `id` names what it reads, such as a message, so
+ * opening the same one again shows its tab. */
 export type DetailTab = {
   id: string;
   title: string;
-  node: HTMLElement;
-  close(): void;
+  content: ReactNode;
 };
-/** The conversation workspace owns promotion; the reader keeps its live
- * content. `release` drops the tab; `close` closes it as its tab's Close does;
- * `select` shows it. */
+/** Opens a reader in a tab the conversation workspace owns. The tab mounts its
+ * own copy of the content, so it doesn't depend on the row that opened it. */
 export const DetailTabContext = createContext<
-  | ((tab: DetailTab) => { release(): void; close(): void; select(): void })
-  | undefined
+  ((tab: DetailTab) => void) | undefined
 >(undefined);
-
-export function DetailTabSlot({
-  node,
-  onAttached,
-}: {
-  node: HTMLElement;
-  onAttached?: (() => void) | undefined;
-}) {
-  const slot = useRef<HTMLDivElement>(null);
-  const attached = useRef(onAttached);
-  attached.current = onAttached;
-  useLayoutEffect(() => {
-    const parent = slot.current;
-    if (!parent) return;
-    const scrollers = [node, ...node.querySelectorAll<HTMLElement>("*")]
-      .filter((element) => element.scrollTop || element.scrollLeft)
-      .map((element) => ({
-        element,
-        top: element.scrollTop,
-        left: element.scrollLeft,
-      }));
-    parent.append(node);
-    for (const { element, top, left } of scrollers) {
-      element.scrollTop = top;
-      element.scrollLeft = left;
-    }
-    attached.current?.();
-    return () => {
-      if (node.parentElement === parent) node.remove();
-    };
-  }, [node]);
-  return (
-    <div
-      ref={slot}
-      style={{
-        display: "flex",
-        flex: 1,
-        minHeight: 0,
-        flexDirection: "column",
-      }}
-    />
-  );
-}

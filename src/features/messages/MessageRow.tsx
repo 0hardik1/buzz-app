@@ -1081,7 +1081,7 @@ function MessageRowContent({
       </div>
     ) : details ? (
       <DetailsMessage
-        keepMounted={keepRowMounted}
+        messageId={row.id}
         author={name}
         avatar={
           <Avatar
@@ -1761,7 +1761,6 @@ function MessageRowContent({
                       registry={extensions.messages}
                       renderer={messageRenderer}
                       message={row}
-                      keepMounted={keepRowMounted}
                       onFailedChange={(renderer, failed) =>
                         setFailedRenderer((current) =>
                           failed

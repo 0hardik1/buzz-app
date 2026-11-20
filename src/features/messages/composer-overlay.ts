@@ -34,8 +34,8 @@ export function overlayHostFor(
   if (!host?.composer.isConnected) return null;
   return {
     ...host,
-    // Retained readers register while detached, then move into sheets or tabs.
-    // Resolve the portal from their live ancestry, outside any filtered sheet.
+    // A reader inside a sheet portals the next one outside that filtered
+    // sheet, resolved from its live ancestry.
     container:
       host.pane.closest<HTMLElement>("[data-details-sheet]")?.parentElement ??
       host.pane,
@@ -116,5 +116,5 @@ export function composerSettled(root: HTMLElement): Promise<void> {
 /** Accepted local sends dismiss an agent details reader attached to this editor. */
 export const COMPOSER_SENT = "message-composer-sent";
 /** A reader opened as a tab closes the others over its composer; the event's
- * detail is the promoted reader's id. */
+ * detail is the id of the sheet that opened its tab. */
 export const COMPOSER_PROMOTED = "message-composer-promoted";

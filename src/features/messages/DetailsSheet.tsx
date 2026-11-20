@@ -1,5 +1,3 @@
-import { createPortal } from "react-dom";
-import { DetailTabContext, DetailTabSlot } from "./DetailTabContext";
 import {
   type InlineThreadIntroStep,
   IntroSpotlight,
@@ -17,7 +15,6 @@ import {
   type CSSProperties,
   type ReactNode,
   type RefObject,
-  useContext,
   useId,
   useEffect,
   useLayoutEffect,
@@ -316,10 +313,7 @@ export function DetailsSheet({
   readerOnly = false,
   headerActions,
   onClosed,
-  onPromoted,
   onOpenAsTab,
-  promotable = true,
-  showRequest,
   focusContent = false,
   onEscapeKey,
   spotlight,
@@ -343,14 +337,9 @@ export function DetailsSheet({
   readerOnly?: boolean;
   headerActions?: ReactNode;
   onClosed?: () => void;
-  onPromoted?: (() => void) | undefined;
-  /** Content with its own tab, such as a thread, opens that tab instead of
-   * moving this sheet's body into a new one. */
+  /** Opens what this sheet reads in a tab, as its own thread tab or a reader
+   * tab, and closes the sheet. Without it there is no Open as tab. */
   onOpenAsTab?: (() => void) | undefined;
-  /** False: no Open as tab, as for media. */
-  promotable?: boolean;
-  /** Each new value shows this reader again: once it is a tab, that tab. */
-  showRequest?: number | undefined;
   /** The content places focus itself, as a thread opened to reply does;
    * otherwise the sheet takes focus. */
   focusContent?: boolean;
@@ -362,33 +351,19 @@ export function DetailsSheet({
   onSpotlightAnchor?: ((element: HTMLElement | null) => void) | undefined;
 }) {
   const { composer } = host;
-  const promote = useContext(DetailTabContext);
   const tabId = useId();
-  const [promoted, setPromoted] = useState(false);
-  const tab = useRef<ReturnType<NonNullable<typeof promote>> | undefined>(
-    undefined,
-  );
-  // A promoted reader whose source unmounts, such as a row under a branch
-  // that collapsed, closes its tab as the tab's Close would.
-  useEffect(() => () => tab.current?.close(), []);
   const handing = useRef(false);
-  useEffect(() => {
-    if (showRequest) tab.current?.select();
-  }, [showRequest]);
-  const [contentNode] = useState(() => {
-    const node = document.createElement("div");
-    node.className = styles.retainedBody ?? "";
-    return node;
-  });
+  // Once handed to a tab, the tab places focus; the sheet returns none.
+  const [handed, setHanded] = useState(false);
   const [mounted, setMounted] = useState(open);
-  if (open && !mounted) setMounted(true);
-  // Content mounts once its node is in the document: effects that measure
-  // layout or pause a detached video must not see it outside the page.
-  const [attached, setAttached] = useState(false);
+  if (open && !mounted) {
+    setMounted(true);
+    setHanded(false);
+  }
   const [surface, setSurface] = useState<HTMLDivElement | null>(null);
   const style = useComposerGeometry(host, mounted, surface);
   useLayoutEffect(() => {
-    if (!mounted || promoted || (!containsComposer && !readerOnly)) return;
+    if (!mounted || (!containsComposer && !readerOnly)) return;
     if (readerOnly) composer.dataset.composerCovered = "";
     const inert = composer.inert;
     composer.inert = true;
@@ -396,15 +371,10 @@ export function DetailsSheet({
       composer.inert = inert;
       if (readerOnly) delete composer.dataset.composerCovered;
     };
-  }, [composer, mounted, containsComposer, readerOnly, promoted]);
+  }, [composer, mounted, containsComposer, readerOnly]);
   const popup = useRef<HTMLDivElement | null>(null);
   const backdrop = useRef<HTMLDivElement | null>(null);
-  useComposerHandoff(
-    surface,
-    composer,
-    open && !promoted,
-    containsComposer && !promoted,
-  );
+  useComposerHandoff(surface, composer, open, containsComposer);
   const grown = useRef<HTMLDivElement | null>(null);
   const focus = useFinalFocusUnlessMoved(finalFocus, undefined);
   // Base UI hands focus to the first tabbable inside a target that isn't
@@ -439,45 +409,17 @@ export function DetailsSheet({
   // Readers stack over one composer, such as a pull request opened from a
   // details message; opening one as a tab leaves none of the others behind.
   useEffect(() => {
-    if (!open || promoted) return;
+    if (!open) return;
     const close = (event: Event) => {
       if ((event as CustomEvent<string>).detail !== tabId) onOpenChange(false);
     };
     composer.addEventListener(COMPOSER_PROMOTED, close);
     return () => composer.removeEventListener(COMPOSER_PROMOTED, close);
-  }, [composer, open, promoted, onOpenChange, tabId]);
+  }, [composer, open, onOpenChange, tabId]);
   return (
     <>
-      {mounted &&
-        attached &&
-        createPortal(
-          // React events from the moved body still bubble through this sheet's
-          // owner, not the tab that shows it: Escape closes that tab here.
-          // biome-ignore lint/a11y/noStaticElementInteractions: Escape from the promoted body closes its tab, as in the tab host.
-          <div
-            className={styles.retainedContent}
-            onKeyDown={(event) => {
-              if (
-                promoted &&
-                event.key === "Escape" &&
-                // Shift+Escape is Mark all as read, not a dismissal.
-                !event.shiftKey &&
-                !event.nativeEvent.isComposing &&
-                event.nativeEvent.keyCode !== 229 &&
-                !event.defaultPrevented &&
-                event.currentTarget.contains(event.target as Node)
-              ) {
-                event.stopPropagation();
-                tab.current?.close();
-              }
-            }}
-          >
-            {children}
-          </div>,
-          contentNode,
-        )}
       <BaseDialog.Root
-        open={open && !promoted}
+        open={open}
         // Expansion belongs to this pane; the rest of the app stays interactive.
         modal={false}
         onOpenChange={(next, details) => {
@@ -505,13 +447,13 @@ export function DetailsSheet({
               return;
             }
           }
-          if (!promoted) onOpenChange(next);
+          onOpenChange(next);
         }}
         onOpenChangeComplete={(next) => {
-          if (next || promoted) return;
+          if (next) return;
           setMounted(false);
-          setAttached(false);
           onClosed?.();
+          if (handed) return;
           // Once focus has visited the composer, Base UI returns none and Close
           // would leave it on the page; hand it back to the opener instead.
           const active = document.activeElement;
@@ -553,7 +495,7 @@ export function DetailsSheet({
             // a focus tooltip that the first Escape closes instead of the
             // sheet. A reply opening leaves focus for its reply editor.
             initialFocus={focusContent ? false : popup}
-            finalFocus={promoted ? false : returnFocus}
+            finalFocus={handed ? false : returnFocus}
           >
             <div className={styles.content}>
               {/* One row: who wrote it and when, with Close at its end. */}
@@ -589,7 +531,7 @@ export function DetailsSheet({
                 </div>
                 <div className="buzz-dialog-header-actions">
                   {headerActions}
-                  {promotable && (onOpenAsTab || promote) && (
+                  {onOpenAsTab && (
                     <IntroSpotlight
                       shape="ring"
                       active={spotlight === 2}
@@ -608,39 +550,21 @@ export function DetailsSheet({
                           <ArrowSquareOutIcon size={16} aria-hidden="true" />
                         }
                         onClick={() => {
-                          if (onOpenAsTab) {
-                            // Its tab mounts a new composer: let a send finish.
-                            const sheet = popup.current;
-                            if (!sheet || handing.current) return;
-                            handing.current = true;
-                            void composerSettled(sheet).then(() => {
-                              handing.current = false;
-                              if (sheet.isConnected) onOpenAsTab();
-                            });
-                            return;
-                          }
-                          if (!promote) return;
-                          setPromoted(true);
-                          onPromoted?.();
-                          composer.dispatchEvent(
-                            new CustomEvent(COMPOSER_PROMOTED, {
-                              detail: tabId,
-                            }),
-                          );
-                          tab.current = promote({
-                            id: tabId,
-                            title:
-                              typeof title === "string" ? title : "Details",
-                            node: contentNode,
-                            close: () => {
-                              tab.current?.release();
-                              tab.current = undefined;
-                              setPromoted(false);
-                              setMounted(false);
-                              setAttached(false);
-                              onOpenChange(false);
-                              onClosed?.();
-                            },
+                          // Its tab may mount a new composer: let a send
+                          // finish first.
+                          const sheet = popup.current;
+                          if (!sheet || handing.current) return;
+                          handing.current = true;
+                          void composerSettled(sheet).then(() => {
+                            handing.current = false;
+                            if (!sheet.isConnected) return;
+                            setHanded(true);
+                            composer.dispatchEvent(
+                              new CustomEvent(COMPOSER_PROMOTED, {
+                                detail: tabId,
+                              }),
+                            );
+                            onOpenAsTab();
                           });
                         }}
                       />
@@ -660,10 +584,7 @@ export function DetailsSheet({
                 </div>
               </header>
               <div className={`buzz-dialog-body ${styles.body}`}>
-                <DetailTabSlot
-                  node={contentNode}
-                  onAttached={() => setAttached(true)}
-                />
+                <div className={styles.reader}>{children}</div>
               </div>
             </div>
             {/* The composer shows through here, inside the sheet's ring. */}

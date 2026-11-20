@@ -1,9 +1,17 @@
+import { DetailTabContext } from "../../features/messages/DetailTabContext";
 import { DetailsSheet } from "../../features/messages/DetailsSheet";
 import {
   overlayHostFor,
   type ComposerOverlayHost,
 } from "../../features/messages/composer-overlay";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type ReactNode,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ChannelMessage } from "../../features/relay/contracts";
 import { safeMessageUrl } from "../../features/relay/message-content";
 import { ArrowsOutIcon } from "../../shared/design-system/icons";
@@ -14,22 +22,46 @@ import { DiffViewer } from "./DiffViewer";
 import { parsePatch } from "./parse";
 import styles from "./Diffs.module.css";
 
-export function DiffMessage({
-  message,
-  keepMounted,
+/** The expanded diff, with its own layout choice: each sheet or tab that
+ * shows it starts unified. */
+function DiffReader({
+  viewer,
+  warning,
 }: {
-  message: ChannelMessage;
-  keepMounted?: (() => () => void) | undefined;
+  viewer: Omit<ComponentProps<typeof DiffViewer>, "viewType">;
+  warning: ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
-  // The reader lives in this row, in a tab too: keep the row while it is open.
-  const [retained, setRetained] = useState(false);
-  useEffect(() => {
-    if (retained) return keepMounted?.();
-  }, [retained, keepMounted]);
-  const [showRequest, setShowRequest] = useState(0);
-  const [host, setHost] = useState<ComposerOverlayHost | null>(null);
   const [viewType, setViewType] = useState<"unified" | "split">("unified");
+  return (
+    <>
+      <fieldset className={styles.toolbar} aria-label="Diff layout">
+        <Button
+          size="sm"
+          aria-pressed={viewType === "unified"}
+          variant={viewType === "unified" ? "subtle" : "ghost"}
+          onClick={() => setViewType("unified")}
+        >
+          Unified
+        </Button>
+        <Button
+          size="sm"
+          aria-pressed={viewType === "split"}
+          variant={viewType === "split" ? "subtle" : "ghost"}
+          onClick={() => setViewType("split")}
+        >
+          Split
+        </Button>
+      </fieldset>
+      {warning}
+      <DiffViewer {...viewer} viewType={viewType} />
+    </>
+  );
+}
+
+export function DiffMessage({ message }: { message: ChannelMessage }) {
+  const [open, setOpen] = useState(false);
+  const openTab = useContext(DetailTabContext);
+  const [host, setHost] = useState<ComposerOverlayHost | null>(null);
   const expand = useRef<HTMLButtonElement>(null);
   const files = useMemo(() => parsePatch(message.content), [message.content]);
   const meta = message.diff;
@@ -55,30 +87,7 @@ export function DiffMessage({
       )}
     </p>
   );
-  const reader = (
-    <>
-      <fieldset className={styles.toolbar} aria-label="Diff layout">
-        <Button
-          size="sm"
-          aria-pressed={viewType === "unified"}
-          variant={viewType === "unified" ? "subtle" : "ghost"}
-          onClick={() => setViewType("unified")}
-        >
-          Unified
-        </Button>
-        <Button
-          size="sm"
-          aria-pressed={viewType === "split"}
-          variant={viewType === "split" ? "subtle" : "ghost"}
-          onClick={() => setViewType("split")}
-        >
-          Split
-        </Button>
-      </fieldset>
-      {warning}
-      <DiffViewer {...viewer} viewType={viewType} />
-    </>
-  );
+  const reader = <DiffReader viewer={viewer} warning={warning} />;
   return (
     <>
       <section className={styles.card} aria-label={`Diff: ${title}`}>
@@ -101,12 +110,8 @@ export function DiffMessage({
             aria-label="Expand diff"
             icon={<ArrowsOutIcon size={16} aria-hidden="true" />}
             onClick={() => {
-              // A reader already open, as a tab, keeps its layout.
-              if (!retained) setViewType("unified");
-              setRetained(true);
               setHost(overlayHostFor(expand.current));
               setOpen(true);
-              setShowRequest((value) => value + 1);
             }}
           />
         </header>
@@ -127,8 +132,13 @@ export function DiffMessage({
         <DetailsSheet
           open={open}
           onOpenChange={setOpen}
-          onClosed={() => setRetained(false)}
-          showRequest={showRequest}
+          onOpenAsTab={
+            openTab &&
+            (() => {
+              openTab({ id: `diff:${message.id}`, title, content: reader });
+              setOpen(false);
+            })
+          }
           host={host}
           title={title}
           readerOnly
@@ -141,9 +151,6 @@ export function DiffMessage({
         <Dialog
           open={open}
           onOpenChange={setOpen}
-          onOpenChangeComplete={(next) => {
-            if (!next) setRetained(false);
-          }}
           title={title}
           size="expanded"
           closeLabel="Close diff"

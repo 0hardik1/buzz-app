@@ -1,7 +1,4 @@
-import {
-  DetailTabSlot,
-  type DetailTab,
-} from "../../features/messages/DetailTabContext";
+import type { DetailTab } from "../../features/messages/DetailTabContext";
 import { DetailsSheet } from "../../features/messages/DetailsSheet";
 import {
   overlayHostFor,
@@ -168,27 +165,26 @@ export function useConversationTabs({
   const [detailTabs, setDetailTabs] = useState<
     (DetailTab & { channelId: string | undefined })[]
   >([]);
-  // Closing a detail tab from its content does what its tab's Close does.
-  const closeDetail = useRef<(id: string) => void>(() => {});
-  const promoteDetail = useCallback(
+  // Reader tabs belong to this workspace, not to the rows that opened them.
+  // Opening one that is already a tab shows it.
+  const openDetailTab = useCallback(
     (tab: DetailTab) => {
       setDetailTabs((tabs) => [
         ...tabs.filter((item) => item.id !== tab.id),
         { ...tab, channelId: currentId },
       ]);
       tabState.select(tab.id);
-      return {
-        release: () =>
-          setDetailTabs((tabs) => tabs.filter((item) => item.id !== tab.id)),
-        close: () => closeDetail.current(tab.id),
-        select: () => tabState.select(tab.id),
-      };
     },
     [currentId, tabState.select],
   );
+  // A reader tab reads a message in its channel; another channel leaves it.
   useEffect(() => {
-    for (const tab of detailTabs) if (tab.channelId !== currentId) tab.close();
-  }, [currentId, detailTabs]);
+    setDetailTabs((tabs) =>
+      tabs.some((tab) => tab.channelId !== currentId)
+        ? tabs.filter((tab) => tab.channelId === currentId)
+        : tabs,
+    );
+  }, [currentId]);
   const viewer = queries.viewer;
   const { entries, setEntries } = tabState;
   const panelHistory = useRef({ onVisitPanel, onClosePanel });
@@ -341,7 +337,6 @@ export function useConversationTabs({
     host: ComposerOverlayHost;
     trigger: { current: HTMLElement | null };
     open: boolean;
-    promoted?: boolean;
   };
   const detailId = useRef(0);
   const [details, setDetails] = useState<Detail[]>([]);
@@ -366,7 +361,7 @@ export function useConversationTabs({
         trigger: { current: trigger },
         open: true,
       };
-      setDetails((items) => [...items.filter((item) => item.promoted), next]);
+      setDetails([next]);
     },
     [open, currentId],
   );
@@ -374,7 +369,7 @@ export function useConversationTabs({
     (detail) =>
       detail.entry.channelId === currentId &&
       available.includes(detail.entry.panel) &&
-      (detail.promoted || detail.host.composer.isConnected) &&
+      detail.host.composer.isConnected &&
       !navigationSignal?.aborted,
   );
   useEffect(() => {
@@ -646,8 +641,8 @@ export function useConversationTabs({
       else focusSplit.current = true;
     }
   };
-  closeDetail.current = (id) => {
-    detailTabs.find((tab) => tab.id === id)?.close();
+  const closeDetail = (id: string) => {
+    setDetailTabs((tabs) => tabs.filter((tab) => tab.id !== id));
     afterClose(id);
   };
   const closeConversationTab = (id: string) => {
@@ -1099,7 +1094,7 @@ export function useConversationTabs({
       (entry) => panelTabId(entry) === keep,
     );
     opening.current = entryList.current[0];
-    for (const tab of detailTabs) if (tab.id !== keep) tab.close();
+    setDetailTabs((tabs) => tabs.filter((tab) => tab.id === keep));
     tabState.closeTabs(keep);
     if (onCloseTabs) onCloseTabs(closing, closingEntries, keep);
     else if (addressed?.kind === "thread")
@@ -1110,14 +1105,19 @@ export function useConversationTabs({
   return {
     open,
     openDetail,
-    promoteDetail,
+    openDetailTab,
     detailSheet: visibleDetails.map((detail) => (
       <DetailsSheet
         key={detail.id}
         open={detail.open}
         onOpenChange={(open) => updateDetail(detail.id, { open })}
         onClosed={() => removeDetail(detail.id)}
-        onPromoted={() => updateDetail(detail.id, { promoted: true })}
+        // The panel opens as its own tab, fresh from its target.
+        onOpenAsTab={() => {
+          detail.trigger.current = null;
+          removeDetail(detail.id);
+          open(detail.entry);
+        }}
         host={detail.host}
         title={detail.entry.panel.title}
         readerOnly
@@ -1254,8 +1254,8 @@ export function useConversationTabs({
         id: tab.id,
         label: tab.title,
         move: undefined,
-        close: () => closeDetail.current(tab.id),
-        content: <DetailTabSlot node={tab.node} />,
+        close: () => closeDetail(tab.id),
+        content: tab.content,
       })),
     ],
   };

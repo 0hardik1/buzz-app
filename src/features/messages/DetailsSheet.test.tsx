@@ -10,11 +10,7 @@ import {
 } from "@testing-library/react";
 import { StrictMode, useEffect, useRef, useState } from "react";
 import { afterEach, expect, it } from "vitest";
-import {
-  DetailTabContext,
-  DetailTabSlot,
-  type DetailTab,
-} from "./DetailTabContext";
+import type { DetailTab } from "./DetailTabContext";
 import { DetailsSheet } from "./DetailsSheet";
 
 afterEach(() => {
@@ -22,132 +18,75 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-it("keeps a reader's edited state through promotion, releases it on close, and reopens fresh", async () => {
+it("opens what it reads as a tab and closes, leaving the composer's text", async () => {
   const pane = document.createElement("div");
   const composer = document.createElement("form");
+  const editor = document.createElement("textarea");
+  editor.value = "Unsent reply";
+  composer.append(editor);
   pane.append(composer);
   document.body.append(pane);
   const host = { pane, composer, viewport: pane, container: pane };
   function Reader() {
-    const [draft, setDraft] = useState("");
+    const [count, setCount] = useState(0);
     return (
-      <textarea
-        aria-label="Inspector draft"
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-      />
+      <button type="button" onClick={() => setCount(count + 1)}>
+        Pressed {count}
+      </button>
     );
   }
   function Workspace() {
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(true);
     const [tab, setTab] = useState<DetailTab>();
     return (
-      <DetailTabContext
-        value={(next) => {
-          setTab(next);
-          return {
-            release: () => setTab(undefined),
-            close: () => next.close(),
-            select: () => {},
-          };
-        }}
-      >
-        <button type="button" onClick={() => setOpen(true)}>
-          Open inspector
-        </button>
+      <>
         <DetailsSheet
           open={open}
           onOpenChange={setOpen}
-          title="Inspector"
+          onOpenAsTab={() => {
+            setTab({ id: "diff:1", title: "Diff", content: <Reader /> });
+            setOpen(false);
+          }}
+          title="Diff"
           host={host}
           readerOnly
         >
           <Reader />
         </DetailsSheet>
-        {tab && (
-          <section aria-label="Promoted inspector">
-            <button type="button" onClick={tab.close}>
-              Close inspector tab
-            </button>
-            <DetailTabSlot node={tab.node} />
-          </section>
-        )}
-      </DetailTabContext>
+        {tab && <section aria-label="Reader tab">{tab.content}</section>}
+      </>
     );
   }
   render(<Workspace />);
-  expect(
-    screen.queryByRole("textbox", { name: "Inspector draft" }),
-  ).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Open inspector" }));
-  const draft = await screen.findByRole("textbox", { name: "Inspector draft" });
-  fireEvent.change(draft, { target: { value: "Keep this unfinished work" } });
+  const dialog = await screen.findByRole("dialog", { name: "Diff" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Pressed 0" }));
   expect(composer.inert).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: "Open as tab" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Open as tab" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  // The tab mounts its own reader; it carries no state from the sheet.
   expect(
-    screen.getByRole("region", { name: "Promoted inspector" }),
-  ).toContainElement(draft);
-  expect(draft).toHaveValue("Keep this unfinished work");
+    within(screen.getByRole("region", { name: "Reader tab" })).getByRole(
+      "button",
+      { name: "Pressed 0" },
+    ),
+  ).toBeInTheDocument();
   expect(composer.inert).not.toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: "Close inspector tab" }));
-  await waitFor(() =>
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument(),
-  );
-  expect(
-    screen.queryByRole("region", { name: "Promoted inspector" }),
-  ).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Open inspector" }));
-  expect(
-    await screen.findByRole("textbox", { name: "Inspector draft" }),
-  ).toHaveValue("");
+  expect(editor).toHaveValue("Unsent reply");
 });
 
-it("closes its tab as Close would when its owner unmounts", async () => {
+it("offers no Open as tab without a tab to open", async () => {
   const pane = document.createElement("div");
   const composer = document.createElement("form");
   pane.append(composer);
   document.body.append(pane);
   const host = { pane, composer, viewport: pane, container: pane };
-  const calls: string[] = [];
-  function Owner() {
-    const [open, setOpen] = useState(true);
-    return (
-      <DetailsSheet
-        open={open}
-        onOpenChange={setOpen}
-        title="Diff"
-        host={host}
-        readerOnly
-      >
-        <p>Reader</p>
-      </DetailsSheet>
-    );
-  }
-  function Workspace() {
-    const [source, setSource] = useState(true);
-    return (
-      <DetailTabContext
-        value={(next) => ({
-          release: () => calls.push("release"),
-          close: () => {
-            calls.push("close");
-            next.close();
-          },
-          select: () => {},
-        })}
-      >
-        <button type="button" onClick={() => setSource(false)}>
-          Collapse source
-        </button>
-        {source && <Owner />}
-      </DetailTabContext>
-    );
-  }
-  render(<Workspace />);
-  fireEvent.click(await screen.findByRole("button", { name: "Open as tab" }));
-  fireEvent.click(screen.getByRole("button", { name: "Collapse source" }));
-  // Close goes through the tab host, which also moves selection and history.
-  expect(calls[0]).toBe("close");
+  render(
+    <DetailsSheet open onOpenChange={() => {}} title="Media" host={host}>
+      <p>Media</p>
+    </DetailsSheet>,
+  );
+  await screen.findByRole("dialog", { name: "Media" });
+  expect(screen.queryByRole("button", { name: "Open as tab" })).toBeNull();
 });
 
 it("closes the other readers over its composer when one opens as a tab", async () => {
@@ -161,16 +100,7 @@ it("closes the other readers over its composer when one opens as a tab", async (
     const [pull, setPull] = useState(true);
     const [tab, setTab] = useState<DetailTab>();
     return (
-      <DetailTabContext
-        value={(next) => {
-          setTab(next);
-          return {
-            release: () => setTab(undefined),
-            close: () => next.close(),
-            select: () => {},
-          };
-        }}
-      >
+      <>
         <DetailsSheet
           open={details}
           onOpenChange={setDetails}
@@ -182,18 +112,18 @@ it("closes the other readers over its composer when one opens as a tab", async (
         <DetailsSheet
           open={pull}
           onOpenChange={setPull}
+          onOpenAsTab={() => {
+            setTab({ id: "pull", title: "GitHub", content: <p>Pull body</p> });
+            setPull(false);
+          }}
           title="GitHub"
           host={host}
           readerOnly
         >
           <p>Pull body</p>
         </DetailsSheet>
-        {tab && (
-          <section aria-label="Promoted reader">
-            <DetailTabSlot node={tab.node} />
-          </section>
-        )}
-      </DetailTabContext>
+        {tab && <section aria-label="Reader tab">{tab.content}</section>}
+      </>
     );
   }
   render(<Workspace />);
@@ -201,9 +131,9 @@ it("closes the other readers over its composer when one opens as a tab", async (
   const github = screen.getByRole("dialog", { name: "GitHub" });
   fireEvent.click(within(github).getByRole("button", { name: "Open as tab" }));
   await waitFor(() => expect(screen.queryAllByRole("dialog")).toHaveLength(0));
-  expect(
-    screen.getByRole("region", { name: "Promoted reader" }),
-  ).toHaveTextContent("Pull body");
+  expect(screen.getByRole("region", { name: "Reader tab" })).toHaveTextContent(
+    "Pull body",
+  );
 });
 
 it("mounts its content in the document, so content effects see the page", async () => {
@@ -254,7 +184,6 @@ it("hands a thread to its tab only after its composer finishes sending", async (
       title="Thread"
       host={host}
       containsComposer
-      promotable
       onOpenAsTab={() => handoffs.push("tab")}
     >
       <form data-message-composer="" aria-busy="true" aria-label="Reply" />

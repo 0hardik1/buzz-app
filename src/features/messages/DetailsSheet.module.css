@@ -298,7 +298,7 @@ html[data-keyboard-navigation]
   }
 }
 
-.retainedBody {
+.reader {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -306,10 +306,6 @@ html[data-keyboard-navigation]
   min-height: 0;
   overflow: auto;
 }
-.retainedContent {
-  /* Only a key handler: the body lays out its content directly. */
-  display: contents;
-}
-.sheet[data-height="content"][data-contained-composer] .retainedBody {
+.sheet[data-height="content"][data-contained-composer] .reader {
   flex: 0 1 auto;
 }

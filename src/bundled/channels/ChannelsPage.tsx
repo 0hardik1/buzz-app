@@ -3063,7 +3063,7 @@ function ChannelWorkspace({
   );
   return (
     // The review reads thread-tab links like the workspace.
-    <DetailTabContext value={secondary.promoteDetail}>
+    <DetailTabContext value={secondary.openDetailTab}>
       <LinkThreadTabContext value={openLinkedThread}>
         <ConversationChannel
           session={queries}

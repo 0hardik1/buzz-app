@@ -1,6 +1,6 @@
 import {
   type ReactNode,
-  useEffect,
+  useContext,
   useLayoutEffect,
   useRef,
   useState,
@@ -8,6 +8,7 @@ import {
 import { formatItemTimestamp } from "../../shared/datetime";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
+import { DetailTabContext } from "./DetailTabContext";
 import { DetailsSheet } from "./DetailsSheet";
 import { overlayHostFor, type ComposerOverlayHost } from "./composer-overlay";
 import styles from "./Messages.module.css";
@@ -37,29 +38,25 @@ function holdsBack(clip: HTMLElement) {
 /** A details message reads in the chat as its opening brief, in full, and
  * opens whole in a reader that grows out of the composer. */
 export function DetailsMessage({
+  messageId,
   author,
   avatar,
   createdAt,
   preview,
   children,
-  keepMounted,
 }: {
+  messageId: string;
   author: string;
   /** The author's avatar, beside their name in the reader. */
   avatar: ReactNode;
   createdAt: number;
   /** The whole message as the chat renders it; only its brief shows. */
   preview: ReactNode;
-  /** The reader's body. */
+  /** The reader's body, in the sheet and in its tab. */
   children: ReactNode;
-  keepMounted?: (() => () => void) | undefined;
 }) {
   const [open, setOpen] = useState(false);
-  const [showRequest, setShowRequest] = useState(0);
-  const [retained, setRetained] = useState(false);
-  useEffect(() => {
-    if (retained) return keepMounted?.();
-  }, [retained, keepMounted]);
+  const openTab = useContext(DetailTabContext);
   const [host, setHost] = useState<ComposerOverlayHost | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const clip = useRef<HTMLDivElement>(null);
@@ -77,10 +74,8 @@ export function DetailsMessage({
     return () => observer?.disconnect();
   }, []);
   const show = () => {
-    setRetained(true);
     setHost(overlayHostFor(clip.current));
     setOpen(true);
-    setShowRequest((value) => value + 1);
   };
   const time = formatItemTimestamp(createdAt, { withTime: true });
   return (
@@ -121,8 +116,17 @@ export function DetailsMessage({
         <DetailsSheet
           open={open}
           onOpenChange={setOpen}
-          onClosed={() => setRetained(false)}
-          showRequest={showRequest}
+          onOpenAsTab={
+            openTab &&
+            (() => {
+              openTab({
+                id: `details:${messageId}`,
+                title: author,
+                content: <div className={styles.detailsReader}>{children}</div>,
+              });
+              setOpen(false);
+            })
+          }
           host={host}
           leading={avatar}
           title={author}
@@ -136,9 +140,6 @@ export function DetailsMessage({
         <Dialog
           open={open}
           onOpenChange={setOpen}
-          onOpenChangeComplete={(next) => {
-            if (!next) setRetained(false);
-          }}
           title={author}
           description={time}
           closeLabel="Close details"

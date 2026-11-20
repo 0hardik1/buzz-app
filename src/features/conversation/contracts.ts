@@ -254,15 +254,7 @@ export type MessageRenderer = Readonly<{
     message: ChannelMessage,
     attachment: ChannelMessage["attachments"][number],
   ): boolean;
-  component: ComponentType<
-    TargetOpener & {
-      message: ChannelMessage;
-      /** Keeps the message's row mounted while the component shows content
-       * outside it, such as a reader in a tab; returns the release. Absent
-       * where rows are not virtualized. */
-      keepMounted?: (() => () => void) | undefined;
-    }
-  >;
+  component: ComponentType<TargetOpener & { message: ChannelMessage }>;
 }>;
 /** A message action. The host owns placement, focus and row lifetime. */
 export type MessageAction = Readonly<{

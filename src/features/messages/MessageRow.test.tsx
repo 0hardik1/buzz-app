@@ -3749,14 +3749,11 @@ function detailsRow(
 
 it("shows details as their brief, whose Show more opens them whole", async () => {
   const details = detailsRow();
-  const release = vi.fn();
-  const keepMounted = vi.fn(() => release);
   expect(details.audience).toBe("details");
   try {
     renderDom(
       <MessageRow
         row={details}
-        keepMounted={keepMounted}
         profile={{ name: "Morgarita" }}
         media={() => undefined}
         onOpenLink={() => false}
@@ -3769,8 +3766,6 @@ it("shows details as their brief, whose Show more opens them whole", async () =>
     expect(more).toHaveAttribute("aria-haspopup", "dialog");
     fireEvent.click(more);
     // The reader is headed by who wrote it, and holds the whole message.
-    expect(keepMounted).toHaveBeenCalledWith(details.id);
-    expect(release).not.toHaveBeenCalled();
     const dialog = await screen.findByRole("dialog", { name: "Morgarita" });
     expect(within(dialog).getByText("sidebar").tagName).toBe("STRONG");
     expect(within(dialog).getByText("It keeps its place")).toBeVisible();
@@ -3779,7 +3774,6 @@ it("shows details as their brief, whose Show more opens them whole", async () =>
       within(dialog).getByRole("button", { name: "Close details" }),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(release).toHaveBeenCalledTimes(1);
   } finally {
     cleanup();
   }
