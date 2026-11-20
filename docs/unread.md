@@ -114,8 +114,8 @@ viewport):
   Receipts stay on this device, like `msg:` marks, so another device relights
   attention rows; the channel cut syncs. The channel snapshot's `row` counts
   (`observedCount`, `attentionCount`, `threadCount`) leave out what the row
-  has seen. The sidebar row, its floating unread cues, the sidebar
-  **Unreads** filter and the Dock indicator follow `row`. Thread dots,
+  has seen. The sidebar row, its floating unread cues, **Unreads first**
+  and the Dock indicator follow `row`. Thread dots,
   Activity, the channel activity popover, unread-first search, the **New
   messages** divider, mark-read menus and every `observedCount` keep the
   unread. Explicit unread intent omits `row`, so the row shows the whole

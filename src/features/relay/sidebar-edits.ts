@@ -1,8 +1,6 @@
 import { isSidebarSortMode } from "./sidebar-sort.ts";
 import {
   projectSidebarPreferences,
-  validActiveWindow,
-  DEFAULT_ACTIVE_WINDOW_SECONDS,
   HOME_SIDEBAR_SECTIONS,
   MAX_WORKSPACES,
   MAX_WORKSPACE_ASSIGNMENTS,
@@ -12,7 +10,6 @@ import {
   type SidebarSectionEdit,
   type SidebarGroups,
   type SidebarSortMode,
-  type SidebarFilterMode,
 } from "./sidebar-preferences.ts";
 import {
   editSidebarRecord,
@@ -208,22 +205,6 @@ export function validSidebarSort(
   );
 }
 
-export function validSidebarFilter(
-  group: string,
-  mode: SidebarFilterMode,
-  sectionIds: readonly string[],
-  activeWindowSeconds?: number | null,
-): boolean {
-  return (
-    ["all", "unreads", "active"].includes(mode) &&
-    (activeWindowSeconds === undefined ||
-      (activeWindowSeconds === null
-        ? mode !== "active"
-        : mode !== "all" && validActiveWindow(activeWindowSeconds))) &&
-    validSidebarSort(group, "alpha", sectionIds)
-  );
-}
-
 // Pure edits of validated, projected heads. Hosts retain validation, signing,
 // publication, readback and serialization; these functions never perform I/O.
 export function editSidebarAssignment(
@@ -321,60 +302,6 @@ export function editSidebarSort(
   now = Date.now(),
 ): Record<string, unknown> {
   return editSidebarSortRecord(current, createdAt, group, mode, now);
-}
-
-export function editSidebarFilter(
-  current: Record<string, unknown>,
-  createdAt: number,
-  group: string,
-  mode: SidebarFilterMode,
-  now = Date.now(),
-  activeWindowSeconds?: number | null,
-): Record<string, unknown> {
-  // Unreads and Active keep separate windows (see projectSidebarPreferences),
-  // so a window older apps left beside Unreads never limits it.
-  const field =
-    mode === "unreads" ? "unreadsWindowSeconds" : "activeWindowSeconds";
-  const windows = {
-    ...(current[field] as Record<string, number> | undefined),
-  };
-  // Active defaults to 30 days. Unreads has no date limit until one is saved,
-  // so a window beside it, even 30 days, is always stored.
-  const previous =
-    windows[group] ??
-    (mode === "active" ? DEFAULT_ACTIVE_WINDOW_SECONDS : undefined);
-  const changed =
-    activeWindowSeconds === null
-      ? Object.hasOwn(windows, group)
-      : activeWindowSeconds !== undefined && previous !== activeWindowSeconds;
-  if (activeWindowSeconds === null) delete windows[group];
-  else if (activeWindowSeconds !== undefined)
-    windows[group] = activeWindowSeconds;
-  // Resetting to All clears Unreads' window too, so it can't come back later.
-  const unreads = current.unreadsWindowSeconds as
-    | Record<string, number>
-    | undefined;
-  const clearUnreads =
-    mode === "all" &&
-    activeWindowSeconds === null &&
-    !!unreads &&
-    Object.hasOwn(unreads, group);
-  const next = editSidebarRecord(
-    "channel-filter",
-    current,
-    createdAt,
-    [[["g", group], mode === "all" ? null : mode]],
-    now,
-  );
-  const cleared = clearUnreads
-    ? {
-        ...next,
-        unreadsWindowSeconds: Object.fromEntries(
-          Object.entries(unreads).filter(([key]) => key !== group),
-        ),
-      }
-    : next;
-  return changed ? { ...cleared, [field]: windows } : cleared;
 }
 
 export function editSidebarToggle(

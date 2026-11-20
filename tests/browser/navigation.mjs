@@ -285,19 +285,10 @@ export function openMenu(page, name) {
     .and(page.locator(":not([data-closed])"));
 }
 
-/** Opens a card's ••• menu, then its Filter submenu, which holds Unreads
- * only and the time range. Choosing in it keeps the menus open. */
-export async function openFilterMenu(page, title, scope = page) {
-  return openSubmenu(page, title, scope, "Filter");
-}
-
 /** Opens a card's ••• menu, then its Sort submenu, which holds the sort
  * choices and Unreads first. Choosing in it keeps the menus open. */
 export async function openSortMenu(page, title, scope = page) {
-  return openSubmenu(page, title, scope, "Sort");
-}
-
-async function openSubmenu(page, title, scope, name) {
+  const name = "Sort";
   const button = moreActionsButton(scope, title);
   await button.focus();
   await button.click();
@@ -326,17 +317,7 @@ export async function closeMenus(page) {
   await expect(menus).toHaveCount(0);
 }
 
-const DATES = new Set(["All", "Today", "3 days", "7 days", "30 days"]);
-
-/** The Filter menu's Unreads only checkbox, which combines with its Date. */
-export function unreadsOnly(menu) {
-  return menu.getByRole("menuitemcheckbox", {
-    name: "Unreads only",
-    exact: true,
-  });
-}
-
-/** The Filter menu's Unreads first checkbox lives under Sort. */
+/** The Sort submenu's Unreads first checkbox. */
 export function unreadsFirst(menu) {
   return menu.getByRole("menuitemcheckbox", {
     name: "Unreads first",
@@ -344,36 +325,16 @@ export function unreadsFirst(menu) {
   });
 }
 
-/** One Time range choice in an open Filter menu. */
-export function dateChoice(menu, name) {
-  return menu.getByRole("menuitemradio", { name, exact: true });
-}
-
-/** Picks a Time range in an open Filter menu, which stays open. */
-export async function chooseDate(menu, name) {
-  await dateChoice(menu, name).click();
-}
-
-/** Expects a menu to show `name`: Unreads, a Date, or a sort choice. */
+/** Expects an open Sort menu to have `name` chosen. */
 export async function expectViewOption(menu, name) {
-  if (name === "Unreads") await expect(unreadsOnly(menu)).toBeChecked();
-  else
-    await expect(
-      menu.getByRole("menuitemradio", { name, exact: true }),
-    ).toBeChecked();
+  await expect(
+    menu.getByRole("menuitemradio", { name, exact: true }),
+  ).toBeChecked();
 }
 
-/** Picks one Filter choice, such as Unreads or a Date, then closes the menu.
- * All shows every conversation: Unreads off, all dates. */
+/** Picks one sort order, such as Recent or A–Z, then closes the menus. */
 export async function chooseViewOption(page, title, name, scope = page) {
-  const menu = await openFilterMenu(page, title, scope);
-  // Click rather than check: a failed save puts the checkbox back.
-  const unreads = unreadsOnly(menu);
-  if (name === "Unreads") {
-    if (!(await unreads.isChecked())) await unreads.click();
-  } else if (DATES.has(name)) {
-    await chooseDate(menu, name);
-    if (name === "All" && (await unreads.isChecked())) await unreads.click();
-  } else throw new Error(`Not a Filter choice: ${name}`);
+  const menu = await openSortMenu(page, title, scope);
+  await menu.getByRole("menuitemradio", { name, exact: true }).click();
   await closeMenus(page);
 }

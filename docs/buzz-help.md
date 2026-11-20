@@ -620,9 +620,10 @@ Quitting Buzz also turns it off.
   instructions to the shared Canvas** to share ordinary instructions with
   everyone who can view the channel’s Canvas. Folders and worktree settings
   stay in the workspace.
-  In the standard sidebar, use **Filter → Active in the last** from the
-  workspace’s **…** menu to show recent conversations. Open older conversations
-  from **Filter**, or choose **All** to show them in the sidebar again.
+  In the standard sidebar, use **Sort** in the workspace’s **…** menu to order
+  conversations by **Recent** or **A–Z**, and turn on **Unreads first** to keep
+  unread conversations at the top. Drag the card’s bottom edge to choose how
+  many rows it shows, or double-click it to show every conversation.
   Plugins can add tasks, Lead conversations and workspace actions.
   When starting a chat, type **#** to choose a workspace and load its settings.
   Folders are optional unless **Work in a new worktree** is on. An agent that
@@ -1228,7 +1229,7 @@ Quitting Buzz also turns it off.
   row’s menu. Workspaces and **Favorites** accept any type. Unfiled conversations
   return to the home for their type: **Solo** for chats, **Team** for channels
   and forums, or **Direct messages**.
-- Saved workspaces, Favorites, mutes, sorting and filters update while connected in
+- Saved workspaces, Favorites, mutes and sorting update while connected in
   hosts that support saved sidebar preferences. Moving a conversation out of
   Favorites to a workspace or home section from the sidebar removes it from
   Favorites.

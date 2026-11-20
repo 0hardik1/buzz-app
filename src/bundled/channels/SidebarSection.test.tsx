@@ -17,60 +17,8 @@ import { SidebarCardDisplayContext } from "./SidebarCardDisplay";
 import { MenuItem } from "../../shared/design-system/ui/Menu";
 afterEach(cleanup);
 
-it("picks a filter and its window in place from the Filter submenu", async () => {
+it("offers only Sort in the card's menu, with Unreads first enabled", async () => {
   const user = userEvent.setup();
-  const change = vi.fn();
-  render(
-    <SidebarSection
-      sectionKey="channels"
-      title="Channels"
-      open
-      onToggle={() => {}}
-      heightScope="view-options-filter-test"
-      filter={{ value: "unreads", change }}
-    >
-      <p>No channels match this filter.</p>
-    </SidebarSection>,
-  );
-  // Filter lives only in the card's ••• menu; the header has no button for it.
-  expect(screen.queryByRole("button", { name: /^Filter Channels/ })).toBeNull();
-  await user.click(
-    screen.getByRole("button", { name: "More actions for Channels" }),
-  );
-  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
-  const menu = await screen.findByRole("menu", { name: "Filter Channels" });
-  // Unreads and Date are separate: Unreads alone spans all dates, and
-  // picking a date keeps Unreads on. Choosing keeps the menu open.
-  const unreads = within(menu).getByRole("menuitemcheckbox", {
-    name: "Unreads only",
-  });
-  expect(unreads).toBeChecked();
-  expect(
-    within(menu).getByRole("menuitemradio", { name: "All" }),
-  ).toBeChecked();
-  expect(
-    within(menu)
-      .getAllByRole("menuitemradio")
-      .map((item) => item.textContent),
-  ).toEqual(["All", "Today", "3 days", "7 days", "30 days"]);
-  // The open submenu ignores pointer input until the pointer moves into it.
-  fireEvent.click(within(menu).getByRole("menuitemradio", { name: "7 days" }));
-  expect(change).toHaveBeenCalledExactlyOnceWith("unreads", 7 * 86400);
-  expect(menu).toBeInTheDocument();
-  fireEvent.click(unreads);
-  expect(change).toHaveBeenLastCalledWith("all", null);
-  expect(menu).toBeInTheDocument();
-  // The menu has no sort choices: those live under Sort in the card's menu.
-  expect(
-    within(menu).queryByRole("menuitemcheckbox", { name: "Unreads first" }),
-  ).toBeNull();
-  await user.keyboard("{Escape}");
-  await waitFor(() => expect(menu).not.toBeInTheDocument());
-});
-
-it("offers Filter and Sort in the card's menu, with Unreads first off while Unreads only is on", async () => {
-  const user = userEvent.setup();
-  const change = vi.fn();
   render(
     <SidebarSection
       sectionKey="channels"
@@ -78,7 +26,6 @@ it("offers Filter and Sort in the card's menu, with Unreads first off while Unre
       open
       onToggle={() => {}}
       heightScope="view-options-menu-test"
-      filter={{ value: "unreads", change }}
       sort={{ value: "alpha", change: () => {} }}
     >
       <p>Rows</p>
@@ -94,24 +41,13 @@ it("offers Filter and Sort in the card's menu, with Unreads first off while Unre
     within(menu)
       .getAllByRole("menuitem")
       .map((item) => item.textContent),
-  ).toEqual(["Filter", "Sort"]);
-  await user.click(within(menu).getByRole("menuitem", { name: "Filter" }));
-  const filter = await screen.findByRole("menu", { name: "Filter Channels" });
-  expect(
-    within(filter).getByRole("menuitemcheckbox", { name: "Unreads only" }),
-  ).toBeChecked();
-  // The open submenu ignores pointer input until the pointer moves into it.
-  fireEvent.click(
-    within(filter).getByRole("menuitemradio", { name: "30 days" }),
-  );
-  expect(change).toHaveBeenCalledExactlyOnceWith("unreads", 30 * 86400);
+  ).toEqual(["Sort"]);
   await user.click(within(menu).getByRole("menuitem", { name: "Sort" }));
   const sort = await screen.findByRole("menu", { name: "Sort Channels" });
   const first = within(sort).getByRole("menuitemcheckbox", {
     name: "Unreads first",
   });
-  // Unreads only leaves nothing else to put first.
-  expect(first).toHaveAttribute("aria-disabled", "true");
+  expect(first).not.toHaveAttribute("aria-disabled", "true");
 });
 
 it.each([true, false])(
@@ -498,37 +434,6 @@ it("never offers moves without a move capability", async () => {
   await screen.findByRole("menu", { name: "More actions for Channels" });
   expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull();
   expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull();
-});
-
-it("disables Unreads only and Time range when filters are read-only", async () => {
-  const user = userEvent.setup();
-  const change = vi.fn();
-  render(
-    <SidebarSection
-      sectionKey="channels"
-      title="Channels"
-      open
-      onToggle={() => {}}
-      filter={{ value: "unreads", disabled: true, change }}
-    >
-      <p>Rows</p>
-    </SidebarSection>,
-  );
-  await user.click(
-    screen.getByRole("button", { name: "More actions for Channels" }),
-  );
-  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
-  const unreads = await screen.findByRole("menuitemcheckbox", {
-    name: "Unreads only",
-  });
-  expect(unreads).toHaveAttribute("aria-disabled", "true");
-  for (const name of ["All", "Today", "3 days", "7 days", "30 days"])
-    expect(screen.getByRole("menuitemradio", { name })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-  await user.click(unreads);
-  expect(change).not.toHaveBeenCalled();
 });
 
 it("opens workspace settings from a saved section's menu", async () => {

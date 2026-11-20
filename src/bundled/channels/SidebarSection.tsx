@@ -1,8 +1,4 @@
-import {
-  SidebarViewMenuItems,
-  type SidebarViewFilter,
-  type SidebarViewSort,
-} from "./SidebarViewMenus";
+import { SidebarViewMenuItems, type SidebarViewSort } from "./SidebarViewMenus";
 import { FadingLabel } from "./FadingLabel";
 import {
   useEffect,
@@ -64,7 +60,6 @@ export function SidebarSection({
   createSection,
   newMessage,
   sort,
-  filter,
   dropRef,
   dropTarget = false,
   dropEdge,
@@ -111,7 +106,6 @@ export function SidebarSection({
     | { available: boolean; open: (trigger: HTMLButtonElement) => void }
     | undefined;
   sort?: SidebarViewSort | undefined;
-  filter?: SidebarViewFilter | undefined;
   dropRef?: Ref<HTMLDivElement> | undefined;
   dropTarget?: boolean;
   /** Where a dragged group would land relative to this one. */
@@ -163,7 +157,7 @@ export function SidebarSection({
   const displayChoice =
     iconView && heightScope ? { value: display, set: setDisplay } : undefined;
   // View choices stay reachable when the card's own actions are hidden.
-  const viewChoices = !!(filter || sort || unreadsFirstChoice || displayChoice);
+  const viewChoices = !!(sort || unreadsFirstChoice || displayChoice);
   const showMenu = !hideMoreActions || viewChoices;
   if (!showMenu && menuOpen) setMenuOpen(false);
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -221,7 +215,6 @@ export function SidebarSection({
                   >
                     <SidebarViewMenuItems
                       title={title}
-                      filter={filter}
                       sort={sort}
                       unreadsFirst={unreadsFirstChoice}
                       display={displayChoice}

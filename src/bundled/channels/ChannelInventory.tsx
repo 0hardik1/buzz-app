@@ -125,7 +125,6 @@ import { useHiddenDms } from "./useHiddenDms";
 import { resurfaceHiddenDms } from "../../features/relay/dm-resurfacing";
 import { useSidebarPreferences } from "./useSidebarPreferences";
 import { useSidebarView } from "./useSidebarView";
-import { useSidebarFilters } from "./useSidebarFilters";
 import {
   sidebarSections,
   contributedSidebarSectionKey,
@@ -283,41 +282,18 @@ export function ChannelInventory({
     },
     [preferences.data, rowSortModes],
   );
-  // Unsaved cards show everything, all time; a filter is something chosen.
-  const sectionFilter = useCallback(
-    (key: string): "all" | "unreads" | "active" =>
-      preferences.data?.filters?.[
-        key.startsWith("group:") ? `section:${key.slice(6)}` : key
-      ] ?? "all",
-    [preferences.data],
-  );
-  // Whether a card limits its conversations to a time range: Active always
-  // does; Unreads does when a range is saved beside it.
-  const sectionWindowed = (key: string) => {
-    const mode = sectionFilter(key);
-    return (
-      mode === "active" ||
-      (mode === "unreads" &&
-        preferences.data?.activeWindowSeconds?.[
-          key.startsWith("group:") ? `section:${key.slice(6)}` : key
-        ] !== undefined)
-    );
-  };
   const appliedSorts = Object.keys(preferences.data?.sort ?? {}).map((key) =>
     sectionSort(key.startsWith("section:") ? `group:${key.slice(8)}` : key),
   );
   const pluginSorted = appliedSorts.some(
     (mode) => mode !== "alpha" && mode !== "recent",
   );
-  // Set from the rendered cards below; assumed until they render, so a saved
-  // time range never briefly ranks by recency.
-  const [activeFiltered, setActiveFiltered] = useState(true);
   const list = useChannelRoster(queries.channels, {
     activity: true,
     preview: pluginSorted,
     // Recent order is the only reader of activity then; most messages land in
     // a chat that already leads, so they leave the sidebar alone.
-    ...(pluginSorted || activeFiltered ? {} : { rank: recentAt }),
+    ...(pluginSorted ? {} : { rank: recentAt }),
   });
   const rosterRecovers = useRecoveryOwns(queries, (live) =>
     rosterRecovering(live.roster),
@@ -516,17 +492,10 @@ export function ChannelInventory({
     preferences.status === "unsupported";
   const needsActivity =
     preferencesSettled &&
-    cards.some(
-      ({ key }) =>
-        sidebarSortNeedsActivity(sectionSort(key)) || sectionWindowed(key),
-    );
+    cards.some(({ key }) => sidebarSortNeedsActivity(sectionSort(key)));
   useEffect(() => {
     if (needsActivity) return queries.channels.demandActivity?.();
   }, [needsActivity, queries.channels]);
-  const cardsActiveFiltered = cards.some(({ key }) => sectionWindowed(key));
-  useEffect(() => {
-    if (preferencesSettled) setActiveFiltered(cardsActiveFiltered);
-  }, [preferencesSettled, cardsActiveFiltered]);
   const startup = useSidebarStartup(
     queries,
     list,
@@ -536,7 +505,6 @@ export function ChannelInventory({
   );
   const sections = startup.ready ? cards : noSections;
   // Projection rejects duplicate ids; optimistic creates skip existing ids.
-  // useSidebarFilters keeps every section, filtering only its rows.
   const slotsMounted =
     slotsReady?.([
       ...sections.flatMap(({ key }) => (workspaceFrames.has(key) ? [] : [key])),
@@ -991,40 +959,13 @@ export function ChannelInventory({
       }),
     [sortedSections, showsUnreadsFirst, waitingChannels],
   );
-  const filteredSections = useSidebarFilters(
-    orderedSections
-      .filter(({ key }) => !workspaceFrames.has(key))
-      .map((section) =>
-        composedChatSections.has(section.key)
-          ? { ...section, rows: [] }
-          : section,
-      ),
-    Object.fromEntries(
-      sortedSections.map(({ key }) => [key, sectionFilter(key)]),
-    ),
-    current?.id,
-    queries.unread,
-    Object.fromEntries(
-      Object.entries(preferences.data?.activeWindowSeconds ?? {}).map(
-        ([key, seconds]) => [
-          key.startsWith("section:") ? `group:${key.slice(8)}` : key,
-          seconds,
-        ],
-      ),
-    ),
-    list.activityStatus === "ready",
-    waitingChannels,
-  );
-  // Menu dismissal may run before a moved row mounts at its new placement.
-  // Only an actual filter exclusion should return focus to a section summary.
-  const hiddenRowSections = useRef(new Map<string, string>());
-  useLayoutEffect(() => {
-    hiddenRowSections.current = new Map(
-      filteredSections.flatMap((section) =>
-        section.hiddenRows.map(({ id }) => [id, section.key] as const),
-      ),
+  const shownSections = orderedSections
+    .filter(({ key }) => !workspaceFrames.has(key))
+    .map((section) =>
+      composedChatSections.has(section.key)
+        ? { ...section, rows: [] }
+        : section,
     );
-  }, [filteredSections]);
   const channelSectionKey = useCallback(
     (channelId: string) => {
       const data = queries.sidebarPreferences.snapshot().data;
@@ -1106,7 +1047,7 @@ export function ChannelInventory({
   // Group drags land on the placement drop targets, so they need both writers.
   const orderWritable = placementWritable && preferences.sectionOrderWritable;
   const groupIds = workspaceSectionOrder(preferences.data);
-  const visibleGroupIds = filteredSections.map(({ key }) => key);
+  const visibleGroupIds = shownSections.map(({ key }) => key);
   // Saved order uses the same section keys as collapse and drag.
   const orderedContributions = orderContributedSidebarSections(
     contributions.map((entry) => ({
@@ -1165,28 +1106,6 @@ export function ChannelInventory({
         preferences.data?.sections.map((section) => section.id) ?? [],
       )
       .catch(() => {});
-  };
-  const setSectionFilter = (
-    key: string,
-    mode: "all" | "unreads" | "active",
-    activeWindowSeconds?: number | null,
-  ) => {
-    // Menus pass the card key (group:x); Retry passes the saved key (section:x).
-    const card = key.startsWith("section:") ? `group:${key.slice(8)}` : key;
-    const saved = card.startsWith("group:") ? `section:${card.slice(6)}` : card;
-    // With no saved filter to clear, the relay already says All. A failed
-    // choice it replaces is retired either way.
-    if (mode === "all" && preferences.data?.filters?.[saved] === undefined) {
-      preferences.dismissFilterError(saved);
-      return Promise.resolve();
-    }
-    return preferences.setFilter(
-      saved,
-      mode,
-      preferences.data?.sections.map((section) => section.id) ?? [],
-      undefined,
-      activeWindowSeconds,
-    );
   };
   // Compose actual items here; menu availability is their count, not the policy
   // of any one action. Sibling actions keep their own eligibility checks.
@@ -1435,7 +1354,7 @@ export function ChannelInventory({
     rowMenu,
     open: openMenu,
     close: closeMenu,
-  } = useChannelRowMenu(filteredSections, rowActions);
+  } = useChannelRowMenu(shownSections, rowActions);
   const openRowMenu = useCallback(
     (channel: ChannelSummary, sectionKey: string, anchor?: HTMLElement) => {
       readAction.reset();
@@ -1497,9 +1416,8 @@ export function ChannelInventory({
         (candidate) => candidate.dataset.channelId === channelId,
       );
       if (row) return row;
-      const filteredSection = hiddenRowSections.current.get(channelId);
-      const sectionKey = filteredSection ?? channelSectionKey(channelId);
-      if (!filteredSection && !sidebar.collapsed.includes(sectionKey)) return;
+      const sectionKey = channelSectionKey(channelId);
+      if (!sidebar.collapsed.includes(sectionKey)) return;
       return list?.querySelector<HTMLElement>(
         `[data-sidebar-section="${CSS.escape(sectionKey)}"] :is(details > summary, button[aria-expanded]:not([aria-haspopup]))`,
       );
@@ -1625,7 +1543,7 @@ export function ChannelInventory({
   useLayoutEffect(() => {
     if (!soloNeighborsRef || composesChats) return;
     const neighbors = (id: string) => {
-      const shown = filteredSections.flatMap(({ key, rows }) =>
+      const shown = shownSections.flatMap(({ key, rows }) =>
         sidebar.collapsed.includes(key)
           ? []
           : rows.flatMap((row) =>
@@ -1645,7 +1563,7 @@ export function ChannelInventory({
       if (soloNeighborsRef.current === neighbors)
         soloNeighborsRef.current = undefined;
     };
-  }, [composesChats, filteredSections, sidebar.collapsed, soloNeighborsRef]);
+  }, [composesChats, shownSections, sidebar.collapsed, soloNeighborsRef]);
   // The shown rows nearest the confirmed channel and the open one: its own
   // section's, then the nearest expanded sections'. Captured while each is
   // still listed: completion, or removal while it is open, can drop it first.
@@ -1660,10 +1578,10 @@ export function ChannelInventory({
         delete lifecycleNeighbors.current[key];
         return;
       }
-      const at = filteredSections.findIndex((section) =>
+      const at = shownSections.findIndex((section) =>
         section.rows.some((row) => row.id === anchor),
       );
-      const placement = filteredSections[at];
+      const placement = shownSections[at];
       if (!placement) return;
       const shown = (section: typeof placement) =>
         sidebar.collapsed.includes(section.key)
@@ -1681,8 +1599,8 @@ export function ChannelInventory({
         ids: [
           ...own.slice(index + 1),
           ...own.slice(0, index).reverse(),
-          ...filteredSections.slice(at + 1).flatMap(shown),
-          ...filteredSections.slice(0, at).flatMap(shown).reverse(),
+          ...shownSections.slice(at + 1).flatMap(shown),
+          ...shownSections.slice(0, at).flatMap(shown).reverse(),
         ],
       };
     };
@@ -1693,7 +1611,7 @@ export function ChannelInventory({
     );
     // Its neighbor takes its place, so the sidebar stays where it is.
     const successor = (id: string) => {
-      const listed = filteredSections
+      const listed = shownSections
         .flatMap((section) => section.rows)
         .filter((row) => !pluginHiddenRows.current.has(row.id));
       return (
@@ -1904,7 +1822,7 @@ export function ChannelInventory({
       >
         <TeamSidebarSections
           value={[
-            ...filteredSections.map((section, index) => ({
+            ...shownSections.map((section, index) => ({
               id: section.key,
               title: section.title,
               defaultPosition: index,
@@ -1993,23 +1911,7 @@ export function ChannelInventory({
                               : open,
                           )
                         }
-                        channelCount={section.allRows.length}
-                        filter={
-                          preferences.data
-                            ? {
-                                value: sectionFilter(section.key),
-                                disabled: !preferences.filterWritable,
-                                activeWindowSeconds:
-                                  preferences.data.activeWindowSeconds?.[
-                                    section.key.startsWith("group:")
-                                      ? `section:${section.key.slice(6)}`
-                                      : section.key
-                                  ],
-                                change: (mode, seconds) =>
-                                  setSectionFilter(section.key, mode, seconds),
-                              }
-                            : undefined
-                        }
+                        channelCount={section.rows.length}
                         onRemove={
                           preferences.removeSectionWritable &&
                           section.key.startsWith("group:")
@@ -2284,7 +2186,7 @@ export function ChannelInventory({
               return {
                 id: sectionKey,
                 title: entry.title,
-                defaultPosition: filteredSections.length + index,
+                defaultPosition: shownSections.length + index,
                 element: (
                   <SidebarContributionSection
                     key={entry.key}
@@ -2382,39 +2284,6 @@ export function ChannelInventory({
             </button>
           </div>
         ))}
-        {preferences.filterErrors?.map(
-          ({ group, mode, activeWindowSeconds, error }) => (
-            <div key={group} className={styles.preferenceNotice} role="alert">
-              <p>
-                Couldn’t save the filter for{" "}
-                {sections.find(
-                  ({ key }) =>
-                    key ===
-                    (group.startsWith("section:")
-                      ? `group:${group.slice(8)}`
-                      : group),
-                )?.title ?? "this section"}
-                . {error}
-              </p>
-              <button
-                type="button"
-                onClick={() =>
-                  void setSectionFilter(group, mode, activeWindowSeconds).catch(
-                    () => {},
-                  )
-                }
-              >
-                Retry filter
-              </button>
-              <button
-                type="button"
-                onClick={() => preferences.dismissFilterError(group)}
-              >
-                Dismiss
-              </button>
-            </div>
-          ),
-        )}
         {preferences.orderError && (
           <div className={styles.preferenceNotice} role="alert">
             <p>
@@ -2538,7 +2407,7 @@ export function ChannelInventory({
           !activityErrorDismissed && (
             <ToastNotice
               title="Couldn’t refresh recent activity"
-              description="Activity filters and Recent sorting may be out of date."
+              description="Recent sorting may be out of date."
               tone="warning"
               onDismiss={() => setActivityErrorDismissed(true)}
             >

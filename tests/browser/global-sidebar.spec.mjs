@@ -4,7 +4,6 @@ import {
   expectViewOption,
   openPage,
   closeMenus,
-  openFilterMenu,
   openSortMenu,
 } from "./navigation.mjs";
 
@@ -40,7 +39,7 @@ test("a replacement sidebar unmounts Messages and returning restores its view", 
     list.getByRole("button", { name: "Alpha", exact: true }),
   ).toBeVisible();
   const original = await list.elementHandle();
-  await chooseViewOption(page, "Work", "Unreads");
+  await chooseViewOption(page, "Work", "A–Z");
   const work = page.locator('[data-sidebar-section="group:work"]');
   await work.locator("summary").click();
   await expect(work.locator("details").first()).not.toHaveAttribute("open");
@@ -100,8 +99,8 @@ test("a replacement sidebar unmounts Messages and returning restores its view", 
     .toBe(180);
   await expect(work.locator("details").first()).not.toHaveAttribute("open");
   await page.screenshot({ path: info.outputPath("messages-after-return.png") });
-  const workOptions = await openFilterMenu(page, "Work");
-  await expectViewOption(workOptions, "Unreads");
+  const workOptions = await openSortMenu(page, "Work");
+  await expectViewOption(workOptions, "A–Z");
   await closeMenus(page);
   await expect(workOptions).toHaveCount(0);
   const team = await openSortMenu(page, "Team");

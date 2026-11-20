@@ -16,7 +16,6 @@ import {
   readSidebarPreferences,
   workspaceSectionOrder,
 } from "./sidebar-preferences";
-import { editSidebarFilter } from "./sidebar-edits";
 import { keypair, signed, scriptedTransport, flush, roster } from "./testing";
 import type { LiveCallbacks } from "./live";
 import { ReadError } from "./errors";
@@ -778,83 +777,31 @@ it("admits only the complete bounded sidebar batch beyond the normal reader limi
     ).toBe(false);
 });
 
-it("keeps a window older apps left beside Unreads from limiting it after upgrade", () => {
-  const project = (record: Record<string, unknown>) =>
-    projectSidebarPreferences(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      [],
-      record,
-    );
-  // Older apps kept the last Active window when switching to Unreads, and
-  // read Unreads as every unread regardless of date.
-  const legacy = {
-    version: 1,
-    groups: { channels: "unreads", dms: "active" },
-    activeWindowSeconds: { channels: 7 * 86400, dms: 3 * 86400 },
-  };
-  expect(project(legacy).activeWindowSeconds).toEqual({ dms: 3 * 86400 });
-  // A window chosen beside Unreads now is stored on its own.
-  const chosen = editSidebarFilter(
-    legacy,
-    1,
-    "channels",
-    "unreads",
-    2_000,
-    86400,
-  );
-  expect(chosen.unreadsWindowSeconds).toEqual({ channels: 86400 });
-  expect(chosen.activeWindowSeconds).toEqual(legacy.activeWindowSeconds);
-  expect(project(chosen).activeWindowSeconds).toEqual({
-    channels: 86400,
-    dms: 3 * 86400,
-  });
-  // Back on Active, the card keeps Active's own window.
-  const active = editSidebarFilter(chosen, 2, "channels", "active", 3_000);
-  expect(project(active).activeWindowSeconds).toEqual({
-    channels: 7 * 86400,
-    dms: 3 * 86400,
-  });
-  // All clears both, so neither window returns later.
-  const all = editSidebarFilter(active, 3, "channels", "all", 4_000, null);
-  expect(all.unreadsWindowSeconds).toEqual({});
-  expect(all.activeWindowSeconds).toEqual({ dms: 3 * 86400 });
-  for (const value of [0, 86401, "86400"])
-    expect(() =>
-      project({ ...legacy, unreadsWindowSeconds: { channels: value } }),
-    ).toThrow("Invalid sidebar activity window");
-});
-
-it("projects bounded optional activity windows without changing legacy mode decoding", () => {
-  const project = (activeWindowSeconds?: unknown) =>
-    projectSidebarPreferences(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      ["work"],
-      { version: 1, groups: { channels: "active" }, activeWindowSeconds },
-    );
-  expect(project().filters).toEqual({ channels: "active" });
-  expect(project().activeWindowSeconds).toEqual({});
-  expect(
-    project({
-      channels: 604800,
-      "section:work": 31536000,
-      "section:removed": 86400,
-    }).activeWindowSeconds,
-  ).toEqual({ channels: 604800, "section:work": 31536000 });
-  for (const value of [0, -86400, 86401, 1.5, "604800", null, 31622400])
-    expect(() => project({ channels: value })).toThrow(
-      "Invalid sidebar activity window",
-    );
-  expect(() =>
-    project(
-      Object.fromEntries(
-        Array.from({ length: 105 }, (_, i) => [`section:${i}`, 86400]),
-      ),
-    ),
-  ).toThrow("Invalid sidebar activity window");
+it("accepts and ignores an older app's channel-filter record", () => {
+  const records: unknown[] = [
+    {
+      version: 1,
+      groups: { channels: "unreads", "section:x": "active" },
+      activeWindowSeconds: { channels: 7 * 86400 },
+      unreadsWindowSeconds: { channels: 86400 },
+    },
+    { version: 2, groups: "nope" },
+  ];
+  for (const record of records) {
+    let result: ReturnType<typeof projectSidebarPreferences> | undefined;
+    expect(() => {
+      result = projectSidebarPreferences(
+        groups,
+        stars,
+        undefined,
+        { version: 1, groups: { channels: "recent" } },
+        ["work"],
+        record,
+      );
+    }).not.toThrow();
+    expect(result).not.toHaveProperty("filters");
+    expect(result).not.toHaveProperty("activeWindowSeconds");
+    expect(result?.sections).toEqual(expected.sections);
+    expect(result?.sort).toEqual({ channels: "recent" });
+  }
 });

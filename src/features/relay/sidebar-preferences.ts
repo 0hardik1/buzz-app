@@ -437,29 +437,6 @@ export function validWorkspaceSectionOrder(value: unknown): value is string[] {
     )
   );
 }
-export type SidebarFilterMode = "all" | "unreads" | "active";
-export const DEFAULT_ACTIVE_WINDOW_SECONDS = 30 * 86400;
-export const MAX_ACTIVE_WINDOW_SECONDS = 365 * 86400;
-export function validActiveWindow(value: unknown): value is number {
-  return (
-    typeof value === "number" &&
-    Number.isSafeInteger(value) &&
-    value >= 86400 &&
-    value <= MAX_ACTIVE_WINDOW_SECONDS &&
-    value % 86400 === 0
-  );
-}
-export type SidebarFilterSettings = Readonly<{
-  filters: Readonly<Record<string, SidebarFilterMode>>;
-  activeWindowSeconds: Readonly<Record<string, number>>;
-}>;
-export type SidebarFilterMutator = (
-  group: string,
-  mode: SidebarFilterMode,
-  sectionIds: readonly string[],
-  signal: AbortSignal,
-  activeWindowSeconds?: number | null,
-) => Promise<SidebarFilterSettings>;
 export type SidebarSortMutator = (
   group: string,
   mode: SidebarSortMode,
@@ -475,8 +452,6 @@ export type SidebarPreferences = SidebarGroups &
     starred: readonly string[];
     muted: readonly string[];
     sort?: Readonly<Record<string, SidebarSortMode>>;
-    filters?: Readonly<Record<string, SidebarFilterMode>>;
-    activeWindowSeconds?: Readonly<Record<string, number>>;
     /** A first write still needs both verified legacy workspace records. */
     workspaceMigrationPending?: true;
     /** Workspace IDs from the old Solo sidebar, read from its legacy record. */
@@ -552,7 +527,9 @@ export function projectSidebarPreferences(
   mutes?: unknown,
   sort?: unknown,
   sortSectionIds?: readonly string[],
-  filters?: unknown,
+  /** Older apps' card filters. Filtering is gone, so a saved record of any
+   * shape is accepted and ignored: every card shows all of its rows. */
+  _filters?: unknown,
   workspaceRecord = false,
 ): SidebarPreferences {
   const result: {
@@ -562,8 +539,6 @@ export function projectSidebarPreferences(
     legacyTemplates?: Readonly<Record<string, string>>;
     starred: string[];
     sort?: Record<string, SidebarSortMode>;
-    filters?: Record<string, SidebarFilterMode>;
-    activeWindowSeconds?: Record<string, number>;
     muted: string[];
   } = {
     sections: [],
@@ -681,71 +656,6 @@ export function projectSidebarPreferences(
           isSidebarSortMode(entry[1]),
         )
         .map(([key, mode]) => [text(key, 264), mode] as const)
-        .filter(
-          ([key]) =>
-            fixed.has(key) ||
-            liveSections.has(key) ||
-            (sortSectionIds === undefined &&
-              key.startsWith("section:") &&
-              key.length > 8),
-        ),
-    );
-  }
-  if (filters !== undefined) {
-    const data = projectSidebarRecord("channel-filter", object(filters));
-    if (data.version !== 1) throw new Error("Unsupported sidebar filter");
-    const entries = Object.entries(object(data.groups));
-    if (entries.length > (workspaceRecord ? 205 : 104))
-      throw new Error("Sidebar filter budget exceeded");
-    const fixed = new Set<string>(HOME_SIDEBAR_SECTIONS);
-    const liveSections = new Set(
-      (sortSectionIds ?? []).map((id) => `section:${id}`),
-    );
-    if (
-      entries.some(
-        ([, mode]) => mode !== "all" && mode !== "unreads" && mode !== "active",
-      )
-    )
-      throw new Error("Invalid sidebar filter mode");
-    result.filters = Object.fromEntries(
-      entries
-        .filter(
-          (entry): entry is [string, SidebarFilterMode] =>
-            entry[1] === "all" ||
-            entry[1] === "unreads" ||
-            entry[1] === "active",
-        )
-        .map(([key, mode]) => [text(key, 264), mode] as const)
-        .filter(
-          ([key]) =>
-            fixed.has(key) ||
-            liveSections.has(key) ||
-            (sortSectionIds === undefined &&
-              key.startsWith("section:") &&
-              key.length > 8),
-        ),
-    );
-    // Each mode keeps its own windows: `activeWindowSeconds` for Active and
-    // `unreadsWindowSeconds` for Unreads. Older apps left the last Active
-    // window beside Unreads without meaning it, so Unreads reads only its own.
-    const windowsOf = (raw: unknown) => {
-      const windows = Object.entries(object(raw === undefined ? {} : raw));
-      if (
-        windows.length > (workspaceRecord ? 205 : 104) ||
-        windows.some(([, value]) => !validActiveWindow(value))
-      )
-        throw new Error("Invalid sidebar activity window");
-      return windows;
-    };
-    const activeWindows = windowsOf(data.activeWindowSeconds);
-    const unreadsWindows = windowsOf(data.unreadsWindowSeconds);
-    const modes = result.filters;
-    result.activeWindowSeconds = Object.fromEntries(
-      [
-        ...activeWindows.filter(([key]) => modes[key] !== "unreads"),
-        ...unreadsWindows.filter(([key]) => modes[key] === "unreads"),
-      ]
-        .map(([key, value]) => [text(key, 264), value as number] as const)
         .filter(
           ([key]) =>
             fixed.has(key) ||

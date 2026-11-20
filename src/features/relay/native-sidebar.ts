@@ -12,12 +12,10 @@ import {
   validSidebarSectionRemoval,
   validSidebarSectionRename,
   editSidebarSort,
-  editSidebarFilter,
   editSidebarToggle,
   validSidebarAssignment,
   validSidebarChannelId,
   validSidebarSort,
-  validSidebarFilter,
 } from "./sidebar-edits";
 import { invoke } from "@tauri-apps/api/core";
 import { eventDto, type RelayEvent } from "./events";
@@ -35,7 +33,6 @@ import {
   type SidebarGroups,
   type SidebarSectionEdit,
   type SidebarSortMode,
-  type SidebarFilterMode,
 } from "./sidebar-preferences";
 import type { ReadTransport } from "./transport";
 
@@ -464,49 +461,6 @@ export function nativeSidebar(transport: ReadTransport) {
             group
           ] ?? defaultSidebarSort(group)) === mode,
         "Sidebar sort changed on another device; reload and try again",
-      );
-    },
-    async writeSidebarFilter(
-      group: string,
-      mode: SidebarFilterMode,
-      sectionIds: readonly string[],
-      signal: AbortSignal,
-      activeWindowSeconds?: number | null,
-    ) {
-      if (!validSidebarFilter(group, mode, sectionIds, activeWindowSeconds))
-        throw new Error("Invalid sidebar filter intent");
-      const prepare = (current: Record<string, unknown>, createdAt: number) => {
-        const next = editSidebarFilter(
-          current,
-          createdAt,
-          group,
-          mode,
-          Date.now(),
-          activeWindowSeconds,
-        );
-        const settings = project(WORKSPACE_FILTER_COORDINATE, next, sectionIds);
-        return {
-          next,
-          result: {
-            filters: settings.filters ?? {},
-            activeWindowSeconds: settings.activeWindowSeconds ?? {},
-          },
-        };
-      };
-      return mutate(
-        WORKSPACE_FILTER_COORDINATE,
-        signal,
-        prepare,
-        (value) =>
-          editSidebarFilter(
-            value,
-            0,
-            group,
-            mode,
-            Date.now(),
-            activeWindowSeconds,
-          ) === value,
-        "Sidebar filter changed on another device; reload and try again",
       );
     },
   };

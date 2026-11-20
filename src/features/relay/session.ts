@@ -2292,23 +2292,6 @@ export function createRelaySession(
       : undefined,
     renameSection: workspaceWrite(transport?.renameSidebarSection),
     writeOrder: workspaceWrite(transport?.writeSidebarSectionOrder),
-    writeFilter: (() => {
-      const write = transport?.writeSidebarFilter;
-      return write
-        ? (group, mode, sectionIds, signal, activeWindowSeconds) =>
-            write(
-              group,
-              mode,
-              sectionIds,
-              AbortSignal.any([
-                lifetime.signal,
-                AbortSignal.timeout(20_000),
-                signal,
-              ]),
-              activeWindowSeconds,
-            )
-        : undefined;
-    })(),
   });
   type SetupNotice = Readonly<{ id: string; name: string; error: string }>;
   let setupNotices: readonly SetupNotice[] = [];
@@ -2664,7 +2647,7 @@ export function createRelaySession(
           () => loadState(sidebarPreferences.queries.snapshot()),
           () => void sidebarPreferences.queries.refresh(),
         ),
-        // Recent sorting and the 30-day filter's activity read.
+        // Recent sorting's activity read.
         recoverable(
           channelActivity.subscribe,
           () =>
@@ -4290,8 +4273,7 @@ export function createRelaySession(
     const preferences = sidebarPreferences.queries.snapshot().data;
     if (
       !activityDemand &&
-      !Object.values(preferences?.sort ?? {}).some(sidebarSortNeedsActivity) &&
-      !Object.values(preferences?.filters ?? {}).includes("active")
+      !Object.values(preferences?.sort ?? {}).some(sidebarSortNeedsActivity)
     ) {
       channelActivity.cancel();
       activityRosterKey = undefined;

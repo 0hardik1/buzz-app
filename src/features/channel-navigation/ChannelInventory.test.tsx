@@ -30,7 +30,6 @@ import { createSidebarPreferencesStore } from "../relay/sidebar-preferences-stor
 import type {
   SidebarGroups,
   SidebarPreferences,
-  SidebarFilterMode,
   SidebarSortMode,
 } from "../relay/sidebar-preferences";
 import type { LiveCallbacks } from "../relay/live";
@@ -137,17 +136,6 @@ const defaultPages = (
   </nav>
 );
 
-/** Opens a card's ••• menu, then its Filter submenu. */
-async function filterMenu(
-  user: ReturnType<typeof userEvent.setup>,
-  title: string,
-) {
-  await user.click(
-    screen.getByRole("button", { name: `More actions for ${title}` }),
-  );
-  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
-  return screen.findByRole("menu", { name: `Filter ${title}` });
-}
 /** Opens a card's ••• menu, then its Sort submenu. */
 async function sortMenu(
   user: ReturnType<typeof userEvent.setup>,
@@ -159,33 +147,12 @@ async function sortMenu(
   await user.click(await screen.findByRole("menuitem", { name: "Sort" }));
   return screen.findByRole("menu", { name: `Sort ${title}` });
 }
-/** Picks one choice in a card's Filter menu or Sort submenu, then closes the
- * menus. */
+/** Picks one choice in a card's Sort submenu, then closes the menus. */
 async function chooseView(
   user: ReturnType<typeof userEvent.setup>,
   title: string,
   name: string,
 ) {
-  if (name === "Unreads" || name === "All") {
-    const menu = await filterMenu(user, title);
-    const unreads = within(menu).getByRole("menuitemcheckbox", {
-      name: "Unreads only",
-    });
-    if (name === "Unreads") {
-      if (unreads.getAttribute("aria-checked") !== "true")
-        fireEvent.click(unreads);
-    } else {
-      // Every conversation: all time, then Unreads only off.
-      await user.click(
-        within(menu).getByRole("menuitemradio", { name: "All" }),
-      );
-      if (unreads.getAttribute("aria-checked") === "true")
-        fireEvent.click(unreads);
-    }
-    await user.keyboard("{Escape}");
-    await waitFor(() => expect(menu).not.toBeInTheDocument());
-    return;
-  }
   const menu = await sortMenu(user, title);
   fireEvent.click(within(menu).getByRole("menuitemradio", { name }));
   await user.keyboard("{Escape}");
@@ -695,70 +662,6 @@ it.each(["Retry", "Dismiss"] as const)(
     }
   },
 );
-
-it("uses relay section filters across navigation and remount", async () => {
-  const user = userEvent.setup();
-  let filters: Record<string, SidebarFilterMode> = {};
-  const preferences = createSidebarPreferencesStore({
-    read: async () => ({
-      sections: [],
-      assignments: {},
-      starred: [],
-      muted: [],
-      filters,
-    }),
-    available: true,
-    writeFilter: async (group, mode) => {
-      filters = mode === "all" ? {} : { [group]: mode };
-      return { filters, activeWindowSeconds: {} };
-    },
-  });
-  const h = fixture(preferences.queries);
-  const mounted = render(h.view("alpha"));
-  await screen.findByRole("button", { name: "gamma" });
-  await chooseView(user, "Team", "Unreads");
-  // A fading row is hidden from role queries; wait until it has left the DOM.
-  await waitFor(() =>
-    expect(document.querySelector('[data-channel-id="beta"]')).toBeNull(),
-  );
-  expect(screen.getByRole("button", { name: "alpha" })).toBeVisible();
-  mounted.rerender(h.view("beta"));
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "beta" })).toBeVisible(),
-  );
-  expect(screen.queryByRole("button", { name: "alpha" })).toBeNull();
-  mounted.rerender(h.view("not-in-this-section"));
-  expect(screen.queryByText("0 matches")).toBeNull();
-  expect(
-    screen.getByLabelText("Team", { selector: "summary" }).closest("details"),
-  ).toHaveAttribute("open");
-  expect(screen.queryByText("No channels match this filter.")).toBeNull();
-  mounted.unmount();
-  expect(filters).toEqual({ channels: "unreads" });
-  expect(
-    readView("https://relay.test:viewer", "channel-sidebar", {}),
-  ).not.toHaveProperty("sectionFilters");
-  const restored = render(h.view("gamma"));
-  expect(await screen.findByRole("button", { name: "gamma" })).toBeVisible();
-  expect(screen.queryByText("0 matches")).toBeNull();
-  expect(screen.queryByRole("button", { name: "beta" })).toBeNull();
-  restored.rerender(h.view("alpha"));
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "alpha" })).toBeVisible(),
-  );
-  expect(screen.queryByRole("button", { name: "gamma" })).toBeNull();
-  await chooseView(user, "Team", "All");
-  await waitFor(() => {
-    expect(screen.getByRole("button", { name: "beta" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "gamma" })).toBeVisible();
-  });
-  restored.unmount();
-  expect(
-    readView("https://relay.test:viewer", "channel-sidebar", {}),
-  ).not.toHaveProperty("sectionFilters");
-  expect(filters).toEqual({});
-  preferences.dispose();
-});
 
 it("ignores local and legacy filter state", async () => {
   writeView("https://relay.test:viewer", "channel-sidebar", {
@@ -2287,65 +2190,6 @@ it.each(["delete", "leave"] as const)(
     await waitFor(() =>
       expect(h.navigator.open).toHaveBeenCalledWith(
         expect.objectContaining({ kind: "conversation", channelId: "alpha" }),
-      ),
-    );
-    expect(h.navigator.open).toHaveBeenCalledOnce();
-  },
-);
-
-it.each(
-  (["delete", "leave"] as const).flatMap((action) =>
-    [false, true].map((hideUnread) => ({ action, hideUnread })),
-  ),
-)(
-  "pending $action recovers within the Unreads roster (hide remaining unread: $hideUnread)",
-  async ({ action, hideUnread }) => {
-    const registry = rowRegistry({
-      version: 1,
-      id: "visibility",
-      render: (row, Default) =>
-        row.id === "gamma" || row.label.startsWith("hidden ") ? null : Default,
-    });
-    const preferences = createSidebarPreferencesStore({
-      available: true,
-      read: async () => ({
-        sections: [],
-        assignments: {},
-        starred: [],
-        muted: [],
-        filters: { channels: "unreads" },
-      }),
-    });
-    await preferences.queries.ensure();
-    const h = pendingLifecycle(action, preferences.queries, registry, "alpha");
-    try {
-      const alpha = await screen.findByRole("button", { name: /^alpha/ });
-      expect(alpha).toBeVisible();
-      expect(
-        within(alpha).getByRole("img", {
-          name: "Marked unread on this device only",
-        }),
-      ).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "beta" })).toBeVisible();
-      expect(screen.queryByRole("button", { name: "gamma" })).toBeNull();
-      await h.start();
-      h.drop("beta");
-      if (hideUnread) h.publish("alpha", { name: "hidden alpha" });
-    } finally {
-      await act(async () => h.finish());
-      preferences.dispose();
-    }
-    await waitFor(() =>
-      expect(h.navigator.open).toHaveBeenCalledWith(
-        expect.objectContaining(
-          hideUnread
-            ? {
-                kind: "page",
-                pageId: "channels",
-                route: { version: 1, params: "empty" },
-              }
-            : { kind: "conversation", channelId: "alpha" },
-        ),
       ),
     );
     expect(h.navigator.open).toHaveBeenCalledOnce();
@@ -4381,49 +4225,4 @@ it("keeps default Solo recency as live activity changes", async () => {
   await waitFor(() => expect(soloOrder()).toEqual(["alpha", "beta"]));
   h.publish("beta", { lastActivityAt: now });
   await waitFor(() => expect(soloOrder()).toEqual(["beta", "alpha"]));
-});
-
-it("shows an Active card's leading chat again when new activity revives it past its window", async () => {
-  const now = Math.floor(Date.now() / 1000);
-  const days = 24 * 60 * 60;
-  const preferences = createSidebarPreferencesStore({
-    available: true,
-    read: async () => ({
-      sections: [],
-      assignments: {},
-      starred: [],
-      muted: [],
-      filters: { channels: "active" },
-    }),
-  });
-  await preferences.queries.ensure();
-  const h = fixture(preferences.queries, "ready", [
-    // Exactly one default 30-day window old: expired at the boundary, and
-    // still the most recent chat anywhere, so it leads the global rank.
-    {
-      id: "alpha",
-      name: "alpha",
-      channelType: "stream",
-      lastActivityAt: now - 30 * days,
-    },
-    {
-      id: "beta",
-      name: "beta",
-      channelType: "stream",
-      lastActivityAt: now - 40 * days,
-    },
-    { id: "gamma", name: "gamma", channelType: "stream" },
-  ]);
-  const team = () =>
-    [
-      ...document.querySelectorAll(
-        '[data-sidebar-section="channels"] [data-channel-id]',
-      ),
-    ].map((row) => row.getAttribute("data-channel-id"));
-  render(h.view("gamma"));
-  await waitFor(() => expect(team()).toEqual(["gamma"]));
-  // Alpha still leads, so its global rank does not change; only the
-  // 30-day filter sees the difference.
-  h.publish("alpha", { lastActivityAt: now });
-  await waitFor(() => expect(team()).toEqual(["alpha", "gamma"]));
 });

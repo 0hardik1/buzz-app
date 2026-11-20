@@ -1,94 +1,9 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import { DEFAULT_ACTIVE_WINDOW_SECONDS } from "../../features/relay/sidebar-preferences";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type {
   MentionActivityItem,
   ThreadActivityItem,
   UnreadCapability,
 } from "../../features/relay/unread";
-import type { sidebarSections } from "./sidebar-sections";
-
-export type { SidebarFilterMode as SidebarFilter } from "../../features/relay/sidebar-preferences";
-import type { SidebarFilterMode as SidebarFilter } from "../../features/relay/sidebar-preferences";
-export const SIDEBAR_ACTIVE_WINDOW = DEFAULT_ACTIVE_WINDOW_SECONDS * 1000;
-
-/** Filter only the existing section roster; the current destination always stays.
- * Unreads keeps what needs you, the same set Unreads first leads with: DMs,
- * mentions and replies in threads you follow (`needsYou`), plus conversations
- * you marked unread. Other new messages don't count. A date window applies
- * with Active, or alongside Unreads when one is saved. */
-export function useSidebarFilters(
-  sections: ReturnType<typeof sidebarSections>,
-  filters: Readonly<Record<string, SidebarFilter>>,
-  current: string | undefined,
-  unread: UnreadCapability,
-  windows: Readonly<Record<string, number>> = {},
-  activityReady = true,
-  needsYou: ReadonlySet<string> = new Set(),
-) {
-  const ids = JSON.stringify(
-    sections.flatMap((section) =>
-      filters[section.key] === "unreads"
-        ? section.rows.map((row) => row.id)
-        : [],
-    ),
-  );
-  const marked = useUnreadChannelIds(unread, ids, true, true);
-  const [clock, tick] = useState(0);
-  const now = Date.now();
-  let nextExpiry = Infinity;
-  // Unknown activity is not inactivity. Keep those rows during loading or a
-  // failed read; a successful read can establish that a channel has no activity.
-  const visible = sections.map((section) => {
-    const mode = filters[section.key] ?? "all";
-    // Unreads keeps any saved date window too; without one, it spans all dates.
-    const seconds =
-      mode === "active"
-        ? (windows[section.key] ?? DEFAULT_ACTIVE_WINDOW_SECONDS)
-        : mode === "unreads"
-          ? windows[section.key]
-          : undefined;
-    const activeWindow = seconds === undefined ? undefined : seconds * 1000;
-    const rows = section.rows.filter((channel) => {
-      if (activeWindow !== undefined && channel.lastActivityAt !== undefined) {
-        const expiry = channel.lastActivityAt * 1000 + activeWindow;
-        if (expiry > now) nextExpiry = Math.min(nextExpiry, expiry);
-      }
-      return (
-        channel.id === current ||
-        ((mode !== "unreads" ||
-          needsYou.has(channel.id) ||
-          marked.has(channel.id)) &&
-          (activeWindow === undefined ||
-            (channel.lastActivityAt === undefined
-              ? !channel.activityKnown && !activityReady
-              : channel.lastActivityAt * 1000 + activeWindow > now)))
-      );
-    });
-    const visibleIds = new Set(rows.map(({ id }) => id));
-    return {
-      ...section,
-      allRows: section.rows,
-      rows,
-      hiddenRows: section.rows.filter(({ id }) => !visibleIds.has(id)),
-    };
-  });
-  // One owned deadline keeps an idle sidebar correct when activity ages out.
-  useEffect(() => {
-    if (!Number.isFinite(nextExpiry)) return;
-    const timer = window.setTimeout(
-      () => tick(clock + 1),
-      Math.min(Math.max(0, nextExpiry - Date.now()), 2_147_483_647),
-    );
-    return () => window.clearTimeout(timer);
-  }, [nextExpiry, clock]);
-  return visible;
-}
 
 /** Whether a channel has unread messages, a manual mark or unread threads.
  * `shown` asks what its row shows instead, which opening the channel quiets. */
@@ -108,8 +23,8 @@ export function channelHasUnread(
 
 /** Channels among `ids` (a JSON id array) with unread messages or threads, or
  * with `markedOnly`, just those marked unread by hand.
- * `shown` asks what their rows show instead: the sidebar's Unreads filter
- * follows the rows, while search still leads with every unread conversation. */
+ * `shown` asks what their rows show instead, while search still leads with
+ * every unread conversation. */
 export function useUnreadChannelIds(
   unread: UnreadCapability,
   ids: string,
