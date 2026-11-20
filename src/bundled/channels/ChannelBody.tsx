@@ -345,12 +345,16 @@ export const ChannelBody = memo(function ChannelBody({
                         if (intro) finishIntro();
                         const { anchor, replyParent } =
                           thread.handoff.current?.() ?? {};
+                        // The tab places focus; the sheet returns none.
+                        thread.trigger.current = null;
                         setThreads((items) =>
                           items.filter((item) => item.id !== thread.id),
                         );
+                        // A reply target opens its tab at the thread with
+                        // that target's editor focused, not its row selected.
                         if (replyParent)
                           onOpenThread(
-                            replyParent,
+                            thread.messageId,
                             thread.rootId,
                             "reply",
                             replyParent,

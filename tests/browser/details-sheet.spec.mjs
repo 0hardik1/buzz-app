@@ -1,6 +1,6 @@
 import { hoverMessage } from "./message-actions.mjs";
 import { test, expect } from "./fixture.mjs";
-import { open } from "./timeline.mjs";
+import { open, virtuaIdle } from "./timeline.mjs";
 
 test.use({
   threadPlacement: "inline",
@@ -78,6 +78,52 @@ test("a details sheet opened from the keyboard closes with one Escape", async ({
 
 // Real hit testing proves the replacement composer is above the scrim, while
 // the channel draft remains mounted and cannot receive the thread reply.
+// Focus is a real-engine contract: the sheet unmounting must not pull it
+// back to the timeline after the tab placed it.
+test("Open as tab hands the reply target, draft and focus to the thread tab", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const row = page
+    .getByRole("region", { name: "Channel message history" })
+    .locator("[data-message-id]")
+    .first();
+  const rootId = await row.getAttribute("data-message-id");
+  const parent = app.append(
+    "primary",
+    "alpha",
+    "Nested parent",
+    true,
+    false,
+    rootId,
+  );
+  await hoverMessage(row);
+  await row.getByRole("button", { name: "Reply", exact: true }).click();
+  const sheet = page.getByRole("dialog");
+  const nested = sheet.locator(`[data-message-id="${parent.id}"]`);
+  await expect(nested).toBeVisible();
+  await hoverMessage(nested);
+  await nested.getByRole("button", { name: "Reply", exact: true }).click();
+  const editor = page.getByRole("textbox", { name: "Reply to thread" });
+  await expect(editor).toBeFocused();
+  await page.keyboard.type("Nested draft");
+  await sheet.getByRole("button", { name: "Open as tab", exact: true }).click();
+  await expect(sheet).toBeHidden();
+  await expect(
+    page
+      .getByRole("tablist", { name: "Panel tabs" })
+      .getByRole("tab", { selected: true }),
+  ).toHaveText(/primary alpha message 0/);
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveText("Nested draft");
+  await expect(
+    page.getByRole("button", { name: "Cancel reply target" }),
+  ).toBeVisible();
+  await page.keyboard.type(" continues");
+  await expect(editor).toHaveText("Nested draft continues");
+});
+
 test("thread sheet keeps its reply composer usable and restores the channel draft", async ({
   page,
   app,
@@ -655,6 +701,8 @@ test("long thread sheet windows replies while preserving reading, branches, and 
     .toBeLessThan(81);
   const last = history.locator(`[data-message-id="${replies.at(-1).id}"]`);
   await expect(last).toBeInViewport();
+  // Visible rows can still be settling; the virtualizer blocks input until then.
+  await virtuaIdle(page, history);
   await history.getByRole("button", { name: /^View 2 replies/ }).click();
   await expect(
     history.locator(`[data-message-id="${nested.id}"]`),

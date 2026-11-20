@@ -413,6 +413,9 @@ export function DetailsSheet({
     typeof resolveFocus === "function"
       ? (closeType) => {
           const target = resolveFocus(closeType);
+          // An owner that cleared its target placed focus itself, as a
+          // thread handed to its tab does; Base UI's default would take it.
+          if (target === null) return false;
           if (!(target instanceof HTMLElement) || target.tabIndex >= 0)
             return target;
           target.focus({ preventScroll: true });
