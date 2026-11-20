@@ -22,6 +22,28 @@ it("focuses its labelled field and delegates Escape dismissal", () => {
   expect(onCancel).toHaveBeenCalledOnce();
 });
 
+it("focuses an existing draft only on an explicit focus request", () => {
+  const draft = { body: "Retained draft" };
+  const view = (focusRequest = 0) => (
+    <InlineCommentForm
+      draft={draft}
+      focusRequest={focusRequest}
+      busy={false}
+      blocked={false}
+      onSubmit={vi.fn()}
+      onCancel={vi.fn()}
+    />
+  );
+  const first = render(view());
+  expect(document.activeElement).toBe(screen.getByRole("textbox"));
+  first.unmount();
+  const restored = render(view());
+  expect(document.activeElement).not.toBe(screen.getByRole("textbox"));
+  expect(screen.getByRole("textbox")).toHaveProperty("value", "Retained draft");
+  restored.rerender(view(1));
+  expect(document.activeElement).toBe(screen.getByRole("textbox"));
+});
+
 it.each(["busy", "blocked"] as const)(
   "blocks form submission while %s",
   (state) => {

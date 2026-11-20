@@ -59,6 +59,161 @@ const posts = (page) =>
   );
 // Pierre's annotation wrappers can remount sibling forms when a slot is removed.
 for (const layout of ["Unified", "Split"]) {
+  test(`keeps the cancelled line in place in ${layout}`, async ({ page }) => {
+    await open(page);
+    await page.evaluate(() => {
+      window.inlineFixture.state.patch =
+        "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -1 +1,300 @@\n-old\n" +
+        Array.from(
+          { length: 300 },
+          (_, index) => `+const value${index} = ${index};\n`,
+        ).join("");
+    });
+    await page.getByRole("button", { name: "Refresh changes" }).click();
+    if (layout === "Split") await select(page, "Diff layout", "Split");
+    const file = page.getByRole("region", {
+      name: "src/example.ts",
+      exact: true,
+    });
+    const forms = [];
+    for (const number of [20, 150, 280]) {
+      await file
+        .locator(
+          `[data-column-number="${number}"][data-line-type="change-addition"]`,
+        )
+        .hover();
+      await page
+        .getByRole("button", { name: "Comment on hovered line" })
+        .click();
+      const field = page
+        .getByRole("textbox", { name: "Comment", exact: true })
+        .last();
+      await field.fill(`Draft ${number}`);
+      const operation = await field.evaluate(
+        (node) => node.form.dataset.operation,
+      );
+      forms.push(file.locator(`form[data-operation="${operation}"]`));
+    }
+    const cancel = forms[1].getByRole("button", {
+      name: "Cancel",
+      exact: true,
+    });
+    await cancel.scrollIntoViewIfNeeded();
+    const row = file.locator(
+      '[data-column-number="150"][data-line-type="change-addition"]',
+    );
+    const top = (await row.boundingBox()).y;
+    await cancel.click();
+    await expect(forms[1]).toHaveCount(0);
+    await expect
+      .poll(async () => Math.abs((await row.boundingBox()).y - top))
+      .toBeLessThan(2);
+    await expect(forms[0].getByRole("textbox")).toHaveValue("Draft 20");
+    await expect(forms[2].getByRole("textbox")).toHaveValue("Draft 280");
+  });
+  test(`cancels individual empty new-line boxes in ${layout}`, async ({
+    page,
+  }) => {
+    await open(page);
+    if (layout === "Split") await select(page, "Diff layout", "Split");
+    const file = page.getByRole("region", {
+      name: "src/example.ts",
+      exact: true,
+    });
+    const forms = [];
+    for (const [number, type] of [
+      [5000, "change-addition"],
+      [5001, "change-addition"],
+      [5002, "context"],
+    ]) {
+      await file
+        .locator(`[data-column-number="${number}"][data-line-type="${type}"]`)
+        .hover();
+      await page
+        .getByRole("button", { name: "Comment on hovered line" })
+        .click();
+      const operation = await page
+        .getByRole("textbox", { name: "Comment", exact: true })
+        .evaluateAll(
+          (nodes) =>
+            nodes.find((node) => node === document.activeElement)?.form.dataset
+              .operation,
+        );
+      forms.push(file.locator(`form[data-operation="${operation}"]`));
+    }
+    await expect(
+      file.getByRole("textbox", { name: "Comment", exact: true }),
+    ).toHaveCount(3);
+    await forms[2].getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(forms[2]).toHaveCount(0);
+    await expect(forms[0].getByRole("textbox")).toBeVisible();
+    await expect(forms[1].getByRole("textbox")).toBeVisible();
+    await forms[0].getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(forms[0]).toHaveCount(0);
+    await expect(forms[1].getByRole("textbox")).toBeVisible();
+    expect(await posts(page)).toBe(0);
+  });
+  test(`cancels only one reply and retains posted threads in ${layout}`, async ({
+    page,
+  }) => {
+    await open(page);
+    if (layout === "Split") await select(page, "Diff layout", "Split");
+    await page.evaluate(() => {
+      const state = window.inlineFixture.state;
+      for (const [index, line] of [5000, 5001, 5002].entries()) {
+        state.comments.push({
+          id: index + 1,
+          node_id: `comment-${index + 1}`,
+          body: `Existing comment ${index + 1}`,
+          user: { login: "example-reviewer" },
+          html_url: `https://github.com/example-org/sample/pull/1#discussion_r${index + 1}`,
+          created_at: "2026-01-01T00:00:00Z",
+          commit_id: state.head,
+          original_commit_id: state.head,
+          path: "src/example.ts",
+          side: "RIGHT",
+          line,
+          original_line: line,
+        });
+      }
+    });
+    await page.getByRole("button", { name: "Refresh changes" }).click();
+    const threads = page.getByRole("region", {
+      name: "Comments on src/example.ts",
+      exact: true,
+    });
+    await expect(threads).toHaveCount(3);
+    await threads
+      .nth(0)
+      .getByRole("button", { name: "Reply", exact: true })
+      .click();
+    await page
+      .getByRole("textbox", { name: "Comment", exact: true })
+      .fill("First reply");
+    await threads
+      .nth(1)
+      .getByRole("button", { name: "Reply", exact: true })
+      .click();
+    await page
+      .getByRole("textbox", { name: "Comment", exact: true })
+      .last()
+      .fill("Second reply");
+    await page
+      .getByRole("button", { name: "Cancel", exact: true })
+      .first()
+      .click();
+    await expect(
+      page.getByRole("textbox", { name: "Comment", exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      page.getByRole("textbox", { name: "Comment", exact: true }),
+    ).toHaveValue("Second reply");
+    for (const index of [1, 2, 3])
+      await expect(
+        page.getByText(`Existing comment ${index}`, { exact: true }),
+      ).toBeVisible();
+    expect(await posts(page)).toBe(0);
+  });
   test(`preserves same-file drafts when another composer closes in ${layout}`, async ({
     page,
   }) => {

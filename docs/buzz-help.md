@@ -1835,6 +1835,7 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   `gh` account. Verified changes are interactive while comments continue loading.
   Focus a diff file and use Up/Down then Enter to comment with the keyboard.
   The selected line scrolls into view.
+  **Cancel** closes only that draft and keeps your scroll position as the gap closes.
   Closed and merged PRs also offer commenting;
   GitHub checks whether the submission is allowed. Raw or unmapped patches cannot
   accept new line comments.

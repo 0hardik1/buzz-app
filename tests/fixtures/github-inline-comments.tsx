@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { useEffect, useState } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { GitHubPanel } from "../../src/bundled/github";
 import { gitHubCli, gitHubDiff } from "../../src/bundled/github/gh";
 import { createPrComments } from "../../src/bundled/github/pr-comments";
@@ -193,4 +193,8 @@ function Fixture() {
 }
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing root");
-createRoot(root).render(<Fixture />);
+createRoot(root).render(
+  <StrictMode>
+    <Fixture />
+  </StrictMode>,
+);

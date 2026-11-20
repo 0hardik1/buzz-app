@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -65,6 +66,12 @@ export function PrFiles({
   activeRef.current = active;
   const status = useSyncExternalStore(delivery.subscribe, delivery.get);
   const [composers, setComposers] = useState<Composer[]>([]);
+  const root = useRef<HTMLDivElement>(null);
+  const scrollRestore = useRef<(() => void) | undefined>(undefined);
+  useLayoutEffect(() => {
+    scrollRestore.current?.();
+    scrollRestore.current = undefined;
+  });
   const composersRef = useRef(composers);
   composersRef.current = composers;
   const pendingOperation = useRef<string | undefined>(undefined);
@@ -88,7 +95,7 @@ export function PrFiles({
   const restoreFocus = (composer: Composer) => {
     composer.restoreFocus();
     if (document.activeElement === document.body)
-      refreshButton.current?.focus();
+      refreshButton.current?.focus({ preventScroll: true });
   };
   const alive = useRef(true);
   useEffect(() => {
@@ -381,6 +388,26 @@ export function PrFiles({
       }
       onSubmit={(body) => void submit(composer, body)}
       onCancel={() => {
+        const positions: { element: HTMLElement; top: number; left: number }[] =
+          [];
+        for (
+          let element: HTMLElement | null = root.current;
+          element;
+          element = element.parentElement
+        ) {
+          positions.push({
+            element,
+            top: element.scrollTop,
+            left: element.scrollLeft,
+          });
+        }
+        // Rebuilding annotation slots can temporarily collapse the scrollable content.
+        scrollRestore.current = () => {
+          for (const { element, top, left } of positions) {
+            element.scrollTop = top;
+            element.scrollLeft = left;
+          }
+        };
         setComposers((previous) =>
           previous.filter((entry) => entry.operation !== composer.operation),
         );
@@ -481,7 +508,7 @@ export function PrFiles({
                     side: thread.side === "LEFT" ? "deletions" : "additions",
                     lineNumber: thread.line ?? 0,
                   },
-                  () => button.focus(),
+                  () => button.focus({ preventScroll: true }),
                   thread.rootCommentId,
                 );
               }}
@@ -552,7 +579,7 @@ export function PrFiles({
     onSelect,
   };
   return (
-    <div className={styles.files}>
+    <div ref={root} className={styles.files}>
       <div className={styles.actions}>
         <Button
           size="sm"

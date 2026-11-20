@@ -15,7 +15,7 @@ export function InlineCommentForm({
   onCancel,
 }: {
   operation?: string;
-  draft: { body: string };
+  draft: { body: string; lastFocusRequest?: number };
   focusRequest?: number;
   busy: boolean;
   blocked: boolean;
@@ -26,9 +26,10 @@ export function InlineCommentForm({
   const [body, setBody] = useState(draft.body);
   const input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
-    void focusRequest;
+    if (draft.lastFocusRequest === focusRequest) return;
+    draft.lastFocusRequest = focusRequest;
     input.current?.focus();
-  }, [focusRequest]);
+  }, [draft, focusRequest]);
   return (
     <form
       className={styles.comment}
