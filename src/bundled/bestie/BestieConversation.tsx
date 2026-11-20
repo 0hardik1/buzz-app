@@ -13,6 +13,10 @@ import { ChannelMembersDialog } from "../channels/ChannelMembersDialog";
 import { UnreadOptions } from "../channels/UnreadBadge";
 import { ChannelBody } from "../channels/ChannelBody";
 import {
+  InlineContainers,
+  useInlineContainerList,
+} from "../../features/messages/inline-containers";
+import {
   historyPanel,
   useConversationTabs,
 } from "../channels/useConversationTabs";
@@ -275,7 +279,10 @@ export function BestieConversation({
     void navigator.open(target);
     return true;
   };
+  // Threads, panels and details read over the conversation while it shows.
+  const containers = useInlineContainerList(channel.id);
   const secondary = useConversationTabs({
+    containers: containers.actions,
     state,
     relay: host.relay,
     session,
@@ -356,27 +363,18 @@ export function BestieConversation({
     host.panels,
     secondary.open,
   ]);
-  const openThread = (
-    messageId: string,
-    rootId: string,
-    intent?: "reply" | "reveal",
-    replyParent?: string,
-  ) => {
+  const presented = secondary.selectedMain === "conversation";
+  useEffect(() => {
+    if (!presented) containers.closeAll();
+  }, [presented, containers.closeAll]);
+  const openThread = (messageId: string, rootId: string, intent?: "reply") => {
     if (!ownsCurrentVisit()) return;
     trigger.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
     state.leaveVisit();
-    state.openThreadTab(
-      channel.id,
-      messageId,
-      rootId,
-      intent,
-      undefined,
-      undefined,
-      replyParent,
-    );
+    state.openThreadTab(channel.id, messageId, rootId, intent);
     if (navigation?.target.kind === "page")
       void navigator.open(
         bestieThreadTarget(navigation.target, {
@@ -490,7 +488,7 @@ export function BestieConversation({
       }
     />
   );
-  return (
+  const page = (
     <ForwardMessageProvider
       session={session}
       scope={scope}
@@ -685,6 +683,7 @@ export function BestieConversation({
             )}
             {secondary.drag.feedback}
             {secondary.hosts}
+            {containers.layer}
             <span role="status" className="sr-only">
               {secondary.announcement}
             </span>
@@ -693,4 +692,5 @@ export function BestieConversation({
       </LinkThreadTabContext>
     </ForwardMessageProvider>
   );
+  return <InlineContainers value={containers.actions}>{page}</InlineContainers>;
 }

@@ -1,9 +1,10 @@
 import { DetailTabContext } from "../../features/messages/DetailTabContext";
-import { DetailsSheet } from "../../features/messages/DetailsSheet";
 import {
-  overlayHostFor,
-  type ComposerOverlayHost,
+  composerChannel,
+  overlayHost,
+  useComposerName,
 } from "../../features/messages/composer-overlay";
+import { useInlineContainers } from "../../features/messages/inline-containers";
 import {
   type ComponentProps,
   type ReactNode,
@@ -61,7 +62,8 @@ function DiffReader({
 export function DiffMessage({ message }: { message: ChannelMessage }) {
   const [open, setOpen] = useState(false);
   const openTab = useContext(DetailTabContext);
-  const [host, setHost] = useState<ComposerOverlayHost | null>(null);
+  const containers = useInlineContainers();
+  const composer = useComposerName();
   const expand = useRef<HTMLButtonElement>(null);
   const files = useMemo(() => parsePatch(message.content), [message.content]);
   const meta = message.diff;
@@ -110,8 +112,24 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
             aria-label="Expand diff"
             icon={<ArrowsOutIcon size={16} aria-hidden="true" />}
             onClick={() => {
-              setHost(overlayHostFor(expand.current));
-              setOpen(true);
+              if (!containers || !composer || !overlayHost(composer)) {
+                setOpen(true);
+                return;
+              }
+              const id = `diff:${message.id}`;
+              containers.open({
+                id,
+                kind: "reader",
+                channelId: composerChannel(composer),
+                composer,
+                title,
+                closeLabel: "Close diff",
+                readerOnly: true,
+                content: reader,
+                openAsTab:
+                  openTab && (() => openTab({ id, title, content: reader })),
+                trigger: expand.current,
+              });
             }}
           />
         </header>
@@ -128,37 +146,16 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
         </section>
         {warning}
       </section>
-      {host ? (
-        <DetailsSheet
-          open={open}
-          onOpenChange={setOpen}
-          onOpenAsTab={
-            openTab &&
-            (() => {
-              openTab({ id: `diff:${message.id}`, title, content: reader });
-              setOpen(false);
-            })
-          }
-          host={host}
-          title={title}
-          readerOnly
-          closeLabel="Close diff"
-          finalFocus={expand}
-        >
-          {reader}
-        </DetailsSheet>
-      ) : (
-        <Dialog
-          open={open}
-          onOpenChange={setOpen}
-          title={title}
-          size="expanded"
-          closeLabel="Close diff"
-          finalFocus={expand}
-        >
-          {reader}
-        </Dialog>
-      )}
+      <Dialog
+        open={open}
+        onOpenChange={setOpen}
+        title={title}
+        size="expanded"
+        closeLabel="Close diff"
+        finalFocus={expand}
+      >
+        {reader}
+      </Dialog>
     </>
   );
 }

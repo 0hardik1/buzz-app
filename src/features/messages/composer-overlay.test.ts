@@ -1,48 +1,46 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it } from "vitest";
-import { overlayHostFor, registerOverlayComposer } from "./composer-overlay";
+import { overlayHost, registerOverlayComposer } from "./composer-overlay";
 import { setThreadPlacementPreference } from "./thread-preferences";
 
 afterEach(() => document.body.replaceChildren());
 
-it("opens nested details outside the sheet once its reader attaches", () => {
+it("finds a composer by name and opens over it outside its sheet once it attaches", () => {
   const reader = document.createElement("section");
   reader.dataset.composerHost = "";
   const composer = document.createElement("form");
-  const trigger = document.createElement("button");
-  reader.append(trigger, composer);
+  reader.append(composer);
   // React can register the editor before its portal attaches.
-  const release = registerOverlayComposer(composer);
+  const release = registerOverlayComposer("channel:C", composer);
   try {
-    expect(overlayHostFor(trigger)).toBeNull();
+    expect(overlayHost("channel:C")).toBeNull();
     const layer = document.createElement("div");
     layer.dataset.detailsSheet = "";
     const sheet = document.createElement("div");
     sheet.append(reader);
     layer.append(sheet);
     document.body.append(layer);
-    const nested = overlayHostFor(trigger);
+    const nested = overlayHost("channel:C");
     expect(nested?.container).toBe(document.body);
     expect(nested?.composer).toBe(composer);
     expect(nested?.pane).toBe(reader);
   } finally {
     release();
   }
-  expect(overlayHostFor(trigger)).toBeNull();
+  expect(overlayHost("channel:C")).toBeNull();
 });
 
-it("opens no reader over the conversation unless threads and details open inline", () => {
+it("opens nothing over a composer unless threads and details open inline", () => {
   const reader = document.createElement("section");
   reader.dataset.composerHost = "";
   const composer = document.createElement("form");
-  const trigger = document.createElement("button");
-  reader.append(trigger, composer);
+  reader.append(composer);
   document.body.append(reader);
-  const release = registerOverlayComposer(composer);
+  const release = registerOverlayComposer("channel:C", composer);
   try {
-    expect(overlayHostFor(trigger)?.composer).toBe(composer);
+    expect(overlayHost("channel:C")?.composer).toBe(composer);
     setThreadPlacementPreference("side");
-    expect(overlayHostFor(trigger)).toBeNull();
+    expect(overlayHost("channel:C")).toBeNull();
   } finally {
     release();
     localStorage.clear();

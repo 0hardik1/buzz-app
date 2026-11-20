@@ -9,7 +9,12 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import { registerOverlayComposer } from "../../features/messages/composer-overlay";
+import {
+  InlineContainers,
+  useInlineContainerList,
+} from "../../features/messages/inline-containers";
 import {
   setThreadPlacementPreference,
   threadPlacementPreference,
@@ -58,10 +63,31 @@ vi.mock("../../features/conversation/Conversation", () => ({
     </button>
   ),
   ConversationThread: () => <textarea aria-label="Thread draft" />,
+  WithConversation: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("../../features/relay/RecoveryNotice", () => ({
   useRecoveryOwns: () => false,
 }));
+
+// The workspace's container list, over the channel's registered composer.
+function Workspace({ children }: { children: ReactNode }) {
+  const containers = useInlineContainerList("alpha");
+  return (
+    <InlineContainers value={containers.actions}>
+      <div data-composer-host="">
+        {children}
+        <form
+          data-message-composer
+          ref={(node) =>
+            node ? registerOverlayComposer("channel:alpha", node) : undefined
+          }
+          style={{ borderRadius: "12px" }}
+        />
+      </div>
+      {containers.layer}
+    </InlineContainers>
+  );
+}
 
 afterEach(() => {
   cleanup();
@@ -71,14 +97,9 @@ afterEach(() => {
 it("keeps the focused thread and draft mounted through channel loading and recovery", () => {
   fixture.update("ready", [{ id: "root" }]);
   const view = render(
-    <div data-composer-host="">
+    <Workspace>
       <ChannelBody cached={false} onOpenThread={() => {}} />
-      <form
-        data-message-composer
-        ref={(node) => (node ? registerOverlayComposer(node) : undefined)}
-        style={{ borderRadius: "12px" }}
-      />
-    </div>,
+    </Workspace>,
   );
   const trigger = screen.getByRole("button", { name: "Open reply" });
   trigger.focus();
@@ -110,13 +131,9 @@ it.each(["side", "main"] as const)(
     fixture.update("ready", [{ id: "root" }]);
     const openThread = vi.fn();
     render(
-      <div data-composer-host="">
+      <Workspace>
         <ChannelBody cached={false} onOpenThread={openThread} />
-        <form
-          data-message-composer
-          ref={(node) => (node ? registerOverlayComposer(node) : undefined)}
-        />
-      </div>,
+      </Workspace>,
     );
     const trigger = screen.getByRole("button", { name: "Open reply" });
     trigger.focus();
@@ -130,7 +147,7 @@ it("selects a thread's existing tab instead of reading it inline", () => {
   fixture.update("ready", [{ id: "root" }]);
   const openThread = vi.fn();
   render(
-    <div data-composer-host="">
+    <Workspace>
       <ChannelBody
         cached={false}
         onOpenThread={openThread}
@@ -138,11 +155,7 @@ it("selects a thread's existing tab instead of reading it inline", () => {
           channelId === "alpha" && rootId === "root"
         }
       />
-      <form
-        data-message-composer
-        ref={(node) => (node ? registerOverlayComposer(node) : undefined)}
-      />
-    </div>,
+    </Workspace>,
   );
   const trigger = screen.getByRole("button", { name: "Open reply" });
   trigger.focus();
@@ -154,13 +167,9 @@ it("selects a thread's existing tab instead of reading it inline", () => {
 it("introduces the first inline thread once in two steps: replying here, then its tab button and inline switch", async () => {
   fixture.update("ready", [{ id: "root" }]);
   const view = render(
-    <div data-composer-host="">
+    <Workspace>
       <ChannelBody cached={false} onOpenThread={() => {}} />
-      <form
-        data-message-composer
-        ref={(node) => (node ? registerOverlayComposer(node) : undefined)}
-      />
-    </div>,
+    </Workspace>,
   );
   const open = () => {
     const trigger = screen.getByRole("button", { name: "Open reply" });

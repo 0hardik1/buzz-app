@@ -24,6 +24,7 @@ import {
   MessageManagementStatus,
 } from "../messages/MessageManagement";
 import { MediaReviewViewer } from "../messages/MediaReviewViewer";
+import { channelComposer, ComposerScope } from "../messages/composer-overlay";
 import { ThreadPanel, type ThreadPanelProps } from "../messages/ThreadPanel";
 import { useListedChannel } from "../relay/listed-channel";
 import { ownSolo } from "../solo/labels";
@@ -36,7 +37,7 @@ import {
 
 /** Everything a reader or composer needs from its channel, supplied once,
  * including the Solo policy, so no view can open a chat under other rules. */
-type Conversation = Pick<
+export type Conversation = Pick<
   ThreadPanelProps,
   "session" | "scope" | "channelId" | "channelName" | "extensions"
 > &
@@ -258,9 +259,25 @@ function Provider({
   );
   return (
     <Context.Provider value={value}>
-      <ActivityIndicatorPresentation>{children}</ActivityIndicatorPresentation>
+      <ComposerScope value={id ? channelComposer(id) : undefined}>
+        <ActivityIndicatorPresentation>
+          {children}
+        </ActivityIndicatorPresentation>
+      </ComposerScope>
     </Context.Provider>
   );
+}
+
+/** Keeps a conversation's readers working where they are drawn outside it, as
+ * a thread drawn over its composer by the workspace. */
+export function WithConversation({
+  value,
+  children,
+}: {
+  value: Conversation;
+  children: ReactNode;
+}) {
+  return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
 function ConversationMediaReview(props: MediaReview) {

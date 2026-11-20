@@ -4,19 +4,12 @@ import {
 } from "./InlineThreadIntro";
 import { DialogBarMaterial } from "../../shared/design-system/ui/DialogBarMaterial";
 import { spring } from "motion";
-import {
-  COMPOSER_PROMOTED,
-  COMPOSER_SENT,
-  type ComposerOverlayHost,
-  composerSettled,
-} from "./composer-overlay";
+import { type ComposerOverlayHost, composerSettled } from "./composer-overlay";
 import { Dialog as BaseDialog } from "@base-ui/react/dialog";
 import {
   type CSSProperties,
   type ReactNode,
   type RefObject,
-  useId,
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -28,12 +21,15 @@ import styles from "./DetailsSheet.module.css";
 import messageStyles from "./Messages.module.css";
 
 /** Where the sheet sits: around its composer, within the composer's pane. */
-function geometry({
-  composer,
-  pane,
-  viewport,
-}: ComposerOverlayHost): CSSProperties {
-  const rect = composer.getBoundingClientRect();
+function geometry(
+  { composer, pane, viewport }: ComposerOverlayHost,
+  stacked: boolean,
+): CSSProperties {
+  const box = composer.getBoundingClientRect();
+  // A sheet stacked on another sheet's composer sits above that composer,
+  // which stays in the sheet below, uncovered and usable: its scrim and its
+  // fold start at the composer's top edge.
+  const rect = stacked ? new DOMRect(box.left, box.top, box.width, 0) : box;
   const bounds = viewport.getBoundingClientRect();
   // The reader owns sheet layout; its outer surface owns scrim clipping,
   // including the panel's border and rounded corners. Joined panels share
@@ -76,7 +72,9 @@ function geometry({
     "--scrim-top": `${surfaceBounds.top}px`,
     "--scrim-left": `${surfaceBounds.left}px`,
     "--scrim-width": `${surfaceBounds.width}px`,
-    "--scrim-height": `${surfaceBounds.height}px`,
+    "--scrim-height": `${
+      stacked ? box.top - surfaceBounds.top : surfaceBounds.height
+    }px`,
     "--scrim-radius": surfaceStyle.borderRadius,
     "--scrim-inset": clipInsets,
   } as CSSProperties;
@@ -86,17 +84,18 @@ function geometry({
  * typed, and the pane resizes with the window and its splits. */
 function useComposerGeometry(
   host: ComposerOverlayHost,
+  stacked: boolean,
   mounted: boolean,
   surface: HTMLElement | null,
 ) {
   const { composer, pane, viewport } = host;
-  const [style, setStyle] = useState(() => geometry(host));
+  const [style, setStyle] = useState(() => geometry(host, stacked));
   useLayoutEffect(() => {
     if (!mounted) return;
     const header = surface?.querySelector("header");
     const update = () =>
       setStyle({
-        ...geometry(host),
+        ...geometry(host, stacked),
         "--sheet-border-width": surface
           ? getComputedStyle(surface).borderBottomWidth
           : "0px",
@@ -116,7 +115,7 @@ function useComposerGeometry(
       observer?.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [host, composer, pane, viewport, mounted, surface]);
+  }, [host, stacked, composer, pane, viewport, mounted, surface]);
   return style;
 }
 
@@ -314,6 +313,7 @@ export function DetailsSheet({
   headerActions,
   onClosed,
   onOpenAsTab,
+  stacked = false,
   focusContent = false,
   onEscapeKey,
   spotlight,
@@ -340,6 +340,9 @@ export function DetailsSheet({
   /** Opens what this sheet reads in a tab, as its own thread tab or a reader
    * tab, and closes the sheet. Without it there is no Open as tab. */
   onOpenAsTab?: (() => void) | undefined;
+  /** It sits on another sheet, above that sheet's composer, which stays
+   * uncovered and usable. */
+  stacked?: boolean;
   /** The content places focus itself, as a thread opened to reply does;
    * otherwise the sheet takes focus. */
   focusContent?: boolean;
@@ -351,19 +354,14 @@ export function DetailsSheet({
   onSpotlightAnchor?: ((element: HTMLElement | null) => void) | undefined;
 }) {
   const { composer } = host;
-  const tabId = useId();
   const handing = useRef(false);
-  // Once handed to a tab, the tab places focus; the sheet returns none.
-  const [handed, setHanded] = useState(false);
   const [mounted, setMounted] = useState(open);
-  if (open && !mounted) {
-    setMounted(true);
-    setHanded(false);
-  }
+  if (open && !mounted) setMounted(true);
   const [surface, setSurface] = useState<HTMLDivElement | null>(null);
-  const style = useComposerGeometry(host, mounted, surface);
+  const style = useComposerGeometry(host, stacked, mounted, surface);
   useLayoutEffect(() => {
-    if (!mounted || (!containsComposer && !readerOnly)) return;
+    // Stacked above a composer, it leaves that composer uncovered.
+    if (!mounted || stacked || (!containsComposer && !readerOnly)) return;
     if (readerOnly) composer.dataset.composerCovered = "";
     const inert = composer.inert;
     composer.inert = true;
@@ -371,7 +369,7 @@ export function DetailsSheet({
       composer.inert = inert;
       if (readerOnly) delete composer.dataset.composerCovered;
     };
-  }, [composer, mounted, containsComposer, readerOnly]);
+  }, [composer, mounted, stacked, containsComposer, readerOnly]);
   const popup = useRef<HTMLDivElement | null>(null);
   const backdrop = useRef<HTMLDivElement | null>(null);
   useComposerHandoff(surface, composer, open, containsComposer);
@@ -400,22 +398,6 @@ export function DetailsSheet({
   useLayoutEffect(() => {
     if (popup.current && height !== "stable") grow(popup.current, open);
   });
-  useEffect(() => {
-    if (!open || containsComposer || readerOnly) return;
-    const close = () => onOpenChange(false);
-    composer.addEventListener(COMPOSER_SENT, close);
-    return () => composer.removeEventListener(COMPOSER_SENT, close);
-  }, [composer, open, onOpenChange, containsComposer, readerOnly]);
-  // Readers stack over one composer, such as a pull request opened from a
-  // details message; opening one as a tab leaves none of the others behind.
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: Event) => {
-      if ((event as CustomEvent<string>).detail !== tabId) onOpenChange(false);
-    };
-    composer.addEventListener(COMPOSER_PROMOTED, close);
-    return () => composer.removeEventListener(COMPOSER_PROMOTED, close);
-  }, [composer, open, onOpenChange, tabId]);
   return (
     <>
       <BaseDialog.Root
@@ -453,7 +435,6 @@ export function DetailsSheet({
           if (next) return;
           setMounted(false);
           onClosed?.();
-          if (handed) return;
           // Once focus has visited the composer, Base UI returns none and Close
           // would leave it on the page; hand it back to the opener instead.
           const active = document.activeElement;
@@ -489,13 +470,14 @@ export function DetailsSheet({
             data-details-sheet-surface=""
             data-contained-composer={containsComposer || undefined}
             data-reader-only={readerOnly || undefined}
+            data-stacked={stacked || undefined}
             data-height={height}
             style={style}
             // The sheet takes focus itself: its first header action would show
             // a focus tooltip that the first Escape closes instead of the
             // sheet. A reply opening leaves focus for its reply editor.
             initialFocus={focusContent ? false : popup}
-            finalFocus={handed ? false : returnFocus}
+            finalFocus={returnFocus}
           >
             <div className={styles.content}>
               {/* One row: who wrote it and when, with Close at its end. */}
@@ -557,14 +539,7 @@ export function DetailsSheet({
                           handing.current = true;
                           void composerSettled(sheet).then(() => {
                             handing.current = false;
-                            if (!sheet.isConnected) return;
-                            setHanded(true);
-                            composer.dispatchEvent(
-                              new CustomEvent(COMPOSER_PROMOTED, {
-                                detail: tabId,
-                              }),
-                            );
-                            onOpenAsTab();
+                            if (sheet.isConnected) onOpenAsTab();
                           });
                         }}
                       />

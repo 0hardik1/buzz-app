@@ -89,50 +89,40 @@ it("offers no Open as tab without a tab to open", async () => {
   expect(screen.queryByRole("button", { name: "Open as tab" })).toBeNull();
 });
 
-it("closes the other readers over its composer when one opens as a tab", async () => {
+it("leaves the composer it stacks over usable, as a thread's reply box", async () => {
   const pane = document.createElement("div");
   const composer = document.createElement("form");
   pane.append(composer);
   document.body.append(pane);
   const host = { pane, composer, viewport: pane, container: pane };
-  function Workspace() {
-    const [details, setDetails] = useState(true);
-    const [pull, setPull] = useState(true);
-    const [tab, setTab] = useState<DetailTab>();
-    return (
-      <>
-        <DetailsSheet
-          open={details}
-          onOpenChange={setDetails}
-          title="Details"
-          host={host}
-        >
-          <p>Details body</p>
-        </DetailsSheet>
-        <DetailsSheet
-          open={pull}
-          onOpenChange={setPull}
-          onOpenAsTab={() => {
-            setTab({ id: "pull", title: "GitHub", content: <p>Pull body</p> });
-            setPull(false);
-          }}
-          title="GitHub"
-          host={host}
-          readerOnly
-        >
-          <p>Pull body</p>
-        </DetailsSheet>
-        {tab && <section aria-label="Reader tab">{tab.content}</section>}
-      </>
-    );
-  }
-  render(<Workspace />);
-  expect(await screen.findAllByRole("dialog")).toHaveLength(2);
-  const github = screen.getByRole("dialog", { name: "GitHub" });
-  fireEvent.click(within(github).getByRole("button", { name: "Open as tab" }));
-  await waitFor(() => expect(screen.queryAllByRole("dialog")).toHaveLength(0));
-  expect(screen.getByRole("region", { name: "Reader tab" })).toHaveTextContent(
-    "Pull body",
+  const view = render(
+    <DetailsSheet
+      open
+      onOpenChange={() => {}}
+      title="Diff"
+      host={host}
+      readerOnly
+    >
+      <p>Diff body</p>
+    </DetailsSheet>,
+  );
+  await screen.findByRole("dialog", { name: "Diff" });
+  expect(composer.inert).toBe(true);
+  view.rerender(
+    <DetailsSheet
+      open
+      onOpenChange={() => {}}
+      title="Diff"
+      host={host}
+      readerOnly
+      stacked
+    >
+      <p>Diff body</p>
+    </DetailsSheet>,
+  );
+  expect(composer.inert).not.toBe(true);
+  expect(screen.getByRole("dialog", { name: "Diff" })).toHaveAttribute(
+    "data-stacked",
   );
 });
 

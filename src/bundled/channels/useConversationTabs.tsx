@@ -1,9 +1,13 @@
 import type { DetailTab } from "../../features/messages/DetailTabContext";
-import { DetailsSheet } from "../../features/messages/DetailsSheet";
 import {
-  overlayHostFor,
-  type ComposerOverlayHost,
+  channelComposer,
+  overlayHost,
+  threadComposer,
 } from "../../features/messages/composer-overlay";
+import type {
+  InlineContainer,
+  InlineContainerActions,
+} from "../../features/messages/inline-containers";
 import { PanelView } from "../../features/panels/PanelView";
 import { PanelSubviewHost } from "../../features/panels/PanelSubview";
 import panelStyles from "../../features/panels/Panels.module.css";
@@ -102,7 +106,10 @@ export function useConversationTabs({
   onVisitPanel,
   onClosePanel,
   onCloseTabs,
+  containers,
 }: {
+  /** Where a panel opened from a message reads over its composer. */
+  containers?: InlineContainerActions | undefined;
   state: ReturnType<typeof useChannelTabState>;
   relay: RelayData;
   session: RelaySession;
@@ -331,17 +338,59 @@ export function useConversationTabs({
     },
     [selectOpening, setEntries, tabState.moveEntry],
   );
-  type Detail = {
-    id: number;
-    entry: Opening;
-    host: ComposerOverlayHost;
-    trigger: { current: HTMLElement | null };
-    open: boolean;
+  // A panel opened from a message reads over that message's composer; without
+  // one it opens its tab.
+  const panelContainer = (
+    entry: Opening,
+  ): Omit<InlineContainer, "composer" | "trigger"> => {
+    const id = `panel:${entry.channelId}:${entry.rootId ?? ""}`;
+    const close = () => containers?.close(id);
+    return {
+      id,
+      kind: "reader",
+      channelId: entry.channelId,
+      title: entry.panel.title,
+      closeLabel: "Close",
+      readerOnly: true,
+      // The panel opens as its own tab, fresh from its target.
+      openAsTab: () => open(entry),
+      content: (
+        <PanelSubviewHost close={close}>
+          {/* The card bounds the content so it scrolls, as in a panel tab. */}
+          <div className={panelStyles.card}>
+            <div className={panelStyles.content}>
+              <PanelView
+                panel={entry.panel}
+                target={entry.target}
+                context={{
+                  channelId: entry.channelId,
+                  ...(entry.rootId && { rootId: entry.rootId }),
+                  canOpen: canOpenLink,
+                  open: (target: string) => {
+                    const next =
+                      active() &&
+                      panelOpening(
+                        panels,
+                        entry.channelId,
+                        target,
+                        entry.rootId,
+                      );
+                    if (!next) return false;
+                    containers?.update(id, panelContainer(next));
+                    return true;
+                  },
+                }}
+                close={close}
+              />
+            </div>
+          </div>
+        </PanelSubviewHost>
+      ),
+    };
   };
-  const detailId = useRef(0);
-  const [details, setDetails] = useState<Detail[]>([]);
-  const detailsRef = useRef(details);
-  detailsRef.current = details;
+  const latestPanel = useRef(panelContainer);
+  latestPanel.current = panelContainer;
+  // Stable, so link handlers keep memoized rows' props.
   const openDetail = useCallback(
     (entry: Opening, origin?: HTMLElement | null, append = true) => {
       const trigger =
@@ -349,56 +398,17 @@ export function useConversationTabs({
         (document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null);
-      const host = overlayHostFor(trigger);
-      if (!host || !currentId || entry.channelId !== currentId) {
+      const composer = entry.rootId
+        ? threadComposer(entry.channelId, entry.rootId)
+        : channelComposer(entry.channelId);
+      if (!containers || !overlayHost(composer)) {
         open(entry, append);
         return;
       }
-      const next = {
-        id: ++detailId.current,
-        entry,
-        host,
-        trigger: { current: trigger },
-        open: true,
-      };
-      setDetails([next]);
+      containers.open({ ...latestPanel.current(entry), composer, trigger });
     },
-    [open, currentId],
+    [open, containers],
   );
-  const visibleDetails = details.filter(
-    (detail) =>
-      detail.entry.channelId === currentId &&
-      available.includes(detail.entry.panel) &&
-      detail.host.composer.isConnected &&
-      !navigationSignal?.aborted,
-  );
-  useEffect(() => {
-    if (details.length !== visibleDetails.length) setDetails(visibleDetails);
-  }, [details.length, visibleDetails]);
-  const updateDetail = (id: number, patch: Partial<Detail>) =>
-    setDetails((items) =>
-      items.map((item) => (item.id === id ? { ...item, ...patch } : item)),
-    );
-  const removeDetail = (id: number) =>
-    setDetails((items) => items.filter((item) => item.id !== id));
-  const detailContext = (detail: Detail) => ({
-    channelId: detail.entry.channelId,
-    ...(detail.entry.rootId && { rootId: detail.entry.rootId }),
-    canOpen: canOpenLink,
-    open: (target: string) => {
-      if (!active() || !detailsRef.current.includes(detail) || !detail.open)
-        return false;
-      const next = panelOpening(
-        panels,
-        detail.entry.channelId,
-        target,
-        detail.entry.rootId,
-      );
-      if (!next) return false;
-      updateDetail(detail.id, { entry: next });
-      return true;
-    },
-  });
   const panelTabs = entries.filter(
     (entry) =>
       available.includes(entry.panel) &&
@@ -760,7 +770,6 @@ export function useConversationTabs({
     rootId: string,
     intent?: "reply" | "reveal" | "focus",
     unreadSince?: number,
-    replyParent?: string,
   ) => {
     if (!currentVisit()) return;
     // Flat sessions keep their side-only host; channels support both panes.
@@ -771,7 +780,6 @@ export function useConversationTabs({
       intent,
       threadPane ?? (mainPane ? undefined : "side"),
       unreadSince,
-      replyParent,
     );
     if (
       opening.current &&
@@ -983,15 +991,8 @@ export function useConversationTabs({
               openConversationLink(target.id, url, origin)
             }
             canOpenLink={canOpenLink}
-            openThread={(id, root, intent, replyParent) =>
-              openConversationThread(
-                target.id,
-                id,
-                root,
-                intent,
-                undefined,
-                replyParent,
-              )
+            openThread={(id, root, intent) =>
+              openConversationThread(target.id, id, root, intent)
             }
             close={() => closeConversationTab(tab.id)}
             parent={parentOf(tab, target)}
@@ -1106,38 +1107,6 @@ export function useConversationTabs({
     open,
     openDetail,
     openDetailTab,
-    detailSheet: visibleDetails.map((detail) => (
-      <DetailsSheet
-        key={detail.id}
-        open={detail.open}
-        onOpenChange={(open) => updateDetail(detail.id, { open })}
-        onClosed={() => removeDetail(detail.id)}
-        // The panel opens as its own tab, fresh from its target.
-        onOpenAsTab={() => {
-          detail.trigger.current = null;
-          removeDetail(detail.id);
-          open(detail.entry);
-        }}
-        host={detail.host}
-        title={detail.entry.panel.title}
-        readerOnly
-        finalFocus={detail.trigger}
-      >
-        <PanelSubviewHost close={() => removeDetail(detail.id)}>
-          {/* The card bounds the content so it scrolls, as in a panel tab. */}
-          <div className={panelStyles.card}>
-            <div className={panelStyles.content}>
-              <PanelView
-                panel={detail.entry.panel}
-                target={detail.entry.target}
-                context={detailContext(detail)}
-                close={() => removeDetail(detail.id)}
-              />
-            </div>
-          </div>
-        </PanelSubviewHost>
-      </DetailsSheet>
-    )),
     opened,
     panel,
     panelTabs,
@@ -1228,15 +1197,8 @@ export function useConversationTabs({
                 openConversationLink(target.id, url, origin)
               }
               canOpenLink={canOpenLink}
-              openThread={(id, root, intent, replyParent) =>
-                openConversationThread(
-                  target.id,
-                  id,
-                  root,
-                  intent,
-                  undefined,
-                  replyParent,
-                )
+              openThread={(id, root, intent) =>
+                openConversationThread(target.id, id, root, intent)
               }
               close={() => closeConversationTab(tab.id)}
               parent={parentOf(tab, target)}

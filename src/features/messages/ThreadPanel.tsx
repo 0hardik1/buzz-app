@@ -3,7 +3,12 @@ import { ThreadReplyWindow } from "./ThreadReplyWindow";
 import { DialogBarMaterial } from "../../shared/design-system/ui/DialogBarMaterial";
 import { MessageLoading } from "./MessageLoading";
 import { useMessageArrival } from "./use-message-arrival";
-import { overlayHostFor, type MediaReviewOrigin } from "./composer-overlay";
+import {
+  ComposerScope,
+  overlayHost,
+  threadComposer,
+  type MediaReviewOrigin,
+} from "./composer-overlay";
 import { AgentConnectionSetup } from "../agents/AgentConnectionSetup";
 import { TypingIndicator, useLiveConversationAgents } from "./TypingIndicator";
 import { ActivityExpansion } from "./ActivityExpansion";
@@ -73,11 +78,6 @@ import { useKnownAgentPubkeys } from "../agents/use-known";
 import { JumpToLatestButton } from "./JumpToLatestButton";
 import { correctScrollTop } from "./scroll-correction";
 
-export type ThreadHandoff = Readonly<{
-  anchor?: string | undefined;
-  replyParent?: string | undefined;
-}>;
-
 export type ThreadPanelProps = {
   intro?: ReactNode;
   extensions?: ConversationExtensions | undefined;
@@ -100,12 +100,6 @@ export type ThreadPanelProps = {
   /** Retry a failed routed opening with fresh navigation authority. */
   onRetryNavigation?: (() => void) | undefined;
   replyRequest?: number | undefined;
-  /** With replyRequest: the nested reply it targets, as a reader handed over
-   * to a tab carries it. */
-  replyParent?: string | undefined;
-  /** Filled with what a tab taking over this reader carries: the reply it
-   * reads at, unless it follows the latest, and its reply target. */
-  handoff?: { current: (() => ThreadHandoff) | undefined } | undefined;
   /** Each new value focuses the reply box, keeping its target. */
   focusRequest?: number | undefined;
   /** A saved draft carries its cancellable target through a delayed root read. */
@@ -460,8 +454,6 @@ function OwnedThreadPanel({
   soloConversation,
   disabled,
   replyRequest,
-  replyParent,
-  handoff,
   focusRequest,
   autoFocus,
   active = true,
@@ -541,8 +533,6 @@ function OwnedThreadPanel({
       navigation={navigation}
       messageId={messageId}
       replyRequest={replyRequest}
-      replyParent={replyParent}
-      handoff={handoff}
       focusRequest={focusRequest}
       autoFocus={autoFocus}
       active={active}
@@ -578,8 +568,6 @@ function ThreadMessages({
   soloConversation,
   disabled,
   replyRequest,
-  replyParent: requestedReplyParent,
-  handoff,
   focusRequest,
   autoFocus,
   active,
@@ -616,8 +604,6 @@ function ThreadMessages({
   messageId: string;
   view: ThreadView;
   replyRequest?: number | undefined;
-  replyParent?: string | undefined;
-  handoff?: ThreadPanelProps["handoff"];
   focusRequest?: number | undefined;
   autoFocus?: ThreadPanelProps["autoFocus"];
   active?: boolean | undefined;
@@ -1315,27 +1301,9 @@ function ThreadMessages({
     setReplyParent((current) => (current === id ? undefined : id));
     setReplyFocus((value) => value + 1);
   }, []);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the target belongs to its request, which alone asks again.
   useEffect(() => {
-    if (!replyRequest) return;
-    if (requestedReplyParent) {
-      setReplyParent(requestedReplyParent);
-      setReplyFocus((value) => value + 1);
-    } else focusReply();
+    if (replyRequest) focusReply();
   }, [replyRequest, focusReply]);
-  useLayoutEffect(() => {
-    if (!handoff) return;
-    handoff.current = () => {
-      captureResizePosition();
-      const anchor = follow.current
-        ? undefined
-        : resizePosition.current?.anchor?.element.dataset.messageId;
-      return { anchor, replyParent };
-    };
-    return () => {
-      handoff.current = undefined;
-    };
-  });
   useEffect(() => {
     if (focusRequest) setReplyFocus((value) => value + 1);
   }, [focusRequest]);
@@ -1408,12 +1376,14 @@ function ThreadMessages({
           hasMediaComments,
           attachments,
           {
-            host: opening ? opening.host : overlayHostFor(scroller.current),
+            host: opening
+              ? opening.host
+              : overlayHost(threadComposer(channelId, rootId ?? messageId)),
             rootId,
           },
         );
     },
-    [rootId, onOpenMediaReview, hasMediaComments],
+    [channelId, rootId, messageId, onOpenMediaReview, hasMediaComments],
   );
   // Without a selected viewer, bare timecodes need one unambiguous video.
   const videoUrls = new Set(
@@ -2189,7 +2159,7 @@ function ThreadMessages({
       void view.loadMore();
     } else void view.refresh();
   };
-  return (
+  const thread = (
     <MessageEditScope>
       <Reading
         session={session}
@@ -2591,6 +2561,12 @@ function ThreadMessages({
         />
       )}
     </MessageEditScope>
+  );
+  // What opens from this thread opens over its reply box.
+  return (
+    <ComposerScope value={threadComposer(channelId, rootId ?? messageId)}>
+      {thread}
+    </ComposerScope>
   );
 }
 /** Holds the thread's area with the Buzz mark until its first page can show. */

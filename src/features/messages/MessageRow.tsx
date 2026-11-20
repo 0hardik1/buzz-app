@@ -7,7 +7,11 @@ import { AgentResponsePreview } from "./AgentResponsePreview";
 import { useActivityIndicator } from "./use-activity-indicator";
 import type { ActivityRowPresentation } from "./activity-presentation";
 import { ShimmerText } from "../../shared/design-system/ui/ShimmerText";
-import { overlayHostFor, type MediaReviewOrigin } from "./composer-overlay";
+import {
+  type MediaReviewOrigin,
+  overlayHost,
+  useComposerName,
+} from "./composer-overlay";
 import { Collapsible } from "@base-ui/react/collapsible";
 import { formatItemTimestamp } from "../../shared/datetime";
 import { useClockPreference } from "../../shared/clock-preference";
@@ -543,6 +547,7 @@ function MessageRowContent({
     !readOnly
   );
   const rowRef = useRef<HTMLDivElement>(null);
+  const composerName = useComposerName();
   const menuTrigger = useRef<HTMLButtonElement>(null);
   const active = useConversationPresentation();
   const forward = useForwardMessage();
@@ -904,7 +909,7 @@ function MessageRowContent({
                                   row.threadRootId !== row.id),
                               row.attachments,
                               {
-                                host: overlayHostFor(rowRef.current),
+                                host: overlayHost(composerName),
                                 rootId: row.threadRootId ?? row.id,
                               },
                             ),
@@ -962,7 +967,7 @@ function MessageRowContent({
                                 row.threadRootId !== row.id),
                             row.attachments,
                             {
-                              host: overlayHostFor(rowRef.current),
+                              host: overlayHost(composerName),
                               rootId: row.threadRootId ?? row.id,
                             },
                           ),

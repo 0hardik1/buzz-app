@@ -2,7 +2,14 @@ import { useChannelHistoryFocus } from "./useChannelHistoryFocus";
 import type { Conversation } from "../../features/conversation/service";
 import { MediaReviewViewer } from "../../features/messages/MediaReviewViewer";
 import { DetailTabContext } from "../../features/messages/DetailTabContext";
-import type { MediaReviewOrigin } from "../../features/messages/composer-overlay";
+import {
+  InlineContainers,
+  useInlineContainerList,
+} from "../../features/messages/inline-containers";
+import {
+  type MediaReviewOrigin,
+  threadComposer,
+} from "../../features/messages/composer-overlay";
 import { StartLinkedChat, canStartLinkedChat } from "./StartLinkedChat";
 import {
   readLinkedChat,
@@ -1192,26 +1199,6 @@ function ChannelWorkspace({
         : undefined,
     [inlineThreadSignal, requestedMessage],
   );
-  // An inline sheet is an overlay, not a history entry: dismissing the thread
-  // a visit opened retires that visit, back to its conversation.
-  const closeInlineThread = useCallback(
-    (signal: AbortSignal) => {
-      if (
-        !navigator ||
-        navigation?.signal !== signal ||
-        navigation.target.kind !== "conversation" ||
-        navigator.snapshot().entry.id !== navigation.entryId
-      )
-        return;
-      const {
-        messageId: _message,
-        threadRootId: _root,
-        ...target
-      } = navigation.target;
-      navigator.dismiss([navigation.entryId], target);
-    },
-    [navigator, navigation],
-  );
   // The route addresses a thread; its tab owns presentation, the route only
   // selects it and supplies the reveal request.
   const detailSource =
@@ -1482,7 +1469,10 @@ function ChannelWorkspace({
     if (mediaReviews.length !== showingMediaReviews.length)
       setMediaReviews(showingMediaReviews);
   }, [mediaReviews.length, showingMediaReviews]);
+  // Threads, panels and details read over their composers.
+  const containers = useInlineContainerList(currentId);
   const secondary = useConversationTabs({
+    containers: containers.actions,
     state: tabState,
     relay,
     session: queries,
@@ -1870,8 +1860,7 @@ function ChannelWorkspace({
       channelId: string,
       messageId: string,
       threadRootId: string,
-      intent?: "reply" | "reveal",
-      replyParent?: string,
+      intent?: "reply",
     ) => {
       setSettings(undefined);
       threadTrigger.current =
@@ -1882,6 +1871,8 @@ function ChannelWorkspace({
       tabState.leaveVisit();
       // Retire transient details first; selecting the thread is the last word.
       open(undefined);
+      // A thread shows in one place: its tab, not also over the conversation.
+      containers.actions.close(threadComposer(channelId, threadRootId));
       // Every opening keeps existing work: a new thread adds a tab and an
       // open one is selected wherever it was placed.
       tabState.openThreadTab(
@@ -1890,8 +1881,6 @@ function ChannelWorkspace({
         threadRootId,
         intent,
         threadPane,
-        undefined,
-        replyParent,
       );
       const target = navigator?.snapshot().entry.target;
       if (
@@ -1925,23 +1914,13 @@ function ChannelWorkspace({
       threadPane,
       tabState.openThreadTab,
       tabState.leaveVisit,
+      containers.actions,
     ],
   );
   const openThread = useCallback(
-    (
-      messageId: string,
-      threadRootId: string,
-      intent?: "reply" | "reveal",
-      replyParent?: string,
-    ) => {
+    (messageId: string, threadRootId: string, intent?: "reply") => {
       if (currentId)
-        openChannelThread(
-          currentId,
-          messageId,
-          threadRootId,
-          intent,
-          replyParent,
-        );
+        openChannelThread(currentId, messageId, threadRootId, intent);
     },
     [currentId, openChannelThread],
   );
@@ -2477,7 +2456,6 @@ function ChannelWorkspace({
             onOpenThread={openThread}
             hasThreadTab={tabState.hasThreadTab}
             threadRequest={inlineThreadRequest}
-            onCloseThreadRequest={closeInlineThread}
             revealMessageId={
               sent?.channelId === current.id ? sent.id : undefined
             }
@@ -2980,7 +2958,7 @@ function ChannelWorkspace({
         )}
       {secondary.drag.feedback}
       {secondary.hosts}
-      {secondary.detailSheet}
+      {containers.layer}
       <p role="status" className="sr-only">
         {secondary.announcement}
       </p>
@@ -3061,7 +3039,7 @@ function ChannelWorkspace({
       </PanelDock>
     </div>
   );
-  return (
+  const page = (
     // The review reads thread-tab links like the workspace.
     <DetailTabContext value={secondary.openDetailTab}>
       <LinkThreadTabContext value={openLinkedThread}>
@@ -3105,6 +3083,7 @@ function ChannelWorkspace({
       </LinkThreadTabContext>
     </DetailTabContext>
   );
+  return <InlineContainers value={containers.actions}>{page}</InlineContainers>;
 }
 
 export function mediaReviewForDestination<

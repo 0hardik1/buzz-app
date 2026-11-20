@@ -9,8 +9,12 @@ import { formatItemTimestamp } from "../../shared/datetime";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { DetailTabContext } from "./DetailTabContext";
-import { DetailsSheet } from "./DetailsSheet";
-import { overlayHostFor, type ComposerOverlayHost } from "./composer-overlay";
+import {
+  composerChannel,
+  overlayHost,
+  useComposerName,
+} from "./composer-overlay";
+import { useInlineContainers } from "./inline-containers";
 import styles from "./Messages.module.css";
 
 const HEADING = /^H[1-6]$/;
@@ -57,7 +61,8 @@ export function DetailsMessage({
 }) {
   const [open, setOpen] = useState(false);
   const openTab = useContext(DetailTabContext);
-  const [host, setHost] = useState<ComposerOverlayHost | null>(null);
+  const containers = useInlineContainers();
+  const composer = useComposerName();
   const trigger = useRef<HTMLButtonElement>(null);
   const clip = useRef<HTMLDivElement>(null);
   const [clipped, setClipped] = useState(false);
@@ -73,11 +78,32 @@ export function DetailsMessage({
     observer?.observe(element);
     return () => observer?.disconnect();
   }, []);
-  const show = () => {
-    setHost(overlayHostFor(clip.current));
-    setOpen(true);
-  };
   const time = formatItemTimestamp(createdAt, { withTime: true });
+  // It reads over the composer its message is answered from, and a send there
+  // closes it; without one it opens a dialog.
+  const show = () => {
+    if (!containers || !composer || !overlayHost(composer)) {
+      setOpen(true);
+      return;
+    }
+    const id = `details:${messageId}`;
+    const reader = <div className={styles.detailsReader}>{children}</div>;
+    containers.open({
+      id,
+      kind: "reader",
+      channelId: composerChannel(composer),
+      composer,
+      closesOnSend: true,
+      leading: avatar,
+      title: author,
+      description: time,
+      closeLabel: "Close details",
+      content: reader,
+      openAsTab:
+        openTab && (() => openTab({ id, title: author, content: reader })),
+      trigger: trigger.current,
+    });
+  };
   return (
     <div className={styles.detailsPreview} data-clipped={clipped || undefined}>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: Show more is the keyboard path; this only widens the pointer target. */}
@@ -112,42 +138,16 @@ export function DetailsMessage({
           </Button>
         </span>
       )}
-      {host ? (
-        <DetailsSheet
-          open={open}
-          onOpenChange={setOpen}
-          onOpenAsTab={
-            openTab &&
-            (() => {
-              openTab({
-                id: `details:${messageId}`,
-                title: author,
-                content: <div className={styles.detailsReader}>{children}</div>,
-              });
-              setOpen(false);
-            })
-          }
-          host={host}
-          leading={avatar}
-          title={author}
-          description={time}
-          closeLabel="Close details"
-          finalFocus={trigger}
-        >
-          <div className={styles.detailsReader}>{children}</div>
-        </DetailsSheet>
-      ) : (
-        <Dialog
-          open={open}
-          onOpenChange={setOpen}
-          title={author}
-          description={time}
-          closeLabel="Close details"
-          finalFocus={trigger}
-        >
-          <div className={styles.detailsReader}>{children}</div>
-        </Dialog>
-      )}
+      <Dialog
+        open={open}
+        onOpenChange={setOpen}
+        title={author}
+        description={time}
+        closeLabel="Close details"
+        finalFocus={trigger}
+      >
+        <div className={styles.detailsReader}>{children}</div>
+      </Dialog>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import type { MediaReviewPlacement } from "./MediaReviewViewer";
 import { DetailsSheet } from "./DetailsSheet";
+import { ComposerScope } from "./composer-overlay";
 import {
   useState,
   useRef,
@@ -216,25 +217,28 @@ export function MediaReviewFrame(
       finalFocus={props.restoreFocus}
       headerActions={props.actions}
     >
-      <section
-        ref={props.frame}
-        data-composer-host=""
-        className={styles.sheetReview}
-        aria-label={props.label}
-        tabIndex={-1}
-        onKeyDown={(event) =>
-          mediaKeyDown(event, props.isVideo, props.video, props.navigate)
-        }
-      >
-        <div
-          className={`${styles.mediaReviewStage} dark`}
-          data-color-mode="dark"
-          data-review-stage=""
+      {/* Media is a viewer, not a container: nothing reads over its composer. */}
+      <ComposerScope value={undefined}>
+        <section
+          ref={props.frame}
+          data-composer-host=""
+          className={styles.sheetReview}
+          aria-label={props.label}
+          tabIndex={-1}
+          onKeyDown={(event) =>
+            mediaKeyDown(event, props.isVideo, props.video, props.navigate)
+          }
         >
-          {props.children}
-        </div>
-        {props.sidebar}
-      </section>
+          <div
+            className={`${styles.mediaReviewStage} dark`}
+            data-color-mode="dark"
+            data-review-stage=""
+          >
+            {props.children}
+          </div>
+          {props.sidebar}
+        </section>
+      </ComposerScope>
     </DetailsSheet>
   );
 }

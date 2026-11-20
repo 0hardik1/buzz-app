@@ -25,7 +25,7 @@ import { createRelaySession } from "../relay/session";
 import { keypair, message, metadata, roster, signed } from "../relay/testing";
 import {
   registerOverlayComposer,
-  overlayHostFor,
+  overlayHost,
   type MediaReviewOrigin,
 } from "./composer-overlay";
 import { readView } from "../../shared/view-state";
@@ -153,8 +153,8 @@ async function setupReview({
     pane.append(composer);
     document.body.append(pane);
     sourceReaders.push(pane);
-    registerOverlayComposer(composer);
-    opening = { host: overlayHostFor(composer), rootId: sourceRoot };
+    registerOverlayComposer("channel:C", composer);
+    opening = { host: overlayHost("channel:C"), rootId: sourceRoot };
   }
   const owner = createRelaySession(
     {

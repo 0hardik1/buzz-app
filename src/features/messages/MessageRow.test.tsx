@@ -1,4 +1,9 @@
-import { registerOverlayComposer } from "./composer-overlay";
+import {
+  ComposerScope,
+  channelComposer,
+  registerOverlayComposer,
+} from "./composer-overlay";
+import { InlineContainers, useInlineContainerList } from "./inline-containers";
 // @vitest-environment jsdom
 import {
   createLocalAgentActivity,
@@ -3818,25 +3823,39 @@ it("offers Show more for a single brief only when it runs past its lines", () =>
 
 it("opens details out of the conversation's composer, which stays usable", async () => {
   try {
-    renderDom(
-      <div data-composer-host="">
-        <MessageRow
-          row={detailsRow()}
-          profile={{ name: "Morgarita" }}
-          media={() => undefined}
-          onOpenLink={() => false}
-          day={false}
-          retry={undefined}
-        />
-        <form
-          data-message-composer=""
-          aria-label="Composer"
-          ref={(node) => (node ? registerOverlayComposer(node) : undefined)}
-        >
-          <textarea aria-label="Reply" />
-        </form>
-      </div>,
-    );
+    // The workspace's container list, over the conversation's composer.
+    function Workspace() {
+      const containers = useInlineContainerList("C");
+      return (
+        <InlineContainers value={containers.actions}>
+          <ComposerScope value={channelComposer("C")}>
+            <div data-composer-host="">
+              <MessageRow
+                row={detailsRow()}
+                profile={{ name: "Morgarita" }}
+                media={() => undefined}
+                onOpenLink={() => false}
+                day={false}
+                retry={undefined}
+              />
+              <form
+                data-message-composer=""
+                aria-label="Composer"
+                ref={(node) =>
+                  node
+                    ? registerOverlayComposer(channelComposer("C"), node)
+                    : undefined
+                }
+              >
+                <textarea aria-label="Reply" />
+              </form>
+            </div>
+          </ComposerScope>
+          {containers.layer}
+        </InlineContainers>
+      );
+    }
+    renderDom(<Workspace />);
     const more = screen.getByRole("button", { name: "Show more" });
     fireEvent.click(more);
     const sheet = await screen.findByRole("dialog", { name: "Morgarita" });

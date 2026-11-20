@@ -42,12 +42,7 @@ type ConversationTabProps = {
   extensions?: ConversationExtensions | undefined;
   openLink(target: string, origin?: MessageLinkOrigin): boolean;
   canOpenLink(target: string): boolean;
-  openThread(
-    messageId: string,
-    rootId: string,
-    intent?: "reply" | "reveal",
-    replyParent?: string,
-  ): void;
+  openThread(messageId: string, rootId: string, intent?: "reply"): void;
   close(): void;
   /** The current route's request, only for the thread it addresses. */
   navigation?: PageNavigation | undefined;
@@ -145,8 +140,8 @@ export function ConversationTab({
     [],
   );
   const onOpenThread = useCallback<typeof openThread>(
-    (messageId, rootId, intent, replyParent) =>
-      latest.current.openThread(messageId, rootId, intent, replyParent),
+    (messageId, rootId, intent) =>
+      latest.current.openThread(messageId, rootId, intent),
     [],
   );
   return (
@@ -183,7 +178,6 @@ export function ConversationTab({
             onResolvedRoot={onResolvedRoot}
             onDifferentThread={onDifferentThread}
             replyRequest={reply === restoredReply.current ? undefined : reply}
-            replyParent={tab.kind === "thread" ? tab.replyParent : undefined}
             focusRequest={focusRequest}
             revealSelected={threadReveal !== undefined}
             revealRequest={threadReveal}

@@ -136,6 +136,14 @@
   flex: none;
   height: calc(var(--composer-height) + var(--sheet-gap));
 }
+/* Stacked on another sheet, it stops above that sheet's composer, which stays
+   in the sheet below. Geometry reports that composer's top edge. */
+.sheet[data-stacked] {
+  bottom: calc(var(--composer-bottom) + var(--sheet-gap));
+}
+.sheet[data-stacked] .composerSpace {
+  display: none;
+}
 
 html[data-keyboard-navigation] :is(.scrim, .content) {
   transition: none;
