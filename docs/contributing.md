@@ -568,10 +568,13 @@ suites. Lanes:
   inputs changed.
 - **browser:** the selected journeys plus any `--browser=<spec[:line]>` you name,
   in Chromium and WebKit. Linux uses the CI Playwright configuration; other
-  hosts use the local one. A Linux host outside CI's Playwright container
-  needs the browser system libraries once:
-  `sudo bin/pnpm exec playwright install-deps chromium webkit`.
+  hosts use the local one.
 - **full:** `--lanes=full` runs `just scan` instead.
+
+A Linux host outside CI's runners needs CI's system packages once: the browser
+libraries (`sudo bin/pnpm exec playwright install-deps chromium webkit`) and,
+for the Rust lane, the apt packages in `.github/workflows/ci.yml`. A lane that
+fails for want of them says so in the summary.
 
 Pick lanes with `--lanes=auto|all|full|static,tests,…`, compare against another
 base with `--base=<ref>`, and add `--tag=<name>` when several reviewers share a
