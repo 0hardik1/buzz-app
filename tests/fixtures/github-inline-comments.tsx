@@ -22,20 +22,6 @@ try {
 } catch {
   /* A fresh fixture starts empty. */
 }
-fixture.state.comments.push({
-  id: 1,
-  node_id: "comment-1",
-  body: "A **read-only** discussion",
-  user: { login: "example-reviewer" },
-  html_url: "https://github.com/example-org/sample/pull/1#discussion_r1",
-  created_at: "2026-01-01T00:00:00Z",
-  commit_id: fixture.state.head,
-  original_commit_id: fixture.state.head,
-  path: "src/example.ts",
-  side: "RIGHT",
-  line: 5001,
-  original_line: 5001,
-});
 const comments = createPrComments(fixture.host);
 const gh = gitHubCli(fixture.host);
 const diff = gitHubDiff(fixture.host);
@@ -45,7 +31,14 @@ memory.setView(
   url,
   new URLSearchParams(location.search).has("summary") ? "summary" : "changes",
 );
-const modes = ["success", "refresh-failed"] as const;
+const modes = [
+  "success",
+  "denied",
+  "validation",
+  "timeout",
+  "refresh-failed",
+  "hold",
+] as const;
 const fixtureWindow = window as unknown as { inlineFixture: typeof fixture };
 fixtureWindow.inlineFixture = fixture;
 function Fixture() {
@@ -124,6 +117,9 @@ function Fixture() {
         </Button>
         <Button size="sm" onClick={() => setMount((previous) => previous + 1)}>
           Remount panel
+        </Button>
+        <Button size="sm" onClick={() => fixture.state.release()}>
+          Release held POST
         </Button>
         <Button
           size="sm"
