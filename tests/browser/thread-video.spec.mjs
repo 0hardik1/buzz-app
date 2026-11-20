@@ -7,8 +7,10 @@ async function checkMediaExit(page, dialog, screenshot) {
   // Hold the real exit halfway through: the whole media should fade away,
   // rather than getting cropped into a bottom strip before unmounting.
   await dialog.evaluate((element) => {
-    // Hold it from the event that reports it started, in the frame it was
-    // created: on a slow runner a later frame can come after a short exit.
+    // Hold it as soon as it exists: when the ending style lands (reading
+    // the animations flushes style, which creates the transitions), or from
+    // the event that reports it started. A later frame can come after a
+    // short exit on a slow runner.
     let held = false;
     const hold = () => {
       if (held || !element.matches("[data-ending-style]")) return;
@@ -22,6 +24,10 @@ async function checkMediaExit(page, dialog, screenshot) {
       }
       element.dataset.exitSampled = String(animations.length);
     };
+    new MutationObserver(hold).observe(element, {
+      attributes: true,
+      attributeFilter: ["data-ending-style"],
+    });
     for (const type of ["transitionrun", "animationstart"])
       element.addEventListener(type, hold, true);
   });
@@ -48,11 +54,13 @@ async function checkMediaExit(page, dialog, screenshot) {
       path: test.info().outputPath(screenshot),
     });
   } finally {
-    await dialog.evaluate((element) =>
-      element.getAnimations({ subtree: true }).forEach((animation) => {
-        animation.play();
-      }),
-    );
+    // The viewer may already be gone; waiting for it here would replace the
+    // assertion that failed with a timeout.
+    await dialog.evaluateAll((elements) => {
+      for (const element of elements)
+        for (const animation of element.getAnimations({ subtree: true }))
+          animation.play();
+    });
   }
   await expect(dialog).toHaveCount(0);
 }
