@@ -1,5 +1,5 @@
 import { test, expect } from "./fixture.mjs";
-import { newChat, viewOptionsButton } from "./navigation.mjs";
+import { newChat, showAllInCard, viewOptionsButton } from "./navigation.mjs";
 
 const chat = "33333333-3333-4333-8333-333333333333";
 test.use({
@@ -155,6 +155,9 @@ test("workspace settings rename preserves filing in ordinary and composed headin
     await page.reload();
     if (composed) await show.click();
     await expect(title()).toBeVisible();
+    // The clock now follows the signed 2026 publications, past Alpha's 2023
+    // activity, so show the new card's whole roster rather than its 30 days.
+    if (!composed) await showAllInCard(page, name);
     await expect(
       sidebar
         .locator(`[data-sidebar-section="group:${id}"]`)
