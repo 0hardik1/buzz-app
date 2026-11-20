@@ -4,6 +4,7 @@ import { test, expect } from "./fixture.mjs";
 import {
   activate,
   clickRow,
+  end,
   expectAnchor,
   open,
   settle,
@@ -1103,6 +1104,131 @@ for (const hinted of [false, true])
     ).toBeInViewport();
   });
 
+// A link to a channel message reveals it once. The dock returns to that
+// visit at the reader's place in the channel, and focus stays on the dock.
+for (const later of [10, 30])
+  test(`the dock returns to a channel message link ${later} messages back, keeping the reading place and focus on the dock`, async ({
+    page,
+    app,
+  }) => {
+    const linked = app.append(
+      "primary",
+      "alpha",
+      "Linked message",
+      false,
+      false,
+    );
+    for (let i = 0; i < later; i++)
+      app.append(
+        "primary",
+        "alpha",
+        `Later ${i}\n${"Enough text to scroll the channel. ".repeat(6)}`,
+        false,
+        false,
+      );
+    const opener = app.append(
+      "primary",
+      "alpha",
+      `See <buzz://message?channel=alpha&id=${linked.id}>`,
+      false,
+    );
+    await open(page, app);
+    const timeline = page.locator('[data-channel-timeline="alpha"]');
+    const openerRow = timeline.locator(`[data-message-id="${opener.id}"]`);
+    await openerRow
+      .getByRole("link", { name: "Alice Fixture in #Alpha", exact: true })
+      .click();
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const { status, entry } = window.fixtureNavigation.snapshot();
+          return status === "opened" && entry.target.messageId;
+        }),
+      )
+      .toBe(linked.id);
+    const focusedMessage = () =>
+      page.evaluate(
+        () =>
+          document.activeElement?.closest("[data-message-id]")?.dataset
+            .messageId,
+      );
+    await expect.poll(focusedMessage).toBe(linked.id);
+    const linkedRow = timeline.locator(`[data-message-id="${linked.id}"]`);
+    const threadMessage = page
+      .getByRole("complementary", { name: "Thread", exact: true })
+      .getByText("Linked message", { exact: true });
+    // A message past the loaded timeline opens in the Thread panel; one in it
+    // is revealed in place.
+    if (later === 30) await expect(threadMessage).toBeVisible();
+    else await expect(threadMessage).toHaveCount(0);
+    if (later === 10) await expect(linkedRow).toBeInViewport();
+    // Read on, to the end of the channel.
+    await end(page);
+    await settle(page);
+    await expect(openerRow).toBeInViewport();
+    await dockRoundTrip(page);
+    const messages = page
+      .getByRole("navigation", { name: "Apps dock" })
+      .getByRole("tab", { name: "Messages", exact: true });
+    await expect(messages).toBeFocused();
+    await settle(page);
+    await expect(messages).toBeFocused();
+    expect(await focusedMessage()).toBeUndefined();
+    await expect(openerRow).toBeInViewport();
+    await expect(linkedRow).not.toBeInViewport();
+    // The visit is still the link's, and shows as it did.
+    expect(await visitTarget(page)).toMatchObject({
+      kind: "conversation",
+      channelId: "alpha",
+      messageId: linked.id,
+    });
+    if (later === 30) await expect(threadMessage).toBeVisible();
+    else await expect(threadMessage).toHaveCount(0);
+  });
+
+// A link naming a thread root without a thread hint opens that thread; the
+// dock returns to it.
+test("the dock returns to the thread a hintless root link opened", async ({
+  page,
+  app,
+}) => {
+  const root = app.histories
+    .get("primary/alpha")
+    .find((row) => row.content === "Thread root 0");
+  app.append("primary", "alpha", "Root reply", false, false, root.id);
+  const opener = app.append(
+    "primary",
+    "alpha",
+    `See <buzz://message?channel=alpha&id=${root.id}>`,
+    false,
+  );
+  await open(page, app);
+  const panel = page.getByRole("complementary", {
+    name: "Thread",
+    exact: true,
+  });
+  await page
+    .locator(`[data-channel-timeline="alpha"] [data-message-id="${opener.id}"]`)
+    .getByRole("link", { name: "Fixture Reader in #Alpha", exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const { status, entry } = window.fixtureNavigation.snapshot();
+        return status === "opened" && entry.target.messageId;
+      }),
+    )
+    .toBe(root.id);
+  await expect(panel.getByText("Root reply", { exact: true })).toBeVisible();
+  await dockRoundTrip(page);
+  expect(await visitTarget(page)).toMatchObject({
+    kind: "conversation",
+    channelId: "alpha",
+    messageId: root.id,
+  });
+  await expect(panel.getByText("Root reply", { exact: true })).toBeVisible();
+});
+
 test.describe(() => {
   test.use({ historyCounts: { alpha: 80, beta: 20 } });
 
@@ -1367,4 +1493,50 @@ test("Back and Forward return to a root-linked thread's reading place; a fresh l
   await rootLink.click();
   await opened();
   await rootAtTop();
+});
+
+// A channel the reader lost access to while away is forgotten: the dock opens
+// the Messages app's own page in its place, and the next return works.
+test("the dock forgets a channel that no longer opens", async ({
+  page,
+  app,
+}) => {
+  app.setChannelMetadata("beta", [
+    ["name", "Beta"],
+    ["t", "stream"],
+    ["private"],
+  ]);
+  await open(page, app);
+  const sidebar = page.getByRole("navigation", { name: "Subscribed channels" });
+  await sidebar.locator('button[data-channel-id="beta"]').click();
+  const opened = () =>
+    page.evaluate(() => {
+      const { status, entry } = window.fixtureNavigation.snapshot();
+      return status === "opened" && (entry.target.channelId ?? false);
+    });
+  await expect.poll(opened).toBe("beta");
+  const dock = page.getByRole("navigation", { name: "Apps dock" });
+  await dock.getByRole("tab", { name: "Workflows", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const { status, entry } = window.fixtureNavigation.snapshot();
+        return status === "opened" && entry.target.pluginId;
+      }),
+    )
+    .toBe("buzz.workflows");
+  app.removeViewer("beta");
+  await expect(sidebar.locator('button[data-channel-id="beta"]')).toHaveCount(
+    0,
+  );
+  const unavailable = page.getByText("This page isn't available", {
+    exact: true,
+  });
+  await dock.getByRole("tab", { name: "Messages", exact: true }).click();
+  // The app's own page opens its saved channel.
+  await expect.poll(opened).toBe("alpha");
+  await expect(unavailable).toHaveCount(0);
+  await dockRoundTrip(page);
+  await expect.poll(opened).toBe("alpha");
+  await expect(unavailable).toHaveCount(0);
 });

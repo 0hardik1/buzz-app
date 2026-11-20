@@ -104,3 +104,21 @@ it("opens the app's own page for another scope, app or a removed page", () => {
     ),
   ).toBeUndefined();
 });
+
+it("reopens the visit beneath a join dialog, without the dialog", () => {
+  const join = { viewer: scope.viewer, visit: "opening" };
+  const activity: OpenTarget = {
+    version: 1,
+    kind: "page",
+    pluginId: "buzz.inbox",
+    pageId: "inbox",
+    scope,
+  };
+  expect(
+    dockReturn(pages, "buzz.channels/channels", { ...activity, join }, scope),
+  ).toEqual(activity);
+  const root: OpenTarget = { ...thread, messageId: "c".repeat(64), join };
+  expect(
+    dockReturn(pages, "buzz.channels/channels", root, scope),
+  ).not.toHaveProperty("join");
+});

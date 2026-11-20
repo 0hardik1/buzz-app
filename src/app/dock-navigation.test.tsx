@@ -281,6 +281,38 @@ it("opens Messages' own page when the remembered place is in another community",
   });
 });
 
+// Activity opened with no scope still belongs to the community it opened in.
+it("opens Messages' own page when unscoped Activity opened in another community", async () => {
+  const app = dockFixture();
+  await waitFor(() => expect(app.navigation.snapshot().status).toBe("opened"));
+  act(() => {
+    void current().navigation.open(inboxTarget);
+  });
+  await waitFor(() =>
+    expect(app.navigation.snapshot()).toMatchObject({
+      status: "opened",
+      entry: { target: { pluginId: "buzz.inbox" } },
+    }),
+  );
+  expect(app.navigation.snapshot().entry.target).not.toHaveProperty("scope");
+  await visit(app, {
+    version: 1,
+    kind: "page",
+    pluginId: "buzz.bestie",
+    pageId: "bestie",
+    scope: scope(elsewhere),
+  });
+  expect(app.communities.snapshot().selected).toBe(elsewhere);
+  await userEvent.click(messagesTab());
+  await opened(app, {
+    version: 1,
+    kind: "page",
+    pluginId: "buzz.channels",
+    pageId: "channels",
+    scope: scope(elsewhere),
+  });
+});
+
 const channelsRoot: OpenTarget = {
   version: 1,
   kind: "page",
@@ -339,3 +371,81 @@ it.each([
     expect(app.navigation.snapshot().entry.target).toEqual(channelsRoot);
   },
 );
+
+// Branching history drops the dock's newer visit, not the person's place: the
+// app's older visit, still in history, is where the dock returns.
+it("returns to the newest visit still in history when a branch drops the newer one", async () => {
+  const app = dockFixture();
+  await visit(app, activity);
+  await bestie();
+  await userEvent.click(messagesTab());
+  await opened(app, activity);
+  act(() => app.navigation.back());
+  await waitFor(() =>
+    expect(app.navigation.snapshot()).toMatchObject({
+      status: "opened",
+      entry: { target: { pluginId: "buzz.bestie" } },
+    }),
+  );
+  // A new branch from Bestie drops the dock's own Activity visit.
+  await visit(app, {
+    version: 1,
+    kind: "page",
+    pluginId: "buzz.agents",
+    pageId: "agents",
+    scope: scope(),
+  });
+  await userEvent.click(messagesTab());
+  await opened(app, activity);
+});
+
+// A join dialog is shown once over a visit; the dock returns to that visit.
+it("returns to the visit beneath a join dialog, without the dialog", async () => {
+  const app = dockFixture();
+  await visit(app, activity);
+  const join = { viewer, visit: crypto.randomUUID() };
+  await visit(app, { ...activity, join });
+  // A link opens Bestie over the dialog; the dock leaves it.
+  await visit(app, {
+    version: 1,
+    kind: "page",
+    pluginId: "buzz.bestie",
+    pageId: "bestie",
+    scope: scope(),
+  });
+  await userEvent.click(messagesTab());
+  await opened(app, activity);
+  expect(app.navigation.snapshot().entry.target).not.toHaveProperty("join");
+});
+
+// A dismissed visit never comes back, even with an older place to return to.
+it("returns to the older visit when the newer one is closed", async () => {
+  const app = dockFixture({ channel: true });
+  await visit(app, activity);
+  await visit(app, {
+    version: 1,
+    kind: "conversation",
+    scope: scope(),
+    channelId: "alpha",
+    messageId: root.id,
+    threadRootId: root.id,
+  });
+  const closed = app.navigation.snapshot().entry.id;
+  holdQueries = true;
+  const fallback: OpenTarget = {
+    version: 1,
+    kind: "conversation",
+    scope: scope(),
+    channelId: "beta",
+  };
+  act(() => app.navigation.dismiss([closed], fallback));
+  await waitFor(() =>
+    expect(app.navigation.snapshot()).toMatchObject({
+      status: "opening",
+      entry: { target: fallback },
+    }),
+  );
+  await bestie();
+  await userEvent.click(messagesTab());
+  await opened(app, activity);
+});

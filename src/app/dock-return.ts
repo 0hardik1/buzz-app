@@ -1,7 +1,8 @@
 import type { RegisteredPage } from "../features/pages/service";
-import type {
-  NavigationScope,
-  OpenTarget,
+import {
+  withoutJoin,
+  type NavigationScope,
+  type OpenTarget,
 } from "../features/navigation/targets";
 import { navigationOwner } from "./shell/presentation";
 
@@ -26,12 +27,12 @@ export function dockOwner(
 
 /**
  * Where the dock reopens `owner`: its last visit, without the parts that act
- * once (Members, Forward, and the context it was opened with). A conversation
- * keeps its message, so its reader finds the thread again, as following the
- * link again does. A thread root keeps its thread; a reply drops its thread
- * hint and is placed by the reader alone. Nothing when that visit was in another
- * account or community, or now belongs to another app; the dock then opens
- * the app's own page.
+ * once (a join dialog, Members, Forward, and the context it was opened with).
+ * A conversation keeps its message, so its reader finds the thread again, as
+ * following the link again does. A thread root keeps its thread; a reply drops
+ * its thread hint and is placed by the reader alone. Nothing when that visit
+ * was in another account or community, or now belongs to another app; the dock
+ * then opens the app's own page.
  */
 export function dockReturn(
   pages: readonly RegisteredPage[],
@@ -50,14 +51,15 @@ export function dockReturn(
         was.communityOrigin !== scope.communityOrigin)
   )
     return;
-  if (last.kind !== "conversation") return last;
+  const visit = withoutJoin(last);
+  if (visit.kind !== "conversation") return visit;
   const {
     panel: _panel,
     forward: _forward,
     context: _context,
     threadRootId,
     ...place
-  } = last;
+  } = visit;
   // A reply's thread root is only a hint, and a wrong one can fold another
   // open thread away. The reply alone lets its reader find its thread.
   return threadRootId && threadRootId === place.messageId
