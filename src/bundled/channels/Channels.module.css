@@ -1107,17 +1107,26 @@ html[data-keyboard-navigation]
   pointer-events: none;
   transform: translate(-50%, -50%) scaleX(calc(40 / 56));
   transition:
+    background-color var(--duration-fast) var(--easing-state),
     opacity var(--duration-fast) var(--easing-state),
     transform var(--duration-fast) var(--easing-enter);
 }
+/* A card with rows past its edge keeps a quiet handle at rest; hover, focus or
+   a drag darken it. A card showing every row hides it until then. */
+.cardResize[data-more]::after {
+  background: var(--border-standard);
+  opacity: 1;
+}
 @media (hover: hover) and (pointer: fine) {
   .cardResize:hover::after {
+    background: var(--border-focus);
     opacity: 1;
     transform: translate(-50%, -50%) scaleX(1);
   }
 }
 .cardResize:focus-visible::after,
 .cardResize[data-resizing]::after {
+  background: var(--border-focus);
   opacity: 1;
   transform: translate(-50%, -50%) scaleX(1);
 }

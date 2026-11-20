@@ -108,6 +108,16 @@ it("tells assistive technology how many rows show, and Enter toggles full", () =
   expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
 });
 
+it("keeps the grip showing while rows are past the card's edge", () => {
+  render(<Card rows={5} />);
+  layOut();
+  const grip = screen.getByRole("separator", { name: "Resize Work" });
+  fireEvent.keyDown(grip, { key: "ArrowUp" });
+  expect(grip).toHaveAttribute("data-more");
+  fireEvent.keyDown(grip, { key: "Enter" });
+  expect(grip).not.toHaveAttribute("data-more");
+});
+
 it("hints at the grip until it has been dragged or double-clicked once", () => {
   render(<Card rows={5} />);
   layOut();

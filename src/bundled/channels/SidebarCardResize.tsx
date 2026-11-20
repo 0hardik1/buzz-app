@@ -161,6 +161,9 @@ export function SidebarCardResize({
             aria-valuemax={count}
             aria-valuenow={shown}
             aria-valuetext={`${shown} of ${count} rows`}
+            // Rows past the edge keep the handle showing, so the card reads
+            // as having more.
+            data-more={shown < count ? "" : undefined}
             aria-keyshortcuts="Enter"
             tabIndex={0}
             onDoubleClick={() => {
