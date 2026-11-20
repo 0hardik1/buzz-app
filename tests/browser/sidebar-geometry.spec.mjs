@@ -202,17 +202,20 @@ const newOptions = (page) =>
     exact: true,
   });
 
-// Solo's New chat action stays in its heading at every scale.
+// Solo's New chat action stays in its heading at every scale: after the label
+// on its row, or, where it would cover the label, on its own row below.
 function controlsAgainstHeading(button) {
   const heading = button.closest(".navigation-section-heading");
   const summary = heading.querySelector("summary").getBoundingClientRect();
   const control = button.getBoundingClientRect();
   const box = heading.getBoundingClientRect();
   const center = (rect) => rect.top + rect.height / 2;
+  const below = control.top >= summary.bottom - 0.5;
   return {
-    afterHeadingLabel: control.left >= summary.right - 0.5,
-    centered: Math.abs(center(control) - center(box)) < 1,
-    withinHeading: control.right <= box.right + 0.5,
+    afterHeadingLabel: below || control.left >= summary.right - 0.5,
+    centered: below || Math.abs(center(control) - center(box)) < 1,
+    withinHeading:
+      control.right <= box.right + 0.5 && control.bottom <= box.bottom + 0.5,
   };
 }
 

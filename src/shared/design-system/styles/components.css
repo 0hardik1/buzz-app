@@ -1668,8 +1668,11 @@
 
   /* Auto layout: the label fills and truncates, the actions hug. Nothing is
      positioned over the row or reserves width for something else. */
+  /* The label keeps room for its title; actions that would cover it wrap to
+     their own row instead, as at narrow widths with enlarged text. */
   .navigation-section-heading {
     display: flex;
+    flex-wrap: wrap;
     min-height: var(--size-row);
     align-items: center;
     gap: var(--space-row-gap);
@@ -1678,8 +1681,8 @@
 
   .navigation-section-heading-label {
     display: flex;
-    flex: 1 1 auto;
-    min-width: 0;
+    flex: 1 1 min(100%, var(--space-16));
+    min-width: min(100%, var(--space-16));
     align-items: center;
   }
 
@@ -1687,6 +1690,7 @@
     display: flex;
     flex: none;
     align-items: center;
+    margin-inline-start: auto;
   }
 
   .navigation-section-heading-actions:empty {

@@ -35,7 +35,8 @@ export function NavigationSection({
  * `data-navigation-reveal` such as a chevron, appear on hover, keyboard focus,
  * while a menu or popover from the heading is open or one of them has focus, and always
  * on touch. Hidden
- * actions take no width, so the label uses that space until they appear.
+ * actions take no width, so the label uses that space until they appear. The
+ * label keeps room for its title; actions that would cover it wrap below.
  */
 export function NavigationSectionHeading({
   actions,
