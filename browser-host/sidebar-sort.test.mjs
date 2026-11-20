@@ -509,20 +509,23 @@ it("atomically confirms custom windows, preserves other sections and clears remo
   expect(read).not.toHaveBeenCalled();
 });
 
-it("saves a date window beside Unreads, including the 30-day default, and clears it for all dates", () => {
+it("saves a date window beside Unreads on its own, any length, and clears it for all dates", () => {
   const h = harness();
   const choice = { group: "channels", mode: "unreads", sectionIds: [] };
   const plain = prepareSidebarFilter([], choice, h.secret);
-  expect(h.decode(plain.event).activeWindowSeconds).toBeUndefined();
+  expect(h.decode(plain.event).unreadsWindowSeconds).toBeUndefined();
   const month = prepareSidebarFilter(
     [plain.event],
     { ...choice, activeWindowSeconds: 30 * 86400 },
     h.secret,
   );
+  // Unreads' window never lands in Active's map, which older apps left
+  // beside Unreads without applying.
   expect(h.decode(month.event)).toMatchObject({
     groups: { channels: "unreads" },
-    activeWindowSeconds: { channels: 30 * 86400 },
+    unreadsWindowSeconds: { channels: 30 * 86400 },
   });
+  expect(h.decode(month.event).activeWindowSeconds).toBeUndefined();
   const cleared = prepareSidebarFilter(
     [month.event],
     { ...choice, activeWindowSeconds: null },
@@ -530,7 +533,7 @@ it("saves a date window beside Unreads, including the 30-day default, and clears
   );
   expect(h.decode(cleared.event)).toMatchObject({
     groups: { channels: "unreads" },
-    activeWindowSeconds: {},
+    unreadsWindowSeconds: {},
   });
   expect(() =>
     prepareSidebarFilter(
