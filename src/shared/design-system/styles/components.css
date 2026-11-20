@@ -1792,6 +1792,24 @@
     overflow: hidden;
   }
 
+  /* Actions that can't fit beside the label keep their wrapped row while
+     hidden, so revealing them changes only their opacity, never the height. */
+  .navigation-section-heading[data-actions-row]
+  > .navigation-section-heading-actions[data-navigation-reveal] {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 100%;
+  }
+
+  /* The revealed layout, applied for one synchronous measure before paint. */
+  .navigation-section-heading[data-actions-measure]
+  > .navigation-section-heading-actions[data-navigation-reveal] {
+    flex-basis: auto;
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
   :is(
       .navigation-section-heading:hover,
       html[data-keyboard-navigation] .navigation-section-heading:focus-within,

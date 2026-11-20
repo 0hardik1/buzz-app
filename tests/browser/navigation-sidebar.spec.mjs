@@ -185,6 +185,50 @@ test.describe("workspace heading resize", () => {
       }
     }
   });
+
+  // Revealing actions must not move the rows under the pointer: where they
+  // can't fit beside the label, their wrapped row is kept while hidden.
+  test("revealing heading actions keeps the heading's height at enlarged text", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    const workspace = page.locator('[data-sidebar-section="group:work"]');
+    const heading = workspace.locator(".navigation-section-heading");
+    const actions = heading.locator(".navigation-section-heading-actions");
+    const more = workspace.getByRole("button", {
+      name: "More actions for Work",
+    });
+    const firstRow = workspace.locator("[data-channel-id]").first();
+    const layout = async () => ({
+      heading: Math.round((await heading.boundingBox()).height),
+      row: Math.round((await firstRow.boundingBox()).y),
+    });
+    const rest = async () => {
+      await page.mouse.move(800, 600);
+      await page.evaluate(() => document.activeElement?.blur());
+      await expect(actions).toHaveCSS("opacity", "0");
+    };
+    await page.getByRole("separator", { name: "Resize sidebar" }).press("Home");
+    for (const scale of [1.5, 2]) {
+      await page.evaluate((value) => {
+        document.documentElement.style.setProperty(
+          "--buzz-text-scale",
+          String(value),
+        );
+      }, scale);
+      await rest();
+      await heading.scrollIntoViewIfNeeded();
+      const before = await layout();
+      await heading.hover();
+      await expect(actions).toHaveCSS("opacity", "1");
+      expect(await layout()).toEqual(before);
+      await rest();
+      await more.focus();
+      await expect(actions).toHaveCSS("opacity", "1");
+      expect(await layout()).toEqual(before);
+    }
+  });
 });
 
 test("channel sidebar resizes from the full gutter and persists", async ({
