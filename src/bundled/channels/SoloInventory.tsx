@@ -410,9 +410,7 @@ export function SoloInventory({
           finalFocus={trigger}
           onCreated={async (id) => {
             if (!current() || !trigger.current?.isConnected) return;
-            if (await soloNavigationFor(session)?.openCreatedWorkspace(id))
-              return;
-            if (trigger.current?.isConnected) newChat(id);
+            await soloNavigationFor(session)?.openCreatedWorkspace(id);
           }}
         />
       )}

@@ -535,56 +535,26 @@ it("keeps unavailable creation actions disabled", async () => {
   expect(screen.queryByRole("menuitem", { name: "New section" })).toBeNull();
 });
 
-it.each([["New options", "New workspace"]])(
-  "opens an ordinary workspace draft from %s and ignores later completion after session replacement",
-  async (triggerName, itemName) => {
-    const f = fixture(true, true);
-    const user = userEvent.setup();
-    let finish!: () => void;
-    const pending = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
-    const create = vi
-      .spyOn(f.session.sidebarPreferences, "createSection")
-      .mockResolvedValueOnce(undefined)
-      .mockReturnValue(pending);
-    await user.click(screen.getByRole("button", { name: triggerName }));
-    await user.click(await screen.findByRole("menuitem", { name: itemName }));
-    const first = await screen.findByRole("dialog", { name: "New workspace" });
-    await user.type(
-      within(first).getByRole("textbox", { name: "Name" }),
-      "First workspace",
-    );
-    await user.click(within(first).getByRole("button", { name: "Create" }));
-    const project = create.mock.calls[0]?.[0];
-    if (!project) throw new Error("Missing created workspace");
-    await waitFor(() =>
-      expect(f.open).toHaveBeenCalledWith(
-        soloDraftTarget(scope, { project: project.id }),
-      ),
-    );
-    await waitFor(() => expect(first).not.toBeInTheDocument());
-    f.open.mockClear();
-    await user.click(screen.getByRole("button", { name: triggerName }));
-    await user.click(await screen.findByRole("menuitem", { name: itemName }));
-    const dialog = await screen.findByRole("dialog", { name: "New workspace" });
-    await user.type(
-      within(dialog).getByRole("textbox", { name: "Name" }),
-      "Planning",
-    );
-    try {
-      await user.click(within(dialog).getByRole("button", { name: "Create" }));
-      await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
-      f.replaceSession();
-    } finally {
-      await act(async () => {
-        finish();
-        await pending;
-      });
-    }
-    expect(f.open).not.toHaveBeenCalled();
-  },
-);
+it("creates a workspace from New options without opening a chat in it", async () => {
+  const f = fixture(true, true);
+  const user = userEvent.setup();
+  const create = vi
+    .spyOn(f.session.sidebarPreferences, "createSection")
+    .mockResolvedValue(undefined);
+  await user.click(screen.getByRole("button", { name: "New options" }));
+  await user.click(
+    await screen.findByRole("menuitem", { name: "New workspace" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "New workspace" });
+  await user.type(
+    within(dialog).getByRole("textbox", { name: "Name" }),
+    "Planning",
+  );
+  await user.click(within(dialog).getByRole("button", { name: "Create" }));
+  await waitFor(() => expect(dialog).not.toBeInTheDocument());
+  expect(create).toHaveBeenCalledTimes(1);
+  expect(f.open).not.toHaveBeenCalled();
+});
 
 it.each([
   ["New workspace", "New workspace", "Name"],
