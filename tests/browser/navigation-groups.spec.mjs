@@ -332,10 +332,9 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
   const openSort = async () => {
     await viewOptionsButton(page, "Team").focus();
     await page.keyboard.press("Enter");
-    const options = page.getByRole("dialog", {
-      name: "View options for Team",
-      exact: true,
-    });
+    const options = page
+      .getByRole("dialog", { name: "Filter & sort", exact: true })
+      .and(page.locator(":not([data-closed])"));
     await expect(options).toBeVisible();
     return options.getByRole("radiogroup", { name: "Sort", exact: true });
   };

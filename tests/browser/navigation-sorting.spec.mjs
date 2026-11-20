@@ -857,7 +857,7 @@ test.describe("section sort persistence", () => {
     expect(startupActivity.length).toBeGreaterThan(2);
     expect(new Set(startupActivity).size).toBe(startupActivity.length);
     const popup = page.getByRole("dialog", {
-      name: "View options for Team",
+      name: "Filter & sort",
       exact: true,
     });
     async function openSort() {

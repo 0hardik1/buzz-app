@@ -197,8 +197,8 @@ test("section filters save activity windows from the view options popover", asyn
           ?.channels,
     )
     .toBe(30 * 86400);
-  // 30 days is Team's default, so its button no longer reads as filtered.
-  await expect(trigger).toHaveAccessibleName("View options for Team");
+  // Any time range is a filter, even Team's default 30 days.
+  await expect(trigger).toHaveAccessibleName("View options for Team, filtered");
   popup = await viewOptions(page, "Team");
   await checked(popup, "30 days");
   await page.emulateMedia({ colorScheme: "dark" });

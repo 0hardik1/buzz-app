@@ -147,7 +147,7 @@ async function viewOptions(
       name: new RegExp(`^View options for ${title}(, filtered)?$`),
     }),
   );
-  return screen.findByRole("dialog", { name: `View options for ${title}` });
+  return screen.findByRole("dialog", { name: "Filter & sort" });
 }
 /** Picks one choice in a card's View options, then closes it. */
 async function chooseView(
@@ -156,7 +156,19 @@ async function chooseView(
   name: string,
 ) {
   const popup = await viewOptions(user, title);
-  fireEvent.click(within(popup).getByRole("radio", { name }));
+  const unreads = within(popup).getByRole("switch", { name: "Unreads only" });
+  if (name === "Unreads") {
+    if (unreads.getAttribute("aria-checked") !== "true")
+      fireEvent.click(unreads);
+  } else if (name === "All") {
+    // Every conversation: all time, then Unreads only off.
+    await user.click(
+      within(popup).getByRole("combobox", { name: "Time range" }),
+    );
+    await user.click(await screen.findByRole("option", { name: "All" }));
+    if (unreads.getAttribute("aria-checked") === "true")
+      fireEvent.click(unreads);
+  } else fireEvent.click(within(popup).getByRole("radio", { name }));
   await user.keyboard("{Escape}");
   await waitFor(() => expect(popup).not.toBeInTheDocument());
 }

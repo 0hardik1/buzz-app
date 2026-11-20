@@ -281,10 +281,10 @@ export async function openViewOptions(page, title, scope = page) {
   const button = viewOptionsButton(scope, title);
   await button.focus();
   await button.click();
-  const popup = page.getByRole("dialog", {
-    name: `View options for ${title}`,
-    exact: true,
-  });
+  // Every card's popover shares its title; skip one still closing.
+  const popup = page
+    .getByRole("dialog", { name: "Filter & sort", exact: true })
+    .and(page.locator(":not([data-closed])"));
   await expect(popup).toBeVisible();
   return popup;
 }
@@ -293,12 +293,12 @@ const DATES = new Set(["All", "Today", "3 days", "7 days", "30 days"]);
 
 /** View options' Unreads switch, which combines with its Date. */
 export function unreadsSwitch(popup) {
-  return popup.getByRole("switch", { name: "Unreads", exact: true });
+  return popup.getByRole("switch", { name: "Unreads only", exact: true });
 }
 
 /** View options' Date dropdown. */
 export function dateChoice(popup) {
-  return popup.getByRole("combobox", { name: "Date", exact: true });
+  return popup.getByRole("combobox", { name: "Time range", exact: true });
 }
 
 /** Picks a Date in an open View options popover. */

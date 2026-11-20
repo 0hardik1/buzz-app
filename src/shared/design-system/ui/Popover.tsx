@@ -102,11 +102,19 @@ export function PopoverPopup({
   );
 }
 
-export function PopoverTitle(
-  props: Omit<ComponentProps<typeof BasePopover.Title>, "className">,
-) {
+export function PopoverTitle({
+  emphasis = "default",
+  ...props
+}: Omit<ComponentProps<typeof BasePopover.Title>, "className"> & {
+  /** `quiet` names a popover of settings, like a menu's group label. */
+  emphasis?: "default" | "quiet";
+}) {
   return (
-    <BasePopover.Title {...props} className="buzz-popover-title text-label" />
+    <BasePopover.Title
+      {...props}
+      data-emphasis={emphasis}
+      className={`buzz-popover-title ${emphasis === "quiet" ? "text-body-sm" : "text-label"}`}
+    />
   );
 }
 

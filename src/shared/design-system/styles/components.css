@@ -2710,6 +2710,9 @@
   .buzz-popover-title {
     margin: 0;
   }
+  .buzz-popover-title[data-emphasis="quiet"] {
+    color: var(--text-subtle);
+  }
   .buzz-popover-description {
     margin: var(--space-2) 0 0;
     color: var(--text-subtle);

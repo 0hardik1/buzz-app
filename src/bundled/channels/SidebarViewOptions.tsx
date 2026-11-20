@@ -10,6 +10,7 @@ import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
   PopoverPopup,
   PopoverRoot,
+  PopoverTitle,
   PopoverTrigger,
 } from "../../shared/design-system/ui/Popover";
 import { Radio, RadioGroup } from "../../shared/design-system/ui/RadioGroup";
@@ -96,26 +97,25 @@ export function SidebarViewOptions({
           />
         }
       />
-      <PopoverPopup size="compact" align="end" aria-label={label}>
+      <PopoverPopup size="compact" align="end">
         <div className={styles.viewOptions}>
+          <PopoverTitle emphasis="quiet">Filter &amp; sort</PopoverTitle>
           {filter && (
-            <>
-              <SwitchPreferenceRow
-                label="Unreads"
-                checked={unreads}
-                disabled={filter.disabled}
-                onCheckedChange={(on) => change(on, date)}
-              />
-              <Select
-                variant="preference"
-                label="Date"
-                align="end"
-                value={date}
-                disabled={filter.disabled === true}
-                groups={[{ label: "", options: dateOptions }]}
-                onValueChange={(next) => change(unreads, next)}
-              />
-            </>
+            <SwitchPreferenceRow
+              label="Unreads only"
+              checked={unreads}
+              disabled={filter.disabled}
+              onCheckedChange={(on) => change(on, date)}
+            />
+          )}
+          {unreadsFirst && (
+            <SwitchPreferenceRow
+              label="Unreads first"
+              checked={unreadsFirst.on}
+              // Unreads only leaves nothing else to put first.
+              disabled={unreads}
+              onCheckedChange={unreadsFirst.set}
+            />
           )}
           {sort && (
             <PreferenceRow
@@ -147,15 +147,6 @@ export function SidebarViewOptions({
                   </RadioGroup>
                 </Field>
               }
-            />
-          )}
-          {unreadsFirst && (
-            // Unreads already leaves only unread conversations to order.
-            <SwitchPreferenceRow
-              label="Unreads first"
-              checked={unreadsFirst.on}
-              disabled={unreads}
-              onCheckedChange={unreadsFirst.set}
             />
           )}
           {display && (
@@ -198,6 +189,17 @@ export function SidebarViewOptions({
                   </RadioGroup>
                 </Field>
               }
+            />
+          )}
+          {filter && (
+            <Select
+              variant="preference"
+              label="Time range"
+              align="end"
+              value={date}
+              disabled={filter.disabled === true}
+              groups={[{ label: "", options: dateOptions }]}
+              onValueChange={(next) => change(unreads, next)}
             />
           )}
         </div>

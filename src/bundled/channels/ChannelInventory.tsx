@@ -1,4 +1,3 @@
-import { DEFAULT_ACTIVE_WINDOW_SECONDS } from "../../features/relay/sidebar-preferences";
 import { workspaceMessageTarget } from "../../features/channel-navigation/new-message-route";
 import { WorkspaceNewMenu } from "./WorkspaceNewMenu";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
@@ -303,19 +302,9 @@ export function ChannelInventory({
         : "active"),
     [preferences.data, filterAll],
   );
-  // A card is filtered when it shows less than its default: Unreads, or an
-  // Active window other than the default 30 days (or any, where All is default).
-  const sectionFiltered = (key: string) => {
-    const mode = sectionFilter(key);
-    if (mode === "unreads") return true;
-    if (mode !== "active") return false;
-    if (key === "starred" || key === SIDEBAR_PAGES_SECTION) return true;
-    const seconds =
-      preferences.data?.activeWindowSeconds?.[
-        key.startsWith("group:") ? `section:${key.slice(6)}` : key
-      ] ?? DEFAULT_ACTIVE_WINDOW_SECONDS;
-    return seconds !== DEFAULT_ACTIVE_WINDOW_SECONDS;
-  };
+  // The filters are Unreads only and Time range; sort and layout aren't.
+  // A card is filtered when either narrows it: Unreads only, or any range.
+  const sectionFiltered = (key: string) => sectionFilter(key) !== "all";
   const appliedSorts = Object.keys(preferences.data?.sort ?? {}).map((key) =>
     sectionSort(key.startsWith("section:") ? `group:${key.slice(8)}` : key),
   );

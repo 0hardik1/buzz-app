@@ -725,7 +725,7 @@ export const ROLE_GROUPS: RoleGroup[] = [
       {
         token: "icon-accent",
         variable: "--icon-accent",
-        pointsAt: "accent-link light / accent-link dark",
+        pointsAt: "accent-9, the selected fill",
         use: 'An icon action whose state is on, such as a filtered card\'s view options (IconButton tone="accent"). Not text; the accessible name carries the state.',
         status: "core",
       },

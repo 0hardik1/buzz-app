@@ -1036,8 +1036,8 @@ width. Both controls use the same sm/md/lg scale. Existing names
 remain compatibility aliases: primary/solid → prominent, quiet → subtle,
 compact/toolbar → sm, default → md, large → lg. Do not add new alias call sites.
 Buzz's tint and chrome icon variants remain for composer and backdrop actions.
-`IconButton tone="accent"` colors only the icon (`--icon-accent`) while the
-action's state is on, such as a card's view options button while the card is
+`IconButton tone="accent"` colors only the icon (`--icon-accent`, the same
+accent as a selected row's fill) while the action's state is on, such as a card's view options button while the card is
 filtered; the variant's fill, hover and pressed states are unchanged. Its
 accessible name says the state too; color alone does not carry it.
 
@@ -1247,7 +1247,8 @@ spacing. Use `size="compact"` with list padding for short account/action surface
 width and 16px corners. `MenuPopup size="compact"` uses the same corner, inset, row and
 hover treatment for short action lists. Content and wide popovers retain 24px corners.
 Name it with PopoverTitle or aria-label; PopoverDescription connects
-supporting copy. Hover opening is optional and remains configured by its feature.
+supporting copy. `PopoverTitle emphasis="quiet"` names a compact popover of
+settings in small, subtle text, like a menu group label. Hover opening is optional and remains configured by its feature.
 Use `padding="none"` for an embedded picker that owns its internal spacing, such as
 emoji/GIF content.
 Dropdown menus, submenus, and popovers use a quicker version of the form dropdown

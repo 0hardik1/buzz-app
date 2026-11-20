@@ -50,9 +50,9 @@ it("picks a filter and its window in place from the view options popover", async
   await user.click(trigger);
   // Unreads and Date are separate: Unreads alone spans all dates, and
   // picking a date keeps Unreads on.
-  const unreads = await screen.findByRole("switch", { name: "Unreads" });
+  const unreads = await screen.findByRole("switch", { name: "Unreads only" });
   expect(unreads).toBeChecked();
-  const date = screen.getByRole("combobox", { name: "Date" });
+  const date = screen.getByRole("combobox", { name: "Time range" });
   expect(date).toHaveTextContent("All");
   await user.click(date);
   await user.click(await screen.findByRole("option", { name: "7 days" }));
@@ -62,7 +62,7 @@ it("picks a filter and its window in place from the view options popover", async
   // Unreads leads; Unreads first has nothing to reorder while it's on.
   const switches = screen.getAllByRole("switch");
   expect(switches.map((control) => control.getAttribute("aria-label"))).toEqual(
-    ["Unreads", "Unreads first"],
+    ["Unreads only", "Unreads first"],
   );
   expect(switches[1]).toHaveAttribute("aria-disabled", "true");
   // The menu keeps only card actions.
@@ -491,9 +491,9 @@ it("disables Unreads and Date when filters are read-only", async () => {
   await user.click(
     screen.getByRole("button", { name: "View options for Channels, filtered" }),
   );
-  const unreads = await screen.findByRole("switch", { name: "Unreads" });
+  const unreads = await screen.findByRole("switch", { name: "Unreads only" });
   expect(unreads).toHaveAttribute("aria-disabled", "true");
-  expect(screen.getByRole("combobox", { name: "Date" })).toBeDisabled();
+  expect(screen.getByRole("combobox", { name: "Time range" })).toBeDisabled();
   await user.click(unreads);
   expect(change).not.toHaveBeenCalled();
 });
