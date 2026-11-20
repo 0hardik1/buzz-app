@@ -28,8 +28,20 @@ export const MAX_BACKOFF_MS = 15 * 60_000;
  * week away, is noted but not alerted. */
 export const STALE_MS = 24 * 60 * 60_000;
 
-/** What was last decided about an unread notification. */
-type Seen = Readonly<{ reason: string; updated: string; alerted: boolean }>;
+/** How many reads ask again about an update whose lookup or alert failed. */
+export const ATTEMPTS = 3;
+/** GitHub gives 50 notifications a read; what is kept beyond them is capped. */
+const MAX_SEEN = 500;
+
+/** What was last decided about an unread notification: `done` once alerted
+ * (or noted on the first run), never asked about again while it stays
+ * unread; otherwise `retries` more reads ask about this update. */
+type Seen = Readonly<{
+  reason: string;
+  updated: string;
+  done: boolean;
+  retries: number;
+}>;
 
 const PULL_API =
   /^https:\/\/api\.github\.com\/repos\/([\w.-]+)\/([\w.-]+)\/(?:pulls|issues)\/(\d+)$/;
@@ -73,7 +85,8 @@ function load(): Map<string, Seen> | undefined {
           typeof entry[0] === "string" &&
           typeof entry[1]?.reason === "string" &&
           typeof entry[1].updated === "string" &&
-          typeof entry[1].alerted === "boolean",
+          typeof entry[1].done === "boolean" &&
+          typeof entry[1].retries === "number",
       ),
     );
   } catch {
@@ -101,11 +114,10 @@ export function watchReviewAlerts(
   const mention = notifications.register(MENTIONED);
   const lifetime = new AbortController();
   const signal = lifetime.signal;
-  // The first read ever only notes what is already there: nobody wants an
-  // alert for every review request they've left unread.
   let seen = load();
   let etag: string | undefined;
   let backoff = 0;
+  let wait = MIN_POLL_MS;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   /** Whether the review requested on `thread`'s pull request names the
@@ -132,7 +144,7 @@ export function watchReviewAlerts(
   const alert = (thread: GitHubThread, kind: "review" | "mention") => {
     const number = PULL_API.exec(thread.subject.url ?? "")?.[3];
     const name = thread.repository.full_name.split("/")[1];
-    void (kind === "review" ? review : mention)
+    return (kind === "review" ? review : mention)
       .submit({
         sourceKey: `${thread.id}:${thread.updated_at}`,
         target: { version: 1, kind: "home" },
@@ -141,65 +153,78 @@ export function watchReviewAlerts(
           ? `${name}#${number} · ${thread.subject.title}`
           : `${thread.repository.full_name} · ${thread.subject.title}`,
       })
-      .catch(() => undefined);
+      .catch(() => false);
   };
 
   /** One read. Returns how long GitHub asks to wait before the next. */
   const poll = async () => {
     const answer = await read(etag, signal);
-    const wait = Math.max(MIN_POLL_MS, (answer.poll ?? 0) * 1000);
+    wait = Math.max(MIN_POLL_MS, (answer.poll ?? 0) * 1000);
     if (answer.status === "unchanged") return wait;
-    const quietly = !seen;
+    // The first read ever only notes what is already there: nobody wants an
+    // alert for every review request they've left unread.
+    const first = !seen;
     const previous = seen ?? new Map<string, Seen>();
     const next = new Map<string, Seen>();
-    let complete = true;
     for (const thread of answer.threads) {
+      const before = previous.get(thread.id);
+      // Decided already: alerted for this reason, or this update was. A
+      // team's request that later names the person is a new update.
+      if (
+        before?.reason === thread.reason &&
+        (before.done ||
+          (before.updated === thread.updated_at && !before.retries))
+      ) {
+        next.set(thread.id, before);
+        continue;
+      }
       const kind =
         thread.reason === "review_requested"
           ? "review"
           : thread.reason === "mention"
             ? "mention"
             : undefined;
-      const before = previous.get(thread.id);
-      // Decided already: alerted for this reason, or not alerted and nothing
-      // happened since. A team's request that later names the person is a
-      // new update, so it is asked again.
-      if (
-        before?.reason === thread.reason &&
-        (before.alerted || before.updated === thread.updated_at)
-      ) {
-        next.set(thread.id, before);
-        continue;
+      const updated = Date.parse(thread.updated_at);
+      const fresh = Date.now() - updated <= STALE_MS;
+      let done = first;
+      let failed = false;
+      if (!first && kind && fresh) {
+        try {
+          if (kind === "mention" || (await requestsViewer(thread))) {
+            // Buzz may refuse it, as before an account is chosen.
+            done = await alert(thread, kind);
+            failed = !done;
+          }
+        } catch (error) {
+          if (signal.aborted) throw error;
+          failed = true;
+        }
       }
-      let wanted = false;
-      try {
-        wanted =
-          kind === "mention" ||
-          (kind === "review" && (await requestsViewer(thread)));
-      } catch (error) {
-        if (signal.aborted) throw error;
-        // Asked again on the next read, which must not be a 304.
-        complete = false;
-        continue;
-      }
-      const stale =
-        Date.now() - Date.parse(thread.updated_at) > STALE_MS ||
-        Number.isNaN(Date.parse(thread.updated_at));
-      if (wanted && kind && !quietly && !stale) alert(thread, kind);
+      const retries = !failed
+        ? 0
+        : (before?.updated === thread.updated_at &&
+          before.reason === thread.reason
+            ? before.retries
+            : ATTEMPTS) - 1;
       next.set(thread.id, {
         reason: thread.reason,
         updated: thread.updated_at,
-        alerted: wanted,
+        done,
+        retries,
       });
     }
-    // A first read that could not decide everything stays the first, so
-    // what was already there never alerts.
-    if (signal.aborted || (quietly && !complete)) return wait;
-    // A notification read on GitHub leaves the list; if it comes back, it
-    // is new.
+    if (signal.aborted) return wait;
+    // A notification read on GitHub leaves the list, and if it comes back it
+    // is new. Past the first page, what was decided is kept.
+    if (answer.threads.length >= 50)
+      for (const [id, entry] of previous)
+        if (next.size < MAX_SEEN && !next.has(id)) next.set(id, entry);
     seen = next;
     save(next);
-    etag = complete ? answer.etag : undefined;
+    // A 304 would hide an update still to be asked about again.
+    etag = [...next.values()].some((entry) => entry.retries > 0)
+      ? undefined
+      : answer.etag;
     return wait;
   };
 
@@ -216,7 +241,7 @@ export function watchReviewAlerts(
             MAX_BACKOFF_MS,
             backoff ? backoff * 2 : MIN_POLL_MS,
           );
-          schedule(backoff);
+          schedule(Math.max(backoff, wait));
         },
       );
     }, delay);

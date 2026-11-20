@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, expect, it, type Mock, vi } from "vitest";
 import type { GitHubNotifications, GitHubThread } from "./gh";
 import {
+  ATTEMPTS,
   MAX_BACKOFF_MS,
   MENTIONED,
   MIN_POLL_MS,
@@ -246,17 +247,78 @@ it("asks again after a failed lookup, and backs off while reads fail", async () 
   expect(reads()).toBe(before + 1);
 });
 
-it("stays quiet about what was already there when the first read's lookup fails", async () => {
+it("notes the first read without lookups, and gives up on a lookup that keeps failing", async () => {
   const hub = github();
   const shown = notifications();
   hub.reviewers.set(13, ["octocat"]);
   hub.post(thread("13", "review_requested", 13));
-  hub.gh.mockRejectedValueOnce(new Error("HTTP 502"));
   const stop = watchReviewAlerts(shown, hub.read, hub.gh);
   await tick(0);
+  expect(hub.gh.mock.calls).toHaveLength(0);
+
+  // A pull request the token can't read: asked about ATTEMPTS times, then
+  // reads are 304s again, and other alerts still come.
+  hub.gh.mockRejectedValue(new Error("Could not resolve to a Repository"));
+  hub.post(
+    thread("13", "review_requested", 13),
+    thread("14", "review_requested", 14),
+  );
+  for (let read = 0; read < ATTEMPTS + 2; read++) await tick();
+  expect(hub.gh.mock.calls).toHaveLength(ATTEMPTS);
+  expect(hub.read).toHaveBeenLastCalledWith(`"2"`, expect.any(AbortSignal));
+  hub.post(
+    thread("13", "review_requested", 13),
+    thread("14", "review_requested", 14),
+    thread("15", "mention", 15),
+  );
   await tick();
-  expect(hub.gh.mock.calls).toHaveLength(2);
-  expect(shown.submitted).toEqual([]);
+  expect(shown.submitted.map((item) => item.body)).toEqual([
+    "example-repo#15 · Change 15",
+  ]);
+  stop();
+});
+
+it("alerts again when Buzz refused the alert, as before an account is chosen", async () => {
+  const hub = github();
+  let accepting = false;
+  const submitted: string[] = [];
+  const shown = {
+    register: vi.fn(() => ({
+      submit: vi.fn(async (input: { body?: string }) => {
+        if (accepting) submitted.push(input.body ?? "");
+        return accepting;
+      }),
+    })),
+  };
+  hub.post();
+  const stop = watchReviewAlerts(shown, hub.read, hub.gh);
+  await tick(0);
+  hub.post(thread("16", "mention", 16));
+  await tick();
+  expect(submitted).toEqual([]);
+  accepting = true;
+  await tick();
+  await tick();
+  expect(submitted).toEqual(["example-repo#16 · Change 16"]);
+  stop();
+});
+
+it("keeps what it decided about notifications past GitHub's first page", async () => {
+  const hub = github();
+  const shown = notifications();
+  hub.post();
+  const stop = watchReviewAlerts(shown, hub.read, hub.gh);
+  await tick(0);
+  hub.post(thread("17", "mention", 17));
+  await tick();
+  const page = Array.from({ length: 50 }, (_, index) =>
+    thread(`page-${index}`, "author", index),
+  );
+  hub.post(...page);
+  await tick();
+  hub.post(thread("17", "mention", 17), ...page.slice(1));
+  await tick();
+  expect(shown.submitted).toHaveLength(1);
   stop();
 });
 

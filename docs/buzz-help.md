@@ -1964,9 +1964,9 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   does not alert, nor does a review requested because CODEOWNERS lists you. **Settings → Notifications** has a
   switch for each: **GitHub reviews requested from you** and **GitHub mentions
   of you**. It checks GitHub's notifications about once a minute while Buzz is
-  open, alerts for each one once, and skips notifications that were already
-  unread the first time it ran or are more than a day old. Clicking an alert
-  opens Buzz, not the pull request.
+  open and alerts once per pull request or issue until you read it on GitHub.
+  It skips notifications that were already unread the first time it ran or are
+  more than a day old. Clicking an alert opens Buzz, not the pull request.
 - The **GitHub** plugin’s pull request panel offers **Queue for merge** when
   the target branch requires a merge queue. After confirmation, it queues the
   displayed commit and shows **Queued for merge**; GitHub controls when it merges.
