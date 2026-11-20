@@ -272,10 +272,12 @@ test("scaffold builds through pnpm and installs a usable standalone JSX page", a
     assert.equal(rolledBack.status, 0, rolledBack.stderr);
     assert.equal((await installedPlugin()).current, beforeRollback.previous);
     assert.equal((await installedPlugin()).enabled, false);
-    assert.equal(
-      cli("--home", directory, "plugin", "remove", "test.page").status,
-      0,
-    );
+    // The removal saves, but this CLI cannot observe saved-credential cleanup.
+    const removed = cli("--home", directory, "plugin", "remove", "test.page");
+    assert.equal(removed.status, 1);
+    assert.match(removed.stdout, /Removed test\.page/);
+    assert.match(removed.stderr, /incomplete\/unknown/);
+    assert.doesNotMatch(removed.stdout + removed.stderr, /confirmed complete/);
     assert.equal(await installedPlugin(), undefined);
   });
 });
