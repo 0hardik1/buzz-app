@@ -69,12 +69,14 @@ const mentionerCache = new WeakMap<
 export function inboxMentioners(inbox: InboxSnapshot) {
   let mentioners = mentionerCache.get(inbox);
   if (!mentioners) {
+    // A conversation that once mentioned you isn't enough: one of its unread
+    // messages must, so a later plain reply in that thread shows no face.
     const byChannel = new Map<string, InboxItem[]>();
-    for (const item of inbox.items) {
-      if (!item.mentioned || item.workflowOwnerId || !hasUnread(item)) continue;
-      byChannel.set(item.channelId, [
-        ...(byChannel.get(item.channelId) ?? []),
-        item,
+    for (const { mention } of inbox.items) {
+      if (!mention?.unreadCount || mention.workflowOwnerId) continue;
+      byChannel.set(mention.channelId, [
+        ...(byChannel.get(mention.channelId) ?? []),
+        mention,
       ]);
     }
     mentioners = new Map(
