@@ -86,7 +86,6 @@ export function AnimatedAvatarCapture({
   const [section, setSection] = useState<"You" | "Background" | "Frame">("You");
   const [poster, setPoster] = useState(0);
   const reducedMotion = useReducedMotion();
-  const [playing, setPlaying] = useState(false);
   const [composition, setComposition] = useState(initialComposition);
 
   useEffect(
@@ -112,10 +111,10 @@ export function AnimatedAvatarCapture({
       index += direction;
     };
     draw();
-    if (!playing || reducedMotion) return;
+    if (section === "Frame" || reducedMotion) return;
     const timer = window.setInterval(draw, 1000 / 12);
     return () => window.clearInterval(timer);
-  }, [phase, poster, composition, playing, reducedMotion]);
+  }, [phase, poster, composition, section, reducedMotion]);
 
   async function start(device = camera) {
     if (operation.current || disabled) return;
@@ -195,7 +194,6 @@ export function AnimatedAvatarCapture({
       setSegmented(recording.backgroundRemoved);
       setSection("You");
       setPoster(0);
-      setPlaying(!reducedMotion);
       setPhase("review");
     } catch (reason) {
       if (!request.signal.aborted) {
@@ -255,7 +253,7 @@ export function AnimatedAvatarCapture({
     }
   }
   return (
-    <div className={styles.capture}>
+    <div className={styles.capture} data-phase={phase}>
       <div className={styles.stage} data-phase={phase}>
         {phase === "idle" && <VideoCameraIcon aria-hidden="true" size={36} />}
         <video
@@ -584,19 +582,11 @@ export function AnimatedAvatarCapture({
                   min={0}
                   max={Math.max(0, frames.current.length - 1)}
                   value={poster}
-                  onPointerDown={() => setPlaying(false)}
                   onChange={(event) => {
-                    setPlaying(false);
                     setPoster(Number(event.target.value));
                   }}
                 />
               </div>
-              <Button
-                onClick={() => setPlaying(!playing)}
-                disabled={!!reducedMotion}
-              >
-                {playing && !reducedMotion ? "Pause preview" : "Play preview"}
-              </Button>
             </div>
           )}
           <Button
