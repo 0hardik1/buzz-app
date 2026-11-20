@@ -68,7 +68,6 @@ import {
   useChannelNavigation,
 } from "./ChannelNavigationState";
 import { readView, writeView } from "../../shared/view-state";
-import styles from "../../bundled/channels/MessagesSidebar.module.css";
 import { BestieNavigationProvider } from "../../app/shell/BestieNavigation";
 import { PageNavigation } from "../../app/shell/PageNavigation";
 import { createAgentChoices } from "../agents/choices";
@@ -238,8 +237,7 @@ function fixture(
       attempt: { id: "visit" },
     }),
   } as unknown as Navigation;
-  /** Any `controls` other than the default page navigation mount beside the
-   * sidebar, so they keep their state when the pages section mounts. */
+  /** Any `controls` other than the default page navigation mount beside the sidebar. */
   const view = (
     id: string,
     controls: ReactNode = defaultPages,
@@ -1209,16 +1207,49 @@ it("explains and disables unavailable move retries, then enables them after pref
 });
 
 it.each(["ready", "error"] as const)(
-  "keeps the supplied page navigation while the relay is %s",
-  (status) => {
-    const h = fixture(undefined, status);
-    render(h.view("alpha"));
-    const pages = screen.getByRole("navigation", { name: "Pages" });
-    expect(
-      within(pages).getByRole("button", { name: "Projects" }),
-    ).toBeVisible();
-    // A ready inventory lists pages itself, in their orderable section.
-    expect(!!pages.closest(`.${styles.destinations}`)).toBe(status === "error");
+  "keeps plugin pages above the conversation list while the relay is %s",
+  async (status) => {
+    const data = {
+      sections: [],
+      assignments: {},
+      sectionOrder: ["solo", "channels", "pages", "starred"],
+      starred: [],
+      muted: [],
+    };
+    const preferences = createSidebarPreferencesStore({
+      read: async () => data,
+      available: true,
+      write: async () => data,
+      writeStar: async () => [],
+      writeOrder: async () => data,
+    });
+    try {
+      await preferences.queries.ensure();
+      const h = fixture(preferences.queries, status);
+      render(h.view("alpha"));
+      const pages = screen.getByRole("navigation", { name: "Pages" });
+      expect(
+        screen.queryByText("Plugins", { exact: true }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(pages).getByRole("button", { name: "Projects" }),
+      ).toBeVisible();
+      if (status === "ready") {
+        await screen.findByRole("button", { name: "alpha" });
+        const conversations = screen.getByRole("navigation", {
+          name: "Subscribed channels",
+        });
+        expect(conversations).not.toContainElement(pages);
+        expect(pages.compareDocumentPosition(conversations)).toBe(
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        );
+        expect(
+          screen.queryByRole("button", { name: "More actions for Plugins" }),
+        ).not.toBeInTheDocument();
+      }
+    } finally {
+      preferences.dispose();
+    }
   },
 );
 
@@ -2446,7 +2477,7 @@ it("keeps owned and unfiled shared Solo chats out of Team without removing acces
     .getByLabelText("Team", { selector: "summary" })
     .closest("[data-sidebar-section]");
   const solo = screen
-    .getByLabelText("Solo", { selector: "summary" })
+    .getByLabelText("Solo chats", { selector: "summary" })
     .closest("[data-sidebar-section]");
   expect(solo).toContainElement(screen.getByRole("button", { name: "beta" }));
   expect(team).not.toContainElement(

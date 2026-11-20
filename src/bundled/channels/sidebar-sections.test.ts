@@ -148,7 +148,7 @@ it("intersects groups/stars with active authorized streams and movable DMs", () 
   ).toEqual(["forum", "solo", "star"]);
   expect(sidebarSections([])).toEqual([
     { key: "starred", title: "Starred", icon: undefined, rows: [] },
-    { key: "solo", title: "Solo", icon: undefined, rows: [] },
+    { key: "solo", title: "Solo chats", icon: undefined, rows: [] },
     { key: "channels", title: "Team", icon: undefined, rows: [] },
     { key: "forums", title: "Forums", icon: undefined, rows: [] },
     { key: "dms", title: "Direct messages", icon: undefined, rows: [] },
@@ -218,6 +218,37 @@ it("sorts every section independently with deterministic inactive and tie fallba
       .find(({ key }) => key === "channels")
       ?.rows.map((channel) => channel.id),
   ).toEqual(["quiet-a", "quiet-b", "a-id", "z-id", "new"]);
+});
+it("Recent places a chat without known activity by when it was created", () => {
+  const solo = { channelType: "solo" as const };
+  const roster = [
+    row("talked", {
+      ...solo,
+      name: "Talked",
+      createdAt: 5,
+      lastActivityAt: 25,
+    }),
+    row("queued-earlier", {
+      ...solo,
+      name: "Queued earlier",
+      createdAt: 40,
+      lastActivityAt: 20,
+    }),
+    row("unknown", { ...solo, name: "Unknown" }),
+    row("old-empty", { ...solo, name: "Old empty", createdAt: 10 }),
+    row("just-started", { ...solo, name: "Just started", createdAt: 30 }),
+  ];
+  expect(
+    sidebarSections(roster)
+      .find(({ key }) => key === "solo")
+      ?.rows.map((channel) => channel.id),
+  ).toEqual([
+    "queued-earlier",
+    "just-started",
+    "talked",
+    "old-empty",
+    "unknown",
+  ]);
 });
 it("Star projection is exclusive and retains empty saved groups", () => {
   const channels = [row("alpha"), row("beta")];

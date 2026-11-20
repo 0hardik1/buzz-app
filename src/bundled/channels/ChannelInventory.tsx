@@ -48,10 +48,7 @@ import {
   useSoloDraftProjects,
 } from "../../features/solo/draft-projects";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
-import {
-  SIDEBAR_PAGES_SECTION,
-  workspaceSectionOrder,
-} from "../../features/relay/sidebar-preferences";
+import { workspaceSectionOrder } from "../../features/relay/sidebar-preferences";
 import type { RelayData } from "../../features/relay/service";
 import type { Agents } from "../../features/agents/service";
 import type { RelaySession } from "../../features/relay/session";
@@ -119,6 +116,7 @@ import { NewWorkspace } from "../../features/solo/NewWorkspace";
 import { useSidebarStartup } from "./useSidebarStartup";
 import { useChannelLabels } from "./useChannelLabels";
 import { useHiddenDms } from "./useHiddenDms";
+import { resurfaceHiddenDms } from "../../features/relay/dm-resurfacing";
 import { useSidebarPreferences } from "./useSidebarPreferences";
 import { useSidebarView } from "./useSidebarView";
 import { useSidebarFilters } from "./useSidebarFilters";
@@ -205,7 +203,6 @@ export function ChannelInventory({
   sidebarRows: contributedRows,
   chatIcons,
   chatMenus,
-  pages,
   render,
 }: {
   relay: RelayData;
@@ -226,8 +223,6 @@ export function ChannelInventory({
   sidebarRows?: SidebarRows | undefined;
   chatIcons?: ContributionReader<ChatIcon> | undefined;
   chatMenus?: ContributionReader<ChatMenu> | undefined;
-  /** Sidebar-placed pages, shown as one orderable Plugins section. */
-  pages?: ReactNode;
   render(inventory: Inventory): ReactNode;
 }) {
   const registeredSections = useSyncExternalStore(
@@ -375,6 +370,11 @@ export function ChannelInventory({
       ),
     [queries, lifecycle],
   );
+  useEffect(
+    () =>
+      resurfaceHiddenDms(queries, viewer, visibilityRequest.current?.signal),
+    [queries, viewer],
+  );
   const lifecycleFocus = useRef<string | undefined>(undefined);
   const lifecycleTrigger = useRef<HTMLElement | undefined>(undefined);
   const { channels, profiles: dmProfiles } = useChannelLabels(
@@ -472,7 +472,6 @@ export function ChannelInventory({
         return next;
       });
   }, []);
-  const hasPages = !!pages;
   const sections = useMemo(
     () =>
       startup.ready
@@ -483,11 +482,9 @@ export function ChannelInventory({
             chatsOnly,
             new Set<string>(JSON.parse(activeDraftSections)),
             regions.managed,
-            hasPages,
           )
         : [],
     [
-      hasPages,
       startup.ready,
       sidebarChannels,
       preferences.data,
@@ -550,13 +547,12 @@ export function ChannelInventory({
   const selectedSection =
     target.kind === "conversation"
       ? sections.find(({ rows }) =>
-          rows.some(({ id }) => id === target.channelId),
+          rows.some(
+            ({ id, channelType }) =>
+              id === target.channelId && channelType !== "solo",
+          ),
         )?.key
-      : currentDraft && !currentDraft.region
-        ? currentDraft.project
-          ? `group:${currentDraft.project}`
-          : "solo"
-        : undefined;
+      : undefined;
   const ordinarySelection =
     selectedSection && !composedChatSections.has(selectedSection)
       ? selectedSection
@@ -983,7 +979,11 @@ export function ChannelInventory({
     [queries, regions.managed],
   );
   const focusChannelPlacement = (channelId: string) => {
-    sidebar.toggle(channelSectionKey(channelId), true);
+    if (
+      queries.channels.list().channels.find(({ id }) => id === channelId)
+        ?.channelType !== "solo"
+    )
+      sidebar.toggle(channelSectionKey(channelId), true);
     setRowFocus(channelId);
   };
   const moveChannel = (
@@ -1441,14 +1441,14 @@ export function ChannelInventory({
         (candidate) => candidate.dataset.channelId === channelId,
       );
       if (row) return row;
-      const sectionKey = hiddenRowSections.current.get(channelId);
-      return sectionKey
-        ? list?.querySelector<HTMLElement>(
-            `[data-sidebar-section="${CSS.escape(sectionKey)}"] details > summary`,
-          )
-        : undefined;
+      const filteredSection = hiddenRowSections.current.get(channelId);
+      const sectionKey = filteredSection ?? channelSectionKey(channelId);
+      if (!filteredSection && !sidebar.collapsed.includes(sectionKey)) return;
+      return list?.querySelector<HTMLElement>(
+        `[data-sidebar-section="${CSS.escape(sectionKey)}"] :is(details > summary, button[aria-expanded]:not([aria-haspopup]))`,
+      );
     },
-    [sidebar.list],
+    [channelSectionKey, sidebar.collapsed, sidebar.list],
   );
   const rowMenuFinalFocus = useCallback(
     (channelId: string) =>
@@ -1862,25 +1862,8 @@ export function ChannelInventory({
               defaultPosition: index,
               element: (
                 <TeamSidebarSection
-                  render={() =>
-                    section.key === SIDEBAR_PAGES_SECTION ? (
-                      <DroppableSidebarSection
-                        key={section.key}
-                        groupIndex={groupIds.indexOf(section.key)}
-                        // A section drop target that accepts no rows.
-                        disabled={false}
-                        accepts={[]}
-                        reorderable={orderWritable}
-                        move={sectionMove(section.key)}
-                        sectionKey={section.key}
-                        title={section.title}
-                        hideMoreActions={!orderWritable}
-                        open={!sidebar.collapsed.includes(section.key)}
-                        onToggle={(open) => sidebar.toggle(section.key, open)}
-                      >
-                        {pages}
-                      </DroppableSidebarSection>
-                    ) : (
+                  render={() => {
+                    return (
                       <DroppableSidebarSection
                         key={section.key}
                         createSectionTarget={
@@ -1961,58 +1944,22 @@ export function ChannelInventory({
                         menuActions={
                           section.key.startsWith("group:")
                             ? (dismiss, trigger) => (
-                                <>
-                                  <MenuItem
-                                    onClick={() => {
-                                      dismiss();
-                                      requestAnimationFrame(() => {
-                                        if (mounted.current)
-                                          setWorkspaceSettings({
-                                            id: section.key.slice(6),
-                                            name: section.title,
-                                            icon: section.icon,
-                                            trigger,
-                                          });
-                                      });
-                                    }}
-                                  >
-                                    Workspace settings
-                                  </MenuItem>
-                                  {handoff && (
-                                    <MenuItem
-                                      disabled={
-                                        !queries.channelLifecycle.available ||
-                                        !!handoff.inactiveRun ||
-                                        handoff.inactiveRuns.length > 0 ||
-                                        !!handoff.lifecycleDialog
-                                      }
-                                      onClick={() => {
-                                        dismiss();
-                                        const id = section.key.slice(6);
-                                        requestAnimationFrame(() => {
-                                          if (mounted.current)
-                                            handoff.archiveInactive({
-                                              action: "archive",
-                                              workspaceId: id,
-                                              ids: sidebarChannels
-                                                .filter(
-                                                  (channel) =>
-                                                    channel.channelType ===
-                                                      "solo" &&
-                                                    preferences.data
-                                                      ?.assignments[
-                                                      channel.id
-                                                    ] === id,
-                                                )
-                                                .map(({ id }) => id),
-                                            });
+                                <MenuItem
+                                  onClick={() => {
+                                    dismiss();
+                                    requestAnimationFrame(() => {
+                                      if (mounted.current)
+                                        setWorkspaceSettings({
+                                          id: section.key.slice(6),
+                                          name: section.title,
+                                          icon: section.icon,
+                                          trigger,
                                         });
-                                      }}
-                                    >
-                                      Archive inactive chats
-                                    </MenuItem>
-                                  )}
-                                </>
+                                    });
+                                  }}
+                                >
+                                  Workspace settings
+                                </MenuItem>
                               )
                             : undefined
                         }
@@ -2025,7 +1972,7 @@ export function ChannelInventory({
                           ) : section.key === "solo" ? (
                             <IconButton
                               size="compact"
-                              aria-label={`New chat in ${section.title}`}
+                              aria-label="New Solo chat"
                               title="New chat"
                               icon={<PlusIcon size={15} strokeWidth={2.5} />}
                               onClick={() => newChat()}
@@ -2242,8 +2189,8 @@ export function ChannelInventory({
                           ]}
                         </ChannelSidebarRows>
                       </DroppableSidebarSection>
-                    )
-                  }
+                    );
+                  }}
                 />
               ),
             })),
@@ -2304,8 +2251,6 @@ export function ChannelInventory({
     ),
     content: (
       <>
-        {/* Pages stay reachable until their orderable section can render. */}
-        {!startup.ready && pages}
         {!startup.ready && (
           <p className={styles.empty} role="status">
             Loading your sidebar…
@@ -2608,7 +2553,10 @@ export function ChannelInventory({
                   : {}),
               });
             }}
-            onCreated={(id) => sidebar.toggle(`group:${id}`, true)}
+            onCreated={(id) => {
+              if (creatingFor.channel.channelType !== "solo")
+                sidebar.toggle(`group:${id}`, true);
+            }}
             finalFocus={() =>
               creatingFor.surface
                 ? false
