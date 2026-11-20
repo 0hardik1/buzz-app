@@ -34,7 +34,10 @@ import type { ConversationExtensions } from "../../features/conversation/contrac
 import type { ConversationHostServices } from "../../features/conversation/ConversationHost";
 import { ForwardMessageProvider } from "../../features/messages/ForwardMessage";
 import { MessageManagementStatus } from "../../features/messages/MessageManagement";
-import type { Navigation } from "../../features/navigation/controller";
+import {
+  sameOpen,
+  type Navigation,
+} from "../../features/navigation/controller";
 import type { PageNavigation } from "../../features/navigation/service";
 import { targetKey } from "../../features/navigation/targets";
 import { buzzLinkTarget } from "../../features/navigation/buzz-links";
@@ -466,12 +469,19 @@ export function BestieConversation({
     const request = focusRequest;
     if (!request || handedOff.current === request) return;
     // Another Bestie surface (the pinned one) leaves the request to its page.
-    if (navigation?.entryId !== request.attempt.entry.id) return;
+    // The open's current attempt names the visit, even after it resolved
+    // its address.
+    const opened = navigator.snapshot().attempt;
+    if (
+      sameOpen(opened, request.attempt) &&
+      navigation?.entryId !== opened.entry.id
+    )
+      return;
     const valid = () => {
       const workspace = main.current;
       return (
         bestieFocusRequests.snapshot() === request &&
-        navigator.snapshot().attempt === request.attempt &&
+        sameOpen(navigator.snapshot().attempt, request.attempt) &&
         !request.attempt.signal.aborted &&
         ownsCurrentVisit() &&
         request.inScope() &&

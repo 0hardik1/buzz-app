@@ -1187,6 +1187,22 @@ it("the dock's request puts the cursor in the conversation composer once", async
   outside.remove();
 });
 
+it("the dock's request still applies after the open replaced its attempt token", async () => {
+  const f = await threadHistoryFixture();
+  const composer = await screen.findByRole("textbox", {
+    name: "Message Pollen",
+  });
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  outside.focus();
+  // Resolving an address keeps the open's id and signal in a new object.
+  const token = Object.freeze({ ...f.navigator.snapshot().attempt });
+  act(() => bestieFocusRequests.post(composerRequest(f, { attempt: token })));
+  await waitFor(() => expect(composer).toHaveFocus());
+  expect(bestieFocusRequests.snapshot()).toBeUndefined();
+  outside.remove();
+});
+
 it("the dock's request selects the conversation over an open thread, which stays open", async () => {
   const f = await threadHistoryFixture();
   await userEvent.click(
@@ -1209,7 +1225,11 @@ it.each([
   [
     "another attempt",
     (f: Awaited<ReturnType<typeof threadHistoryFixture>>) => ({
-      attempt: { ...f.navigator.snapshot().attempt },
+      attempt: {
+        ...f.navigator.snapshot().attempt,
+        id: "another-attempt",
+        signal: new AbortController().signal,
+      },
     }),
   ],
   ["a cancelled press", () => ({ cancelled: () => true })],

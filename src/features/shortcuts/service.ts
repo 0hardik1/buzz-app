@@ -11,13 +11,12 @@ import {
 } from "../../plugins/contributions";
 import {
   inEditable,
-  isBindingList,
   matches,
   normalizeShortcut,
   resolveBindings,
-  sameBinding,
   type BindingRow,
   type KeyBinding,
+  type ResolvedBinding,
   type NormalizedShortcut,
   type Shortcut,
 } from "./bindings";
@@ -34,6 +33,8 @@ export type Shortcuts = {
 export type BindingOverrides = {
   /** A stored override is a nonempty alias list; anything else means the default. */
   resolve(key: string): readonly KeyBinding[] | undefined;
+  /** A new value on every change, so the resolved table is reused until then. */
+  snapshot?(): unknown;
 };
 declare module "@deepseek-ai/cordis" {
   interface Context {
@@ -82,6 +83,7 @@ export class ShortcutsService extends Service implements Shortcuts {
     native: readonly KeyBinding[] = [],
   ) {
     super(ctx, "shortcuts");
+    this.overrides = overrides;
     this.native = Object.freeze(native.map((chord) => Object.freeze(chord)));
     this.contributions = createContributions<NormalizedShortcut>(ctx);
     const apple = /Mac|iPhone|iPad/.test(host?.navigator.platform ?? "");
@@ -89,24 +91,6 @@ export class ShortcutsService extends Service implements Shortcuts {
     // re-registration and survives plugin disable/enable. Anything that is not
     // a binding list (a malformed store entry, an inherited property under a
     // key such as "constructor") means the default, so dispatch cannot throw.
-    const bindingsFor = (shortcut: NormalizedShortcut, key: string) => {
-      const override = overrides?.resolve(key);
-      if (!isBindingList(override)) return shortcut.binding;
-      if (!this.native.length || !matchesNative(override)) return override;
-      // A saved override on a native chord: resolve the whole table, as
-      // Settings does, so a restored default never takes another's chord.
-      return (
-        resolveBindings(
-          this.bindingRows(),
-          (row) => overrides?.resolve(row),
-          this.native,
-        ).get(key)?.effective ?? []
-      );
-    };
-    const matchesNative = (bindings: readonly KeyBinding[]) =>
-      bindings.some((binding) =>
-        this.native.some((chord) => sameBinding(chord, binding)),
-      );
     const dispatch = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
@@ -126,6 +110,9 @@ export class ShortcutsService extends Service implements Shortcuts {
           .some((target) => (target as Element).matches?.(MODAL));
       const eligible = (shortcut: Shortcut) =>
         eligibleIn(shortcut, editable, modal);
+      const table = this.resolved();
+      const bindingsFor = (shortcut: NormalizedShortcut, key: string) =>
+        table.get(key)?.effective ?? shortcut.binding;
       // Host chords are reserved even while unavailable (e.g. Settings behind a modal).
       const reserved = [...this.hostBindings.values()].find(
         (shortcut) =>
@@ -189,6 +176,37 @@ export class ShortcutsService extends Service implements Shortcuts {
   readonly runHost: (id: string) => boolean;
   /** Chords owned by a native menu on this platform; never matched here. */
   readonly native: readonly KeyBinding[];
+  private readonly overrides: BindingOverrides | undefined;
+  private table:
+    | Readonly<{
+        hosts: readonly HostShortcut[];
+        contributions: readonly RegisteredShortcut[];
+        overrides: unknown;
+        value: ReadonlyMap<string, ResolvedBinding>;
+      }>
+    | undefined;
+  /** What every action answers to now, as dispatch and Settings apply it. */
+  resolved(): ReadonlyMap<string, ResolvedBinding> {
+    const hosts = this.hostReady;
+    const contributions = this.contributions.snapshot();
+    const overrides = this.overrides?.snapshot?.();
+    const table = this.table;
+    if (
+      table &&
+      table.hosts === hosts &&
+      table.contributions === contributions &&
+      table.overrides === overrides &&
+      (!this.overrides || this.overrides.snapshot)
+    )
+      return table.value;
+    const value = resolveBindings(
+      this.bindingRows(),
+      (key) => this.overrides?.resolve(key),
+      this.native,
+    );
+    this.table = { hosts, contributions, overrides, value };
+    return value;
+  }
   /** Every dispatcher action in Settings order: host by order, then contributions. */
   bindingRows(): BindingRow[] {
     return [
@@ -198,6 +216,7 @@ export class ShortcutsService extends Service implements Shortcuts {
           key: shortcut.id,
           defaults: shortcut.binding,
           local: shortcut.local,
+          host: true,
         })),
       ...[...this.contributions.snapshot()]
         .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))

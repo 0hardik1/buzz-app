@@ -126,6 +126,8 @@ export type BindingRow = Readonly<{
   defaults: readonly KeyBinding[];
   /** A field matches it itself; it competes only with other field-local rows. */
   local?: boolean;
+  /** The host's own action: its defaults change between versions. */
+  host?: boolean;
 }>;
 /** What applies now for one action. `masked` names a saved override that a
  * native chord took over; `restored` says whether its default came back. */
@@ -139,6 +141,10 @@ const answersTo = (chords: readonly KeyBinding[], binding: KeyBinding) =>
 
 /**
  * Effective chords for every action at once, shared by dispatch and Settings.
+ * A saved override outranks a host action's default: a host default someone
+ * already assigned elsewhere, such as one a newer version ships with, is left
+ * to that assignment, and a host action with no default left is unbound.
+ * Plugin defaults stay listed as shared, for the person to settle.
  * A native chord (a menu accelerator that must reach the native menu) masks
  * any saved override equal to it. The masked action gets its default back only
  * if no other action answers to it and it is not native itself; otherwise it
@@ -153,13 +159,30 @@ export function resolveBindings(
 ): ReadonlyMap<string, ResolvedBinding> {
   const resolved = new Map<string, ResolvedBinding>();
   const masked: { row: BindingRow; override: readonly KeyBinding[] }[] = [];
+  const defaulted: BindingRow[] = [];
+  // Saved overrides no native chord masks.
+  const assignments: BindingRow[] = [];
   for (const row of rows) {
     const saved = override(row.key);
-    if (!isBindingList(saved))
-      resolved.set(row.key, { effective: row.defaults });
-    else if (!saved.some((binding) => answersTo(native, binding)))
+    if (!isBindingList(saved)) {
+      if (row.host) defaulted.push(row);
+      else resolved.set(row.key, { effective: row.defaults });
+    } else if (!saved.some((binding) => answersTo(native, binding))) {
       resolved.set(row.key, { effective: saved });
-    else masked.push({ row, override: saved });
+      assignments.push(row);
+    } else masked.push({ row, override: saved });
+  }
+  for (const row of defaulted) {
+    const assigned = (binding: KeyBinding) =>
+      assignments.some(
+        (other) =>
+          !!other.local === !!row.local &&
+          answersTo(resolved.get(other.key)?.effective ?? [], binding),
+      );
+    const free = row.defaults.filter((binding) => !assigned(binding));
+    resolved.set(row.key, {
+      effective: free.length === row.defaults.length ? row.defaults : free,
+    });
   }
   for (const { row, override: saved } of masked) {
     const taken = (binding: KeyBinding) =>

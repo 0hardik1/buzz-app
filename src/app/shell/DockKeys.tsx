@@ -1,11 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import {
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { inTerminal } from "../../bundled/channels/conversation-rows";
 import type { Communities } from "../../features/communities/service";
 import type {
@@ -14,11 +8,10 @@ import type {
   OpenAttempt,
   OpenResult,
 } from "../../features/navigation/controller";
+import { sameOpen } from "../../features/navigation/controller";
 import type { RegisteredPage } from "../../features/pages/service";
-import {
-  resolveBindings,
-  type KeyBinding,
-} from "../../features/shortcuts/bindings";
+import type { KeyBinding } from "../../features/shortcuts/bindings";
+import { useResolvedBindings } from "../../features/shortcuts/useResolvedBindings";
 import { isApplePlatform } from "../../features/shortcuts/format";
 import { focusWithKeyboard } from "../../shared/design-system/useKeyboardFocusVisibility";
 import { HOST_SHORTCUT_ORDER } from "../shortcuts";
@@ -184,6 +177,7 @@ export function useDockKeys({
       const target = bestie && list?.contains(bestie) ? bestie : tabs[0];
       if (!target) return;
       exits.current += 1;
+      const entered = exits.current;
       mode.current = {
         returnTo: guest
           ? { kind: "guest", id: guest }
@@ -193,9 +187,16 @@ export function useDockKeys({
       setActive(true);
       focusWithKeyboard(target);
       // A guest page holds native keyboard focus; only then does the main
-      // view need it back, and only after the tab has DOM focus.
-      if (guest && native)
-        void invoke<boolean>("focus_main_view").catch(() => {});
+      // view need it back, and only after the tab has DOM focus. If it stays
+      // with the guest, the dock's keys would never arrive, so the mode ends.
+      if (guest && native) {
+        const refused = () => {
+          if (exits.current === entered) actions.current?.end();
+        };
+        void invoke<boolean>("focus_main_view").then((focused) => {
+          if (!focused) refused();
+        }, refused);
+      }
     },
     open(key) {
       if (!mode.current) return;
@@ -253,7 +254,13 @@ export function useDockKeys({
             const proceed =
               current(settled, attempt) && inScope() && !press.cancelled();
             press.dispose();
-            if (!proceed) return;
+            const tabpanel = panel();
+            if (
+              !proceed ||
+              tabpanel?.getAttribute("role") !== "tabpanel" ||
+              tabpanel.closest("[hidden], [inert]")
+            )
+              return;
             // A page that took focus keeps it; otherwise its tabpanel does.
             const focused = document.activeElement;
             if (
@@ -262,9 +269,7 @@ export function useDockKeys({
               !dockList()?.contains(focused)
             )
               return;
-            const tabpanel = panel();
-            if (tabpanel?.getAttribute("role") === "tabpanel")
-              focusWithKeyboard(tabpanel);
+            focusWithKeyboard(tabpanel);
           });
         },
       });
@@ -272,7 +277,7 @@ export function useDockKeys({
       function current(settled: OpenResult, attempt: OpenAttempt) {
         return (
           settled.status === "opened" &&
-          navigation?.snapshot().attempt === attempt &&
+          sameOpen(navigation?.snapshot().attempt, attempt) &&
           !attempt.signal.aborted
         );
       }
@@ -351,9 +356,13 @@ export function useDockKeys({
         if (mode.current) {
           const focused = document.activeElement?.closest('[role="tab"]');
           const key = focused?.getAttribute("data-tab-value");
-          if (key && dockList()?.contains(focused ?? null))
+          if (key && dockList()?.contains(focused ?? null)) {
             actions.current?.open(key);
-          return;
+            return;
+          }
+          // Focus left the dock without a focusout, as WebKit does when the
+          // focused tab is removed: start again from here.
+          actions.current?.end();
         }
         actions.current?.enter(guest);
       },
@@ -378,6 +387,39 @@ export function useDockKeys({
       remove();
     };
   }, [shortcuts, desktop, native]);
+
+  // A key the dock used stays its own until it is released: its repeats, and
+  // the release Space activates on, must not reach the tab or what opened.
+  const held = useRef<string>(undefined);
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (event.code !== held.current) return;
+      // A fresh press means the release went elsewhere, such as to a guest.
+      if (!event.repeat) {
+        held.current = undefined;
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const keyup = (event: KeyboardEvent) => {
+      if (event.code !== held.current) return;
+      held.current = undefined;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const blur = () => {
+      held.current = undefined;
+    };
+    window.addEventListener("keydown", keydown, true);
+    window.addEventListener("keyup", keyup, true);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", keydown, true);
+      window.removeEventListener("keyup", keyup, true);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
 
   // While on: the app tablist takes digits, Return, Space and Escape before
   // its buttons do; anything modified goes on to the window dispatcher.
@@ -412,6 +454,7 @@ export function useDockKeys({
       if (!digit && !key && event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
+      held.current = event.code;
       if (event.key === "Escape") actions.current?.leave();
       else if (key) actions.current?.open(key);
     };
@@ -421,10 +464,18 @@ export function useDockKeys({
         actions.current?.end();
     };
     const pointer = () => actions.current?.end();
+    // WebKit sends no focusout when the focused tab itself is removed, such
+    // as by disabling its plugin, so a removal that takes focus ends it too.
+    const removed = new MutationObserver(() => {
+      if (!list.isConnected || !list.contains(document.activeElement))
+        actions.current?.end();
+    });
+    removed.observe(list, { childList: true, subtree: true });
     list.addEventListener("keydown", keydown, true);
     list.addEventListener("focusout", focusout);
     window.addEventListener("pointerdown", pointer, true);
     return () => {
+      removed.disconnect();
       list.removeEventListener("keydown", keydown, true);
       list.removeEventListener("focusout", focusout);
       window.removeEventListener("pointerdown", pointer, true);
@@ -434,31 +485,12 @@ export function useDockKeys({
   return { active, entry, chord, apple };
 }
 
-/** The effective Go to Dock chord: rebinds off Apple, the menu's on macOS. */
+/** The effective Go to Dock chord: rebinds off Apple, the menu's on macOS.
+ * Unbound while a saved shortcut holds its default. */
 function useGoToDockChord(
   shortcuts: SearchServices["shortcuts"] | undefined,
   bindings: SearchServices["shortcutBindings"] | undefined,
 ) {
-  const subscribeHost = shortcuts?.hostSubscribe ?? noSubscribe;
-  const subscribeBindings = bindings?.subscribe ?? noSubscribe;
-  const hosts = useSyncExternalStore(
-    subscribeHost,
-    shortcuts?.hostSnapshot ?? noHosts,
-  );
-  const overrides = useSyncExternalStore(
-    subscribeBindings,
-    bindings?.snapshot ?? noBindings,
-  );
-  if (!shortcuts || !hosts.some((host) => host.id === GO_TO_DOCK))
-    return undefined;
-  void overrides;
-  return resolveBindings(
-    shortcuts.bindingRows(),
-    (key) => bindings?.resolve(key),
-    shortcuts.native,
-  ).get(GO_TO_DOCK)?.effective[0];
+  return useResolvedBindings(shortcuts, bindings)?.get(GO_TO_DOCK)
+    ?.effective[0];
 }
-const noSubscribe = () => () => {};
-const NO_HOSTS: readonly never[] = [];
-const noHosts = () => NO_HOSTS;
-const noBindings = () => undefined;

@@ -642,3 +642,48 @@ it("keeps a masked action's default free for the first of two masked actions and
     await rig.root.fiber.dispose();
   }
 });
+
+it("upgrade profile off macOS: a saved Ctrl+D keeps its action and the new dock default is unbound", async () => {
+  const b = browser(false),
+    root = new Context();
+  root.provide("pluginStatus", {
+    isActive: () => true,
+    subscribe: () => () => {},
+  });
+  const bindings = createShortcutBindings(undefined);
+  bindings.set("focus-composer", dockChord);
+  const service = new ShortcutsService(root, b.host, bindings, []);
+  try {
+    const dock = vi.fn();
+    const focus = vi.fn();
+    service.registerHost({
+      id: "go-to-dock",
+      title: "Go to dock",
+      binding: dockChord,
+      order: 72,
+      run: dock,
+    });
+    service.registerHost({
+      id: "focus-composer",
+      title: "Focus message box",
+      binding: focusChord,
+      order: 10,
+      run: focus,
+    });
+    expect(service.resolved().get("go-to-dock")?.effective).toEqual([]);
+    expect(b.key("d").defaultPrevented).toBe(true);
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(dock).not.toHaveBeenCalled();
+    // Moving the saved shortcut off Ctrl+D gives the dock its default back.
+    bindings.set("focus-composer", homeChord);
+    expect(service.resolved().get("go-to-dock")?.effective).toEqual([
+      dockChord,
+    ]);
+    b.key("d");
+    expect(dock).toHaveBeenCalledTimes(1);
+    expect(focus).toHaveBeenCalledTimes(1);
+  } finally {
+    await root.fiber.dispose();
+    bindings.dispose();
+  }
+});

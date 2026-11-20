@@ -463,6 +463,12 @@ mod macos {
             .is_some_and(|window| Retained::as_ptr(&window).cast::<c_void>() == host.cast_const())
     }
 
+    /// Whether the guest is shown now. Resizes hide it directly, until the
+    /// host places it again.
+    pub fn shown(guest: &WebView) -> bool {
+        !guest.webview().isHiddenOrHasHiddenAncestor()
+    }
+
     pub fn focused(guest: &WebView) -> bool {
         let view = guest.webview();
         let Some(responder) = view.window().and_then(|window| window.firstResponder()) else {
@@ -660,7 +666,7 @@ pub(super) fn resize_guest(
 pub(super) use macos::{
     back, current_url, deny_permissions, focused, forward, fullscreen, in_host_window,
     install_builderlab_cookie, leave_fullscreen, load, loading, observe_fullscreen,
-    observe_navigation, set_media_suspended, Fullscreen,
+    observe_navigation, set_media_suspended, shown, Fullscreen,
 };
 #[cfg(target_os = "macos")]
 pub(super) type Permissions = objc2::rc::Retained<macos::PermissionDelegate>;
@@ -722,6 +728,17 @@ pub(super) fn observe_fullscreen(
 #[cfg(not(target_os = "macos"))]
 pub(super) fn in_host_window(_guest: &WebView, _host: &tauri::Webview) -> bool {
     true
+}
+
+/// Elsewhere no dock exit gives a guest focus back.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn shown(_guest: &WebView) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn focused(_guest: &WebView) -> bool {
+    false
 }
 
 #[cfg(not(target_os = "macos"))]

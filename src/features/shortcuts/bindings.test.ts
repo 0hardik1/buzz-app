@@ -12,6 +12,71 @@ const resolve = (
 ) => resolveBindings(rows, (key) => saved[key] as never, native);
 
 describe("resolveBindings", () => {
+  it("leaves a default someone assigned to another action to that action", () => {
+    // Off macOS nothing is native: a new action's default Ctrl+D that a saved
+    // shortcut already uses stays with the saved one, and the new one is unbound.
+    const resolved = resolve(
+      [
+        { key: "go-to-dock", defaults: [dock], host: true },
+        { key: "focus-composer", defaults: [focus], host: true },
+      ],
+      { "focus-composer": [dock] },
+      [],
+    );
+    expect(resolved.get("focus-composer")).toEqual({ effective: [dock] });
+    expect(resolved.get("go-to-dock")).toEqual({ effective: [] });
+  });
+
+  it("lists a plugin default someone assigned elsewhere as shared, for them to settle", () => {
+    const resolved = resolve(
+      [
+        { key: "saved", defaults: [focus], host: true },
+        { key: "plugin/action", defaults: [home] },
+      ],
+      { saved: [home] },
+      [],
+    );
+    expect(resolved.get("plugin/action")).toEqual({ effective: [home] });
+    expect(resolved.get("saved")).toEqual({ effective: [home] });
+  });
+
+  it("keeps the free aliases of a default when another action holds one", () => {
+    const resolved = resolve(
+      [
+        { key: "search", defaults: [focus, home], host: true },
+        { key: "b", defaults: [other] },
+      ],
+      { b: [home] },
+      [],
+    );
+    expect(resolved.get("search")).toEqual({ effective: [focus] });
+  });
+
+  it("a field-local override and a global default never take each other's chord", () => {
+    const resolved = resolve(
+      [
+        { key: "global", defaults: [focus], host: true },
+        { key: "field", defaults: [home], local: true, host: true },
+      ],
+      { field: [focus] },
+      [],
+    );
+    expect(resolved.get("global")).toEqual({ effective: [focus] });
+    expect(resolved.get("field")).toEqual({ effective: [focus] });
+  });
+
+  it("a native default keeps its chord over a saved override the native chord masks", () => {
+    const resolved = resolve(
+      [
+        { key: "go-to-dock", defaults: [dock], host: true },
+        { key: "focus-composer", defaults: [focus], host: true },
+      ],
+      { "focus-composer": [dock] },
+    );
+    expect(resolved.get("go-to-dock")).toEqual({ effective: [dock] });
+    expect(resolved.get("focus-composer")?.effective).toEqual([focus]);
+  });
+
   it("gives a row with no override its defaults", () => {
     const resolved = resolve([{ key: "a", defaults: [focus, home] }], {});
     expect(resolved.get("a")).toEqual({ effective: [focus, home] });

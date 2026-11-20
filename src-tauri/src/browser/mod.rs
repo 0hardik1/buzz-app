@@ -786,14 +786,21 @@ fn main_window_accepts_focus<R: tauri::Runtime>(app: &AppHandle<R>) -> bool {
 }
 
 /// A guest takes keyboard focus back only while the host still shows it in
-/// the main window, not away in fullscreen.
-fn guest_accepts_focus(requested_visible: bool, away: bool, in_host_window: bool) -> bool {
-    requested_visible && !away && in_host_window
+/// the main window, not away in fullscreen. `shown` is what is on screen: a
+/// resize hides the guest before the host asks for it again.
+fn guest_accepts_focus(
+    requested_visible: bool,
+    shown: bool,
+    away: bool,
+    in_host_window: bool,
+) -> bool {
+    requested_visible && shown && !away && in_host_window
 }
 
 /// Gives keyboard focus back to the guest page a dock exit returns to. Only
 /// the trusted main view may ask, and every check runs again when the request
-/// reaches the UI thread. False means nothing moved.
+/// reaches the UI thread. True only when the guest holds focus afterwards;
+/// false lets the caller fall back.
 #[tauri::command]
 pub async fn browser_focus(
     app: AppHandle,
@@ -813,16 +820,14 @@ pub async fn browser_focus(
             let away = platform::fullscreen(&browser.guest) || browser.fullscreen.returning();
             if !guest_accepts_focus(
                 browser.requested_visible.get(),
+                platform::shown(&browser.guest),
                 away,
                 platform::in_host_window(&browser.guest, &browser.host),
             ) {
                 return Ok(false);
             }
-            browser
-                .guest
-                .focus()
-                .map(|()| true)
-                .map_err(|error| error.to_string())
+            browser.guest.focus().map_err(|error| error.to_string())?;
+            Ok(platform::focused(&browser.guest))
         })
         .unwrap_or(false))
     })
@@ -886,11 +891,13 @@ mod focus_tests {
 
     #[test]
     fn a_guest_takes_focus_back_only_while_shown_in_the_main_window() {
-        assert!(guest_accepts_focus(true, false, true));
-        // Hidden by the host, away in fullscreen, or in another window.
-        assert!(!guest_accepts_focus(false, false, true));
-        assert!(!guest_accepts_focus(true, true, true));
-        assert!(!guest_accepts_focus(true, false, false));
+        assert!(guest_accepts_focus(true, true, false, true));
+        // Hidden by the host, hidden by a resize the host has not placed
+        // again, away in fullscreen, or in another window.
+        assert!(!guest_accepts_focus(false, true, false, true));
+        assert!(!guest_accepts_focus(true, false, false, true));
+        assert!(!guest_accepts_focus(true, true, true, true));
+        assert!(!guest_accepts_focus(true, true, false, false));
     }
 }
 

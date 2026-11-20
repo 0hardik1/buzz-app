@@ -79,6 +79,12 @@ export type OpenAttempt = Readonly<{
   /** History traversal returned to a visit it already held; not opened again. */
   traversal?: true;
 }>;
+/** Whether two attempts are one open: resolving a destination's address
+ * replaces the attempt object but keeps its id and signal. */
+export const sameOpen = (
+  current: OpenAttempt | undefined,
+  attempt: OpenAttempt,
+) => current?.id === attempt.id && current.signal === attempt.signal;
 export type NavigationSnapshot = Readonly<{
   entry: NavigationEntry;
   attempt: OpenAttempt;

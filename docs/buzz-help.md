@@ -1039,7 +1039,9 @@ Quitting Buzz also turns it off.
   the same key as another shortcut, Settings → Shortcuts marks it "Also used
   by"; change one of them to choose which fires. In the Mac app, **Buzz →
   Settings…** in the menu bar also opens Settings. If an older custom shortcut
-  used ⌘D, Settings → Shortcuts says what that action uses now.
+  used ⌘D, Settings → Shortcuts says what that action uses now. On Windows and
+  Linux, an older custom shortcut on Ctrl+D keeps it, and **Go to dock** shows
+  **Not set** until you give it a key.
 - **Message width**: choose **Narrow** or **Wide** in **Settings → Appearance →
   Interface**. Narrow is the default; Wide gives messages and the composer
   50% more room when the pane is wide enough. The choice is saved on this device.

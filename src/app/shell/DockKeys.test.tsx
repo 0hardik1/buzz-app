@@ -198,6 +198,13 @@ function setup({
     supersede: () => {
       current = attemptFor("elsewhere");
     },
+    /** The destination resolves its address: same open, new attempt object. */
+    resolveAddress: () => {
+      current = Object.freeze({
+        ...current,
+        entry: { ...current.entry, id: `${current.entry.id}-resolved` },
+      });
+    },
   };
 }
 
@@ -705,4 +712,152 @@ it("a click that moves focus before the reply means no fallback", async () => {
   await act(async () => reply.resolve(false));
   expect(draft).toHaveFocus();
   host.remove();
+});
+
+it("a held Return opens once; its repeats and release stay with the dock until it is let go", async () => {
+  const { tab, draft, onSelect, opens } = setup();
+  draft.focus();
+  ctrlD();
+  tab("Messages").focus();
+  press("Enter", { code: "Enter" });
+  expect(onSelect).toHaveBeenCalledOnce();
+  // Dock mode has ended, but the tab still has focus while the open is
+  // pending: a repeat must not click it into a second, preserving open.
+  const clicked = vi.fn();
+  tab("Messages").addEventListener("keydown", clicked);
+  for (const key of ["Enter", "Enter"]) {
+    const repeat = press(key, { code: "Enter", repeat: true });
+    expect(repeat.defaultPrevented).toBe(true);
+  }
+  expect(clicked).not.toHaveBeenCalled();
+  const release = new KeyboardEvent("keyup", {
+    key: "Enter",
+    code: "Enter",
+    bubbles: true,
+    cancelable: true,
+  });
+  act(() => {
+    tab("Messages").dispatchEvent(release);
+  });
+  expect(release.defaultPrevented).toBe(true);
+  expect(onSelect).toHaveBeenCalledOnce();
+  await opens[0]?.settle({ status: "opened" });
+  expect(screen.getByRole("tabpanel", { name: "Messages" })).toHaveFocus();
+  // Released: the next Return is an ordinary key again.
+  tab("Reminders").focus();
+  expect(press("Enter", { code: "Enter" }).defaultPrevented).toBe(false);
+});
+
+it("a held Space opens once and its release does not reach the tab", () => {
+  const { tab, draft, onSelect } = setup();
+  draft.focus();
+  ctrlD();
+  press(" ", { code: "Space" });
+  expect(onSelect).toHaveBeenCalledOnce();
+  const keyup = vi.fn();
+  tab("Bestie").addEventListener("keyup", keyup);
+  press(" ", { code: "Space", repeat: true });
+  act(() => {
+    tab("Bestie").dispatchEvent(
+      new KeyboardEvent("keyup", { key: " ", code: "Space", bubbles: true }),
+    );
+  });
+  expect(keyup).not.toHaveBeenCalled();
+  expect(onSelect).toHaveBeenCalledOnce();
+});
+
+it("a fresh press after a release elsewhere is not held", () => {
+  const { draft, onSelect } = setup();
+  draft.focus();
+  ctrlD();
+  press("2");
+  expect(onSelect).toHaveBeenCalledOnce();
+  // The release went to another view: the next 2 is the field's own.
+  act(() => draft.focus());
+  expect(press("2").defaultPrevented).toBe(false);
+  expect(press("2", { repeat: true }).defaultPrevented).toBe(false);
+  expect(onSelect).toHaveBeenCalledOnce();
+});
+
+it("a page that resolves its address before it opens still gets its tabpanel focused", async () => {
+  const { draft, opens, resolveAddress } = setup();
+  draft.focus();
+  ctrlD();
+  press("2");
+  resolveAddress();
+  await opens[0]?.settle({ status: "opened" });
+  expect(screen.getByRole("tabpanel", { name: "Messages" })).toHaveFocus();
+});
+
+it.each([
+  ["gone", (panel: HTMLElement) => panel.remove()],
+  ["hidden", (panel: HTMLElement) => panel.setAttribute("hidden", "")],
+  ["inert", (panel: HTMLElement) => panel.setAttribute("inert", "")],
+])("an open whose panel is %s leaves focus alone", async (_, change) => {
+  const { draft, opens } = setup();
+  draft.focus();
+  ctrlD();
+  press("2");
+  const tabFocused = document.activeElement;
+  const panel = document.getElementById(`shell-page-${MESSAGES.key}`);
+  if (panel) change(panel);
+  await opens[0]?.settle({ status: "opened" });
+  expect(document.activeElement).toBe(tabFocused);
+});
+
+it("removing the focused tab ends dock mode, and ⌘D starts again", async () => {
+  const { tab, draft, setPages } = setup();
+  draft.focus();
+  ctrlD();
+  expect(tab("Bestie")).toHaveFocus();
+  // jsdom, like WebKit, sends no focusout when the focused element goes.
+  const focusout = vi.fn();
+  document.addEventListener("focusout", focusout, true);
+  setPages([MESSAGES, REMINDERS]);
+  await waitFor(() => expect(numbers()).toEqual([]));
+  expect(focusout).not.toHaveBeenCalled();
+  ctrlD();
+  expect(tab("Messages")).toHaveFocus();
+  expect(numbers()).toEqual(["1", "2"]);
+});
+
+it("⌘D in dock mode with focus outside the dock starts again instead of doing nothing", () => {
+  const { tab, draft, onSelect } = setup();
+  draft.focus();
+  ctrlD();
+  // Focus moves away with no focusout reaching the dock.
+  const swallow = (event: Event) => event.stopPropagation();
+  document.addEventListener("focusout", swallow, true);
+  act(() => draft.focus());
+  document.removeEventListener("focusout", swallow, true);
+  expect(numbers()).toHaveLength(3);
+  ctrlD();
+  expect(onSelect).not.toHaveBeenCalled();
+  expect(tab("Bestie")).toHaveFocus();
+  expect(numbers()).toHaveLength(3);
+});
+
+it("a refused main-view focus ends dock mode: the guest still has the keys", async () => {
+  const { tab } = setup(mac);
+  invoke.mockResolvedValue(false);
+  menuRequest("guest-1");
+  expect(tab("Bestie")).toHaveFocus();
+  await waitFor(() => expect(numbers()).toEqual([]));
+  invoke.mockRejectedValue(new Error("gone"));
+  menuRequest("guest-1");
+  await waitFor(() => expect(numbers()).toEqual([]));
+});
+
+it("a late refusal from an earlier entry leaves the current mode on", async () => {
+  const { draft } = setup(mac);
+  const reply = deferred<boolean>();
+  invoke.mockReturnValueOnce(reply.promise);
+  menuRequest("guest-1");
+  // Esc, then ⌘D from inside the app: a new entry with no native call.
+  press("Escape", { code: "Escape" });
+  act(() => draft.focus());
+  menuRequest(null);
+  expect(numbers()).toHaveLength(3);
+  await act(async () => reply.resolve(false));
+  expect(numbers()).toHaveLength(3);
 });
