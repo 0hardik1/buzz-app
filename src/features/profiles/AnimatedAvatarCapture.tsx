@@ -4,7 +4,6 @@ import { Button } from "../../shared/design-system/ui/Button";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Select } from "../../shared/design-system/ui/Select";
 import {
-  CircleNotchIcon,
   ImageIcon,
   PaletteIcon,
   UserIcon,
@@ -270,11 +269,13 @@ export function AnimatedAvatarCapture({
         />
         {phase === "starting" && (
           <span role="status" className="relative grid place-items-center">
-            <CircleNotchIcon
-              aria-hidden="true"
-              size={24}
-              className="motion-safe:animate-spin"
-            />
+            <picture>
+              <source
+                media="(prefers-reduced-motion: reduce)"
+                srcSet="/buzz-mark.svg"
+              />
+              <img src="/buzz-loading-mark.svg" alt="" width="64" height="44" />
+            </picture>
             <span className="sr-only">Starting camera…</span>
           </span>
         )}
