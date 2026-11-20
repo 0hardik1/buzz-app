@@ -148,6 +148,9 @@ function useActionsRow(
       return;
     const label = heading.firstElementChild as HTMLElement;
     const measure = () => {
+      // A hidden heading has no layout to ask; keep the last answer, so it
+      // shows again at its old height instead of a reserved row for a frame.
+      if (!heading.getClientRects().length) return;
       heading.setAttribute("data-actions-measure", "");
       const wraps =
         actions.getBoundingClientRect().top >=

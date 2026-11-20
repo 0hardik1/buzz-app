@@ -8,14 +8,21 @@ import { useSyncExternalStore } from "react";
 let card: string | undefined;
 /** Just came Back, so the main level slides in once from the other side. */
 let returning = false;
+/** Where the main level was scrolled when See all opened, for Back. */
+let leftAt: number | undefined;
 let settle: ReturnType<typeof setTimeout> | undefined;
 const listeners = new Set<() => void>();
 const notify = () => {
   for (const listener of listeners) listener();
 };
 
-export function setSidebarSeeAll(next: string | undefined) {
+/**
+ * Go into a card (`scrollTop` is where the main level was scrolled) or back
+ * out of it. Back keeps that position for the card to restore.
+ */
+export function setSidebarSeeAll(next: string | undefined, scrollTop?: number) {
   if (next === card) return;
+  if (next !== undefined) leftAt = scrollTop;
   returning = card !== undefined && next === undefined;
   card = next;
   clearTimeout(settle);
@@ -48,4 +55,11 @@ export function useSidebarSeeAll() {
     () => card,
     () => card,
   );
+}
+
+/** The main level's scroll position from before See all, read once on Back. */
+export function takeSidebarSeeAllScroll() {
+  const top = leftAt;
+  leftAt = undefined;
+  return top;
 }

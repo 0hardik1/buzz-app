@@ -493,6 +493,13 @@ export const ROLE_GROUPS: RoleGroup[] = [
         status: "core",
       },
       {
+        token: "bg-surface-navigation-arrival",
+        variable: "--surface-navigation-arrival",
+        pointsAt: "surface-message-highlight",
+        use: "Temporary arrival cue on a navigation row you return to, such as See all after Back; the same wash as a message arrival.",
+        status: "core",
+      },
+      {
         token: "bg-surface-inset",
         variable: "--surface-inset",
         pointsAt: "neutral-2 light / neutral-2 dark",

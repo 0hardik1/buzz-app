@@ -640,3 +640,77 @@ test("See all shares the card's view options and filter", async ({
     "View options for Team",
   );
 });
+
+// Back from See all returns the reader to the scroll position they left and
+// marks the See all they opened, like arriving back at a message.
+test("Back from See all restores the sidebar scroll and marks See all", async ({
+  page,
+  app,
+}) => {
+  const now = Math.floor(Date.now() / 1000);
+  for (const [id, age] of [
+    ["alpha", 60],
+    ["beta", 2],
+    ["gamma", 0],
+    ["delta", 45],
+  ])
+    app.histories.set(`primary/${id}`, [
+      app.sign({
+        kind: 9,
+        tags: [["h", id]],
+        content: "Project update",
+        created_at: now - age * 86400,
+      }),
+    ]);
+  // Short enough that the sidebar scrolls.
+  await page.setViewportSize({ width: 1024, height: 420 });
+  await page.goto(app.origin);
+  await openPage(page, "Messages");
+  // Filters keep the open conversation; open one the filter keeps anyway.
+  await page
+    .getByRole("navigation", { name: "Subscribed channels" })
+    .getByRole("button", { name: "Design", exact: true })
+    .click();
+  const popup = await viewOptions(page, "Team");
+  await chooseDate(page, popup, "7 days");
+  await page.keyboard.press("Escape");
+  const seeAll = page.getByRole("button", {
+    name: "See all in Team",
+    exact: true,
+  });
+  await expect(seeAll).toBeVisible();
+  // Leave the heading, so its hover-only actions don't change the height.
+  await page.mouse.move(600, 300);
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      ),
+  );
+  const scroller = page
+    .getByRole("navigation", { name: "Subscribed channels" })
+    .first();
+  const left = await scroller.evaluate((list) => {
+    list.scrollTop = list.scrollHeight;
+    return list.scrollTop;
+  });
+  expect(left).toBeGreaterThan(0);
+
+  await seeAll.click();
+  const back = page.getByRole("button", { name: "Back to all cards" });
+  await expect(back).toBeFocused();
+  // The card starts at its top.
+  await expect.poll(() => scroller.evaluate((list) => list.scrollTop)).toBe(0);
+
+  await back.click();
+  await page.mouse.move(600, 300);
+  await expect(seeAll).toBeFocused();
+  await expect(seeAll).toHaveAttribute("data-arrived", "");
+  expect(
+    Math.abs((await scroller.evaluate((list) => list.scrollTop)) - left),
+  ).toBeLessThan(1);
+  // The mark holds about a second, then fades and is retired.
+  await expect(seeAll).not.toHaveAttribute("data-arrived", "", {
+    timeout: 5000,
+  });
+});

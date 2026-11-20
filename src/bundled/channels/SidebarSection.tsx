@@ -6,6 +6,7 @@ import { FadingLabel } from "./FadingLabel";
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type DOMAttributes,
@@ -36,9 +37,13 @@ import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Field } from "../../shared/design-system/ui/Field";
 import { Input } from "../../shared/design-system/ui/Input";
 import { NavigationSectionHeading } from "../../shared/design-system/ui/NavigationSection";
-import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
+import {
+  NavigationItem,
+  markNavigationArrival,
+} from "../../shared/design-system/ui/NavigationItem";
 import {
   setSidebarSeeAll,
+  takeSidebarSeeAllScroll,
   useSidebarSeeAll,
   useSidebarSeeAllReturning,
 } from "./useSidebarSeeAll";
@@ -186,6 +191,20 @@ export function SidebarSection({
     if (seeingAll && focusBack.current) back.current?.focus();
     focusBack.current = false;
   }, [seeingAll]);
+  // Going in starts the card at its top; Back returns the main level to where
+  // it was scrolled, then marks the See all the reader came from.
+  const wasSeeingAll = useRef(seeingAll);
+  useLayoutEffect(() => {
+    const was = wasSeeingAll.current;
+    wasSeeingAll.current = seeingAll;
+    if (was === seeingAll) return;
+    const scroller = sidebarScroller(sectionKey);
+    if (seeingAll) {
+      if (scroller) scroller.scrollTop = 0;
+      return;
+    }
+    return arriveFromSeeAll(sectionKey, scroller, takeSidebarSeeAllScroll());
+  }, [seeingAll, sectionKey]);
   const pendingToggle = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(pendingToggle.current), []);
   const [removing, setRemoving] = useState(false);
@@ -220,17 +239,7 @@ export function SidebarSection({
             icon={<CaretLeftIcon size={14} />}
             label="Back"
             aria-label="Back to all cards"
-            onClick={() => {
-              setSidebarSeeAll(undefined);
-              // Back on the main level, focus lands on this card again.
-              requestAnimationFrame(() =>
-                document
-                  .querySelector<HTMLElement>(
-                    `[data-sidebar-section="${CSS.escape(sectionKey)}"] summary`,
-                  )
-                  ?.focus({ preventScroll: true }),
-              );
-            }}
+            onClick={() => setSidebarSeeAll(undefined)}
           />
         </div>
       )}
@@ -508,7 +517,10 @@ export function SidebarSection({
                 hidden: !!channels?.rows.length,
                 open: () => {
                   focusBack.current = true;
-                  setSidebarSeeAll(sectionKey);
+                  setSidebarSeeAll(
+                    sectionKey,
+                    sidebarScroller(sectionKey)?.scrollTop,
+                  );
                 },
               }}
             >
@@ -639,4 +651,60 @@ function SectionNameEditor({
       </Field>
     </form>
   );
+}
+
+function sidebarCard(sectionKey: string) {
+  return document.querySelector<HTMLElement>(
+    `[data-sidebar-section="${CSS.escape(sectionKey)}"]`,
+  );
+}
+
+function sidebarScroller(sectionKey: string) {
+  return (
+    sidebarCard(sectionKey)?.closest<HTMLElement>("[data-scroll-fade]") ?? null
+  );
+}
+
+/** How long Back waits for the card's See all row before focusing its heading. */
+const ARRIVAL_WAIT_MS = 1000;
+
+/**
+ * Back on the main level: restore the scroll position from before See all,
+ * then focus and mark the card's See all row. Rows and the card's edge settle
+ * over the first frames, so the position is held until the row appears.
+ * Returns a cancel.
+ */
+function arriveFromSeeAll(
+  sectionKey: string,
+  scroller: HTMLElement | null,
+  top: number | undefined,
+) {
+  const hold = () => {
+    if (scroller && top !== undefined) scroller.scrollTop = top;
+  };
+  hold();
+  let frame = 0;
+  let clear = () => {};
+  const start = performance.now();
+  const tick = (now: number) => {
+    hold();
+    const card = sidebarCard(sectionKey);
+    const row = card?.querySelector<HTMLElement>("[data-card-see-all]");
+    if (row) {
+      row.focus({ preventScroll: true });
+      clear = markNavigationArrival(row);
+      return;
+    }
+    if (now - start < ARRIVAL_WAIT_MS) {
+      frame = requestAnimationFrame(tick);
+      return;
+    }
+    // The card no longer cuts anything short, so its heading takes focus.
+    card?.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
+  };
+  frame = requestAnimationFrame(tick);
+  return () => {
+    cancelAnimationFrame(frame);
+    clear();
+  };
 }

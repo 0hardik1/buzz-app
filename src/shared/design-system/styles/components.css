@@ -2294,6 +2294,27 @@
     color: var(--navigation-item-text, var(--text-standard));
   }
 
+  /* A row you come back to is marked like a message arrival: held about a
+     second, then faded. While it shows, it replaces hover. */
+  .navigation-item[data-arrived] {
+    animation: navigation-item-arrival calc(var(--duration-settle) * 10)
+      ease-out both;
+  }
+  @keyframes navigation-item-arrival {
+    0%,
+    45% {
+      background-color: var(--surface-navigation-arrival);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .navigation-item[data-arrived] {
+      animation-timing-function: steps(1, end);
+    }
+  }
+
   /* Route navigation shares flat chrome, not Tabs' focus/tabpanel contract. */
   .chrome-navigation {
     display: inline-flex;
