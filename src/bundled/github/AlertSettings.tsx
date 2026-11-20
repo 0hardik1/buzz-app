@@ -13,16 +13,15 @@ export function AlertSettings({ active }: { active(): boolean }) {
   const [error, setError] = useState(false);
   return (
     <section aria-label="GitHub alert settings">
-      <InlineHeader title="Alerts" />
+      <InlineHeader
+        title="Alerts"
+        subtitle="Desktop alerts for your unread GitHub notifications while Buzz is open. Turn them all off under GitHub in Settings → Notifications."
+      />
       <SettingsGroup>
-        {ALERT_KINDS.map((kind, index) => (
+        {ALERT_KINDS.map((kind) => (
           <SwitchPreferenceRow
             key={kind.key}
             label={kind.label}
-            {...(index === 0 && {
-              description:
-                "Desktop alerts for your unread GitHub notifications while Buzz is open. Turn them all off under GitHub in Notifications.",
-            })}
             checked={choices[kind.key]}
             onCheckedChange={(next) => {
               if (!active()) return;
