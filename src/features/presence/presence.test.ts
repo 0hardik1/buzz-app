@@ -327,6 +327,44 @@ it.each([
   },
 );
 
+it("hiding a tab cancels its read, so the shared broker slot passes to a visible tab", async () => {
+  const hidden = setup();
+  const visible = setup();
+  let flight = false;
+  let signal!: AbortSignal;
+  // Like the development broker: one presence read in flight across all
+  // tabs; a read that meets a held slot gets 204 (null).
+  hidden.read.mockImplementationOnce(
+    (_authors, owned) =>
+      new Promise((_resolve, reject) => {
+        signal = owned;
+        flight = true;
+        owned.addEventListener(
+          "abort",
+          () => {
+            flight = false;
+            reject(owned.reason);
+          },
+          { once: true },
+        );
+      }),
+  );
+  visible.read.mockImplementation(async (authors) =>
+    flight ? null : new Map(authors.map((author) => [author, "online"])),
+  );
+  hidden.owner.subscribe(key(3), () => {});
+  await vi.advanceTimersByTimeAsync(100);
+  expect(hidden.read).toHaveBeenCalledOnce();
+  hidden.hide();
+  expect(signal.aborted).toBe(true);
+  visible.owner.subscribe(key(4), () => {});
+  await vi.advanceTimersByTimeAsync(100);
+  expect(visible.read).toHaveBeenCalledOnce();
+  expect(visible.owner.status(key(4))).toBe("online");
+  hidden.owner.dispose();
+  visible.owner.dispose();
+});
+
 it("local skips expire evidence; network failures enforce a minute delay even for new demand", async () => {
   const h = setup();
   h.owner.subscribe(key(3), () => {});

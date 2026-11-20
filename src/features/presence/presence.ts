@@ -231,9 +231,9 @@ export function createPresence(
     for (const subject of subjects.values()) change(subject, "unknown");
     schedule();
   }
-  /** No demand remains: cancel the read on the wire, retired or not, so it
-   * frees the broker's shared presence slot for another community and a late
-   * refusal cannot reach a successor session. */
+  /** No demand remains, or the tab is hidden: cancel the read on the wire,
+   * retired or not, so it frees the broker's shared presence slot for another
+   * community or tab, and a late refusal cannot reach a successor session. */
   function abandon() {
     controller = undefined;
     inflight?.abort();
@@ -319,8 +319,10 @@ export function createPresence(
     schedule();
   }
   const stopActivity = activity?.subscribe(() => {
-    if (!activity.visible()) clear(false);
-    else refresh();
+    if (!activity.visible()) {
+      clear(false);
+      abandon();
+    } else refresh();
     if (
       lastStatus !== activity.status() ||
       lastCommand !== activity.command?.()
