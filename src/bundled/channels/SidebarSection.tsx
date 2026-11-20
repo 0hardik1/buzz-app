@@ -240,30 +240,6 @@ export function SidebarSection({
       <NavigationSectionHeading
         disclosure
         revealActions
-        stateShown={!!filter?.filtered}
-        stateAction={
-          (filter || sort || heightScope) && (
-            <SidebarViewOptions
-              title={title}
-              filter={filter}
-              sort={sort}
-              unreadsFirst={
-                heightScope
-                  ? {
-                      on: unreadsFirst,
-                      set: (on) =>
-                        setSidebarUnreadsFirst(heightScope, sectionKey, on),
-                    }
-                  : undefined
-              }
-              display={
-                iconView && heightScope
-                  ? { value: display, set: setDisplay }
-                  : undefined
-              }
-            />
-          )
-        }
         actions={
           <>
             {!hideMoreActions && (
@@ -345,6 +321,27 @@ export function SidebarSection({
                   )}
                 </MenuPopup>
               </MenuRoot>
+            )}
+            {(filter || sort || heightScope) && (
+              <SidebarViewOptions
+                title={title}
+                filter={filter}
+                sort={sort}
+                unreadsFirst={
+                  heightScope
+                    ? {
+                        on: unreadsFirst,
+                        set: (on) =>
+                          setSidebarUnreadsFirst(heightScope, sectionKey, on),
+                      }
+                    : undefined
+                }
+                display={
+                  iconView && heightScope
+                    ? { value: display, set: setDisplay }
+                    : undefined
+                }
+              />
             )}
             {headerActions}
             {newMessage && (

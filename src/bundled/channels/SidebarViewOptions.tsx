@@ -34,7 +34,7 @@ export type SidebarViewFilter = {
 
 /**
  * One popover for how a card shows its conversations: which ones, in what
- * order, and as a list or icons. Its button fills while the card is filtered.
+ * order, and as a list or icons. Its icon takes the accent while filtered.
  */
 export function SidebarViewOptions({
   title,
@@ -68,7 +68,7 @@ export function SidebarViewOptions({
         render={
           <IconButton
             size="compact"
-            variant={filter?.filtered ? "accent" : "ghost"}
+            tone={filter?.filtered ? "accent" : undefined}
             aria-label={filter?.filtered ? `${label}, filtered` : label}
             icon={<Filter2Icon size={14} />}
           />

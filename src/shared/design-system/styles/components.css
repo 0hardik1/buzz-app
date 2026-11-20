@@ -382,8 +382,7 @@
         [data-icon-variant="chrome"],
         [data-icon-variant="avatar"],
         [data-icon-variant="media"],
-        [data-icon-variant="bare"],
-        [data-icon-variant="accent"]
+        [data-icon-variant="bare"]
       ) {
       background: var(--interaction-hover);
     }
@@ -416,8 +415,7 @@
     [data-icon-variant="chrome"],
     [data-icon-variant="avatar"],
     [data-icon-variant="media"],
-    [data-icon-variant="bare"],
-    [data-icon-variant="accent"]
+    [data-icon-variant="bare"]
   ) {
     background: var(--interaction-pressed);
   }
@@ -705,22 +703,10 @@
     background: var(--affordance-accent);
     color: var(--text-accent);
   }
-  /* An icon action whose state is on, such as a filtered view, fills with the
-     accent so it reads at a glance. */
-  .buzz-button[data-icon-variant="accent"] {
-    background: var(--affordance-accent-prominent);
-    color: var(--text-on-accent);
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .buzz-button[data-icon-variant="accent"]:hover:not([data-disabled]) {
-      background: var(--affordance-accent-prominent-hover);
-    }
-  }
-  .buzz-button[data-icon-variant="accent"]:is(
-    :active,
-    [aria-expanded="true"]
-  ):not([data-disabled]) {
-    background: var(--affordance-accent-prominent-pressed);
+  /* An icon action whose state is on, such as a filtered view, colors only its
+     icon; the button keeps its variant's fill, hover and pressed states. */
+  .buzz-button[data-icon-tone="accent"]:not([data-disabled]) {
+    color: var(--icon-accent);
   }
   .buzz-button[data-muted]:not([data-disabled]) {
     color: var(--text-subtle);
@@ -1707,13 +1693,6 @@
     display: none;
   }
 
-  .navigation-section-heading-state {
-    display: flex;
-    flex: none;
-    align-items: center;
-    color: var(--text-subtle);
-  }
-
   /* A disclosure heading's trigger spans the label slot, so the inset is its
      hit area and focus ring; the actions keep a small trailing inset. */
   .navigation-section-heading[data-disclosure] {
@@ -1732,7 +1711,7 @@
 
   .navigation-section-heading[data-disclosure]
     .navigation-section-heading-actions
-    [data-icon-variant]:not([data-disabled]) {
+    [data-icon-variant]:not([data-disabled], [data-icon-tone]) {
     color: inherit;
   }
 
@@ -1796,10 +1775,7 @@
     opacity: 0;
   }
 
-  :is(
-    .navigation-section-heading-actions,
-    .navigation-section-heading-state
-  )[data-navigation-reveal] {
+  .navigation-section-heading-actions[data-navigation-reveal] {
     max-width: 0;
     overflow: hidden;
   }

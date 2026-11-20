@@ -7,8 +7,6 @@ type IconButtonVariant =
   | "solid"
   | "inset"
   | "tint"
-  /** Fills with the accent while the action's state is on, such as a filter. */
-  | "accent"
   | "chrome"
   | "avatar"
   | "media"
@@ -28,6 +26,8 @@ export type IconButtonProps = Omit<
   variant?: IconButtonVariant;
   size?: IconButtonSize;
   shape?: IconButtonShape;
+  /** Colors the icon while the action's state is on, such as a filter. */
+  tone?: "accent" | undefined;
 } & (
     | { icon: ReactElement; emoji?: never }
     /** A glyph in place of an icon, such as a hand in the chosen skin tone. */
@@ -40,6 +40,7 @@ export function IconButton({
   variant = "ghost",
   size = "sm",
   shape = variant === "avatar" ? "round" : "control",
+  tone,
   ...props
 }: IconButtonProps) {
   return (
@@ -53,7 +54,6 @@ export function IconButton({
             : variant === "inset"
               ? "subtle"
               : variant === "tint" ||
-                  variant === "accent" ||
                   variant === "chrome" ||
                   variant === "avatar" ||
                   variant === "media" ||
@@ -71,6 +71,7 @@ export function IconButton({
       data-icon-variant={variant}
       data-icon-size={size}
       data-icon-shape={shape}
+      data-icon-tone={tone}
     >
       {emoji === undefined ? (
         icon

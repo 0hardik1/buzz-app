@@ -34,9 +34,18 @@ it("picks a filter and its window in place from the view options popover", async
   const trigger = screen.getByRole("button", {
     name: "View options for Channels, filtered",
   });
-  // A filtered card's button fills with the accent and stays shown.
-  expect(trigger).toHaveAttribute("data-icon-variant", "accent");
-  expect(trigger.closest("[data-navigation-reveal]")).toBeNull();
+  // A filtered card's icon takes the accent; the button keeps the quiet
+  // style and still reveals on hover with the card's other actions.
+  expect(trigger).toHaveAttribute("data-icon-tone", "accent");
+  expect(trigger).toHaveAttribute("data-icon-variant", "ghost");
+  expect(trigger.closest("[data-navigation-reveal]")).not.toBeNull();
+  // Order: more actions, then view options.
+  const more = screen.getByRole("button", {
+    name: "More actions for Channels",
+  });
+  expect(
+    more.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
   await user.click(trigger);
   const show = await screen.findByRole("radiogroup", { name: "Show" });
   expect(within(show).getByRole("radio", { name: "Unreads" })).toBeChecked();
@@ -69,6 +78,7 @@ it("reveals an unfiltered card's view options with its other actions", () => {
     name: "View options for Channels",
   });
   expect(trigger).toHaveAttribute("data-icon-variant", "ghost");
+  expect(trigger).not.toHaveAttribute("data-icon-tone");
   expect(trigger.closest("[data-navigation-reveal]")).not.toBeNull();
 });
 

@@ -114,9 +114,21 @@ test("section filters save activity windows from the view options popover", asyn
     .poll(() => app.report.sidebarPublications?.at(-1)?.blob.groups.channels)
     .toBe("unreads");
   await checked(popup, "Unreads");
-  // A filtered card's button fills with the accent and says so.
+  // A filtered card's icon takes the accent, and its name says so.
   await expect(trigger).toHaveAccessibleName("View options for Team, filtered");
-  await expect(trigger).toHaveAttribute("data-icon-variant", "accent");
+  await expect(trigger).toHaveAttribute("data-icon-tone", "accent");
+  await expect(trigger).toHaveAttribute("data-icon-variant", "ghost");
+  // The accent reaches the icon through the heading's quiet action color.
+  const iconColor = () =>
+    trigger.evaluate((button) => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--icon-accent)";
+      button.append(probe);
+      const expected = getComputedStyle(probe).color;
+      probe.remove();
+      return getComputedStyle(button).color === expected;
+    });
+  await expect.poll(iconColor).toBe(true);
   await shot("03-unreads");
   // Activity windows are picked in place; there is no dialog step.
   await popup.getByRole("radio", { name: "7 days", exact: true }).click();
@@ -135,9 +147,28 @@ test("section filters save activity windows from the view options popover", asyn
   await expect(popup).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await page.mouse.move(0, 0);
-  await page.locator("body").focus();
-  // Without hover or focus, the filled button stays in view.
-  await expect(trigger).toBeVisible();
+  await trigger.blur();
+  // Like the card's other actions, it shows only on hover, even when filtered.
+  const revealed = () =>
+    trigger.evaluate(
+      (button) =>
+        getComputedStyle(button.closest("[data-navigation-reveal]")).opacity,
+    );
+  await expect.poll(revealed).toBe("0");
+  await page.getByLabel("Team", { exact: true }).hover();
+  await expect.poll(revealed).toBe("1");
+  // More actions, then view options, then new.
+  const xs = await section
+    .locator(".navigation-section-heading-actions button")
+    .evaluateAll((buttons) =>
+      buttons.map((button) => button.getAttribute("aria-label")),
+    );
+  expect(xs.indexOf("More actions for Team")).toBeLessThan(
+    xs.indexOf("View options for Team, filtered"),
+  );
+  expect(xs.indexOf("View options for Team, filtered")).toBe(
+    xs.indexOf("More actions for Team") + 1,
+  );
   await shot("05-filtered-button");
   await page.reload();
   await expect(section.locator('[data-channel-id="gamma"]')).toBeVisible();
@@ -540,18 +571,29 @@ test("See all shares the card's view options and filter", async ({
     exact: true,
   });
   const resize = page.getByRole("separator", { name: "Resize sidebar" });
-  // The popover and filled button at the default and narrowest widths.
+  // The popover, then the filtered card and an unfiltered one on hover, at
+  // the default and narrowest widths.
   const capture = async (name) => {
     const popup = await viewOptions(page, "Team");
     await settle();
     await page.screenshot({ path: testInfo.outputPath(`${name}-popover.png`) });
     await page.keyboard.press("Escape");
     await expect(popup).toHaveCount(0);
-    await page.mouse.move(0, 0);
+    await viewOptionsButton(page, "Team").blur();
+    await page.getByLabel("Team", { exact: true }).hover();
     await settle();
     await sidebar.screenshot({
-      path: testInfo.outputPath(`${name}-filtered.png`),
+      path: testInfo.outputPath(`${name}-filtered-hover.png`),
     });
+    const work = page.getByLabel("Work", { exact: true });
+    if (await work.isVisible()) {
+      await work.hover();
+      await settle();
+      await sidebar.screenshot({
+        path: testInfo.outputPath(`${name}-unfiltered-hover.png`),
+      });
+    }
+    await page.mouse.move(0, 0);
   };
   let popup = await viewOptions(page, "Team");
   await popup.getByRole("radio", { name: "7 days", exact: true }).click();
@@ -585,7 +627,7 @@ test("See all shares the card's view options and filter", async ({
   expect(inset).toBeCloseTo(expected, 0);
 
   await seeAllRow.click();
-  // See all has no row of filter controls, only the same filled button.
+  // See all has no row of filter controls, only the same button.
   await expect(page.getByRole("tablist", { name: "Filter Team" })).toHaveCount(
     0,
   );

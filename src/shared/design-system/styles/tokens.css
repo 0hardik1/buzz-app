@@ -1689,6 +1689,7 @@
   --affordance-reaction-self-own: var(--surface-message);
   --text-reaction-self-own: var(--text-standard);
   --text-message-link: var(--accent-link);
+  --icon-accent: var(--accent-link);
   --surface-sidebar-selected: var(--accent-9);
   --text-sidebar-selected: var(--accent-contrast);
   /* Corner counts keep a dark fill and readable accent ink in both modes. */
@@ -1738,6 +1739,7 @@
   --affordance-reaction-self-own: var(--surface-message);
   --text-reaction-self-own: var(--text-standard);
   --text-message-link: var(--accent-link);
+  --icon-accent: var(--accent-link);
   --surface-sidebar-selected: var(--accent-9);
   --text-sidebar-selected: var(--accent-contrast);
   /* Corner counts keep a dark fill and readable accent ink in both modes. */
