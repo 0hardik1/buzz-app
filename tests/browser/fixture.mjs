@@ -2855,6 +2855,8 @@ export const test = base.extend({
       await use({
         mediaFiles,
         sign: (template) => finalizeEvent(template, userKey),
+        // A peer's event, e.g. a message that mentions or DMs the viewer.
+        signPeer: (template) => finalizeEvent(template, peerKey),
         channelMetadata: (id, tags) => sign(39000, [["d", id], ...tags]),
         // Model an owner changing visibility; production discovery consumes the
         // signed metadata through normal reads/live traffic.

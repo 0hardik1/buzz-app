@@ -32,6 +32,20 @@ test.beforeEach(async ({ page, app }) => {
     { scopes: Object.values(JSON.parse(fixtureAliases)), viewer: app.viewer },
   );
 });
+// Ordinary backlog no longer earns a cue; a peer's mention of the viewer does.
+const seedMention = (app, community, channel) =>
+  app.histories.set(`${community}/${channel}`, [
+    ...(app.histories.get(`${community}/${channel}`) ?? []),
+    app.signPeer({
+      kind: 9,
+      tags: [
+        ["h", channel],
+        ["p", app.viewer],
+      ],
+      content: `Mention in ${community} ${channel}`,
+      created_at: 1700000950,
+    }),
+  ]);
 const sidebar = (page) =>
   page.getByRole("complementary", { name: "Sidebar", exact: true });
 const list = (page) =>
@@ -450,6 +464,8 @@ test("at default card heights the edge cue leads to the card's badge for rows pa
   page,
   app,
 }) => {
+  // Short enough that the Direct messages card's badge starts offscreen.
+  await page.setViewportSize({ width: 1440, height: 500 });
   await open(page, app);
   const dm = row(page, "dm-030");
   // Unexpanded, the Direct messages card clips dm-030 past its edge.
@@ -463,6 +479,7 @@ test("at default card heights the edge cue leads to the card's badge for rows pa
   });
   await expect(badge).toBeAttached();
   await scroll(page, 0);
+  await expect(badge).not.toBeInViewport();
   await expect(cue(page, "below")).toBeVisible();
   await cue(page, "below").click();
   await expect(badge).toBeFocused();
@@ -564,7 +581,7 @@ test("resizing, collapsed groups and new unread evidence update only the display
   await expectCueHidden(page, "below");
 });
 
-test("session changes discard the previous sidebar targets and manual unread still participates", async ({
+test("session changes discard the previous sidebar targets and manual unread alone earns no cue", async ({
   page,
   app,
 }) => {
@@ -583,6 +600,7 @@ test("session changes discard the previous sidebar targets and manual unread sti
     pendingRoutes.push(pending);
     return pending;
   });
+  seedMention(app, "secondary", "beta");
   try {
     await open(page, app);
     await showAllRows(page);
@@ -614,8 +632,10 @@ test("session changes discard the previous sidebar targets and manual unread sti
     ).toHaveCount(0);
     await showAllRows(page);
     await scroll(page, 1800);
-    // Marked unread shows in Activity, so it earns a cue.
-    await expect(cue(page, "above")).toBeVisible();
+    // Beta's mention waits on the viewer; Alpha's manual unread does not.
+    await expect(cue(page, "above")).toHaveAccessibleName(
+      "1 unread conversation above",
+    );
     // Completing delayed preferences must not replace the user's newer viewport.
     const refreshed = page.waitForResponse(
       (response) =>
@@ -629,12 +649,18 @@ test("session changes discard the previous sidebar targets and manual unread sti
       1800,
     );
     await cue(page, "above").click();
-    await expect.poll(() => inView(page, "alpha")).toBe(true);
+    await expect.poll(() => inView(page, "beta")).toBe(true);
+    await expect(
+      row(page, "beta").locator("[data-channel-waiting]"),
+    ).toBeAttached();
     await expect(
       row(page, "alpha").locator(
         '[data-channel-unread][data-priority="false"]',
       ),
     ).toBeAttached();
+    await expect(
+      row(page, "alpha").locator("[data-channel-waiting]"),
+    ).toHaveCount(0);
   } finally {
     release();
     await Promise.all(pendingRoutes);
@@ -726,7 +752,9 @@ test.describe("DM preview wiring", () => {
       "dm-self": [],
     },
   });
-  test("production sidebar wires only 1:1 avatars and preserves their shape and overlap", async ({
+  // Beta waits on the viewer, so it joins the DMs in the cues.
+  test.beforeEach(({ app }) => seedMention(app, "primary", "beta"));
+  test("production sidebar wires 1:1 and mentioner avatars and preserves their shape and overlap", async ({
     page,
     app,
   }, info) => {
@@ -739,7 +767,8 @@ test.describe("DM preview wiring", () => {
       ).toBeAttached();
     const below = cue(page, "below");
     await expect(below.locator("[data-unread-dm]")).toHaveCount(3);
-    const eligible = new Set(["dm-a", "dm-b", "dm-c", "dm-d"]);
+    // Group DMs and self-DMs show no face; a person's mention does.
+    const eligible = new Set(["dm-a", "dm-b", "dm-c", "dm-d", "beta"]);
     for (const edge of ["below", "above"]) {
       if (edge === "above")
         await list(page).evaluate((el) => {
@@ -883,6 +912,15 @@ test.describe("DM preview wiring", () => {
     page,
     app,
   }) => {
+    // Ordinary backlog shows on its row but never counts toward a cue.
+    app.histories.set("primary/padding-11", [
+      app.signPeer({
+        kind: 9,
+        tags: [["h", "padding-11"]],
+        content: "Ordinary backlog",
+        created_at: 1700000950,
+      }),
+    ]);
     await open(page, app);
     await page.getByRole("textbox", { name: "Message #Alpha" }).focus();
     await expect(
@@ -919,6 +957,14 @@ test.describe("DM preview wiring", () => {
     await expect(action).toBeInViewport({ ratio: 1 });
     await expect(below).toBeInViewport({ ratio: 1 });
     await expect(below).toHaveAccessibleName("7 unread conversations below");
+    await expect(
+      row(page, "padding-11").locator(
+        "[data-channel-unread], [data-channel-activity]",
+      ),
+    ).toBeAttached();
+    await expect(
+      row(page, "padding-11").locator("[data-channel-waiting]"),
+    ).toHaveCount(0);
     await action.click({ trial: true });
     await below.click();
     await expect(firstUnread).toBeFocused();

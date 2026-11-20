@@ -193,6 +193,7 @@ export function SidebarUnread({
           2 * Math.max(center - actionRect.right, actionRect.left - center) -
           2 * gap;
         cue.removeAttribute("data-preview-limit");
+        upper.removeAttribute("data-preview-limit");
         if (actionRect.width > 0 && cue.offsetWidth > available) {
           // Try the widest option first and drop the farthest avatars first.
           const previews = cue.querySelectorAll("[data-unread-dm]").length;
@@ -235,6 +236,21 @@ export function SidebarUnread({
               cue.dataset.shareActionRow = "stacked";
               upper.dataset.shareActionRow = "stacked";
             }
+          }
+        }
+        // The count outranks faces: drop the farthest faces before it clips.
+        for (const edge of [upper, cue]) {
+          const label = edge.querySelector(`.${styles.unreadEdgeLabel}`);
+          if (!label) continue;
+          const shown =
+            Number(edge.dataset.previewLimit) ||
+            edge.querySelectorAll("[data-unread-dm]").length;
+          for (
+            let limit = shown - 1;
+            limit >= 0 && label.scrollWidth > label.clientWidth;
+            limit--
+          ) {
+            edge.dataset.previewLimit = String(limit);
           }
         }
       });
@@ -300,6 +316,7 @@ export function SidebarUnread({
       }
       cue?.removeAttribute("data-lifted");
       cue?.removeAttribute("data-preview-limit");
+      upper?.removeAttribute("data-preview-limit");
     };
   }, [list, floatingAction]);
   const reveal = (edge: keyof Edges) => {
