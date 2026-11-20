@@ -1465,8 +1465,10 @@
     margin: calc(var(--space-1) * -1);
     scroll-padding-inline: var(--space-1);
   }
+  /* They still share a wide track, as segmented tabs do, but never shrink
+     below their icon: past the track's width, the list scrolls. */
   .buzz-tabs[data-variant="segmented-icons"] .buzz-tabs-tab {
-    flex: 0 0 auto;
+    flex: 1 0 auto;
   }
   /* Only a new selection travels; resizing the selected tab follows layout. */
   .buzz-tabs:is([data-variant="segmented"], [data-variant="segmented-icons"])

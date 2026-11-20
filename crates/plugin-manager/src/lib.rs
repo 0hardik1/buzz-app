@@ -579,6 +579,8 @@ fn bundled_manifests_for(gateway: Option<&gateway::Native>) -> Vec<Manifest> {
             "../../../src/bundled/relay-notes/manifest.json"
         ))
         .expect("relay notes manifest"),
+        serde_json::from_str(include_str!("../../../src/bundled/bitties/manifest.json"))
+            .expect("bitties manifest"),
         serde_json::from_str(include_str!("../../../src/bundled/typesafe/manifest.json"))
             .expect("typesafe manifest"),
         serde_json::from_str(include_str!(
@@ -632,6 +634,7 @@ fn enabled_by_default(id: &str) -> bool {
             | "buzz.relay-staff"
             | "buzz.typesafe"
             | "buzz.plugin-development"
+            | "buzz.bitties"
     ) || org_plugins()
         .iter()
         .any(|plugin| plugin.manifest.id == id && plugin.enabled_by_default)
