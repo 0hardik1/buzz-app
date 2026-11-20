@@ -808,8 +808,11 @@ set as `{ text, applied, reason? }` per section, where `reason` is `"owner"`,
 the plugin holds none there. When the plugin replaces `working-location` in a
 Solo chat, the Canvas's folders are for reading, as in a chat with an assigned
 folder. The set is kept on this device, survives a restart, and is dropped
-when the agent is deleted. Claude, Codex, Goose and Pi (`conversationSections`
-on the type) support it; other harnesses reject. Plugins feature-detect the methods.
+when the agent is deleted. Claude, Codex, Goose, Pi and the custom ACP agent
+(`conversationSections` on the type) support it; other harnesses reject. The
+custom ACP agent takes a conversation's choices as its session starts, so a
+change, the owner's or a plugin's, gives that conversation's next turn a new
+session, a busy one's included; its other conversations keep theirs. Plugins feature-detect the methods.
 
 A plugin leaves context for a later turn with
 `ctx.agents.note(pubkey, channelId, text, root?)`, without waking the agent
@@ -861,8 +864,11 @@ start there. Another program that does not share this device's agent state,
 such as a development build with its own storage, an older build or another
 computer, does not see the folder and starts the conversation in the
 workspace. `ctx.agents.conversationFolder(pubkey,
-place)` returns the folder. Claude, Codex, Goose and Pi (`conversationFolders`
-on the type) support folders; other harnesses and agents on an execution target
+place)` returns the folder. Claude, Codex, Goose, Pi and the custom ACP agent
+(`conversationFolders` on the type) support folders; the custom ACP agent's
+harness still runs on the command, args, env and workspace its owner
+confirmed, and only the conversation's session and History replay work in the
+folder; other harnesses and agents on an execution target
 reject. Plugins feature-detect the method.
 
 A type marks its primary configuration tab with `role: "settings"`. In the
