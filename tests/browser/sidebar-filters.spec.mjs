@@ -663,9 +663,29 @@ test("See all shows the card's filter as a row and shares it", async ({
   await page.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(rowFor("delta")).toHaveCount(0);
 
-  await page
-    .getByRole("button", { name: "See all in Team", exact: true })
-    .click();
+  // See all has no icon, so its label sits clear of the pill's rounded edge
+  // rather than where row icons start.
+  const seeAllRow = page.getByRole("button", {
+    name: "See all in Team",
+    exact: true,
+  });
+  const { inset, expected } = await seeAllRow.evaluate((row) => {
+    const label = row.querySelector(".navigation-item-label");
+    const probe = document.createElement("div");
+    probe.style.width = "var(--space-3)";
+    row.append(probe);
+    const expected = probe.getBoundingClientRect().width;
+    probe.remove();
+    return {
+      inset:
+        label.getBoundingClientRect().left - row.getBoundingClientRect().left,
+      expected,
+    };
+  });
+  expect(expected).toBeGreaterThan(0);
+  expect(inset).toBeCloseTo(expected, 0);
+
+  await seeAllRow.click();
   const filters = page.getByRole("tablist", { name: "Filter Team" });
   const tab = (name) => filters.getByRole("tab", { name });
   await expect(tab(/^Active/)).toHaveAttribute("aria-selected", "true");

@@ -98,6 +98,15 @@
     )
     var(--space-2);
 }
+/* Text-only rows such as See all keep their label clear of the pill's rounded
+   edge. The label's design-system class is matched by attribute so the module
+   doesn't scope it. */
+.channelList
+[data-variant="row"]:has(> [class~="navigation-item-label"]:first-child),
+.sidebarFilter
+  [data-variant="row"]:has(> [class~="navigation-item-label"]:first-child) {
+  padding-inline-start: var(--space-3);
+}
 .channelList [data-variant="row"][data-inset],
 .sidebarFilter [data-variant="row"][data-inset] {
   padding-inline-start: calc(

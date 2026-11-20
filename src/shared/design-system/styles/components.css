@@ -2314,13 +2314,6 @@
     --text-subtle: var(--text-sidebar-hover);
     --text-metadata: var(--text-sidebar-hover);
   }
-  /* Text-only rows keep their label clear of the row's rounded hover edge. */
-  .buzz-sidebar-navigation
-  .navigation-item[data-variant="row"]:has(
-    > .navigation-item-label:first-child
-  ) {
-    padding-inline-start: var(--space-3);
-  }
   .buzz-sidebar-navigation .navigation-item[data-variant="row"][data-inset] {
     padding-inline-start: calc(var(--space-2) + var(--space-6));
   }
