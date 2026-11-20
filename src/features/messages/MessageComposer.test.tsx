@@ -4072,6 +4072,22 @@ it("asks again when a send without importing stops at a later prompt", async () 
   expect(port).not.toHaveBeenCalled();
 });
 
+it("offers to import an old Buzz agent a Solo chat sends to", async () => {
+  const { agents, port } = oldBuzzAgents();
+  const { h } = mountSoloAgents({ agents });
+  h.fill("hello");
+  h.submit();
+  await screen.findByRole("dialog", { name: "Import Honey?" });
+  expect(h.messages.send).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Import and send" }));
+  await waitFor(() => expect(h.messages.send).toHaveBeenCalledOnce());
+  expect(port).toHaveBeenCalledExactlyOnceWith({
+    source: "installed",
+    pubkey: first.pubkey,
+    type: "test/agent",
+  });
+});
+
 it("keeps the draft when the import dialog is closed", async () => {
   const { agents, port } = oldBuzzAgents();
   const h = mount({}, undefined, undefined, agents);
@@ -4147,6 +4163,7 @@ const sessionAgents = (
     find: (pubkey: string) =>
       snapshot.agents.find((agent) => agent.pubkey === pubkey),
     joinable: () => [],
+    portable: async () => ({ agents: [] }),
     sessionState: () => state,
     session,
     setSessionState(

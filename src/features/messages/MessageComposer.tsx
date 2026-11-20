@@ -2924,6 +2924,26 @@ function Composer({
       let references: readonly string[] = [];
       let recipients = capturedRecipients.map((item) => item.pubkey);
       let declinedImports: readonly string[] = [];
+      // An agent only an earlier Buzz runs would not answer; offer it here first.
+      const lookup = oldAgents.find(capturedRecipients);
+      const old = lookup instanceof Promise ? await lookup : lookup;
+      if (old.length) {
+        setSending(true);
+        setError(undefined);
+        const decision = await oldAgents.ask(
+          old,
+          attempt.signal,
+          () =>
+            valueRef.current === captured &&
+            sameAttachmentSelection(
+              attachments.store.snapshot(),
+              capturedAttachments,
+            ) &&
+            permitted.current,
+        );
+        if (decision === null) return;
+        declinedImports = decision;
+      }
       if (soloConversation || ownSoloConversation) {
         admission.current = true;
         setAdmitting(true);
@@ -2932,26 +2952,6 @@ function Composer({
           fromPill,
         ));
       } else if (recipients.length) {
-        // An agent only an earlier Buzz runs would not answer; offer it here first.
-        const lookup = oldAgents.find(captured.recipients);
-        const old = lookup instanceof Promise ? await lookup : lookup;
-        if (old.length) {
-          setSending(true);
-          setError(undefined);
-          const decision = await oldAgents.ask(
-            old,
-            attempt.signal,
-            () =>
-              valueRef.current === captured &&
-              sameAttachmentSelection(
-                attachments.store.snapshot(),
-                capturedAttachments,
-              ) &&
-              permitted.current,
-          );
-          if (decision === null) return;
-          declinedImports = decision;
-        }
         const channel = session.channels
           .list()
           .channels.find((item) => item.id === channelId);
