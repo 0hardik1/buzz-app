@@ -1656,6 +1656,20 @@ direction. Agent-elided strings and payloads are labeled, not hidden. Turns whos
 `turn_started` frame is not loaded are marked as partial. Posted chat messages are
 not joined here; the transcript shows the agent's ACP output.
 
+A custom ACP agent's History reads a transcript only when its harness offers
+`session/load`. Otherwise it says the harness can't replay its transcripts.
+Each read starts a short-lived harness process. It replays the sessions Buzz
+recorded on this device for the conversation, oldest first (up to ten), plus
+the working one. The transcript reads again when you Refresh it, when its
+session changes, and as its work starts and ends. It never reads on a timer.
+A session the harness can no longer load is left out, and the transcript says
+its history is incomplete. Standalone turns, such as a watch's or a timer's,
+are listed on their own. A session's system prompt shows only when Buzz kept
+it when the session started, so sessions saved before that show none. A
+session is marked as started only when its replay keeps its first prompt. A
+harness that trims its replay shows that session as continued. Sessions
+another build or device started aren't listed.
+
 The shared Claude, Goose, and Pi turn formatter sends conversation history and
 the triggering event as exact JSON records with escaped markup delimiters, the
 same records Codex sends. Beside the author's `pubkey`, each record carries

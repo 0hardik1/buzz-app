@@ -1900,6 +1900,11 @@ If an agent reports incompatible synced settings, choose the **Previous Versions
   sessions in goose's local history by the conversation they were tagged with.
   Sessions from before Buzz tagged them aren't found, and watch and timer
   turns from before Buzz recorded where they started aren't listed.
+- A custom ACP agent's **History** lists its conversations on this device and
+  its watch and timer turns. **Transcript** replays one when the harness
+  supports it; some harnesses can't. Use **Refresh** to read it again while
+  it works. If an older session can no longer be loaded, the transcript shows
+  the rest and says its history is incomplete.
 - Confirmed failures keep **Couldn’t finish** visible after the working indicator
   stops, even when the agent sends no reply. Cancelled requests show **Stopped**.
   There is no viewing timer. Outcomes supplied only by live activity may be lost
