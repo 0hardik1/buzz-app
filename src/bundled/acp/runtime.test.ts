@@ -551,7 +551,14 @@ describe("AcpRuntime", () => {
     const restoreNotes = vi.fn((_c: string, back: readonly string[]) =>
       pending.push(...back),
     );
-    Object.assign(agent, { notes, restoreNotes });
+    // The builder's last step reads the plugins' instructions.
+    let built!: () => void;
+    const finished = new Promise<void>((resolve) => (built = resolve));
+    const instructions = vi.fn(() => {
+      built();
+      return undefined;
+    });
+    Object.assign(agent, { notes, restoreNotes, instructions });
     const mention = message("1", "@Opal hi");
     const settled = vi.fn();
     await deliver(mention, config, undefined, {
@@ -561,8 +568,7 @@ describe("AcpRuntime", () => {
     fake.harnesses[0]?.exit();
     await vi.waitFor(() => expect(settled).toHaveBeenCalled());
     release();
-    // The builder has finished: its read is answered and the turn is over.
-    await flush(50);
+    await finished;
     expect(notes).not.toHaveBeenCalled();
     expect(pending).toEqual(["<note>Ticket ABC-1 is open.</note>"]);
     expect(fake.harnesses.flatMap((h) => h.turns)).toHaveLength(0);
