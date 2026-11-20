@@ -344,7 +344,7 @@
   display: none;
 }
 .channelSection[data-only-unread-dms]
-  [data-card-row]:not([data-unread-dm-row], :has([data-selected])) {
+  [data-card-row]:not([data-waiting-row], :has([data-selected])) {
   display: none;
 }
 .cardDragOverlay {

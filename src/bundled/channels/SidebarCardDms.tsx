@@ -7,27 +7,24 @@ import {
 } from "react";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { Button } from "../../shared/design-system/ui/Button";
-import { UnreadDmPreviews, type UnreadDmPreview } from "./SidebarUnread";
-import { UNREAD_MARKERS } from "./conversation-rows";
+import {
+  UnreadDmPreviews,
+  audiblyUnread,
+  waitsForYou,
+  type UnreadDmPreview,
+} from "./SidebarUnread";
 import styles from "./Channels.module.css";
 
-/** Marks a card row holding an unread DM, for the card's DM-only view. */
-export const UNREAD_DM_ROW = "data-unread-dm-row";
+/** Marks a card row that is waiting for you, for the card's filtered view. */
+export const WAITING_ROW = "data-waiting-row";
 
-type HiddenDm = { channelId: string } & UnreadDmPreview;
-
-function unread(row: Element) {
-  // Muting keeps unread evidence but never asks for attention.
-  return [...row.querySelectorAll(UNREAD_MARKERS)].some(
-    (marker) => !marker.hasAttribute("data-channel-muted"),
-  );
-}
+type Waiting = { channelId: string; preview?: UnreadDmPreview | undefined };
 
 /**
- * Who is waiting in a card's unread DMs that its cut hides: everything when
- * the card is collapsed, otherwise the rows below its clipped list. Shows up
- * to three faces and a count; clicking shows only those DMs, and the same
- * spot then reads Show all. The DM you have open never counts. The view ends
+ * What waits for you in a card below its cut: every dotted row when the card
+ * is collapsed, otherwise those below its clipped list. Shows the faces of up
+ * to three DMs and a count; clicking shows only those rows, and the same spot
+ * then reads Show all. The conversation you have open never counts. The view ends
  * by itself once none are unread; a card it opened then waits for you to
  * leave the conversation you are in before it collapses again.
  */
@@ -51,7 +48,7 @@ export function SidebarCardDms({
 }) {
   const previews = useContext(UnreadDmPreviews);
   const anchor = useRef<HTMLDivElement>(null);
-  const [hidden, setHidden] = useState<HiddenDm[]>([]);
+  const [hidden, setHidden] = useState<Waiting[]>([]);
   // Unread DMs in the whole card; unknown until first measured.
   const [total, setTotal] = useState<number>();
   const [holding, setHolding] = useState(false);
@@ -59,13 +56,13 @@ export function SidebarCardDms({
   // DM-only view without its marked rows.
   useLayoutEffect(() => {
     const card = anchor.current?.closest<HTMLElement>("[data-sidebar-section]");
-    if (!card || !previews) return;
+    if (!card) return;
     const list = () => card.querySelector<HTMLElement>(`.${styles.cardRows}`);
     let frame = 0;
     const measure = () => {
       frame = 0;
       const cut = open ? list()?.getBoundingClientRect().bottom : undefined;
-      const next: HiddenDm[] = [];
+      const next: Waiting[] = [];
       let count = 0;
       let selected = false;
       for (const row of card.querySelectorAll<HTMLElement>("[data-card-row]")) {
@@ -73,17 +70,22 @@ export function SidebarCardDms({
           "button[data-channel-id]",
         );
         const id = button?.dataset.channelId;
-        const preview = id ? previews.get(id) : undefined;
         const current = row.querySelector("[data-selected]") !== null;
         selected ||= current;
-        const waiting = !current && !!button && !!preview && unread(button);
-        row.toggleAttribute(UNREAD_DM_ROW, waiting);
-        if (!waiting || !id || !preview) continue;
+        // The same rule as the sidebar's unread cue, so the two always agree.
+        const waiting =
+          !current &&
+          !!button &&
+          !!id &&
+          audiblyUnread(button) &&
+          waitsForYou(button);
+        row.toggleAttribute(WAITING_ROW, waiting);
+        if (!waiting || !id) continue;
         count++;
         const below =
           !open ||
           (cut !== undefined && button.getBoundingClientRect().top >= cut - 1);
-        if (below) next.push({ channelId: id, ...preview });
+        if (below) next.push({ channelId: id, preview: previews?.get(id) });
       }
       setTotal(count);
       setHolding(selected);
@@ -92,7 +94,7 @@ export function SidebarCardDms({
         previous.every(
           (dm, index) =>
             dm.channelId === next[index]?.channelId &&
-            dm.src === next[index]?.src,
+            dm.preview?.src === next[index]?.preview?.src,
         )
           ? previous
           : next,
@@ -111,6 +113,7 @@ export function SidebarCardDms({
         "open",
         "data-channel-unread",
         "data-channel-muted",
+        "data-priority",
         "data-channel-activity",
         "data-channel-id",
         "data-selected",
@@ -126,8 +129,8 @@ export function SidebarCardDms({
       cancelAnimationFrame(frame);
       mutations.disconnect();
       sized?.disconnect();
-      for (const row of card.querySelectorAll(`[${UNREAD_DM_ROW}]`))
-        row.removeAttribute(UNREAD_DM_ROW);
+      for (const row of card.querySelectorAll(`[${WAITING_ROW}]`))
+        row.removeAttribute(WAITING_ROW);
     };
   }, [open, previews]);
   // Reading the last one ends the DM-only view; the card stays where it is.
@@ -139,7 +142,15 @@ export function SidebarCardDms({
   }, [settling, holding, onSettled]);
 
   const count = hidden.length;
-  const faces = hidden.slice(0, 3);
+  // Faces belong to DMs; mentions and thread replies add to the count.
+  const faces = hidden
+    .flatMap((waiting) =>
+      waiting.preview
+        ? [{ channelId: waiting.channelId, ...waiting.preview }]
+        : [],
+    )
+    .slice(0, 3);
+  const counted = count > 1 || faces.length === 0;
   return (
     <div
       ref={anchor}
@@ -163,31 +174,33 @@ export function SidebarCardDms({
           size="xs"
           shape="capsule"
           type="button"
-          aria-label={`${count} unread ${count === 1 ? "DM" : "DMs"}, show only these`}
+          aria-label={`${count} unread for you, show only these`}
           onClick={onShow}
         >
-          <span className={styles.unreadDmPreviews} aria-hidden="true">
-            <span className={styles.unreadDmStack}>
-              {faces.map((dm, index) => (
-                <span
-                  key={dm.channelId}
-                  className={styles.unreadDmAvatar}
-                  style={{ zIndex: faces.length - index }}
-                >
-                  <Avatar
-                    src={dm.src}
-                    alt=""
-                    fallback={dm.name}
-                    size="fill"
-                    shape={dm.isAgent ? "squircle" : "circle"}
-                  />
-                </span>
-              ))}
+          {faces.length > 0 && (
+            <span className={styles.unreadDmPreviews} aria-hidden="true">
+              <span className={styles.unreadDmStack}>
+                {faces.map((dm, index) => (
+                  <span
+                    key={dm.channelId}
+                    className={styles.unreadDmAvatar}
+                    style={{ zIndex: faces.length - index }}
+                  >
+                    <Avatar
+                      src={dm.src}
+                      alt=""
+                      fallback={dm.name}
+                      size="fill"
+                      shape={dm.isAgent ? "squircle" : "circle"}
+                    />
+                  </span>
+                ))}
+              </span>
+              {/* One face says it all; otherwise the count follows. */}
+              {faces.length > 0 && counted && <span>·</span>}
             </span>
-            {/* One face says it all; a count starts at two. */}
-            {count > 1 && <span>·</span>}
-          </span>
-          {count > 1 && <span>{count} unread</span>}
+          )}
+          {counted && <span>{count} unread</span>}
         </Button>
       ) : null}
     </div>
