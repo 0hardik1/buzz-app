@@ -552,7 +552,6 @@ it("honors the promoted DM's mute and unread state through reads and Bestie repl
         <PageNavigation
           pages={[page]}
           selected={page.key}
-          placement="dock"
           onSelect={() => {}}
         />
       </PrimarySidebar>
@@ -566,7 +565,8 @@ it("honors the promoted DM's mute and unread state through reads and Bestie repl
     </StrictMode>
   );
   const view = render(tree());
-  const row = () => screen.getByRole("tab", { name: /^Pollen/ });
+  // Bestie is a row in the sidebar's Plugins card.
+  const row = () => screen.getByRole("button", { name: /^Pollen/ });
   const dmRow = () => document.querySelector(`[data-channel-id="${first}"]`);
   expect(row().querySelector("[data-channel-priority]")).toBeNull();
   await waitFor(() =>
@@ -618,7 +618,7 @@ it("honors the promoted DM's mute and unread state through reads and Bestie repl
   act(() => {
     setDefaultAgent(currentScope, fizz);
   });
-  const replacement = screen.getByRole("tab", { name: "Fizz" });
+  const replacement = screen.getByRole("button", { name: /^Fizz/ });
   expect(replacement.querySelector("[data-channel-priority]")).toBeNull();
   act(() => {
     live?.receive([message(agent, first, "Old bestie message", 1_700_000_006)]);
@@ -637,7 +637,7 @@ it("honors the promoted DM's mute and unread state through reads and Bestie repl
   });
   expect(
     screen
-      .getByRole("tab", { name: "Create an agent" })
+      .getByRole("button", { name: /^Create an agent/ })
       .querySelector("[data-channel-priority]"),
   ).toBeNull();
 });
