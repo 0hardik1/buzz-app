@@ -1,7 +1,7 @@
 import { hoverMessage } from "./message-actions.mjs";
 import { test, expect } from "./fixture.mjs";
 import { holdReadingFocusNow, releaseReadingFocus } from "./reading.mjs";
-import { open, virtuaIdle } from "./timeline.mjs";
+import { open, settle, virtuaIdle } from "./timeline.mjs";
 
 test.use({
   threadPlacement: "inline",
@@ -668,6 +668,9 @@ test.describe("expanded thread scroll controls", () => {
         ),
       )
       .toBe(true);
+    // The channel follows its latest message through its own re-measures, so
+    // a scroll while it still moves is not the reader's.
+    await virtuaIdle(page, channel);
     // Establish the geometry under test independently of native wheel inertia.
     for (const scroller of [channel, thread]) {
       await scroller.evaluate((element) => {
@@ -779,6 +782,13 @@ test("long thread sheet windows replies while preserving reading, branches, and 
     exact: true,
   });
   await editor.fill("Windowed thread draft");
+  // The branch just opened can still be measuring; wheel input waits for it.
+  // Its replies are a list of their own, so name the window's.
+  await expect(history.locator("[data-thread-window] > ol")).toHaveCSS(
+    "pointer-events",
+    "auto",
+  );
+  await settle(page, history);
   await history.hover();
   await page.mouse.wheel(0, -10000);
   await expect(
