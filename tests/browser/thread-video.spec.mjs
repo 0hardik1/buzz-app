@@ -7,20 +7,21 @@ async function checkMediaExit(page, dialog, screenshot) {
   // Hold the real exit halfway through: the whole media should fade away,
   // rather than getting cropped into a bottom strip before unmounting.
   await dialog.evaluate((element) => {
-    element.addEventListener(
-      "click",
-      () =>
-        requestAnimationFrame(() => {
-          const animations = element.getAnimations({ subtree: true });
-          for (const animation of animations) {
-            animation.pause();
-            animation.currentTime =
-              Number(animation.effect.getTiming().duration) / 2;
-          }
-          element.dataset.exitSampled = String(animations.length);
-        }),
-      { once: true },
-    );
+    // The exit starts once the close renders, which can be frames after the
+    // click on a slow runner: hold it on the first frame it is running.
+    const hold = () => {
+      const animations = element.getAnimations({ subtree: true });
+      if (!animations.length) return requestAnimationFrame(hold);
+      for (const animation of animations) {
+        animation.pause();
+        animation.currentTime =
+          Number(animation.effect.getTiming().duration) / 2;
+      }
+      element.dataset.exitSampled = String(animations.length);
+    };
+    element.addEventListener("click", () => requestAnimationFrame(hold), {
+      once: true,
+    });
   });
   try {
     await dialog.getByRole("button", { name: "Close media viewer" }).click();

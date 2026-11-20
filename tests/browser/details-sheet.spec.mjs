@@ -312,14 +312,19 @@ test("thread sheet keeps its reply composer usable and restores the channel draf
     sheet.locator(`[data-message-id="${longReply.id}"]`),
   ).toBeAttached();
   await expect(history).toHaveAttribute("aria-busy", "false");
+  // Reopening starts at the first unread reply, as a side-pane thread does:
+  // the long reply begins in view instead of the thread scrolling past it.
   await expect
     .poll(() =>
-      history.evaluate(
-        (element) =>
-          element.scrollHeight - element.clientHeight - element.scrollTop,
-      ),
+      history.evaluate((element, id) => {
+        const reply = element.querySelector(`[data-message-id="${id}"]`);
+        const top =
+          reply.getBoundingClientRect().top -
+          element.getBoundingClientRect().top;
+        return top >= 0 && top < element.clientHeight;
+      }, longReply.id),
     )
-    .toBeLessThan(1);
+    .toBe(true);
   // A sheet belongs to this conversation, not to the whole application.
   // Real clicks prove the sidebar and global controls remain reachable.
   await page.getByRole("button", { name: "Beta", exact: true }).click();
@@ -342,10 +347,12 @@ test("thread sheet keeps its reply composer usable and restores the channel draf
   await expect(sheet.getByRole("textbox")).toHaveText("Thread draft");
   await sheet.getByRole("button", { name: "Open as tab", exact: true }).click();
   await expect(sheet).toBeHidden();
-  // The sheet's live reader moves into the tab, draft and all.
+  // The thread opens as its own thread tab, named by its root, draft and all.
   await expect(
-    page.locator('[role="tab"][aria-selected="true"]', { hasText: "Thread" }),
-  ).toBeVisible();
+    page
+      .getByRole("tablist", { name: "Panel tabs" })
+      .getByRole("tab", { selected: true }),
+  ).toHaveText(/primary alpha message 0/);
   await expect(
     page.getByRole("textbox", { name: "Reply to thread" }),
   ).toHaveText("Thread draft");
