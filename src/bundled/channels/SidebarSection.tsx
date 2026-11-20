@@ -67,6 +67,10 @@ import {
   SidebarCardDisplayContext,
   useSidebarCardDisplay,
 } from "./SidebarCardDisplay";
+import {
+  setSidebarUnreadsFirst,
+  useSidebarUnreadsFirst,
+} from "./SidebarUnreadsFirst";
 import styles from "./Channels.module.css";
 
 export function SidebarSection({
@@ -192,6 +196,7 @@ export function SidebarSection({
     iconView ? heightScope : undefined,
     sectionKey,
   );
+  const unreadsFirst = useSidebarUnreadsFirst(heightScope)(sectionKey);
   // The menu unmounts while hidden, so it must not reopen when shown again.
   if (hideMoreActions && menuOpen) setMenuOpen(false);
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -447,9 +452,30 @@ export function SidebarSection({
                       {display === "icons" ? "Show as list" : "Show as icons"}
                     </MenuItem>
                   )}
+                  {heightScope && (
+                    <MenuItem
+                      onClick={() => {
+                        setSidebarUnreadsFirst(
+                          heightScope,
+                          sectionKey,
+                          !unreadsFirst,
+                        );
+                        setMenuOpen(false);
+                      }}
+                    >
+                      <MenuIcon>
+                        <ChatUnreadIcon size={14} />
+                      </MenuIcon>
+                      {unreadsFirst
+                        ? "Stop showing unreads first"
+                        : "Show unreads first"}
+                    </MenuItem>
+                  )}
                   {createSection && (
                     <>
-                      {(filter || sort || iconView) && <MenuSeparator />}
+                      {(filter || sort || iconView || heightScope) && (
+                        <MenuSeparator />
+                      )}
                       <MenuItem
                         disabled={!createSection.available}
                         onClick={() => {
