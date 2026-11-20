@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { avatarMedia } from "../../shared/avatar-source";
 import { AgentAvatarArtworkProvider } from "../agents/AgentAvatarArtworkProvider";
-import { hoverAvatarSources } from "./HoverAvatarArtwork";
+import { profileAvatarSources } from "./ProfileAvatarArtwork";
 
 afterEach(() => {
   cleanup();
@@ -13,7 +13,7 @@ afterEach(() => {
 });
 const picture =
   "https://relay.example/poster.png#buzz-anim=https%3A%2F%2Frelay.example%2Fanimation.png";
-function setup(allowed = true) {
+function setup(allowed = true, autoPlay = true) {
   vi.stubGlobal("matchMedia", () => ({
     matches: allowed,
     addEventListener() {},
@@ -42,7 +42,7 @@ function setup(allowed = true) {
   );
   const view = render(
     <AgentAvatarArtworkProvider>
-      <Avatar src={source} alt="Person" fallback="Person" />
+      <Avatar autoPlay={autoPlay} src={source} alt="Person" fallback="Person" />
     </AgentAvatarArtworkProvider>,
   );
   const avatar = view.getByRole("img", { name: "Person" });
@@ -53,42 +53,26 @@ function setup(allowed = true) {
   };
   return { avatar, enter, requests };
 }
-it("loads full authorized animation on mouse hover, retains poster until ready, and restores it on exit", () => {
-  const { avatar, enter, requests } = setup();
-  const poster = avatar.querySelector("img")?.getAttribute("src");
-  expect(poster).toContain("/protected/small?");
-  expect(requests).toHaveLength(0);
-  enter();
+it("autoplays an expanded portrait once its authorized animation is ready", () => {
+  const { avatar, requests } = setup();
+  expect(avatar.querySelector("img")?.getAttribute("src")).toContain(
+    "/protected/small?",
+  );
   expect(requests[0]?.src).toContain("/protected/full?");
-  expect(requests[0]?.referrerPolicy).toBe("no-referrer");
-  expect(avatar.querySelector("img")).toHaveAttribute("src", poster);
   act(() => requests[0]?.onload?.());
   expect(avatar.querySelector("img")).toHaveAttribute("src", requests[0]?.src);
-  fireEvent.pointerLeave(avatar);
-  expect(avatar.querySelector("img")).toHaveAttribute("src", poster);
 });
-it("does not replace the poster when hover ends before loading completes", () => {
-  const { avatar, enter, requests } = setup();
-  const poster = avatar.querySelector("img")?.getAttribute("src");
-  enter();
-  const lateLoad = requests[0]?.onload;
-  fireEvent.pointerLeave(avatar);
-  act(() => lateLoad?.());
-  expect(avatar.querySelector("img")).toHaveAttribute("src", poster);
-});
-it("does not start hover playback for reduced motion or coarse pointers", () => {
-  const { enter, requests } = setup(false);
+it("keeps the inline portrait still on hover", () => {
+  const { enter, requests } = setup(true, false);
   enter();
   expect(requests).toHaveLength(0);
 });
-it("ignores touch pointer entry", () => {
-  const { enter, requests } = setup();
-  enter("touch");
-  expect(requests).toHaveLength(0);
+it("keeps expanded portraits still with reduced motion", () => {
+  expect(setup(false).requests).toHaveLength(0);
 });
 it("rejects unsafe animation schemes in display descriptors", () => {
   expect(
-    hoverAvatarSources(
+    profileAvatarSources(
       "https://example.org/poster#buzz-anim=file%3A%2F%2F%2Fprivate",
     ),
   ).toBeUndefined();
@@ -96,7 +80,7 @@ it("rejects unsafe animation schemes in display descriptors", () => {
 
 it("never interprets persisted profile metadata as authorized display metadata", () => {
   expect(
-    hoverAvatarSources(
+    profileAvatarSources(
       "https://example.org/poster#buzz-anim=%2Fapi%2Frelay%2Fprivate",
     ),
   ).toBeUndefined();
@@ -107,7 +91,7 @@ it("rejects display metadata hidden after another URL fragment", () => {
     "https://example.org/poster.png#section#buzz-avatar-display=%2Fapi%2Frelay%2Fprivate",
     (url) => url,
   );
-  expect(hoverAvatarSources(src ?? "")).toBeUndefined();
+  expect(profileAvatarSources(src ?? "")).toBeUndefined();
 });
 
 it.each([
@@ -118,7 +102,7 @@ it.each([
   "never promotes a public poster into protected media reads: %s",
   (animation) => {
     expect(
-      hoverAvatarSources(
+      profileAvatarSources(
         `https://example.org/poster.png#buzz-avatar-display=${encodeURIComponent(animation)}`,
       ),
     ).toBeUndefined();
@@ -130,7 +114,7 @@ it.each([
   "https://buzz-media.localhost",
 ])("supports matching native media hosts: %s", (origin) => {
   expect(
-    hoverAvatarSources(
+    profileAvatarSources(
       `${origin}/poster#buzz-avatar-display=${encodeURIComponent(`${origin}/animation`)}`,
     ),
   ).toEqual({ poster: `${origin}/poster`, animation: `${origin}/animation` });
@@ -143,7 +127,7 @@ it.each([
   "//example.org/animation",
 ])("rejects ambiguous display URL spellings: %j", (animation) => {
   expect(
-    hoverAvatarSources(
+    profileAvatarSources(
       `https://example.org/poster#buzz-avatar-display=${encodeURIComponent(animation)}`,
     ),
   ).toBeUndefined();

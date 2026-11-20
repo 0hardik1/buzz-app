@@ -1,9 +1,12 @@
 import type { ComponentProps, ReactNode } from "react";
-import { AvatarArtworkContext } from "../../shared/design-system/ui/Avatar";
 import {
-  HoverAvatarArtwork,
-  hoverAvatarSources,
-} from "../profiles/HoverAvatarArtwork";
+  AvatarArtwork,
+  AvatarArtworkContext,
+} from "../../shared/design-system/ui/Avatar";
+import {
+  ProfileAvatarArtwork,
+  profileAvatarSources,
+} from "../profiles/ProfileAvatarArtwork";
 import { agentAvatars } from "./avatar-packs";
 
 const packsBySource = new Map(
@@ -14,14 +17,21 @@ const packsBySource = new Map(
 );
 function renderArtwork(
   src: string,
-  options: Omit<
-    ComponentProps<typeof HoverAvatarArtwork>,
+  {
+    autoPlay,
+    ...options
+  }: { autoPlay: boolean } & Omit<
+    ComponentProps<typeof ProfileAvatarArtwork>,
     "poster" | "animation"
   >,
 ) {
-  const animated = hoverAvatarSources(src);
+  const animated = profileAvatarSources(src);
   if (animated)
-    return <HoverAvatarArtwork key={src} {...animated} {...options} />;
+    return autoPlay ? (
+      <ProfileAvatarArtwork key={src} {...animated} {...options} />
+    ) : (
+      <AvatarArtwork key={animated.poster} src={animated.poster} {...options} />
+    );
   const avatar = packsBySource.get(src);
   return avatar ? (
     <img
@@ -33,7 +43,7 @@ function renderArtwork(
   ) : null;
 }
 
-/** Human recordings play on hover; bundled agent artwork keeps its static portrait. */
+/** Human recordings play in expanded profiles; bundled agent artwork keeps its static portrait. */
 export function AgentAvatarArtworkProvider({
   children,
 }: {

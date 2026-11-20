@@ -800,32 +800,18 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   );
 });
 
-test("human avatars play on hover and return to their poster, respecting reduced motion", async ({
+test("the inline portrait stays still while the open profile preview plays", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/tests/fixtures/profile-settings.html");
-  const avatar = page.getByRole("img", {
-    name: "Hover playback sample",
-    exact: true,
-  });
-  const image = avatar.locator("img");
-  await expect(image).toHaveAttribute("src", /still\.png$/);
-  await page
-    .getByRole("button", { name: "Hover playback button", exact: true })
-    .hover();
-  await expect(image).toHaveAttribute("src", /animated\.png$/);
-  await expect(image).toHaveAttribute("data-loaded", "true");
-  await page.getByRole("heading").hover();
-  await expect(image).toHaveAttribute("src", /still\.png$/);
+  const trigger = page.getByRole("button", { name: "Hover playback button" });
+  await trigger.hover();
+  const portrait = page
+    .getByLabel("Sample person profile preview")
+    .locator(".buzz-avatar img");
+  await expect(portrait).toHaveAttribute("src", /animated\.png$/);
+  await expect(trigger.locator("img")).toHaveAttribute("src", /still\.png$/);
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page
-    .getByRole("button", { name: "Hover playback button", exact: true })
-    .hover();
-  // Pointer entry and the media change have both been handled before checking.
-  await expect(image).toHaveAttribute("src", /still\.png$/);
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await expect(image).toHaveAttribute("src", /animated\.png$/);
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect(image).toHaveAttribute("src", /still\.png$/);
+  await expect(portrait).toHaveAttribute("src", /still\.png$/);
 });

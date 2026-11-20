@@ -1,3 +1,4 @@
+import { ProfilePeek } from "../../src/features/profiles/ProfilePeek";
 import { IconButton } from "../../src/shared/design-system/ui/IconButton";
 import { AgentAvatarArtworkProvider } from "../../src/features/agents/AgentAvatarArtworkProvider";
 import { Avatar } from "../../src/shared/design-system/ui/Avatar";
@@ -137,6 +138,11 @@ const accountActions = {
 } as unknown as AccountActionsService;
 const communities = createCommunities(new Context(), true);
 Object.assign(window, { avatarProfileFixture: { profiles, communities } });
+const samplePicture = avatarMedia(
+  "https://example.org/poster.png#buzz-anim=https%3A%2F%2Fexample.org%2Fanimation.png",
+  (_url, size) =>
+    `/tests/fixtures/attachment-media/${size ? "still.png" : "animated.png"}`,
+);
 function Fixture() {
   useKeyboardFocusVisibility();
   const [human, setHuman] = useState(false);
@@ -148,20 +154,29 @@ function Fixture() {
       className="mx-auto max-w-4xl space-y-4 p-4 text-body text-primary"
     >
       <AgentAvatarArtworkProvider>
-        <IconButton
-          aria-label="Hover playback button"
-          variant="avatar"
-          icon={
-            <Avatar
-              alt="Hover playback sample"
-              fallback="Person"
-              src={avatarMedia(
-                "https://example.org/poster.png#buzz-anim=https%3A%2F%2Fexample.org%2Fanimation.png",
-                (_url, size) =>
-                  `/tests/fixtures/attachment-media/${size ? "still.png" : "animated.png"}`,
-              )}
+        <ProfilePeek
+          trigger={
+            <IconButton
+              aria-label="Hover playback button"
+              variant="avatar"
+              icon={
+                <Avatar
+                  alt="Hover playback sample"
+                  fallback="Person"
+                  src={samplePicture}
+                />
+              }
             />
           }
+          name="Sample person"
+          picture={samplePicture}
+          pubkey={profileViewer}
+          agent={false}
+          session={undefined}
+          channelId="sample"
+          viewer={undefined}
+          target="sample"
+          onOpen={() => true}
         />
       </AgentAvatarArtworkProvider>
       <header className="space-y-3 rounded-xl bg-panel p-4">

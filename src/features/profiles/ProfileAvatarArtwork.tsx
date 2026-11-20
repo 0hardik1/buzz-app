@@ -1,9 +1,9 @@
-import { useEffect, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AvatarArtwork } from "../../shared/design-system/ui/Avatar";
 import { avatarAnimationParts } from "../../shared/avatar-source";
 
 /** Accept authorized host URLs as well as public HTTPS artwork, never file or executable URLs. */
-export function hoverAvatarSources(src: string) {
+export function profileAvatarSources(src: string) {
   const parts = avatarAnimationParts(src, "#buzz-avatar-display=");
   const classify = (value: string) => {
     if (
@@ -47,43 +47,21 @@ export function hoverAvatarSources(src: string) {
   return parts;
 }
 
-export function HoverAvatarArtwork({
+export function ProfileAvatarArtwork({
   poster,
   animation,
-  root,
   fallback,
   loading,
 }: {
   poster: string;
   animation: string;
-  root: RefObject<HTMLSpanElement | null>;
   fallback: ReactNode;
   loading: "eager" | "lazy" | undefined;
 }) {
-  const [hovered, setHovered] = useState(false);
-  useEffect(() => {
-    if (!root.current) return;
-    const target =
-      getComputedStyle(root.current).pointerEvents === "none"
-        ? (root.current.closest("button, a, [role=button]") ?? root.current)
-        : root.current;
-    const enter = (event: Event) => {
-      if ((event as PointerEvent).pointerType === "mouse") setHovered(true);
-    };
-    const leave = () => setHovered(false);
-    target.addEventListener("pointerenter", enter);
-    target.addEventListener("pointerleave", leave);
-    return () => {
-      target.removeEventListener("pointerenter", enter);
-      target.removeEventListener("pointerleave", leave);
-    };
-  }, [root]);
   const [allowed, setAllowed] = useState(false);
   const [loaded, setLoaded] = useState<string>();
   useEffect(() => {
-    const query = matchMedia(
-      "(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)",
-    );
+    const query = matchMedia("(prefers-reduced-motion: no-preference)");
     const update = () => setAllowed(query.matches && !document.hidden);
     update();
     query.addEventListener("change", update);
@@ -93,7 +71,7 @@ export function HoverAvatarArtwork({
       document.removeEventListener("visibilitychange", update);
     };
   }, []);
-  const active = hovered && allowed;
+  const active = allowed;
   useEffect(() => {
     if (!active) return;
     const image = new Image();

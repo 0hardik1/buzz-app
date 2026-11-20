@@ -9,7 +9,6 @@ import {
   useRef,
   useState,
   type ReactNode,
-  type RefObject,
 } from "react";
 
 /** The host may supply artwork for recognized sources; unknown images keep normal loading. */
@@ -17,7 +16,7 @@ export const AvatarArtworkContext = createContext<
   | ((
       src: string,
       options: {
-        root: RefObject<HTMLSpanElement | null>;
+        autoPlay: boolean;
         fallback: ReactNode;
         loading: "eager" | "lazy" | undefined;
       },
@@ -147,6 +146,7 @@ export function Avatar({
   size = "default",
   shape = "circle",
   statusBadge,
+  autoPlay = false,
   loading,
 }: {
   src?: string | null | undefined;
@@ -158,15 +158,15 @@ export function Avatar({
   size?: AvatarSize;
   shape?: "circle" | "squircle";
   statusBadge?: "online" | "away" | "offline" | undefined;
+  autoPlay?: boolean;
   /** Immediate visible editors may bypass lazy scheduling, never image readiness. */
   loading?: "eager" | "lazy";
 }) {
   const renderArtwork = useContext(AvatarArtworkContext);
-  const root = useRef<HTMLSpanElement>(null);
   const initial = Array.from(fallback.trim())[0]?.toUpperCase() || "?";
   const content = fallbackContent ?? initial;
   const artwork = src
-    ? renderArtwork?.(src, { root, fallback: content, loading })
+    ? renderArtwork?.(src, { autoPlay, fallback: content, loading })
     : undefined;
   return (
     <span
@@ -176,7 +176,6 @@ export function Avatar({
       data-status={statusBadge}
     >
       <BaseAvatar.Root
-        ref={root}
         data-buzz-ui=""
         className="buzz-avatar"
         data-size={size}
