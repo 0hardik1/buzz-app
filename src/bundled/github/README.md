@@ -19,9 +19,7 @@ Preview GitHub repositories, pull requests, issues, and commits without leaving 
 2. On a pull request, switch between **Discussion** and **Checks**.
 3. Switch a pull request from **Summary** to **Changes** to read its diff.
 4. Choose **Open on GitHub** to see the full page.
-5. With `gh` signed in, get a desktop alert for the GitHub notifications you
-   choose under **Alerts** in the GitHub settings: reviews requested from you
-   by name, from your teams or because CODEOWNERS lists you, and mentions of
-   you or your teams. By default only reviews requested from you and mentions
-   of you alert. Buzz reads your GitHub notifications once a minute; a read
+5. With `gh` signed in, get desktop alerts for the pull request events you
+   choose under **Alerts** in the GitHub settings, like those GitHub's Slack
+   app offers. Buzz reads your GitHub notifications once a minute; a read
    with nothing new costs none of your rate limit.

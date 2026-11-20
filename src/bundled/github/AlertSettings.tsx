@@ -15,7 +15,7 @@ export function AlertSettings({ active }: { active(): boolean }) {
     <section aria-label="GitHub alert settings">
       <InlineHeader
         title="Alerts"
-        subtitle="Desktop alerts for your unread GitHub notifications while Buzz is open. Turn them all off under GitHub in Settings → Notifications."
+        subtitle="Desktop alerts for pull requests you're involved in, while Buzz is open. Turn them all off under GitHub in Settings → Notifications."
       />
       <SettingsGroup>
         {ALERT_KINDS.map((kind) => (

@@ -1959,15 +1959,16 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   panel or your browser. It starts on and is saved on this device across all
   communities. Turning it off keeps pull request indicators and agent tools enabled.
 - With `gh` signed in on the desktop app, the **GitHub** plugin can alert you
-  about your GitHub notifications. Choose which kinds under **Alerts** in the
-  GitHub settings: reviews requested from you by name (on by default), from
-  your teams, or because CODEOWNERS lists you, and mentions of you (on by
-  default) or of your teams. **GitHub** in **Settings → Notifications** turns
-  them all off. It checks GitHub's notifications about once a minute while
-  Buzz is open and alerts once per pull request or issue until you read it on
-  GitHub. It skips notifications that were already unread the first time it
-  ran or are more than a day old. Clicking an alert opens Buzz, not the pull
-  request.
+  about pull requests. Choose which events alert under **Alerts** in the
+  GitHub settings: your review requested (by name, through a team, or as a
+  code owner), your pull request approved or changes requested, being
+  assigned, comments on your pull request or one you're in, being mentioned,
+  your pull request merged, and its checks failing. **GitHub** in
+  **Settings → Notifications** turns them all off. It checks GitHub about once
+  a minute while Buzz is open. Each new event alerts once, and nothing you did
+  yourself alerts. It skips what was already unread the first time it ran, and
+  notifications more than a day old. Clicking an alert opens Buzz, not the
+  pull request.
 - The **GitHub** plugin’s pull request panel offers **Queue for merge** when
   the target branch requires a merge queue. After confirmation, it queues the
   displayed commit and shows **Queued for merge**; GitHub controls when it merges.

@@ -1,16 +1,33 @@
 import { useSyncExternalStore } from "react";
 
-/** What GitHub notifies about that can alert, each with its own switch. */
+/** What can alert about pull requests, each with its own switch. */
 export const ALERT_KINDS = [
-  { key: "review", label: "Reviews requested from you", on: true },
-  { key: "teamReview", label: "Reviews requested from your teams", on: false },
+  { key: "review", label: "Your review is requested", on: true },
+  { key: "teamReview", label: "Your team's review is requested", on: false },
   {
     key: "codeOwnerReview",
-    label: "Reviews requested because you're a code owner",
+    label: "Your review is requested because you're a code owner",
     on: false,
   },
-  { key: "mention", label: "Mentions of you", on: true },
-  { key: "teamMention", label: "Mentions of your teams", on: false },
+  {
+    key: "reviewed",
+    label: "Your pull request is approved or has changes requested",
+    on: true,
+  },
+  { key: "assigned", label: "You're assigned to a pull request", on: true },
+  { key: "comment", label: "Someone comments on your pull request", on: true },
+  {
+    key: "threadComment",
+    label: "Someone comments on a pull request you're in",
+    on: false,
+  },
+  { key: "mention", label: "You're mentioned on a pull request", on: true },
+  { key: "merged", label: "Your pull request is merged", on: false },
+  {
+    key: "failedChecks",
+    label: "Your pull request has failed checks",
+    on: false,
+  },
 ] as const;
 
 export type AlertKind = (typeof ALERT_KINDS)[number]["key"];
