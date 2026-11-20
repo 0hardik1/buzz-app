@@ -73,7 +73,11 @@ import { threadReference } from "../../features/relay/thread-reference";
 import type { ChannelLabel } from "../../features/channels/channel-icon";
 import { appClient, readFile, relayKeyOf } from "../../buzz-mcp/app-client";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
-import { project, readCanvas } from "../../features/agent-harness/project";
+import {
+  project,
+  readCanvas,
+  worksElsewhere,
+} from "../../features/agent-harness/project";
 import {
   referencedFolders,
   referencedSkills,
@@ -189,7 +193,7 @@ type Request = {
   sessionContext?: string;
   /** The Solo chat's workspace Canvas section, if it has one. */
   project?: string;
-  /** `project` for a turn that works where `elsewhere` says. */
+  /** `project` for a turn that works where `worksElsewhere` says. */
   projectAt?: (elsewhere: boolean) => string | undefined;
   canvas?: Project;
   solo?: boolean;
@@ -985,7 +989,7 @@ export class CodexRuntime {
         {},
         undefined,
         home,
-        sessionPlace(conversation),
+        conversation,
       );
       const { bridge } = prepared;
       let { params } = prepared;
@@ -2250,9 +2254,13 @@ export class CodexRuntime {
     // A community session works in the agent's workspace, as
     // `conversationPlace` has it, whatever folder the chat kept.
     const canvasProjectOf = (
-      elsewhere = settings.scope !== "community" &&
-        // A Solo chat is one conversation, with no thread root.
-        Boolean(this.folder(reads.scope, agent.key, channelId)),
+      elsewhere = worksElsewhere(
+        settings.scope === "community"
+          ? undefined
+          : // A Solo chat is one conversation, with no thread root.
+            this.folder(reads.scope, agent.key, channelId),
+        agent.promptSections?.(channelId),
+      ),
     ) => canvasRead && project(canvasRead.text, elsewhere);
     const projectOf = (elsewhere?: boolean) =>
       [
@@ -2835,8 +2843,6 @@ export class CodexRuntime {
         workspace,
         {},
         delivery.synced,
-        undefined,
-        "standalone",
       );
       const { model, effort, summary, bridge } = prepared;
       let { params } = prepared;
@@ -3613,8 +3619,8 @@ export class CodexRuntime {
     synced?: Delivery["synced"],
     /** The agent's workspace, when `workspace` is the conversation's folder. */
     home?: string,
-    /** What the thread is, for its Session Model. */
-    place?: Facts["place"],
+    /** The conversation the thread is for; none for a one-off turn. */
+    conversation?: Readonly<{ channelId: string; root?: string }>,
   ) {
     const normalized = await rpc.request<{
       config: ProviderConfig & {
@@ -3655,8 +3661,18 @@ export class CodexRuntime {
     const credential = await rpc.toolCredential(agent);
     // Read once: what the thread is told and what its saved prompt shows
     // come from the same choices.
-    const choices = agent.promptSections?.();
-    const base = composeBase(baseFacts(settings, home, place), choices);
+    const choices = agent.promptSections?.(
+      conversation?.channelId,
+      conversation?.root,
+    );
+    const base = composeBase(
+      baseFacts(
+        settings,
+        home,
+        conversation ? sessionPlace(conversation) : "standalone",
+      ),
+      choices,
+    );
     const params = {
       model,
       cwd: workspace,
@@ -3765,15 +3781,20 @@ export class CodexRuntime {
 
   /** Whether a thread that started with `sections` can be given `base`.
    * One from before its sections were kept cannot be told which of them
-   * the owner changed, so it starts fresh once. A remote thread is kept by
-   * design, as restarting it would stop the conversation with a reset
-   * error: it keeps the sections it started with until the owner chooses
-   * New. */
+   * changed, so it starts fresh once. A remote thread is kept by design for
+   * the owner's choices, as restarting it would stop the conversation with
+   * a reset error: it keeps the sections it started with until the owner
+   * chooses New. A plugin's text is not the owner's to wait for, so the
+   * remote thread asks for New then. */
   private keepsSections(
     sections: Saved["sections"],
-    base: Pick<ReturnType<typeof composeBase>, "custom">,
+    base: Pick<ReturnType<typeof composeBase>, "custom" | "plugin">,
   ) {
-    return !base.custom || sections?.layout === LAYOUT || !!this.target;
+    return (
+      !base.custom ||
+      sections?.layout === LAYOUT ||
+      (!!this.target && !base.plugin)
+    );
   }
 
   /** Shared thread setup; a voice seat retains it between delegated turns. */
@@ -3806,7 +3827,7 @@ export class CodexRuntime {
       request,
       request.synced,
       home,
-      sessionPlace(request.conversation),
+      request.conversation,
     );
     const { model, effort, summary, bridge, base, choices } = prepared;
     let { params } = prepared;
@@ -3828,10 +3849,9 @@ export class CodexRuntime {
       // tools starts fresh.
       const added = this.added();
       const tools = addedKey(added);
-      const resuming =
-        existing?.workspace === workspace &&
-        (existing.tools ?? "") === tools &&
-        this.keepsSections(existing.sections, base);
+      const same =
+        existing?.workspace === workspace && (existing.tools ?? "") === tools;
+      const resuming = same && this.keepsSections(existing?.sections, base);
       /** The Buzz session a gateway thread runs under. */
       let binding = resuming ? existing.gateway : undefined;
       // The whole table replaces the provider's headers on every start and
@@ -3869,7 +3889,9 @@ export class CodexRuntime {
       if (this.target && existing && !resuming)
         throw Object.assign(
           new Error(
-            "The Codex workspace or tools changed. Start a new session to continue.",
+            same
+              ? "The base instructions of this conversation changed. Start a new session to continue."
+              : "The Codex workspace or tools changed. Start a new session to continue.",
           ),
           { code: "EXECUTION_SESSION_RESET_REQUIRED" },
         );
@@ -3931,8 +3953,6 @@ export class CodexRuntime {
       return {
         threadId,
         workspace,
-        // Where it works, which its Canvas states the rule from.
-        elsewhere: Boolean(home),
         params,
         model,
         effort,
@@ -3946,6 +3966,8 @@ export class CodexRuntime {
         base,
         facts,
         sections,
+        // Where it works, which its Canvas states the rule from.
+        elsewhere: worksElsewhere(home && workspace, choices),
         updates: fresh
           ? ""
           : sectionUpdates(existing?.sections, facts, choices),
@@ -4053,7 +4075,12 @@ export class CodexRuntime {
       seat = lane.voice;
       // A seat keeps its loaded thread between turns, and the owner can
       // change a section meanwhile: its turns get the sections as they are.
-      const choices = seat && agent.promptSections?.();
+      const choices =
+        seat &&
+        agent.promptSections?.(
+          request.conversation.channelId,
+          request.conversation.root,
+        );
       if (
         seat &&
         adopted === undefined &&
