@@ -14,6 +14,11 @@ import { missing } from "./harness";
 import manifest from "./manifest.json";
 import { AcpRuntime } from "./runtime";
 import { localSessions } from "./sessions";
+import {
+  PROMPTS_PREFIX,
+  sessionPrompts,
+} from "../../features/agents/session-prompts";
+import { localStore } from "../../features/agents/store";
 import { eventDto, type RelayEvent } from "../../features/relay/events";
 import { keypair, signed } from "../../features/relay/testing";
 
@@ -1227,6 +1232,33 @@ describe("AcpRuntime", () => {
       >;
     }
 
+    it("keeps a new session's prompt, and never today's for a resumed one", async () => {
+      const config = await confirmed({ instructions: INSTRUCTIONS });
+      const one = setup({ capabilities: resumable });
+      const prompts = sessionPrompts(localStore(one.storage), "acp", self);
+      one.sync(config);
+      const root = message("1", "@Opal hello");
+      await one.deliver(root, config).run;
+      await vi.waitFor(() =>
+        expect(prompts.get("session-1")?.[0]?.text).toContain(INSTRUCTIONS),
+      );
+      await flush(20);
+      one.runtime.dispose();
+      // Saved before prompts were kept: its prompt stays unknown.
+      await localStore(one.storage).set(`${PROMPTS_PREFIX}acp:${self}`, null);
+      const two = setup({ capabilities: resumable }, { storage: one.storage });
+      two.sync(config);
+      const reply = message("2", "@Opal again");
+      reply.tags.push(["e", root.id, "", "reply"]);
+      await two.deliver(reply, config).run;
+      await vi.waitFor(() =>
+        expect(two.fake.harnesses[0]?.turns).toHaveLength(1),
+      );
+      expect(two.fake.harnesses[0]?.sent("session/load")).toHaveLength(1);
+      await flush(20);
+      expect(prompts.get("session-1")).toBeUndefined();
+    });
+
     it("loads the saved session and sends only what it hasn't seen, without instructions", async () => {
       const config = await confirmed({ instructions: INSTRUCTIONS });
       const harness = await twoRuns(config, config);
@@ -1277,6 +1309,29 @@ describe("AcpRuntime", () => {
       });
       expect(harness.sent("session/load")).toHaveLength(0);
       expect(harness.sent("session/new")).toHaveLength(1);
+    });
+
+    it("shows a replayed session's saved prompt at its top", async () => {
+      const { runtime, storage, sync } = setup({
+        capabilities: resumable,
+        replay: [
+          {
+            sessionUpdate: "user_message_chunk",
+            content: { type: "text", text: "hi" },
+          },
+        ],
+      });
+      sync(await confirmed());
+      localSessions(storage, self).set(channel, { at: 1, id: "old" });
+      await sessionPrompts(localStore(storage), "acp", self).save("old", [
+        { label: "", text: "You are Opal." },
+      ]);
+      const read = await runtime.transcript(
+        self,
+        channel,
+        new AbortController().signal,
+      );
+      expect(JSON.stringify(read?.turns[0])).toContain("You are Opal.");
     });
 
     it("places each replayed transcript turn in its saved conversation", async () => {

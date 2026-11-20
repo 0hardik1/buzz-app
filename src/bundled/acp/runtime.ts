@@ -52,6 +52,8 @@ import {
   type TurnResult,
 } from "../../features/agents/service";
 import { soloChat } from "../../features/agents/solo-chat";
+import { sessionPrompts } from "../../features/agents/session-prompts";
+import { localStore } from "../../features/agents/store";
 import type { Host } from "../../features/host/service";
 import type { EventData } from "../../features/relay/events";
 import type { RelayData } from "../../features/relay/service";
@@ -893,6 +895,16 @@ export class AcpRuntime {
       process: entry.harness,
       store: entry.store,
       onChange: () => this.notify(),
+      // Only a new session's prompt is its own: a resumed one started with
+      // whatever it was sent then.
+      started: (session, text, title, conversation, resumed) => {
+        if (resumed) return;
+        void this.prompts(agent).save(session, [{ label: "", text }], {
+          at: Date.now(),
+          title: title ?? "",
+          conversation: conversation ?? null,
+        });
+      },
       resume: true,
       configOptions: true,
       // Each session runs on the settings it opened with. Only a saved change
@@ -986,6 +998,11 @@ export class AcpRuntime {
     return list;
   }
 
+  /** What each of the agent's new sessions was started with. */
+  private prompts(agent: AgentKey) {
+    return sessionPrompts(localStore(this.storage), "acp", agent);
+  }
+
   replays(agent: AgentKey) {
     return this.agents.get(agent)?.replays;
   }
@@ -1018,10 +1035,12 @@ export class AcpRuntime {
     }
     return (
       transcript && {
-        turns: transcript.turns.map((turn) => ({
-          ...turn,
-          channelId: channelId ?? null,
-        })),
+        turns: this.prompts(agent)
+          .shown(transcript.turns)
+          .map((turn) => ({
+            ...turn,
+            channelId: channelId ?? null,
+          })),
       }
     );
   }

@@ -256,12 +256,14 @@ export type SessionsOptions<S = unknown> = Readonly<{
   /** Where each conversation's last use is saved. */
   store?: SessionStore;
   /** Told of each session opened, with the prompt and title it was opened
-   * with, and the conversation it opened for: none for a one-off turn. */
+   * with, and the conversation it opened for: none for a one-off turn.
+   * `resumed`: a saved session reopened, which today's prompt never started. */
   started?(
     sessionId: string,
     systemPrompt: string,
     title?: string,
     conversation?: string,
+    resumed?: boolean,
   ): void;
   /** The tags a session opens with, for the conversation it opens for:
    * none for a one-off turn. */
@@ -1557,6 +1559,7 @@ export class AgentSessions<S = unknown> {
       launch.systemPrompt,
       title,
       this.once.has(key) ? undefined : key,
+      session.resumed,
     );
     // Removed meanwhile: the callers are gone, and `shutdown` waits for this.
     if (this.disposed) void this.close(live);
