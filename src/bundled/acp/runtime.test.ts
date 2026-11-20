@@ -5,7 +5,6 @@ import { modelCache, picks } from "./models";
 import type { AddedTool } from "../../buzz-mcp/session-tools";
 import type { Delivery } from "../../features/agents/service";
 import type { Host } from "../../features/host/service";
-import type { RelayEvent } from "../../features/relay/events";
 import type { RelayData } from "../../features/relay/service";
 import { REQUEST_TIMEOUT_MS } from "../../features/agent-harness/acp/process";
 import { flush } from "../goose/goose-testing";
@@ -15,6 +14,8 @@ import { missing } from "./harness";
 import manifest from "./manifest.json";
 import { AcpRuntime } from "./runtime";
 import { localSessions } from "./sessions";
+import { eventDto, type RelayEvent } from "../../features/relay/events";
+import { keypair, signed } from "../../features/relay/testing";
 
 const appClient = vi.hoisted(() => vi.fn());
 vi.mock("../../buzz-mcp/app-client", async (actual) => {
@@ -89,7 +90,10 @@ function setup(
     solo = false,
     canvas,
     storage = memoryStorage(),
+    workflowAuthority = "workflow-authority",
   }: {
+    /** The community's relay workflow key. */
+    workflowAuthority?: string;
     /** Where saved conversations and models are kept. */
     storage?: Storage;
     solo?: boolean;
@@ -117,7 +121,7 @@ function setup(
       }),
     },
     relayAuthor: "relay-author",
-    workflowAuthority: "workflow-authority",
+    workflowAuthority,
     channelWrites: { startingCanvas: () => undefined },
     canvas: {
       available: canvas !== undefined,
@@ -142,9 +146,26 @@ function setup(
       has: () => false,
     },
   };
+  // A reconnect tells its subscribers once the community is ready again.
+  const state = { status: "ready" };
+  const listeners = new Set<() => void>();
   const relay = {
-    snapshot: () => ({ status: "ready", session, viewer: alice }),
+    snapshot: () => ({
+      status: state.status,
+      ...(state.status === "ready" ? { session } : {}),
+      viewer: alice,
+      origin: "https://acp.example",
+      scope: `https://acp.example:${alice}`,
+    }),
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
   } as unknown as RelayData;
+  const connect = (status: string) => {
+    state.status = status;
+    for (const listener of [...listeners]) listener();
+  };
   // Another community of the same identity: its own session, with its own memory.
   const awaySession = {
     ...session,
@@ -168,6 +189,7 @@ function setup(
     pubkey: self,
     name: "Opal",
     owner: alice,
+    relay: "wss://acp.example",
     type: "buzz.acp/acp",
     publish: vi.fn(async (template: (typeof published)[number]) => {
       published.push(template);
@@ -213,6 +235,7 @@ function setup(
     cache,
     storage,
     agent,
+    connect,
   };
 }
 
@@ -794,6 +817,60 @@ describe("AcpRuntime", () => {
     expect(fake.harnesses).toEqual([]);
   });
 
+  describe("a workflow's mention", () => {
+    const workflow = (named: boolean) => {
+      const relay = keypair();
+      return {
+        relay,
+        event: eventDto(
+          signed(relay, {
+            kind: 9,
+            content: "@Opal workflow",
+            tags: [
+              ["h", channel],
+              ["p", self],
+              ["buzz:workflow", "true"],
+              ["buzz:workflow-owner", alice],
+              ...(named ? [["buzz:workflow-mention", self]] : []),
+            ],
+          }),
+        ) as RelayEvent,
+      };
+    };
+
+    it("that arrives during a reconnect is answered once the community is ready", async () => {
+      const config = await confirmed();
+      const { relay, event } = workflow(true);
+      const { fake, deliver, sync, connect } = setup(
+        {},
+        { workflowAuthority: relay.pubkey },
+      );
+      sync(config);
+      connect("connecting");
+      const { run, ignored } = deliver(event, config);
+      await flush(20);
+      expect(fake.harnesses).toEqual([]);
+      connect("ready");
+      await run;
+      await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+      expect(ignored).not.toHaveBeenCalled();
+    });
+
+    it("that doesn't name the agent is refused with the workflow reason", async () => {
+      const config = await confirmed();
+      const { relay, event } = workflow(false);
+      const { fake, deliver, sync } = setup(
+        {},
+        { workflowAuthority: relay.pubkey },
+      );
+      sync(config);
+      const { run, ignored } = deliver(event, config);
+      await run;
+      expect(ignored).toHaveBeenCalledExactlyOnceWith("workflow");
+      expect(fake.harnesses).toEqual([]);
+    });
+  });
+
   it.each([
     ["a provider error", "Request failed: https://p.test/v1?key=SENTINEL"],
     ["a plain answer", "Here is my answer, SENTINEL"],
@@ -1283,6 +1360,23 @@ describe("AcpRuntime", () => {
       await deliver(at(message("6", "@Opal same second"), 105), config).run;
       await flush(50);
       expect(turns).toHaveLength(3);
+    });
+
+    it("answers a mention an earlier prompt showed only as context", async () => {
+      const config = await confirmed({ scope: "channel" });
+      const first = at(message("5", "@Opal first"), 105);
+      const tie = at(message("6", "@Opal same second"), 105);
+      const { fake, deliver, sync } = setup(
+        {},
+        { read: async () => [first, tie] },
+      );
+      sync(config);
+      await deliver(first, config).run;
+      await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+      expect(fake.harnesses[0]?.turns[0]?.text).toContain("@Opal same second");
+      await flush(20);
+      await deliver(tie, config).run;
+      await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(2));
     });
 
     it("keeps identity coverage across a resume", async () => {
@@ -2245,6 +2339,30 @@ describe("AcpRuntime", () => {
       expect(runtime.signIn(self)).toEqual({ methods: [{ name: "Log in" }] }),
     );
     fake.harnesses[0]?.turns[0]?.finish();
+    await flush(50);
+    expect(runtime.signIn(self)).toEqual({ methods: [{ name: "Log in" }] });
+  });
+
+  it("keeps the sign-in state through a stopped turn on the same launch", async () => {
+    const config = await confirmed();
+    const { fake, deliver, sync, runtime } = setup({
+      hold: true,
+      authMethods: [{ id: "login", name: "Log in" }],
+    });
+    sync(config);
+    await deliver(message("1", "@Opal one"), config).run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+    fake.harnesses[0]?.turns[0]?.fail(-32000, "Sign in first");
+    await vi.waitFor(() =>
+      expect(runtime.signIn(self)).toEqual({ methods: [{ name: "Log in" }] }),
+    );
+    const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
+    await deliver(message("2", "@Opal two"), config, undefined, {
+      interruptible,
+    }).run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(2));
+    await interruptible.mock.calls[0]?.[0]();
+    fake.harnesses[0]?.turns[1]?.finish("cancelled");
     await flush(50);
     expect(runtime.signIn(self)).toEqual({ methods: [{ name: "Log in" }] });
   });

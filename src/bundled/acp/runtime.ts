@@ -9,7 +9,7 @@
 import { type AgentKey, pubkeyOf } from "../../features/agents/membership";
 import type { Context, Memories } from "../../buzz-mcp/client";
 import {
-  abortable,
+  MemoryReads,
   READ_TIMEOUT_MS,
 } from "../../features/agent-harness/core-memory";
 import { respond } from "../../buzz-mcp/rpc";
@@ -40,7 +40,7 @@ import {
 } from "../../features/agent-harness/acp/types";
 import type { Transcript } from "../../features/agents/activity-transcript";
 import {
-  fromOwner,
+  mentionAuthority,
   type Agent,
   type AgentHandle,
   type Agents,
@@ -66,7 +66,12 @@ import { digest } from "../../features/agent-harness/acp/agent-sessions";
 import { RESUMED_PROMPT } from "../../buzz-mcp/prompt";
 import { standalonePrompt } from "../goose/runtime";
 import { readAuthorNames } from "../../features/agent-harness/author-names";
-import { ownerReads } from "../../features/agents/reads";
+import {
+  ownerReads,
+  readyOwnerReads,
+  workflowMarked,
+} from "../../features/agents/reads";
+import { workflowOf } from "../../features/agents/owner-attestation";
 import { offers } from "../../features/agent-harness/acp/options";
 import { unsupportedSynced } from "../../features/agents/agent-config";
 import {
@@ -99,7 +104,9 @@ const launchOf = ({ command, args, env, workspace, approval }: Config) =>
  * delivered on launch `generation`; an older launch's says nothing of it. */
 function signedIn(entry: Entry, generation: Generation, result: Settled) {
   if (generation !== entry.generation) return;
-  if (result.ok) entry.signIn = undefined;
+  // A stopped or undelivered turn proves nothing about signing in.
+  if (result.ok && !result.stopped && !result.undelivered)
+    entry.signIn = undefined;
   else if (result.code === AUTH_REQUIRED)
     entry.signIn = {
       methods: (result.authMethods ?? []).map(({ name, description }) => ({
@@ -179,7 +186,7 @@ type Entry = {
 
 export class AcpRuntime {
   private readonly agents = new Map<string, Entry>();
-  private readonly reading = new Map<string, Promise<Memories>>();
+  private readonly memoryReads = new MemoryReads();
   private readonly listeners = new Set<() => void>();
   private readonly views = new Map<
     string,
@@ -382,23 +389,26 @@ export class AcpRuntime {
     // The harness runs commands as you; mentions need owner or delegated
     // authority.
     if (trigger.type === "mention") {
-      const snapshot = this.relay(agent.key)?.snapshot();
-      if (
-        !(await fromOwner(trigger.event, agent.owner, {
-          agent: agent.pubkey,
-          authority:
-            snapshot?.status === "ready"
-              ? snapshot.session.workflowAuthority
-              : undefined,
-          profiles:
-            snapshot?.status === "ready"
-              ? snapshot.session.profiles
-              : undefined,
-        }))
-      ) {
-        ignored?.();
-        return;
+      // A workflow's mention waits out a reconnect; the check below decides.
+      const ready = workflowMarked(trigger.event, agent.owner);
+      const reads = ready
+        ? await readyOwnerReads(
+            this.relay(agent.key),
+            agent,
+            signal,
+            channelId ?? trigger.event.tags.find((tag) => tag[0] === "h")?.[1],
+          )
+        : ownerReads(this.relay(agent.key), agent.pubkey);
+      if (ready) {
+        signal.throwIfAborted();
+        if (current && !current()) return ignored?.();
       }
+      const authority = await mentionAuthority(
+        trigger.event,
+        agent.owner,
+        workflowOf(reads, agent.pubkey),
+      );
+      if (authority !== "owner") return ignored?.(authority);
       signal.throwIfAborted();
     }
     const entry = this.entry(agent.key, settings);
@@ -464,7 +474,9 @@ export class AcpRuntime {
         // Only a commit adds to `from`, so what it holds was delivered.
         const unpaid = owed.get(key).filter((id) => !from.ids.includes(id));
         owed.set(key, unpaid);
-        if (from.ids.includes(event.id)) return undefined;
+        // Only a request a prompt delivered as its own is answered; one shown
+        // as another prompt's context still is.
+        if (from.requests?.includes(event.id)) return undefined;
         const turn = await this.turn(
           agent.key,
           event,
@@ -496,7 +508,7 @@ export class AcpRuntime {
             resumed ? `${prompt}\n\n${RESUMED_PROMPT}` : prompt,
           ),
           // Only what the prompt shows counts as seen.
-          through: cover(from, [...turn.context.slice(-CONTEXT_LIMIT), event]),
+          through: cover(from, turn.context.slice(-CONTEXT_LIMIT), event),
         };
       },
       signal,
@@ -1017,51 +1029,47 @@ export class AcpRuntime {
   /** The agent's memory, or only entry `slug`, read back through the owner's
    * session: it is encrypted to the owner, so no agent key is needed. */
   private memories(agent: AgentKey, slug?: string): Promise<Memories> {
-    const key = `${agent}\0${slug ?? ""}`;
-    let reading = this.reading.get(key);
-    if (!reading) {
-      const started = this.readMemories(agent, slug).finally(() => {
-        if (this.reading.get(key) === started) this.reading.delete(key);
-      });
-      this.reading.set(key, started);
-      reading = started;
-    }
-    // The shared read keeps its own bound, so a caller that stops waiting
-    // sooner cannot cut it short for the others.
-    return abortable(reading, AbortSignal.timeout(READ_TIMEOUT_MS));
+    const pubkey = pubkeyOf(agent);
+    const reads = ownerReads(this.relay(agent), pubkey);
+    if (!reads) return Promise.reject(new Error("Buzz is not connected"));
+    return this.memoryReads.read(
+      reads,
+      pubkey,
+      AbortSignal.timeout(READ_TIMEOUT_MS),
+      slug,
+    );
   }
   /** After a memory write, a read that may have started before it is not
    * shared with later callers. */
   private forgetMemories(agent: AgentKey) {
-    for (const key of this.reading.keys())
-      if (key.startsWith(`${agent}\0`)) this.reading.delete(key);
-  }
-  private async readMemories(
-    agent: AgentKey,
-    slug?: string,
-  ): Promise<Memories> {
-    const snapshot = this.relay(agent)?.snapshot();
-    if (snapshot?.status !== "ready") throw new Error("Buzz is not connected");
-    return snapshot.session.agentMemories.read(
-      pubkeyOf(agent),
-      AbortSignal.timeout(READ_TIMEOUT_MS),
-      slug,
-    );
+    const pubkey = pubkeyOf(agent);
+    const reads = ownerReads(this.relay(agent), pubkey);
+    if (reads) this.memoryReads.forget(reads.connection, pubkey);
   }
 }
 
 /** Newest event ids a mark remembers; an id that falls out can only repeat. */
 const COVERED_IDS = 256;
 
-/** `from` plus the events a prompt carried: identities, not just seconds, so
- * a distinct message in a covered second, or a late older one, still goes. */
-export function cover(from: Mark, carried: readonly EventData[]): Mark {
+/** `from` plus the events a prompt carried as context and its `request`:
+ * identities, not just seconds, so a distinct message in a covered second, or
+ * a late older one, still goes. */
+export function cover(
+  from: Mark,
+  context: readonly EventData[],
+  request: EventData,
+): Mark {
+  const carried = [...context, request];
   const added = new Set(carried.map((item) => item.id));
   return {
     at: Math.max(from.at, ...carried.map((item) => item.created_at)),
     ids: [...from.ids.filter((id) => !added.has(id)), ...added].slice(
       -COVERED_IDS,
     ),
+    requests: [
+      ...(from.requests ?? []).filter((id) => id !== request.id),
+      request.id,
+    ].slice(-COVERED_IDS),
   };
 }
 

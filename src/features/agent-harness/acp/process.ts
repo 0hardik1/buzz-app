@@ -376,6 +376,7 @@ export class AcpProcess {
       });
       session.resumed = true;
       session.replaying = reopen === "session/load";
+      session.reopening = true;
       this.sessions.set(resume, session);
       launch.onSession?.(session);
       try {
@@ -389,7 +390,8 @@ export class AcpProcess {
           REQUEST_TIMEOUT_MS,
         )) as { configOptions?: unknown } | undefined;
         session.replaying = false;
-        // An answer without options keeps what the replay reported.
+        session.reopening = false;
+        // An answer without options keeps what reopening reported.
         session.replace(result?.configOptions);
         if (stopped) throw new Error(STOPPED);
       } catch (error) {

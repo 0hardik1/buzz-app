@@ -51,7 +51,12 @@ export type AuthMethod = Readonly<{
 
 /** What a session has been shown: the newest second it covers, and the
  * message ids at or near it, so messages sharing a second stay distinct. */
-export type Mark = Readonly<{ at: number; ids: readonly string[] }>;
+export type Mark = Readonly<{
+  at: number;
+  ids: readonly string[];
+  /** Of `ids`, those a prompt delivered as its request, not as context. */
+  requests?: readonly string[];
+}>;
 /** The boundary of a session that has been shown nothing yet: below every
  * plugin mark, so a prompt built from it carries the whole conversation. */
 export const FRESH: Mark = { at: -1, ids: [] };

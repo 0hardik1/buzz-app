@@ -1863,37 +1863,46 @@ describe("a pinned session's queued default", () => {
   });
 });
 
-describe("a load's replayed options", () => {
-  it("are kept when the load answers without options, so a pick is set", async () => {
-    const model = {
-      id: "m",
-      name: "Model",
-      category: "model",
-      type: "select",
-      currentValue: "fast",
-      options: [
-        { value: "fast", name: "Fast" },
-        { value: "smart", name: "Smart" },
-      ],
-    };
-    const harness = fakeHarness({
-      capabilities: { mcpCapabilities: { http: true }, loadSession: true },
-      replay: [
-        { sessionUpdate: "config_option_update", configOptions: [model] },
-      ],
-      reopened: {},
-    });
-    const { sessions } = pinnedSessions(harness, {
-      configOptions: true,
-      saved: { chat: { at: 0, id: "old", covered: 0, context: SAVED } },
-    });
-    await sessions.deliver("chat", "a", 1, { model: "smart", build: build(1) });
-    expect(harness.sent("session/load")).toHaveLength(1);
-    expect(
-      harness.sent("session/set_config_option").map((m) => m.params?.value),
-    ).toEqual(["smart"]);
-    sessions.dispose();
-  });
+describe("a reopened session's options", () => {
+  it.each([
+    ["load", { loadSession: true }],
+    ["resume", { sessionCapabilities: { resume: {} } }],
+  ])(
+    "are kept when the %s answers without options, so a pick is set",
+    async (method, reopens) => {
+      const model = {
+        id: "m",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "fast",
+        options: [
+          { value: "fast", name: "Fast" },
+          { value: "smart", name: "Smart" },
+        ],
+      };
+      const harness = fakeHarness({
+        capabilities: { mcpCapabilities: { http: true }, ...reopens },
+        replay: [
+          { sessionUpdate: "config_option_update", configOptions: [model] },
+        ],
+        reopened: {},
+      });
+      const { sessions } = pinnedSessions(harness, {
+        configOptions: true,
+        saved: { chat: { at: 0, id: "old", covered: 0, context: SAVED } },
+      });
+      await sessions.deliver("chat", "a", 1, {
+        model: "smart",
+        build: build(1),
+      });
+      expect(harness.sent(`session/${method}`)).toHaveLength(1);
+      expect(
+        harness.sent("session/set_config_option").map((m) => m.params?.value),
+      ).toEqual(["smart"]);
+      sessions.dispose();
+    },
+  );
 });
 
 describe("reconnecting after sign-in", () => {

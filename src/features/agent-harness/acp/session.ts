@@ -84,6 +84,9 @@ export class AcpSession {
   title: string | undefined;
   /** Between `session/load` and its answer: updates only set state. */
   replaying = false;
+  /** Between `session/load` or `session/resume` and its answer: option
+   * updates are kept, before its owner is attached. */
+  reopening = false;
   /** Opened from a saved record rather than new. */
   resumed = false;
   /** The newest message the harness definitely received. */
@@ -310,8 +313,8 @@ export class AcpSession {
       );
     }
     const kind = update.sessionUpdate;
-    // Kept through a load's replay too, before its owner is attached.
-    if ((this.parity || this.replaying) && kind === "config_option_update") {
+    // Kept while it reopens too, before its owner is attached.
+    if ((this.parity || this.reopening) && kind === "config_option_update") {
       this.replace(update.configOptions);
       return;
     }
