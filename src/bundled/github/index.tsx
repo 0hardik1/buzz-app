@@ -29,6 +29,7 @@ import { parseGitHubReference, type GitHubReference } from "./references";
 import {
   gitHubCli,
   gitHubDiff,
+  gitHubNotifications,
   GitHubError,
   type GitHubCli,
   type GitHubDiff,
@@ -60,6 +61,7 @@ import {
   SoloPullLauncher,
 } from "./SoloPull";
 import { watchPulls } from "./watcher";
+import { watchReviewAlerts } from "./review-alerts";
 import { presentPull } from "./attention";
 import { SubmitReview } from "./SubmitReview";
 import { createPanelMemory, type PanelMemory } from "./panel-memory";
@@ -217,6 +219,12 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ctx.inject(["agents", "host", "navigation"], (scope) =>
     watchPulls(scope, states, gh, presentPull(scope.navigation)),
   );
+  // Desktop alerts for reviews requested from the person and mentions of them.
+  ctx.inject(["notifications"], (scope) => {
+    scope.effect(() =>
+      watchReviewAlerts(scope.notifications, gitHubNotifications(ctx.host), gh),
+    );
+  });
   // One settings destination for the plugin, retaining its existing deep link.
   ctx.inject(["settingsCards"], (scope) => {
     scope.settingsCards.register({

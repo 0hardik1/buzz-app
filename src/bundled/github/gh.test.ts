@@ -5,6 +5,7 @@ import {
   GitHubError,
   gitHubCli,
   gitHubDiff,
+  gitHubNotifications,
   MAX_DIFF_CHARS,
   OutputTooLarge,
   parseAnswer,
@@ -240,4 +241,80 @@ it("gives GitHub's reason a diff was refused, and stops gh past the size the pan
     }),
   ).rejects.toThrow(OutputTooLarge);
   expect(kill).toHaveBeenCalled();
+});
+
+const thread = {
+  id: "1",
+  reason: "review_requested",
+  updated_at: "2026-11-20T17:00:00Z",
+  subject: {
+    title: "Fix the thing",
+    url: "https://api.github.com/repos/example-org/example-repo/pulls/42",
+    type: "PullRequest",
+  },
+  repository: { full_name: "example-org/example-repo" },
+};
+
+it("reads notifications with the last ETag, and a 304 as unchanged", async () => {
+  expect(gitHubNotifications({})).toBeUndefined();
+  // gh prints the status line, headers, a blank line, then the body.
+  let { spawn } = diffSpawn(
+    [
+      'HTTP/2.0 200 OK\nEtag: W/"abc"\r\nX-Poll-Interval: 90\r\n\r\n',
+      JSON.stringify([thread, { id: 2 }]),
+    ],
+    0,
+  );
+  await expect(gitHubNotifications({ spawn })?.(undefined)).resolves.toEqual({
+    status: "changed",
+    etag: 'W/"abc"',
+    poll: 90,
+    threads: [thread],
+  });
+  expect(spawn).toHaveBeenCalledWith("notifications", expect.any(Object));
+  expect(spawn.mock.calls[0]?.[1]).not.toHaveProperty("args");
+
+  // gh exits 1 on a 304, which costs none of the rate limit.
+  ({ spawn } = diffSpawn(
+    ["HTTP/2.0 304 Not Modified\nX-Poll-Interval: 60\r\n\r\n"],
+    1,
+    "gh: HTTP 304",
+  ));
+  await expect(gitHubNotifications({ spawn })?.('W/"abc"')).resolves.toEqual({
+    status: "unchanged",
+    poll: 60,
+  });
+  expect(spawn).toHaveBeenCalledWith(
+    "notifications",
+    expect.objectContaining({
+      args: ["--header", 'If-None-Match: W/"abc"'],
+    }),
+  );
+  // An ETag that could carry another header is not sent.
+  ({ spawn } = diffSpawn(["HTTP/2.0 200 OK\r\n\r\n[]"], 0));
+  await gitHubNotifications({ spawn })?.('"a"\r\nX-Other: 1');
+  expect(spawn.mock.calls[0]?.[1]).not.toHaveProperty("args");
+});
+
+it("says gh is unavailable when signed out, and gives GitHub's other failures", async () => {
+  let { spawn } = diffSpawn(
+    ['HTTP/2.0 401 Unauthorized\r\n\r\n{"message":"Bad credentials"}'],
+    1,
+    "gh: Bad credentials (HTTP 401)",
+  );
+  await expect(gitHubNotifications({ spawn })?.(undefined)).rejects.toThrow(
+    GhUnavailable,
+  );
+  ({ spawn } = diffSpawn([], 4, "gh auth login"));
+  await expect(gitHubNotifications({ spawn })?.(undefined)).rejects.toThrow(
+    GhUnavailable,
+  );
+  ({ spawn } = diffSpawn(
+    ["HTTP/2.0 502 Bad Gateway\r\n\r\n<html></html>"],
+    1,
+    "gh: HTTP 502",
+  ));
+  await expect(gitHubNotifications({ spawn })?.(undefined)).rejects.toThrow(
+    new GitHubError("HTTP 502"),
+  );
 });

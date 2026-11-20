@@ -201,3 +201,91 @@ export function parseAnswer<T>(
     throw new GhUnavailable(reason || "gh did not answer");
   throw new GitHubError(reason || "GitHub did not answer");
 }
+
+/** One of the person's unread GitHub notifications, as GitHub's REST API
+ * gives it; only the fields this plugin reads. */
+export type GitHubThread = Readonly<{
+  id: string;
+  /** Why it notifies: `review_requested`, `mention`, `team_mention`… */
+  reason: string;
+  updated_at: string;
+  subject: Readonly<{ title: string; url: string | null; type: string }>;
+  repository: Readonly<{ full_name: string }>;
+}>;
+
+/** The person's unread notifications, or `unchanged` when they are the same
+ * as the read `etag` names. GitHub answers that with a 304, which costs none of
+ * the rate limit. `poll` is how many seconds GitHub asks clients to wait. */
+export type GitHubNotifications = (
+  etag: string | undefined,
+  signal?: AbortSignal,
+) => Promise<
+  | Readonly<{ status: "unchanged"; poll: number | undefined }>
+  | Readonly<{
+      status: "changed";
+      etag: string | undefined;
+      poll: number | undefined;
+      threads: readonly GitHubThread[];
+    }>
+>;
+
+const ETAG = /^(?:W\/)?"[^"\r\n]{1,256}"$/;
+
+/** Reads notifications through the manifest's `notifications` process, or
+ * undefined where processes cannot run. */
+export function gitHubNotifications(
+  host: Pick<Host, "spawn">,
+): GitHubNotifications | undefined {
+  const spawn = host.spawn?.bind(host);
+  if (!spawn) return undefined;
+  return async (etag, signal) => {
+    const { stdout, stderr, code } = await runGh(spawn, "notifications", {
+      ...(etag &&
+        ETAG.test(etag) && { args: ["--header", `If-None-Match: ${etag}`] }),
+      signal,
+    });
+    // `--include` prints the status line and headers, a blank line, then the
+    // body. gh exits 1 on a 304 but still prints them.
+    const split = stdout.search(/\r?\n\r?\n/);
+    const head = split < 0 ? stdout : stdout.slice(0, split);
+    const status = Number(/^HTTP\/[\d.]+ (\d{3})/.exec(head)?.[1]);
+    const header = (name: string) =>
+      new RegExp(`^${name}:[ \\t]*(.*?)\\r?$`, "im").exec(head)?.[1];
+    const interval = Number(header("X-Poll-Interval"));
+    const poll =
+      Number.isFinite(interval) && interval > 0 ? interval : undefined;
+    if (status === 304) return { status: "unchanged", poll };
+    const reason = stderr.trim().replace(/^gh: /, "");
+    if (status === 200 && code === 0) {
+      let threads: unknown;
+      try {
+        threads = JSON.parse(stdout.slice(split).trim());
+      } catch {}
+      if (!Array.isArray(threads))
+        throw new GitHubError("GitHub's notifications could not be read");
+      return {
+        status: "changed",
+        etag: header("ETag"),
+        poll,
+        threads: threads.filter(isThread),
+      };
+    }
+    if (!status) throw new GhUnavailable(reason || "gh did not answer");
+    if (status === 401) throw new GhUnavailable(reason);
+    throw new GitHubError(reason || `HTTP ${status}`);
+  };
+}
+
+function isThread(value: unknown): value is GitHubThread {
+  const thread = value as GitHubThread | null;
+  return (
+    !!thread &&
+    typeof thread.id === "string" &&
+    typeof thread.reason === "string" &&
+    typeof thread.updated_at === "string" &&
+    typeof thread.subject?.title === "string" &&
+    typeof thread.subject.type === "string" &&
+    (thread.subject.url === null || typeof thread.subject.url === "string") &&
+    typeof thread.repository?.full_name === "string"
+  );
+}

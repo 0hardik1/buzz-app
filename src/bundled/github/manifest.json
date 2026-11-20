@@ -26,6 +26,19 @@
           "--header",
           "Accept: application/vnd.github.diff"
         ]
+      },
+      {
+        "id": "notifications",
+        "program": "gh",
+        "args": [
+          "api",
+          "--hostname",
+          "github.com",
+          "--method",
+          "GET",
+          "--include",
+          "notifications?participating=true&per_page=50"
+        ]
       }
     ]
   }
