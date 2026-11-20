@@ -64,6 +64,12 @@ html[data-keyboard-navigation] .link:focus-visible {
   white-space: nowrap;
 }
 
+/* With an avatar, the pill's leading inset matches its block padding, so the
+   avatar sits concentric with the pill's rounded end (chips.css). */
+[data-mention-kind][data-mention-avatar].link {
+  padding-inline-start: var(--space-half);
+}
+
 /* Flush against the name, as a channel's hash reads as part of it. */
 .icon.flush,
 [data-mention-kind] .icon {

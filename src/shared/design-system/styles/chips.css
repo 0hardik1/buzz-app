@@ -118,20 +118,40 @@
   }
 
   /* An identity's avatar in place of a person or agent chip's sigil or icon,
-     in the composer and in messages alike. Taller than the 1em icon, so the
-     negative block margin keeps the line box; an inline-block that clips takes
-     its baseline from its bottom margin edge, so -0.125em centres it on the
-     capitals like the icon. */
+     in the composer and in messages alike. It sits concentric with the
+     pill's rounded end: the same --space-half inset above, below and before
+     it. Its artwork is a block so no line box offsets it inside the slot. */
   .inline-chip-avatar {
     display: inline-block;
     overflow: hidden;
-    /* No line box of its own, so the avatar fills the box from its top. */
-    line-height: 0;
-    width: 1.3em;
-    height: 1.3em;
-    margin-block: -0.15em;
     margin-right: 0.3em;
-    vertical-align: -0.125em;
+  }
+
+  .inline-chip-avatar > * {
+    display: block;
+  }
+
+  /* Composer chip: the pill is the label's line box, so the avatar is that
+     height less the inset on each side, hung from the top of the line. */
+  .inline-chip .inline-chip-avatar {
+    width: calc(1lh - 2 * var(--space-half));
+    height: calc(1lh - 2 * var(--space-half));
+    margin-block: var(--space-half);
+    vertical-align: top;
+  }
+
+  .inline-chip:has(.inline-chip-avatar) {
+    padding-inline-start: var(--space-half);
+  }
+
+  /* Message chip: the pill is the font box plus a --space-half padding, so
+     the avatar is exactly the font box, from its top. A normal line height
+     makes 1lh that box whatever line height the prose sets. */
+  [data-mention-kind] .inline-chip-avatar {
+    line-height: normal;
+    width: 1lh;
+    height: 1lh;
+    vertical-align: text-top;
   }
 
   /* A slow or failed picture shows the kind's icon, as a chip without one does. */

@@ -88,6 +88,9 @@ export function ProfileMention({
   // A namesake-qualified span shows its name; its target is the key.
   const shown = text.slice(1).replace(/ \([a-f0-9]{64}\)$/i, "");
   const label = key ? resolveName(key, shown) : shown;
+  const avatar = key
+    ? avatarMedia(profiles.get(key)?.picture, media)
+    : undefined;
   const Mention = onOpen ? "button" : "span";
   // Selection copy reads the identity and the whole label (selection-copy.ts).
   return (
@@ -98,6 +101,7 @@ export function ProfileMention({
       data-mention-self={key && key === viewer ? "" : undefined}
       data-profile-target={target}
       data-mention-name={label}
+      data-mention-avatar={avatar ? "" : undefined}
       aria-label={onOpen ? `View ${label} profile` : undefined}
       onClick={
         onOpen
@@ -108,13 +112,7 @@ export function ProfileMention({
           : undefined
       }
     >
-      <MentionLabel
-        agent={agent}
-        label={label}
-        avatar={
-          key ? avatarMedia(profiles.get(key)?.picture, media) : undefined
-        }
-      />
+      <MentionLabel agent={agent} label={label} avatar={avatar} />
     </Mention>
   );
 }
@@ -302,6 +300,13 @@ export function ReferenceText({
         {renderText(text.slice(offset, reference.start))}
       </span>,
     );
+    const avatar =
+      reference.kind === "channel"
+        ? undefined
+        : avatarMedia(
+            directory.profiles.get(reference.id)?.picture,
+            session?.media,
+          );
     const label =
       reference.kind === "channel"
         ? reference.label.slice(1)
@@ -325,15 +330,13 @@ export function ReferenceText({
           className={styles.link}
           data-mention-kind={reference.kind}
           data-mention-self={reference.id === session?.viewer ? "" : undefined}
+          data-mention-avatar={avatar ? "" : undefined}
           title={`${reference.kind === "agent" ? "Agent" : "Person"}: ${label}\n${reference.id}`}
         >
           <MentionLabel
             agent={reference.kind === "agent"}
             label={label}
-            avatar={avatarMedia(
-              directory.profiles.get(reference.id)?.picture,
-              session?.media,
-            )}
+            avatar={avatar}
           />
         </span>
       ),
