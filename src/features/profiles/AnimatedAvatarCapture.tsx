@@ -9,6 +9,7 @@ import {
   UserIcon,
   VideoCameraIcon,
 } from "../../shared/design-system/icons";
+import { scrollAvatarPalette } from "./scroll-avatar-palette";
 import { avatarColors } from "./avatar-colors";
 import { AvatarCustomColor } from "./AvatarCustomColor";
 import editorStyles from "./AvatarEditor.module.css";
@@ -83,6 +84,7 @@ export function AnimatedAvatarCapture({
   const [segmented, setSegmented] = useState(true);
   const [progress, setProgress] = useState(0);
   const [customColorOpen, setCustomColorOpen] = useState(false);
+  const colorDrag = useRef<{ x: number; left: number } | null>(null);
   const restoreCustomFocus = useRef(false);
   const [section, setSection] = useState<"You" | "Background" | "Frame">("You");
   const [poster, setPoster] = useState(0);
@@ -466,7 +468,40 @@ export function AnimatedAvatarCapture({
                 />
               ) : (
                 <fieldset
-                  className={editorStyles.swatches}
+                  className={styles.colorRow}
+                  ref={(row) => {
+                    if (!row) return;
+                    row.addEventListener("wheel", scrollAvatarPalette, {
+                      passive: false,
+                    });
+                    return () =>
+                      row.removeEventListener("wheel", scrollAvatarPalette);
+                  }}
+                  onPointerDown={(event) => {
+                    if (event.pointerType === "mouse" && event.button === 0)
+                      colorDrag.current = {
+                        x: event.clientX,
+                        left: event.currentTarget.scrollLeft,
+                      };
+                  }}
+                  onPointerMove={(event) => {
+                    if (!event.buttons || !colorDrag.current) return;
+                    const distance = event.clientX - colorDrag.current.x;
+                    if (
+                      Math.abs(distance) < 4 &&
+                      !event.currentTarget.hasPointerCapture(event.pointerId)
+                    )
+                      return;
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    event.currentTarget.scrollLeft =
+                      colorDrag.current.left - distance;
+                  }}
+                  onPointerUp={() => {
+                    colorDrag.current = null;
+                  }}
+                  onPointerCancel={() => {
+                    colorDrag.current = null;
+                  }}
                   aria-label="Background colors"
                 >
                   {[null, ...avatarColors].map((color) => (

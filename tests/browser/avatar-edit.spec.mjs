@@ -827,6 +827,15 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
     .getByRole("group", { name: "Background colors" })
     .getByRole("button");
   await expect(swatches).toHaveCount(25);
+  const row = page.getByRole("group", { name: "Background colors" });
+  await row.dispatchEvent("wheel", {
+    deltaY: 200,
+    bubbles: true,
+    cancelable: true,
+  });
+  await expect
+    .poll(() => row.evaluate((el) => el.scrollLeft))
+    .toBeGreaterThan(0);
   const preset = page.getByRole("button", { name: "#FFE75C", exact: true });
   await preset.click();
   await expect(preset).toHaveAttribute("aria-pressed", "true");
