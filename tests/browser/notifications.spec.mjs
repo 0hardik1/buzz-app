@@ -327,8 +327,8 @@ test("a fully visible incoming row stays quiet without publishing read intent", 
   // Controlled policy/dwell ordering, not evidence about native frame scheduling.
   // Exact-row navigation and reflow journeys below retain native rAF.
   await pauseClock(page, 30_000);
-  // Catch-up of the initial row covers every timestamp at or below it.
-  // Keep arrivals newer even though the browser clock and Node clock differ.
+  // The earlier row can finish its dwell as the clock advances. Publish
+  // after its read frontier so this live mention starts unread.
   const row = liveMessage(app, "Visible mention", {
     createdAt: following.created_at + 1,
   });
