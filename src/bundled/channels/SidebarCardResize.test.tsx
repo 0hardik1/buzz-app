@@ -93,6 +93,21 @@ it("steps a row with the keyboard, and double-click toggles full and back", () =
   expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
 });
 
+it("tells assistive technology how many rows show, and Enter toggles full", () => {
+  render(<Card rows={5} />);
+  const list = layOut();
+  const grip = screen.getByRole("separator", { name: "Resize Work" });
+  fireEvent.keyDown(grip, { key: "ArrowUp" });
+  expect(grip).toHaveAttribute("aria-valuenow", "4");
+  expect(grip).toHaveAttribute("aria-valuemax", "5");
+  expect(grip).toHaveAttribute("aria-valuetext", "4 of 5 rows");
+  fireEvent.keyDown(grip, { key: "Enter" });
+  expect(list.style.maxHeight).toBe("");
+  expect(grip).toHaveAttribute("aria-valuenow", "5");
+  fireEvent.keyDown(grip, { key: "Enter" });
+  expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
+});
+
 it("hints at the grip until it has been dragged or double-clicked once", () => {
   render(<Card rows={5} />);
   layOut();

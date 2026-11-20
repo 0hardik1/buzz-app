@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -68,7 +69,7 @@ export function useSidebarCardHeight(scope: string, card: string) {
  * A card's rows and the grip on its bottom edge. The rows show the first ten
  * until the grip is dragged, then clip to wherever it is left; full shows
  * every row. The drag follows the pointer exactly, then settles onto the
- * nearest whole row on release; the bottom stop is full. Double-click toggles
+ * nearest whole row on release; the bottom stop is full. Double-click or Enter toggles
  * full. Rows are the descendants marked `data-card-row`.
  */
 export function SidebarCardResize({
@@ -92,6 +93,13 @@ export function SidebarCardResize({
   const stop = useRef<() => void>(undefined);
   useEffect(() => () => stop.current?.(), []);
   const [count, setCount] = useState(0);
+  // Rows the card shows now, for assistive technology.
+  const [shown, setShown] = useState(0);
+  const apply = useCallback(
+    (rows: HTMLElement, height: number | undefined) =>
+      setShown(clip(rows, height)),
+    [],
+  );
   const saved = useRef(height);
   // The hint explains the grip until it has been used once.
   const learned = useSyncExternalStore(
@@ -102,14 +110,14 @@ export function SidebarCardResize({
   // first get a size (a card opened after starting closed).
   useLayoutEffect(() => {
     saved.current = height;
-    if (list.current && !stop.current) clip(list.current, height);
-  }, [height]);
+    if (list.current && !stop.current) apply(list.current, height);
+  }, [height, apply]);
   useEffect(() => {
     const rows = list.current;
     if (!rows) return;
     const update = () => {
       setCount(rows.querySelectorAll("[data-card-row]").length);
-      if (!stop.current) clip(rows, saved.current);
+      if (!stop.current) apply(rows, saved.current);
     };
     update();
     const added = new MutationObserver(update);
@@ -118,14 +126,14 @@ export function SidebarCardResize({
       typeof ResizeObserver === "undefined"
         ? undefined
         : new ResizeObserver(() => {
-            if (!stop.current) clip(rows, saved.current);
+            if (!stop.current) apply(rows, saved.current);
           });
     sized?.observe(rows);
     return () => {
       added.disconnect();
       sized?.disconnect();
     };
-  }, []);
+  }, [apply]);
 
   return (
     <>
@@ -149,7 +157,11 @@ export function SidebarCardResize({
             className={styles.cardResize}
             aria-label={`Resize ${label}`}
             aria-orientation="horizontal"
-            aria-valuenow={height === ALL_ROWS ? undefined : height}
+            aria-valuemin={1}
+            aria-valuemax={count}
+            aria-valuenow={shown}
+            aria-valuetext={`${shown} of ${count} rows`}
+            aria-keyshortcuts="Enter"
             tabIndex={0}
             onDoubleClick={() => {
               learn();
@@ -164,7 +176,10 @@ export function SidebarCardResize({
               const [first, last] = [ends[0], ends.at(-1)];
               const current = rows.offsetHeight;
               if (first === undefined || last === undefined) return;
-              if (event.key === "ArrowUp")
+              if (event.key === "Enter") {
+                learn();
+                onToggle();
+              } else if (event.key === "ArrowUp")
                 onResize(
                   ends.filter((end) => end < current - 1).at(-1) ?? first,
                 );
@@ -210,11 +225,11 @@ export function SidebarCardResize({
                 // to the bottom, it keeps showing every row as new ones arrive.
                 // A click without a drag (half of a double-click) changes nothing.
                 if (event.type !== "pointerup" || next === start)
-                  return clip(rows, height);
+                  return apply(rows, height);
                 learn();
                 const settled = nearest(stops(rows), next);
                 const target = settled >= max ? ALL_ROWS : settled;
-                if (target === height) clip(rows, height);
+                if (target === height) apply(rows, height);
                 else onResize(target);
               };
               stop.current = () => {
@@ -254,8 +269,9 @@ export function SidebarCardResize({
  * Clip the list to a saved height: ten rows when unset, none when full. A
  * saved height lands on a whole row even after text size changes. Rows past
  * the clip are inert, so focus and the keyboard skip what the card hides.
+ * Returns how many rows show.
  */
-function clip(list: HTMLElement, height: number | undefined) {
+function clip(list: HTMLElement, height: number | undefined): number {
   const ends = stops(list);
   const full = ends.at(-1) ?? 0;
   // A hidden card has no layout, so every stop is zero: keep the saved
@@ -263,7 +279,7 @@ function clip(list: HTMLElement, height: number | undefined) {
   if (!full) {
     list.style.maxHeight =
       height !== undefined && height !== ALL_ROWS ? `${height}px` : "";
-    return;
+    return ends.length;
   }
   const limit =
     height === ALL_ROWS
@@ -273,13 +289,16 @@ function clip(list: HTMLElement, height: number | undefined) {
         : nearest(ends, height);
   const clipped = limit !== undefined && limit < full;
   list.style.maxHeight = clipped ? `${limit}px` : "";
+  let shown = 0;
   list
     .querySelectorAll<HTMLElement>("[data-card-row]")
     .forEach((row, index) => {
       const hidden = clipped && (ends[index - 1] ?? 0) >= limit;
       row.inert = hidden;
       row.toggleAttribute("data-card-clipped", hidden);
+      if (!hidden) shown++;
     });
+  return shown;
 }
 
 /** Where the list ends after each of its rows. */
