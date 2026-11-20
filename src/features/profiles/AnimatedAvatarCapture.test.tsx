@@ -58,7 +58,9 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
 });
-const stream = {} as MediaStream;
+const stream = {
+  getVideoTracks: () => [new EventTarget()],
+} as unknown as MediaStream;
 function mount() {
   const apply = vi.fn();
   return {
@@ -126,7 +128,7 @@ it("uploads the poster and animation before applying the mobile-compatible URL",
   expect(capture.stopAvatarCamera).toHaveBeenCalledWith(stream);
   expect(
     screen.getByRole("button", { name: "Saving", busy: true }),
-  ).toBeDisabled();
+  ).toHaveAttribute("aria-disabled", "true");
   expect(apply).not.toHaveBeenCalled();
   await act(async () =>
     animationUpload.resolve("https://relay.example/animation.png"),
@@ -144,5 +146,51 @@ it("reports denied camera permission and allows retry", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Camera permission denied",
   );
-  expect(screen.getByRole("button", { name: "Start camera" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Start camera" })).toHaveFocus();
 });
+
+it.each(["live", "recording"])(
+  "recovers from a disconnected camera while %s",
+  async (phase) => {
+    const track = new EventTarget();
+    const disconnected = {
+      getVideoTracks: () => [track],
+    } as unknown as MediaStream;
+    vi.mocked(capture.openAvatarCamera)
+      .mockResolvedValueOnce(disconnected)
+      .mockResolvedValueOnce(stream);
+    const take =
+      deferred<
+        Awaited<ReturnType<typeof capture.recordAnimatedAvatarFrames>>
+      >();
+    mount();
+    fireEvent.click(screen.getByRole("button", { name: "Start camera" }));
+    const record = await screen.findByRole("button", {
+      name: "Record 3 seconds",
+    });
+    if (phase === "recording") {
+      vi.mocked(capture.recordAnimatedAvatarFrames).mockReturnValueOnce(
+        take.promise,
+      );
+      fireEvent.click(record);
+    }
+    act(() => {
+      track.dispatchEvent(new Event("ended"));
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("Camera disconnected");
+    expect(capture.stopAvatarCamera).toHaveBeenCalledWith(disconnected);
+    fireEvent.click(screen.getByRole("button", { name: "Start camera" }));
+    await screen.findByRole("button", { name: "Record 3 seconds" });
+    if (phase === "recording") {
+      expect(
+        vi.mocked(capture.recordAnimatedAvatarFrames).mock.calls[0]?.[1]?.signal
+          ?.aborted,
+      ).toBe(true);
+      await act(async () =>
+        take.resolve({ frames: [], backgroundRemoved: false }),
+      );
+      expect(capture.createAvatarFrameBitmaps).not.toHaveBeenCalled();
+      expect(capture.stopAvatarCamera).not.toHaveBeenCalledWith(stream);
+    }
+  },
+);

@@ -731,18 +731,18 @@ test("human avatar choices restore Animated and recover from camera denial", asy
   ).toBeVisible();
 });
 
-// Real canvas/APNG encoding and the two-file upload/publication boundary need a browser.
-// Only the camera's input frames are synthetic; no device permission is claimed here.
-test("human animation encodes, uploads both assets and saves a mobile-compatible profile", async ({
-  page,
-}) => {
+async function installAvatarCameraFixture(page) {
   await page.route(
     "**/src/features/profiles/animated-avatar-capture.ts",
     (route) =>
       route.fulfill({
         contentType: "text/javascript",
         body: `export * from '/src/features/profiles/animated-avatar-capture.ts?capture-fixture';
-      export async function openAvatarCamera(device) { window.avatarTestCamera = device; return { getTracks: () => [{ stop() {} }] }; }
+      export async function openAvatarCamera(device) {
+        window.avatarTestCamera = device;
+        const track = Object.assign(new EventTarget(), { readyState: 'live', stop() {} });
+        return { getTracks: () => [track], getVideoTracks: () => [track] };
+      }
       export async function listAvatarCameras() { return [{deviceId:"one",label:"Front camera"},{deviceId:"two",label:"Desk camera"}]; }
       export function preloadAvatarSegmenter() {}
       export async function recordAnimatedAvatarFrames(video, {onProgress}) {
@@ -775,6 +775,57 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
       get: () => 256,
     });
   });
+}
+
+test("a recorded onboarding avatar keeps keyboard focus and survives outside presses through upload", async ({
+  page,
+}) => {
+  await installAvatarCameraFixture(page);
+  await page.route("**/src/features/profiles/avatar-upload.ts", (route) =>
+    route.fulfill({
+      contentType: "text/javascript",
+      body: `export * from '/src/features/profiles/avatar-upload.ts?onboarding-fixture';
+        export async function uploadAvatar(file) {
+          if (file.name.includes('animation'))
+            await new Promise(resolve => { window.finishAvatarUpload = resolve; });
+          return 'https://relay.example/media/' + file.name;
+        }`,
+    }),
+  );
+  const { dialog } = await onboardingAvatar(page);
+  const outside = page.getByRole("heading", { name: "Set up your profile" });
+  await dialog.getByRole("tab", { name: "Animated" }).click();
+  await dialog.getByRole("button", { name: "Start camera" }).press("Enter");
+  const record = dialog.getByRole("button", { name: "Record 3 seconds" });
+  await expect(record).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(dialog.getByRole("progressbar")).toBeFocused();
+  await page.evaluate(() => window.finishAvatarRecording());
+  const done = dialog.getByRole("button", { name: "Done", exact: true });
+  await expect(done).toBeFocused();
+  await outside.click();
+  await expect(done).toBeFocused();
+  await page.keyboard.press("Enter");
+  const saving = dialog.getByRole("button", { name: "Saving" });
+  await expect(saving).toBeFocused();
+  await outside.click();
+  await expect(saving).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => typeof window.finishAvatarUpload))
+    .toBe("function");
+  await page.evaluate(() => window.finishAvatarUpload());
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Edit avatar", exact: true }),
+  ).toBeFocused();
+});
+
+// Real canvas/APNG encoding and the two-file upload/publication boundary need a browser.
+// Only the camera's input frames are synthetic; no device permission is claimed here.
+test("human animation encodes, uploads both assets and saves a mobile-compatible profile", async ({
+  page,
+}) => {
+  await installAvatarCameraFixture(page);
   await page.goto("/tests/fixtures/profile-settings.html");
   await page
     .getByRole("button", { name: "Edit human profile", exact: true })

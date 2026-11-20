@@ -1,5 +1,5 @@
 import { useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../../shared/design-system/ui/Button";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Select } from "../../shared/design-system/ui/Select";
@@ -57,14 +57,16 @@ export function AnimatedAvatarCapture({
   community,
   disabled,
   onApply,
+  onDraftChange,
 }: {
   community: string | undefined;
   disabled: boolean;
   onApply(value: string): void;
+  onDraftChange?(dirty: boolean): void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const stream = useRef<MediaStream | null>(null);
+  const releaseCamera = useRef<(() => void) | null>(null);
   const operation = useRef<AbortController | null>(null);
   const drag = useRef<{
     id: number;
@@ -77,6 +79,23 @@ export function AnimatedAvatarCapture({
   const [phase, setPhase] = useState<
     "idle" | "starting" | "live" | "recording" | "review" | "saving"
   >("idle");
+  const previousPhase = useRef(phase);
+  const captureRoot = useRef<HTMLDivElement>(null);
+  const hasTake = phase === "review" || phase === "saving";
+  useLayoutEffect(() => {
+    onDraftChange?.(hasTake);
+    return () => onDraftChange?.(false);
+  }, [hasTake, onDraftChange]);
+  useLayoutEffect(() => {
+    if (previousPhase.current === phase) return;
+    previousPhase.current = phase;
+    const root = captureRoot.current;
+    // Keep the next step reachable when its trigger disappears. A user who
+    // tabbed away during camera startup or upload keeps their chosen focus.
+    const active = document.activeElement;
+    if (active === document.body || root?.contains(active))
+      root?.querySelector<HTMLElement>("[data-capture-focus]")?.focus();
+  }, [phase]);
   const [cameras, setCameras] = useState<AvatarCameraDevice[]>([]);
   const [camera, setCamera] = useState("");
   const [error, setError] = useState("");
@@ -91,7 +110,7 @@ export function AnimatedAvatarCapture({
   useEffect(
     () => () => {
       operation.current?.abort();
-      if (stream.current) stopAvatarCamera(stream.current);
+      releaseCamera.current?.();
       frames.current.forEach((frame) => {
         frame.close();
       });
@@ -122,15 +141,33 @@ export function AnimatedAvatarCapture({
     operation.current = request;
     setError("");
     setPhase("starting");
-    if (stream.current) stopAvatarCamera(stream.current);
-    stream.current = null;
+    releaseCamera.current?.();
     try {
       const acquired = await openAvatarCamera(device || undefined);
       if (request.signal.aborted) {
         stopAvatarCamera(acquired);
         return;
       }
-      stream.current = acquired;
+      const track = acquired.getVideoTracks()[0];
+      const release = () => {
+        track?.removeEventListener("ended", disconnected);
+        stopAvatarCamera(acquired);
+        if (releaseCamera.current === release) releaseCamera.current = null;
+      };
+      const disconnected = () => {
+        operation.current?.abort();
+        operation.current = null;
+        release();
+        setError("Camera disconnected. Reconnect it or choose another camera.");
+        setCamera("");
+        setPhase("idle");
+      };
+      releaseCamera.current = release;
+      if (!track || track.readyState === "ended") {
+        disconnected();
+        return;
+      }
+      track.addEventListener("ended", disconnected);
       const preview = video.current;
       if (!preview)
         throw new Error("Camera preview is unavailable. Try again.");
@@ -143,16 +180,15 @@ export function AnimatedAvatarCapture({
       preloadAvatarSegmenter();
       void listAvatarCameras().then(
         (devices) => {
-          if (!request.signal.aborted) setCameras(devices);
+          if (releaseCamera.current === release) setCameras(devices);
         },
         () => {
           /* Recording remains usable when enumeration is unavailable. */
         },
       );
     } catch (reason) {
-      if (stream.current) stopAvatarCamera(stream.current);
-      stream.current = null;
       if (!request.signal.aborted) {
+        releaseCamera.current?.();
         setError(
           reason instanceof Error
             ? reason.message
@@ -178,8 +214,8 @@ export function AnimatedAvatarCapture({
           if (!request.signal.aborted) setProgress(value);
         },
       });
-      if (stream.current) stopAvatarCamera(stream.current);
-      stream.current = null;
+      request.signal.throwIfAborted();
+      releaseCamera.current?.();
       const bitmaps = await createAvatarFrameBitmaps(recording.frames);
       if (request.signal.aborted) {
         bitmaps.forEach((frame) => {
@@ -205,9 +241,10 @@ export function AnimatedAvatarCapture({
         setPhase("idle");
       }
     } finally {
-      if (stream.current) stopAvatarCamera(stream.current);
-      stream.current = null;
-      if (operation.current === request) operation.current = null;
+      if (operation.current === request) {
+        releaseCamera.current?.();
+        operation.current = null;
+      }
     }
   }
   async function save() {
@@ -253,7 +290,7 @@ export function AnimatedAvatarCapture({
     }
   }
   return (
-    <div className={styles.capture} data-phase={phase}>
+    <div ref={captureRoot} className={styles.capture} data-phase={phase}>
       <div className={styles.stage} data-phase={phase}>
         {phase === "idle" && <VideoCameraIcon aria-hidden="true" size={36} />}
         <video
@@ -268,7 +305,12 @@ export function AnimatedAvatarCapture({
           className={styles.preview}
         />
         {phase === "starting" && (
-          <span role="status" className="relative grid place-items-center">
+          <span
+            data-capture-focus=""
+            tabIndex={-1}
+            role="status"
+            className="relative grid place-items-center"
+          >
             <span
               aria-hidden="true"
               className="size-6 rounded-full border-4 border-[var(--border-standard)] border-t-current motion-safe:animate-[spin_500ms_linear_infinite]"
@@ -281,6 +323,8 @@ export function AnimatedAvatarCapture({
           <svg
             className={styles.timerRing}
             viewBox="0 0 100 100"
+            data-capture-focus=""
+            tabIndex={-1}
             role="progressbar"
             aria-label="Recording progress"
             aria-valuemin={0}
@@ -393,6 +437,7 @@ export function AnimatedAvatarCapture({
           )}
           {phase === "idle" ? (
             <Button
+              data-capture-focus=""
               shape="capsule"
               disabled={disabled || !community}
               onClick={() => void start()}
@@ -401,6 +446,7 @@ export function AnimatedAvatarCapture({
             </Button>
           ) : (
             <Button
+              data-capture-focus=""
               shape="capsule"
               variant="prominent"
               disabled={disabled}
@@ -576,6 +622,9 @@ export function AnimatedAvatarCapture({
           </div>
           <Button
             variant="prominent"
+            data-capture-focus=""
+            focusableWhenDisabled={phase === "saving"}
+            aria-label={phase === "saving" ? "Saving" : undefined}
             aria-busy={phase === "saving"}
             disabled={disabled || !community || phase === "saving"}
             onClick={() => void save()}

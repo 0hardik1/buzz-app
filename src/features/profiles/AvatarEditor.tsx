@@ -77,6 +77,7 @@ const outsideEditor = (popup: HTMLElement | null, target: EventTarget | null) =>
 export function AvatarEditor(props: Props) {
   const setupAnchor = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(!!props.inlinePicker);
+  const [hasAnimatedTake, setHasAnimatedTake] = useState(false);
   const [draftPreview, setDraftPreview] = useState<DraftPreview | null>(null);
   const [sizeTarget, setSizeTarget] = useState<HTMLElement | null>(null);
   // Compact profile previews reuse the header's cached thumbnail; full-size
@@ -98,10 +99,11 @@ export function AvatarEditor(props: Props) {
   const popupElement = useRef<HTMLDivElement>(null);
   // What the preview shows and Done could apply (an emoji needs a community).
   const unsaved =
-    !!draftPreview &&
-    (draftPreview.emoji
-      ? !!props.community
-      : draftPreview.picture !== props.value);
+    hasAnimatedTake ||
+    (!!draftPreview &&
+      (draftPreview.emoji
+        ? !!props.community
+        : draftPreview.picture !== props.value));
   const callback = useRef(props.onBusyChange);
   callback.current = props.onBusyChange;
   useEffect(() => {
@@ -134,6 +136,7 @@ export function AvatarEditor(props: Props) {
     <AvatarDraft
       key={props.community ?? "local"}
       {...props}
+      onAnimatedDraftChange={setHasAnimatedTake}
       onPreview={setDraftPreview}
       sizeTarget={sizeTarget}
       done={(value) => {
@@ -489,12 +492,14 @@ function AvatarDraft({
   community,
   personal,
   onPreview,
+  onAnimatedDraftChange,
   sizeTarget,
   disabled = false,
   done,
 }: Props & {
   done(value: string): void;
   onPreview(value: DraftPreview | null): void;
+  onAnimatedDraftChange(dirty: boolean): void;
   sizeTarget: HTMLElement | null;
 }) {
   const [customColorOpen, setCustomColorOpen] = useState(false);
@@ -665,6 +670,7 @@ function AvatarDraft({
           community={community}
           disabled={disabled}
           onApply={done}
+          onDraftChange={onAnimatedDraftChange}
         />
       </Suspense>
     ) : tab === "image" ? (
