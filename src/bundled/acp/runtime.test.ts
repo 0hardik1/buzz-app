@@ -181,7 +181,14 @@ function setup(
     agentMemories: { read: vi.fn(async () => ({ entries: [] })) },
   };
   const awayRelay = {
-    snapshot: () => ({ status: "ready", session: awaySession, viewer: alice }),
+    snapshot: () => ({
+      status: "ready",
+      session: awaySession,
+      viewer: alice,
+      origin: "https://away.example",
+      scope: `https://away.example:${alice}`,
+    }),
+    subscribe: () => () => {},
   } as unknown as RelayData;
   const cache = modelCache(storage);
   const runtime = new AcpRuntime(
@@ -321,7 +328,12 @@ describe("AcpRuntime", () => {
     const [home] = fake.harnesses;
     const homeSession = home?.turns[0]?.sessionId ?? "";
     // The same identity, delivered to in another community it belongs to.
-    const away = { key: `${self}@away.example`, pubkey: self, owner: alice };
+    const away = {
+      key: `${self}@away.example`,
+      pubkey: self,
+      owner: alice,
+      relay: "wss://away.example",
+    };
     await deliver(message("2", "@Opal over here"), config, undefined, {
       agent: away,
     } as Partial<Delivery>).run;
@@ -455,6 +467,24 @@ describe("AcpRuntime", () => {
         expect(text).toContain("Use tokens.");
       } else expect(text).not.toContain("Use tokens.");
     }
+  });
+
+  it("answers a mention that arrives during a reconnect in its Solo chat once the community is ready", async () => {
+    const config = await confirmed();
+    const { fake, deliver, sync, connect } = setup({}, { solo: true });
+    sync(config);
+    connect("connecting");
+    const { run, ignored } = deliver(message("1", "@Opal hello"), config);
+    await flush(20);
+    expect(fake.harnesses).toEqual([]);
+    connect("ready");
+    await run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+    // Answered as the Solo chat it is, not as a thread.
+    const text = fake.harnesses[0]?.turns[0]?.text ?? "";
+    expect(text).toContain("Scope: channel");
+    expect(text).not.toContain("Thread root:");
+    expect(ignored).not.toHaveBeenCalled();
   });
 
   it("leads only a new session's first prompt with the instructions", async () => {
@@ -639,7 +669,13 @@ describe("AcpRuntime", () => {
         at: 200_000,
       },
       channelId: channel,
-      agent: { key: self, pubkey: self, name: "Opal", owner: alice },
+      agent: {
+        key: self,
+        pubkey: self,
+        name: "Opal",
+        owner: alice,
+        relay: "wss://acp.example",
+      },
       config,
       signal: new AbortController().signal,
       workingUntil,
@@ -769,7 +805,13 @@ describe("AcpRuntime", () => {
         at: 1,
       },
       channelId: channel,
-      agent: { key: self, pubkey: self, name: "Opal", owner: alice },
+      agent: {
+        key: self,
+        pubkey: self,
+        name: "Opal",
+        owner: alice,
+        relay: "wss://acp.example",
+      },
       config,
       signal: new AbortController().signal,
       workingUntil,
@@ -797,7 +839,13 @@ describe("AcpRuntime", () => {
     await flush();
     const wake = await runtime.runOnce({
       delivery: {
-        agent: { key: self, pubkey: self, name: "Opal", owner: alice },
+        agent: {
+          key: self,
+          pubkey: self,
+          name: "Opal",
+          owner: alice,
+          relay: "wss://acp.example",
+        },
         config,
         current: () => false,
       } as unknown as Delivery,
@@ -2152,7 +2200,13 @@ describe("AcpRuntime", () => {
     sync(config);
     const done = await runtime.runOnce({
       delivery: {
-        agent: { key: self, pubkey: self, name: "Opal", owner: alice },
+        agent: {
+          key: self,
+          pubkey: self,
+          name: "Opal",
+          owner: alice,
+          relay: "wss://acp.example",
+        },
         config,
         current: () => true,
       } as unknown as Delivery,
@@ -2368,7 +2422,13 @@ describe("AcpRuntime", () => {
     });
     sync(config);
     const delivery = {
-      agent: { key: self, pubkey: self, name: "Opal", owner: alice },
+      agent: {
+        key: self,
+        pubkey: self,
+        name: "Opal",
+        owner: alice,
+        relay: "wss://acp.example",
+      },
       config,
     } as unknown as Delivery;
     const done = runtime.runOnce({
@@ -2416,7 +2476,13 @@ describe("AcpRuntime", () => {
     // A watch or timer is checked the same way.
     const wake = await runtime.runOnce({
       delivery: {
-        agent: { key: self, pubkey: self, name: "Opal", owner: alice },
+        agent: {
+          key: self,
+          pubkey: self,
+          name: "Opal",
+          owner: alice,
+          relay: "wss://acp.example",
+        },
         config,
         ...synced,
       } as unknown as Delivery,
@@ -2512,6 +2578,7 @@ describe("AcpRuntime", () => {
         pubkey: self,
         name: "Opal",
         owner: alice,
+        relay: "wss://acp.example",
         publish: vi.fn(async (t: { content: string; tags: string[][] }) => {
           published.push(t);
           return t;
@@ -2584,7 +2651,13 @@ describe("AcpRuntime", () => {
     // A watch or timer is checked the same way.
     const wake = await runtime.runOnce({
       delivery: {
-        agent: { key: self, pubkey: self, name: "Opal", owner: alice },
+        agent: {
+          key: self,
+          pubkey: self,
+          name: "Opal",
+          owner: alice,
+          relay: "wss://acp.example",
+        },
         config,
         ...synced,
       } as unknown as Delivery,
@@ -2711,7 +2784,13 @@ describe("AcpRuntime", () => {
     const once = (key: string) =>
       runtime.runOnce({
         delivery: {
-          agent: { key: self, pubkey: self, name: "Opal", owner: alice },
+          agent: {
+            key: self,
+            pubkey: self,
+            name: "Opal",
+            owner: alice,
+            relay: "wss://acp.example",
+          },
           config,
         } as unknown as Delivery,
         key,
@@ -2765,7 +2844,15 @@ describe("AcpRuntime", () => {
       const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
       await deliver(message("2", "@Opal two"), config, undefined, {
         interruptible,
-        ...(outcome === "undelivered" ? { current: () => false } : {}),
+        // Current when it starts, superseded before it is handed over.
+        ...(outcome === "undelivered"
+          ? {
+              current: vi
+                .fn(() => true)
+                .mockReturnValue(false)
+                .mockReturnValueOnce(true),
+            }
+          : {}),
       }).run;
       if (outcome === "stopped") {
         await vi.waitFor(() =>
@@ -2799,7 +2886,13 @@ describe("AcpRuntime", () => {
     sync(config);
     const done = await runtime.runOnce({
       delivery: {
-        agent: { key: self, pubkey: self, name: "Opal", owner: alice },
+        agent: {
+          key: self,
+          pubkey: self,
+          name: "Opal",
+          owner: alice,
+          relay: "wss://acp.example",
+        },
         config,
       } as unknown as Delivery,
       key: "timer",
