@@ -332,4 +332,43 @@ describe("history", () => {
       vi.useRealTimers();
     }
   });
+
+  it("details over a thread tab brought back again wait their full time", () => {
+    vi.useFakeTimers();
+    try {
+      const { navigation, opener, placed } = overTab("C");
+      opener.settle("C", () => true);
+      vi.advanceTimersByTime(3000);
+      navigation.forward();
+      expect(placed()).toEqual([]);
+      vi.advanceTimersByTime(1000);
+      navigation.back();
+      expect(placed()).toEqual([["inline", true]]);
+      // The first wait's time is up; this one has most of its own left.
+      vi.advanceTimersByTime(4999);
+      expect(placed()).toEqual([["inline", true]]);
+      vi.advanceTimersByTime(1);
+      expect(placed()).toEqual([["dialog", false]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("details over a thread tab give up to a dialog over the row mounted now", () => {
+    vi.useFakeTimers();
+    try {
+      const { opener, placed } = overTab("C");
+      opener.settle("C", () => true);
+      // The tab's row is back without a reply box, as over an archived channel.
+      const again = createComposerHandle(threadComposer("C", id(9)));
+      opener.outlet(again);
+      vi.advanceTimersByTime(5000);
+      expect(placed()).toEqual([["dialog", false]]);
+      expect(opener.store.get().find((item) => item.open)?.composer).toBe(
+        again,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

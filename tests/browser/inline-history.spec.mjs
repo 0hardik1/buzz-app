@@ -331,6 +331,57 @@ const visitWithin = (page, target) =>
     location.hash = `buzz=${encodeURIComponent(JSON.stringify(target))}`;
   }, target);
 
+// The production broker carries channel metadata live, as an archive does.
+test.describe("an archive meanwhile", () => {
+  test.use({ productionBroker: true });
+
+  test("Back to details over a thread tab of a channel archived meanwhile opens them", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    const root = app.append("primary", "alpha", "Thread root", true);
+    app.append(
+      "primary",
+      "alpha",
+      longDetails,
+      false,
+      false,
+      root.id,
+      undefined,
+      [["audience", "details"]],
+    );
+    const sheet = await openThread(page, root);
+    await sheet
+      .getByRole("button", { name: "Open as tab", exact: true })
+      .click();
+    await expect(page.getByRole("tab", { name: /Thread root/ })).toBeVisible();
+    const thread = page.getByRole("complementary", {
+      name: "Thread",
+      exact: true,
+    });
+    await threadIdle(page, thread);
+    await thread.getByRole("button", { name: "Show more" }).click();
+    const reader = () => sheets(page).filter({ hasText: "The end." });
+    await expect(reader()).toHaveCount(1);
+    await channel(page, "Beta").first().click();
+    await expect(
+      page.getByRole("textbox", { name: "Message #Beta" }),
+    ).toBeVisible();
+    app.archiveChannel("alpha");
+    await back(page);
+    await expect(page.getByRole("tab", { name: /Thread root/ })).toBeVisible();
+    // Its tab has no reply box now, so the details wait out their five
+    // seconds, then open as a dialog over the row that is there.
+    await expect(
+      thread.getByText("This channel is archived", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("dialog").filter({ hasText: "The end." }),
+    ).toBeVisible({ timeout: 10_000 });
+  });
+});
+
 test.describe("a send", () => {
   test.use({ sendChannels: ["alpha"] });
 

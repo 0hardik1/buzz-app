@@ -3075,6 +3075,16 @@ export const test = base.extend({
           expect(rosterIds).toContain(id);
           rosterIds.splice(rosterIds.indexOf(id), 1);
         },
+        // Someone else archives the channel: the relay republishes its
+        // metadata live, and later reads agree.
+        archiveChannel(id) {
+          expect(rosterIds).toContain(id);
+          archivedIds.add(id);
+          lifecycleTime++;
+          const metadata = answer("primary", { kinds: [39000], "#d": [id] })[0];
+          relay.publish("primary", metadata);
+          return metadata;
+        },
         // An admin removes the viewer: the relay republishes the roster live
         // without them, and later reads agree. Channel metadata remains.
         removeViewer(id) {

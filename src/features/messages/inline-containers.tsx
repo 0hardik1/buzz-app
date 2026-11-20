@@ -579,7 +579,11 @@ export function createOpener(
             if (!(brief(item) && gives(item))) return [item];
             if (channelOf(item) !== drawn) return [];
             const placed = elsewhere(item);
-            return placed ? [placed] : [];
+            if (!placed) return [];
+            // It opens over its row as now mounted, which a return remounts.
+            const name = placed.composer?.name;
+            const row = [...((name && outlets.get(name)) || [])].at(-1);
+            return [row ? { ...placed, composer: row } : placed];
           })
         : items,
     );
@@ -624,17 +628,16 @@ export function createOpener(
         () => ++sequence,
       ),
     );
+    // Each restore waits its own time: keyed by the item it placed, not by
+    // the opening, which an earlier restore's timer still names.
     const waits = new Set(
       store
         .get()
         .filter(brief)
-        .map((item) => item.opening ?? item.key),
+        .map((item) => item.key),
     );
     if (waits.size)
-      setTimeout(
-        () => giveUp((item) => waits.has(item.opening ?? item.key)),
-        BRIEF_WAIT_MS,
-      );
+      setTimeout(() => giveUp((item) => waits.has(item.key)), BRIEF_WAIT_MS);
   };
   /** Closes what reads `id` for good; see InlineOpener.dismiss. */
   const dismiss = (id: string) => {
