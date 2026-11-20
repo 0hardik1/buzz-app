@@ -111,6 +111,7 @@ function answer(events: Event[], filters: Filter[]) {
 function setup(
   heads: Event[] | ((signed: Signed[]) => Event[]) = [],
   publishImpl?: (event: Event) => Promise<string>,
+  access: "writable" | "owner-read-only" | "agent-not-member" = "writable",
 ) {
   const signed: Signed[] = [];
   const currentHeads = () =>
@@ -122,6 +123,15 @@ function setup(
     snapshotRead: vi.fn(async (filters: Filter[]) =>
       answer([...currentHeads(), ...places], filters),
     ),
+    channels: {
+      get: vi.fn(() => ({
+        id: home,
+        name: "work",
+        channelType: "stream",
+        members: access === "agent-not-member" ? [viewer] : [viewer, agent],
+        ...(access === "owner-read-only" ? { readOnly: true } : {}),
+      })),
+    },
     configArtifactWriter: {
       sign: vi.fn(async (template: Signed) => {
         signed.push(template);
@@ -256,6 +266,25 @@ it("never creates in a home the agent cannot read", async () => {
   expect(signed).toHaveLength(0);
 });
 
+it("refuses owner-signed writes outside a writable shared membership", async () => {
+  for (const access of ["owner-read-only", "agent-not-member"] as const) {
+    const created = setup([], undefined, access);
+    await expect(
+      created.call("tasks_create", {
+        title: "Unauthorized work",
+        why: "A readable home is not enough to write.",
+        done_when: "The write is refused.",
+      }),
+    ).rejects.toThrow("owner can write and this agent is a member");
+    expect(created.signed).toHaveLength(0);
+    const updated = setup([head()], undefined, access);
+    await expect(
+      updated.call("tasks_note", { id, note: "Must not be signed." }),
+    ).rejects.toThrow("owner can write and this agent is a member");
+    expect(updated.signed).toHaveLength(0);
+  }
+});
+
 it("requires a note and evidence for an update, then appends it", async () => {
   const { call, signed } = setup([head()]);
   await expect(
@@ -271,6 +300,7 @@ it("requires a note and evidence for an update, then appends it", async () => {
   expect(reply).toContain("Updated task");
   const saved = JSON.parse(signed[0]?.content ?? "") as TaskFields;
   expect(saved.state).toBe("done");
+  expect(signed[0]?.tags).toContainEqual(["via", agent]);
   expect(saved.log).toHaveLength(2);
   expect(saved.log[1]).toMatchObject({
     note: "Merged PR 42 and verified the task table.",

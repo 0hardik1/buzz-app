@@ -1,5 +1,9 @@
 import { isAdminAddition } from "../channel-members/administration-protocol.ts";
-import type { ArtifactIncrementalReader } from "./artifact-incremental-reader.ts";
+import {
+  artifactIncrementalCapability,
+  createArtifactIncrementalReader,
+  type ArtifactIncrementalReader,
+} from "./artifact-incremental-reader.ts";
 import type { VerifiedProfileAuthority } from "./verified-profile";
 import type { ReminderHost } from "./reminders";
 import {
@@ -567,6 +571,7 @@ export async function connectBrokerTransport(
     soloMemberRoleUpdates?: boolean;
     searchSort?: boolean;
     artifactSync?: boolean;
+    artifactIncremental?: unknown;
     sidebarPreferenceWrites?: boolean;
     sidebarSectionRemoval?: boolean;
     sidebarSectionOrder?: boolean;
@@ -659,6 +664,22 @@ export async function connectBrokerTransport(
   return {
     profiling,
     observeRefusal,
+    ...(artifactIncrementalCapability({
+      artifacts: { incremental: session.artifactIncremental },
+    })
+      ? {
+          artifactIncremental: createArtifactIncrementalReader(
+            (filter, signal) =>
+              fetch(`${endpoint}/query`, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify([filter]),
+                signal,
+              }),
+          ),
+        }
+      : {}),
     ...(session.attachmentUploads === true && session.relayUrl
       ? { uploadAttachment: brokerUpload(endpoint, session.relayUrl, fetch) }
       : {}),

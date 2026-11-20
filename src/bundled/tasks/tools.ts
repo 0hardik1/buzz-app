@@ -1,6 +1,6 @@
 // Agents read through their own relay connection. Saves are signed by the
-// owner only after the agent can read the task/home; NIP-AR checks the owner's
-// write access and rejects stale revisions. Every mutation appends a dated note.
+// owner only when its current roster entry is writable and the agent is a
+// signed member of the same home. NIP-AR also rejects stale revisions.
 import type { Agents as AgentsService } from "../../features/agents/service";
 import type { BuzzClient } from "../../buzz-mcp/client";
 import { channelIdentity } from "../../features/relay/channel-labels";
@@ -147,6 +147,30 @@ async function readableHome(
     );
 }
 
+async function writableHome(
+  session: RelaySession,
+  reads: TaskSource,
+  home: string,
+  agent: string,
+  signal: AbortSignal,
+) {
+  await readableHome(reads, home, signal);
+  const place = session.channels.get?.(home);
+  if (
+    !place ||
+    place.pending ||
+    place.archived ||
+    place.huddle ||
+    place.readOnly ||
+    !place.channelType ||
+    !["stream", "forum", "solo"].includes(place.channelType) ||
+    !place.members?.includes(agent)
+  )
+    throw new Error(
+      "Tasks need a home where the owner can write and this agent is a member.",
+    );
+}
+
 export function addTaskTools(agents: Agents) {
   function sessionOf(client: Client) {
     const relay = agents.relay(client.key)?.snapshot();
@@ -167,16 +191,18 @@ export function addTaskTools(agents: Agents) {
     reads: TaskSource,
     id: string,
     edit: (task: Task) => TaskFields,
+    agent: string,
     signal: AbortSignal,
   ) {
     let task = await current(reads, id, signal);
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       signal.throwIfAborted();
+      await writableHome(session, reads, task.home, agent, signal);
       const result: SaveResult = await saveTask(
         session,
         reads,
         edit(task),
-        { op: "update", base: task },
+        { op: "update", base: task, via: agent },
         signal,
       );
       if (result.status === "saved") return result.task;
@@ -302,7 +328,7 @@ export function addTaskTools(agents: Agents) {
       const home = textArg(args, "home") ?? context.channel;
       if (!isChannelId(home))
         throw new Error("Say which channel or Solo chat the task belongs in");
-      await readableHome(reads, home, signal);
+      await writableHome(session, reads, home, client.pubkey, signal);
       const title = textArg(args, "title") ?? "";
       const requestedState = stateArg(args);
       if (args.state !== undefined && !requestedState)
@@ -426,6 +452,7 @@ export function addTaskTools(agents: Agents) {
           );
           return checkedFields(next);
         },
+        client.pubkey,
         signal,
       );
       return `Updated task ${id}.\n\n${describe(saved)}`;
@@ -483,6 +510,7 @@ export function addTaskTools(agents: Agents) {
             },
             note,
           ),
+        client.pubkey,
         signal,
       );
       return `Added a note to task ${id}.\n\n${describe(saved)}`;

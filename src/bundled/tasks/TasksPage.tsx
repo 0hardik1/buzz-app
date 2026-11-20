@@ -153,10 +153,13 @@ function ConnectedTasks({
             op: "update",
             base: editor.task,
           });
-    if (result.status === "conflict")
+    if (result.status === "conflict") {
+      if (editor.kind === "edit")
+        setEditor({ kind: "edit", task: result.current });
       throw new Error(
-        "Someone else updated this task. Your draft is still here; close and reopen it to apply the note to their latest log.",
+        "Someone else updated this task. Your draft is still here; review their latest log note, then save again.",
       );
+    }
     table.setSaved(result.task);
   };
   const editing = editor?.kind === "edit" ? editor.task : undefined;
@@ -301,7 +304,7 @@ function ConnectedTasks({
       </LoadingRegion>
       {editor && (
         <TaskEditor
-          key={editor.kind === "edit" ? editor.task.revision : editor.id}
+          key={editor.kind === "edit" ? editor.task.id : editor.id}
           task={editing}
           homes={homes}
           initialHome={editing?.home ?? homes[0]?.id ?? ""}

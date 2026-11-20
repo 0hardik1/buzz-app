@@ -96,7 +96,7 @@ export type SaveResult =
 
 export type SaveTarget =
   | Readonly<{ op: "create"; home: string; id: string; via?: string }>
-  | Readonly<{ op: "update"; base: Task }>;
+  | Readonly<{ op: "update"; base: Task; via?: string }>;
 
 /** A new id is chosen before signing, so an uncertain create can be found. */
 export async function saveTask(
@@ -127,7 +127,7 @@ export async function saveTask(
         ["type", TASK_TYPE],
         ["op", target.op],
         ...(base ? [["prev", base.revision]] : []),
-        ...(target.op === "create" && target.via ? [["via", target.via]] : []),
+        ...(target.via ? [["via", target.via]] : []),
         ...taskTags(checked, base).map((tag) => [...tag]),
       ],
     },

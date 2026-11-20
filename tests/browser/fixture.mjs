@@ -32,6 +32,16 @@ export const historySize = 640;
 // The built app, React, services, verification, IndexedDB and Virtua stay real.
 // Layout journeys use synthetic broker HTTP; live journeys retain the production
 // broker/subscriber and model only the upstream relay policy with ephemeral keys.
+const incrementalArtifacts = {
+  version: 1,
+  overlapSeconds: 120,
+  pageRows: 100,
+  currentRows: 100,
+  responseBytes: 8388608,
+  permanentChannelsOnly: true,
+  checkpointLifetimeSeconds: 2592000,
+};
+
 export const test = base.extend({
   productionBroker: [false, { option: true }],
   openingAdminSetup: [false, { option: true }],
@@ -51,6 +61,7 @@ export const test = base.extend({
   // browser's zone into it; null leaves the key out so launch shares one.
   profileTimeZone: ["", { option: true }],
   readState: [false, { option: true }],
+  artifactSync: [false, { option: true }],
   threadUnread: [false, { option: true }],
   presenceThreadAuthors: [0, { option: true }],
   threadUnreadMentions: [false, { option: true }],
@@ -152,6 +163,7 @@ export const test = base.extend({
       profilePicture,
       profileTimeZone,
       readState,
+      artifactSync,
       threadUnread,
       presenceThreadAuthors,
       threadUnreadMentions,
@@ -1108,6 +1120,26 @@ export const test = base.extend({
         .map((entry) => entry.event);
     };
     const answer = (community, filter) => {
+      if (artifactSync && filter.kinds?.includes(45010)) {
+        return [...readEvents.get(community).values()]
+          .filter(
+            (event) =>
+              event.kind === 45010 &&
+              (!filter.authors || filter.authors.includes(event.pubkey)) &&
+              Object.entries(filter)
+                .filter(([key]) => key.startsWith("#"))
+                .every(([key, values]) =>
+                  event.tags.some(
+                    ([name, value]) =>
+                      name === key.slice(1) && values.includes(value),
+                  ),
+                ),
+          )
+          .toSorted(
+            (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
+          )
+          .slice(0, filter.limit);
+      }
       if (openingAdminSetup && (filter.ids || filter.kinds?.includes(9007)))
         return [
           report.setupCreation,
@@ -2313,12 +2345,18 @@ export const test = base.extend({
             self: getPublicKey(relayKey),
             ...(openingAdminSetup ? { supported_nips: [29] } : {}),
             // Solo details publications below retain label changes as well as names.
-            ...(ownSoloChannels.length || memberRoleChanges
+            ...(ownSoloChannels.length || memberRoleChanges || artifactSync
               ? {
                   supported_extensions: [
                     ...(ownSoloChannels.length ? ["nip-cl"] : []),
                     ...(memberRoleChanges ? ["buzz-solo-member-role"] : []),
+                    ...(artifactSync ? ["nip-ar"] : []),
                   ],
+                }
+              : {}),
+            ...(artifactSync
+              ? {
+                  artifacts: { incremental: incrementalArtifacts },
                 }
               : {}),
             ...(readState
@@ -2407,6 +2445,9 @@ export const test = base.extend({
         if (route === "session") {
           report.sessions.push(saved ? requestedCommunity : community);
           return send(response, {
+            ...(artifactSync
+              ? { artifactIncremental: incrementalArtifacts }
+              : {}),
             viewer,
             relayAuthor: getPublicKey(relayKey),
             writeKinds:
@@ -2443,7 +2484,7 @@ export const test = base.extend({
           expect(tag("type")).toBe("buzz.task");
           expect(channelIds).toContain(tag("h"));
           expect(["create", "update"]).toContain(tag("op"));
-          const coordinate = `45010:${body.pubkey}:${tag("d")}:${tag("type")}`;
+          const coordinate = `45010:${tag("h")}:${tag("d")}:${tag("type")}`;
           const previous = readEvents.get(community).get(coordinate);
           expect(tag("prev")).toBe(previous?.id);
           if (tag("op") === "create") expect(previous).toBeUndefined();
@@ -2558,6 +2599,48 @@ export const test = base.extend({
           throw new Error(
             `Unexpected fixture request: ${request.method} ${request.url}`,
           );
+        if (
+          artifactSync &&
+          body.length === 1 &&
+          body[0].artifact === "incremental"
+        ) {
+          const request = body[0];
+          const rows = answer(community, request.query);
+          const wanted = request.artifactIds
+            ? new Set(request.artifactIds)
+            : undefined;
+          const selected = wanted
+            ? [...readEvents.get(community).keys()]
+                .filter((key) => wanted.has(key.split(":")[2]))
+                .map((key) => readEvents.get(community).get(key))
+            : rows;
+          const artifactIds = new Set(
+            selected.map((event) => event.tags.find(([key]) => key === "d")[1]),
+          );
+          return send(response, {
+            version: 1,
+            startedAt: new Date().toISOString(),
+            ...(wanted
+              ? {}
+              : {
+                  overlapSeconds: 120,
+                  nextCursor: null,
+                  checkpoint: `fixture-${Date.now()}`,
+                }),
+            changes: [
+              ...selected.map((event) => ({
+                type: "upsert",
+                artifactId: event.tags.find(([key]) => key === "d")[1],
+                event,
+              })),
+              ...(wanted
+                ? [...wanted]
+                    .filter((id) => !artifactIds.has(id))
+                    .map((artifactId) => ({ type: "remove", artifactId }))
+                : []),
+            ],
+          });
+        }
         expect(body.length).toBeGreaterThan(0);
         expect(body.length).toBeLessThanOrEqual(
           body.every(

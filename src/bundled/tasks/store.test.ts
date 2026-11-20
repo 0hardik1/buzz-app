@@ -138,6 +138,7 @@ it("creates and updates compare-and-set revisions with the Task v2 schema", asyn
   const second = sign.mock.calls[1]?.[0] as { tags: string[][] };
   expect(second.tags).toContainEqual(["op", "update"]);
   expect(second.tags).toContainEqual(["prev", created.task.revision]);
+  expect(second.tags.some(([name]) => name === "via")).toBe(false);
 });
 
 it("returns the other writer's head on conflict", async () => {

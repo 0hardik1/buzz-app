@@ -11,6 +11,7 @@ test.use({
   channelNames: { [alpha]: "Alpha", [beta]: "Beta" },
   historyCounts: { [alpha]: 1, [beta]: 1 },
   channelWriteKinds: [9, 30315, 45010],
+  artifactSync: true,
 });
 
 // Real shell routing, plugin registration, artifact writer, IndexedDB and
@@ -72,16 +73,31 @@ test("creates and updates Task v2 records in a contained responsive table", asyn
     edit.getByRole("heading", { name: "Log", exact: true }),
   ).toBeVisible();
   await edit.getByRole("combobox", { name: "State", exact: true }).click();
-  await page.getByRole("option", { name: "Open", exact: true }).click();
+  await page.getByRole("option", { name: "Waiting", exact: true }).click();
   await edit
     .getByLabel("Update note", { exact: true })
-    .fill("Confirmed the record survives a fresh read; PR evidence is linked.");
+    .fill(
+      "Saved the waiting state and PR evidence; reloading for verification.",
+    );
   await edit.getByRole("button", { name: "Save update", exact: true }).click();
   await expect(edit).toHaveCount(0);
   await expect(workspace.getByRole("table")).toContainText(
-    "Confirmed the record survives a fresh read",
+    "Saved the waiting state and PR evidence",
   );
-  await expect(workspace.getByRole("table")).toContainText("Open");
+  await expect(workspace.getByRole("table")).toContainText("Waiting");
+
+  // A reload discards the local save overlay. Artifact sync must restore the
+  // signed current revision into IndexedDB and then into this table.
+  await page.reload();
+  await open(page, app);
+  await page.getByRole("tab", { name: "Tasks", exact: true }).click();
+  await expect(
+    workspace.getByRole("button", { name: "Verify offline handoff" }),
+  ).toBeVisible();
+  await expect(workspace.getByRole("table")).toContainText("Waiting");
+  await expect(workspace.getByRole("table")).toContainText(
+    "Saved the waiting state and PR evidence",
+  );
 
   for (const width of [390, 800, 1280]) {
     for (const theme of ["light", "dark"]) {

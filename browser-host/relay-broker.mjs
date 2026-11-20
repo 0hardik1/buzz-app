@@ -352,6 +352,9 @@ async function relayAuthority(fetch, relay) {
       nip11.supported_extensions.includes("buzz-solo-member-role"),
     // NIP-AR sync: REQ with `"artifact": "current"` keeps a set current.
     artifactSync: nip11.artifacts?.sync?.version === 1,
+    ...(nip11.artifacts?.incremental
+      ? { artifactIncremental: nip11.artifacts.incremental }
+      : {}),
     artifactSupport:
       Array.isArray(nip11.supported_extensions) &&
       nip11.supported_extensions.includes("nip-ar"),

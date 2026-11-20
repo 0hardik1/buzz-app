@@ -2,6 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { expect, it, vi, afterEach } from "vitest";
 import {
+  act,
   cleanup,
   render,
   screen,
@@ -14,7 +15,8 @@ import type { ArtifactStorage } from "../../features/artifact-storage/service";
 import type { RelayData } from "../../features/relay/service";
 import type { RelayEvent } from "../../features/relay/events";
 import type { RelaySession } from "../../features/relay/session";
-import { createTaskFields, taskOf, type TaskFields } from "./model";
+import { PublishRejected } from "../../features/relay/outbox";
+import { createTaskFields, reviseTask, taskOf, type TaskFields } from "./model";
 import { TasksPage } from "./TasksPage";
 import { parseLinks } from "./TaskEditor";
 
@@ -49,16 +51,19 @@ function event(fields: TaskFields, revision = "d".repeat(64)) {
 }
 
 function entry(fields: TaskFields): ArtifactEntry {
-  const revision = event(fields);
+  return artifact(event(fields) as unknown as RelayEvent);
+}
+
+function artifact(revision: RelayEvent): ArtifactEntry {
   return {
     record: {
       id: revision.id,
-      channelId: home,
+      channelId: revision.tags.find(([name]) => name === "h")?.[1] ?? "",
       type: "buzz.task",
       current: {
         id: revision.id,
         content: revision.content,
-        event: revision as unknown as RelayEvent,
+        event: revision,
       },
       availability: { state: "available" },
     },
@@ -66,9 +71,14 @@ function entry(fields: TaskFields): ArtifactEntry {
 }
 
 function setup(rows: ArtifactEntry[] = [], writable = true) {
+  let currentRows = rows;
+  const listeners = new Set<() => void>();
   const collection = {
-    subscribe: () => () => {},
-    page: vi.fn(async () => ({ entries: rows })),
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    page: vi.fn(async () => ({ entries: currentRows })),
     refreshError: vi.fn(async () => null),
     close: vi.fn(),
   };
@@ -82,10 +92,11 @@ function setup(rows: ArtifactEntry[] = [], writable = true) {
     sig: "",
   }));
   const publish = vi.fn(async () => "");
+  const snapshotRead = vi.fn(async () => []);
   const session = {
     viewer,
     relayAuthor: "e".repeat(64),
-    snapshotRead: vi.fn(async () => []),
+    snapshotRead,
     ...(writable ? { configArtifactWriter: { sign, publish } } : {}),
     channels: {
       ensureList: () => () => {},
@@ -106,7 +117,19 @@ function setup(rows: ArtifactEntry[] = [], writable = true) {
     snapshot: () => connection,
     subscribe: () => () => {},
   } as unknown as RelayData;
-  return { storage, relay, collection, sign, publish };
+  const replaceRows = (next: ArtifactEntry[]) => {
+    currentRows = next;
+    for (const listener of listeners) listener();
+  };
+  return {
+    storage,
+    relay,
+    collection,
+    sign,
+    publish,
+    snapshotRead,
+    replaceRows,
+  };
 }
 
 function parseLinksShape(text: string) {
@@ -223,6 +246,93 @@ it("requires a note before an update and appends it on save", async () => {
   expect(body.log).toHaveLength(2);
   expect(body.log.at(-1)?.note).toBe("Implementation is ready for review.");
   expect(signed.tags).toContainEqual(["prev", "d".repeat(64)]);
+});
+
+it("keeps the draft and rebases its base after a conflicting save", async () => {
+  const app = setup([entry(base)]);
+  app.publish.mockRejectedValueOnce(
+    new PublishRejected("rejected", "conflict: stale prev"),
+  );
+  const theirs = reviseTask(base, {}, "A teammate added context.", 101);
+  app.snapshotRead.mockResolvedValue([event(theirs, "c".repeat(64))] as never);
+  render(<TasksPage relay={app.relay} storage={app.storage} />);
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Build the tracker" }),
+  );
+  const dialog = screen.getByRole("dialog", { name: "Edit task" });
+  const note = within(dialog).getByLabelText("Update note");
+  await userEvent.type(note, "My draft must survive the conflict.");
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "Save update" }),
+  );
+  await waitFor(() => expect(app.publish).toHaveBeenCalledOnce());
+  expect(dialog).toBeInTheDocument();
+  expect(note).toHaveValue("My draft must survive the conflict.");
+  expect(
+    within(dialog).getByText("A teammate added context."),
+  ).toBeInTheDocument();
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "Save update" }),
+  );
+  await waitFor(() => expect(app.publish).toHaveBeenCalledTimes(2));
+  const second = app.sign.mock.calls[1]?.[0] as {
+    content: string;
+    tags: string[][];
+  };
+  expect(second.tags).toContainEqual(["prev", "c".repeat(64)]);
+  expect(
+    (JSON.parse(second.content) as TaskFields).log.map((entry) => entry.note),
+  ).toEqual([
+    "Created task.",
+    "A teammate added context.",
+    "My draft must survive the conflict.",
+  ]);
+});
+
+it("retires a local overlay after sync and never resurrects a deleted row", async () => {
+  const app = setup();
+  render(<TasksPage relay={app.relay} storage={app.storage} />);
+  const firstCreate = (
+    await screen.findAllByRole("button", { name: "New task" })
+  )[0];
+  if (!firstCreate) throw new Error("Missing create button");
+  await userEvent.click(firstCreate);
+  const dialog = screen.getByRole("dialog", { name: "New task" });
+  await userEvent.type(
+    within(dialog).getByLabelText("Title"),
+    "Local draft row",
+  );
+  await userEvent.type(
+    within(dialog).getByLabelText("Why"),
+    "Sync must own it.",
+  );
+  await userEvent.type(
+    within(dialog).getByLabelText("Done when"),
+    "It disappears with the record.",
+  );
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "Create task" }),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Local draft row" }),
+  ).toBeInTheDocument();
+  const signed = app.sign.mock.calls[0]?.[0] as Omit<RelayEvent, "id">;
+  const confirmed = {
+    ...signed,
+    id: "d".repeat(64),
+    pubkey: viewer,
+    sig: "signed",
+    created_at: 100,
+  } as RelayEvent;
+  await act(async () => app.replaceRows([artifact(confirmed)]));
+  expect(
+    await screen.findByRole("button", { name: "Local draft row" }),
+  ).toBeInTheDocument();
+  await act(async () => app.replaceRows([]));
+  expect(
+    await screen.findByRole("heading", { name: "No tasks yet" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Local draft row" })).toBeNull();
 });
 
 it("shows a read-only record without edit actions when no writer is available", async () => {

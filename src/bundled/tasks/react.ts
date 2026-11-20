@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { ArtifactStorage } from "../../features/artifact-storage/service";
 import type { RelaySession } from "../../features/relay/session";
 import type { Task } from "./model";
@@ -19,7 +25,9 @@ export function useTasks(
 ) {
   const [table, setTable] = useState<TasksTable>(loading);
   const [saved, setSavedMap] = useState<ReadonlyMap<string, Task>>(new Map());
+  const confirmedIds = useRef(new Set<string>());
   useEffect(() => {
+    confirmedIds.current.clear();
     setSavedMap(new Map());
     if (!session) {
       setTable(loading);
@@ -36,18 +44,24 @@ export function useTasks(
   );
   const setSaved = (task: Task) =>
     setSavedMap((current) => new Map(current).set(task.id, task));
-  // A local save is pending until authoritative sync returns that revision or
-  // demonstrably newer activity. Equal timestamps keep the local revision.
+  // Once any authoritative revision arrives, sync owns the row—even if this
+  // device later loses access or the record disappears.
+  useEffect(() => {
+    setSavedMap((current) => {
+      const next = new Map(current);
+      for (const task of state.tasks) next.delete(task.id);
+      return next.size === current.size ? current : next;
+    });
+  }, [state.tasks]);
   const tasks = useMemo(() => {
+    for (const task of state.tasks) confirmedIds.current.add(task.id);
     if (!saved.size) return state.tasks;
     const current = new Map(state.tasks.map((task) => [task.id, task]));
     for (const task of saved.values()) {
       const confirmed = current.get(task.id);
-      if (
-        !confirmed ||
-        (confirmed.revision !== task.revision &&
-          confirmed.updatedAt <= task.updatedAt)
-      )
+      // Remember confirmation synchronously as well as pruning above: a fast
+      // confirmed → deleted sequence must not briefly restore the local copy.
+      if (!confirmed && !confirmedIds.current.has(task.id))
         current.set(task.id, task);
     }
     return [...current.values()].sort(

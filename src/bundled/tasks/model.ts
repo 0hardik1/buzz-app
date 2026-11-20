@@ -257,6 +257,7 @@ const OWNED_TAGS = new Set([
   "op",
   "prev",
   "state",
+  "via",
 ]);
 
 export function taskTags(fields: TaskFields, base?: Task) {
