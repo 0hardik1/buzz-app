@@ -85,8 +85,7 @@ export function AnimatedAvatarCapture({
   const reducedMotion = useReducedMotion();
   const [playing, setPlaying] = useState(false);
   const [composition, setComposition] = useState(initialComposition);
-  const busy =
-    phase === "starting" || phase === "recording" || phase === "saving";
+
   useEffect(
     () => () => {
       operation.current?.abort();
@@ -267,6 +266,30 @@ export function AnimatedAvatarCapture({
           aria-label="Camera preview"
           className={styles.preview}
         />
+        {phase === "recording" && (
+          <svg
+            className={styles.timerRing}
+            viewBox="0 0 100 100"
+            role="progressbar"
+            aria-label="Recording progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress * 100)}
+          >
+            <circle
+              cx="50"
+              cy="50"
+              r="48"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              pathLength="100"
+              strokeDasharray="100"
+              strokeDashoffset={100 - progress * 100}
+            />
+          </svg>
+        )}
         {(phase === "review" || phase === "saving") && (
           <canvas
             ref={canvas}
@@ -560,13 +583,11 @@ export function AnimatedAvatarCapture({
           </Button>
         </>
       )}
-      {busy && (
+      {(phase === "starting" || phase === "saving") && (
         <p role="status" className="text-body-sm">
           {phase === "starting"
             ? "Starting camera…"
-            : phase === "recording"
-              ? `Recording… ${Math.round(progress * 100)}%`
-              : "Uploading animated avatar…"}
+            : "Uploading animated avatar…"}
         </p>
       )}
       {error && (

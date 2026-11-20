@@ -65,12 +65,19 @@ video.preview {
   outline: 2px solid currentColor;
 }
 
-.stage[data-phase="recording"]::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border: 3px solid var(--text-danger);
+.stage[data-phase="recording"] {
+  overflow: visible;
+}
+.stage[data-phase="recording"] video {
   border-radius: inherit;
+}
+.timerRing {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  transform: rotate(-90deg);
+  color: var(--text-standard);
   pointer-events: none;
 }
 .stage[data-phase="idle"] {

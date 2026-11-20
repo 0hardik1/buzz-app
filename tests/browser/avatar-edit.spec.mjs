@@ -745,7 +745,9 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
       export async function openAvatarCamera(device) { window.avatarTestCamera = device; return { getTracks: () => [{ stop() {} }] }; }
       export async function listAvatarCameras() { return [{deviceId:"one",label:"Front camera"},{deviceId:"two",label:"Desk camera"}]; }
       export function preloadAvatarSegmenter() {}
-      export async function recordAnimatedAvatarFrames() {
+      export async function recordAnimatedAvatarFrames(video, {onProgress}) {
+        onProgress(0.5);
+        await new Promise(resolve => { window.finishAvatarRecording = resolve; });
         return { backgroundRemoved: true, frames: [0, 1, 2].map(index => {
           const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
           const context = canvas.getContext('2d'); context.fillStyle = ['red', 'green', 'blue'][index];
@@ -792,6 +794,15 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   await page
     .getByRole("button", { name: "Record 3 seconds", exact: true })
     .click();
+  const ring = page.getByRole("progressbar", { name: "Recording progress" });
+  await expect(ring).toHaveAttribute("aria-valuenow", "50");
+  await expect(ring.locator("circle")).toHaveAttribute(
+    "stroke-dashoffset",
+    "50",
+  );
+  await expect(ring).toBeVisible();
+  await page.evaluate(() => window.finishAvatarRecording());
+  await expect(ring).toHaveCount(0);
   await page.getByRole("button", { name: "Background", exact: true }).click();
   await page.getByRole("button", { name: "Transparent background" }).click();
   await page.getByRole("button", { name: "Frame", exact: true }).click();
