@@ -1,4 +1,9 @@
 import { workspaceSectionOrder } from "../../features/relay/sidebar-preferences";
+import {
+  unreadsFirst,
+  useSidebarUnreadsFirst,
+  useWaitingChannels,
+} from "./SidebarUnreadsFirst";
 import { FadingLabel } from "./FadingLabel";
 import { ChannelSidebarRows } from "../../features/channel-navigation/ChannelSidebarRows";
 import { createPortal } from "react-dom";
@@ -303,19 +308,36 @@ export function SoloWorkspaces({
     );
     void preferences.reorderSections(`group:${id}`, reordered).catch(() => {});
   };
+  const showsUnreadsFirst = useSidebarUnreadsFirst(scope);
+  const waiting = useWaitingChannels(
+    session.unread,
+    snapshot.data?.muted,
+    undefined,
+  );
   const assigned = snapshot.data?.assignments ?? {};
   const assignmentFor = (item: ChatListItem) =>
     dormantAssignments?.has(item.id) ? undefined : assigned[item.id];
   const ids = new Set(groups.map((group) => group.id));
+  // Chats that wait on you lead a workspace that shows unreads first.
+  const ordered = (id: string, rows: readonly ChatListItem[]) =>
+    showsUnreadsFirst(workspaceSectionKey(id))
+      ? unreadsFirst(rows, waiting, (item) => item.id)
+      : rows;
   const projects = [
     ...groups.map((group) => ({
       ...group,
-      rows: chats.filter((item) => assignmentFor(item) === group.id),
+      rows: ordered(
+        group.id,
+        chats.filter((item) => assignmentFor(item) === group.id),
+      ),
     })),
     {
       id: "",
       name: "Chats",
-      rows: chats.filter((item) => !ids.has(assignmentFor(item) ?? "")),
+      rows: ordered(
+        "",
+        chats.filter((item) => !ids.has(assignmentFor(item) ?? "")),
+      ),
     },
   ].filter(
     (project) =>

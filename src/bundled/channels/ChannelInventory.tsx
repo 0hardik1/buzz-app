@@ -148,6 +148,11 @@ import {
 import { splitPartition } from "../../features/relay/partition";
 import styles from "./Channels.module.css";
 import { inboxMentioners } from "../../features/relay/inbox";
+import {
+  unreadsFirst,
+  useSidebarUnreadsFirst,
+  useWaitingChannels,
+} from "./SidebarUnreadsFirst";
 import { selectProfiles } from "../../features/relay/profile-selection";
 import { useBestieConversation } from "../../app/shell/bestie-context";
 
@@ -964,8 +969,30 @@ export function ChannelInventory({
         : sections,
     [sections, rowSortModes, sectionSort, rowUnread, queries.unread],
   );
+  // Conversations that wait on you lead each card that shows unreads first.
+  const showsUnreadsFirst = useSidebarUnreadsFirst(scope);
+  const waitingChannels = useWaitingChannels(
+    queries.unread,
+    preferences.data?.muted,
+    current?.id,
+  );
+  const orderedSections = useMemo(
+    () =>
+      sortedSections.map((section) => {
+        if (!showsUnreadsFirst(section.key)) return section;
+        const rows = unreadsFirst(
+          section.rows,
+          waitingChannels,
+          (channel) => channel.id,
+        );
+        return rows === section.rows
+          ? section
+          : { ...section, rows: [...rows] };
+      }),
+    [sortedSections, showsUnreadsFirst, waitingChannels],
+  );
   const filteredSections = useSidebarFilters(
-    sortedSections
+    orderedSections
       .filter(({ key }) => !workspaceFrames.has(key))
       .map((section) =>
         composedChatSections.has(section.key)
