@@ -10,6 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import { useState, type ComponentProps } from "react";
+import { createPortal } from "react-dom";
 import {
   WorkspaceCompositionContext,
   RegionWorkspace,
@@ -330,7 +331,6 @@ it("keeps Catch me up pinned while unified workspaces reorder", async () => {
       "solo",
       "group:personal",
       "channels",
-      "forums",
       "dms",
     ],
   });
@@ -392,7 +392,6 @@ it("keeps Catch me up pinned while unified workspaces reorder", async () => {
           "group:work",
           "group:personal",
           "channels",
-          "forums",
           "dms",
         ],
         expect.any(AbortSignal),
@@ -409,6 +408,45 @@ it("keeps Catch me up pinned while unified workspaces reorder", async () => {
       "aria-disabled",
       "true",
     );
+  } finally {
+    store.dispose();
+  }
+});
+
+it("returns focus to the workspace title after a failed order save", async () => {
+  const h = fixture();
+  h.setSaved({
+    ...h.saved(),
+    sections: [
+      { id: "work", name: "Work", order: 0 },
+      { id: "home", name: "Home", order: 1 },
+    ],
+  });
+  const store = h.store();
+  const user = userEvent.setup();
+  await store.queries.ensure();
+  h.order.mockRejectedValueOnce(new Error("Order was refused"));
+  render(
+    h.view(store.queries, undefined, undefined, undefined, (parts) => (
+      <WorkspaceCompositionContext value={parts}>
+        <RegionWorkspace id="work" />
+        <RegionWorkspace
+          id="home"
+          headerLeading={{
+            icon: "H",
+            label: "Open Home summary",
+            onActivate() {},
+          }}
+        />
+      </WorkspaceCompositionContext>
+    )),
+  );
+  try {
+    await user.click(screen.getByRole("button", { name: "Actions for Home" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Move up" }));
+    const error = await screen.findByRole("alert");
+    await user.click(within(error).getByRole("button", { name: "Dismiss" }));
+    expect(screen.getByRole("button", { name: /^Home$/ })).toHaveFocus();
   } finally {
     store.dispose();
   }
@@ -655,6 +693,10 @@ it("shares a workspace frame while keeping selection, disclosure and chat creati
               select(true);
             }}
             onNewTask={onTask}
+            headerAccessory={createPortal(
+              <button type="button">Accessory popup action</button>,
+              document.body,
+            )}
           >
             <button type="button">Workspace task</button>
           </RegionWorkspace>
@@ -693,6 +735,15 @@ it("shares a workspace frame while keeping selection, disclosure and chat creati
     );
     await user.click(screen.getByRole("button", { name: "New task in Work" }));
     expect(onTask).toHaveBeenCalledOnce();
+    const popupAction = screen.getByRole("button", {
+      name: "Accessory popup action",
+    });
+    popupAction.focus();
+    expect(popupAction).toHaveFocus();
+    await user.keyboard("{Shift>}{F10}{/Shift}");
+    expect(screen.queryByRole("menu", { name: "Actions for Work" })).toBeNull();
+    fireEvent.contextMenu(popupAction);
+    expect(screen.queryByRole("menu", { name: "Actions for Work" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Actions for Work" }));
     await user.click(
       await screen.findByRole("menuitem", { name: /^New task$/ }),
