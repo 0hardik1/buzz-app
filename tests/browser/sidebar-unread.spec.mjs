@@ -754,9 +754,9 @@ test.describe("DM preview wiring", () => {
       "dm-self": [],
     },
   });
-  // Beta waits on the viewer, so it joins the DMs in the cues.
+  // Beta waits on the viewer, so it joins the DMs in the cues, without a face.
   test.beforeEach(({ app }) => seedMention(app, "primary", "beta"));
-  test("production sidebar wires 1:1 and mentioner avatars and preserves their shape and overlap", async ({
+  test("production sidebar wires 1:1 DM avatars and preserves their shape and overlap", async ({
     page,
     app,
   }, info) => {
@@ -769,8 +769,8 @@ test.describe("DM preview wiring", () => {
       ).toBeAttached();
     const below = cue(page, "below");
     await expect(below.locator("[data-unread-dm]")).toHaveCount(3);
-    // Group DMs and self-DMs show no face; a person's mention does.
-    const eligible = new Set(["dm-a", "dm-b", "dm-c", "dm-d", "beta"]);
+    // Only 1:1 DMs show a face: not group or self DMs, nor a mention.
+    const eligible = new Set(["dm-a", "dm-b", "dm-c", "dm-d"]);
     for (const edge of ["below", "above"]) {
       if (edge === "above")
         await list(page).evaluate((el) => {

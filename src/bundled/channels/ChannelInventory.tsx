@@ -152,13 +152,11 @@ import {
 } from "../../features/channel-navigation/ChannelNavigationState";
 import { splitPartition } from "../../features/relay/partition";
 import styles from "./Channels.module.css";
-import { inboxMentioners } from "../../features/relay/inbox";
 import {
   unreadsFirst,
   useSidebarUnreadsFirst,
   useWaitingChannels,
 } from "./SidebarUnreadsFirst";
-import { selectProfiles } from "../../features/relay/profile-selection";
 import { useBestieConversation } from "../../app/shell/bestie-context";
 
 /** The sidebar entry selected by a destination, excluding nested message state. */
@@ -408,48 +406,9 @@ export function ChannelInventory({
     queries.profiles,
     queries.names,
   );
-  // Who mentioned you, so the edge cue can show their face beside DMs'.
-  const inbox = useSyncExternalStore(
-    queries.unread.subscribeInbox,
-    () => queries.unread.inbox(),
-    () => queries.unread.inbox(),
-  );
-  const mentioners = useMemo(() => inboxMentioners(inbox), [inbox]);
-  const mentionerKey = [...new Set([...mentioners.values()].flat())]
-    .sort()
-    .join(":");
-  const mentionerIds = useMemo(
-    () => (mentionerKey ? mentionerKey.split(":") : []),
-    [mentionerKey],
-  );
-  const mentionerSelection = useMemo(
-    () => selectProfiles(queries.profiles, mentionerIds),
-    [queries.profiles, mentionerIds],
-  );
-  const mentionerProfiles = useSyncExternalStore(
-    mentionerSelection.subscribe,
-    mentionerSelection.snapshot,
-    mentionerSelection.snapshot,
-  );
-  const missingMentioners = mentionerIds
-    .filter((id) => !mentionerProfiles.has(id))
-    .join(":");
-  useEffect(() => {
-    if (missingMentioners)
-      void queries.profiles
-        .ensure(missingMentioners.split(":"), "background")
-        .catch(() => {});
-  }, [queries.profiles, missingMentioners]);
   const unreadDmPreviews = useMemo(
-    () =>
-      unreadPreviews(
-        channels,
-        dmProfiles,
-        mentioners,
-        mentionerProfiles,
-        queries.media,
-      ),
-    [channels, dmProfiles, mentioners, mentionerProfiles, queries.media],
+    () => unreadPreviews(channels, dmProfiles, queries.media),
+    [channels, dmProfiles, queries.media],
   );
   const workingIds = useSyncExternalStore(
     queries.agentActivity.subscribeWorking,

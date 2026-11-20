@@ -484,22 +484,19 @@ it.each([
   },
 );
 
-it("shows the newest person who mentioned you, never an agent", () => {
-  const people = new Map<string, { name: string; isAgent?: true }>([
-    ["agent", { name: "Helper", isAgent: true }],
-    ["alice", { name: "Alice" }],
-  ]);
-  const previews = (authors: string[]) =>
-    unreadPreviews(
-      [],
-      new Map(),
-      new Map([["room", authors]]),
-      people,
-      undefined,
-    );
-  // The agent mentioned you last, but the stack shows Alice.
-  expect(previews(["agent", "alice"]).get("room")?.name).toBe("Alice");
-  // An agent alone, or someone whose profile hasn't loaded, shows no face.
-  expect(previews(["agent"]).has("room")).toBe(false);
-  expect(previews(["unknown"]).has("room")).toBe(false);
+it("shows faces only for 1:1 DMs", () => {
+  const dm = {
+    id: "dm",
+    name: "Alice",
+    channelType: "dm",
+    participants: ["alice"],
+  };
+  const group = { ...dm, id: "group", participants: ["alice", "bob"] };
+  const room = { id: "room", name: "room", channelType: "stream" };
+  const previews = unreadPreviews(
+    [dm, group, room] as unknown as Parameters<typeof unreadPreviews>[0],
+    new Map([["alice", { name: "Alice" }]]),
+    undefined,
+  );
+  expect([...previews.keys()]).toEqual(["dm"]);
 });

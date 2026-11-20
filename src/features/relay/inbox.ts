@@ -61,41 +61,6 @@ export function inboxUnreadChannels(inbox: InboxSnapshot) {
   return channels;
 }
 
-const mentionerCache = new WeakMap<
-  InboxSnapshot,
-  ReadonlyMap<string, readonly string[]>
->();
-/** Everyone with an unread mention of you in each channel, newest first. */
-export function inboxMentioners(inbox: InboxSnapshot) {
-  let mentioners = mentionerCache.get(inbox);
-  if (!mentioners) {
-    // A conversation that once mentioned you isn't enough: one of its unread
-    // messages must, so a later plain reply in that thread shows no face.
-    const byChannel = new Map<string, InboxItem[]>();
-    for (const { mention } of inbox.items) {
-      if (!mention?.unreadCount || mention.workflowOwnerId) continue;
-      byChannel.set(mention.channelId, [
-        ...(byChannel.get(mention.channelId) ?? []),
-        mention,
-      ]);
-    }
-    mentioners = new Map(
-      [...byChannel].map(([channelId, items]) => [
-        channelId,
-        [
-          ...new Set(
-            items
-              .sort((a, b) => b.createdAt - a.createdAt)
-              .map((item) => item.authorId),
-          ),
-        ],
-      ]),
-    );
-    mentionerCache.set(inbox, mentioners);
-  }
-  return mentioners;
-}
-
 export type InboxSnapshot = Readonly<{
   status: "idle" | "loading" | "ready" | "error";
   items: readonly InboxItem[];
