@@ -1036,6 +1036,9 @@ width. Both controls use the same sm/md/lg scale. Existing names
 remain compatibility aliases: primary/solid → prominent, quiet → subtle,
 compact/toolbar → sm, default → md, large → lg. Do not add new alias call sites.
 Buzz's tint and chrome icon variants remain for composer and backdrop actions.
+`IconButton variant="accent"` fills with the accent while the action's state is
+on, such as a card's view options button while the card is filtered. Its
+accessible name says the state too; color alone does not carry it.
 
 Proposed: when a trigger changes between icon-only and labelled content, keep one
 `Button` mounted and switch `shape="icon"` / `shape="capsule"`. The icon shape
@@ -1118,8 +1121,8 @@ inline choices, use `size="sm"`: 32px rows, 16px controls, and an 8px label gap.
 Pair small radios with `RadioGroup size="sm"` to remove the extra group gap.
 For a short set of single-select options side by side, such as a view filter,
 use `Radio variant="chip"` inside `RadioGroup layout="wrap"`: compact pills that
-wrap at the container's edge. Selection is the selected fill, never a check or
-dot. Name the group with a `Field` label.
+wrap at the container's edge. Unselected chips have no fill; the selected one
+fills, never a check or dot. Name the group with a `Field` label.
 Compact filter popovers use `padding="list"`; keep room around a scrolling
 choice list for the shared keyboard focus ring.
 

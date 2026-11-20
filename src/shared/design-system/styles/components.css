@@ -382,7 +382,8 @@
         [data-icon-variant="chrome"],
         [data-icon-variant="avatar"],
         [data-icon-variant="media"],
-        [data-icon-variant="bare"]
+        [data-icon-variant="bare"],
+        [data-icon-variant="accent"]
       ) {
       background: var(--interaction-hover);
     }
@@ -415,7 +416,8 @@
     [data-icon-variant="chrome"],
     [data-icon-variant="avatar"],
     [data-icon-variant="media"],
-    [data-icon-variant="bare"]
+    [data-icon-variant="bare"],
+    [data-icon-variant="accent"]
   ) {
     background: var(--interaction-pressed);
   }
@@ -702,6 +704,23 @@
   .buzz-button[data-icon-variant="tint"] {
     background: var(--affordance-accent);
     color: var(--text-accent);
+  }
+  /* An icon action whose state is on, such as a filtered view, fills with the
+     accent so it reads at a glance. */
+  .buzz-button[data-icon-variant="accent"] {
+    background: var(--affordance-accent-prominent);
+    color: var(--text-on-accent);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .buzz-button[data-icon-variant="accent"]:hover:not([data-disabled]) {
+      background: var(--affordance-accent-prominent-hover);
+    }
+  }
+  .buzz-button[data-icon-variant="accent"]:is(
+    :active,
+    [aria-expanded="true"]
+  ):not([data-disabled]) {
+    background: var(--affordance-accent-prominent-pressed);
   }
   .buzz-button[data-muted]:not([data-disabled]) {
     color: var(--text-subtle);

@@ -290,13 +290,13 @@
     flex-wrap: wrap;
     gap: var(--space-1);
   }
-  /* A compact pill: quiet fill at rest, the selected fill when chosen. */
+  /* A compact pill: no fill at rest, so the chosen one's fill stands out. */
   .buzz-choice[data-variant="chip"] {
     position: relative;
     min-height: var(--space-6);
     padding: var(--space-half) var(--space-2);
     border-radius: var(--radius-pill);
-    background: var(--interaction-fill);
+    background: transparent;
     color: var(--text-subtle);
     @apply text-body-sm;
   }

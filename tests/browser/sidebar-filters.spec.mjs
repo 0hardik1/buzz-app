@@ -16,9 +16,34 @@ test.use({
   historyCounts: { alpha: 1, beta: 1, gamma: 1, delta: 1 },
 });
 
-// Browser-only contract: nested menu focus, modal save/recovery and the real
-// broker's encrypted preference readback must agree after a document reload.
-test("section filters save activity windows and recover hidden channels", async ({
+// A card's view options popover holds its filter, sort and layout. Its button
+// names the card and says when the card is filtered.
+const viewOptionsButton = (scope, title) =>
+  scope.getByRole("button", {
+    name: new RegExp(`^View options for ${title}(, filtered)?$`),
+  });
+const viewOptions = async (page, title, scope = page) => {
+  const button = viewOptionsButton(scope, title);
+  // An unfiltered card reveals the button with its heading's other actions.
+  await button.focus();
+  await button.click();
+  const popup = page.getByRole("dialog", {
+    name: `View options for ${title}`,
+    exact: true,
+  });
+  await expect(popup).toBeVisible();
+  return popup;
+};
+const show = async (page, title, name, scope = page) => {
+  const popup = await viewOptions(page, title, scope);
+  await popup.getByRole("radio", { name, exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(popup).toHaveCount(0);
+};
+
+// Browser-only contract: popover choices, save recovery and the real broker's
+// encrypted preference readback must agree after a document reload.
+test("section filters save activity windows from the view options popover", async ({
   page,
   app,
 }, testInfo) => {
@@ -73,67 +98,28 @@ test("section filters save activity windows and recover hidden channels", async 
       path: join(process.env.BUZZ_FILTER_CAPTURE_DIR, `${name}.png`),
     });
   };
-  const menu = async () => {
-    await page
-      .getByRole("button", { name: "More actions for Team", exact: true })
-      .click();
-    const trigger = page.getByRole("menuitem", { name: "Filter", exact: true });
-    await trigger.hover();
-    await expect(
-      page.getByRole("menu", { name: "Filter Team", exact: true }),
-    ).toBeVisible();
-  };
-  const active = async (name = "Active") => {
-    await menu();
-    await page.getByRole("menuitemradio", { name, exact: true }).click();
-    await expect(
-      page.getByRole("dialog", { name: "Active in the last", exact: true }),
-    ).toBeVisible();
-  };
+  const trigger = viewOptionsButton(page, "Team");
+  const checked = (popup, name) =>
+    expect(popup.getByRole("radio", { name, exact: true })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   await shot("01-all");
-  await menu();
-  await expect(
-    page.getByRole("menuitemradio", { name: "All", exact: true }),
-  ).toHaveAttribute("aria-checked", "true");
-  await shot("02-filter-menu");
-  await page
-    .getByRole("menuitemradio", { name: "Unreads", exact: true })
-    .click();
+  let popup = await viewOptions(page, "Team");
+  await checked(popup, "All");
+  await expect(trigger).toHaveAttribute("data-icon-variant", "ghost");
+  await shot("02-view-options");
+  await popup.getByRole("radio", { name: "Unreads", exact: true }).click();
   await expect
     .poll(() => app.report.sidebarPublications?.at(-1)?.blob.groups.channels)
     .toBe("unreads");
-  await menu();
-  await expect(
-    page.getByRole("menuitemradio", { name: "Unreads", exact: true }),
-  ).toHaveAttribute("aria-checked", "true");
+  await checked(popup, "Unreads");
+  // A filtered card's button fills with the accent and says so.
+  await expect(trigger).toHaveAccessibleName("View options for Team, filtered");
+  await expect(trigger).toHaveAttribute("data-icon-variant", "accent");
   await shot("03-unreads");
-  await page.keyboard.press("Escape");
-  await page.keyboard.press("Escape");
-  await active();
-  for (const days of [1, 7, 30, 90]) {
-    const name = `${days} ${days === 1 ? "day" : "days"}`;
-    await page.getByRole("radio", { name, exact: true }).click();
-    await expect(
-      page.getByRole("radio", { name, exact: true }),
-    ).toHaveAttribute("aria-checked", "true");
-    await shot(`04-dialog-${days}`);
-  }
-  // Cancel has no publication side effect after editing the draft.
-  const beforeCancel = app.report.sidebarPublications.length;
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await menu();
-  await expect(
-    page.getByRole("menuitemradio", { name: "Unreads", exact: true }),
-  ).toHaveAttribute("aria-checked", "true");
-  expect(app.report.sidebarPublications).toHaveLength(beforeCancel);
-  await page
-    .getByRole("menuitemradio", { name: "Active", exact: true })
-    .click();
-  await page.getByRole("radio", { name: "7 days", exact: true }).click();
-  await page.getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(
-    page.getByRole("dialog", { name: "Active in the last", exact: true }),
-  ).toHaveCount(0);
+  // Activity windows are picked in place; there is no dialog step.
+  await popup.getByRole("radio", { name: "7 days", exact: true }).click();
   await expect
     .poll(
       () =>
@@ -141,95 +127,42 @@ test("section filters save activity windows and recover hidden channels", async 
           ?.channels,
     )
     .toBe(7 * 86400);
+  await checked(popup, "7 days");
   await expect(section.locator('[data-channel-id="gamma"]')).toBeVisible();
   await expect(section.locator('[data-channel-id="delta"]')).toHaveCount(0);
-  await shot("05-active");
+  await shot("04-seven-days");
+  await page.keyboard.press("Escape");
+  await expect(popup).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await page.mouse.move(0, 0);
+  await page.locator("body").focus();
+  // Without hover or focus, the filled button stays in view.
+  await expect(trigger).toBeVisible();
+  await shot("05-filtered-button");
   await page.reload();
   await expect(section.locator('[data-channel-id="gamma"]')).toBeVisible();
-  await menu();
-  const selectedActive = page.getByRole("menuitemradio", {
-    name: "Active 7 days",
-    exact: true,
-  });
-  await expect(selectedActive).toHaveAttribute("aria-checked", "true");
-  await expect(selectedActive).toContainText("7 days");
-  await expect(
-    page.getByRole("menuitem", { name: "Archive", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("group", {
-      name: "No activity in the last 7 days",
-      exact: true,
-    }),
-  ).toBeVisible();
-  await shot("06-hidden-channels");
-  await page.emulateMedia({ colorScheme: "dark" });
-  await shot("06-hidden-channels-dark");
-  await page.emulateMedia({ colorScheme: "light" });
-  await page.getByRole("menuitem", { name: "Archive", exact: true }).click();
-  await expect(section.locator('[data-channel-id="delta"]')).toBeVisible();
-  await shot("07-open-hidden-channel");
-  // A failed duration save keeps the dialog draft; retry goes through the broker.
-  await active("Active 7 days");
-  await page.getByRole("radio", { name: "30 days", exact: true }).click();
-  let release;
-  let started;
-  const pending = new Promise((resolve) => {
-    started = resolve;
-  });
-  const gate = new Promise((resolve) => {
-    release = resolve;
-  });
+  await expect(section.locator('[data-channel-id="delta"]')).toHaveCount(0);
+  popup = await viewOptions(page, "Team");
+  await checked(popup, "7 days");
+  // A failed save offers Retry, which goes through the broker.
   const pattern = "**/sidebar-filter";
-  await page.route(pattern, async (route) => {
-    started();
-    await gate;
+  await page.route(pattern, (route) => {
     app.report.sidebarPreferenceFailures ??= [];
     app.report.sidebarPreferenceFailures.push(route.request().url());
-    await route.fulfill({
+    return route.fulfill({
       status: 502,
       contentType: "application/json",
       body: JSON.stringify({ error: "Filter could not be saved. Try again." }),
     });
   });
-  const apply = page.getByRole("button", { name: "Apply", exact: true });
-  try {
-    await apply.focus();
-    await apply.press("Enter");
-    await pending;
-    await expect(apply).toBeFocused();
-    await expect(apply).toHaveAttribute("aria-disabled", "true");
-    await expect(
-      page.getByRole("button", { name: "Cancel", exact: true }),
-    ).toBeDisabled();
-    await shot("08-saving");
-  } finally {
-    release();
-  }
-  await expect(page.getByRole("alert")).toContainText(
-    "Relay request failed (502)",
-  );
-  await expect(apply).toBeFocused();
-  await expect(apply).toBeEnabled();
-  await shot("09-save-error");
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(
-    page.getByRole("dialog", { name: "Active in the last", exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Retry filter", exact: true }),
-  ).toHaveCount(0);
-  await active("Active 7 days");
-  await page.getByRole("radio", { name: "30 days", exact: true }).click();
-  await page.getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Relay request failed (502)",
-  );
+  await popup.getByRole("radio", { name: "30 days", exact: true }).click();
+  const retry = page.getByRole("button", { name: "Retry filter", exact: true });
+  await expect(retry).toBeVisible();
+  await page.keyboard.press("Escape");
+  await shot("06-save-error");
   await page.unroute(pattern);
-  await page.getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(
-    page.getByRole("dialog", { name: "Active in the last", exact: true }),
-  ).toHaveCount(0);
+  await retry.click();
+  await expect(retry).toHaveCount(0);
   await expect
     .poll(
       () =>
@@ -237,19 +170,14 @@ test("section filters save activity windows and recover hidden channels", async 
           ?.channels,
     )
     .toBe(30 * 86400);
-  await active("Active 30 days");
+  // 30 days is Team's default, so its button no longer reads as filtered.
+  await expect(trigger).toHaveAccessibleName("View options for Team");
+  popup = await viewOptions(page, "Team");
+  await checked(popup, "30 days");
   await page.emulateMedia({ colorScheme: "dark" });
-  await shot("10-dialog-dark");
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page
-    .getByRole("button", { name: "More actions for Work", exact: true })
-    .click();
-  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-  await page
-    .getByRole("menuitemradio", { name: "Active", exact: true })
-    .click();
-  await page.getByRole("radio", { name: "1 day", exact: true }).click();
-  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await shot("07-view-options-dark");
+  await page.keyboard.press("Escape");
+  await show(page, "Work", "Today");
   const work = page.locator('[data-sidebar-section="group:work"]');
   await expect(work.locator("[data-channel-id]")).toHaveCount(0);
   await expect(work.locator("details")).toHaveAttribute("open");
@@ -257,22 +185,22 @@ test("section filters save activity windows and recover hidden channels", async 
   await expect(
     page.getByText("No channels match this filter.", { exact: true }),
   ).toHaveCount(0);
-  await shot("11-empty-header-dark");
+  await shot("08-empty-header-dark");
   await page.emulateMedia({ colorScheme: "light" });
   await page.setViewportSize({ width: 800, height: 850 });
-  await active("Active 30 days");
+  popup = await viewOptions(page, "Team");
   await page.evaluate(() => {
     document.documentElement.style.fontSize = "150%";
   });
-  await shot("12-narrow-enlarged-text");
+  await shot("09-narrow-enlarged-text");
   await page.evaluate(() => {
     document.documentElement.style.fontSize = "";
   });
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 1440, height: 950 });
   await page.getByLabel("Work", { exact: true }).click();
   await expect(work.locator("details")).not.toHaveAttribute("open");
-  await shot("13-collapsed-empty");
+  await shot("10-collapsed-empty");
   await page.route("**/session", async (route) => {
     const response = await route.fetch();
     await route.fulfill({
@@ -281,40 +209,15 @@ test("section filters save activity windows and recover hidden channels", async 
     });
   });
   await page.reload();
-  await page
-    .getByRole("button", { name: "More actions for Work", exact: true })
-    .click();
-  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+  popup = await viewOptions(page, "Work");
   await expect(
-    page.getByRole("menuitemradio", { name: "All", exact: true }),
+    popup.getByRole("radio", { name: "All", exact: true }),
   ).toBeDisabled();
-  const disabledActive = page.getByRole("menuitemradio", {
-    name: "Active 1 day",
-    exact: true,
-  });
-  await expect(disabledActive).toBeDisabled();
   await expect(
-    page.getByRole("menuitem", { name: "Planning", exact: true }),
-  ).toBeEnabled();
-  // Real CSS must mute the duration and selected check with the disabled label.
-  for (const theme of ["light", "dark"]) {
-    await page.emulateMedia({ colorScheme: theme });
-    await expect
-      .poll(() =>
-        disabledActive.evaluate((element) => {
-          const color = getComputedStyle(element).color;
-          return [".buzz-menu-trailing", ".buzz-menu-item-indicator"].every(
-            (selector) =>
-              getComputedStyle(element.querySelector(selector)).color === color,
-          );
-        }),
-      )
-      .toBe(true);
-  }
-  await page.emulateMedia({ colorScheme: "light" });
-  await shot("14-read-only-hidden-channels");
-  await page.getByRole("menuitem", { name: "Planning", exact: true }).click();
-  await expect(work.locator('[data-channel-id="beta"]')).toBeVisible();
+    popup.getByRole("radio", { name: "Today", exact: true }),
+  ).toBeDisabled();
+  await checked(popup, "Today");
+  await shot("11-read-only");
 });
 
 test("failed activity reads explain the filter and recover on Retry", async ({
@@ -376,23 +279,15 @@ test("failed activity reads explain the filter and recover on Retry", async ({
   await expect(
     page.getByRole("textbox", { name: "Message #General" }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "More actions for Team", exact: true })
-    .click();
-  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-  await page
-    .getByRole("menuitemradio", { name: "Active", exact: true })
-    .click();
+  const popup = await viewOptions(page, "Team");
   try {
-    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await popup.getByRole("radio", { name: "30 days", exact: true }).click();
     await requested;
-    await expect(
-      page.getByRole("dialog", { name: "Active in the last", exact: true }),
-    ).toHaveCount(0);
     await expect(unknown).toBeVisible();
   } finally {
     release();
   }
+  await page.keyboard.press("Escape");
   await expect(
     page.getByText("Activity filters and Recent sorting may be out of date.", {
       exact: true,
@@ -467,13 +362,7 @@ test.describe("filter action focus", () => {
     const channels = page.locator('[data-sidebar-section="channels"]');
     const work = page.locator('[data-sidebar-section="group:work"]');
     const row = channels.locator('[data-channel-id="delta"]');
-    const filter = async (section, title, name) => {
-      await section
-        .getByRole("button", { name: `More actions for ${title}`, exact: true })
-        .click();
-      await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-      await page.getByRole("menuitemradio", { name, exact: true }).click();
-    };
+    const filter = (section, title, name) => show(page, title, name, section);
     await expect(row).toBeVisible();
     // Unreads keeps only rows with observed unread history; wait for it first.
     await expect(row.getByRole("img", { name: /unread/ })).toBeVisible();
@@ -510,13 +399,7 @@ test.describe("with no saved Team filter", () => {
   }) => {
     await page.goto(app.origin);
     await openPage(page, "Messages");
-    const choose = async (name) => {
-      await page
-        .getByRole("button", { name: "More actions for Team", exact: true })
-        .click();
-      await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-      await page.getByRole("menuitemradio", { name, exact: true }).click();
-    };
+    const choose = (name) => show(page, "Team", name);
     const pattern = "**/sidebar-filter";
     await page.route(pattern, (route) => {
       app.report.sidebarPreferenceFailures ??= [];
@@ -537,12 +420,9 @@ test.describe("with no saved Team filter", () => {
     const published = app.report.sidebarPublications?.length ?? 0;
     await choose("All");
     await expect(retry).toHaveCount(0);
-    await page
-      .getByRole("button", { name: "More actions for Team", exact: true })
-      .click();
-    await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+    const popup = await viewOptions(page, "Team");
     await expect(
-      page.getByRole("menuitemradio", { name: "All", exact: true }),
+      popup.getByRole("radio", { name: "All", exact: true }),
     ).toHaveAttribute("aria-checked", "true");
     expect(app.report.sidebarPublications?.length ?? 0).toBe(published);
   });
@@ -557,16 +437,7 @@ test.describe("with a saved workspace filter", () => {
     page,
     app,
   }) => {
-    const filter = async () => {
-      await page
-        .getByRole("button", { name: "More actions for Work", exact: true })
-        .click();
-      await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-    };
-    const choose = async (name) => {
-      await filter();
-      await page.getByRole("menuitemradio", { name, exact: true }).click();
-    };
+    const choose = (name) => show(page, "Work", name);
     const filterSaves = () =>
       (app.report.sidebarPublications ?? []).filter(({ blob }) =>
         JSON.stringify(blob).includes("section:work"),
@@ -611,16 +482,16 @@ test.describe("with a saved workspace filter", () => {
 
     await page.reload();
     await openPage(page, "Messages");
-    await filter();
+    const popup = await viewOptions(page, "Work");
     await expect(
-      page.getByRole("menuitemradio", { name: "All", exact: true }),
+      popup.getByRole("radio", { name: "All", exact: true }),
     ).toHaveAttribute("aria-checked", "true");
   });
 });
 
-// See all keeps the card's filter and shows it as a row, so what's selected
-// always matches the list; choosing there changes the card's filter too.
-test("See all shows the card's filter as a row and shares it", async ({
+// See all keeps the card's filter behind the same view options button, so
+// what's selected always matches the list; choosing there changes the card too.
+test("See all shares the card's view options and filter", async ({
   page,
   app,
 }, testInfo) => {
@@ -652,16 +523,44 @@ test("See all shows the card's filter as a row and shares it", async ({
   await expect(
     page.getByRole("textbox", { name: "Message #Design" }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "More actions for Team", exact: true })
-    .click();
-  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-  await page
-    .getByRole("menuitemradio", { name: "Active", exact: true })
-    .click();
-  await page.getByRole("radio", { name: "7 days", exact: true }).click();
-  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  const settle = () =>
+    page.evaluate(() =>
+      Promise.all(
+        document
+          .getAnimations()
+          .filter(
+            (animation) =>
+              animation.effect?.getComputedTiming().iterations !== Infinity,
+          )
+          .map((animation) => animation.finished.catch(() => {})),
+      ),
+    );
+  const sidebar = page.getByRole("complementary", {
+    name: "Sidebar",
+    exact: true,
+  });
+  const resize = page.getByRole("separator", { name: "Resize sidebar" });
+  // The popover and filled button at the default and narrowest widths.
+  const capture = async (name) => {
+    const popup = await viewOptions(page, "Team");
+    await settle();
+    await page.screenshot({ path: testInfo.outputPath(`${name}-popover.png`) });
+    await page.keyboard.press("Escape");
+    await expect(popup).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await settle();
+    await sidebar.screenshot({
+      path: testInfo.outputPath(`${name}-filtered.png`),
+    });
+  };
+  let popup = await viewOptions(page, "Team");
+  await popup.getByRole("radio", { name: "7 days", exact: true }).click();
+  await page.keyboard.press("Escape");
   await expect(rowFor("delta")).toHaveCount(0);
+  await capture("card-default");
+  await resize.press("Home");
+  await capture("card-narrow");
+  await resize.press("End");
 
   // See all has no icon, so its label sits clear of the pill's rounded edge
   // rather than where row icons start.
@@ -686,44 +585,25 @@ test("See all shows the card's filter as a row and shares it", async ({
   expect(inset).toBeCloseTo(expected, 0);
 
   await seeAllRow.click();
-  const filters = page.getByRole("tablist", { name: "Filter Team" });
-  const tab = (name) => filters.getByRole("tab", { name });
-  await expect(tab(/^Active/)).toHaveAttribute("aria-selected", "true");
-  await expect(tab(/^Active/)).toContainText("7 days");
+  // See all has no row of filter controls, only the same filled button.
+  await expect(page.getByRole("tablist", { name: "Filter Team" })).toHaveCount(
+    0,
+  );
+  await expect(viewOptionsButton(page, "Team")).toHaveAccessibleName(
+    "View options for Team, filtered",
+  );
   await expect(rowFor("gamma")).toBeVisible();
   await expect(rowFor("delta")).toHaveCount(0);
-  const settle = () =>
-    page.evaluate(() =>
-      Promise.all(
-        document
-          .getAnimations()
-          .filter(
-            (animation) =>
-              animation.effect?.getComputedTiming().iterations !== Infinity,
-          )
-          .map((animation) => animation.finished.catch(() => {})),
-      ),
-    );
-  const sidebar = page.getByRole("complementary", {
-    name: "Sidebar",
-    exact: true,
-  });
-  await settle();
-  await sidebar.screenshot({ path: testInfo.outputPath("see-all-active.png") });
-  const resize = page.getByRole("separator", { name: "Resize sidebar" });
+  await capture("see-all-default");
   await resize.press("Home");
-  await settle();
-  await sidebar.screenshot({ path: testInfo.outputPath("see-all-narrow.png") });
+  await capture("see-all-narrow");
   await resize.press("End");
 
-  await tab("All").click();
-  await expect(tab("All")).toHaveAttribute("aria-selected", "true");
+  popup = await viewOptions(page, "Team");
+  await popup.getByRole("radio", { name: "All", exact: true }).click();
+  await page.keyboard.press("Escape");
   await expect(rowFor("delta")).toBeVisible();
-  await page
-    .getByRole("button", { name: "More actions for Team", exact: true })
-    .click();
-  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-  await expect(
-    page.getByRole("menuitemradio", { name: "All", exact: true }),
-  ).toHaveAttribute("aria-checked", "true");
+  await expect(viewOptionsButton(page, "Team")).toHaveAccessibleName(
+    "View options for Team",
+  );
 });

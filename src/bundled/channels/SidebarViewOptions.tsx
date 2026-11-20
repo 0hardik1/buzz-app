@@ -68,7 +68,7 @@ export function SidebarViewOptions({
         render={
           <IconButton
             size="compact"
-            variant={filter?.filtered ? "tint" : "ghost"}
+            variant={filter?.filtered ? "accent" : "ghost"}
             aria-label={filter?.filtered ? `${label}, filtered` : label}
             icon={<Filter2Icon size={14} />}
           />

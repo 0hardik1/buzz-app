@@ -7,6 +7,8 @@ type IconButtonVariant =
   | "solid"
   | "inset"
   | "tint"
+  /** Fills with the accent while the action's state is on, such as a filter. */
+  | "accent"
   | "chrome"
   | "avatar"
   | "media"
@@ -51,6 +53,7 @@ export function IconButton({
             : variant === "inset"
               ? "subtle"
               : variant === "tint" ||
+                  variant === "accent" ||
                   variant === "chrome" ||
                   variant === "avatar" ||
                   variant === "media" ||

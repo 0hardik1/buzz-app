@@ -17,63 +17,59 @@ import { SidebarCardDisplayContext } from "./SidebarCardDisplay";
 import { MenuItem } from "../../shared/design-system/ui/Menu";
 afterEach(cleanup);
 
-it("chooses a filter with the keyboard and appends hidden channels below its options", async () => {
+it("picks a filter and its window in place from the view options popover", async () => {
   const user = userEvent.setup();
   const change = vi.fn();
-  const select = vi.fn();
-  const toggle = vi.fn();
   render(
     <SidebarSection
       sectionKey="channels"
       title="Channels"
-      open={false}
-      onToggle={toggle}
-      filter={{ value: "unreads", change }}
-      channels={{ rows: [{ id: "quiet", name: "Quiet channel" }], select }}
+      open
+      onToggle={() => {}}
+      filter={{ value: "unreads", filtered: true, change }}
     >
       <p>No channels match this filter.</p>
     </SidebarSection>,
   );
   const trigger = screen.getByRole("button", {
-    name: "More actions for Channels",
+    name: "View options for Channels, filtered",
   });
+  // A filtered card's button fills with the accent and stays shown.
+  expect(trigger).toHaveAttribute("data-icon-variant", "accent");
+  expect(trigger.closest("[data-navigation-reveal]")).toBeNull();
   await user.click(trigger);
-  expect(
-    within(
-      await screen.findByRole("menu", { name: "More actions for Channels" }),
-    ).getAllByRole("menuitem")[0],
-  ).toHaveTextContent("Filter");
-  await user.keyboard("{ArrowDown}{ArrowRight}");
-  expect(
-    await screen.findByRole("menuitemradio", { name: "Unreads" }),
-  ).toHaveAttribute("aria-checked", "true");
-  await user.click(screen.getByRole("menuitemradio", { name: "Active" }));
-  expect(change).not.toHaveBeenCalled();
-  await user.click(await screen.findByRole("button", { name: "Apply" }));
-  expect(change).toHaveBeenCalledExactlyOnceWith("active", 30 * 86400);
-  await waitFor(() => expect(trigger).toHaveFocus());
-  await user.click(trigger);
-  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
-  const quiet = await screen.findByRole("menuitem", { name: "Quiet channel" });
-  expect(
-    within(screen.getByRole("group", { name: "No unread messages" })).getByRole(
-      "menuitem",
-      { name: "Quiet channel" },
-    ),
-  ).toBe(quiet);
-  const popup = quiet.closest('[role="menu"]');
-  expect(popup?.querySelectorAll('[role^="menuitem"]')).toHaveLength(4);
-  expect(popup?.querySelector('[role="separator"]')).toBeInTheDocument();
-  expect(
-    screen
-      .getByRole("menuitemradio", { name: "Active" })
-      .compareDocumentPosition(quiet) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
-  // jsdom has no submenu geometry; browser checks own pointer travel/focus.
-  fireEvent.click(quiet);
-  expect(select).toHaveBeenCalledExactlyOnceWith("quiet");
-  expect(toggle).toHaveBeenCalledExactlyOnceWith(true);
-  expect(change).toHaveBeenCalledOnce();
+  const show = await screen.findByRole("radiogroup", { name: "Show" });
+  expect(within(show).getByRole("radio", { name: "Unreads" })).toBeChecked();
+  await user.click(within(show).getByRole("radio", { name: "7 days" }));
+  expect(change).toHaveBeenCalledExactlyOnceWith("active", 7 * 86400);
+  await user.click(within(show).getByRole("radio", { name: "All" }));
+  expect(change).toHaveBeenLastCalledWith("all");
+  // The menu keeps only card actions.
+  await user.keyboard("{Escape}");
+  await user.click(
+    screen.getByRole("button", { name: "More actions for Channels" }),
+  );
+  await screen.findByRole("menu", { name: "More actions for Channels" });
+  expect(screen.queryByRole("menuitem", { name: "Filter" })).toBeNull();
+});
+
+it("reveals an unfiltered card's view options with its other actions", () => {
+  render(
+    <SidebarSection
+      sectionKey="channels"
+      title="Channels"
+      open
+      onToggle={() => {}}
+      filter={{ value: "active", change: () => {} }}
+    >
+      <p>Rows</p>
+    </SidebarSection>,
+  );
+  const trigger = screen.getByRole("button", {
+    name: "View options for Channels",
+  });
+  expect(trigger).toHaveAttribute("data-icon-variant", "ghost");
+  expect(trigger.closest("[data-navigation-reveal]")).not.toBeNull();
 });
 
 it.each([true, false])(
@@ -168,29 +164,32 @@ it("keeps section actions independent of disclosure and supports menu keyboard d
   await user.click(screen.getByLabelText("Channels"));
   expect(screen.getByRole("button", { name: "General" })).toBeVisible();
 });
-it("keeps one controlled actions menu, closes it after sorting, and restores trigger focus", async () => {
+it("sorts from the view options popover and turns unreads first off", async () => {
   const user = userEvent.setup();
   const change = vi.fn();
-  render(<Section sort={{ value: "alpha", change }} />);
-  const trigger = screen.getByRole("button", {
-    name: "More actions for Channels",
-  });
-  expect(screen.queryByRole("button", { name: "Sort Channels" })).toBeNull();
-  await user.click(trigger);
-  const actions = await screen.findByRole("menu", {
-    name: "More actions for Channels",
-  });
-  expect(actions).toHaveTextContent("Sort");
-  expect(
-    within(actions).queryByRole("menuitem", { name: "Collapse section" }),
-  ).not.toBeInTheDocument();
-  await user.keyboard("{ArrowDown}{ArrowRight}");
-  await user.click(
-    await screen.findByRole("menuitemradio", { name: "Recent" }),
+  render(
+    <SidebarSection
+      sectionKey="channels"
+      title="Channels"
+      open
+      onToggle={() => {}}
+      heightScope="unreads-first-test"
+      sort={{ value: "alpha", change }}
+    >
+      <p>Rows</p>
+    </SidebarSection>,
   );
-  expect(change).toHaveBeenCalledWith("recent");
-  await waitFor(() => expect(actions).not.toBeInTheDocument());
-  expect(trigger).toHaveFocus();
+  await user.click(
+    screen.getByRole("button", { name: "View options for Channels" }),
+  );
+  const sort = await screen.findByRole("radiogroup", { name: "Sort" });
+  expect(within(sort).getByRole("radio", { name: "A–Z" })).toBeChecked();
+  await user.click(within(sort).getByRole("radio", { name: "Recent" }));
+  expect(change).toHaveBeenCalledExactlyOnceWith("recent");
+  const first = screen.getByRole("switch", { name: "Unreads first" });
+  expect(first).toBeChecked();
+  await user.click(first);
+  expect(first).not.toBeChecked();
 });
 
 it("orders header actions before section rows for keyboard navigation", async () => {
@@ -453,70 +452,26 @@ it("never offers moves without a move capability", async () => {
   expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull();
 });
 
-it("keeps hidden-channel navigation available when filter choices are read-only", async () => {
+it("disables Show choices when filters are read-only", async () => {
   const user = userEvent.setup();
   const change = vi.fn();
-  const select = vi.fn();
   render(
     <SidebarSection
       sectionKey="channels"
       title="Channels"
       open
       onToggle={() => {}}
-      filter={{ value: "unreads", disabled: true, change }}
-      channels={{ rows: [{ id: "quiet", name: "Quiet channel" }], select }}
+      filter={{ value: "unreads", filtered: true, disabled: true, change }}
     >
-      <p>No channels match this filter.</p>
+      <p>Rows</p>
     </SidebarSection>,
   );
   await user.click(
-    screen.getByRole("button", { name: "More actions for Channels" }),
+    screen.getByRole("button", { name: "View options for Channels, filtered" }),
   );
-  expect(screen.queryByRole("menuitem", { name: "View All" })).toBeNull();
-  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
-  for (const choice of await screen.findAllByRole("menuitemradio"))
-    expect(choice).toHaveAttribute("aria-disabled", "true");
-  fireEvent.click(
-    await screen.findByRole("menuitem", { name: "Quiet channel" }),
-  );
-  expect(select).toHaveBeenCalledExactlyOnceWith("quiet");
+  const show = await screen.findByRole("radiogroup", { name: "Show" });
+  await user.click(within(show).getByText("All"));
   expect(change).not.toHaveBeenCalled();
-});
-
-it("opens a filtered Solo chat without expanding its workspace", async () => {
-  const user = userEvent.setup();
-  function Workspace() {
-    const [open, setOpen] = useState(false);
-    const [chat, select] = useState<string>();
-    return (
-      <>
-        <SidebarSection
-          sectionKey="group:work"
-          title="Work"
-          open={open}
-          onToggle={setOpen}
-          filter={{ value: "unreads", change: () => {} }}
-          channels={{
-            rows: [{ id: "quiet", name: "Quiet chat", channelType: "solo" }],
-            select,
-          }}
-        >
-          <p>Workspace chats</p>
-        </SidebarSection>
-        <output aria-label="Open chat">{chat}</output>
-      </>
-    );
-  }
-  render(<Workspace />);
-  await user.click(
-    screen.getByRole("button", { name: "More actions for Work" }),
-  );
-  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Quiet chat" }));
-  expect(screen.getByLabelText("Open chat")).toHaveTextContent("quiet");
-  expect(screen.getByLabelText("Work").closest("details")).not.toHaveAttribute(
-    "open",
-  );
 });
 
 it("opens workspace settings from a saved section's menu", async () => {
@@ -715,7 +670,7 @@ it("returns focus to the header after a save that loses it, but not after a deli
   await act(async () => release());
   expect(stopped).toHaveBeenLastCalledWith(false);
 });
-it("switches a card between a list and icons from its menu, remembered on this device", async () => {
+it("switches a card between a list and icons from its view options, remembered on this device", async () => {
   const user = userEvent.setup();
   function Rows() {
     return <p>Display: {useContext(SidebarCardDisplayContext)}</p>;
@@ -737,11 +692,9 @@ it("switches a card between a list and icons from its menu, remembered on this d
   const rows = () => document.querySelector("[data-card-rows]");
   expect(rows()).toBeInTheDocument();
   await user.click(
-    screen.getByRole("button", { name: "More actions for Direct messages" }),
+    screen.getByRole("button", { name: "View options for Direct messages" }),
   );
-  await user.click(
-    await screen.findByRole("menuitem", { name: "Show as icons" }),
-  );
+  await user.click(await screen.findByRole("radio", { name: "Icons" }));
   expect(screen.getByText("Display: icons")).toBeInTheDocument();
   // Icons wrap and show every row, so the card isn't resizable.
   expect(rows()).not.toBeInTheDocument();
@@ -752,11 +705,9 @@ it("switches a card between a list and icons from its menu, remembered on this d
   render(card());
   expect(screen.getByText("Display: icons")).toBeInTheDocument();
   await user.click(
-    screen.getByRole("button", { name: "More actions for Direct messages" }),
+    screen.getByRole("button", { name: "View options for Direct messages" }),
   );
-  await user.click(
-    await screen.findByRole("menuitem", { name: "Show as list" }),
-  );
+  await user.click(await screen.findByRole("radio", { name: "List" }));
   expect(screen.getByText("Display: list")).toBeInTheDocument();
 });
 it("offers no icon view to a card that keeps its names", async () => {
@@ -774,10 +725,10 @@ it("offers no icon view to a card that keeps its names", async () => {
     </SidebarSection>,
   );
   await user.click(
-    screen.getByRole("button", { name: "More actions for Solo chats" }),
+    screen.getByRole("button", { name: "View options for Solo chats" }),
   );
-  await screen.findByRole("menu");
+  await screen.findByRole("switch", { name: "Unreads first" });
   expect(
-    screen.queryByRole("menuitem", { name: "Show as icons" }),
+    screen.queryByRole("radiogroup", { name: "Layout" }),
   ).not.toBeInTheDocument();
 });
