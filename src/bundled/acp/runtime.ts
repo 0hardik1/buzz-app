@@ -61,6 +61,11 @@ import {
   type StandaloneTurn,
   type TurnResult,
 } from "../../features/agents/service";
+import {
+  conversationFolder,
+  existingFolder,
+  startingFolder,
+} from "../../features/agents/conversation-folders";
 import { soloChat } from "../../features/agents/solo-chat";
 import { sessionPrompts } from "../../features/agents/session-prompts";
 import { localStore, type AgentStore } from "../../features/agents/store";
@@ -144,12 +149,14 @@ type Snap = Readonly<{
   /** The base prompt's section choices for its conversation, taken as the
    * session is pinned: its prompt and Canvas both use these. */
   sections?: SectionChoices;
+  /** The folder a plugin gave its conversation, which it works in. */
+  folder?: string;
 }>;
 
 /** Everything a session is opened with, so a saved one resumes only while
  * none of it changed. The launch counts by its confirmation digest, never
  * its env values. */
-const contextOf = ({ config: c, team, name, added, sections }: Snap) =>
+const contextOf = ({ config: c, team, name, added, sections, folder }: Snap) =>
   digest(
     JSON.stringify([
       c.approval,
@@ -160,6 +167,7 @@ const contextOf = ({ config: c, team, name, added, sections }: Snap) =>
       added,
       c.scope,
       replacedSections(sections),
+      folder ?? "",
     ]),
   );
 
@@ -245,6 +253,22 @@ export class AcpRuntime {
     if (!this.host.resolveDirectory)
       throw new Error("ACP agents run only in the desktop app");
     return this.host.resolveDirectory(path);
+  }
+  /** The folder a plugin gave conversation `key`, if any; a one-off turn has
+   * none. */
+  private folder(agent: AgentKey, key: string | undefined) {
+    if (!key) return undefined;
+    return conversationFolder(this.agentStore, this.scopeOf(agent), agent, key);
+  }
+  /** `folder`, checked to still be a directory without creating it. */
+  private folderAt(folder: string) {
+    return existingFolder(this.host.resolveDirectory?.bind(this.host), folder);
+  }
+  /** The community scope conversation folders are kept under. */
+  private scopeOf(agent: AgentKey) {
+    const scope = this.relay(agent)?.snapshot().scope;
+    if (!scope) throw new Error("Buzz is not connected");
+    return scope;
   }
   private readFile(path: string, cwd: string): Promise<Uint8Array> {
     if (!this.host.readFile)
@@ -755,7 +779,7 @@ export class AcpRuntime {
                 )
             : undefined,
           // Its serving session's choices: the ones its prompt has.
-          worksElsewhere(undefined, pinned?.sections),
+          worksElsewhere(pinned?.folder, pinned?.sections),
         )
       : Promise.resolve(undefined);
     let earlier: readonly EventData[] = [];
@@ -890,7 +914,9 @@ export class AcpRuntime {
       const place = pinned ? entry.places.get(pinned as Snap) : undefined;
       // The serving turn's handle.
       const handle = place?.handle ?? entry.handle;
+      // Where the serving session works: its conversation's folder, if any.
       const workspace =
+        (pinned as Snap | undefined)?.folder ??
         (pinned as Snap | undefined)?.config.workspace ??
         entry.config.workspace;
       // Built again after a wait through a reload, so a call carries the
@@ -922,12 +948,27 @@ export class AcpRuntime {
       { config: c, team, name, sections }: Snap,
       conversation?: string,
     ) => {
+      // A conversation given its own folder starts there, and the folder must
+      // still exist; the agent's workspace stays its home. The confirmed
+      // launch is the process's, which runs as it was confirmed.
+      const assigned = conversation
+        ? await startingFolder(
+            this.agentStore,
+            this.scopeOf(agent),
+            agent,
+            conversation,
+          )
+        : undefined;
+      const cwd = assigned ? await this.folderAt(assigned) : c.workspace;
       const memory = await this.core(agent);
       return {
-        workspace: c.workspace,
+        workspace: cwd,
         systemPrompt: systemPrompt({
           scope: c.scope,
-          cwd: c.workspace,
+          cwd,
+          ...(assigned
+            ? { workspace: await this.resolveDirectory(c.workspace) }
+            : {}),
           ...(name ? { agent: { name, pubkey } } : {}),
           instructions: c.instructions,
           team,
@@ -967,7 +1008,15 @@ export class AcpRuntime {
         // Its conversation's choices as they are now, so a change makes the
         // next turn a new session's, a busy one's included.
         const sections = sectionsOf(entry.handle, conversation);
-        const snapshot: Snap = { ...snap(), ...(sections ? { sections } : {}) };
+        // Synchronous and never throws: with no community, it has none.
+        const folder = this.relay(agent)?.snapshot().scope
+          ? this.folder(agent, conversation)
+          : undefined;
+        const snapshot: Snap = {
+          ...snap(),
+          ...(sections ? { sections } : {}),
+          ...(folder ? { folder } : {}),
+        };
         return {
           snapshot,
           context: contextOf(snapshot),
@@ -980,6 +1029,7 @@ export class AcpRuntime {
             // sessions opened after.
             snapshot.syncedModel ?? false,
             replacedSections(snapshot.sections),
+            snapshot.folder ?? "",
           ]),
           generation: entry.generation,
         };
@@ -1111,7 +1161,12 @@ export class AcpRuntime {
     if (!entry || !ids.length) return undefined;
     const launch = entry.config;
     const { generation } = entry;
-    const cwd = await this.resolveDirectory(launch.workspace);
+    // Where its sessions ran: its folder, which must still exist, else the
+    // workspace.
+    const folder = standalone ? undefined : this.folder(agent, key);
+    const cwd = folder
+      ? await this.folderAt(folder)
+      : await this.resolveDirectory(launch.workspace);
     const [channelId, root] = standalone ? [] : key.split("/");
     // Each of its sessions in turn, oldest first. One the harness can no
     // longer load is left out, and the rest still shown.

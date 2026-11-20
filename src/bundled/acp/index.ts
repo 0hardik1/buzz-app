@@ -67,6 +67,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   });
   agents.register<Config>({
     id: TYPE_ID,
+    conversationFolders: true,
     conversationSections: true,
     title: "ACP agent",
     description:

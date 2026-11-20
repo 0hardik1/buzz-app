@@ -1,3 +1,4 @@
+import { assignConversationFolder } from "../../features/agents/conversation-folders";
 import { workspaceCanvas } from "../../features/solo/workspace";
 import type { SectionChoices } from "../../features/agent-harness/sections/choices";
 import { RESUMED_PROMPT } from "../../buzz-mcp/prompt";
@@ -100,7 +101,10 @@ function setup(
     storage = memoryStorage(),
     agentStore = localStore(storage),
     workflowAuthority = "workflow-authority",
+    gone = [],
   }: {
+    /** Folders that no longer exist. */
+    gone?: readonly string[];
     /** Agent storage, which desktop keeps apart from `storage`. */
     agentStore?: AgentStore;
     /** The community's relay workflow key. */
@@ -117,6 +121,11 @@ function setup(
 ) {
   const fake = fakeHarness(options);
   const host = declared(fake);
+  const resolve = host.resolveDirectory;
+  host.resolveDirectory = async (path, options) => {
+    if (gone.includes(path)) throw new Error(`Could not find ${path}`);
+    return resolve?.(path, options) ?? path;
+  };
   const session = {
     read: vi.fn(read),
     channels: {
@@ -851,6 +860,171 @@ describe("AcpRuntime", () => {
         "Work in the plugin's folder.",
       );
       harness?.turns[0]?.finish();
+    });
+  });
+
+  describe("conversation folders", () => {
+    const capabilities = {
+      mcpCapabilities: { http: true },
+      sessionCapabilities: { systemPrompt: {} },
+      loadSession: true,
+    };
+    const promptOf = (opened: Record<string, unknown> | undefined) =>
+      (opened?.systemPrompt as { content: { text: string }[] } | undefined)
+        ?.content[0]?.text ?? "";
+    const scope = `https://acp.example:${alice}`;
+    const folder = "/repos/app";
+    const workspace = "/home/opal";
+    const a = message("1", "@Opal A");
+    const b = message("3", "@Opal B");
+    const assign = (agentStore: AgentStore, root: string) =>
+      assignConversationFolder(
+        agentStore,
+        scope,
+        self,
+        `${channel}/${root}`,
+        folder,
+      );
+
+    it("starts a conversation given a folder there, on the launch it was confirmed with", async () => {
+      const config = await confirmed({ workspace });
+      const f = setup({ capabilities });
+      f.sync(config);
+      await assign(localStore(f.storage), a.id);
+      await f.deliver(a, config).run;
+      await f.deliver(b, config).run;
+      await vi.waitFor(() =>
+        expect(f.fake.harnesses[0]?.turns).toHaveLength(2),
+      );
+      const [harness] = f.fake.harnesses;
+      // The fake numbers its sessions in the order they open.
+      const openedFor = (text: string) => {
+        const turn = harness?.turns.find((t) => t.text.includes(text));
+        return harness?.opened[Number(turn?.sessionId.split("-")[1]) - 1];
+      };
+      const [inFolder, inWorkspace] = [
+        openedFor("@Opal A"),
+        openedFor("@Opal B"),
+      ];
+      expect(inFolder).toMatchObject({ cwd: folder });
+      expect(promptOf(inFolder)).toContain(
+        `Current working directory: ${folder}`,
+      );
+      expect(inWorkspace).toMatchObject({ cwd: workspace });
+      expect(promptOf(inWorkspace)).toContain(
+        `Current working directory: ${workspace}`,
+      );
+      // One process, on the confirmed command, args and workspace.
+      expect(f.fake.harnesses).toHaveLength(1);
+      expect(harness?.options.args).toEqual(["opencode", "acp"]);
+      for (const turn of harness?.turns ?? []) turn.finish();
+    });
+
+    it("fails a conversation whose folder is gone, without starting it anywhere else", async () => {
+      const config = await confirmed({ workspace });
+      const f = setup({ capabilities }, { gone: [folder] });
+      f.sync(config);
+      await assign(localStore(f.storage), a.id);
+      await f.deliver(a, config).run;
+      await vi.waitFor(() => expect(f.workingUntil).toHaveBeenCalledTimes(1));
+      expect(await f.workingUntil.mock.calls[0]?.[0]).toMatchObject({
+        ok: false,
+      });
+      expect(f.fake.harnesses.flatMap((h) => h.opened)).toEqual([]);
+    });
+
+    it("replays a conversation's sessions in its folder, after a restart too", async () => {
+      const config = await confirmed({ workspace });
+      const storage = memoryStorage();
+      const one = setup({ capabilities }, { storage });
+      one.sync(config);
+      await assign(localStore(storage), a.id);
+      await one.deliver(a, config).run;
+      await vi.waitFor(() =>
+        expect(one.fake.harnesses[0]?.turns).toHaveLength(1),
+      );
+      one.fake.harnesses[0]?.turns[0]?.finish();
+      await flush(20);
+      one.runtime.dispose();
+      const two = setup(
+        {
+          capabilities,
+          replay: [
+            {
+              sessionUpdate: "user_message_chunk",
+              content: { type: "text", text: "hi" },
+            },
+          ],
+        },
+        { storage },
+      );
+      two.sync(config);
+      await two.runtime.transcript(
+        self,
+        `${channel}/${a.id}`,
+        new AbortController().signal,
+      );
+      const loads = two.fake.harnesses.flatMap((h) => h.sent("session/load"));
+      expect(loads.length).toBeGreaterThan(0);
+      for (const load of loads)
+        expect(load.params).toMatchObject({ cwd: folder });
+    });
+
+    it("refuses to replay a conversation whose folder is gone", async () => {
+      const config = await confirmed({ workspace });
+      const storage = memoryStorage();
+      const one = setup({ capabilities }, { storage });
+      one.sync(config);
+      await assign(localStore(storage), a.id);
+      await one.deliver(a, config).run;
+      await vi.waitFor(() =>
+        expect(one.fake.harnesses[0]?.turns).toHaveLength(1),
+      );
+      one.fake.harnesses[0]?.turns[0]?.finish();
+      await flush(20);
+      one.runtime.dispose();
+      const two = setup({ capabilities }, { storage, gone: [folder] });
+      two.sync(config);
+      await expect(
+        two.runtime.transcript(
+          self,
+          `${channel}/${a.id}`,
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow();
+      expect(two.fake.harnesses.flatMap((h) => h.sent("session/load"))).toEqual(
+        [],
+      );
+    });
+
+    it("tells a Solo chat given a folder that its Canvas folders are for reading", async () => {
+      const config = await confirmed({ workspace });
+      const f = setup(
+        { capabilities },
+        {
+          solo: true,
+          canvas: workspaceCanvas({
+            folders: ["~/Development/app"],
+            canvas: "Use the design system.",
+          }),
+        },
+      );
+      f.sync(config);
+      await assignConversationFolder(
+        localStore(f.storage),
+        scope,
+        self,
+        channel,
+        folder,
+      );
+      await f.deliver(message("1", "@Opal hi"), config).run;
+      await vi.waitFor(() =>
+        expect(f.fake.harnesses[0]?.turns).toHaveLength(1),
+      );
+      const text = f.fake.harnesses[0]?.turns[0]?.text ?? "";
+      expect(text).toContain("They are for reading.");
+      expect(text).not.toContain("This chat's work happens in these folders");
+      f.fake.harnesses[0]?.turns[0]?.finish();
     });
   });
 
