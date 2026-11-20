@@ -1805,6 +1805,34 @@ mod cli_cleanup {
         (result.is_ok(), text)
     }
     const WAIT: Duration = Duration::from_secs(3);
+    const WARNING: &str =
+        "Warning: Saved credential cleanup is incomplete/unknown — not confirmed.";
+
+    /// A saved change reports unconfirmed cleanup as a separate stderr warning,
+    /// which libtest captures in-process. Rerun `test` alone, uncaptured, and
+    /// return that stderr with its secrets and paths checked; `None` in the rerun.
+    fn rerun_for_stderr(test: &str) -> Option<String> {
+        const CHILD: &str = "BUZZ_CLI_CLEANUP_STDERR";
+        if std::env::var_os(CHILD).is_some() {
+            return None;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &format!("cli_cleanup::{test}"), "--nocapture"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{stderr}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(!stderr.contains("sk-cli-sentinel"));
+        assert!(!stderr.contains(&"1".repeat(64)));
+        assert!(!stderr.contains(&"2".repeat(64)));
+        assert!(!stderr.contains("confirmed complete"));
+        Some(stderr)
+    }
 
     #[test]
     fn cli_complete_remove_and_recover_commit_then_confirm_both_identities() {
@@ -1837,13 +1865,21 @@ mod cli_cleanup {
     }
     #[test]
     fn cli_partial_denied_restart_no_row_and_explicit_retry_zero_one() {
+        if let Some(stderr) =
+            rerun_for_stderr("cli_partial_denied_restart_no_row_and_explicit_retry_zero_one")
+        {
+            // One separate warning per saved removal, never a path.
+            assert_eq!(stderr.matches(WARNING).count(), 2, "{stderr}");
+            assert!(!stderr.contains("/tmp") && !stderr.contains("/var/folders"));
+            return;
+        }
         for allowed in [0, 1] {
             let (temp, manager, store) = setup();
             *store.remaining.lock().unwrap() = Some(allowed);
             let (ok, text) = run(&manager, "remove", WAIT);
-            assert!(!ok, "{text}");
+            assert!(ok, "the saved removal succeeds: {text}");
             assert!(text.contains("Removed example.page"));
-            assert!(text.contains("not confirmed"));
+            assert!(!text.contains("confirmed complete"));
             assert!(!text.contains(temp.path().to_str().unwrap()));
             let reopened = Manager::open(Some(temp.path().into()), "test", false)
                 .unwrap()
@@ -1861,6 +1897,12 @@ mod cli_cleanup {
     }
     #[test]
     fn cli_stalled_wait_and_busy_namespace_keep_debt_without_claiming_deletion() {
+        if let Some(stderr) = rerun_for_stderr(
+            "cli_stalled_wait_and_busy_namespace_keep_debt_without_claiming_deletion",
+        ) {
+            assert_eq!(stderr.matches(WARNING).count(), 1, "{stderr}");
+            return;
+        }
         let (temp, manager, store) = setup();
         let (started, observed) = mpsc::channel();
         let (release, released) = mpsc::channel();
@@ -1893,9 +1935,7 @@ mod cli_cleanup {
             "removal must commit before the stalled OS deletion"
         );
         assert!(text.contains("Removed example.page"));
-        assert!(!ok);
-        assert!(text.contains("incomplete/unknown"));
-        assert!(text.contains("not confirmed"));
+        assert!(ok, "the saved removal succeeds: {text}");
         assert!(!text.contains("confirmed complete"));
         assert_eq!(debt.pending, 2);
         assert_eq!(debt.running, 1);
@@ -1936,6 +1976,13 @@ mod cli_cleanup {
     }
     #[test]
     fn cli_configured_legacy_absent_inventory_never_confirms_cleanup() {
+        if let Some(stderr) =
+            rerun_for_stderr("cli_configured_legacy_absent_inventory_never_confirms_cleanup")
+        {
+            // Saved remove and recover each warn; list and retry report in their output.
+            assert_eq!(stderr.matches(WARNING).count(), 2, "{stderr}");
+            return;
+        }
         let mut failures = Vec::new();
         for action in ["list", "cleanup-retry", "remove", "recover"] {
             let (temp, manager, source) = fixture();
@@ -1945,13 +1992,14 @@ mod cli_cleanup {
             manager.install(&source).unwrap();
             assert!(!root.exists());
             let (ok, text) = run(&manager, action, WAIT);
-            let truthful = ok == (action == "list")
+            // A saved change succeeds; only cleanup-retry fails when unconfirmed.
+            let truthful = ok == (action != "cleanup-retry")
                 && !text.contains("confirmed complete")
-                && text.contains(if action == "list" {
-                    "not observed"
-                } else {
-                    "incomplete/unknown"
-                });
+                && match action {
+                    "list" => text.contains("not observed"),
+                    "cleanup-retry" => text.contains("incomplete/unknown"),
+                    _ => !text.contains("Saved credential cleanup"),
+                };
             if !truthful {
                 failures.push(format!("{action}: ok={ok}, {text}"));
             }
@@ -2008,11 +2056,19 @@ mod cli_cleanup {
     }
     #[test]
     fn cli_unconfigured_arbitrary_home_does_not_enroll_or_create_native_evidence() {
+        if let Some(stderr) = rerun_for_stderr(
+            "cli_unconfigured_arbitrary_home_does_not_enroll_or_create_native_evidence",
+        ) {
+            assert_eq!(stderr.matches(WARNING).count(), 2, "{stderr}");
+            return;
+        }
         let (temp, manager, source) = fixture();
         manager.install(&source).unwrap();
         for action in ["list", "remove", "recover", "cleanup-retry"] {
             let (ok, text) = run(&manager, action, WAIT);
-            assert_eq!(ok, action == "list", "{action}: {text}");
+            // Saved changes succeed; an unconfirmed retry still fails.
+            assert_eq!(ok, action != "cleanup-retry", "{action}: {text}");
+            assert!(!text.contains("confirmed complete"), "{action}: {text}");
         }
         let registry: serde_json::Value = serde_json::from_slice(
             &fs::read(temp.path().join("profiles/test/registry.json")).unwrap(),
