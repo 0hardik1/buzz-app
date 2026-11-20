@@ -7742,7 +7742,7 @@ it("a dwell in a public channel the viewer has not joined reads its mentions amo
   lease.dispose();
 });
 
-it("a dwell at a bottom mention in a channel the viewer has not joined leaves older unshown mentions unread", async () => {
+it("a dwell at a bottom mention too tall to observe, in a channel the viewer has not joined, reads only that mention", async () => {
   const h = setup();
   h.emit([
     roster(h.relay, "lobby", [h.alice.pubkey], 10),
@@ -7757,7 +7757,8 @@ it("a dwell at a bottom mention in a channel the viewer has not joined leaves ol
   h.emit([older, bottom]);
   const lease = h.session.unread.reading("lobby");
   await lease.catchUp(bottom.id);
-  await lease.observe([bottom.id]);
+  // Taller than the viewport: it earned bottom dwell but is not observed.
+  await lease.observe([]);
   expect(h.session.unread.attention("lobby", bottom.id).unread).toBe(false);
   expect(h.session.unread.attention("lobby", older.id).unread).toBe(true);
   expect(h.journal()?.state.frontiers.lobby).toBeUndefined();
@@ -7806,6 +7807,89 @@ it("missing roots of outside replies in several channels share one read", async 
     ).toEqual(threads.map(({ root }) => root.id).sort()),
   );
   expect(rootReads(h)).toBe(1);
+});
+
+it("an outside reply's root that the lookup cache evicts is read again once", async () => {
+  const h = setup();
+  const first = outsideReply(h, "lobby", 20);
+  const roots = new Map([[first.root.id, first.root]]);
+  h.query.mockImplementation(async (filters) =>
+    filters.flatMap((filter) =>
+      (filter.ids ?? []).flatMap((id) => roots.get(id) ?? []),
+    ),
+  );
+  const grouped = () =>
+    h.session.unread
+      .inbox()
+      .items.find((item) => item.messageIds.includes(first.reply.id))?.rootId;
+  h.emit([first.reply]);
+  h.session.unread.inbox();
+  await vi.waitFor(() => expect(grouped()).toBe(first.root.id));
+  // 1,024 more roots push the first one out of the lookup cache.
+  const fillers = Array.from({ length: 1024 }, (_, index) => {
+    const root = message(h.alice, "lobby", `filler root ${index}`, 30);
+    roots.set(root.id, root);
+    return message(h.alice, "lobby", `filler reply ${index}`, 31, [
+      ["e", root.id, "", "reply"],
+      ["p", h.viewer.pubkey],
+    ]);
+  });
+  h.emit(fillers);
+  const asked = () =>
+    h.query.mock.calls.filter(([filters]) =>
+      filters.some((filter) => filter.ids?.includes(first.root.id)),
+    ).length;
+  await vi.waitFor(
+    () => {
+      h.session.unread.inbox();
+      expect(asked()).toBe(2);
+    },
+    { timeout: 10000 },
+  );
+  await vi.waitFor(() => expect(grouped()).toBe(first.root.id));
+  // What the re-read evicts stays lost, so no further reads follow.
+  const reads = rootReads(h);
+  for (let round = 0; round < 5; round++) {
+    h.session.unread.inbox();
+    await flush();
+  }
+  expect(rootReads(h)).toBe(reads);
+  expect(grouped()).toBe(first.root.id);
+}, 30000);
+
+it("a thread dwell at its bottom in a channel the viewer has not joined clears its replies' reminders without a thread mark", async () => {
+  const h = setup();
+  const { root, reply } = outsideReply(h, "lobby", 20);
+  const bottom = message(h.alice, "lobby", "bottom reply", 30, [
+    ["e", root.id, "", "reply"],
+    ["p", h.viewer.pubkey],
+  ]);
+  h.query.mockImplementation(async (filters) =>
+    filters.some((filter) => filter.ids?.includes(root.id)) ? [root] : [],
+  );
+  h.emit([reply, bottom]);
+  h.session.unread.inbox();
+  await vi.waitFor(() =>
+    expect(h.session.unread.inbox().items[0]?.rootId).toBe(root.id),
+  );
+  const shown = h.session.unread.reading("lobby", root.id);
+  await shown.observe([reply.id]);
+  shown.dispose();
+  const older = {
+    kind: "message" as const,
+    channelId: "lobby",
+    messageId: reply.id,
+  };
+  await h.session.unread.markUnreadLocal(older);
+  const local = `msg:${reply.id}`;
+  expect(h.journal()?.localUnread[local]).toBeDefined();
+  const lease = h.session.unread.reading("lobby", root.id);
+  await lease.catchUp(bottom.id, root.id);
+  await lease.observe([]);
+  expect(h.journal()?.localUnread[local]).toBeUndefined();
+  expect(h.journal()?.state.frontiers[`thread:${root.id}`]).toBeUndefined();
+  expect(h.session.unread.attention("lobby", bottom.id).unread).toBe(false);
+  lease.dispose();
 });
 
 it("read outside mentions in one thread group under its root after a restart", async () => {

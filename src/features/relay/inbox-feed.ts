@@ -114,36 +114,47 @@ export function createInboxFeed({
     kinds: readonly number[],
     signal: AbortSignal,
   ) {
-    if (!ids.length) return [];
-    const collected: RelayEvent[] = [];
-    let cursor: ReturnType<typeof cursorOf> | undefined;
-    for (;;) {
-      const page = [
-        ...(await reader.read(
-          [
-            {
-              kinds,
-              "#e": ids,
-              limit: 500,
-              ...(cursor ?? {}),
-            },
-          ],
-          { signal },
-        )),
-      ].sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id));
-      const previous = cursor;
-      if (previous && page.some((event) => !older(event, previous)))
-        throw new Error("Inbox message updates did not advance. Retry inbox.");
-      collected.push(...page);
-      if (collected.length > 2000 || byteSize(collected) > 4 * 1024 * 1024)
-        throw new Error(
-          "Inbox message updates exceed the read budget. Retry inbox.",
+    const collected = new Map<string, RelayEvent>();
+    // The reader rejects filters over 64 KiB, about 900 event IDs.
+    for (let start = 0; start < ids.length; start += 500) {
+      const batch = ids.slice(start, start + 500);
+      let cursor: ReturnType<typeof cursorOf> | undefined;
+      for (;;) {
+        const page = [
+          ...(await reader.read(
+            [
+              {
+                kinds,
+                "#e": batch,
+                limit: 500,
+                ...(cursor ?? {}),
+              },
+            ],
+            { signal },
+          )),
+        ].sort(
+          (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
         );
-      const last = page.at(-1);
-      if (!last) return collected;
-      cursor = cursorOf(last);
-      // Authorized responses can have short pages. Only empty ends the walk.
+        const previous = cursor;
+        if (previous && page.some((event) => !older(event, previous)))
+          throw new Error(
+            "Inbox message updates did not advance. Retry inbox.",
+          );
+        for (const event of page) collected.set(event.id, event);
+        if (
+          collected.size > 2000 ||
+          byteSize([...collected.values()]) > 4 * 1024 * 1024
+        )
+          throw new Error(
+            "Inbox message updates exceed the read budget. Retry inbox.",
+          );
+        const last = page.at(-1);
+        if (!last) break;
+        cursor = cursorOf(last);
+        // Authorized responses can have short pages. Only empty ends the walk.
+      }
     }
+    return [...collected.values()];
   }
   async function refresh() {
     if (closed) return;
@@ -177,13 +188,21 @@ export function createInboxFeed({
           },
         );
         if (closed || generation !== epoch) return;
+        // A retained outside mention the page may omit, since it was deleted,
+        // is unchecked like the page's own rows until its overlays settle.
+        const retained = retainedOutsideIds();
+        if (retained.length)
+          publish({
+            incomplete: Object.freeze([
+              ...new Set([...snapshot.incomplete, ...retained]),
+            ]),
+          });
         // Retry older failed targets even when newer addressed rows pushed them
         // beyond the latest page; never clear an unchecked exact ID.
         const targets = [
           ...new Set([
             ...snapshot.incomplete,
             ...project(mentions).map((event) => event.id),
-            ...retainedOutsideIds(),
           ]),
         ];
         const updates = await overlays(targets, [40003, 5, 9005], owned.signal);

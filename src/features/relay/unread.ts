@@ -719,6 +719,9 @@ export function createUnread({
   };
   const lookups = new Map<string, Lookup>();
   const lookupEvents = new Map<string, RelayEvent>();
+  // An evicted root is read again once. What a re-read evicts stays lost, so a
+  // working set larger than the cache cannot cycle through it.
+  const recovered = new Set<string>();
   const queued = new Map<
     string,
     {
@@ -2284,6 +2287,7 @@ export function createUnread({
   function resetLookups() {
     lookups.clear();
     lookupEvents.clear();
+    recovered.clear();
     queued.clear();
     retracted.clear();
     witnesses.clear();
@@ -2305,9 +2309,18 @@ export function createUnread({
   }
   function keep(event: RelayEvent) {
     lookupEvents.set(event.id, event);
-    for (const [oldest] of lookupEvents) {
+    for (const [oldest, lost] of lookupEvents) {
       if (lookupEvents.size <= 1024) break;
       lookupEvents.delete(oldest);
+      if (recovered.has(event.id) || recovered.has(oldest)) continue;
+      recovered.add(oldest);
+      for (const first of recovered) {
+        if (recovered.size <= 4096) break;
+        recovered.delete(first);
+      }
+      lookups.delete(
+        `${conversationKey(channelOf(lost) ?? "", oldest)}:structure`,
+      );
     }
   }
   const contentKinds = [9, 40002, 40008];
@@ -3247,8 +3260,13 @@ export function createUnread({
             await dm;
             return;
           }
-          // Outside a channel, a dwell reads only the mentions it shows.
-          if (outside(channelId)) return;
+          // Outside a channel, a dwell reads only what it shows: the bottom row
+          // it reached, exactly, and a thread's reply reminders, never a mark.
+          const away = outside(channelId);
+          if (away) {
+            await this.observe([id]);
+            if (!rootId || !events.has(id)) return;
+          }
           const event = requireMessage(target, id);
           // A broadcast reply is shown in the channel but never its cutoff.
           if (!rootId && threadReference(event)) return;
@@ -3307,6 +3325,11 @@ export function createUnread({
             reminders.every(
               (local) => manual(local, journal) <= manualRevision,
             );
+          if (away) {
+            if (reminders.length)
+              await reads.clearLocalUnread(key, reminders, fresh);
+            return;
+          }
           if ((effectiveFrontier(state, key, channelId) ?? -1) >= cut) {
             if (endManual)
               await reads.clearLocalUnread(

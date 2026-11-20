@@ -108,11 +108,15 @@ their edits or deletions; the next addressed read lists them again. There
 is no live route for these channels; a running session lists their mentions on
 its next addressed history read, or live while the viewer has the channel open.
 That read also checks every retained mention for edits and deletions, since the
-relay leaves a deleted one out of the next page.
-A dwell in the channel reads the mentions it shows and skips its other rows. It
-never moves the channel's read mark, which would read older mentions it did not
-show. The channel's thread roots are never retained, so a reply mention's root
-is fetched for grouping even once it is read, in one read across channels.
+relay leaves a deleted one out of the next page, and marks each incomplete until
+its check finishes.
+A dwell in the channel reads the mentions it shows and skips its other rows. A
+dwell at the bottom reads only the bottom row it reached, even one too tall to
+show whole; in a thread it also clears the device's reminders on replies there.
+It never moves the channel's or thread's read mark, which would read older
+mentions it did not show. The channel's thread roots are never retained, so a
+reply mention's root is fetched for grouping even once it is read, in one read
+across channels. A root the lookup cache evicts is fetched again once.
 
 Channel-archived rooms are excluded from the shared Inbox projection in every
 activity view. Signed archive/unarchive metadata invalidates that projection even
@@ -167,7 +171,8 @@ query omits their soft-deleted rows. If reference visibility withholds an auxili
 event, the finite attempt stays failed/incomplete rather than treating the filtered
 page as exhausted history. Explicit Retry can settle it once existing shared
 readers have admitted the missing reference; Inbox adds no reference-resolution loop.
-Auxiliary reads cap retained results at 2,000 events / 4 MiB per stage; the shared reader
+Auxiliary reads ask for at most 500 IDs per filter and cap retained results at
+2,000 events / 4 MiB per stage; the shared reader
 keeps its existing per-request deadline and cancellation. Missing roots,
 participation or older activity can omit rows; an empty Inbox does not prove
 complete history. No polling, independent row source or channel window is

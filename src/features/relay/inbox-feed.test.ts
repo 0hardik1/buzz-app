@@ -1951,6 +1951,54 @@ it("a retained outside mention deleted later leaves Activity on a refresh that n
   await again;
   expect(rows(h)).toEqual([]);
 });
+it("a retained outside mention stays incomplete while its recheck runs and after it fails", async () => {
+  const h = setup();
+  h.admit([h.viewer.pubkey]);
+  outside(h, "lobby", PUBLIC_STREAM);
+  const mention = mentionIn(h, "lobby", "outside mention", 20);
+  const first = h.session.inboxFeed.ensure();
+  (await take(h, 9)).resolve([mention]);
+  await first;
+  expect(h.session.inboxFeed.snapshot().incomplete).toEqual([]);
+  const recheck = deferred<RelayEvent[]>();
+  const read = h.query.getMockImplementation();
+  h.query.mockImplementation((filters) =>
+    filters[0]?.["#e"]?.includes(mention.id)
+      ? recheck.promise
+      : (read?.(filters) ?? Promise.resolve([])),
+  );
+  const again = h.session.inboxFeed.refresh();
+  (await take(h, 9)).resolve([]);
+  await vi.waitFor(() =>
+    expect(h.session.inboxFeed.snapshot().incomplete).toEqual([mention.id]),
+  );
+  recheck.reject(new Error("relay unavailable"));
+  await again;
+  expect(h.session.inboxFeed.snapshot()).toMatchObject({
+    status: "error",
+    incomplete: [mention.id],
+  });
+});
+it("rechecking many retained outside mentions splits the overlay reads under the request budget", async () => {
+  const h = setup();
+  h.admit([h.viewer.pubkey]);
+  outside(h, "lobby", PUBLIC_STREAM);
+  const mentions = Array.from({ length: 1000 }, (_, index) =>
+    mentionIn(h, "lobby", `mention ${index}`, 20 + index),
+  );
+  h.live.receive(mentions, liveIn("lobby"));
+  const work = h.session.inboxFeed.refresh();
+  (await take(h, 9)).resolve([]);
+  await work;
+  expect(h.session.inboxFeed.snapshot()).toMatchObject({
+    status: "ready",
+    incomplete: [],
+  });
+  const checked = h.query.mock.calls.flatMap(
+    ([filters]) => filters[0]?.["#e"] ?? [],
+  );
+  expect(new Set(checked)).toEqual(new Set(mentions.map(({ id }) => id)));
+});
 it("a deep outside edit chain with repeated targets settles without walking each path", () => {
   const h = setup();
   h.admit([h.viewer.pubkey]);
