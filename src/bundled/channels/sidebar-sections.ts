@@ -93,7 +93,7 @@ export function compareRecent(a: ChannelSummary, b: ChannelSummary) {
 const titles: Record<string, string> = {
   pages: "Plugins",
   starred: "Favorites",
-  solo: "Solo",
+  solo: "Solo chats",
   channels: "Team",
   forums: "Forums",
   dms: "Direct messages",

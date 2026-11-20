@@ -26,6 +26,7 @@ import {
   READ_STATE_TIMESTAMP_REFUSAL,
   type ReadStateHost,
   type ReadStateSigning,
+  type ThreadFollowsSigning,
 } from "./read-state-host";
 import {
   parseReadSnapshot,
@@ -145,7 +146,10 @@ export interface ReadTransport {
   readonly channelLifecycle?: RelayWriter;
   /** Name/about/private-only metadata writer, separate from lifecycle and outbox. */
   readonly channelDetails?: RelayWriter;
-  readonly memberAdministration?: RelayWriter;
+  readonly memberAdministration?: RelayWriter & {
+    /** NIP-11 advertises `buzz-solo-member-role` for kind:9050 updates. */
+    readonly soloMemberRoleUpdates?: true;
+  };
   /** NIP-AR kind-45010 config artifacts only; never supplied to the outbox. */
   readonly configArtifacts?: RelayWriter;
   /** Narrow NIP-IA 9035/9036 signer/publisher; never supplied to the message outbox. */
@@ -560,6 +564,7 @@ export async function connectBrokerTransport(
     sidebarMuteWrites?: boolean;
     channelKit?: boolean;
     channelIdentity?: boolean;
+    soloMemberRoleUpdates?: boolean;
     searchSort?: boolean;
     artifactSync?: boolean;
     sidebarPreferenceWrites?: boolean;
@@ -1013,6 +1018,56 @@ export async function connectBrokerTransport(
               });
               await acceptReadStatePublish(response, event.id);
             },
+            async decodeFollows(
+              events: readonly RelayEvent[],
+              signal: AbortSignal,
+            ) {
+              const response = await fetch(
+                `${endpoint}/thread-follows-decode`,
+                {
+                  method: "POST",
+                  credentials: "same-origin",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(events),
+                  signal,
+                },
+              );
+              if (!response.ok)
+                throw new Error(
+                  `Thread-follows decode failed (${response.status})`,
+                );
+              return response.json();
+            },
+            async signFollows(
+              intent: ThreadFollowsSigning,
+              signal: AbortSignal,
+            ) {
+              const response = await fetch(`${endpoint}/thread-follows-sign`, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(intent),
+                signal,
+              });
+              if (!response.ok)
+                throw new Error(
+                  `Thread-follows signing failed (${response.status})`,
+                );
+              return eventDto(await response.json());
+            },
+            async publishFollows(event: RelayEvent, signal: AbortSignal) {
+              const response = await fetch(
+                `${endpoint}/thread-follows-publish`,
+                {
+                  method: "POST",
+                  credentials: "same-origin",
+                  headers: publicationHeaders(),
+                  body: JSON.stringify(event),
+                  signal,
+                },
+              );
+              await acceptReadStatePublish(response, event.id);
+            },
           },
         }
       : {}),
@@ -1153,7 +1208,14 @@ export async function connectBrokerTransport(
       ? { channelDetails: routeWriter("channel-details") }
       : {}),
     ...(session.memberAdministration === true
-      ? { memberAdministration: routeWriter("member-administration") }
+      ? {
+          memberAdministration: {
+            ...routeWriter("member-administration"),
+            ...(session.soloMemberRoleUpdates === true
+              ? { soloMemberRoleUpdates: true as const }
+              : {}),
+          },
+        }
       : {}),
     ...(session.channelLifecycle === true
       ? { channelLifecycle: routeWriter("channel-lifecycle") }

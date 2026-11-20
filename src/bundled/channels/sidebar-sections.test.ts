@@ -151,7 +151,7 @@ it("intersects groups/stars with active authorized streams and movable DMs", () 
   // Forums shows only once there is a forum to list.
   expect(sidebarSections([])).toEqual([
     { key: "starred", title: "Favorites", icon: undefined, rows: [] },
-    { key: "solo", title: "Solo", icon: undefined, rows: [] },
+    { key: "solo", title: "Solo chats", icon: undefined, rows: [] },
     { key: "channels", title: "Team", icon: undefined, rows: [] },
     { key: "dms", title: "Direct messages", icon: undefined, rows: [] },
   ]);
