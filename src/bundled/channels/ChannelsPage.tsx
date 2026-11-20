@@ -4,9 +4,11 @@ import { MediaReviewViewer } from "../../features/messages/MediaReviewViewer";
 import { DetailTabContext } from "../../features/messages/DetailTabContext";
 import {
   InlineContainers,
+  type PanelRenderer,
   useInlineContainerList,
 } from "../../features/messages/inline-containers";
 import {
+  type ComposerHandle,
   type MediaReviewOrigin,
   threadComposer,
 } from "../../features/messages/composer-overlay";
@@ -1470,9 +1472,12 @@ function ChannelWorkspace({
       setMediaReviews(showingMediaReviews);
   }, [mediaReviews.length, showingMediaReviews]);
   // Threads, panels and details read over their composers.
-  const containers = useInlineContainerList(currentId);
+  const panelRenderer = useRef<PanelRenderer>(undefined);
+  const containers = useInlineContainerList(currentId, (target, controls) =>
+    panelRenderer.current?.(target, controls),
+  );
   const secondary = useConversationTabs({
-    containers: containers.actions,
+    containers: containers.opener,
     state: tabState,
     relay,
     session: queries,
@@ -1608,6 +1613,7 @@ function ChannelWorkspace({
         entry.panel.channelMenu.eligible(current, queries)
       ),
   });
+  panelRenderer.current = secondary.renderInlinePanel;
   const focusConversation = useRef(false);
   const closeAllTabs = () => {
     if (!secondary.closeAllTabs()) return false;
@@ -1872,7 +1878,7 @@ function ChannelWorkspace({
       // Retire transient details first; selecting the thread is the last word.
       open(undefined);
       // A thread shows in one place: its tab, not also over the conversation.
-      containers.actions.close(threadComposer(channelId, threadRootId));
+      containers.opener.close(threadComposer(channelId, threadRootId));
       // Every opening keeps existing work: a new thread adds a tab and an
       // open one is selected wherever it was placed.
       tabState.openThreadTab(
@@ -1914,7 +1920,7 @@ function ChannelWorkspace({
       threadPane,
       tabState.openThreadTab,
       tabState.leaveVisit,
-      containers.actions,
+      containers.opener,
     ],
   );
   const openThread = useCallback(
@@ -2005,10 +2011,13 @@ function ChannelWorkspace({
         fromThread = false,
         returnFocus,
         rootId,
+        composer,
       }: {
         fromThread?: boolean;
         returnFocus?: HTMLElement | undefined;
         rootId?: string;
+        /** The composer of the row it was opened from, which it reads over. */
+        composer?: ComposerHandle | undefined;
       } = {},
     ) => {
       const { current, navigation } = destination.current;
@@ -2080,7 +2089,7 @@ function ChannelWorkspace({
         // Thread-origin details cover the live thread instead of retiring it.
         if (!fromThread && routedThread && !historyPanel(next))
           select(channelId);
-        openDetail(next, panelTrigger.current, fromThread);
+        openDetail(next, panelTrigger.current, fromThread, composer);
         return true;
       }
       return false;
@@ -2958,7 +2967,7 @@ function ChannelWorkspace({
         )}
       {secondary.drag.feedback}
       {secondary.hosts}
-      {containers.layer}
+      {containers.dialogs}
       <p role="status" className="sr-only">
         {secondary.announcement}
       </p>
@@ -3083,7 +3092,7 @@ function ChannelWorkspace({
       </LinkThreadTabContext>
     </DetailTabContext>
   );
-  return <InlineContainers value={containers.actions}>{page}</InlineContainers>;
+  return <InlineContainers value={containers.opener}>{page}</InlineContainers>;
 }
 
 export function mediaReviewForDestination<

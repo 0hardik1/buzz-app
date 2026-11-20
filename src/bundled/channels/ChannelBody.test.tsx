@@ -9,10 +9,15 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
-import { registerOverlayComposer } from "../../features/messages/composer-overlay";
+import { type ReactNode, useRef } from "react";
 import {
+  channelComposer,
+  useOverlayComposerRef,
+} from "../../features/messages/composer-overlay";
+import {
+  ComposerScopeProvider,
   InlineContainers,
+  useComposerHandle,
   useInlineContainerList,
 } from "../../features/messages/inline-containers";
 import {
@@ -62,29 +67,38 @@ vi.mock("../../features/conversation/Conversation", () => ({
       Open reply
     </button>
   ),
-  ConversationThread: () => <textarea aria-label="Thread draft" />,
-  WithConversation: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("../../features/relay/RecoveryNotice", () => ({
   useRecoveryOwns: () => false,
 }));
 
-// The workspace's container list, over the channel's registered composer.
+function Composer() {
+  const form = useRef<HTMLFormElement>(null);
+  return (
+    <form
+      data-message-composer
+      ref={useOverlayComposerRef(form)}
+      style={{ borderRadius: "12px" }}
+    />
+  );
+}
+// The workspace's opener, over the channel's composer, which draws its
+// threads as the conversation does.
 function Workspace({ children }: { children: ReactNode }) {
   const containers = useInlineContainerList("alpha");
+  const handle = useComposerHandle(channelComposer("alpha"));
   return (
-    <InlineContainers value={containers.actions}>
-      <div data-composer-host="">
-        {children}
-        <form
-          data-message-composer
-          ref={(node) =>
-            node ? registerOverlayComposer("channel:alpha", node) : undefined
-          }
-          style={{ borderRadius: "12px" }}
-        />
-      </div>
-      {containers.layer}
+    <InlineContainers value={containers.opener}>
+      <ComposerScopeProvider
+        handle={handle}
+        renderThread={() => <textarea aria-label="Thread draft" />}
+      >
+        <div data-composer-host="">
+          {children}
+          <Composer />
+        </div>
+      </ComposerScopeProvider>
+      {containers.dialogs}
     </InlineContainers>
   );
 }

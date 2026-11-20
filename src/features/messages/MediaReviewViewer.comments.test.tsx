@@ -24,7 +24,7 @@ import type { RelayEvent } from "../relay/events";
 import { createRelaySession } from "../relay/session";
 import { keypair, message, metadata, roster, signed } from "../relay/testing";
 import {
-  registerOverlayComposer,
+  createComposerHandle,
   overlayHost,
   type MediaReviewOrigin,
 } from "./composer-overlay";
@@ -153,8 +153,9 @@ async function setupReview({
     pane.append(composer);
     document.body.append(pane);
     sourceReaders.push(pane);
-    registerOverlayComposer("channel:C", composer);
-    opening = { host: overlayHost("channel:C"), rootId: sourceRoot };
+    const handle = createComposerHandle("channel:C");
+    handle.attach(composer);
+    opening = { host: overlayHost(handle), rootId: sourceRoot };
   }
   const owner = createRelaySession(
     {
@@ -840,8 +841,9 @@ it.each([
       },
     );
     if (entry.fromThread) {
+      // The thread's reply box hosts the sheet the video opens on.
       await user.click(
-        await screen.findByRole("button", { name: "Open video fullscreen" }),
+        await screen.findByRole("button", { name: "Open video" }),
       );
       expect(openReview).toHaveBeenCalledWith(
         attachmentOwner.id,

@@ -14,6 +14,7 @@ import { UnreadOptions } from "../channels/UnreadBadge";
 import { ChannelBody } from "../channels/ChannelBody";
 import {
   InlineContainers,
+  type PanelRenderer,
   useInlineContainerList,
 } from "../../features/messages/inline-containers";
 import {
@@ -280,9 +281,12 @@ export function BestieConversation({
     return true;
   };
   // Threads, panels and details read over the conversation while it shows.
-  const containers = useInlineContainerList(channel.id);
+  const panelRenderer = useRef<PanelRenderer>(undefined);
+  const containers = useInlineContainerList(channel.id, (target, controls) =>
+    panelRenderer.current?.(target, controls),
+  );
   const secondary = useConversationTabs({
-    containers: containers.actions,
+    containers: containers.opener,
     state,
     relay: host.relay,
     session,
@@ -322,6 +326,7 @@ export function BestieConversation({
     },
     onCloseTabs: (tabs, entries) => dismissContent(tabs, entries, "main"),
   });
+  panelRenderer.current = secondary.renderInlinePanel;
   const appliedVisit = useRef<string>(undefined);
   useLayoutEffect(() => {
     if (
@@ -683,7 +688,7 @@ export function BestieConversation({
             )}
             {secondary.drag.feedback}
             {secondary.hosts}
-            {containers.layer}
+            {containers.dialogs}
             <span role="status" className="sr-only">
               {secondary.announcement}
             </span>
@@ -692,5 +697,5 @@ export function BestieConversation({
       </LinkThreadTabContext>
     </ForwardMessageProvider>
   );
-  return <InlineContainers value={containers.actions}>{page}</InlineContainers>;
+  return <InlineContainers value={containers.opener}>{page}</InlineContainers>;
 }

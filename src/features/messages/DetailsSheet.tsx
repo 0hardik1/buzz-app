@@ -21,16 +21,45 @@ import styles from "./DetailsSheet.module.css";
 import messageStyles from "./Messages.module.css";
 
 /** Where the sheet sits: around its composer, within the composer's pane. */
-function geometry(
-  { composer, pane, viewport }: ComposerOverlayHost,
-  stacked: boolean,
-): CSSProperties {
-  const box = composer.getBoundingClientRect();
-  // A sheet stacked on another sheet's composer sits above that composer,
-  // which stays in the sheet below, uncovered and usable: its scrim and its
-  // fold start at the composer's top edge.
-  const rect = stacked ? new DOMRect(box.left, box.top, box.width, 0) : box;
-  const bounds = viewport.getBoundingClientRect();
+/** The element fixed descendants of `element` are placed in: the viewport,
+ * or an ancestor that filters or transforms, as a sheet's surface does for a
+ * sheet opened over a composer inside it. */
+function fixedFrame(element: HTMLElement): HTMLElement | null {
+  for (
+    let node = element.parentElement;
+    node && node !== document.documentElement;
+    node = node.parentElement
+  ) {
+    const style = getComputedStyle(node);
+    if (
+      style.transform !== "none" ||
+      style.filter !== "none" ||
+      (style.backdropFilter && style.backdropFilter !== "none") ||
+      style.perspective !== "none" ||
+      /paint|layout|strict|content/.test(style.contain) ||
+      /transform|filter|perspective/.test(style.willChange)
+    )
+      return node;
+  }
+  return null;
+}
+
+function geometry({
+  composer,
+  pane,
+  viewport,
+  container,
+}: ComposerOverlayHost): CSSProperties {
+  // Inside another sheet, positions count from that sheet's padding box.
+  const frame = fixedFrame(container);
+  const frameBox = frame?.getBoundingClientRect();
+  const originX = frameBox ? frameBox.left + (frame?.clientLeft ?? 0) : 0;
+  const originY = frameBox ? frameBox.top + (frame?.clientTop ?? 0) : 0;
+  const frameHeight = frame ? frame.clientHeight : window.innerHeight;
+  const local = (box: DOMRect) =>
+    new DOMRect(box.left - originX, box.top - originY, box.width, box.height);
+  const rect = local(composer.getBoundingClientRect());
+  const bounds = local(viewport.getBoundingClientRect());
   // The reader owns sheet layout; its outer surface owns scrim clipping,
   // including the panel's border and rounded corners. Joined panels share
   // their outer shell surface; their inner panels deliberately have no radius.
@@ -39,7 +68,8 @@ function geometry(
     pane.closest<HTMLElement>("[data-buzz-surface][data-joined]") ??
     pane.closest<HTMLElement>("[data-buzz-surface]") ??
     pane;
-  const surfaceBounds = surface.getBoundingClientRect();
+  const surfaceBox = surface.getBoundingClientRect();
+  const surfaceBounds = local(surfaceBox);
   const surfaceStyle = getComputedStyle(surface);
   const boundary =
     pane.closest<HTMLElement>(
@@ -51,20 +81,29 @@ function geometry(
   const inset = (distance: number, border: string) =>
     distance <= Number.parseFloat(border) ? 0 : distance;
   const clipInsets = [
-    inset(clip.top - surfaceBounds.top, surfaceStyle.borderTopWidth),
-    inset(surfaceBounds.right - clip.right, surfaceStyle.borderRightWidth),
-    inset(surfaceBounds.bottom - clip.bottom, surfaceStyle.borderBottomWidth),
-    inset(clip.left - surfaceBounds.left, surfaceStyle.borderLeftWidth),
+    inset(clip.top - surfaceBox.top, surfaceStyle.borderTopWidth),
+    inset(surfaceBox.right - clip.right, surfaceStyle.borderRightWidth),
+    inset(surfaceBox.bottom - clip.bottom, surfaceStyle.borderBottomWidth),
+    inset(clip.left - surfaceBox.left, surfaceStyle.borderLeftWidth),
   ]
     .map((value) => `${value}px`)
     .join(" ");
+  // A sheet over a composer inside another sheet stops below that sheet's
+  // header, which stays above it.
+  const header = frame?.matches("[data-details-sheet-surface]")
+    ? frame.querySelector("header")?.getBoundingClientRect()
+    : undefined;
   return {
     "--composer-left": `${rect.left}px`,
     "--composer-width": `${rect.width}px`,
     "--composer-height": `${rect.height}px`,
-    "--composer-bottom": `${window.innerHeight - rect.bottom}px`,
+    "--composer-bottom": `${frameHeight - rect.bottom}px`,
     "--composer-pane-bottom": `${bounds.bottom - rect.bottom}px`,
     "--composer-radius": getComputedStyle(composer).borderTopLeftRadius,
+    "--frame-height": `${frameHeight}px`,
+    ...(frame && {
+      "--sheet-top": `${Math.max(bounds.top, header ? header.bottom - originY : 0)}px`,
+    }),
     "--pane-top": `${bounds.top}px`,
     "--pane-left": `${bounds.left}px`,
     "--pane-width": `${bounds.width}px`,
@@ -72,9 +111,7 @@ function geometry(
     "--scrim-top": `${surfaceBounds.top}px`,
     "--scrim-left": `${surfaceBounds.left}px`,
     "--scrim-width": `${surfaceBounds.width}px`,
-    "--scrim-height": `${
-      stacked ? box.top - surfaceBounds.top : surfaceBounds.height
-    }px`,
+    "--scrim-height": `${surfaceBounds.height}px`,
     "--scrim-radius": surfaceStyle.borderRadius,
     "--scrim-inset": clipInsets,
   } as CSSProperties;
@@ -84,18 +121,17 @@ function geometry(
  * typed, and the pane resizes with the window and its splits. */
 function useComposerGeometry(
   host: ComposerOverlayHost,
-  stacked: boolean,
   mounted: boolean,
   surface: HTMLElement | null,
 ) {
   const { composer, pane, viewport } = host;
-  const [style, setStyle] = useState(() => geometry(host, stacked));
+  const [style, setStyle] = useState(() => geometry(host));
   useLayoutEffect(() => {
     if (!mounted) return;
     const header = surface?.querySelector("header");
     const update = () =>
       setStyle({
-        ...geometry(host, stacked),
+        ...geometry(host),
         "--sheet-border-width": surface
           ? getComputedStyle(surface).borderBottomWidth
           : "0px",
@@ -115,7 +151,7 @@ function useComposerGeometry(
       observer?.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [host, stacked, composer, pane, viewport, mounted, surface]);
+  }, [host, composer, pane, viewport, mounted, surface]);
   return style;
 }
 
@@ -313,7 +349,6 @@ export function DetailsSheet({
   headerActions,
   onClosed,
   onOpenAsTab,
-  stacked = false,
   focusContent = false,
   onEscapeKey,
   spotlight,
@@ -340,9 +375,6 @@ export function DetailsSheet({
   /** Opens what this sheet reads in a tab, as its own thread tab or a reader
    * tab, and closes the sheet. Without it there is no Open as tab. */
   onOpenAsTab?: (() => void) | undefined;
-  /** It sits on another sheet, above that sheet's composer, which stays
-   * uncovered and usable. */
-  stacked?: boolean;
   /** The content places focus itself, as a thread opened to reply does;
    * otherwise the sheet takes focus. */
   focusContent?: boolean;
@@ -358,10 +390,9 @@ export function DetailsSheet({
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
   const [surface, setSurface] = useState<HTMLDivElement | null>(null);
-  const style = useComposerGeometry(host, stacked, mounted, surface);
+  const style = useComposerGeometry(host, mounted, surface);
   useLayoutEffect(() => {
-    // Stacked above a composer, it leaves that composer uncovered.
-    if (!mounted || stacked || (!containsComposer && !readerOnly)) return;
+    if (!mounted || (!containsComposer && !readerOnly)) return;
     if (readerOnly) composer.dataset.composerCovered = "";
     const inert = composer.inert;
     composer.inert = true;
@@ -369,7 +400,7 @@ export function DetailsSheet({
       composer.inert = inert;
       if (readerOnly) delete composer.dataset.composerCovered;
     };
-  }, [composer, mounted, stacked, containsComposer, readerOnly]);
+  }, [composer, mounted, containsComposer, readerOnly]);
   const popup = useRef<HTMLDivElement | null>(null);
   const backdrop = useRef<HTMLDivElement | null>(null);
   useComposerHandoff(surface, composer, open, containsComposer);
@@ -399,176 +430,171 @@ export function DetailsSheet({
     if (popup.current && height !== "stable") grow(popup.current, open);
   });
   return (
-    <>
-      <BaseDialog.Root
-        open={open}
-        // Expansion belongs to this pane; the rest of the app stays interactive.
-        modal={false}
-        onOpenChange={(next, details) => {
-          if (!next) {
-            if (details.reason === "escape-key" && onEscapeKey?.()) {
-              details.cancel();
-              return;
-            }
-            const target =
-              details.event instanceof FocusEvent
-                ? details.event.relatedTarget
-                : details.event?.target;
-            // Only this pane's scrim dismisses on outside press. Application
-            // controls and sibling portalled viewers remain independent.
-            if (
-              details.reason === "outside-press" &&
-              target !== backdrop.current
-            ) {
-              details.cancel();
-              return;
-            }
-            // Only a press, Escape or Close dismisses it, never moving focus.
-            if (details.reason === "focus-out") {
-              details.cancel();
-              return;
-            }
+    <BaseDialog.Root
+      open={open}
+      // Expansion belongs to this pane; the rest of the app stays interactive.
+      modal={false}
+      onOpenChange={(next, details) => {
+        if (!next) {
+          if (details.reason === "escape-key" && onEscapeKey?.()) {
+            details.cancel();
+            return;
           }
-          onOpenChange(next);
-        }}
-        onOpenChangeComplete={(next) => {
-          if (next) return;
-          setMounted(false);
-          onClosed?.();
-          // Once focus has visited the composer, Base UI returns none and Close
-          // would leave it on the page; hand it back to the opener instead.
-          const active = document.activeElement;
-          if (active === document.body || popup.current?.contains(active))
-            finalFocus?.current?.focus({ preventScroll: true });
-        }}
+          const target =
+            details.event instanceof FocusEvent
+              ? details.event.relatedTarget
+              : details.event?.target;
+          // Only this pane's scrim dismisses on outside press. Application
+          // controls and sibling portalled viewers remain independent.
+          if (
+            details.reason === "outside-press" &&
+            target !== backdrop.current
+          ) {
+            details.cancel();
+            return;
+          }
+          // Only a press, Escape or Close dismisses it, never moving focus.
+          if (details.reason === "focus-out") {
+            details.cancel();
+            return;
+          }
+        }
+        onOpenChange(next);
+      }}
+      onOpenChangeComplete={(next) => {
+        if (next) return;
+        setMounted(false);
+        onClosed?.();
+        // Once focus has visited the composer, Base UI returns none and Close
+        // would leave it on the page; hand it back to the opener instead.
+        const active = document.activeElement;
+        if (active === document.body || popup.current?.contains(active))
+          finalFocus?.current?.focus({ preventScroll: true });
+      }}
+    >
+      <BaseDialog.Portal
+        container={host.container}
+        className={messageStyles.detailsSheetLayer}
+        data-workspace-overlay={host.viewport !== host.pane || undefined}
+        data-details-sheet=""
       >
-        <BaseDialog.Portal
-          container={host.container}
-          className={messageStyles.detailsSheetLayer}
-          data-workspace-overlay={host.viewport !== host.pane || undefined}
-          data-details-sheet=""
+        <BaseDialog.Backdrop
+          ref={backdrop}
+          forceRender
+          className={styles.scrim}
+          data-window={height === "stable" || undefined}
+          style={style}
+        />
+        <BaseDialog.Popup
+          ref={(element) => {
+            // React reattaches this callback each render; grow once per mount.
+            if (element && element !== grown.current) {
+              grown.current = element;
+              setSurface(element);
+              if (height !== "stable") grow(element, true, true);
+            }
+            popup.current = element;
+            focus.ref(element);
+          }}
+          className={styles.sheet}
+          data-details-sheet-surface=""
+          data-contained-composer={containsComposer || undefined}
+          data-reader-only={readerOnly || undefined}
+          data-height={height}
+          style={style}
+          // The sheet takes focus itself: its first header action would show
+          // a focus tooltip that the first Escape closes instead of the
+          // sheet. A reply opening leaves focus for its reply editor.
+          initialFocus={focusContent ? false : popup}
+          finalFocus={returnFocus}
         >
-          <BaseDialog.Backdrop
-            ref={backdrop}
-            forceRender
-            className={styles.scrim}
-            data-window={height === "stable" || undefined}
-            style={style}
-          />
-          <BaseDialog.Popup
-            ref={(element) => {
-              // React reattaches this callback each render; grow once per mount.
-              if (element && element !== grown.current) {
-                grown.current = element;
-                setSurface(element);
-                if (height !== "stable") grow(element, true, true);
-              }
-              popup.current = element;
-              focus.ref(element);
-            }}
-            className={styles.sheet}
-            data-details-sheet-surface=""
-            data-contained-composer={containsComposer || undefined}
-            data-reader-only={readerOnly || undefined}
-            data-stacked={stacked || undefined}
-            data-height={height}
-            style={style}
-            // The sheet takes focus itself: its first header action would show
-            // a focus tooltip that the first Escape closes instead of the
-            // sheet. A reply opening leaves focus for its reply editor.
-            initialFocus={focusContent ? false : popup}
-            finalFocus={returnFocus}
-          >
-            <div className={styles.content}>
-              {/* One row: who wrote it and when, with Close at its end. */}
-              <header className={`buzz-dialog-header ${styles.header}`}>
-                {containsComposer && height === "content" && (
-                  <DialogBarMaterial className={styles.headerMaterial} />
-                )}
-                <div className={styles.byline}>
-                  {leading}
-                  <BaseDialog.Title
-                    className={`text-label ${styles.name}`}
-                    data-spotlight={spotlight === 1 || undefined}
-                  >
-                    {spotlight === undefined ? (
-                      title
-                    ) : (
-                      <IntroSpotlight
-                        shape="pill"
-                        active={spotlight === 1}
-                        anchorRef={onSpotlightAnchor}
-                      >
-                        {title}
-                      </IntroSpotlight>
-                    )}
-                  </BaseDialog.Title>
-                  {description && (
-                    <BaseDialog.Description
-                      className={`buzz-dialog-description ${styles.time}`}
-                    >
-                      {description}
-                    </BaseDialog.Description>
-                  )}
-                </div>
-                <div className="buzz-dialog-header-actions">
-                  {headerActions}
-                  {onOpenAsTab && (
+          <div className={styles.content}>
+            {/* One row: who wrote it and when, with Close at its end. */}
+            <header className={`buzz-dialog-header ${styles.header}`}>
+              {containsComposer && height === "content" && (
+                <DialogBarMaterial className={styles.headerMaterial} />
+              )}
+              <div className={styles.byline}>
+                {leading}
+                <BaseDialog.Title
+                  className={`text-label ${styles.name}`}
+                  data-spotlight={spotlight === 1 || undefined}
+                >
+                  {spotlight === undefined ? (
+                    title
+                  ) : (
                     <IntroSpotlight
-                      shape="ring"
-                      active={spotlight === 2}
+                      shape="pill"
+                      active={spotlight === 1}
                       anchorRef={onSpotlightAnchor}
                     >
-                      <IconButton
-                        aria-label="Open as tab"
-                        // An intro step names it while it points here.
-                        title={
-                          spotlight === undefined ? "Open as tab" : undefined
-                        }
-                        variant="glass"
-                        shape="round"
-                        size="compact"
-                        icon={
-                          <ArrowSquareOutIcon size={16} aria-hidden="true" />
-                        }
-                        onClick={() => {
-                          // Its tab may mount a new composer: let a send
-                          // finish first.
-                          const sheet = popup.current;
-                          if (!sheet || handing.current) return;
-                          handing.current = true;
-                          void composerSettled(sheet).then(() => {
-                            handing.current = false;
-                            if (sheet.isConnected) onOpenAsTab();
-                          });
-                        }}
-                      />
+                      {title}
                     </IntroSpotlight>
                   )}
-                  <BaseDialog.Close
-                    render={
-                      <IconButton
-                        aria-label={closeLabel}
-                        variant="glass"
-                        shape="round"
-                        size="compact"
-                        icon={<XIcon size={16} aria-hidden="true" />}
-                      />
-                    }
-                  />
-                </div>
-              </header>
-              <div className={`buzz-dialog-body ${styles.body}`}>
-                <div className={styles.reader}>{children}</div>
+                </BaseDialog.Title>
+                {description && (
+                  <BaseDialog.Description
+                    className={`buzz-dialog-description ${styles.time}`}
+                  >
+                    {description}
+                  </BaseDialog.Description>
+                )}
               </div>
+              <div className="buzz-dialog-header-actions">
+                {headerActions}
+                {onOpenAsTab && (
+                  <IntroSpotlight
+                    shape="ring"
+                    active={spotlight === 2}
+                    anchorRef={onSpotlightAnchor}
+                  >
+                    <IconButton
+                      aria-label="Open as tab"
+                      // An intro step names it while it points here.
+                      title={
+                        spotlight === undefined ? "Open as tab" : undefined
+                      }
+                      variant="glass"
+                      shape="round"
+                      size="compact"
+                      icon={<ArrowSquareOutIcon size={16} aria-hidden="true" />}
+                      onClick={() => {
+                        // Its tab may mount a new composer: let a send
+                        // finish first.
+                        const sheet = popup.current;
+                        if (!sheet || handing.current) return;
+                        handing.current = true;
+                        void composerSettled(sheet).then(() => {
+                          handing.current = false;
+                          if (sheet.isConnected) onOpenAsTab();
+                        });
+                      }}
+                    />
+                  </IntroSpotlight>
+                )}
+                <BaseDialog.Close
+                  render={
+                    <IconButton
+                      aria-label={closeLabel}
+                      variant="glass"
+                      shape="round"
+                      size="compact"
+                      icon={<XIcon size={16} aria-hidden="true" />}
+                    />
+                  }
+                />
+              </div>
+            </header>
+            <div className={`buzz-dialog-body ${styles.body}`}>
+              <div className={styles.reader}>{children}</div>
             </div>
-            {/* The composer shows through here, inside the sheet's ring. */}
-            {!containsComposer && !readerOnly && (
-              <div className={styles.composerSpace} aria-hidden="true" />
-            )}
-          </BaseDialog.Popup>
-        </BaseDialog.Portal>
-      </BaseDialog.Root>
-    </>
+          </div>
+          {/* The composer shows through here, inside the sheet's ring. */}
+          {!containsComposer && !readerOnly && (
+            <div className={styles.composerSpace} aria-hidden="true" />
+          )}
+        </BaseDialog.Popup>
+      </BaseDialog.Portal>
+    </BaseDialog.Root>
   );
 }

@@ -1,14 +1,10 @@
 import { MessageLoading } from "../../features/messages/MessageLoading";
-import {
-  channelComposer,
-  overlayHost,
-  threadComposer,
-  useComposerName,
-} from "../../features/messages/composer-overlay";
-import { useInlineContainers } from "../../features/messages/inline-containers";
+import { useComposerScope } from "../../features/messages/composer-overlay";
+import { InlineContainers } from "../../features/messages/inline-containers";
 import {
   memo,
   type ReactNode,
+  useContext,
   useCallback,
   useEffect,
   useId,
@@ -16,11 +12,8 @@ import {
   useRef,
 } from "react";
 import {
-  type Conversation,
   ConversationTimeline,
-  ConversationThread,
   useConversation,
-  WithConversation,
 } from "../../features/conversation/Conversation";
 import type { ChannelTimelineProps } from "../../features/messages/ChannelTimeline";
 import type { PageNavigation } from "../../features/navigation/service";
@@ -30,44 +23,6 @@ import { headRecovering } from "../../features/relay/live-recovery";
 import { clientMetrics } from "../../features/developer/client-metrics";
 import { Button } from "../../shared/design-system/ui/Button";
 import styles from "./Channels.module.css";
-
-/** A thread read over the composer it was opened from. */
-function threadContainer(
-  conversation: Conversation,
-  composer: string,
-  messageId: string,
-  rootId: string,
-  trigger: Element | null,
-  openAsTab: (() => void) | undefined,
-  reply: boolean,
-) {
-  const { channelId } = conversation;
-  return {
-    id: threadComposer(channelId, rootId),
-    kind: "thread" as const,
-    channelId,
-    composer,
-    provides: threadComposer(channelId, rootId),
-    title: "Thread",
-    closeLabel: "Close thread",
-    containsComposer: true,
-    focusContent: reply,
-    // Drawn by the workspace, outside this conversation's providers.
-    content: (
-      <WithConversation value={conversation}>
-        <ConversationThread
-          messageId={messageId}
-          replyRequest={reply ? 1 : undefined}
-          revealSelected={messageId !== rootId}
-          initialScroll="latest"
-          virtualizeReplies
-        />
-      </WithConversation>
-    ),
-    openAsTab,
-    trigger: trigger instanceof HTMLElement ? trigger : null,
-  };
-}
 
 export const ChannelBody = memo(function ChannelBody({
   cached,
@@ -116,45 +71,44 @@ export const ChannelBody = memo(function ChannelBody({
     channelId,
     ownSoloConversation: solo,
   } = conversation;
-  const containers = useInlineContainers();
-  const composer = useComposerName() ?? channelComposer(channelId);
+  const opener = useContext(InlineContainers);
+  const composer = useComposerScope();
   // Stable, so memoized message rows keep their props across window updates.
   // The row it opens from is where focus returns: on macOS a click moves none.
   // A thread with a tab, or with nothing to open over, opens its tab.
-  const live = useRef({ conversation, composer, onOpenThread, hasThreadTab });
+  const live = useRef({ channelId, composer, onOpenThread, hasThreadTab });
   useLayoutEffect(() => {
-    live.current = { conversation, composer, onOpenThread, hasThreadTab };
+    live.current = { channelId, composer, onOpenThread, hasThreadTab };
   });
   const read = useCallback(
     (
       messageId: string,
       rootId: string,
-      opener: Element | null,
+      origin: Element | null,
       intent?: "reply",
     ) => {
-      const { conversation, composer, onOpenThread, hasThreadTab } =
-        live.current;
-      if (
-        !containers ||
-        hasThreadTab?.(conversation.channelId, rootId) ||
-        !overlayHost(composer)
-      ) {
-        onOpenThread?.(messageId, rootId, intent);
+      const { channelId, composer, onOpenThread, hasThreadTab } = live.current;
+      const openAsTab =
+        onOpenThread && (() => onOpenThread(messageId, rootId, intent));
+      if (!opener) {
+        openAsTab?.();
         return;
       }
-      containers.open(
-        threadContainer(
-          conversation,
-          composer,
-          messageId,
+      opener.open({
+        target: {
+          kind: "thread",
+          channelId,
           rootId,
-          opener,
-          onOpenThread && (() => onOpenThread(messageId, rootId)),
-          intent === "reply",
-        ),
-      );
+          messageId,
+          reply: intent === "reply",
+        },
+        composer,
+        trigger: origin instanceof HTMLElement ? origin : null,
+        hasTab: hasThreadTab?.(channelId, rootId),
+        openAsTab,
+      });
     },
-    [containers],
+    [opener],
   );
   const openThread = useCallback(
     (

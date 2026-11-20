@@ -89,43 +89,6 @@ it("offers no Open as tab without a tab to open", async () => {
   expect(screen.queryByRole("button", { name: "Open as tab" })).toBeNull();
 });
 
-it("leaves the composer it stacks over usable, as a thread's reply box", async () => {
-  const pane = document.createElement("div");
-  const composer = document.createElement("form");
-  pane.append(composer);
-  document.body.append(pane);
-  const host = { pane, composer, viewport: pane, container: pane };
-  const view = render(
-    <DetailsSheet
-      open
-      onOpenChange={() => {}}
-      title="Diff"
-      host={host}
-      readerOnly
-    >
-      <p>Diff body</p>
-    </DetailsSheet>,
-  );
-  await screen.findByRole("dialog", { name: "Diff" });
-  expect(composer.inert).toBe(true);
-  view.rerender(
-    <DetailsSheet
-      open
-      onOpenChange={() => {}}
-      title="Diff"
-      host={host}
-      readerOnly
-      stacked
-    >
-      <p>Diff body</p>
-    </DetailsSheet>,
-  );
-  expect(composer.inert).not.toBe(true);
-  expect(screen.getByRole("dialog", { name: "Diff" })).toHaveAttribute(
-    "data-stacked",
-  );
-});
-
 it("mounts its content in the document, so content effects see the page", async () => {
   const pane = document.createElement("div");
   const composer = document.createElement("form");

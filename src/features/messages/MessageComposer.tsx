@@ -198,8 +198,8 @@ import { followUpBehaviorPreference } from "./follow-up-preference";
 import { followUpQueue } from "./follow-up-queue";
 import { followUpMessage } from "./follow-up-message";
 import { QueuedFollowUps } from "./QueuedFollowUps";
-import { useComposerName, useOverlayComposerRef } from "./composer-overlay";
-import { useInlineContainers } from "./inline-containers";
+import { useComposerScope, useOverlayComposerRef } from "./composer-overlay";
+import { InlineContainers } from "./inline-containers";
 
 const noChannels: ReturnType<ComposerSession["channels"]["list"]> = {
   status: "idle",
@@ -1427,8 +1427,8 @@ function Composer({
   });
   useLayoutEffect(() => () => handOffFocus(), []);
   const overlayComposerRef = useOverlayComposerRef(form);
-  const composerName = useComposerName();
-  const containers = useInlineContainers();
+  const composerScope = useComposerScope();
+  const containers = useContext(InlineContainers);
   const canAttach = submission
     ? !!submission.attachments && !!session.attachments?.uploadForNewChat
     : !!session.attachments;
@@ -3354,7 +3354,7 @@ function Composer({
       recoveryFor(session).set(recoveryKey, pending);
       setAccepted(pending);
       // A send answers the details read over this composer.
-      if (composerName) containers?.sent(composerName);
+      if (composerScope) containers?.sent(composerScope);
       attachments.store.clear();
       completion.invalidate();
       clearMediaTime?.();

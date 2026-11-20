@@ -8,10 +8,12 @@ import { useActivityIndicator } from "./use-activity-indicator";
 import type { ActivityRowPresentation } from "./activity-presentation";
 import { ShimmerText } from "../../shared/design-system/ui/ShimmerText";
 import {
+  type ComposerHandle,
   type MediaReviewOrigin,
   overlayHost,
-  useComposerName,
+  useComposerScope,
 } from "./composer-overlay";
+import { RowKeepAlive } from "./inline-containers";
 import { Collapsible } from "@base-ui/react/collapsible";
 import { formatItemTimestamp } from "../../shared/datetime";
 import { useClockPreference } from "../../shared/clock-preference";
@@ -133,7 +135,12 @@ import { messageCopyLink, messageCopyText } from "./message-copy";
 import { avatarMedia } from "../../shared/avatar-source";
 import { useThreadDraft } from "./draft-places";
 
-export type MessageLinkOrigin = Readonly<{ rootId: string }>;
+/** Where a link was opened: its thread, and the composer of the scope it sits
+ * in, which what it opens reads over. */
+export type MessageLinkOrigin = Readonly<{
+  rootId: string;
+  composer?: ComposerHandle | undefined;
+}>;
 export type MessageRowProps = {
   row: ChannelMessage;
   /** Read-only presentations can retain their own prose highlighting. */
@@ -324,9 +331,10 @@ function MessageRowContent({
     row.channelId,
     rootId,
   );
+  const composerScope = useComposerScope();
   const openLink = useCallback(
-    (url: string) => onOpenLink(url, { rootId }),
-    [onOpenLink, rootId],
+    (url: string) => onOpenLink(url, { rootId, composer: composerScope }),
+    [onOpenLink, rootId, composerScope],
   );
   const channels = session?.channels;
   const listed = useListedChannel(
@@ -547,7 +555,6 @@ function MessageRowContent({
     !readOnly
   );
   const rowRef = useRef<HTMLDivElement>(null);
-  const composerName = useComposerName();
   const menuTrigger = useRef<HTMLButtonElement>(null);
   const active = useConversationPresentation();
   const forward = useForwardMessage();
@@ -909,7 +916,7 @@ function MessageRowContent({
                                   row.threadRootId !== row.id),
                               row.attachments,
                               {
-                                host: overlayHost(composerName),
+                                host: overlayHost(composerScope),
                                 rootId: row.threadRootId ?? row.id,
                               },
                             ),
@@ -967,7 +974,7 @@ function MessageRowContent({
                                 row.threadRootId !== row.id),
                             row.attachments,
                             {
-                              host: overlayHost(composerName),
+                              host: overlayHost(composerScope),
                               rootId: row.threadRootId ?? row.id,
                             },
                           ),
@@ -1761,26 +1768,29 @@ function MessageRowContent({
                       )}
                     </div>
                   )}
-                  {extensions?.messages ? (
-                    <MessageCard
-                      registry={extensions.messages}
-                      renderer={messageRenderer}
-                      message={row}
-                      onFailedChange={(renderer, failed) =>
-                        setFailedRenderer((current) =>
-                          failed
-                            ? renderer
-                            : current === renderer
-                              ? undefined
-                              : current,
-                        )
-                      }
-                    >
-                      {body}
-                    </MessageCard>
-                  ) : (
-                    body
-                  )}
+                  {/* Readers drawn from this row keep it mounted. */}
+                  <RowKeepAlive value={keepRowMounted}>
+                    {extensions?.messages ? (
+                      <MessageCard
+                        registry={extensions.messages}
+                        renderer={messageRenderer}
+                        message={row}
+                        onFailedChange={(renderer, failed) =>
+                          setFailedRenderer((current) =>
+                            failed
+                              ? renderer
+                              : current === renderer
+                                ? undefined
+                                : current,
+                          )
+                        }
+                      >
+                        {body}
+                      </MessageCard>
+                    ) : (
+                      body
+                    )}
+                  </RowKeepAlive>
                   {editedInBubble && shown.edited && <EditedMarker />}
                   {reactionsInBubble && reactionContent}
                 </div>

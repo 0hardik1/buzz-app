@@ -4,11 +4,11 @@ import { DialogBarMaterial } from "../../shared/design-system/ui/DialogBarMateri
 import { MessageLoading } from "./MessageLoading";
 import { useMessageArrival } from "./use-message-arrival";
 import {
-  ComposerScope,
   overlayHost,
   threadComposer,
   type MediaReviewOrigin,
 } from "./composer-overlay";
+import { ComposerScopeProvider, useComposerHandle } from "./inline-containers";
 import { AgentConnectionSetup } from "../agents/AgentConnectionSetup";
 import { TypingIndicator, useLiveConversationAgents } from "./TypingIndicator";
 import { ActivityExpansion } from "./ActivityExpansion";
@@ -1313,6 +1313,10 @@ function ThreadMessages({
     request: number;
   }>();
   const rootId = snapshot.root?.id;
+  // What opens from this thread opens over its reply box.
+  const composer = useComposerHandle(
+    threadComposer(channelId, rootId ?? messageId),
+  );
   const rootPresentation = useMemo(
     () =>
       activityPresentation(
@@ -1376,14 +1380,12 @@ function ThreadMessages({
           hasMediaComments,
           attachments,
           {
-            host: opening
-              ? opening.host
-              : overlayHost(threadComposer(channelId, rootId ?? messageId)),
+            host: opening ? opening.host : overlayHost(composer),
             rootId,
           },
         );
     },
-    [channelId, rootId, messageId, onOpenMediaReview, hasMediaComments],
+    [composer, rootId, onOpenMediaReview, hasMediaComments],
   );
   // Without a selected viewer, bare timecodes need one unambiguous video.
   const videoUrls = new Set(
@@ -2562,11 +2564,8 @@ function ThreadMessages({
       )}
     </MessageEditScope>
   );
-  // What opens from this thread opens over its reply box.
   return (
-    <ComposerScope value={threadComposer(channelId, rootId ?? messageId)}>
-      {thread}
-    </ComposerScope>
+    <ComposerScopeProvider handle={composer}>{thread}</ComposerScopeProvider>
   );
 }
 /** Holds the thread's area with the Buzz mark until its first page can show. */

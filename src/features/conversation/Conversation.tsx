@@ -24,7 +24,12 @@ import {
   MessageManagementStatus,
 } from "../messages/MessageManagement";
 import { MediaReviewViewer } from "../messages/MediaReviewViewer";
-import { channelComposer, ComposerScope } from "../messages/composer-overlay";
+import { channelComposer } from "../messages/composer-overlay";
+import {
+  ComposerScopeProvider,
+  type InlineTarget,
+  useComposerHandle,
+} from "../messages/inline-containers";
 import { ThreadPanel, type ThreadPanelProps } from "../messages/ThreadPanel";
 import { useListedChannel } from "../relay/listed-channel";
 import { ownSolo } from "../solo/labels";
@@ -257,28 +262,28 @@ function Provider({
       onOpenMediaReview,
     ],
   );
+  const composer = useComposerHandle(id ? channelComposer(id) : undefined);
   return (
     <Context.Provider value={value}>
-      <ComposerScope value={id ? channelComposer(id) : undefined}>
+      <ComposerScopeProvider handle={composer} renderThread={inlineThread}>
         <ActivityIndicatorPresentation>
           {children}
         </ActivityIndicatorPresentation>
-      </ComposerScope>
+      </ComposerScopeProvider>
     </Context.Provider>
   );
 }
 
-/** Keeps a conversation's readers working where they are drawn outside it, as
- * a thread drawn over its composer by the workspace. */
-export function WithConversation({
-  value,
-  children,
-}: {
-  value: Conversation;
-  children: ReactNode;
-}) {
-  return <Context.Provider value={value}>{children}</Context.Provider>;
-}
+/** A thread read over its channel's composer, inside its conversation. */
+const inlineThread = (target: Extract<InlineTarget, { kind: "thread" }>) => (
+  <ConversationThread
+    messageId={target.messageId}
+    replyRequest={target.reply ? 1 : undefined}
+    revealSelected={target.messageId !== target.rootId}
+    initialScroll="latest"
+    virtualizeReplies
+  />
+);
 
 function ConversationMediaReview(props: MediaReview) {
   const { session, scope, channelId, channelName, extensions, onOpenLink } =

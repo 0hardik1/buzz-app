@@ -1,15 +1,16 @@
+import { channelComposer, useOverlayComposerRef } from "./composer-overlay";
 import {
-  ComposerScope,
-  channelComposer,
-  registerOverlayComposer,
-} from "./composer-overlay";
-import { InlineContainers, useInlineContainerList } from "./inline-containers";
+  ComposerScopeProvider,
+  InlineContainers,
+  useComposerHandle,
+  useInlineContainerList,
+} from "./inline-containers";
 // @vitest-environment jsdom
 import {
   createLocalAgentActivity,
   REPLY_CORRELATION_MS,
 } from "../agents/local-activity";
-import { StrictMode } from "react";
+import { StrictMode, useRef } from "react";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import { bytesToHex } from "nostr-tools/utils";
 import "@testing-library/jest-dom/vitest";
@@ -3823,12 +3824,26 @@ it("offers Show more for a single brief only when it runs past its lines", () =>
 
 it("opens details out of the conversation's composer, which stays usable", async () => {
   try {
-    // The workspace's container list, over the conversation's composer.
+    // The conversation's composer, mounted in its scope.
+    function Composer() {
+      const form = useRef<HTMLFormElement>(null);
+      return (
+        <form
+          data-message-composer=""
+          aria-label="Composer"
+          ref={useOverlayComposerRef(form)}
+        >
+          <textarea aria-label="Reply" />
+        </form>
+      );
+    }
+    // The workspace's opener, with the conversation's composer scope.
     function Workspace() {
       const containers = useInlineContainerList("C");
+      const handle = useComposerHandle(channelComposer("C"));
       return (
-        <InlineContainers value={containers.actions}>
-          <ComposerScope value={channelComposer("C")}>
+        <InlineContainers value={containers.opener}>
+          <ComposerScopeProvider handle={handle}>
             <div data-composer-host="">
               <MessageRow
                 row={detailsRow()}
@@ -3838,20 +3853,10 @@ it("opens details out of the conversation's composer, which stays usable", async
                 day={false}
                 retry={undefined}
               />
-              <form
-                data-message-composer=""
-                aria-label="Composer"
-                ref={(node) =>
-                  node
-                    ? registerOverlayComposer(channelComposer("C"), node)
-                    : undefined
-                }
-              >
-                <textarea aria-label="Reply" />
-              </form>
+              <Composer />
             </div>
-          </ComposerScope>
-          {containers.layer}
+          </ComposerScopeProvider>
+          {containers.dialogs}
         </InlineContainers>
       );
     }

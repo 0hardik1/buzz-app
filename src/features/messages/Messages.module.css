@@ -796,6 +796,10 @@ html[data-keyboard-navigation] .attachmentImage:focus-visible {
 :has(> .detailsSheetLayer) > :not(.detailsSheetLayer) > .composer {
   z-index: 2;
 }
+/* A reader's row draws its message into these places in its sheet. */
+.readerSlot {
+  display: contents;
+}
 /* Keep the source editor painted while the thread resolves its scoped editor,
    and bring it back at the start of closing rather than after the fold. */
 .composer[data-composer-covered] {

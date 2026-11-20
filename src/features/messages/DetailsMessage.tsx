@@ -1,20 +1,20 @@
 import {
   type ReactNode,
   useContext,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { formatItemTimestamp } from "../../shared/datetime";
 import { Button } from "../../shared/design-system/ui/Button";
-import { Dialog } from "../../shared/design-system/ui/Dialog";
-import { DetailTabContext } from "./DetailTabContext";
+import { useComposerScope } from "./composer-overlay";
 import {
-  composerChannel,
-  overlayHost,
-  useComposerName,
-} from "./composer-overlay";
-import { useInlineContainers } from "./inline-containers";
+  RowKeepAlive,
+  useInlineContainers,
+  useReaderSlot,
+} from "./inline-containers";
 import styles from "./Messages.module.css";
 
 const HEADING = /^H[1-6]$/;
@@ -40,7 +40,8 @@ function holdsBack(clip: HTMLElement) {
 }
 
 /** A details message reads in the chat as its opening brief, in full, and
- * opens whole in a reader that grows out of the composer. */
+ * opens whole in a reader over the composer it is answered from. The row
+ * draws the reader's content, so it stays live and its links work. */
 export function DetailsMessage({
   messageId,
   author,
@@ -56,13 +57,17 @@ export function DetailsMessage({
   createdAt: number;
   /** The whole message as the chat renders it; only its brief shows. */
   preview: ReactNode;
-  /** The reader's body, in the sheet and in its tab. */
+  /** The reader's body. */
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
-  const openTab = useContext(DetailTabContext);
-  const containers = useInlineContainers();
-  const composer = useComposerName();
+  const { opener, dialogs } = useInlineContainers();
+  const composer = useComposerScope();
+  const target = { kind: "details", messageId } as const;
+  const slot = useReaderSlot(composer, target);
+  const keepMounted = useContext(RowKeepAlive);
+  const open = !!slot;
+  // Its reader is drawn from this row: it stays mounted while it reads.
+  useEffect(() => (open ? keepMounted?.() : undefined), [open, keepMounted]);
   const trigger = useRef<HTMLButtonElement>(null);
   const clip = useRef<HTMLDivElement>(null);
   const [clipped, setClipped] = useState(false);
@@ -79,31 +84,9 @@ export function DetailsMessage({
     return () => observer?.disconnect();
   }, []);
   const time = formatItemTimestamp(createdAt, { withTime: true });
-  // It reads over the composer its message is answered from, and a send there
-  // closes it; without one it opens a dialog.
-  const show = () => {
-    if (!containers || !composer || !overlayHost(composer)) {
-      setOpen(true);
-      return;
-    }
-    const id = `details:${messageId}`;
-    const reader = <div className={styles.detailsReader}>{children}</div>;
-    containers.open({
-      id,
-      kind: "reader",
-      channelId: composerChannel(composer),
-      composer,
-      closesOnSend: true,
-      leading: avatar,
-      title: author,
-      description: time,
-      closeLabel: "Close details",
-      content: reader,
-      openAsTab:
-        openTab && (() => openTab({ id, title: author, content: reader })),
-      trigger: trigger.current,
-    });
-  };
+  // A send from its composer closes it.
+  const show = () =>
+    opener.open({ target, composer, trigger: trigger.current });
   return (
     <div className={styles.detailsPreview} data-clipped={clipped || undefined}>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: Show more is the keyboard path; this only widens the pointer target. */}
@@ -138,16 +121,15 @@ export function DetailsMessage({
           </Button>
         </span>
       )}
-      <Dialog
-        open={open}
-        onOpenChange={setOpen}
-        title={author}
-        description={time}
-        closeLabel="Close details"
-        finalFocus={trigger}
-      >
-        <div className={styles.detailsReader}>{children}</div>
-      </Dialog>
+      {slot?.title && createPortal(author, slot.title)}
+      {slot?.leading && createPortal(avatar, slot.leading)}
+      {slot?.description && createPortal(time, slot.description)}
+      {slot?.body &&
+        createPortal(
+          <div className={styles.detailsReader}>{children}</div>,
+          slot.body,
+        )}
+      {dialogs}
     </div>
   );
 }

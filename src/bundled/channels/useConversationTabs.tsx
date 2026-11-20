@@ -1,12 +1,8 @@
 import type { DetailTab } from "../../features/messages/DetailTabContext";
-import {
-  channelComposer,
-  overlayHost,
-  threadComposer,
-} from "../../features/messages/composer-overlay";
+import type { ComposerHandle } from "../../features/messages/composer-overlay";
 import type {
-  InlineContainer,
-  InlineContainerActions,
+  InlineOpener,
+  PanelRenderer,
 } from "../../features/messages/inline-containers";
 import { PanelView } from "../../features/panels/PanelView";
 import { PanelSubviewHost } from "../../features/panels/PanelSubview";
@@ -109,7 +105,7 @@ export function useConversationTabs({
   containers,
 }: {
   /** Where a panel opened from a message reads over its composer. */
-  containers?: InlineContainerActions | undefined;
+  containers?: InlineOpener | undefined;
   state: ReturnType<typeof useChannelTabState>;
   relay: RelayData;
   session: RelaySession;
@@ -338,74 +334,62 @@ export function useConversationTabs({
     },
     [selectOpening, setEntries, tabState.moveEntry],
   );
-  // A panel opened from a message reads over that message's composer; without
-  // one it opens its tab.
-  const panelContainer = (
-    entry: Opening,
-  ): Omit<InlineContainer, "composer" | "trigger"> => {
-    const id = `panel:${entry.channelId}:${entry.rootId ?? ""}`;
-    const close = () => containers?.close(id);
-    return {
-      id,
-      kind: "reader",
-      channelId: entry.channelId,
-      title: entry.panel.title,
-      closeLabel: "Close",
-      readerOnly: true,
-      // The panel opens as its own tab, fresh from its target.
-      openAsTab: () => open(entry),
-      content: (
-        <PanelSubviewHost close={close}>
-          {/* The card bounds the content so it scrolls, as in a panel tab. */}
-          <div className={panelStyles.card}>
-            <div className={panelStyles.content}>
-              <PanelView
-                panel={entry.panel}
-                target={entry.target}
-                context={{
-                  channelId: entry.channelId,
-                  ...(entry.rootId && { rootId: entry.rootId }),
-                  canOpen: canOpenLink,
-                  open: (target: string) => {
-                    const next =
-                      active() &&
-                      panelOpening(
-                        panels,
-                        entry.channelId,
-                        target,
-                        entry.rootId,
-                      );
-                    if (!next) return false;
-                    containers?.update(id, panelContainer(next));
-                    return true;
-                  },
-                }}
-                close={close}
-              />
-            </div>
+  // A panel opened from a message reads over that message's composer.
+  const renderInlinePanel: PanelRenderer = (target, { close, navigate }) => {
+    const entry = target.opening as Opening;
+    return (
+      <PanelSubviewHost close={close}>
+        {/* The card bounds the content so it scrolls, as in a panel tab. */}
+        <div className={panelStyles.card}>
+          <div className={panelStyles.content}>
+            <PanelView
+              panel={entry.panel}
+              target={entry.target}
+              context={{
+                channelId: entry.channelId,
+                ...(entry.rootId && { rootId: entry.rootId }),
+                canOpen: canOpenLink,
+                open: (next: string) => {
+                  const opening =
+                    active() &&
+                    panelOpening(panels, entry.channelId, next, entry.rootId);
+                  if (!opening) return false;
+                  navigate(panelTarget(opening));
+                  return true;
+                },
+              }}
+              close={close}
+            />
           </div>
-        </PanelSubviewHost>
-      ),
-    };
+        </div>
+      </PanelSubviewHost>
+    );
   };
-  const latestPanel = useRef(panelContainer);
-  latestPanel.current = panelContainer;
-  // Stable, so link handlers keep memoized rows' props.
+  // Stable, so link handlers keep memoized rows' props. Without a composer to
+  // read over, it opens its tab.
   const openDetail = useCallback(
-    (entry: Opening, origin?: HTMLElement | null, append = true) => {
+    (
+      entry: Opening,
+      origin?: HTMLElement | null,
+      append = true,
+      composer?: ComposerHandle,
+    ) => {
       const trigger =
         origin ??
         (document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null);
-      const composer = entry.rootId
-        ? threadComposer(entry.channelId, entry.rootId)
-        : channelComposer(entry.channelId);
-      if (!containers || !overlayHost(composer)) {
-        open(entry, append);
+      const openAsTab = () => open(entry, append);
+      if (!containers) {
+        openAsTab();
         return;
       }
-      containers.open({ ...latestPanel.current(entry), composer, trigger });
+      containers.open({
+        target: panelTarget(entry),
+        composer,
+        trigger,
+        openAsTab,
+      });
     },
     [open, containers],
   );
@@ -816,7 +800,7 @@ export function useConversationTabs({
         document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null;
-      openDetail(next, panelTrigger.current);
+      openDetail(next, panelTrigger.current, true, origin?.composer);
       return true;
     }
     return openLink(url);
@@ -1107,6 +1091,7 @@ export function useConversationTabs({
     open,
     openDetail,
     openDetailTab,
+    renderInlinePanel,
     opened,
     panel,
     panelTabs,
@@ -1220,5 +1205,16 @@ export function useConversationTabs({
         content: tab.content,
       })),
     ],
+  };
+}
+
+/** A panel as the inline opener describes it. */
+function panelTarget(entry: PanelOpening) {
+  return {
+    kind: "panel" as const,
+    channelId: entry.channelId,
+    rootId: entry.rootId,
+    title: entry.panel.title,
+    opening: entry,
   };
 }

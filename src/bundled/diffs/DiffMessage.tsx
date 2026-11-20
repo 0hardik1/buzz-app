@@ -1,24 +1,25 @@
 import { DetailTabContext } from "../../features/messages/DetailTabContext";
+import { useComposerScope } from "../../features/messages/composer-overlay";
 import {
-  composerChannel,
-  overlayHost,
-  useComposerName,
-} from "../../features/messages/composer-overlay";
-import { useInlineContainers } from "../../features/messages/inline-containers";
+  RowKeepAlive,
+  useInlineContainers,
+  useReaderSlot,
+} from "../../features/messages/inline-containers";
 import {
   type ComponentProps,
   type ReactNode,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import type { ChannelMessage } from "../../features/relay/contracts";
 import { safeMessageUrl } from "../../features/relay/message-content";
 import { ArrowsOutIcon } from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
-import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { DiffViewer } from "./DiffViewer";
 import { parsePatch } from "./parse";
 import styles from "./Diffs.module.css";
@@ -60,10 +61,15 @@ function DiffReader({
 }
 
 export function DiffMessage({ message }: { message: ChannelMessage }) {
-  const [open, setOpen] = useState(false);
   const openTab = useContext(DetailTabContext);
-  const containers = useInlineContainers();
-  const composer = useComposerName();
+  const { opener, dialogs } = useInlineContainers();
+  const composer = useComposerScope();
+  const target = { kind: "diff", messageId: message.id } as const;
+  const slot = useReaderSlot(composer, target);
+  const keepMounted = useContext(RowKeepAlive);
+  const open = !!slot;
+  // Its reader is drawn from this row: it stays mounted while it reads.
+  useEffect(() => (open ? keepMounted?.() : undefined), [open, keepMounted]);
   const expand = useRef<HTMLButtonElement>(null);
   const files = useMemo(() => parsePatch(message.content), [message.content]);
   const meta = message.diff;
@@ -111,26 +117,21 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
             size="sm"
             aria-label="Expand diff"
             icon={<ArrowsOutIcon size={16} aria-hidden="true" />}
-            onClick={() => {
-              if (!containers || !composer || !overlayHost(composer)) {
-                setOpen(true);
-                return;
-              }
-              const id = `diff:${message.id}`;
-              containers.open({
-                id,
-                kind: "reader",
-                channelId: composerChannel(composer),
+            onClick={() =>
+              opener.open({
+                target,
                 composer,
-                title,
-                closeLabel: "Close diff",
-                readerOnly: true,
-                content: reader,
-                openAsTab:
-                  openTab && (() => openTab({ id, title, content: reader })),
                 trigger: expand.current,
-              });
-            }}
+                openAsTab:
+                  openTab &&
+                  (() =>
+                    openTab({
+                      id: `diff:${message.id}`,
+                      title,
+                      content: reader,
+                    })),
+              })
+            }
           />
         </header>
         {meta.description && (
@@ -146,16 +147,9 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
         </section>
         {warning}
       </section>
-      <Dialog
-        open={open}
-        onOpenChange={setOpen}
-        title={title}
-        size="expanded"
-        closeLabel="Close diff"
-        finalFocus={expand}
-      >
-        {reader}
-      </Dialog>
+      {slot?.title && createPortal(title, slot.title)}
+      {slot?.body && createPortal(reader, slot.body)}
+      {dialogs}
     </>
   );
 }
