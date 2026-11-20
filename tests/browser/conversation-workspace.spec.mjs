@@ -44,8 +44,12 @@ async function expectBottom(page, region) {
 
 async function readEarlier(page, region) {
   await region.hover();
-  await wheel(page, -450, region);
-  await expect.poll(() => gap(region)).toBeGreaterThan(200);
+  // Linux WebKit animates a wheel and can end it early when a row measures
+  // mid-scroll, so read on up as a reader would. Each wheel ends settled.
+  await expect(async () => {
+    await wheel(page, -450, region);
+    expect(await gap(region)).toBeGreaterThan(200);
+  }).toPass({ timeout: 10_000 });
   await settle(page, region);
 }
 
