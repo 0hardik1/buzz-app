@@ -5,6 +5,7 @@ import type { AgentHandle, Delivery } from "../agents/service";
 import { eventDto, type EventData, type RelayEvent } from "../relay/events";
 import type { RelayData } from "../relay/service";
 import { keypair, signed } from "../relay/testing";
+import { workspaceCanvas } from "../solo/workspace";
 import { harnessKit } from "./kit";
 
 const self = "c".repeat(64);
@@ -47,6 +48,8 @@ function setup(
     thread?: readonly EventData[];
     core?: string | null;
     notes?: readonly string[];
+    /** The Canvas of the chat, as one its owner is still creating has it. */
+    canvas?: string;
   }> = {},
 ) {
   const read = vi.fn(
@@ -77,14 +80,15 @@ function setup(
     },
     names: { resolve: (pubkey: string) => (pubkey === alice ? "Alice" : "") },
     profiles: { ensure: vi.fn(async () => {}), snapshot: () => new Map() },
-    channelWrites: { startingCanvas: () => undefined },
+    channelWrites: { startingCanvas: () => options.canvas },
     canvas: { available: false, read: vi.fn(async () => null) },
     agentMemories: { open: vi.fn() },
     workflowAuthority: workflowKey.pubkey,
   };
+  const state = { status: "ready" };
   const relay = {
     snapshot: () => ({
-      status: "ready",
+      status: state.status,
       session,
       viewer: alice,
       scope: `https://kit.example:${alice}`,
@@ -125,7 +129,7 @@ function setup(
       current: () => true,
       ...extra,
     }) as unknown as Delivery;
-  return { kit, agent, delivery, published, restored, read };
+  return { kit, agent, delivery, published, restored, read, session, state };
 }
 
 describe("harnessKit.conversation", () => {
@@ -395,6 +399,69 @@ describe("harnessKit.systemPrompt", () => {
     expect(text).toContain("~/work");
     expect(text).toContain(`<repos for="https://kit.example:${alice}"/>`);
     expect(text).not.toContain("<buzz-tools-unavailable>");
+    await expect(text).toMatchFileSnapshot(
+      "./sections/snapshots/kit.thread.txt",
+    );
+  });
+
+  it("builds the base prompt with the sections the owner chose", async () => {
+    const { kit, agent, delivery } = setup();
+    const text = await kit.systemPrompt(
+      delivery(
+        { type: "mention", event: message("1", "x") },
+        {
+          agent: {
+            ...agent,
+            promptSections: () => ({
+              owner: {
+                progress: { mode: "off" },
+                etiquette: { mode: "custom", text: "Be brief." },
+              },
+            }),
+          } as unknown as Delivery["agent"],
+        },
+      ),
+      { scope: "thread", cwd: "~", instructions: "" },
+    );
+    expect(text).not.toContain("## Progress");
+    expect(text).toContain(
+      '## Etiquette\n<owner-section id="etiquette">\nBe brief.\n</owner-section>',
+    );
+  });
+
+  it("asks for the sections of the conversation the session is for", async () => {
+    const { kit, agent, delivery } = setup();
+    const asked: unknown[] = [];
+    const d = delivery(
+      { type: "mention", event: reply("2", "1", "x") },
+      {
+        agent: {
+          ...agent,
+          promptSections: (channel?: string, root?: string) => {
+            asked.push([channel, root]);
+            return channel
+              ? { plugin: { id: "example", sections: { progress: "Quiet." } } }
+              : {};
+          },
+        } as unknown as Delivery["agent"],
+      },
+    );
+    const conversation = await kit.conversation(d, "thread");
+    if (!conversation) throw new Error("not admitted");
+    const options = { scope: "thread", cwd: "~", instructions: "" } as const;
+    const text = await kit.systemPrompt(d, { ...options, conversation });
+    expect(asked).toEqual([[conversation.channel, conversation.root]]);
+    expect(text).toContain(
+      '## Progress\n<plugin-section id="progress" plugin="example">\nQuiet.\n</plugin-section>',
+    );
+    expect(text).toContain("This session is one thread");
+    // Without the conversation, the prompt has no plugin's sections, and its
+    // Session Model states the scope alone.
+    const unnamed = await kit.systemPrompt(d, options);
+    expect(unnamed).not.toContain("</plugin-section>\n");
+    expect(unnamed).not.toContain("This session is one thread");
+    expect(unnamed).toContain("each thread gets its own independent");
+    expect(asked[1]).toEqual([undefined, undefined]);
   });
 
   it("tells a session without tools that its final message is its reply", async () => {
@@ -428,6 +495,38 @@ describe("harnessKit.reply", () => {
         ],
       },
     ]);
+  });
+
+  it("reads a Solo chat's Canvas folders as context where a plugin says where the work happens", async () => {
+    const { kit, delivery, agent } = setup({
+      type: "solo",
+      canvas: workspaceCanvas({
+        folders: ["~/app"],
+        worktree: { location: "~/trees", baseBranch: "main" },
+        canvas: "Use tokens.",
+      }),
+    });
+    const d = delivery({ type: "mention", event: message("1", "go") });
+    const conversation = await kit.conversation(d, "thread");
+    if (!conversation) throw new Error("not admitted");
+    const sections = vi.fn((_channel?: string) => ({ owner: {} }));
+    Object.assign(agent, { promptSections: sections });
+    expect((await kit.turnPrompt(d, conversation)).text).toContain(
+      "This chat's work happens in these folders, not your own workspace: `~/app`, `~/trees`.",
+    );
+    sections.mockReturnValue({
+      owner: {},
+      plugin: {
+        id: "example",
+        sections: { "working-location": "Work in the task's folder." },
+      },
+    } as never);
+    const { text } = await kit.turnPrompt(d, conversation);
+    expect(text).toContain(
+      "relevant to this chat: `~/app`, `~/trees`. They are for reading.",
+    );
+    expect(text).not.toContain("create a new worktree");
+    expect(sections).toHaveBeenLastCalledWith(channel);
   });
 
   it("posts at a Solo chat's top level", async () => {
@@ -499,6 +598,30 @@ describe("harnessKit.tools", () => {
     expect(JSON.stringify(without)).toContain("cannot read ./a.txt");
     await call(kit.tools(agent, conversation, { read }));
     expect(read).toHaveBeenCalledWith("./a.txt");
+  });
+
+  it("builds its client again after a reload, with the new session's relay key", async () => {
+    const { kit, agent, session, state } = setup();
+    const relay = keypair();
+    Object.assign(session, { relayAuthor: relay.pubkey });
+    state.status = "connecting";
+    // The call arrives mid-reload; its wait ends with the community ready.
+    Object.assign(agent, {
+      settle: vi.fn(async () => {
+        state.status = "ready";
+        return true;
+      }),
+    });
+    const answer = (await kit.tools(agent)({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "solo_worker_connections", arguments: {} },
+    })) as unknown;
+    expect(agent.settle).toHaveBeenCalled();
+    expect(JSON.stringify(answer)).not.toContain(
+      "does not know its relay's key",
+    );
   });
 
   it("standalone prompts carry the agent's routing context", () => {

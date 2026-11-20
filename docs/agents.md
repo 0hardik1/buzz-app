@@ -40,8 +40,10 @@ native agent session before execution. The argument type is
 The host verifies the request and selects the native conversation first.
 The hook receives both the source message's channel/thread and that native
 conversation. It cannot change session scope, reply placement or access.
-Solo keeps each agent's existing channel conversation. Thread-scoped agents
-keep their existing thread conversations.
+Community-scoped agents use one logical lifetime across their conversations,
+including DMs, Solo chats and huddles. The admission's `conversation.community`
+identifies it; `source` still names the current request. Other scopes retain
+Solo and DM channel conversations and their existing thread/channel selection.
 
 `ready()` opens only the plugin's local keyed storage. It must not wait for
 relay publication or sidebar loading. `matches()` selects the sources the
@@ -136,11 +138,11 @@ the available operations and arguments. Agent tools do not expose draft approval
 
 `agent_update` submits an unsaved draft of changes to one of the owner's local
 agents in the same community, named by pubkey or exact name: a new name, a type
-key from `agent_types`, new instructions or a new picture. An agent may propose
-changes to itself. Absent fields stay as they are. The
-owner reviews them in the New agent form, titled Edit and filled in with the
-agent's settings and the proposed changes, with the usual type-change preview;
-saving applies what the owner reviewed, and closing the review discards the
+key from `agent_types`, new instructions, or a new picture. On supported
+local harnesses the draft can also include model, thinking effort, session scope,
+workspace, and the Auto-compact threshold. Use a token count string such as `"150000"` for `compactAt`, or `""` to restore the harness default. Codex additionally accepts Huddle voice and its apps
+and plugins preference. For a Codex agent using an execution adapter, the target runtime checks the model and thinking overrides when it starts a turn. Its Huddle voice proposal can select the target’s default. For other harnesses, agents using an execution adapter cannot receive model or thinking proposals. The Edit dialog compares the saved and proposed runtime settings above the editable controls, with a separate preview for a harness change. Absent fields stay as
+they are. Settings that all match the saved values are omitted when queuing a draft. A settings-only proposal with matching values returns a message to the requester and skips owner review. Save applies the reviewed values. Closing the dialog discards the
 request. A type change carries what the new type adopts, as a manual one does. A proposed picture
 is a local PNG, JPEG, GIF or WebP file that the tool uploads to the community as
 the requesting agent once the request is valid, stripped of metadata as the
@@ -159,16 +161,32 @@ Each named or listed agent also has `modelSettings`. Codex, Claude Code, goose
 and Pi expose `model` and `effort`; goose and Pi also expose `provider`.
 Each field has a `source`: `configured` includes the saved string `value`,
 `default` inherits the type's defaults, and `recommended` follows
-Buzz's Recommended policy. Defaults and recommendations have no `value`: this
-read does not discover models, resolve aliases, inspect harness files or start
-a process. A type can inherit device preferences before the harness default.
-These are saved agent selections, not proof of an active turn's
-model or effort. Per-conversation choices can differ.
+Buzz's Recommended policy. These saved fields stay unchanged when defaults change.
+Codex and Claude Code also include `resolved` on each field. A known selection
+has `{ value, source }`, where the source is `configured`, `device`, `provider`
+or `recommended`. Codex uses the same device preferences, loaded model catalog
+and supported thinking fallback as execution. Claude resolves device preferences
+and cached Recommended choices; an unset native choice stays unknown because
+Claude Code settings can depend on the workspace. Model aliases remain aliases.
+An unresolved selection has `{ unavailable }`: `not-loaded` for a catalog or
+recommendation not yet loaded, `unknown` for a default the host cannot establish,
+`remote` for an execution target's settings, `unsupported` when execution would
+refuse a synced thinking choice, or `execution-unavailable` when its saved
+placement cannot be read. Reads never start discovery, inspect harness
+files or start a process. Other types can omit `resolved`.
+These are current selections, not proof of an active turn's model or effort.
+Per-conversation choices and existing sessions can differ.
 An invalid field has `source: "unavailable"`. A type without this read contract,
 an unreadable synced config, or an agent hosted elsewhere has
 `modelSettings: { unavailable: "…" }`, even when its instructions are readable.
 The type owns the projection through `AgentType.readModelSettings`; the service
 does not expose its config or infer settings from the type's name or summary.
+Plugins can feature-detect `ctx.agents.readModelSettings(agentKey)` to read the
+same safe metadata for a local membership, including one that runs on an execution
+target. It returns `modelSettings` directly, or `{ unavailable: "…" }` when the
+membership or settings are unavailable here. It does not read another device's
+defaults or alter agent settings. Named reads, lists and plugin reads share the
+same projection. See [the plugin contract](plugin-architecture.md#agent-model-selections).
 
 `team_read` returns the teams Your teams shows in that community, by id or
 exact name, or all of them: name, instructions, members, whether the team syncs
@@ -453,7 +471,7 @@ Attention command processes on macOS and Linux stop when their app process exits
 Attention is shared by every harness, and a harness has no attention code.
 `src/buzz-mcp/session-tools.ts` exports `BUZZ_SESSION`: the Buzz tools and the
 Attention tools. How to use the Attention tools is in their own descriptions,
-not `BUZZ_PROMPT`. Every session gets the
+not the base prompt. Every session gets the
 same list and prompt, whether Attention is on or off, so turning Attention on or off never
 restarts a session or invalidates its prompt cache. `turnNote` gives the text
 to add at the end of each turn: the Attention review when Attention is on and
@@ -525,8 +543,10 @@ settles on the head commit, once per commit and result and again when a failure
 is run again, or when new feedback has been quiet for 90 seconds, and once more
 when the pull request merges or closes, so the agent can finish and retire its
 Interest. It also wakes for what nothing else would on the way to merging:
-merge conflicts; checks pending on one commit for 3 hours; an approved, green
-pull request that must catch up with its base; auto-merge turned off, or the
+merge conflicts; checks pending on one commit for 3 hours; losing its approval
+(GitHub wants a review again; it waits for running checks until they count as
+stuck, and changes requested come as that review's feedback instead); an
+approved, green pull request that must catch up with its base; auto-merge turned off, or the
 pull request leaving the merge queue, while it is open; and looking ready to
 merge (approved, checks that block merging passed, no conflicts or unresolved
 review threads, not a draft, auto-merge off). Recovering wakes nothing, a merge
@@ -626,12 +646,63 @@ Then the wake's run
 goes on, and only what it sends is posted. Pi still waits for the wake, so a
 run of its own that fails fails what is queued behind it too, which reports it.
 
+Plugins can pass guard options to `ctx.agents.wake` when the host advertises
+support. Check the flag strictly before calling; older JavaScript hosts can
+ignore extra arguments and enqueue an unguarded wake. Never send a wake as a
+capability probe.
+
+```ts
+if (ctx.agents.supportsGuardedWake === true) {
+  const result = await ctx.agents.wake(agentKey, wake, {
+    signal: controller.signal,
+    current: () => workIsStillCurrent(),
+  });
+  if (result.status === "dropped") {
+    // No input was handed to the prompt/steer transport.
+  }
+}
+```
+
+It uses the same queue, destination and plugin-data framing as `wake`.
+The synchronous `current` predicate must return `true`. The host checks it at
+admission, after queue waits, and immediately before prompt or steering handoff.
+A thrown predicate fails closed. The host also checks plugin lifetime, agent
+identity, community session, destination membership and the owner's read access.
+A predicate cannot grant access or override Stop.
+
+The result is `{ status: "delivered" }` at the final guarded handoff to the
+runner's prompt/steer transport. This is neither an early queue acknowledgement
+nor proof of model consumption, task completion, or a durable receipt. Once input
+has been handed off, cancellation cannot retract it. A dropped result has
+`status: "dropped"` and a `reason`: `aborted` for caller cancellation, `stale` for
+a false predicate, `guard-error` for a thrown predicate, `unavailable` for a lost
+host binding or authority, or `refused` for a full queue or a harness that ends
+without handoff or does not support guarded wakes. Invalid wake or guard
+arguments throw synchronously.
+Two-argument calls still return `void` and throw on an unavailable agent or
+full queue. Plugins must
+choose their own fallback when the support flag is absent.
+The guard and result are local and are not saved across shutdown. Dropped guarded
+wakes have no retry action that could bypass the original guard.
+
+Harness authors opt in with `AgentType.supportsGuardedWake: true` only when every
+prompt/steer path checks `Delivery.current()` and `signal` after waits, immediately
+before handoff, and calls `Delivery.accepted()` at that handoff. Without this
+explicit support, a guarded wake returns `dropped/refused` before queue admission
+and never invokes `run`. Ordinary wakes still work. The bundled Claude Code,
+Codex, goose and Pi harnesses support this contract.
+
 An agent hands off to itself in another of its conversations with the
 `self_handoff` tool, which takes a channel, a thread and text. The tool requires
 a channel the agent can see, as `send` does, and a thread in that channel (any
 message of it names its root) unless the channel is a Solo chat. It refuses the
 current conversation, which is the whole channel in a DM, a Solo chat or a
-channel-scoped session. It is the same `plugin` trigger with `from`, the
+channel-scoped session. A channel-level watch or timer turn of an agent whose
+type runs one session per thread (its `sessionControls.scope`) is apart from
+that channel's threads outside a DM, Solo chat or huddle room, so it can hand off into one of
+them. Agents decides this for every harness through the run's handle
+(`threadsApart`); a type with no session controls keeps the channel one
+conversation. It is the same `plugin` trigger with `from`, the
 conversation it came from, in place of `plugin`, shown in a `<self-handoff>`
 section that names that conversation, says nobody wrote it as a message and that
 its text is data, and that the agent acts only on what its owner asked. Only a
@@ -653,9 +724,10 @@ conversation with
 `ctx.agents.setConversationInstructions(pubkey, { channelId, root? }, text)`.
 Every turn of that agent there then ends with an `<owner-instructions>`
 section naming the plugin, after any `<plugin-instructions>`; Mesh agents get
-none. The base prompt ranks the section with the agent's instructions: the
-owner's messages override it, and it overrides a Solo chat's Canvas. New text
-replaces the old; empty text clears it, and later turns there say no such
+none. The base prompt ranks the section below its own sections: the owner's
+messages, a Solo chat's Canvas that the owner wrote, the agent's instructions
+and the base instructions override it, and it overrides a Canvas that an agent
+wrote and any `<plugin-instructions>`. New text replaces the old; empty text clears it, and later turns there say no such
 instructions apply now. While the agent is not in the channel, its turns there
 say so too. Text is at most 8192 UTF-8 bytes after trimming and is sent with
 every turn. `place` names the conversation as session controls do: a root for
@@ -666,6 +738,44 @@ deleted; another program that does not share this device's agent state does
 not see it. `ctx.agents.conversationInstructions(pubkey, place)` resolves
 with the text, or undefined. Plugins feature-detect the methods.
 
+A plugin whose manifest declares `host.agentPromptSections` replaces sections
+of the base prompt for the owner's local agent in one conversation with
+`ctx.agents.setConversationSections(pubkey, { channelId, root? }, sections)`.
+`sections` maps a section ID to the plugin's text for it. The plugin that
+holds a conversation's set manages that conversation: the agent's next turn
+there gets each text in place of the section's default text, in a
+`<plugin-section>` wrapper that names the plugin, and the base prompt ranks it
+as the section it replaces. A running session gets a changed section at its
+next turn: Claude restarts its process and resumes the session, Codex sends
+the changed sections to the resumed thread, Goose gives the session the new
+prompt in place, and Pi sends the conversation its instructions with each
+turn. A message that steers a turn already running does not change that turn's
+prompt. A Codex thread saved by a Buzz version that did not keep its sections
+cannot be told which sections changed: a local one starts a new thread once,
+without its earlier context, and one on an execution target stops with an
+error that asks for a new session. Each call replaces the plugin's
+whole set, and an empty set clears it. Each ID must be one the manifest
+declares, each text has from 1 to 4096 UTF-8 bytes after trimming, and the set
+at most 12 KiB; a plugin cannot turn a section off. `place` follows the rules
+of conversation instructions. The call rejects while another plugin that is on
+manages the conversation, also while that plugin starts, updates or failed to
+start. The host uses a text only while the plugin is active, its manifest still
+declares the section and the agent's type supports the sections. An agent on an
+execution target uses no `working-location` text, as no plugin can give its
+conversations their own folders. An agent with one session for its whole
+community has one prompt for every conversation: the call rejects for it, and
+it uses no text kept from before. The owner's own choice for a section
+in **Settings → Agent setup → Base instructions** wins over the plugin's text,
+and a protected agent uses no plugin text.
+`ctx.agents.conversationSections(pubkey, place)` resolves with the plugin's
+set as `{ text, applied, reason? }` per section, where `reason` is `"owner"`,
+`"protected"`, `"target"` or `"community"` when a prompt does not use the text, or with undefined when
+the plugin holds none there. When the plugin replaces `working-location` in a
+Solo chat, the Canvas's folders are for reading, as in a chat with an assigned
+folder. The set is kept on this device, survives a restart, and is dropped
+when the agent is deleted. Claude, Codex, Goose and Pi (`conversationSections`
+on the type) support it; other harnesses reject. Plugins feature-detect the methods.
+
 A plugin leaves context for a later turn with
 `ctx.agents.note(pubkey, channelId, text, root?)`, without waking the agent
 or publishing a message. Pass the thread root for a thread conversation.
@@ -674,8 +784,12 @@ thread-scoped sessions take only notes addressed to their root. Notes are
 consumed once when the harness is ready to deliver the turn, and restored to
 the same conversation ahead of newer notes if delivery definitely never began.
 They remain in memory only, and the call returns false unless this copy runs
-the agent. Pi agents don't take notes yet: the call still returns true for one,
-but its turns never include the note.
+the agent. A turn whose outcome is unknown, such as one that fails after its
+prompt is built, does not get its notes back, so a note is never shown twice.
+Claude, Codex, Goose and Pi show notes and advertise it with `notes` on the
+type. Without the flag, support is unadvertised: a harness that builds its
+turns with `ctx.agents.harness.turnPrompt` still shows notes, and another one
+never does. The call returns true either way.
 
 A plugin with `host.files` gives one conversation of the owner's local agent
 its own working folder with
@@ -693,17 +807,27 @@ takes no folder. `path` is absolute or `~/…` and must be an existing
 directory; the call resolves with it as a real path. The folder is kept only on
 this device and is set once: the same folder again resolves, another rejects,
 because a session's history is found by the folder it ran in. For the same
-reason, a conversation that already has a session in the workspace rejects:
-the harness's `sessions` list names the conversations that do. If the folder
-later disappears, the conversation's next turn fails with an error naming it
+reason, a conversation that already started in the workspace rejects. A
+harness records that when it first starts the conversation's session, in the
+same record the folder is saved in, so a start and an assignment that race have
+one winner: the later one sees it. For a conversation that started before this
+record existed, the harness's `sessions` list names the conversations that
+have a session, and a harness whose list forgets old sessions (`sessions.history`;
+Goose keeps the latest 200) is also asked for the conversation's own history.
+A harness whose list can be behind (`sessions.ready`) is waited for first: Pi
+reads its sessions in the background, and Goose and Pi finish starting the
+conversation's first turn if one is under way.
+The call rejects when the sessions or history cannot be read, as for a Pi agent
+that is not running.
+If the folder later disappears, the conversation's next turn fails with an error naming it
 and never falls back to the workspace. The folder applies on the device that
 runs the agent, so messages from any of the owner's clients, such as mobile,
 start there. Another program that does not share this device's agent state,
 such as a development build with its own storage, an older build or another
 computer, does not see the folder and starts the conversation in the
 workspace. `ctx.agents.conversationFolder(pubkey,
-place)` returns the folder. Claude and Codex (`conversationFolders` on the
-type) support folders; other harnesses and agents on an execution target
+place)` returns the folder. Claude, Codex, Goose and Pi (`conversationFolders`
+on the type) support folders; other harnesses and agents on an execution target
 reject. Plugins feature-detect the method.
 
 A type marks its primary configuration tab with `role: "settings"`. In the
@@ -881,6 +1005,16 @@ shown the mention's thread, including what it already posted there.
 Mentions queued behind a working turn, watch turns and other types are not
 kept.
 
+### Moving an agent off Codex
+
+Before an agent on the shared Codex server changes harness, Buzz asks Codex to
+stop the background terminals in each thread the agent used. Codex closes an
+idle thread by itself after about a minute and answers `thread not found` for
+it, so Buzz counts that thread as already cleaned. Any other cleanup error stops
+the harness change. A protected agent has its own Codex process, which Buzz
+shuts down instead. The conversation stays on disk, so an agent that returns to
+Codex resumes it.
+
 ### Saved Solo follow-ups
 
 The queued rows above the Solo composer are unsent messages, separate from the
@@ -1001,7 +1135,7 @@ not native execution.
 
 ## Creating a Solo chat in a personal workspace
 
-Locally hosted agent runs can call `solo_workspace_list` for the host-bound
+Only locally hosted agent runs can call `solo_workspace_list` for the host-bound
 owner's personal workspace IDs and names in that community. Pass an exact ID as
 `workspace` to `channel_create` with `solo: true`, and name the owner explicitly
 in `members`. This files only that new confirmed Solo chat. It does not enroll
@@ -1012,8 +1146,6 @@ result preserves its ID. A known refusal before assignment says “created, not
 filed”; after assignment starts, failure says placement is unconfirmed and may
 have completed. Inspect or refresh the chat before using **Move to**; never
 create a duplicate. Omit `workspace` for unchanged creation.
-External/standalone tools, Nexus worker requests, and plugin agent handles do
-not gain this host-private capability or a general move operation.
 
 ## Exact channel-member mentions
 
@@ -1618,6 +1750,26 @@ cannot replace a received terminal result. Recovery neither archives raw activit
 nor restores history after reload. Older servers without the endpoint leave
 tasks unknown.
 
+A remote agent's Activity tab also lists the sessions Builderlab stored, above
+the live feed. Each time the tab opens it reads
+`/v3/beekeeper/list-agent-sessions` (pages of 50, most recently active first),
+following `next_cursor` past short or empty pages until it has 30, no cursor
+remains, or five pages were read. It shows up to 30, saying when older ones
+aren't shown. The conversation it was
+opened from comes first: its thread's session, else its channel's, which a DM
+or channel-scoped agent shares. When that session is not on the page, the tab
+asks for it by `channel_id` and `thread_root_event_id`. A session's messages
+are read from `/v3/beekeeper/get-agent-session-messages` only when its
+transcript opens, and again when the live feed shows one of its turns start or
+end. Each read returns the whole session, so a running turn isn't polled; with
+the live feed off or connecting, an open transcript doesn't refresh on its own. Messages carry no turn: a prompt joins the turn its mention
+started, and any other message the latest stored turn started at or before it,
+never one before the last prompt's turn. A message older than every turn joins
+the first. Tool requests join their responses by ID, and a message tool's text
+shows as the agent's posted message. A removed session shows no transcript. A
+server without the session list, a signed-out owner or an account without
+remote agents shows the live feed only, as it shows without Builderlab.
+
 ### Activity updates in the conversation
 
 An agent's work has one working indicator. While a live activity bubble on the
@@ -1710,6 +1862,28 @@ Chromium and WebKit. These use ephemeral identities and synthetic telemetry.
 Packaged GUI quit/relaunch, real-relay agent ownership admission and hosted
 cross-platform checks are separate gates; consult the pull request for results
 tied to its head.
+
+## Relayed messages
+
+A plugin that relays an agent's text into another conversation as the agent's
+owner tags the kind 9 message `["relayed-from", <agent pubkey>, <source channel id>]`.
+The source channel is optional, and the plugin sends it to every audience so
+every member sees the same row. Content up to and including the first blank
+line is the relaying sender's notice for clients that do not read the tag.
+
+The app honours the tag only while the agent's cryptographically verified owner
+(`profiles.queries.owner`) signed the message as its author, and only for one
+well-formed tag naming someone other than the signer. A relay-signed message
+attributed to the owner does not qualify. The row omits the signed original's
+notice only while the shown text, after any edit, still starts with it. `relayedFrom.verified`
+records that check in the fold, which refolds when the owner verdict changes.
+`rowProfileIds` includes the claimed agent so its profile, and with it the
+verdict, loads with the row. A verified row is drawn as the agent's collapsed
+line without the notice, never right-aligned as the viewer's own and never
+grouped with the author's messages. It names the source chat only when it is
+in the viewer's joined list. Unverified, conflicting or malformed claims leave
+an ordinary message with its notice. The content is unchanged for every other
+consumer, including unread counts and agent context.
 
 ## Shared identity names
 
@@ -1943,8 +2117,8 @@ the subagent threads each one spawned. Codex records no cost. A standalone turn
 runs on an ephemeral thread, which Codex keeps no rollout for, so Usage does not
 count it.
 
-Goose lists the agent's sessions in its workspace through `goose-acp`, as its
-Activity tab does, and reads the usage goose saves on each reply, with goose's
+Goose lists the agent's sessions in its workspace, and in the folders its
+conversations were given, through `goose-acp`, as its Activity tab does, and reads the usage goose saves on each reply, with goose's
 own cost estimate where it has one. Both count a request's cached tokens in its
 input, which the readers subtract. Goose and Pi also count a standalone turn's
 session, which has no `channelId`; Pi finds it by the same kept record and
@@ -1975,13 +2149,21 @@ Source output accepts the same optional classifier questions as event watches. C
 
 The bundled Agents plugin owns the command producer and discovery tool. The GitHub plugin owns the GitHub PR producer. Saved provider IDs remain `attention/command` and `attention/github-pr`, and discovery marks them `builtIn: true`. The bundled Attention plugin owns the per-agent overview and controls for existing watches. The GitHub source uses the same PR parser and feedback policy as `github_watch_pr`; it requires the signed-in `gh` CLI. The tool configures Attention subscriptions rather than owning a separate polling loop. Other plugins can register their own source producers through the same lifecycle. Legacy Monitor command registrations and pending wakes are not imported; recreate needed command watches in Attention.
 
+### Event watch read failures
+
+Plugins with the `agents` capability can read `ctx.agents.snapshot().watchReadFailures` and use `ctx.agents.subscribe` to observe changes. The read-only array covers the viewer's running agents on this device. Older hosts omit the field. An empty array means the host currently reports no event-watch history failures.
+
+Each row identifies the membership (`agentKey`), watch (`watchSlug`), and history source (`channelId`, or `null` for an all-channels stream). `summary` contains host-authored text. `consecutiveFailures` counts failed catch-up reads since the stream last recovered or reset. `failedAt` and `retryAt` are Unix milliseconds. The runner tries again no earlier than `retryAt`, when connected and able to read on its existing tick.
+
+The runner keeps the failure and its deadline across relay reconnects. The row clears on a successful read, an edit or removal of the watch, or when the watch or its Interest stops running. Failure status and backoff are runtime-only and start empty after app restart. Saved watch definitions and catch-up checkpoints keep their existing storage.
+
 ## Attention delivery destinations
 
 Event watches and timers accept an optional delivery `channel` and thread `root`. The event watch's `channels` still selects where to listen: channels the agent is a member of, and public channels it has not joined (`all` hears those through catch-up, about every 30 seconds). A delivery address needs membership; the relay decides where the agent may post. Watches do not change who a mention wakes: a channel the owner's app hears only because a watch names it gives no mention turn, though the watch still hears its events. With an address, the wake continues that conversation with the Interest's instructions. A thread root must be readable by the agent in that destination channel; a missing or mismatched root stops delivery before the harness builds context. Claude, Codex, Goose and Pi accept these Attention triggers. A channel without a root defaults to channel-level posting, while explicit reporting instructions in the Interest can direct another thread or channel within the agent's existing authority. Solo chats retain their personal-chat framing and reply restriction. The address owns the execution conversation and default destination; the Interest owns explicit reporting policy.
 
 Without an address, the subscription runs an independent turn in its Interest's lane. Timers retain their occurrence and expiry budgets. An addressed timer waits without spending an occurrence while destination membership is unconfirmed or absent. `watch_show` reports delivery as held or blocked with a reason; delivery resumes once membership is confirmed. Expiry still applies while held. Membership checks never join channels. The Attention panel shows listening channels separately from the delivery destination.
 
-Event matches wait for confirmation of both listening and destination rosters. Confirmed destination nonmembership discards the match. Addressed wakes refresh the Interest instructions after harness startup and queue waits, immediately before submission, while retaining cancellation checks.
+When an agent creates or enables a watch, adds listening channels or changes its delivery channel, it needs confirmed access under the same policy used for event delivery. Removing or reordering an explicit listening list checks no unchanged channels; changing from all channels to an explicit list checks the full list. Other edits on active watches and timer rearms remain available if an unchanged channel later becomes unreachable or unconfirmed. An agent's write to an enabled completed source restarts it and requires confirmed destination membership. Disabled watches remain editable and removable. Event matches wait for confirmation of both listening and destination rosters. Confirmed destination nonmembership discards the match. Addressed wakes refresh the Interest instructions after harness startup and queue waits, immediately before submission, while retaining cancellation checks.
 
 Conversation wakes are local, have no signed message to resume, and never publish their synthetic anchor ids. Pi saves an Attention wake's reply destination separately from its tool context so a recovered answer keeps its destination. Ordinary plugin wakes retain the separate contract above.
 
@@ -1995,7 +2177,7 @@ Source return or failure, cancellation, Attention off, agent stop, plugin unload
 
 ## Tools for the user's other local agents
 
-A plugin can offer MCP tools to agents Buzz did not start, such as Claude Code, Codex, Pi or Nexus sessions. It serves a dedicated `host.serveMcp` server and declares the bundled helper as a process, for example `{ "id": "agent-access", "program": "buzz-agent-command", "bundled": true, "args": ["--advertise"] }`. `spawn("agent-access", { mcp: server })` lets the helper claim that server's one session and save it to `~/.buzz-foundation/agent-connections`, then exit. The plugin keeps the server open after the helper exits and spawns it once per server: a second spawn on the same server stops it. Every local agent of this user can then call that server's tools. On macOS and Linux the directory and files are private to the user and the helper ignores files others could have written; on Windows they rely on the profile's inherited permissions. The plugin handler must not assume a particular caller, and protected workers that must not reach these tools need that directory in `hiddenPaths`.
+A plugin can offer MCP tools to agents that run outside Buzz, such as standalone Claude Code, Codex, or Pi sessions. It serves a dedicated `host.serveMcp` server and declares the bundled helper as a process, for example `{ "id": "agent-access", "program": "buzz-agent-command", "bundled": true, "args": ["--advertise"] }`. `spawn("agent-access", { mcp: server })` lets the helper claim that server's one session and save it to `~/.buzz-foundation/agent-connections`, then exit. The plugin keeps the server open after the helper exits and spawns it once per server: a second spawn on the same server stops it. Every local agent of this user can then call that server's tools. On macOS and Linux the directory and files are private to the user and the helper ignores files others could have written; on Windows they rely on the profile's inherited permissions. The plugin handler must not assume a particular caller, and protected workers that must not reach these tools need that directory in `hiddenPaths`.
 
 An agent runs the installed helper by absolute path, with no inherited connection, configuration or token: `/Applications/Buzz.app/Contents/Resources/bin/buzz-agent-command tools` on macOS (inside the app's installed name, such as `Buzz Foundation.app`), `…\bin\buzz-agent-command.exe` on Windows and `/usr/lib/Buzz Foundation/bin/buzz-agent-command` on Linux. `tools`, `<tool> --field value` and `call <tool> '<JSON object>'` behave as `buzz` does inside an agent command, and `--help` prints that usage with the path it was run as. The agent's own sandbox must allow loopback connections: Codex's read-only and workspace-write modes, for example, block them unless network access is enabled, and the helper then reports `Could not reach Buzz` and leaves the advertisement in place. The helper uses the newest advertised session that still answers and offers the tool, so a second Buzz window's tools are still reached; when two plugins offer the same tool name, the newer advertisement wins. A tool call stops asking older advertisements once it finds that session, so a stalled older server does not delay it; `tools` asks every advertisement. Before sending a saved session, the helper connects and confirms, by numeric user ID, that a process of this user has accepted that same connection (`lsof` on macOS, `/proc/net/tcp` on Linux), then sends the request on it. If that is not confirmed within about a second, as when another user's process holds a closed server's port, the server receives nothing and the advertisement stays. Windows does not support advertised sessions; the helper reports that instead. An advertisement lasts as long as its server. Closing the server, reloading the page, unloading the plugin or quitting Buzz ends it, and the next caller that asks it removes the file once its server refuses the connection or the session. An inherited `BUZZ_AGENT_CONNECTION` always takes precedence.
 

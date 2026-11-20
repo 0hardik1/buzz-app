@@ -6,6 +6,8 @@ import type { PresenceActivity } from "../presence/activity";
 import type { Context } from "@deepseek-ai/cordis";
 import { createRelaySession, type RelaySession } from "./session";
 import { createHeadPersistence } from "./persistence";
+import { clearNativeMedia, nativeChannelMedia, nativeMediaUrl } from "./native";
+import { nativeIdentityEnabled } from "../identity/service";
 import { savedVerifiedProfileAuthority } from "./verified-profile";
 import {
   relayPartition,
@@ -14,7 +16,8 @@ import {
 } from "./partition";
 import { isTransientFailure, ReadError, readErrorKind } from "./errors";
 import { RECOVERY_DELAYS_MS } from "./recovery";
-import type { ReadTransport } from "./transport";
+import { mediaUrl, type ReadTransport } from "./transport";
+import { retryFailedImages } from "../../shared/design-system/useReadyImage";
 import { refusalOfError, type CommunityRefusal } from "./http-admission";
 /** The snapshot's error for a refusal heard after connecting, for logs and
  * diagnostics; what it offers follows `refusal`, never this text. */
@@ -34,6 +37,10 @@ export type RelaySnapshot = Readonly<{
   origin?: string;
   session: RelaySession;
   viewer?: string;
+  /** The community UUID this session's transport read from the relay's NIP-11
+   * document when it was created, if it advertised one. A socket reconnect
+   * keeps it; a new session reads it again. */
+  communityId?: string;
   error?: string;
   /** A usable device snapshot while the real transport is connecting/unavailable. */
   cached?: true;
@@ -43,6 +50,9 @@ export type RelaySnapshot = Readonly<{
   retrying?: true;
   /** The community refused this account; not a connection problem. */
   denied?: true;
+  /** A reload is under way, through its retries and failures, until the
+   * community is ready again or disconnects. */
+  reloading?: true;
   /** Why, when the relay said: its sign-in ended, or it has no access. */
   refusal?: CommunityRefusal;
 }>;
@@ -65,6 +75,30 @@ declare module "@deepseek-ai/cordis" {
   interface Context {
     relay: RelayData;
   }
+}
+
+/** Opens again what a reload had open, once the new roster authorizes it:
+ * nothing was restored from disk to authorize it sooner. Each ID stays in
+ * `ids` until its channel opens or a complete roster omits it, through
+ * later roster pages and errors; a later reload carries what is left. */
+function reopenListed(
+  owner: ReturnType<typeof createRelaySession>,
+  ids: Set<string>,
+) {
+  const { channels } = owner.session;
+  const open = () => {
+    const list = channels.list();
+    if (list.status === "idle" || list.status === "loading") return false;
+    for (const id of ids) channels.ensure(id);
+    for (const id of owner.retainedChannels()) ids.delete(id);
+    // Only a complete roster read proves the rest are no longer the viewer's.
+    if (list.status === "ready" && list.rosterAsOf !== undefined) ids.clear();
+    return !ids.size;
+  };
+  if (open()) return;
+  const stop = channels.subscribeList(() => {
+    if (open()) stop();
+  });
 }
 
 /** App-owned session. Plugins receive read models, never a signer or transport.
@@ -107,14 +141,28 @@ export function provideRelay(
   /** Whether the latest connection failure can clear without anyone acting.
    * Later publishes of the same failure (cache handoff) keep it. */
   let transientFailure = false;
-  const publish = ({ retrying: _retrying, ...next }: RelaySnapshot) => {
+  /** A reload's state, from `reload()` until ready or disconnected: it reads
+   * nothing saved, and its channels open again on the new session. */
+  let reloading: { channels: Set<string> } | undefined;
+  /** What the last reload has yet to open again on its session. */
+  let reopening: Set<string> | undefined;
+  const publish = ({
+    retrying: _retrying,
+    reloading: _reloading,
+    ...next
+  }: RelaySnapshot) => {
     if (next.origin) origin = next.origin;
     if (next.status !== "error") transientFailure = false;
-    snapshot = Object.freeze(
-      transientFailure && !disposed
-        ? { ...next, retrying: true as const }
-        : next,
-    );
+    if (
+      (next.status === "ready" && !next.cached) ||
+      next.status === "disconnected"
+    )
+      reloading = undefined;
+    snapshot = Object.freeze({
+      ...next,
+      ...(transientFailure && !disposed ? { retrying: true as const } : {}),
+      ...(reloading && !disposed ? { reloading: true as const } : {}),
+    });
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
     if (next.status === "ready" && !next.cached) reconnects = 0;
@@ -166,7 +214,15 @@ export function provideRelay(
                 "Reconnect to update saved conversations.",
               ),
             ),
-          media: () => undefined,
+          // The same URLs the connection will use, so restored avatars show
+          // their saved images at once instead of after it connects.
+          media: (url, size) =>
+            mediaUrl(
+              url,
+              nativeIdentityEnabled() ? nativeMediaUrl : undefined,
+              resume.scope,
+              size,
+            ),
           ...(verifyStored ? { verifyStored } : {}),
         },
         {
@@ -236,8 +292,10 @@ export function provideRelay(
       current === generation &&
       signal === controller?.signal;
     if (kind !== "sign-in") {
-      await store.clearCache();
+      await store.clearCache().catch(() => {});
       if (resume) {
+        // Saved images are optional; failing to forget them keeps the rest.
+        await clearNativeMedia(resume.scope).catch(() => {});
         const disk = createHeadPersistence(resume.viewer, resume.scope);
         try {
           await disk.clear();
@@ -266,6 +324,9 @@ export function provideRelay(
   const service: RelayData & {
     /** The federated session changed to signed in: retry what it refused. */
     reauthorize(): void;
+    /** Replaces the session and reads everything from the relay again, even
+     * when connected or showing saved data. Does nothing once disconnected. */
+    reload(): void;
   } = {
     snapshot: () => snapshot,
     subscribe: (listener) => {
@@ -286,7 +347,7 @@ export function provideRelay(
         void ask?.().catch(() => {});
         return;
       }
-      const retained = snapshot.cached;
+      const retained = snapshot.cached && !reloading;
       if (!retained) reset();
       connecting = true;
       const current = generation;
@@ -299,7 +360,7 @@ export function provideRelay(
           session: store.session,
           // Only the first attempt bootstraps from disk behind the launch
           // surface; a retry after a failure keeps the app on screen.
-          ...(resume && snapshot.status !== "error"
+          ...(resume && snapshot.status !== "error" && !reloading
             ? { restoring: true as const }
             : {}),
         });
@@ -307,9 +368,10 @@ export function provideRelay(
         const { error: _error, ...retainedSnapshot } = snapshot;
         publish({ ...retainedSnapshot, status: "connecting" });
       }
-      const restoring = retained
-        ? Promise.resolve()
-        : restoreLocal(current, signal);
+      const restoring =
+        retained || reloading
+          ? Promise.resolve()
+          : restoreLocal(current, signal);
       const timer = setTimeout(() => {
         if (disposed || current !== generation || signal !== controller?.signal)
           return;
@@ -361,6 +423,7 @@ export function provideRelay(
             prepared: true,
             // Keep intent preparation, but do not fetch every unopened channel.
             warm: false,
+            ...(reloading ? { revalidate: true } : {}),
             initialChannelId: readView<string | undefined>(
               transportPartition(transport),
               "selected-channel",
@@ -370,6 +433,7 @@ export function provideRelay(
               transport.viewer,
               transportOrigin(transport),
             ),
+            channelMedia: nativeChannelMedia(transportOrigin(transport)),
           });
           await successor.restore();
           if (
@@ -385,6 +449,7 @@ export function provideRelay(
           // an idle window between two already-hydrated owners.
           for (const id of store.retainedChannels())
             successor.session.channels.ensure(id);
+          const reopen = reloading?.channels;
           store.dispose();
           store = successor;
           if (refused) {
@@ -398,9 +463,17 @@ export function provideRelay(
             origin: transportOrigin(transport),
             scope: transportPartition(transport),
             session: store.session,
+            ...(transport.readState?.communityId
+              ? { communityId: transport.readState.communityId }
+              : {}),
           });
           ready = true;
+          // Restored images keep their URLs across this handoff, so one that
+          // failed while offline would otherwise not be requested again.
+          retryFailedImages();
           store.session.channels.ensureList();
+          reopening = reopen;
+          if (reopen) reopenListed(store, reopen);
         })
         .catch(async (error) => {
           await restoring;
@@ -427,6 +500,24 @@ export function provideRelay(
           if (current === generation && signal === controller?.signal)
             connecting = false;
         });
+    },
+    reload() {
+      if (disposed || !connect || snapshot.status === "disconnected") return;
+      if (clearing) {
+        void clearing.then(() => service.reload());
+        return;
+      }
+      // Reset disposes the store, so keep what it has open first.
+      const channels = new Set([
+        ...(reloading?.channels ?? []),
+        ...(reopening ?? []),
+        ...store.retainedChannels(),
+      ]);
+      reopening = undefined;
+      reloading = { channels };
+      // A connection under way may already have read what was saved.
+      reset();
+      service.retry();
     },
     reauthorize() {
       if (disposed) return;
@@ -469,17 +560,21 @@ export function provideRelay(
       connecting = false;
       clearing = Promise.resolve()
         .then(async () => {
-          await retainedStore.clearCache();
+          // A failed delete still clears the rest, then fails the clear so
+          // its caller doesn't report saved data as gone.
+          const failures: unknown[] = [];
+          const fail = (error: unknown) => void failures.push(error);
+          await retainedStore.clearCache().catch(fail);
           if (resume) {
+            await clearNativeMedia(resume.scope).catch(fail);
             const disk = createHeadPersistence(resume.viewer, resume.scope);
-            try {
-              await disk.clear();
-            } catch {
-              /* Storage can be unavailable. */
-            } finally {
-              disk.close();
-            }
+            await disk
+              .clear()
+              .catch(fail)
+              .finally(() => disk.close());
           }
+          if (failures.length)
+            throw new AggregateError(failures, "Cached data was not cleared");
         })
         .finally(() => {
           clearing = undefined;

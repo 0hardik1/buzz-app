@@ -277,7 +277,7 @@ function ReviewShell({
   error?: string;
   retry?: () => void | Promise<void>;
 }) {
-  const source = session.media(attachment.url);
+  const source = session.media(attachment.url, undefined, channelId);
   // Listener unavailability is not a playback error the selection resets.
   const sourceUnavailable = useMediaElementSource(
     attachment.kind === "video" ? source : undefined,
@@ -334,7 +334,7 @@ function ReviewShell({
   };
   const markers = timecodesSeekable
     ? replies.flatMap((row) => {
-        const parsed = parseMediaTimeReply(row.content);
+        const parsed = parseMediaTimeReply(row.forward?.note ?? row.content);
         if (!parsed || !timecodeApplies(row)) return [];
         const displayId = row.workflowOwnerId ?? row.authorId;
         const profile = profiles.get(displayId);
@@ -524,6 +524,7 @@ function ReviewShell({
                   }}
                 >
                   <MessageComposer
+                    shown={commentsOpen}
                     extensions={extensions}
                     session={session}
                     scope={scope}
@@ -575,13 +576,14 @@ function ReviewShell({
       ) : attachment.kind === "video" && source ? (
         <VideoPlayer
           key={source}
+          attachmentUrl={attachment.url}
           downloadName={attachment.name ?? ""}
           videoRef={video}
           source={source}
           poster={
             (selectionRequest === 0 ? origin?.poster : undefined) ??
             (attachment.previewUrl
-              ? session.media(attachment.previewUrl)
+              ? session.media(attachment.previewUrl, undefined, channelId)
               : undefined)
           }
           initialTime={initialTime}
