@@ -1000,6 +1000,7 @@ export const test = base.extend({
         compiledBuild: {
           worker: testInfo.workerIndex,
           durationMs: compiledApp.durationMs,
+          reused: compiledApp.reused,
         },
         signedHistory: { counts: historyCounts, durationMs: historyDurationMs },
         largeSidebar,

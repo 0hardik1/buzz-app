@@ -72,12 +72,14 @@ measurements in the default gate. The explicit measurement command above uses
 `--no-deps` so all selected measurements repeat, with `--workers=1` to retain
 isolation and one invocation to preserve both engines' evidence.
 
-Compiled frontend assets are worker-scoped, split by `developmentReact` and
-`pluginFixtures`, and removed when that worker ends. They are never reused across
+Compiled frontend assets are shared by build configuration within one Playwright
+run. Every build option, including injected fixtures, selects a separate build.
+Workers publish only complete builds; concurrent first builds may duplicate work.
+The runner removes the assets after all workers finish. They are never reused across
 invocations. Every built-app test still gets a fresh preview server/port, ephemeral
 signing keys, signed histories, relay state and browser context/storage. Evidence records
-the worker and its build time, plus history counts and signing time; worker
-restarts rebuild rather than reuse stale assets.
+the worker, its build/setup time and whether it reused assets, plus history counts
+and signing time. Worker restarts can reuse immutable assets from the same run.
 
 Declare `historyCounts` with `test.use` for built-app tests that do not need large
 histories, for example `{ alpha: 1, beta: 0 }`. Counts apply per community. Keep

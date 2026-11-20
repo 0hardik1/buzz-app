@@ -1,7 +1,9 @@
 import { fixtureAliases } from "../relay-config.ts";
 import { build } from "./vite-server.mjs";
 import react from "@vitejs/plugin-react";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdtemp, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +13,18 @@ const PAIRING_CARD = "src/bundled/pairing/MobileApp.tsx";
 const PAIRING_IMPORT = 'import { PairingSettings } from "./PairingSettings";';
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
+const buildsVariable = "BUZZ_BROWSER_APP_BUILDS";
+
+// A fresh directory per Playwright invocation prevents reuse across source edits.
+// Workers only publish finished builds; the runner removes them after all tests.
+export async function prepareAppBuilds() {
+  const directory = await mkdtemp(join(tmpdir(), "buzz-browser-builds-"));
+  process.env[buildsVariable] = directory;
+  return async () => {
+    delete process.env[buildsVariable];
+    await rm(directory, { recursive: true, force: true });
+  };
+}
 
 // Playwright owns this worker-scoped build. Only compiled assets are shared;
 // each test still owns its server, identities, relay state and browser storage.
@@ -27,7 +41,27 @@ export async function buildApp(
   },
   use,
 ) {
-  const directory = await mkdtemp(join(tmpdir(), "buzz-browser-build-"));
+  const sharedRoot = process.env[buildsVariable];
+  // Include every option consumed by the build, including injected fixtures.
+  const key = createHash("sha256")
+    .update(
+      JSON.stringify([
+        developmentReact,
+        builderlabLogin,
+        federatedIdentity,
+        pluginFixtures,
+        companionFixture,
+        localAgentActivity,
+        pairingFixture,
+        startupFailureFixture,
+      ]),
+    )
+    .digest("hex");
+  const shared = sharedRoot && join(sharedRoot, key);
+  // Keep publication on the same filesystem as the shared directory.
+  const directory = await mkdtemp(
+    join(sharedRoot || tmpdir(), "buzz-browser-build-"),
+  );
   let pairingSwapped = false;
   try {
     const config = {
@@ -187,8 +221,22 @@ export async function buildApp(
         },
       });
     const start = performance.now();
-    await build(config);
-    await use({ config, durationMs: performance.now() - start });
+    const reused = Boolean(shared && existsSync(shared));
+    if (!reused) {
+      await build(config);
+      if (shared) {
+        try {
+          await rename(directory, shared);
+        } catch (error) {
+          // Two workers may build together. Keep the first completed build;
+          // neither worker can observe the other's partially written output.
+          if (error.code !== "EEXIST" && error.code !== "ENOTEMPTY")
+            throw error;
+        }
+      }
+    }
+    if (shared) config.build.outDir = join(shared, "dist");
+    await use({ config, durationMs: performance.now() - start, reused });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
