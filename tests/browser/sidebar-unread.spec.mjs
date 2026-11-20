@@ -436,6 +436,40 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
   await expect(row(page, "dm-030")).toHaveAttribute("aria-current", "page");
 });
 
+test("at default card heights the edge cues count only rows they can reach", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const dm = row(page, "dm-030");
+  // Unexpanded, the Direct messages card clips dm-030 past its edge.
+  await expect(dm.locator("[data-channel-unread]")).toBeAttached();
+  await expect(dm.locator("xpath=ancestor::*[@data-card-clipped]")).toHaveCount(
+    1,
+  );
+  // Scrolling can't reach it, so no cue points at it.
+  await scroll(page, 1e6);
+  await expectCueHidden(page, "below");
+  await scroll(page, 0);
+  // Once the card shows it, the cue reveals it: visible, live and focused.
+  const grip = sidebar(page).getByRole("separator", {
+    name: "Resize Direct messages",
+  });
+  await grip.focus();
+  await grip.press("Enter");
+  await expect(dm.locator("xpath=ancestor::*[@data-card-clipped]")).toHaveCount(
+    0,
+  );
+  await expect(cue(page, "below")).toBeVisible();
+  await cue(page, "below").click();
+  await expect.poll(() => inView(page, "dm-030")).toBe(true);
+  const focused = page.locator("button[data-channel-id]:focus");
+  await expect(focused).toBeInViewport();
+  expect(
+    await focused.evaluate((element) => element.closest("[inert]") === null),
+  ).toBe(true);
+});
+
 test("resizing, collapsed groups and new unread evidence update only the displayed roster", async ({
   page,
   app,
