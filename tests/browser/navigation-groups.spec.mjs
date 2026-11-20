@@ -29,8 +29,25 @@ async function openMove(page, row, channelName = "Beta") {
   await expect(menu).toBeVisible();
   return menu;
 }
-/** Shortly after the fixture's history, which dates from November 2023. */
-const fixtureNow = new Date(1_700_100_000_000);
+/**
+ * Moves the page's calendar to shortly after the fixture's November 2023
+ * history, with time still running. Only dates move: Playwright's clock also
+ * fakes animation time, which drifts from the browser's own animation clock
+ * after a reload and leaves WebKit's row exits unfinished.
+ */
+const nearFixtureHistory = (page) =>
+  page.addInitScript((target) => {
+    const RealDate = Date;
+    const offset = target - RealDate.now();
+    globalThis.Date = class extends RealDate {
+      constructor(...args) {
+        super(...(args.length ? args : [RealDate.now() + offset]));
+      }
+      static now() {
+        return RealDate.now() + offset;
+      }
+    };
+  }, 1_700_100_000_000);
 const rowIn = (page, section) =>
   page.locator(`[data-sidebar-section="${section}"] [data-channel-id="beta"]`);
 const sidebar = (page) =>
@@ -810,9 +827,10 @@ test("Create new supports cancel, moves before publication, and retries the same
   await page.addInitScript(() =>
     localStorage.setItem("buzz-appearance.v1", "dark"),
   );
-  // A workspace made here starts on the last 30 days; keep the page clock
-  // beside the fixture's November 2023 history so its rows stay in view.
-  await page.clock.setFixedTime(fixtureNow);
+  // A workspace made here starts on the last 30 days; keep the page's
+  // calendar beside the fixture's November 2023 history so its rows stay
+  // in view.
+  await nearFixtureHistory(page);
   await open(page, app);
   const beta = rowIn(page, "group:work");
   await expect(beta).toBeVisible();
@@ -1209,9 +1227,10 @@ scrollTest(
 // Browser-owned integration: menu/dialog portals, encrypted saves, and
 // retained sidebar placement across app changes and reload.
 test("Move and Create persist across apps", async ({ page, app }) => {
-  // A workspace made here starts on the last 30 days; keep the page clock
-  // beside the fixture's November 2023 history so its rows stay in view.
-  await page.clock.setFixedTime(fixtureNow);
+  // A workspace made here starts on the last 30 days; keep the page's
+  // calendar beside the fixture's November 2023 history so its rows stay
+  // in view.
+  await nearFixtureHistory(page);
   await open(page, app);
   await openPage(page, "Workflows");
   const projects = page.getByRole("heading", {
