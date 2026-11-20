@@ -54,6 +54,7 @@ import {
   conversationFolder,
   conversationKey,
   existingFolder,
+  startingFolder,
 } from "../../features/agents/conversation-folders";
 import type {
   Agent,
@@ -631,6 +632,22 @@ export class CodexRuntime {
       conversationKey(channelId, root),
     );
   }
+  /** `folder`, for a conversation's thread starting, which records that one
+   * without a folder starts in the workspace. */
+  private startFolder(
+    scope: string,
+    agent: AgentKey,
+    channelId: string,
+    root?: string,
+  ) {
+    if (this.target) return undefined;
+    return startingFolder(
+      this.storage,
+      scope,
+      agent,
+      conversationKey(channelId, root),
+    );
+  }
   /** Where a conversation's thread runs: the folder it was given, which must
    * still exist, with the agent's workspace as `home`; or else that
    * workspace. Both absolute. */
@@ -643,7 +660,12 @@ export class CodexRuntime {
     const assigned =
       settings.scope === "community"
         ? undefined
-        : this.folder(scope, agent, conversation.channelId, conversation.root);
+        : await this.startFolder(
+            scope,
+            agent,
+            conversation.channelId,
+            conversation.root,
+          );
     const workspace = await this.workspace(settings.workspace);
     if (!assigned) return { cwd: workspace };
     return {
@@ -2005,7 +2027,7 @@ export class CodexRuntime {
                 .filter(Boolean)
                 .join("\n\n")
             : "";
-        const voiceInstructions = (updates?: string) =>
+        const voiceInstructions = (updates?: string | null) =>
           `${contextText(agent, settings, request.team, memory, this.repositories(reads.scope), updates)}\nFor every spoken request, apply the room's current source policy below, replacing policies retained from other conversations.\n${policy()}\nVoice work acts for owner ${agent.owner}. Buzz tools default to room ${channelId} at top level. This is the room's existing conversation. A turn that starts with <realtime_delegation> is a spoken request: the voice model speaks only your final answer, so put the result there in a few plain spoken sentences, not in a send. When you delegate, say only a short acknowledgement, then wait: never state a fact the delegated work has not returned yet.`;
         loaded = await this.loadThread(
           request,
@@ -2016,9 +2038,10 @@ export class CodexRuntime {
           rpc,
           voiceInstructions(),
         );
-        // Realtime start adds these instructions again, so they carry the
-        // same section updates as the injected message.
-        const instructions = voiceInstructions(loaded.updates);
+        // Realtime start has a size limit and adds its instructions as a
+        // later developer message, so they leave the section updates to the
+        // injected message, which the thread keeps.
+        const instructions = voiceInstructions(null);
         // A resumed thread keeps its first developer message, not resume's.
         if (!loaded.fresh)
           await rpc.request("thread/inject_items", {
@@ -2027,7 +2050,12 @@ export class CodexRuntime {
               {
                 type: "message",
                 role: "developer",
-                content: [{ type: "input_text", text: instructions }],
+                content: [
+                  {
+                    type: "input_text",
+                    text: voiceInstructions(loaded.updates),
+                  },
+                ],
               },
             ],
           });
@@ -4074,7 +4102,11 @@ export class CodexRuntime {
       }
       seat = lane.voice;
       // A seat keeps its loaded thread between turns, and the owner can
-      // change a section meanwhile: its turns get the sections as they are.
+      // change a section or the session scope meanwhile: its turns get the
+      // sections as they are. Its lane fixes its place and folder.
+      const facts = seat
+        ? { ...seat.loaded.facts, scope: settings.scope }
+        : undefined;
       const choices =
         seat &&
         agent.promptSections?.(
@@ -4086,13 +4118,15 @@ export class CodexRuntime {
         adopted === undefined &&
         !this.keepsSections(
           seat.loaded.sections,
-          composeBase(seat.loaded.facts, choices),
+          composeBase(facts ?? seat.loaded.facts, choices),
         )
       ) {
         // Typed work goes on in a fresh thread, which the seat joins next.
+        // Its reply posts to this room, so the Huddle's own "Leave and
+        // rejoin" comes after it.
         seat.end(
           new Error(
-            "The base instructions changed. Join the huddle again to use them.",
+            "The base instructions changed, so voice stopped. Wait for the reply to your typed message before you leave, since a Huddle closes when its only person leaves",
           ),
         );
         seat = undefined;
@@ -4118,10 +4152,11 @@ export class CodexRuntime {
         sections,
         binding,
       } = loaded;
-      const base = seat ? composeBase(loaded.facts, choices) : loaded.base;
-      const updates = seat
-        ? sectionUpdates(sections, loaded.facts, choices)
-        : loaded.updates;
+      const base = seat && facts ? composeBase(facts, choices) : loaded.base;
+      const updates =
+        seat && facts
+          ? sectionUpdates(sections, facts, choices)
+          : loaded.updates;
       // The seat owns the subscription. The typed follower can claim its
       // native turn only once the typed request is about to be sent.
       if (!seat || adopted !== undefined || settings.scope !== "community")

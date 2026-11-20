@@ -55,6 +55,7 @@ import {
   conversationFolder,
   conversationKey,
   existingFolder,
+  startingFolder,
 } from "../../features/agents/conversation-folders";
 import type {
   Agent,
@@ -89,6 +90,7 @@ import {
 } from "../../features/agent-harness/project";
 import {
   placeOf,
+  replacedSections,
   sectionsOf,
 } from "../../features/agent-harness/sections/compose";
 import {
@@ -383,6 +385,16 @@ export class ClaudeRuntime {
     if (!reads) throw new Error("Buzz is not connected");
     return reads.scope
       ? conversationFolder(this.storage, reads.scope, agent, key)
+      : undefined;
+  }
+  /** `folder`, for a launching session, which records that a conversation
+   * without one starts in the workspace. */
+  private startFolder(agent: AgentKey, key: string | undefined) {
+    if (!key || this.target) return undefined;
+    const reads = this.reads(agent);
+    if (!reads) throw new Error("Buzz is not connected");
+    return reads.scope
+      ? startingFolder(this.storage, reads.scope, agent, key)
       : undefined;
   }
   /** Where the conversation's sessions ran: its own folder, or else the
@@ -2226,10 +2238,9 @@ export class ClaudeRuntime {
           entry.memory,
           addedKey(this.added()),
           this.credentials,
-          // The base prompt's sections: a change gives an idle session the
-          // new prompt at its next turn.
-          sectionsOf(entry.handle, key),
         ]),
+      // A change gives the session the new prompt at its next turn.
+      sections: (key) => replacedSections(sectionsOf(entry.handle, key)),
       launch: async (key) => {
         const { workspace, instructions, scope } = entry.config;
         const gate = entry.handle?.protection;
@@ -2238,7 +2249,7 @@ export class ClaudeRuntime {
         gate?.assertAvailable();
         // A conversation given its own folder starts there, never in the
         // workspace, which stays within reach as an absolute path.
-        const assigned = this.folder(agent, key);
+        const assigned = await this.startFolder(agent, key);
         const resolve = this.host.resolveDirectory?.bind(this.host);
         const folder = assigned && (await existingFolder(resolve, assigned));
         const home = folder && (await resolve?.(workspace));

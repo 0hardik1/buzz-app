@@ -439,6 +439,15 @@ export class GooseHistory {
   /** The last transcript read's messages, by session. */
   private exported = new Map<string, Message[]>();
 
+  /** The `folders` other than `workspace`, as written or as goose's
+   * listing of it names it. */
+  async elsewhere(workspace: string, folders: readonly string[]) {
+    const { host } = this;
+    if (!host || !folders.length) return folders;
+    const named = await absolute(host.resolveDirectory, workspace);
+    return folders.filter((folder) => folder !== workspace && folder !== named);
+  }
+
   /** Every session in the `workspaces` used since `since`, newest first, and
    * the messages of those `wanted` picks, all from one `goose-acp`: every
    * agent in a workspace reads its sessions from one listing. */
@@ -467,6 +476,22 @@ export class GooseHistory {
         messages.set(row.sessionId, await listed(goose, row.sessionId));
       }
       return { rows, messages };
+    });
+  }
+
+  /** Whether goose has a session the agent opened for `conversation` in
+   * `workspace`, by its tag index, which holds sessions the app no longer
+   * lists. */
+  started(
+    workspace: string,
+    agent: string,
+    conversation: string,
+    signal: AbortSignal,
+  ) {
+    return this.with(signal, async (goose, { resolveDirectory }) => {
+      const cwd = await absolute(resolveDirectory, workspace);
+      const tags = sessionTags(agent, conversation);
+      return (await page(goose, cwd, undefined, tags)).rows.length > 0;
     });
   }
 

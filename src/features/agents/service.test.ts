@@ -114,6 +114,7 @@ import { CHANNEL_KINDS } from "../relay/live";
 import { fileStore, loadAgentStorage, type AgentStore } from "./state";
 import { readInterrupted, writeInterrupted } from "./interrupted";
 import { saveOwnerSections } from "./prompt-sections";
+import { startingFolder } from "./conversation-folders";
 import { memoryStorage } from "./test-fakes";
 import { SyncedTeams } from "./team-config";
 import { TEAM_MOVES_KEY, TeamMoves } from "./team-migration";
@@ -1949,6 +1950,85 @@ describe("a conversation folder", () => {
     expect(agents.conversationFolder(f.agent.key, other)).toBeUndefined();
   });
 
+  it("is refused when the conversation's first session starts while the check waits on another's sessions", async () => {
+    const storage = memoryStorage();
+    let hold: Promise<void> | undefined;
+    const entered = vi.fn();
+    const f = await ready({
+      storage,
+      conversationFolders: true,
+      sessions: {
+        // Nothing lists a session that is starting, as a harness reads them.
+        list: () => [],
+        ready: async () => {
+          entered();
+          await hold;
+        },
+        subscribe: () => () => {},
+      },
+    });
+    const { agents } = f.plugin;
+    // The community's storage scope, from a folder given first.
+    const first = { channelId: channel, root: "f".repeat(64) };
+    await agents.assignConversationFolder(f.agent.key, first, "~/work");
+    const [scope] = JSON.parse(
+      (
+        storage.keys().find((key) => key.includes("conversation-folder")) ?? ""
+      ).replace(/^[^:]*:/, ""),
+    ) as string[];
+    let start!: () => void;
+    hold = new Promise<void>((resolve) => {
+      start = resolve;
+    });
+    entered.mockClear();
+    const assigning = agents.assignConversationFolder(
+      f.agent.key,
+      thread,
+      "~/work",
+    );
+    const refused = expect(assigning).rejects.toThrow(
+      "This conversation already started in the agent's workspace",
+    );
+    await vi.waitFor(() => expect(entered).toHaveBeenCalledTimes(1));
+    // The conversation's first launch picks the workspace before the check
+    // ends, and no session lists it yet.
+    await expect(
+      startingFolder(storage, scope ?? "", f.agent.key, `${channel}/${root}`),
+    ).resolves.toBeUndefined();
+    start();
+    await refused;
+    expect(agents.conversationFolder(f.agent.key, thread)).toBeUndefined();
+  });
+
+  it("is refused for a conversation the harness itself holds history for, and when that cannot be read", async () => {
+    const history = vi.fn(async (_agent: Agent, _conversation: string) => true);
+    const f = await ready({
+      conversationFolders: true,
+      sessions: { list: () => [], history, subscribe: () => () => {} },
+    });
+    const { agents } = f.plugin;
+    await expect(
+      agents.assignConversationFolder(f.agent.key, thread, "~/work"),
+    ).rejects.toThrow(
+      "This conversation already started in the agent's workspace",
+    );
+    expect(history).toHaveBeenCalledWith(
+      expect.objectContaining({ key: f.agent.key }),
+      `${channel}/${root}`,
+    );
+    expect(agents.conversationFolder(f.agent.key, thread)).toBeUndefined();
+    // History it cannot read may hold the conversation.
+    history.mockRejectedValue(new Error("goose is unavailable"));
+    await expect(
+      agents.assignConversationFolder(f.agent.key, thread, "~/work"),
+    ).rejects.toThrow("goose is unavailable");
+    // Without any, the conversation is given its folder.
+    history.mockResolvedValue(false);
+    await expect(
+      agents.assignConversationFolder(f.agent.key, thread, "~/work"),
+    ).resolves.toBe("/home/me/work");
+  });
+
   it.each(["solo", "dm"] as const)(
     "is given to a %s conversation whole, refusing a root",
     async (channelType) => {
@@ -2267,6 +2347,23 @@ describe("a conversation's sections", () => {
       .keys()
       .filter((key) => key.startsWith("buzz.agents.conversation-sections"));
 
+  it("are built into a turn's prompt while its community reconnects", async () => {
+    const f = await ready();
+    await f.plugin.agents.setConversationSections(f.agent.key, thread, {
+      "working-location": "Work in the task's folder.",
+    });
+    const agent = await handle(f);
+    // A reconnect keeps the community's storage scope, as the conversation's
+    // folder lookup does.
+    vi.spyOn(f.relay, "snapshot").mockReturnValue({
+      ...f.relay.snapshot(),
+      status: "connecting",
+    });
+    expect(agent.promptSections?.(channel, root)?.plugin?.sections).toEqual({
+      "working-location": "Work in the task's folder.",
+    });
+  });
+
   it("are set, replaced and cleared by a plugin, and built into the agent's prompt there", async () => {
     const f = await ready();
     const { agents } = f.plugin;
@@ -2376,6 +2473,42 @@ describe("a conversation's sections", () => {
     );
   });
 
+  it("are refused for one community session, and unused once an agent has one", async () => {
+    let scope: "thread" | "community" = "thread";
+    const f = await ready({
+      sessionControls: {
+        state: () => "idle",
+        run: async () => {},
+        scope: () => scope,
+      } as never,
+    });
+    const { agents } = f.plugin;
+    await agents.setConversationSections(f.agent.key, thread, {
+      progress: "Report to the task.",
+    });
+    const agent = await handle(f);
+    // The owner gives the agent one session for its whole community, which
+    // takes in every conversation's turns.
+    scope = "community";
+    expect(agent.promptSections?.(channel, root)).toEqual({ owner: {} });
+    await expect(
+      agents.conversationSections(f.agent.key, thread),
+    ).resolves.toEqual({
+      progress: {
+        text: "Report to the task.",
+        applied: false,
+        reason: "community",
+      },
+    });
+    await expect(
+      agents.setConversationSections(f.agent.key, thread, { progress: "x" }),
+    ).rejects.toThrow("A community session has one prompt");
+    scope = "thread";
+    expect(agent.promptSections?.(channel, root)?.plugin?.sections).toEqual({
+      progress: "Report to the task.",
+    });
+  });
+
   it("follow the place rules of a conversation's instructions", async () => {
     const whole = await ready({
       sessionControls: {
@@ -2457,6 +2590,103 @@ describe("a conversation's sections", () => {
     // Turned off, its record is not used, and the other plugin takes over.
     f.owners.delete("example");
     expect(agent.promptSections?.(channel, root)).toEqual({ owner: {} });
+    await other.setConversationSections(f.agent.key, thread, {
+      progress: "Mine.",
+    });
+    expect(agent.promptSections?.(channel, root)?.plugin).toEqual({
+      id: "other",
+      sections: { progress: "Mine." },
+    });
+  });
+
+  it("are claimed by the plugin whose first save is still being written", async () => {
+    const f = await ready();
+    const other = another(f);
+    // The first save shows at once and is held while it is written.
+    const set = f.storage.set.bind(f.storage);
+    let release = () => {};
+    const written = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(f.storage, "set").mockImplementationOnce(async (key, value) => {
+      const done = set(key, value);
+      await written;
+      return done;
+    });
+    const first = f.plugin.agents.setConversationSections(f.agent.key, thread, {
+      progress: "Report to the task.",
+    });
+    await vi.waitFor(() => expect(saved(f)).toHaveLength(1));
+    try {
+      for (const sections of [{ progress: "Mine." }, {}])
+        await expect(
+          other.setConversationSections(f.agent.key, thread, sections),
+        ).rejects.toThrow("Another plugin manages this conversation");
+      // A turn still takes no text that is not saved yet.
+      const agent = await handle(f);
+      expect(agent.promptSections?.(channel, root)?.plugin).toBeUndefined();
+    } finally {
+      release();
+    }
+    await first;
+    const agent = await handle(f);
+    expect(agent.promptSections?.(channel, root)?.plugin).toEqual({
+      id: "example",
+      sections: { progress: "Report to the task." },
+    });
+  });
+
+  it("stay claimed by their plugin until its removal is saved", async () => {
+    // The device's file write for the removal is held, then fails.
+    let write: Promise<void> | undefined;
+    let entered = () => {};
+    const storage = fileStore(new Map(), async () => {
+      if (!write) return;
+      entered();
+      await write;
+    });
+    const f = await ready({ storage });
+    const other = another(f);
+    await f.plugin.agents.setConversationSections(f.agent.key, thread, {
+      progress: "Report to the task.",
+    });
+    let fail = () => {};
+    write = new Promise<void>((_, reject) => {
+      fail = () => reject(new Error("Disk full"));
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const clear = f.plugin.agents.setConversationSections(
+      f.agent.key,
+      thread,
+      {},
+    );
+    await started;
+    try {
+      // The removal shows at once, and the other plugin still may not take over.
+      expect(saved(f)).toHaveLength(0);
+      for (const sections of [{ progress: "Mine." }, {}])
+        await expect(
+          other.setConversationSections(f.agent.key, thread, sections),
+        ).rejects.toThrow("Another plugin manages this conversation");
+    } finally {
+      fail();
+    }
+    await expect(clear).rejects.toThrow("Disk full");
+    write = undefined;
+    expect(saved(f)).toHaveLength(1);
+    // It still manages the conversation, and its record is still used.
+    const agent = await handle(f);
+    expect(agent.promptSections?.(channel, root)?.plugin).toEqual({
+      id: "example",
+      sections: { progress: "Report to the task." },
+    });
+    await expect(
+      other.setConversationSections(f.agent.key, thread, { progress: "Mine." }),
+    ).rejects.toThrow("Another plugin manages this conversation");
+    // Once its removal is saved, the other plugin can take over.
+    await f.plugin.agents.setConversationSections(f.agent.key, thread, {});
     await other.setConversationSections(f.agent.key, thread, {
       progress: "Mine.",
     });

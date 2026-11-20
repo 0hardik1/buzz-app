@@ -4381,7 +4381,12 @@ it("leaves a failed first startup unbound so the next mention can start fresh", 
   await f.runtime.run(f.delivery("first"));
   await reading.promise;
   try {
-    expect(f.storage.size).toBe(0);
+    // Only the record that the conversation began in the workspace.
+    expect(
+      [...f.storage.keys()].filter(
+        (key) => !key.includes("conversation-folder"),
+      ),
+    ).toEqual([]);
     expect(f.starts()).toHaveLength(0);
   } finally {
     gate.resolve();
@@ -7596,6 +7601,37 @@ describe("voice seats", () => {
     f.complete(1, "DONE");
     await f.connection.close();
   });
+  it("sends a typed turn on an open seat the session-model section of the owner's current scope", async () => {
+    const f = await seated();
+    const context = (wire: Wire | undefined) =>
+      Object.values(
+        (
+          wire?.params as
+            | { additionalContext?: Record<string, { value: string }> }
+            | undefined
+        )?.additionalContext ?? {},
+      )
+        .map(({ value }) => value)
+        .join("");
+    await f.runtime.run(f.delivery("@Codex first"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    expect(context(f.starts()[0])).not.toContain("<base-section-updates>");
+    f.complete(0, "DONE");
+    await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+    // The owner gives the agent one session per channel while the seat
+    // stays open.
+    const d = f.delivery("@Codex again");
+    await f.runtime.run({
+      ...d,
+      config: { ...(d.config as object), scope: "channel" },
+    } as Delivery);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    const updated = context(f.starts()[1]);
+    expect(updated).toContain("<base-section-updates>");
+    expect(updated).toContain("one per-channel session");
+    f.complete(1, "DONE");
+    await f.connection.close();
+  });
   it("ends a seat on a thread from before sections were kept once the owner changes one, and goes on in a fresh thread", async () => {
     const f = await seated({}, (f) =>
       f.storage.set(
@@ -7623,7 +7659,7 @@ describe("voice seats", () => {
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
     expect(f.ended).toHaveBeenCalledWith(
       new Error(
-        "The base instructions changed. Join the huddle again to use them.",
+        "The base instructions changed, so voice stopped. Wait for the reply to your typed message before you leave, since a Huddle closes when its only person leaves",
       ),
     );
     expect(f.sent.some((wire) => wire.method === "thread/start")).toBe(true);
@@ -9116,7 +9152,7 @@ describe("a thread that keeps the base sections it started with", () => {
     expect(savedPrompts(f.storage)[0]?.[1]).toHaveLength(2);
   });
 
-  it("gives a voice seat's resumed thread the sections that changed, at both starts, and shows them in its saved prompt", async () => {
+  it("gives a voice seat's resumed thread the sections that changed in its injected message, and shows them in its saved prompt", async () => {
     vi.stubGlobal("RTCPeerConnection", class {});
     const started = {
       layout: 1,
@@ -9168,9 +9204,11 @@ describe("a thread that keeps the base sections it started with", () => {
     expect(injected).toContain(
       "<base-section-updates>\nThese sections replace",
     );
-    // Realtime start adds its instructions as a later developer message, so
-    // they must not say that no sections changed.
-    expect(vi.mocked(openVoice).mock.calls.at(-1)?.[5]).toBe(injected);
+    // Realtime start has a size limit and adds its instructions as a later
+    // developer message, so they say nothing of the sections.
+    const start = vi.mocked(openVoice).mock.calls.at(-1)?.[5];
+    expect(start).toContain("Voice work acts for owner");
+    expect(start).not.toContain("base section updates");
     const [[, parts]] = savedPrompts(f.storage) as [
       [string, [string, string][]],
     ];
@@ -9416,6 +9454,21 @@ describe("a conversation given its own folder", () => {
     return f;
   };
 
+  it("refuses a folder once the conversation's first thread started in the workspace", async () => {
+    const f = fixture();
+    await f.runtime.run(f.delivery("@Codex hi", root));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await expect(
+      assignConversationFolder(
+        f.store,
+        scope,
+        pubkey,
+        `channel/${root}`,
+        "/repos/worktree",
+      ),
+    ).rejects.toThrow("already started in the agent's workspace");
+  });
+
   it("tells a Solo chat that works there to read its Canvas's folders, not to make a worktree", async () => {
     const f = await withFolder(folders(), "/repos/worktree", "channel");
     asSoloChat(f);
@@ -9501,7 +9554,10 @@ describe("a conversation given its own folder", () => {
     await f.runtime.run(f.delivery("@Codex first", root));
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
     expect(inputText(f.starts()[0])).toContain("create a new worktree");
-    // Assigned while that turn runs in the agent's workspace.
+    // Assigned while that turn runs in the agent's workspace, as another
+    // program that does not see the conversation's start would.
+    for (const key of f.store.keys())
+      if (f.store.get(key) === "workspace") await f.store.set(key, null);
     await assignConversationFolder(
       f.store,
       scope,

@@ -11,7 +11,7 @@ import { absoluteWorkspace } from "../../../bundled/codex/config";
 import type { SessionAction } from "../../agents/service";
 import type { AcpProcess } from "./process";
 import type { AcpSession } from "./session";
-import { codeOf } from "./steps";
+import { codeOf, errorMessage } from "./steps";
 import type {
   ActivityReceipt,
   Choice,
@@ -355,8 +355,9 @@ export class AgentSessions {
   }
 
   /** Sends `text` into the conversation `key`, and resolves when the session
-   * has answered it. `steer` replaces `text` when the session is mid-turn;
-   * `fresh` builds it again when the session it was built for was closed;
+   * has answered it; the activity's `refresh`, if any, builds it again as
+   * it is handed over, and `fresh` when the session it was built for was
+   * closed;
    * `title` names a session opened for it, except that the conversation's
    * first one is left for the harness to name, if it names sessions, when `named`
    * takes that name;
@@ -370,7 +371,6 @@ export class AgentSessions {
     text: string,
     seen: number,
     {
-      steer = text,
       current,
       fresh,
       title,
@@ -381,7 +381,6 @@ export class AgentSessions {
       kept,
       ...activity
     }: Readonly<{
-      steer?: string;
       current?: () => boolean;
       fresh?: () => Promise<string>;
       title?: string;
@@ -457,7 +456,7 @@ export class AgentSessions {
         key,
         live,
         seen,
-        live.session.busy ? steer : text,
+        text,
         { ...activity, ...(current ? { current } : {}) },
         model,
         effort,
@@ -1052,18 +1051,21 @@ export class AgentSessions {
       at: Date.now(),
     };
     // Each turn runs on the current prompt. The session runs these one at a
-    // time, so an older prompt never lands after a newer one; a failure keeps
-    // the session and is tried again at the next turn.
+    // time, so an older prompt never lands after a newer one. A failure fails
+    // that turn undelivered, as a rule it no longer has would not hold for it,
+    // and keeps the session to try again at the next turn.
     if (process.repromptable)
       session.beforeTurn = async () => {
         const { systemPrompt } = await this.options.launch(conversation);
         if (systemPrompt === live.systemPrompt) return;
         try {
           await process.reprompt(session, systemPrompt);
-          live.systemPrompt = systemPrompt;
         } catch (error) {
-          console.warn(`${this.options.label} kept its old prompt`, error);
+          throw new Error(
+            `${this.options.label} could not update its instructions: ${errorMessage(error)}`,
+          );
         }
+        live.systemPrompt = systemPrompt;
       };
     if (fingerprint !== this.options.fingerprint() && !this.disposed) {
       // Settings saved while it opened: it would work with the old ones.

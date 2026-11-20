@@ -762,12 +762,14 @@ manages the conversation, also while that plugin starts, updates or failed to
 start. The host uses a text only while the plugin is active, its manifest still
 declares the section and the agent's type supports the sections. An agent on an
 execution target uses no `working-location` text, as no plugin can give its
-conversations their own folders. The owner's own choice for a section
+conversations their own folders. An agent with one session for its whole
+community has one prompt for every conversation: the call rejects for it, and
+it uses no text kept from before. The owner's own choice for a section
 in **Settings → Agent setup → Base instructions** wins over the plugin's text,
 and a protected agent uses no plugin text.
 `ctx.agents.conversationSections(pubkey, place)` resolves with the plugin's
 set as `{ text, applied, reason? }` per section, where `reason` is `"owner"`,
-`"protected"` or `"target"` when a prompt does not use the text, or with undefined when
+`"protected"`, `"target"` or `"community"` when a prompt does not use the text, or with undefined when
 the plugin holds none there. When the plugin replaces `working-location` in a
 Solo chat, the Canvas's folders are for reading, as in a chat with an assigned
 folder. The set is kept on this device, survives a restart, and is dropped
@@ -782,9 +784,12 @@ thread-scoped sessions take only notes addressed to their root. Notes are
 consumed once when the harness is ready to deliver the turn, and restored to
 the same conversation ahead of newer notes if delivery definitely never began.
 They remain in memory only, and the call returns false unless this copy runs
-the agent. Claude, Codex, Goose and Pi (`notes` on the type) show notes; for
-another harness the call still returns true, but its turns never include the
-note. A Pi turn that fails while it is handed to Pi may lose its notes.
+the agent. A turn whose outcome is unknown, such as one that fails after its
+prompt is built, does not get its notes back, so a note is never shown twice.
+Claude, Codex, Goose and Pi show notes and advertise it with `notes` on the
+type. Without the flag, support is unadvertised: a harness that builds its
+turns with `ctx.agents.harness.turnPrompt` still shows notes, and another one
+never does. The call returns true either way.
 
 A plugin with `host.files` gives one conversation of the owner's local agent
 its own working folder with
@@ -802,13 +807,18 @@ takes no folder. `path` is absolute or `~/…` and must be an existing
 directory; the call resolves with it as a real path. The folder is kept only on
 this device and is set once: the same folder again resolves, another rejects,
 because a session's history is found by the folder it ran in. For the same
-reason, a conversation that already has a session in the workspace rejects:
-the harness's `sessions` list names the conversations that do. A harness
-whose list can be behind (`sessions.ready`) is waited for first: Pi reads its
-sessions in the background, and Goose and Pi finish starting the
+reason, a conversation that already started in the workspace rejects. A
+harness records that when it first starts the conversation's session, in the
+same record the folder is saved in, so a start and an assignment that race have
+one winner: the later one sees it. For a conversation that started before this
+record existed, the harness's `sessions` list names the conversations that
+have a session, and a harness whose list forgets old sessions (`sessions.history`;
+Goose keeps the latest 200) is also asked for the conversation's own history.
+A harness whose list can be behind (`sessions.ready`) is waited for first: Pi
+reads its sessions in the background, and Goose and Pi finish starting the
 conversation's first turn if one is under way.
-The call rejects when the sessions cannot be read, as for a Pi agent that is
-not running.
+The call rejects when the sessions or history cannot be read, as for a Pi agent
+that is not running.
 If the folder later disappears, the conversation's next turn fails with an error naming it
 and never falls back to the workspace. The folder applies on the device that
 runs the agent, so messages from any of the owner's clients, such as mobile,

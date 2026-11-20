@@ -116,6 +116,7 @@ import { ownerReads, readyOwnerReads } from "./reads";
 import { createToolOperation, type AgentToolProvider } from "./tool-operation";
 import {
   assignConversationFolder as assignFolder,
+  ALREADY_STARTED,
   conversationFolder as storedFolder,
   conversationKey,
 } from "./conversation-folders";
@@ -129,6 +130,7 @@ import {
   conversationSections as storedSections,
   forgetConversationSections,
   setConversationSections as storeSections,
+  sectionsClaims,
   usableSections,
 } from "./conversation-sections";
 import { pluginSection } from "../agent-harness/sections";
@@ -489,7 +491,7 @@ export type TurnInstructions = Readonly<{ plugin: string; text: string }>;
 export type ConversationSection = Readonly<{
   text: string;
   applied: boolean;
-  reason?: "owner" | "protected" | "target";
+  reason?: "owner" | "protected" | "target" | "community";
 }>;
 /** One of an agent's conversation sessions on this device. Without `root` it
  * is the channel's one session: a channel-scoped agent's, a DM's or a Solo
@@ -512,6 +514,10 @@ export type AgentSessions = Readonly<{
    * the conversation's session, if it has one or one is starting, and
    * rejects when they cannot be read. */
   ready?(agent: AgentKey, conversation: string): Promise<void>;
+  /** For a harness whose `list` forgets old sessions: whether the harness
+   * itself holds history for the conversation, in the agent's workspace.
+   * Rejects when it cannot be read. */
+  history?(agent: Agent, conversation: string): Promise<boolean>;
   subscribe(listener: () => void): () => void;
 }>;
 /** Token counts as the harness reported them. An absent count is unknown, not
@@ -1204,8 +1210,9 @@ export type AgentType<Config = unknown> = {
    * `Agents.setConversationSections` applies to its agents. Without it, the
    * call rejects. */
   conversationSections?: true;
-  /** Gives a conversation's next turn the notes `Agents.note` left for it.
-   * Without it, a note for one of its agents is accepted and never shown. */
+  /** Advertises that a conversation's next turn gets the notes `Agents.note`
+   * left for it. Without it, support is unadvertised: a harness that builds
+   * its turns with `turnPrompt` still shows them, and another one never does. */
   notes?: true;
   /** Why protected runs must stop when this runtime cannot enforce the contract. */
   protectionUnavailable?: string;
@@ -1934,8 +1941,8 @@ export type Agents = {
    * has from 1 to 4096 bytes (UTF-8, after trimming), and the set at most
    * 12 KiB: a plugin cannot turn a section off. `place` follows the rules
    * of `setConversationInstructions`. Rejects while another plugin that is
-   * on manages the conversation, and for an agent type that does not
-   * support it. The owner's own choice for a section wins over the
+   * on manages the conversation, for an agent type that does not support
+   * it, and for an agent with one session for its whole community. The owner's own choice for a section wins over the
    * plugin's text, and a protected agent uses none: `conversationSections`
    * tells. Kept on this device, and dropped when the agent is deleted.
    * Plugins only. */
@@ -1948,7 +1955,8 @@ export type Agents = {
    * conversation, with whether a prompt built now uses each text. It does
    * not while the owner's choice for the section applies (`"owner"`), for a
    * protected agent (`"protected"`), for Working location on an execution
-   * target (`"target"`), while the plugin is not active, once its manifest
+   * target (`"target"`), for an agent with one session for its whole
+   * community (`"community"`), while the plugin is not active, once its manifest
    * no longer declares the section, or once the agent has a type that does
    * not support it. Undefined when the plugin gave none. */
   conversationSections(
@@ -5895,11 +5903,10 @@ export class AgentsService extends Service implements Agents {
             (session) =>
               !session.community &&
               conversationKey(session.channelId, session.root) === conversation,
-          )
+          ) ||
+        (await type.sessions?.history?.(agent, conversation))
       )
-        throw new Error(
-          "This conversation already started in the agent's workspace",
-        );
+        throw new Error(ALREADY_STARTED);
     }
     return assignFolder(this.storage, scope, key, conversation, folder);
   }
@@ -5967,12 +5974,20 @@ export class AgentsService extends Service implements Agents {
       throw new Error(
         `${type?.title ?? "This"} agents do not support conversation sections`,
       );
-    const manager = storedSections(this.storage, scope, key, conversation);
+    if (this.communityWide(agent))
+      throw new Error(
+        "A community session has one prompt for every conversation, so it takes no conversation sections",
+      );
+    // A save that is still being written claims the conversation too, and a
+    // removal frees it only once it is saved.
+    const claims = sectionsClaims(this.storage, scope, key, conversation);
     if (
-      manager &&
-      manager.plugin !== owner.id &&
-      // Also while it starts, updates or failed to start: it is still on.
-      this.ctx.pluginStatus.on?.(manager.plugin)
+      [...claims].some(
+        (plugin) =>
+          plugin !== owner.id &&
+          // Also while it starts, updates or failed to start: it is still on.
+          this.ctx.pluginStatus.on?.(plugin),
+      )
     )
       throw new Error("Another plugin manages this conversation");
     await storeSections(
@@ -6004,11 +6019,13 @@ export class AgentsService extends Service implements Agents {
             const current = pluginSection(id)?.id ?? id;
             const reason = agent.protection
               ? "protected"
-              : replacedBy(current, choices)
-                ? "owner"
-                : current === "working-location" && this.executions.read(key)
-                  ? "target"
-                  : undefined;
+              : this.communityWide(agent)
+                ? "community"
+                : replacedBy(current, choices)
+                  ? "owner"
+                  : current === "working-location" && this.executions.read(key)
+                    ? "target"
+                    : undefined;
             return [
               id,
               reason
@@ -6023,10 +6040,21 @@ export class AgentsService extends Service implements Agents {
     }
   }
   /** Whether the agent's type, as it is now, builds a conversation's
-   * sections into its prompt. */
-  private sectionsType(agent: Pick<Agent, "type">) {
-    return !!this.types().find((kind) => kind.key === agent.type)
-      ?.conversationSections;
+   * sections into its prompt: not while one community session serves every
+   * conversation, as a record keyed by one of them would reach the others. */
+  private sectionsType(agent: Agent) {
+    return (
+      !!this.types().find((kind) => kind.key === agent.type)
+        ?.conversationSections && !this.communityWide(agent)
+    );
+  }
+  /** Whether the agent runs one session for its whole community. */
+  private communityWide(agent: Agent) {
+    return (
+      this.types()
+        .find((kind) => kind.key === agent.type)
+        ?.sessionControls?.scope(agent) === "community"
+    );
   }
   /** The texts of `saved` that the agent's prompt uses now: only while its
    * plugin is active, for the sections its manifest declares now and for an
@@ -6034,7 +6062,7 @@ export class AgentsService extends Service implements Agents {
    * Working location text, as no plugin can give its conversations their
    * own folders. */
   private pluginSections(
-    agent: Pick<Agent, "key" | "type">,
+    agent: Agent,
     saved: NonNullable<ReturnType<typeof storedSections>>,
   ) {
     const declared =
@@ -6058,7 +6086,9 @@ export class AgentsService extends Service implements Agents {
   ): SectionChoices {
     const owner = ownerChoices(this.storage);
     const current = this.agent(agent.key) ?? agent;
-    const scope = ownerReads(this.relay(agent.key), pubkeyOf(agent.key))?.scope;
+    // A reconnecting relay keeps its scope, as a turn that starts then keeps
+    // its conversation's folder.
+    const scope = this.relay(agent.key)?.snapshot().scope;
     const saved =
       channelId && scope && !current.protection && this.sectionsType(current)
         ? storedSections(
