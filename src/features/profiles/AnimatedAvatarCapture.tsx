@@ -545,48 +545,48 @@ export function AnimatedAvatarCapture({
           {section === "Frame" && (
             <div className={styles.controls}>
               <div className={styles.filmstrip}>
-                {Array.from(
-                  { length: Math.min(8, frames.current.length) },
-                  (_, slot) => {
-                    const index = Math.round(
-                      (slot * (frames.current.length - 1)) /
-                        Math.max(1, Math.min(8, frames.current.length) - 1),
-                    );
+                {frames.current
+                  .filter(
+                    (_, i) => i % Math.ceil(frames.current.length / 8) === 0,
+                  )
+                  .map((frame) => {
+                    const i = frames.current.indexOf(frame);
                     return (
-                      <canvas
-                        key={index}
-                        width={ANIMATED_AVATAR_SIZE}
-                        height={ANIMATED_AVATAR_SIZE}
-                        ref={(node) => {
-                          const ctx = node?.getContext("2d");
-                          const frame = frames.current[index];
-                          if (ctx && frame)
-                            composeAvatarFrame(ctx, frame, composition);
+                      <button
+                        type="button"
+                        key={i}
+                        aria-label={`Choose frame ${i + 1}`}
+                        aria-pressed={poster === i}
+                        onClick={() => {
+                          setPoster(i);
                         }}
-                      />
+                      >
+                        <canvas
+                          width={ANIMATED_AVATAR_SIZE}
+                          height={ANIMATED_AVATAR_SIZE}
+                          ref={(node) => {
+                            const ctx = node?.getContext("2d");
+                            if (ctx)
+                              composeAvatarFrame(ctx, frame, composition);
+                          }}
+                        />
+                      </button>
                     );
-                  },
-                )}
-                <div aria-hidden="true" className={styles.selectorTrack}>
-                  <span
-                    className={styles.selector}
-                    style={{
-                      left: `${(100 * poster) / Math.max(1, frames.current.length - 1)}%`,
-                    }}
-                  />
-                </div>
+                  })}
+              </div>
+              <label className="text-label-sm">
+                Still frame
                 <input
-                  className={styles.scrubber}
-                  aria-label="Still frame"
                   type="range"
                   min={0}
                   max={Math.max(0, frames.current.length - 1)}
+                  step={1}
                   value={poster}
                   onChange={(event) => {
                     setPoster(Number(event.target.value));
                   }}
                 />
-              </div>
+              </label>
             </div>
           )}
           <Button
