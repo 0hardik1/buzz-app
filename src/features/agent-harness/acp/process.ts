@@ -46,6 +46,11 @@ export const STOP_TIMEOUT_MS = 5_000;
 
 const STDERR_LIMIT = 4_000;
 
+/** What a resumed session runs on, as far as Buzz knows: no provider a
+ * choice names, so a harness's `select` reapplies the choice's. Its model is
+ * unknown too: whatever the session was saved on. */
+export const SAVED: Choice = { provider: "\u0000saved", model: "" };
+
 /** Never reaches a harness, whatever its hooks or launch say: its Buzz tools
  * come over HTTP MCP, never a Buzz key. */
 export const PROTECTED_ENV: Readonly<Record<string, null>> = {
@@ -71,6 +76,31 @@ type Pending = {
   reject: (error: Error) => void;
 };
 
+type AcpLaunch = Readonly<{
+  cwd: string;
+  systemPrompt: string;
+  title?: string;
+  named?: (title: string) => void;
+  tools?: ToolServer;
+  choice?: () => Choice;
+  /** Built-ins beside the Buzz tools, for harnesses that take them. */
+  platform?: PlatformTools;
+  /** Replaces the harness's own base prompt with `systemPrompt` instead
+   * of appending it, for small models that a long prompt throws off. */
+  replacePrompt?: boolean;
+  /** Keys the harness can find the session by later; only a harness
+   * whose `newSessionMeta` sends them keeps them. */
+  tags?: Readonly<Record<string, string>>;
+  /** The id of a saved session to resume with `session/load`. It keeps
+   * its name, so `title` and `named` are ignored. */
+  load?: string;
+  /** The id of a saved session to reopen; see `open`. */
+  resume?: string;
+  /** Given the session as soon as the harness has opened it, before it
+   * is set up, so a caller can close one whose open then fails. */
+  onSession?: (session: AcpSession) => void;
+}>;
+
 export class AcpProcess {
   readonly exited: Promise<number | null>;
   private readonly sessions = new Map<string, AcpSession>();
@@ -80,6 +110,10 @@ export class AcpProcess {
     AcpSession,
     Promise<Error | undefined>
   >();
+  /** How many of `closing` each session id has, for `load` to refuse. */
+  private readonly unclosed = new Map<string, number>();
+  /** Saved sessions being resumed, each by one `open` at a time. */
+  private readonly loading = new Set<string>();
   private readonly calls = new Map<number, Pending>();
   private requests = 0;
   private buffer = "";
@@ -255,34 +289,43 @@ export class AcpProcess {
    * `systemPrompt` appended. With `named`, the harness names it instead when
    * it names sessions, and `named` takes that name. `tools` answers its Buzz
    * tools; without them it has no tools at all. Each turn runs on the
-   * provider and model `choice` gives as it starts. With `resume`, it opens
-   * that saved session instead, through `session/resume` when advertised,
-   * else a replayed `session/load`, and throws when neither is: it gets no
-   * instructions and no name, since it has both. */
-  async open(
-    launch: Readonly<{
-      cwd: string;
-      systemPrompt: string;
-      title?: string;
-      named?: (title: string) => void;
-      tools?: ToolServer;
-      choice?: () => Choice;
-      /** Built-ins beside the Buzz tools, for harnesses that take them. */
-      platform?: PlatformTools;
-      /** Replaces the harness's own base prompt with `systemPrompt` instead
-       * of appending it, for small models that a long prompt throws off. */
-      replacePrompt?: boolean;
-      /** Keys the harness can find the session by later; only a harness
-       * whose `newSessionMeta` sends them keeps them. */
-      tags?: Readonly<Record<string, string>>;
-      /** Given the session as soon as the harness has opened it, before it
-       * is set up, so a caller can close one whose open then fails. */
-      onSession?: (session: AcpSession) => void;
-      resume?: string;
-    }>,
-  ): Promise<AcpSession> {
+   * provider and model `choice` gives as it starts. With `load`, it resumes
+   * that saved session instead, or fails: never a new one in its place.
+   * With `resume`, it opens that saved session instead, through
+   * `session/resume` when advertised, else a replayed `session/load`, and
+   * throws when neither is: it gets no instructions and no name, since it
+   * has both. */
+  async open(launch: AcpLaunch): Promise<AcpSession> {
+    const { load } = launch;
+    if (load === undefined) return this.opening(launch);
+    const { label } = this.hooks;
+    if (this.capabilities.loadSession !== true)
+      throw new Error(`This ${label} cannot resume a session`);
+    // Whether a harness keeps a `session/new` system prompt is unknown.
+    if (
+      launch.systemPrompt &&
+      !this.hooks.systemPrompt &&
+      this.advertises("systemPrompt")
+    )
+      throw new Error(
+        `This ${label} cannot resume a session with its system prompt`,
+      );
+    if (this.sessions.has(load) || this.loading.has(load))
+      throw new Error(`This ${label} session is already open`);
+    // Including a close the harness never acknowledged.
+    if (this.unclosed.has(load))
+      throw new Error(`This ${label} session has not finished closing`);
+    this.loading.add(load);
+    try {
+      return await this.opening(launch);
+    } finally {
+      this.loading.delete(load);
+    }
+  }
+
+  private async opening(launch: AcpLaunch): Promise<AcpSession> {
     const { hooks } = this;
-    const { resume } = launch;
+    const { load, resume, systemPrompt } = launch;
     const reopen = !resume
       ? undefined
       : this.advertises("resume")
@@ -292,13 +335,14 @@ export class AcpProcess {
           : undefined;
     if (resume && !reopen)
       throw new Error(`This ${hooks.label} can't resume sessions`);
-    const named =
-      launch.named && (await this.names()) ? launch.named : undefined;
-    const title = named ? undefined : launch.title;
-    const provider = launch.choice?.().provider ?? "";
-    const { systemPrompt } = launch;
     const prompting = !!systemPrompt && !hooks.systemPrompt;
     const standard = prompting && this.advertises("systemPrompt");
+    const named =
+      load === undefined && launch.named && (await this.names())
+        ? launch.named
+        : undefined;
+    const title = named || load !== undefined ? undefined : launch.title;
+    const provider = launch.choice?.().provider ?? "";
     let server: HostMcpServer | undefined;
     // The harness connects while it opens the session, before it is known here.
     let session: AcpSession | undefined;
@@ -357,28 +401,39 @@ export class AcpProcess {
     let sessionId: string;
     let opened: ConfigOptions;
     try {
-      ({ sessionId, ...opened } = (await this.request(
-        "session/new",
-        {
-          cwd: launch.cwd,
-          mcpServers: buzz ? [buzz] : [],
-          ...(standard && {
-            systemPrompt: {
-              mode: "append",
-              content: [{ type: "text", text: systemPrompt }],
-            },
-          }),
-          ...(hooks.newSessionMeta && {
-            _meta: hooks.newSessionMeta(buzz, {
-              ...(title ? { title } : {}),
-              provider,
-              ...(launch.platform ? { platform: launch.platform } : {}),
-              ...(launch.tags ? { tags: launch.tags } : {}),
+      // Replayed history arrives before the answer, while the session is
+      // not yet in `sessions`, so none of it reaches the session.
+      if (load !== undefined) {
+        sessionId = load;
+        // ACP's load answer may be `null`: it offers no settings.
+        opened = ((await this.request(
+          "session/load",
+          { sessionId, cwd: launch.cwd, mcpServers: buzz ? [buzz] : [] },
+          REQUEST_TIMEOUT_MS,
+        )) ?? {}) as ConfigOptions;
+      } else
+        ({ sessionId, ...opened } = (await this.request(
+          "session/new",
+          {
+            cwd: launch.cwd,
+            mcpServers: buzz ? [buzz] : [],
+            ...(standard && {
+              systemPrompt: {
+                mode: "append",
+                content: [{ type: "text", text: systemPrompt }],
+              },
             }),
-          }),
-        },
-        REQUEST_TIMEOUT_MS,
-      )) as ConfigOptions & { sessionId: string });
+            ...(hooks.newSessionMeta && {
+              _meta: hooks.newSessionMeta(buzz, {
+                ...(title ? { title } : {}),
+                provider,
+                ...(launch.platform ? { platform: launch.platform } : {}),
+                ...(launch.tags ? { tags: launch.tags } : {}),
+              }),
+            }),
+          },
+          REQUEST_TIMEOUT_MS,
+        )) as ConfigOptions & { sessionId: string });
     } catch (error) {
       void server?.close();
       // Signing in is offered with what `initialize` advertised.
@@ -391,8 +446,11 @@ export class AcpProcess {
       sessionId,
       server,
       launch.choice,
-      { provider, model: "" },
-      prompting && !standard ? systemPrompt : "",
+      // A resumed session runs on whatever it was saved with (goose 1.57.0
+      // keeps its saved provider), so its first turn puts it on the choice.
+      load === undefined ? { provider, model: "" } : { ...SAVED },
+      // A resumed conversation already opens with it.
+      prompting && !standard && load === undefined ? systemPrompt : "",
     );
     session.offer(opened);
     session.named = named;
@@ -445,8 +503,14 @@ export class AcpProcess {
       if (!this.sessions.delete(session.id)) return;
       ending = this.end(session);
       this.closing.set(session, ending);
+      const { id } = session;
+      this.unclosed.set(id, (this.unclosed.get(id) ?? 0) + 1);
       const settled = (failure?: unknown) => {
-        if (!failure) this.closing.delete(session);
+        if (failure) return;
+        this.closing.delete(session);
+        const left = (this.unclosed.get(id) ?? 1) - 1;
+        if (left) this.unclosed.set(id, left);
+        else this.unclosed.delete(id);
       };
       void ending.then(settled, settled);
     }

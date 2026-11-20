@@ -67,6 +67,12 @@ export class AcpSession {
   /** Takes the first name the harness generates for it; a titled session gets
    * none. */
   named: ((title: string) => void) | undefined;
+  /** Sees each update first, and whether a `session/prompt` is in flight.
+   * A `session/load` replay never reaches it. One that throws is logged,
+   * and the update is handled anyway. */
+  observe:
+    | ((update: Record<string, unknown>, prompting: boolean) => void)
+    | undefined;
   /** Run before each new turn is sent, one at a time: brings the session's
    * system prompt up to date. */
   beforeTurn: (() => Promise<void>) | undefined;
@@ -295,6 +301,14 @@ export class AcpSession {
 
   /** Called by the process with each `session/update` for this session. */
   update(update: Record<string, unknown>) {
+    try {
+      this.observe?.(update, this.prompting);
+    } catch (error) {
+      console.error(
+        `${this.acp.hooks.label} could not observe an update`,
+        error,
+      );
+    }
     const kind = update.sessionUpdate;
     // Kept through a load's replay too, before its owner is attached.
     if ((this.parity || this.replaying) && kind === "config_option_update") {
