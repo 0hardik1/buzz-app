@@ -1468,13 +1468,20 @@ it("reranks message hits once the decision provider can answer, holding them onc
     });
     await answer();
     expect(order()).toEqual(["one", "two", "runbook"]);
-    expect(screen.queryByText(/Reranked/)).toBeNull();
+    expect(screen.queryByTitle("Reranked")).toBeNull();
+    expect(
+      screen.getByRole("group", { name: "Messages" }),
+    ).not.toHaveAccessibleDescription(/Reranked/);
 
     // New text isn't held.
     await search("deploys");
     await answer();
     expect(order()).toEqual(["runbook", "one", "two"]);
-    expect(screen.getByText(/· Reranked/)).toBeVisible();
+    expect(screen.getByTitle("Reranked")).toBeInTheDocument();
+    // The mark is hidden from assistive technology; the group says it.
+    expect(
+      screen.getByRole("group", { name: "Messages" }),
+    ).toHaveAccessibleDescription(/Reranked/);
 
     // Nor is the earlier text, once the person has typed past it.
     await search("deploy");
@@ -1491,7 +1498,7 @@ it("reranks message hits once the decision provider can answer, holding them onc
     await act(async () => vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS));
     expect(limits).toHaveLength(reads);
     expect(order()).toEqual(["runbook", "one", "two"]);
-    expect(screen.getByText(/· Reranked/)).toBeVisible();
+    expect(screen.getByTitle("Reranked")).toBeInTheDocument();
     view.rerender(<SearchResults {...props} query="deployed" />);
     await act(async () => vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS));
     expect(limits.slice(reads)).toEqual([20]);
@@ -1607,7 +1614,10 @@ it.each([
       expect(order()).toEqual(
         to ? ["runbook", "one", "two"] : ["guide", "three", "four"],
       );
-      expect(screen.getByText(/Reranked/)).toBeVisible();
+      expect(screen.getByTitle("Reranked")).toBeInTheDocument();
+      expect(
+        screen.getByRole("group", { name: "Messages" }),
+      ).toHaveAccessibleDescription(/Reranked/);
     } finally {
       cleanup();
       owner.dispose();

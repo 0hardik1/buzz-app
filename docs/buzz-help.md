@@ -261,6 +261,10 @@ In a Codex agent’s settings, open **Huddle voice** in the **Settings** tab to 
   means nothing is unread, or its unread isn't known yet, for example because that
   community isn't connected or was closed to make room for one you opened. Only
   the first 24 communities get badges at startup; others show one once opened.
+- To reorder communities, drag one in the switcher, or use **Move up** and
+  **Move down** in its right-click menu. The order is saved on this device and
+  sets the numbered shortcuts: ⌘1 is Personal space and ⌘2–9 follow the
+  communities in order. A newly joined community goes last.
 - Community owners and admins manage access in the community's **Membership**
   settings (also reached from **Invite to community** in the community picker's
   right-click menu). **Members** shows the roster and updates as membership changes arrive.
@@ -475,6 +479,17 @@ Quitting Buzz also turns it off.
   that message's author and time on one line above its text. The time is left
   out where message timestamps are hidden. A selection inside a message's text
   copies that text alone.
+
+- A plugin can relay one of your agents' messages into another conversation
+  as you. When the message names the agent and its verified owner is the
+  sender, it shows as that agent's collapsed line instead of the sender's own
+  message: the agent's avatar and name, the chat it came from if you are in that
+  chat, a one-line preview and the time. Select the line to read the whole
+  message and who it was sent as and to; select the chat name to open that
+  chat. Two or more in a row fold into one line showing the latest one and how
+  many more there are; it names their chat when they all came from the same
+  one, or says they came from other chats. Select it to list each one. A claim
+  that cannot be verified shows as the sender's ordinary message.
 
 - Only explicit additions by another member and removals appear as centered
   channel notices; self-joins and voluntary leaves are hidden.
@@ -754,7 +769,10 @@ Quitting Buzz also turns it off.
   dots, and do not contribute to the sidebar’s floating **N unread** buttons or
   their avatar previews. The macOS Dock unread dot follows the rows: a muted channel
   lights it only for a mention of you or **Mark as unread**, and a muted DM still lights it.
-  Muting does not mark messages or threads as read.
+  Muted channels show only direct mentions in Activity, including its sidebar
+  preview and unread count. Marking an ordinary Activity row unread does not
+  override the mute. Muted DMs still appear. Unmuting shows retained activity
+  again with its read state intact.
   In a channel's or DM's main message box, typing `/mute` by itself toggles
   Mute for it, and a toast confirms it once saved. The command is not posted as
   a message. If the change cannot be saved, a notice offers **Retry** instead. Thread
@@ -842,8 +860,10 @@ Quitting Buzz also turns it off.
   conversation**) to search a conversation's full history.
 - **Search results** list the best match's group first: channels, people,
   pages and messages are ordered by how well they match, each heading showing
-  a count and why it ranks there. Messages lead when the text reads like a
-  phrase. Each message shows the words around the match. A panel beside the
+  a count and why it ranks there. **Top results** shows the first few rows of
+  each group; a group cut short says how many it shows, such as "Top 5 of
+  60+", and keeps its heading and **Show all** button in view while you
+  scroll. Messages lead when the text reads like a phrase. Each message shows the words around the match. A panel beside the
   results previews the highlighted row: the message with the ones just before
   and after it, or a channel's or person's latest messages. Up and Down move
   the highlight, as do Control+J or Control+N and Control+K or Control+P on
@@ -851,8 +871,8 @@ Quitting Buzz also turns it off.
   result** and **Next search result** in Settings → Shortcuts, and the key
   hints show them. Up and Down keep working. Tab, Control+L or Control+F
   shows the next group whole and Shift+Tab, Control+H or Control+B the
-  previous one, as do the group filter buttons above the results and choosing
-  a group's heading when it has more; Escape goes back. Groups reorder as
+  previous one, as do the group filter buttons above the results and a
+  group's **Show all**; Escape goes back. Groups reorder as
   slower results arrive until you move the highlight; after that they stay
   put and later groups join at the end. The panel and key hints hide in
   narrow windows.
@@ -860,7 +880,8 @@ Quitting Buzz also turns it off.
   (Settings → Decisions API), searching messages by relevance reads the first
   60 matches, then has the provider reorder them by how well each answers what
   you typed. The keyword order shows first; the reordered list replaces it a
-  moment later, and the heading says **Reranked**. If you've already moved the
+  moment later, and a small sparkle appears at the end of the Messages heading
+  (hover it to see **Reranked**). If you've already moved the
   highlight or chosen a result, the order stays as it is. The provider sees the query and those
   messages' text, conversation names and authors. Newest-first and filter-only
   searches aren't reranked.
@@ -955,6 +976,13 @@ Quitting Buzz also turns it off.
   cleanup is strictly a desktop-local behaviour: when an agent sends attachments
   it read from a remote execution target, the post is published normally but no
   local cleanup is triggered and no remote source is deleted.
+- **Dragging files in**: while files are dragged over a conversation, a dashed
+  frame marks where they will attach and the messages stay visible. Rest the
+  drag for about 0.7 seconds on a channel, DM or chat in the sidebar, or on a
+  message's thread summary, and it opens, so the same drag can continue into
+  that conversation or thread. The row highlights and blinks twice first; with
+  reduced motion it only highlights. Releasing the files on a sidebar row
+  attaches nothing. An image dragged from a message works the same way.
 - **Emoji suggestions** appear when you type `:` and an emoji name. If a name
   is shortened with an ellipsis, hover over it or use the arrow keys to select
   it and see the full name in a tooltip. A chosen or picked emoji is followed
@@ -1879,6 +1907,8 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   sources at startup and once per hour while the app is visible. Checks do not
   install or reload plugins. A notice offers **Update and reload**, or
   **Review permissions** when access increases; either opens the update review.
+  While a request waits for a check or another review, it shows **Preparing update…**;
+  **Later** cancels that pending request. Other Update actions wait until it finishes.
   Even when access is unchanged, choose **Update** in that review to install and
   reload the candidate.
   Click the notice body to open that plugin’s update checkbox in Manage plugins.
