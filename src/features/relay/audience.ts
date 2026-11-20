@@ -2,20 +2,22 @@ import type { RootContent } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
-import type { EventData } from "./events";
 import { visibleHtmlSource } from "./message-content";
+
+/** Only a message's tags decide its audience. */
+type Tagged = Readonly<{ tags: readonly (readonly string[])[] }>;
 
 /** The message's signed `audience` tag names agents: coordination between
  * agents, which people see quietly and are not notified of. Any other value,
  * or none, is for everyone. */
-export const agentAudience = (event: EventData) =>
+export const agentAudience = (event: Tagged) =>
   event.tags.some(([name, value]) => name === "audience" && value === "agents");
 
 /** The signed `audience` a message is shown with: `agents` is quiet
  * coordination between agents; `details` is fuller material for people, read
  * in its own viewer. Any other value, or none, is for everyone. */
 export const messageAudience = (
-  event: EventData,
+  event: Tagged,
 ): "agents" | "details" | undefined =>
   agentAudience(event)
     ? "agents"
