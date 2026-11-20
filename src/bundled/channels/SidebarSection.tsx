@@ -31,6 +31,7 @@ import {
   ArrowUpIcon,
   ArrowsDownUpIcon,
   CaretDownIcon,
+  CaretLeftIcon,
   ChatsCircleIcon,
   ChatUnreadIcon,
   DotsThreeIcon,
@@ -48,6 +49,12 @@ import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Field } from "../../shared/design-system/ui/Field";
 import { Input } from "../../shared/design-system/ui/Input";
 import { NavigationSectionHeading } from "../../shared/design-system/ui/NavigationSection";
+import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
+import {
+  setSidebarSeeAll,
+  useSidebarSeeAll,
+  useSidebarSeeAllReturning,
+} from "./useSidebarSeeAll";
 import type { RelaySession } from "../../features/relay/session";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import type { SidebarSortMode } from "../../features/relay/sidebar-sort";
@@ -188,6 +195,15 @@ export function SidebarSection({
   // The menu unmounts while hidden, so it must not reopen when shown again.
   if (hideMoreActions && menuOpen) setMenuOpen(false);
   const [removeOpen, setRemoveOpen] = useState(false);
+  const seeingAll = useSidebarSeeAll() === sectionKey;
+  const returning = useSidebarSeeAllReturning();
+  const back = useRef<HTMLButtonElement>(null);
+  // Going in or back, focus follows to the other level's control.
+  const focusBack = useRef(false);
+  useEffect(() => {
+    if (seeingAll && focusBack.current) back.current?.focus();
+    focusBack.current = false;
+  }, [seeingAll]);
   const pendingToggle = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(pendingToggle.current), []);
   const [activeOpen, setActiveOpen] = useState(false);
@@ -217,7 +233,29 @@ export function SidebarSection({
       data-drop-edge={dropEdge}
       data-section-dragging={dragging || undefined}
       data-menu-open={menuOpen || undefined}
+      data-see-all={seeingAll || undefined}
+      data-see-all-returning={returning || undefined}
     >
+      {seeingAll && (
+        <NavigationItem
+          ref={back}
+          data-see-all-back=""
+          icon={<CaretLeftIcon size={14} />}
+          label="Back"
+          aria-label="Back to all cards"
+          onClick={() => {
+            setSidebarSeeAll(undefined);
+            // Back on the main level, focus lands on this card again.
+            requestAnimationFrame(() =>
+              document
+                .querySelector<HTMLElement>(
+                  `[data-sidebar-section="${CSS.escape(sectionKey)}"] summary`,
+                )
+                ?.focus({ preventScroll: true }),
+            );
+          }}
+        />
+      )}
       <NavigationSectionHeading
         disclosure
         revealActions
@@ -633,7 +671,19 @@ export function SidebarSection({
             </SidebarCardDisplayContext.Provider>
           </div>
         ) : heightScope ? (
-          <ResizableRows scope={heightScope} card={sectionKey} label={title}>
+          <ResizableRows
+            scope={heightScope}
+            card={sectionKey}
+            label={title}
+            seeAll={{
+              full: seeingAll,
+              hidden: !!channels?.rows.length,
+              open: () => {
+                focusBack.current = true;
+                setSidebarSeeAll(sectionKey);
+              },
+            }}
+          >
             {children}
           </ResizableRows>
         ) : (
@@ -648,11 +698,13 @@ function ResizableRows({
   scope,
   card,
   label,
+  seeAll,
   children,
 }: {
   scope: string;
   card: string;
   label: string;
+  seeAll: { full: boolean; hidden: boolean; open(): void };
   children: ReactNode;
 }) {
   const [height, resize, toggle] = useSidebarCardHeight(scope, card);
@@ -662,6 +714,7 @@ function ResizableRows({
       height={height}
       onResize={resize}
       onToggle={toggle}
+      seeAll={seeAll}
     >
       {children}
     </SidebarCardResize>
