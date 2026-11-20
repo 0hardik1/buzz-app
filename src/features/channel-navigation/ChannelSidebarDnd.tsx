@@ -297,12 +297,17 @@ function CardDropLine() {
     const cards = card?.closest("[data-sidebar-cards]");
     const list = card && scroller(card);
     if (!node || !card || !cards || !list) return;
+    // The cards beside the target: top-level cards, or the workspaces a Solo
+    // region composes inside its own card.
+    const region =
+      card.parentElement?.closest("[data-sidebar-section]") ?? null;
     const shown = [
       ...cards.querySelectorAll<HTMLElement>("[data-sidebar-section]"),
     ].filter(
       (element) =>
         element.getClientRects().length > 0 &&
-        !element.parentElement?.closest("[data-sidebar-section]"),
+        (element.parentElement?.closest("[data-sidebar-section]") ?? null) ===
+          region,
     );
     const index = shown.indexOf(card) + (before ? 0 : 1);
     const [upper, lower] = [shown[index - 1], shown[index]];
