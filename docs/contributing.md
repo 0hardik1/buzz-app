@@ -890,6 +890,19 @@ Buzz identity or signing credentials. It is not native GUI acceptance, a signed
 package, or a cross-platform release gate. `just scan` remains available locally;
 CI does not add full scans to commit/push or ordinary interactive feedback rounds.
 
+### Native browser test scheduling
+
+The ordinary Linux browser matrix starts without the native fixture. The two
+required native browser jobs use the same Chromium/WebKit projects and assertions
+after the verified fixture is available. `playwright.ci.config.mjs` owns the list
+of native-dependent test files; add a file there when it uses `nativeFixture`.
+Forgetting that classification fails in CI because ordinary jobs have no native
+artifact and the helper forbids a build fallback. The coverage guard discovers
+all groups and requires every test/project exactly once. Classification controls
+scheduling, not which source changes can affect a test: all groups run on every
+PR. Local browser commands still run the complete suite.
+
+
 ### On-demand Windows validation
 
 Automatic PR/main CI is Linux-only. Run the existing workflow manually for native

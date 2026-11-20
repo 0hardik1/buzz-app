@@ -91,7 +91,7 @@ test("Linux shards and macOS recording discover every CI functional test/project
     /^ {8}run: .+ -- (\.\/bin\/pnpm test:browser:ci .+)$/m,
   )?.[1];
   assert.ok(command, "functional invocation must exist");
-  const discover = (args, weights = "") => {
+  const discover = (args, weights = "", nativeMode = "all") => {
     const result = spawnSync(
       "pnpm",
       ["--silent", ...args, "--list", "--reporter=json"],
@@ -99,7 +99,11 @@ test("Linux shards and macOS recording discover every CI functional test/project
         encoding: "utf8",
         timeout: 180_000,
         maxBuffer: 16 * 1024 * 1024,
-        env: { ...process.env, PWTEST_SHARD_WEIGHTS: weights },
+        env: {
+          ...process.env,
+          PWTEST_SHARD_WEIGHTS: weights,
+          BUZZ_BROWSER_NATIVE_TESTS: nativeMode,
+        },
       },
     );
     assert.equal(result.error, undefined);
@@ -137,6 +141,13 @@ test("Linux shards and macOS recording discover every CI functional test/project
     (step) => step.name === "Functional journeys",
   );
   assert.equal(functional.env.PWTEST_SHARD_WEIGHTS, `\${{ matrix.weights }}`);
+  const regularJob = parse(workflow).jobs.browser;
+  const nativeJob = parse(workflow).jobs.browser_native;
+  assert.equal(regularJob.needs, undefined);
+  assert.equal(regularJob.env.BUZZ_BROWSER_FIXTURE_DIR, undefined);
+  assert.equal(regularJob.env.BUZZ_BROWSER_NATIVE_TESTS, "exclude");
+  assert.deepEqual(nativeJob.needs, ["browser_fixture"]);
+  assert.equal(nativeJob.env.BUZZ_BROWSER_NATIVE_TESTS, "only");
   const jobs = browserJobs();
   const changedEngines = new Set();
   for (const { engine, shard, shards, weights } of jobs) {
@@ -147,12 +158,19 @@ test("Linux shards and macOS recording discover every CI functional test/project
       .replaceAll(/\$\{\{ matrix\.shard \}\}/g, shard)
       .replaceAll(/\$\{\{ matrix\.shards \}\}/g, shards);
     const args = expanded.replace(/^\.\/bin\/pnpm /, "").split(/\s+/);
-    const selected = discover(args, weights);
+    const selected = discover(
+      args,
+      weights,
+      regularJob.env.BUZZ_BROWSER_NATIVE_TESTS,
+    );
     // Some shards can keep the same tests. Find a changed shard for each engine
     // so this still catches Playwright ignoring the weights after an upgrade.
     if (
       !changedEngines.has(engine) &&
-      !isDeepStrictEqual(selected, discover(args))
+      !isDeepStrictEqual(
+        selected,
+        discover(args, "", regularJob.env.BUZZ_BROWSER_NATIVE_TESTS),
+      )
     ) {
       changedEngines.add(engine);
     }
@@ -166,6 +184,30 @@ test("Linux shards and macOS recording discover every CI functional test/project
       changedEngines.has(engine),
       `${engine} weights must change the split`,
     );
+  }
+  const nativeStep = nativeJob.steps.find(
+    (step) => step.name === "Functional journeys",
+  );
+  assert.equal(nativeStep.if, undefined);
+  assert.equal(nativeStep["continue-on-error"], undefined);
+  const nativeCommand = nativeStep.run.match(
+    / -- (\.\/bin\/pnpm test:browser:ci .+)$/,
+  )?.[1];
+  assert.ok(nativeCommand);
+  assert.deepEqual(nativeJob.strategy.matrix.engine, ["chromium", "webkit"]);
+  for (const engine of nativeJob.strategy.matrix.engine) {
+    const selected = discover(
+      nativeCommand
+        .replaceAll(/\$\{\{ matrix\.engine \}\}/g, engine)
+        .replace(/^\.\/bin\/pnpm /, "")
+        .split(/\s+/),
+      "",
+      nativeJob.env.BUZZ_BROWSER_NATIVE_TESTS,
+    );
+    assert.ok(selected.length > 0);
+    assert.ok(selected.every((id) => id.startsWith(`${engine}:`)));
+    actual.push(...selected);
+    t.diagnostic(`${engine} native: ${selected.length} functional tests`);
   }
   const recording = parse(workflow).jobs.media_recorder.steps.find(
     (step) => step.name === "Recording journeys",
@@ -319,7 +361,7 @@ test("required gate executes its real shell and rejects every unsuccessful lane"
   assert.doesNotMatch(required, /^ {8}if:/m);
   assert.match(
     required,
-    /^ {4}needs: \[javascript_checks, javascript, native, measurements, perf_smoke, browser_fixture, browser, media_recorder, agent_protection\]$/m,
+    /^ {4}needs: \[javascript_checks, javascript, native, measurements, perf_smoke, browser_fixture, browser, browser_native, media_recorder, agent_protection\]$/m,
   );
   assert.doesNotMatch(required, /continue-on-error/);
   const lanes = [
@@ -330,6 +372,7 @@ test("required gate executes its real shell and rejects every unsuccessful lane"
     "PERF_SMOKE",
     "FIXTURE",
     "BROWSER",
+    "BROWSER_NATIVE",
     "MEDIA_RECORDER",
     "AGENT_PROTECTION",
   ];

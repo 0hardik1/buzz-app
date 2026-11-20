@@ -362,7 +362,6 @@ jobs:
     name: Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})
     # Measurements stay isolated on their own runner, not on our critical path.
     # CI required still requires their success independently of these jobs.
-    needs: [browser_fixture]
     runs-on: *linux_8core_or_standard
     # Match package.json's Playwright version and pin immutable browser/OS layers.
     container:
@@ -373,7 +372,7 @@ jobs:
         shell: bash
     env:
       HOME: /root
-      BUZZ_BROWSER_FIXTURE_DIR: target/ci-browser-fixture
+      BUZZ_BROWSER_NATIVE_TESTS: exclude
     # Keep eleven Chromium and eighteen WebKit shards, with two workers each.
     # Give shards with slower tests fewer tests, based on previous CI runs.
     # Playwright still finds and includes new tests automatically.
@@ -408,19 +407,6 @@ jobs:
         with:
           browsers: "true"
           browser-engine: ${{ matrix.engine }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          artifact-ids: ${{ needs.browser_fixture.outputs.artifact-id }}
-          merge-multiple: true
-          path: target/ci-browser-fixture
-      - name: Verify native browser fixture
-        run: |
-          cd target/ci-browser-fixture
-          tar -xf browser-fixture.tar
-          test "$(cat revision)" = "$(git rev-parse HEAD)"
-          sha256sum --check SHA256SUMS
-          test -x fixture-bridge
-          test -x buzzodz
       # CI required enforces measurement success. --no-deps avoids repeating
       # measurements here; the matrix covers both engines on separate runners.
       # Each weight controls one shard's share of the tests.
@@ -435,6 +421,63 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: browser-journeys-${{ matrix.engine }}-${{ matrix.shard }}
+          path: test-results/browser
+          retention-days: 7
+
+  browser_native:
+    if: github.event_name != 'workflow_dispatch'
+    name: Native browser journeys (${{ matrix.engine }})
+    # Only these journeys consume the same-revision native artifact.
+    needs: [browser_fixture]
+    runs-on: *linux_8core_or_standard
+    # Match package.json's Playwright version and pin immutable browser/OS layers.
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --init --ipc=host
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOME: /root
+      BUZZ_BROWSER_FIXTURE_DIR: target/ci-browser-fixture
+      BUZZ_BROWSER_NATIVE_TESTS: only
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Trust this container workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: ./.github/actions/setup
+        with:
+          browsers: "true"
+          browser-engine: ${{ matrix.engine }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.browser_fixture.outputs.artifact-id }}
+          merge-multiple: true
+          path: target/ci-browser-fixture
+      - name: Verify native browser fixture
+        run: |
+          cd target/ci-browser-fixture
+          tar -xf browser-fixture.tar
+          test "$(cat revision)" = "$(git rev-parse HEAD)"
+          sha256sum --check SHA256SUMS
+          test -x fixture-bridge
+          test -x buzzodz
+      - name: Functional journeys
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
+        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Native browser journeys (${{ matrix.engine }})" -- ./bin/pnpm test:browser:ci --project ${{ matrix.engine }} --no-deps --reporter=list,json
+      - name: Browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-native-${{ matrix.engine }}
           path: test-results/browser
           retention-days: 7
 
@@ -582,7 +625,7 @@ jobs:
   required:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Automatic CI (not requested)' || 'CI required' }}
     if: always() && github.event_name != 'workflow_dispatch'
-    needs: [javascript_checks, javascript, native, measurements, perf_smoke, browser_fixture, browser, media_recorder, agent_protection]
+    needs: [javascript_checks, javascript, native, measurements, perf_smoke, browser_fixture, browser, browser_native, media_recorder, agent_protection]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -595,9 +638,10 @@ jobs:
           PERF_SMOKE: ${{ needs.perf_smoke.result }}
           FIXTURE: ${{ needs.browser_fixture.result }}
           BROWSER: ${{ needs.browser.result }}
+          BROWSER_NATIVE: ${{ needs.browser_native.result }}
           MEDIA_RECORDER: ${{ needs.media_recorder.result }}
           AGENT_PROTECTION: ${{ needs.agent_protection.result }}
         run: |
-          for result in "$JAVASCRIPT_CHECKS" "$JAVASCRIPT" "$NATIVE" "$MEASUREMENTS" "$PERF_SMOKE" "$FIXTURE" "$BROWSER" "$MEDIA_RECORDER" "$AGENT_PROTECTION"; do
+          for result in "$JAVASCRIPT_CHECKS" "$JAVASCRIPT" "$NATIVE" "$MEASUREMENTS" "$PERF_SMOKE" "$FIXTURE" "$BROWSER" "$BROWSER_NATIVE" "$MEDIA_RECORDER" "$AGENT_PROTECTION"; do
             test "$result" = success || exit 1
           done
