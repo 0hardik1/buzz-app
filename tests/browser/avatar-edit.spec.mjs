@@ -742,8 +742,8 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
       route.fulfill({
         contentType: "text/javascript",
         body: `export * from '/src/features/profiles/animated-avatar-capture.ts?capture-fixture';
-      export async function openAvatarCamera() { return { getTracks: () => [{ stop() {} }] }; }
-      export async function listAvatarCameras() { return []; }
+      export async function openAvatarCamera(device) { window.avatarTestCamera = device; return { getTracks: () => [{ stop() {} }] }; }
+      export async function listAvatarCameras() { return [{deviceId:"one",label:"Front camera"},{deviceId:"two",label:"Desk camera"}]; }
       export function preloadAvatarSegmenter() {}
       export async function recordAnimatedAvatarFrames() {
         return { backgroundRemoved: true, frames: [0, 1, 2].map(index => {
@@ -780,9 +780,25 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   await page.getByRole("button", { name: "Edit avatar", exact: true }).click();
   await page.getByRole("tab", { name: "Animated", exact: true }).click();
   await page.getByRole("button", { name: "Start camera", exact: true }).click();
+  const stage = page
+    .locator("video[aria-label='Camera preview']")
+    .locator("..");
+  await expect(stage).toHaveCSS("border-radius", "50%");
+  await page.getByRole("combobox", { name: "Camera", exact: true }).click();
+  await page.getByRole("option", { name: "Desk camera" }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.avatarTestCamera))
+    .toBe("two");
   await page
     .getByRole("button", { name: "Record 3 seconds", exact: true })
     .click();
+  await page.getByRole("button", { name: "Background", exact: true }).click();
+  await page.getByRole("button", { name: "Transparent background" }).click();
+  await page.getByRole("button", { name: "Frame", exact: true }).click();
+  await page.getByRole("button", { name: "Choose frame 2" }).click();
+  await expect(page.getByRole("slider", { name: "Still frame" })).toHaveValue(
+    "1",
+  );
   await page
     .getByRole("button", { name: "Use animated avatar", exact: true })
     .click();

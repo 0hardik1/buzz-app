@@ -1,19 +1,96 @@
 .capture {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-4);
   padding-block: var(--space-3);
 }
-.preview {
-  width: 100%;
+.stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  width: min(100%, 11rem);
   aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: var(--radius-control);
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--surface-inset);
 }
-.capture label {
+.preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+video.preview {
+  transform: scaleX(-1);
+}
+.actions,
+.tools,
+.filmstrip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.tools > div,
+.controls {
   display: grid;
   gap: var(--space-2);
 }
+.tools > div {
+  justify-items: center;
+}
+.controls label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.controls input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+.filmstrip {
+  flex-wrap: nowrap;
+}
+.filmstrip button {
+  min-width: 0;
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.filmstrip canvas {
+  width: 100%;
+}
+.filmstrip button[aria-pressed="true"] {
+  outline: 2px solid currentColor;
+}
 
-video.preview {
-  transform: scaleX(-1);
+.stage[data-phase="recording"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--text-danger);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.stage[data-phase="idle"] {
+  border: 2px dashed var(--border-standard);
+}
+.controls fieldset {
+  width: 100%;
+}
+.stage[data-phase="review"],
+.stage[data-phase="saving"] {
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--border-standard);
+}
+.stage:focus-within {
+  outline: 2px solid var(--text-standard);
+}
+canvas.preview {
+  touch-action: none;
+  cursor: grab;
+}
+canvas.preview:active {
+  cursor: grabbing;
 }
