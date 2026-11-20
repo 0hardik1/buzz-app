@@ -150,11 +150,11 @@ sidebar coordinates must match what the sidebar signer produces, and recipe
 coordinates must satisfy the recipe contract.
 
 The sidebar defaults to **Plugins** (apps and sidebar pages such as Activity),
-**Solo**, **Favorites**, personal workspaces, **Team**, **Forums**, and
-**Direct messages**. After an upgrade from the separate Solo and Team
+**Solo**, **Favorites**, personal workspaces, **Team** (channels and forums),
+and **Direct messages**. After an upgrade from the separate Solo and Team
 sidebars, the previous Solo workspaces come first, then **Solo**,
 **Favorites**, the previous Team workspaces and **Team**. Each section is its
-own card; **Forums** shows once you have a forum. Reorder cards by dragging
+own card. Reorder cards by dragging
 their header or using **Move up** and **Move down**. The saved order syncs with
 workspace placement. Double-click a workspace's header to rename it in place.
 A card shows its first ten rows; drag its bottom edge to show more or fewer, or

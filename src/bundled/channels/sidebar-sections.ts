@@ -15,8 +15,7 @@ export type SidebarRowKind = "channel" | "dm" | "solo" | "forum";
 const anyRow: readonly SidebarRowKind[] = ["solo", "channel", "forum", "dm"];
 const homeRows: Partial<Record<string, readonly SidebarRowKind[]>> = {
   solo: ["solo"],
-  channels: ["channel"],
-  forums: ["forum"],
+  channels: ["channel", "forum"],
   dms: ["dm"],
 };
 
@@ -35,13 +34,11 @@ export function sidebarRowKind(channel: ChannelSummary): SidebarRowKind {
 
 export function sidebarHome(channel: ChannelSummary) {
   const kind = sidebarRowKind(channel);
-  return kind === "channel"
+  return kind === "channel" || kind === "forum"
     ? "channels"
     : kind === "dm"
       ? "dms"
-      : kind === "forum"
-        ? "forums"
-        : kind;
+      : kind;
 }
 
 export function contributedSidebarSectionKey(key: string) {
@@ -96,7 +93,6 @@ const titles: Record<string, string> = {
   starred: "Favorites",
   solo: "Solo",
   channels: "Team",
-  forums: "Forums",
   dms: "Direct messages",
 };
 
@@ -116,8 +112,6 @@ export function sidebarSections<T extends ChannelSummary>(
   );
   const stars = new Set(preferences?.starred);
   const rowsBySection = new Map<string, T[]>();
-  // A forum filed elsewhere can still be dropped back into Forums.
-  let forums = false;
   for (const channel of channels) {
     if (
       channel.archived ||
@@ -127,7 +121,6 @@ export function sidebarSections<T extends ChannelSummary>(
       (chatsOnly && channel.channelType !== "solo")
     )
       continue;
-    if (sidebarHome(channel) === "forums") forums = true;
     const destination = dormantAssignments.has(channel.id)
       ? undefined
       : preferences?.assignments[channel.id];
@@ -154,8 +147,6 @@ export function sidebarSections<T extends ChannelSummary>(
       !draftSections.has(key)
     )
       return [];
-    // Forums are rare; their section appears only once there is a forum.
-    if (key === "forums" && !forums && !draftSections.has(key)) return [];
     const mode = preferences?.sort?.[group ? `section:${group.id}` : key];
     rows.sort(
       (mode ?? defaultSidebarSort(key)) === "recent"
