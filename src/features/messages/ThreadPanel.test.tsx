@@ -912,6 +912,30 @@ it("opens at the first unread reply behind a line that reading keeps, paging pas
     line,
   ]);
 });
+it("follows the latest reply after a scroll it did not make lands at the bottom before the line holds", () => {
+  const h = messagesHarness(ordinaryNavigation());
+  const { reply, unread } = unreadReplies(h);
+  const [read, first] = [reply("read", 2), reply("first unread", 3)];
+  unread.add(first.id);
+  h.snapshot.replies = [read, first];
+  h.render();
+  expect(h.element.scrollTop).toBe(300);
+  // A window opening at the latest reply scrolls before its scroll event
+  // arrives, and the reading position is saved there.
+  h.element.scrollTop = 3400;
+  h.snapshot.replies = [read, first];
+  h.render();
+  // The line hold runs at that position before the event.
+  h.snapshot.replies = [read, first];
+  h.render();
+  expect(h.element.scrollTop).toBe(3400);
+  // The event is the reader's move off the line: they follow from here.
+  fireEvent.scroll(h.element);
+  h.snapshot.replies = [read, first, reply("arrival", 4)];
+  h.resize(4800);
+  h.render();
+  expect(h.element.scrollTop).toBe(4200);
+});
 it("shows the loaded page while the read for the first unread reply waits on recovery, and places the line once it recovers", () => {
   const h = messagesHarness(ordinaryNavigation());
   const { reply, unread, read: thread } = unreadReplies(h);

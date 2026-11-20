@@ -1662,8 +1662,13 @@ function ThreadMessages({
     ) {
       // While the reader still starts at a placed line, the line holds its
       // offset: replies around it can fold away, the first unread one too.
+      // The reader is still there only while the saved position is the
+      // line's: a scroll made elsewhere, such as a window opening at the
+      // latest reply, is the reader's move off it, for onScroll to decide.
+      const atLine =
+        lineTop.current !== undefined && reading.scrollTop === lineTop.current;
       const line =
-        lineTop.current !== undefined && reading.line !== undefined
+        atLine && reading.line !== undefined
           ? element.querySelector<HTMLElement>("[data-new-messages-boundary]")
           : null;
       // A row remounted in place, as when a group folds and then opens around
@@ -1696,7 +1701,7 @@ function ThreadMessages({
         lineTop.current = element.scrollTop;
       } else if (anchor) {
         correctScrollTop(element, readingDrift(element, shownAnchor(anchor)));
-        if (lineTop.current !== undefined) lineTop.current = element.scrollTop;
+        if (atLine) lineTop.current = element.scrollTop;
       }
     }
     // An exact target holds its own place through a page: a second anchor
