@@ -840,7 +840,15 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   await preset.click();
   await expect(preset).toHaveAttribute("aria-pressed", "true");
   await expect(swatches.last()).toHaveAccessibleName("#000000");
-  await page.getByRole("button", { name: "Transparent background" }).click();
+  const transparent = page.getByRole("button", {
+    name: "Transparent background",
+  });
+  await expect(transparent).toHaveCSS(
+    "background-image",
+    /repeating-conic-gradient/,
+  );
+  await transparent.click();
+  await expect(transparent).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Frame", exact: true }).click();
   const filmstrip = page.getByRole("slider", { name: "Still frame" });
   const bounds = await filmstrip.boundingBox();

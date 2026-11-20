@@ -491,15 +491,14 @@ export function AnimatedAvatarCapture({
                     key={color ?? "clear"}
                     type="button"
                     className={editorStyles.swatch}
+                    data-transparent={color === null || undefined}
                     aria-label={color ?? "Transparent background"}
                     aria-pressed={composition.backdropColor === color}
                     style={{ backgroundColor: color ?? "transparent" }}
                     onClick={() =>
                       setComposition({ ...composition, backdropColor: color })
                     }
-                  >
-                    {color ? null : "∅"}
-                  </button>
+                  />
                 ))}
               </fieldset>
             </div>

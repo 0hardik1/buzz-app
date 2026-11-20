@@ -196,3 +196,12 @@ canvas.preview:active {
 button[aria-pressed="false"] .outlineGlyph {
   border-style: dashed;
 }
+
+.colorRow [data-transparent] {
+  background-image: repeating-conic-gradient(
+    var(--border-primary) 0 25%,
+    var(--surface-panel) 0 50%
+  );
+  background-size: 0.75rem 0.75rem;
+  background-position: center;
+}
