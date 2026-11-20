@@ -803,7 +803,7 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   await expect(ring).toBeVisible();
   await page.evaluate(() => window.finishAvatarRecording());
   await expect(ring).toHaveCount(0);
-  const tools = ["You", "Background", "Frame", "Retake the recording"];
+  const tools = ["You", "Background", "Still photo", "Retake the recording"];
   const widths = await Promise.all(
     tools.map((name) =>
       page
@@ -849,15 +849,17 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   );
   await transparent.click();
   await expect(transparent).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Frame", exact: true }).click();
-  const filmstrip = page.getByRole("slider", { name: "Still frame" });
-  const bounds = await filmstrip.boundingBox();
-  await filmstrip.click({
+  await page.getByRole("button", { name: "Still photo", exact: true }).click();
+  const scrubber = page.getByRole("slider", {
+    name: "Choose your still photo",
+  });
+  const bounds = await scrubber.boundingBox();
+  await scrubber.click({
     position: { x: bounds.width / 2, y: bounds.height / 2 },
   });
-  await expect(filmstrip).toHaveValue("1");
-  await filmstrip.press("End");
-  await expect(filmstrip).toHaveValue("2");
+  await expect(scrubber).toHaveValue("1");
+  await scrubber.press("End");
+  await expect(scrubber).toHaveValue("2");
   await page
     .getByRole("button", { name: "Use animated avatar", exact: true })
     .click();

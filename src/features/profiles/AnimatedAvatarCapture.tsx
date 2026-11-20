@@ -83,7 +83,9 @@ export function AnimatedAvatarCapture({
   const [segmented, setSegmented] = useState(true);
   const [progress, setProgress] = useState(0);
   const colorDrag = useRef<{ x: number; left: number } | null>(null);
-  const [section, setSection] = useState<"You" | "Background" | "Frame">("You");
+  const [section, setSection] = useState<"You" | "Background" | "Still photo">(
+    "You",
+  );
   const [poster, setPoster] = useState(0);
   const reducedMotion = useReducedMotion();
   const [composition, setComposition] = useState(initialComposition);
@@ -111,7 +113,7 @@ export function AnimatedAvatarCapture({
       index += direction;
     };
     draw();
-    if (section === "Frame" || reducedMotion) return;
+    if (section === "Still photo" || reducedMotion) return;
     const timer = window.setInterval(draw, 1000 / 12);
     return () => window.clearInterval(timer);
   }, [phase, poster, composition, section, reducedMotion]);
@@ -424,7 +426,7 @@ export function AnimatedAvatarCapture({
               [
                 ["You", UserIcon],
                 ["Background", PaletteIcon],
-                ["Frame", ImageIcon],
+                ["Still photo", ImageIcon],
               ] as const
             ).map(([label, Icon]) => (
               <div key={label}>
@@ -552,40 +554,10 @@ export function AnimatedAvatarCapture({
               />
             </div>
           )}
-          {section === "Frame" && (
+          {section === "Still photo" && (
             <div className={styles.controls}>
-              <div className={styles.filmstrip}>
-                {frames.current
-                  .filter(
-                    (_, i) => i % Math.ceil(frames.current.length / 8) === 0,
-                  )
-                  .map((frame) => {
-                    const i = frames.current.indexOf(frame);
-                    return (
-                      <button
-                        type="button"
-                        key={i}
-                        aria-label={`Choose frame ${i + 1}`}
-                        aria-pressed={poster === i}
-                        onClick={() => {
-                          setPoster(i);
-                        }}
-                      >
-                        <canvas
-                          width={ANIMATED_AVATAR_SIZE}
-                          height={ANIMATED_AVATAR_SIZE}
-                          ref={(node) => {
-                            const ctx = node?.getContext("2d");
-                            if (ctx)
-                              composeAvatarFrame(ctx, frame, composition);
-                          }}
-                        />
-                      </button>
-                    );
-                  })}
-              </div>
               <label className="text-label-sm">
-                Still frame
+                <span className="sr-only">Choose your still photo</span>
                 <input
                   type="range"
                   min={0}
@@ -597,6 +569,9 @@ export function AnimatedAvatarCapture({
                   }}
                 />
               </label>
+              <p className="text-body-sm text-muted">
+                Shown when your avatar isn’t playing.
+              </p>
             </div>
           )}
           <Button
