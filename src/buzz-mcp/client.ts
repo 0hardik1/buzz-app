@@ -103,6 +103,9 @@ export interface BuzzClient {
    * host only supplies a lifetime signal. Keep it across waits. */
   readonly signal?: AbortSignal;
   protect?(action: ProtectionAction): Promise<void>;
+  /** Waits while the agent's community reloads in place; a call built from a
+   * client builder is built again after it. */
+  settle?(): Promise<void>;
   /** The runtime reviews each tool call itself before Buzz dispatches it. */
   readonly nativeToolGate?: true;
   readonly pubkey: string;
@@ -149,7 +152,13 @@ export interface BuzzClient {
   readonly owner?: string | undefined;
   /** Trusted connection authorities, never inferred from query results. */
   readonly relayAuthor?: string | undefined;
-  readonly signingAuthority?: string | undefined;
+  /** Without `relayAuthor`: learns the relay's key when a people search first
+   * needs it for verified names, so no other tool waits for it. `undefined`
+   * when the relay has no key; rejects when the key cannot be learned. */
+  readonly relayAuthorLookup?: () => Promise<string | undefined>;
+  /** The relay's NIP-11 self key as the app host knows it: `null` when the
+   * relay advertises none; absent when the host can't tell. */
+  readonly signingAuthority?: string | null;
   /** Reads the community as the agent. Every filter names its kinds. */
   query(filters: readonly Filter[]): Promise<readonly BuzzEvent[]>;
   /** Latest live attachment state, read as this agent from a primary snapshot. */

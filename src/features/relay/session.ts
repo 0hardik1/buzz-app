@@ -1028,6 +1028,12 @@ export function createRelaySession(
       traffic?.publishPresence?.(status, signal) ?? Promise.resolve(false),
     notify,
   );
+  const archives = createIdentityArchives(
+    requests.reader,
+    transport?.archiveAuthority,
+    notify,
+    { writer: transport?.identityArchive, viewer: transport?.viewer },
+  );
   const profiles = createProfileDirectory(
     verified,
     localViews,
@@ -1041,6 +1047,7 @@ export function createRelaySession(
             traffic?.syncVerifiedProfiles?.(filter, sink),
         }
       : undefined,
+    archives.queries,
   );
   const presence = withHostedAgents(
     observedPresence,
@@ -1106,12 +1113,6 @@ export function createRelaySession(
         )
       : undefined,
     notify,
-  );
-  const archives = createIdentityArchives(
-    requests.reader,
-    transport?.archiveAuthority,
-    notify,
-    { writer: transport?.identityArchive, viewer: transport?.viewer },
   );
   const agentChoices = createAgentChoices({
     // Offline sessions keep their historical, never-matching agent scope.
@@ -1991,8 +1992,11 @@ export function createRelaySession(
   })();
   let legacyWorkspaceEpoch = new AbortController();
   let legacyWorkspaceCache: SidebarGroups | undefined;
+  // Workspaces the old Solo sidebar listed; they keep its Show more cap.
+  let legacySoloCache: readonly string[] | undefined;
   function invalidateLegacyWorkspaces() {
     legacyWorkspaceCache = undefined;
+    legacySoloCache = undefined;
     legacyWorkspaceEpoch.abort(
       new Error("Saved workspaces changed while loading. Try again."),
     );
@@ -2006,7 +2010,11 @@ export function createRelaySession(
     const decode = transport?.decodeSidebarPreferences;
     if (!transport?.workspaceMigration || !decode) return undefined;
     const epoch = legacyWorkspaceEpoch;
-    if (!fresh && legacyWorkspaceCache) return { groups: legacyWorkspaceCache };
+    if (!fresh && legacyWorkspaceCache)
+      return {
+        groups: legacyWorkspaceCache,
+        soloWorkspaces: legacySoloCache ?? [],
+      };
     const active = AbortSignal.any([signal, AbortSignal.timeout(5_000)]);
     const [team, solo] = await Promise.allSettled([
       preferenceReader
@@ -2029,9 +2037,14 @@ export function createRelaySession(
       channelKit.readLegacyGroups(active),
     ]);
     signal.throwIfAborted();
+    const soloWorkspaces =
+      solo.status === "fulfilled"
+        ? (solo.value?.groups.map(({ id }) => id) ?? [])
+        : undefined;
     if (team.status === "rejected")
       return solo.status === "fulfilled"
         ? {
+            soloWorkspaces,
             partial: mergeLegacyWorkspaces(
               { sections: [], assignments: {} },
               solo.value,
@@ -2045,8 +2058,11 @@ export function createRelaySession(
     } catch {
       return { partial: team.value };
     }
-    if (legacyWorkspaceEpoch === epoch) legacyWorkspaceCache = groups;
-    return { groups };
+    if (legacyWorkspaceEpoch === epoch) {
+      legacyWorkspaceCache = groups;
+      legacySoloCache = soloWorkspaces;
+    }
+    return { groups, soloWorkspaces };
   }
   const readPreferences = async (
     signal?: AbortSignal,
@@ -2079,17 +2095,22 @@ export function createRelaySession(
       consistency,
       true,
     );
-    if (current.sectionOrder) return current;
     const legacy = await loadingLegacy;
+    const solo = legacy?.soloWorkspaces?.length
+      ? { soloWorkspaces: legacy.soloWorkspaces }
+      : {};
+    if (current.sectionOrder) return { ...current, ...solo };
     if (!legacy?.groups)
       return {
         ...current,
         ...legacy?.partial,
+        ...solo,
         workspaceMigrationPending: true as const,
       };
     return {
       ...current,
       ...projectWorkspaceGroups(workspaceBaseRecord(legacy.groups)),
+      ...solo,
     };
   };
   function workspaceWrite<T>(
@@ -2623,6 +2644,7 @@ export function createRelaySession(
     () => liveRecoveryStatus(live.snapshot()),
     live.retry,
   );
+  let threadRecovery = () => {};
   const recovery = transport
     ? createRecovery([
         liveRecovery,
@@ -2637,6 +2659,26 @@ export function createRelaySession(
           sidebarPreferences.queries.subscribe,
           () => loadState(sidebarPreferences.queries.snapshot()),
           () => void sidebarPreferences.queries.refresh(),
+        ),
+        // Threads a person reads; see createThreadView's `recover`.
+        recoverable(
+          (listener) => {
+            threadRecovery = listener;
+            return () => {
+              threadRecovery = () => {};
+            };
+          },
+          () => {
+            const states = [...threads].map((thread) => thread.recovery());
+            return states.includes("failed")
+              ? "failed"
+              : states.includes("busy")
+                ? "busy"
+                : "settled";
+          },
+          (timed) => {
+            for (const thread of threads) thread.retry(timed);
+          },
         ),
         // Visibility owns its quiet retries and exhausts without `transient`,
         // so this source only reports `busy`; its retry is not reached.
@@ -3034,7 +3076,12 @@ export function createRelaySession(
     thread(
       channelId: string,
       messageId: string,
-      options?: { exact?: boolean; priority?: Priority },
+      options?: {
+        exact?: boolean;
+        priority?: Priority;
+        /** A person reads this view: see createThreadView's `recover`. */
+        reading?: boolean;
+      },
     ) {
       if (closed || views.size >= 64)
         throw new Error("Relay view capacity unavailable");
@@ -3103,6 +3150,8 @@ export function createRelaySession(
         notify,
         dropped: streamDropped,
         now: storeNow,
+        recover:
+          options?.reading && recovery ? () => threadRecovery() : undefined,
       });
       threads.add(thread);
       // Without its root retained, a first open admits none of these; a view
