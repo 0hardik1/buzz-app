@@ -832,10 +832,14 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   await expect(swatches.last()).toBeFocused();
   await page.getByRole("button", { name: "Transparent background" }).click();
   await page.getByRole("button", { name: "Frame", exact: true }).click();
-  await page.getByRole("button", { name: "Choose frame 2" }).click();
-  await expect(page.getByRole("slider", { name: "Still frame" })).toHaveValue(
-    "1",
-  );
+  const filmstrip = page.getByRole("slider", { name: "Still frame" });
+  const bounds = await filmstrip.boundingBox();
+  await filmstrip.click({
+    position: { x: bounds.width / 2, y: bounds.height / 2 },
+  });
+  await expect(filmstrip).toHaveValue("1");
+  await filmstrip.press("End");
+  await expect(filmstrip).toHaveValue("2");
   await page
     .getByRole("button", { name: "Use animated avatar", exact: true })
     .click();
