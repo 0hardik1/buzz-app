@@ -385,7 +385,32 @@ external source project with `pnpm exec tsc` in that directory.
 The host owns navigation, Settings, loading errors, and render error boundaries.
 Settings controls and CLI management do not depend on plugin activation. Updates are detected while the app
 is running. A selected page remounts when its revision changes; its local React
-state resets. Plugin-specific persistent data has no host API yet; bundled plugins such as Reminders and Focus keep small device-local state in namespaced `localStorage` keys.
+state resets. Use [Seen](#remembering-one-time-experiences) to remember one-time
+experiences. Bundled plugins such as Reminders and Focus keep other device-local
+state in namespaced `localStorage` keys.
+
+### Remembering one-time experiences
+
+Get Seen with `const seen = ctx.reflect.get("seen")`. Leave it out of the
+required `inject` list so your plugin still activates on older Buzz hosts.
+Skip the hint when the service is unavailable.
+
+Choose a key in the form `<plugin-id>/<name>`, up to 96 Unicode code points.
+Use your plugin's ID as the prefix to avoid collisions. For an invalid key or
+before sign-in, `has()` returns `undefined` and `mark()` has no effect. Keys
+belong to the signed-in identity and are shared across communities on this
+device.
+
+Show the hint only when `seen?.has(key) === false`. A result of `true` means
+the experience already happened. A result of `undefined` means Buzz does not
+know yet. Once you have the service, a React component can use
+`useSyncExternalStore(seen.subscribe, () => seen.has(key))` to rerender when
+the answer changes.
+
+Call `seen?.mark(key)` when the experience happens. Repeated marks are safe.
+Use a new key to show an updated experience again. If device storage cannot
+save a mark, it stays active in the current window while that identity is
+signed in.
 
 Plugins are trusted code executing in the app's JavaScript context. They are not
 sandboxed: infinite loops, global changes, and external side effects cannot be
