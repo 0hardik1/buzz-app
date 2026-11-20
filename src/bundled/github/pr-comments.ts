@@ -53,6 +53,15 @@ export type Page<T> = Readonly<{
   items: readonly T[];
   nextCursor: string | null;
 }>;
+export type CommentPage = Page<Comment> & {
+  thread: Pick<
+    Thread,
+    "id" | "path" | "side" | "line" | "outdated" | "rootCommentId"
+  >;
+  pullId: string;
+  head: string;
+  base: string;
+};
 export class PrCommentError extends Error {
   constructor(
     message: string,
@@ -78,7 +87,7 @@ export interface PrComments {
     threadId: string,
     cursor?: string,
     signal?: AbortSignal,
-  ): Promise<Page<Comment>>;
+  ): Promise<CommentPage>;
 }
 function failure(error: unknown): PrCommentError {
   const message = error instanceof Error ? error.message : String(error);
@@ -326,9 +335,18 @@ export function createPrComments(
       try {
         const data = await gh<{
           viewer: { login: string };
-          node: { comments: Connection<GraphComment> };
+          node: {
+            id: string;
+            path: string;
+            diffSide: Side;
+            line: number | null;
+            isOutdated: boolean;
+            pullRequest: { id: string; headRefOid: string; baseRefOid: string };
+            root: { nodes: { databaseId: number }[] };
+            comments: Connection<GraphComment>;
+          };
         }>(
-          `query($id:ID!,$cursor:String){viewer{login} node(id:$id){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{${commentFields}} pageInfo{hasNextPage endCursor}}}}}`,
+          `query($id:ID!,$cursor:String){viewer{login} node(id:$id){... on PullRequestReviewThread{id path diffSide line isOutdated pullRequest{id headRefOid baseRefOid} root:comments(first:1){nodes{databaseId}} comments(first:100,after:$cursor){nodes{${commentFields}} pageInfo{hasNextPage endCursor}}}}}`,
           { id: threadId, cursor: cursor ?? null },
           signal,
         );
@@ -340,6 +358,17 @@ export function createPrComments(
         const page = pageOf(data.node.comments);
         return {
           ...page,
+          pullId: data.node.pullRequest.id,
+          head: data.node.pullRequest.headRefOid,
+          base: data.node.pullRequest.baseRefOid,
+          thread: {
+            id: data.node.id,
+            path: data.node.path,
+            side: data.node.diffSide,
+            line: data.node.line,
+            outdated: data.node.isOutdated,
+            rootCommentId: data.node.root.nodes[0]?.databaseId ?? 0,
+          },
           items: page.items.map((comment) => {
             return graphComment(comment);
           }),

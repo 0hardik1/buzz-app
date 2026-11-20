@@ -10,7 +10,12 @@ import { afterEach, expect, it, vi } from "vitest";
 import { useEffect } from "react";
 import type { DiffComments } from "../diffs/DiffViewer";
 import { PrFiles } from "./PrFiles";
-import { createPrComments, type Comment, type Thread } from "./pr-comments";
+import {
+  createPrComments,
+  type Comment,
+  type Thread,
+  type CommentPage,
+} from "./pr-comments";
 import {
   fixturePull,
   githubCommentHost,
@@ -125,12 +130,10 @@ it("discards a reply page that completes after a new snapshot replaces its owner
     commentsComplete: false,
     commentsCursor: "page-2",
   };
-  let release!: (value: { items: Comment[]; nextCursor: null }) => void;
-  const page = new Promise<{ items: Comment[]; nextCursor: null }>(
-    (resolve) => {
-      release = resolve;
-    },
-  );
+  let release!: (value: CommentPage) => void;
+  const page = new Promise<CommentPage>((resolve) => {
+    release = resolve;
+  });
   const loadSnapshot = vi.fn().mockResolvedValue(snapshot);
   const loadComments = vi.fn().mockReturnValue(page);
   const api = {
@@ -164,6 +167,10 @@ it("discards a reply page that completes after a new snapshot replaces its owner
     release({
       items: [{ ...comment, id: "late", body: "Late old page" }],
       nextCursor: null,
+      thread,
+      pullId: snapshot.pullId,
+      head: snapshot.head,
+      base: snapshot.base,
     });
   });
   expect(screen.queryByText("Late old page")).toBeNull();
@@ -177,6 +184,7 @@ it("loads all three reply pages without confusing ownership with pagination", as
   const api = createPrComments(fixture.host);
   if (!api) throw new Error("Missing adapter");
   const snapshot = await api.loadSnapshot(fixturePull);
+  const loadThreads = vi.spyOn(api, "loadThreads");
   seed(fixture.state);
   const root = fixture.state.comments[0];
   if (!root) throw new Error("Missing root");
@@ -207,4 +215,62 @@ it("loads all three reply pages without confusing ownership with pagination", as
   ).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.getByText("Comment 1")).toBeTruthy();
+  expect(loadThreads).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  "pullId",
+  "head",
+  "base",
+  "id",
+  "path",
+  "side",
+  "rootCommentId",
+  "line",
+  "outdated",
+] as const)("rejects a reply page when %s ownership changes", async (field) => {
+  const fixture = githubCommentHost();
+  const transport = createPrComments(fixture.host);
+  if (!transport) throw new Error("Missing adapter");
+  seed(fixture.state);
+  seed(fixture.state, "Late reply", 2, 1);
+  fixture.state.pageSize = 1;
+  const snapshot = await transport.loadSnapshot(fixturePull);
+  const loadThreads = vi.spyOn(transport, "loadThreads");
+  const api = {
+    ...transport,
+    async loadComments(...args: Parameters<typeof transport.loadComments>) {
+      const page = await transport.loadComments(...args);
+      if (field === "pullId" || field === "head" || field === "base")
+        return { ...page, [field]: "changed" };
+      return {
+        ...page,
+        thread: {
+          ...page.thread,
+          [field]:
+            field === "line" || field === "rootCommentId"
+              ? 99
+              : field === "outdated"
+                ? true
+                : field === "side"
+                  ? "LEFT"
+                  : "changed",
+        },
+      } as CommentPage;
+    },
+  };
+  render(
+    <PrFiles
+      api={api}
+      pull={fixturePull}
+      head={snapshot.head}
+      base={snapshot.base}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Load more replies" }),
+  );
+  await screen.findByText("Thread changed; refresh changes.");
+  expect(screen.queryByText("Late reply")).toBeNull();
+  expect(loadThreads).toHaveBeenCalledTimes(1);
 });

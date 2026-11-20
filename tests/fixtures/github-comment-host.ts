@@ -184,6 +184,17 @@ export function githubCommentHost() {
               viewer: { login: state.viewer },
               node: root
                 ? {
+                    id: `thread-${root.id}`,
+                    path: root.path,
+                    diffSide: root.side,
+                    line: root.line,
+                    isOutdated: root.commit_id !== state.head,
+                    pullRequest: {
+                      id: "pull-fixture",
+                      headRefOid: state.head,
+                      baseRefOid: state.base,
+                    },
+                    root: { nodes: [{ databaseId: root.id }] },
                     comments: page(
                       state.comments
                         .filter(

@@ -100,9 +100,21 @@ it("reads file pages, outer thread cursors, and nested comment cursors", async (
     (await api.loadThreads(fixturePull, first.nextCursor ?? undefined)).items[0]
       ?.comments[0]?.body,
   ).toBe("Second");
-  expect((await api.loadComments("thread-1", "1")).items[0]?.body).toBe(
-    "Reply",
-  );
+  const replies = await api.loadComments("thread-1", "1");
+  expect(replies.items[0]?.body).toBe("Reply");
+  expect(replies).toMatchObject({
+    pullId: "pull-fixture",
+    head: state.head,
+    base: state.base,
+    thread: {
+      id: "thread-1",
+      path: "src/example.ts",
+      side: "RIGHT",
+      line: 5001,
+      outdated: false,
+      rootCommentId: 1,
+    },
+  });
 });
 it("normalizes inaccessible PR/thread GraphQL reads", async () => {
   const fixture = githubCommentHost();

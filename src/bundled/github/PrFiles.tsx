@@ -165,11 +165,12 @@ export function PrFiles({
       const current = snapshot;
       try {
         const page = await api.loadComments(thread.id, thread.commentsCursor);
-        // Re-read the owning thread's snapshot before attaching another page.
-        const rows = await readThreads(current);
-        const owning = rows.find((row) => row.id === thread.id);
+        const owning = page.thread;
         if (
-          !owning ||
+          page.pullId !== current.pullId ||
+          page.head !== current.head ||
+          page.base !== current.base ||
+          owning.id !== thread.id ||
           owning.path !== thread.path ||
           owning.side !== thread.side ||
           owning.rootCommentId !== thread.rootCommentId ||
@@ -204,7 +205,7 @@ export function PrFiles({
           setThreadError(readable(failure).message);
       }
     },
-    [snapshot, api, readThreads],
+    [snapshot, api],
   );
   const threadView = useCallback(
     (thread: Thread, inline = false) => {
