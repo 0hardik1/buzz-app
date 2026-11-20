@@ -365,6 +365,14 @@ until you pair it again. Signing out revokes all of them, and a pairing unused
 for 30 days expires. If your sign-in expires, paired tools keep their pairing
 and are asked to sign in again in Buzz.
 
+## Inspect Buzz Beta on macOS
+
+In Buzz Beta on macOS 13.3 or later, open **Settings → Security** and turn on
+**Allow Safari Web Inspector**. In Safari, use the **Develop** menu to select
+the Buzz Beta window. Safari can inspect data in that window and capture
+JavaScript profiles and heap snapshots. Turn the switch off to end access.
+Quitting Buzz also turns it off.
+
 ## Conversations and communities
 
 - Notification sounds and their Settings previews do not become media players;
@@ -514,6 +522,10 @@ and are asked to sign in again in Buzz.
   one to remove it (the last agent stays selected). Rows stay in place while you
   toggle; reopen to refresh their order. Search ranks matching choices by
   relevance, including exact names.
+  Collapsed Solo sections and workspaces stay closed when you open or move a
+  chat, click **In Solo**, or refresh. Use the heading or its chevron to open
+  the group. **In Solo** scrolls to and focuses the chat row or the section heading
+  that represents it.
   Plugins can keep separate unsent drafts in the same workspace. Where supported,
   each draft keeps its text, files, settings, model, and effort when you return.
   A locally hosted agent can list your personal workspace IDs with
@@ -529,6 +541,11 @@ and are asked to sign in again in Buzz.
   the chat; anyone else outside the chat is only named: not added and not
   notified, and the picker row says so. People already in the chat are notified
   as usual. The toolbar's agent menu lists agents only.
+  In a **Private** Solo chat on a relay that supports role updates, the owner can
+  use a current member’s menu in **Share access** to lower their access.
+  The owner can restore **Participating** for a verified
+  agent and grant **Admin** to their own verified agents. **Viewing only**
+  gives read-only access to that chat.
   New chats start **Ongoing** unless **Chat settings** chooses **Temporary**,
   which archives the chat after a set time without activity. To start every new
   chat temporary, open the community's **Settings → Local settings** and choose
@@ -586,16 +603,22 @@ and are asked to sign in again in Buzz.
   from **Filter**, or choose **All** to show them in the sidebar again.
   Plugins can add tasks, Lead conversations and workspace actions.
   When starting a chat, type **#** to choose a workspace and load its settings.
-  Folders are optional unless **Work in a new worktree** is on.
+  Folders are optional unless **Work in a new worktree** is on. An agent that
+  changes a repository makes a new worktree of it and leaves the main worktree
+  as it is. **Work in a new worktree** sets where that worktree goes and the
+  branch it starts from. A conversation that a plugin gave its own folder works
+  in that folder instead.
 - **Channel links.** Type **#** and part of a channel name to link a channel.
   The link is a chip: Backspace or Delete removes it whole, so to change it,
-  remove it and pick again with **#**.
+  remove it and pick again with **#**. A sent chip shows the channel's current
+  name, so it follows a rename; a link with your own text keeps that text.
 - **Folder chips.** In the desktop app, type **!** and part of a folder name in
   any composer to list matching folders in this community's repositories folder
   (**Local settings**). Choosing one adds it to the message as a chip; the
   message shows the folder's name. When you send it to your own Claude or Codex
-  agent on this device, the agent is told the folder's path, and Claude may also
-  work in that folder for the rest of the conversation. A chip someone else
+  agent on this device, the agent is told the folder's path as context, and
+  Claude can also reach that folder for the rest of the conversation. A chip
+  does not choose where the agent works. A chip someone else
   sends, or a folder no longer in your repositories folder, grants nothing.
   A bare **!**, or **!** before a space, stays text.
 - **Activity** (the bell at the top of the Messages sidebar) collects DMs, ordinary responses in Solo chats, mentions of you, and
@@ -767,7 +790,9 @@ and are asked to sign in again in Buzz.
   gone or in another community; the message isn't available, and may have
   been deleted; or the preview couldn't load. Links don't record their
   community, so one from another community looks like a private or missing
-  channel. The card still opens the link.
+  channel. The card still opens the link, unless the channel is private
+  to you: then the link and its card don't open anything, and the link can
+  still be copied. Once you have access, the link opens again.
 - **Manage members** shows **General** access first in the member list. **Public**
   lets people in the community read and new people participate; **View only**
   lets them read; **Private** limits access to people added to the channel.
@@ -831,6 +856,14 @@ and are asked to sign in again in Buzz.
   slower results arrive until you move the highlight; after that they stay
   put and later groups join at the end. The panel and key hints hide in
   narrow windows.
+- **Reranked messages**: when this device has a Decisions API provider set up
+  (Settings → Decisions API), searching messages by relevance reads the first
+  60 matches, then has the provider reorder them by how well each answers what
+  you typed. The keyword order shows first; the reordered list replaces it a
+  moment later, and the heading says **Reranked**. If you've already moved the
+  highlight or chosen a result, the order stays as it is. The provider sees the query and those
+  messages' text, conversation names and authors. Newest-first and filter-only
+  searches aren't reranked.
 - **Ask an agent**: start with `ask:` to write a question for your default
   agent, or choose **Ask** under a long query. Enter opens New chat with the
   question addressed to that agent; press Enter again to send it. If New chat
@@ -1142,7 +1175,16 @@ and are asked to sign in again in Buzz.
   and use the Left/Right arrow keys. Double-click the handle to reset the width.
   Messages and plugin pages share the saved width within the same community
   and identity; narrow windows use a navigation drawer instead.
-- **Sidebar sections** collapse independently through their headings. Buzz
+- **Sidebar sections** default to **Solo**, **Starred**, your workspaces,
+  **Team**, **Forums**, then **Direct messages**. After an upgrade from the
+  separate Solo and Team sidebars, Buzz keeps their order: workspaces from the
+  previous Solo sidebar, **Solo**, **Starred**, workspaces from the previous
+  Team sidebar, then **Team**. A saved section order takes precedence.
+  **Solo** and workspaces from the previous Solo sidebar list their newest 7
+  chats; **Show more** reveals up to 10 more and **Show fewer** returns to 7.
+  Other sections start fully listed and offer **Show fewer** past 7 rows. These
+  choices are saved on this device only.
+  Sections collapse independently through their headings. Buzz
   remembers collapsed sections for each community and identity. Unread messages
   or thread replies highlight the headings of collapsed sections. Muted
   conversations are excluded from these highlights.
@@ -1834,6 +1876,8 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   sources at startup and once per hour while the app is visible. Checks do not
   install or reload plugins. A notice offers **Update and reload**, or
   **Review permissions** when access increases; either opens the update review.
+  While a request waits for a check or another review, it shows **Preparing update…**;
+  **Later** cancels that pending request. Other Update actions wait until it finishes.
   Even when access is unchanged, choose **Update** in that review to install and
   reload the candidate.
   Click the notice body to open that plugin’s update checkbox in Manage plugins.
@@ -2084,29 +2128,6 @@ Canvas, shared notes and repository pages. Those, plus the memory panel, agent
 transcript replies and plugin READMEs, offer **Copy code block** on each code
 block.
 
-### Reading shared files beside a conversation
-
-The optional **File viewer** plugin, off until turned on in Settings → Plugins,
-opens PDFs, Markdown, code, text, CSV and TSV files shared in a conversation in a
-tab beside it. Choose the file's card to open it; the card's download button
-still saves the file. PDFs show every page in one scrolling column: turn pages
-with ‹ and › or the arrow keys, and zoom with **−**, **+** or **Fit to width**.
-**Copy text** copies a file's text; for a PDF it reads the pages when pressed,
-and says when a scanned PDF has none.
-
-- Only files shared in the current community open. Text files open up to 20 MB
-  and PDFs up to 100 MB, laid out to the first 1,000 pages.
-- Markdown, code and text files of any length read in parts, loaded as you
-  scroll. In a Markdown file with three or more headings, **Outline** goes to
-  any section, and `#` links do too. Code is highlighted, with line numbers.
-- The header shows when the file was shared, and a Markdown file's reading time
-  and words, or a code or text file's lines.
-- CSV and TSV files show as a table of the first 5,000 rows and 200 columns,
-  up to 50,000 cells.
-- Markdown follows the Notes rules: no raw HTML. Images shared in the current
-  community are drawn; other images show as their alt text.
-- Office files, images, video and audio are not opened by the viewer.
-
 ### Saved External apps approval
 
 External apps can request saved approval. The app can renew valid approval
@@ -2184,3 +2205,11 @@ not clear saved drafts or bypass conflict checks.
 ## Plugin account actions
 
 Plugins can add actions to your avatar menu. Profile-related actions may appear just above Settings; other plugin actions appear below it.
+
+### App notifications
+
+Desktop toast notifications appear at the top right, 12px from the top on Mac and below the app headers on Windows/Linux. Hover the stack to
+expand it and pause timed notifications; F6 focuses notifications for keyboard
+access. Tab and Shift+Tab also expand the stack, which stays expanded while it
+contains keyboard focus. Dismissible notices show their close button on hover or keyboard focus.
+Recovery notices remain until resolved or dismissed where allowed.
