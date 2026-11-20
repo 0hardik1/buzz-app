@@ -208,6 +208,9 @@ type Entry = {
   /** Where each session's tools default to, and the handle they act with:
    * its current turn's. */
   places: WeakMap<Snap, { context: Context; handle: AgentHandle }>;
+  /** Each conversation's folder as saved storage settled it before its
+   * session was pinned: none when it starts in the workspace. */
+  folders: Map<string, string | undefined>;
   /** Whether the latest delivery's model was synced. */
   syncedModel?: boolean;
 };
@@ -507,6 +510,20 @@ export class AcpRuntime {
           ? // A thread of a channel-scoped session: one conversation.
             { channel, root: place.root, wholeChannel: true }
           : { channel, root: place.root };
+    // Settled before the session is pinned, from saved storage rather than
+    // this program's copy, so its cwd, prompt, tools, Canvas and saved
+    // context all have the one folder. It also records that a conversation
+    // without one starts in the workspace, so a later folder is refused.
+    entry.folders.set(
+      key,
+      await startingFolder(
+        this.agentStore,
+        this.scopeOf(agent.key),
+        agent.key,
+        key,
+      ),
+    );
+    signal.throwIfAborted();
     // A new session's first turn is where a harness asks to sign in.
     const first = !entry.sessions.seen(key);
     // Owed from now until a committed prompt has carried it: a turn that
@@ -902,6 +919,7 @@ export class AcpRuntime {
         () => entry.generation,
       ),
       places: new WeakMap(),
+      folders: new Map(),
     };
     // Every session of the agent shares them, so they read the handle as it is
     // when called, and the place and workspace of the serving session.
@@ -945,20 +963,12 @@ export class AcpRuntime {
       ...(entry.syncedModel ? { syncedModel: true } : {}),
     });
     const launchFor = async (
-      { config: c, team, name, sections }: Snap,
+      { config: c, team, name, sections, folder: assigned }: Snap,
       conversation?: string,
     ) => {
       // A conversation given its own folder starts there, and the folder must
       // still exist; the agent's workspace stays its home. The confirmed
       // launch is the process's, which runs as it was confirmed.
-      const assigned = conversation
-        ? await startingFolder(
-            this.agentStore,
-            this.scopeOf(agent),
-            agent,
-            conversation,
-          )
-        : undefined;
       const cwd = assigned ? await this.folderAt(assigned) : c.workspace;
       const memory = await this.core(agent);
       return {
@@ -1008,9 +1018,9 @@ export class AcpRuntime {
         // Its conversation's choices as they are now, so a change makes the
         // next turn a new session's, a busy one's included.
         const sections = sectionsOf(entry.handle, conversation);
-        // Synchronous and never throws: with no community, it has none.
-        const folder = this.relay(agent)?.snapshot().scope
-          ? this.folder(agent, conversation)
+        // As settled before delivery; synchronous, and never throws.
+        const folder = conversation
+          ? entry.folders.get(conversation)
           : undefined;
         const snapshot: Snap = {
           ...snap(),

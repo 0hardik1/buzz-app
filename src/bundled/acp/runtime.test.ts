@@ -1,4 +1,7 @@
-import { assignConversationFolder } from "../../features/agents/conversation-folders";
+import {
+  ALREADY_STARTED,
+  assignConversationFolder,
+} from "../../features/agents/conversation-folders";
 import { workspaceCanvas } from "../../features/solo/workspace";
 import type { SectionChoices } from "../../features/agent-harness/sections/choices";
 import { RESUMED_PROMPT } from "../../buzz-mcp/prompt";
@@ -121,6 +124,13 @@ function setup(
 ) {
   const fake = fakeHarness(options);
   const host = declared(fake);
+  /** The working folder of each file read. */
+  const fileReads: string[] = [];
+  const readFile = host.readFile;
+  host.readFile = async (path, options) => {
+    fileReads.push(options?.cwd ?? "");
+    return readFile?.(path, options) ?? new Uint8Array();
+  };
   const resolve = host.resolveDirectory;
   host.resolveDirectory = async (path, options) => {
     if (gone.includes(path)) throw new Error(`Could not find ${path}`);
@@ -264,6 +274,7 @@ function setup(
     storage,
     agent,
     connect,
+    fileReads,
   };
 }
 
@@ -995,6 +1006,86 @@ describe("AcpRuntime", () => {
       expect(two.fake.harnesses.flatMap((h) => h.sent("session/load"))).toEqual(
         [],
       );
+    });
+
+    it("works in the folder saved storage settled on, even when this program's copy missed it", async () => {
+      const config = await confirmed({ workspace });
+      /** Runs a Solo chat, given a folder in saved storage, and what it did. */
+      const run = async (stale: boolean) => {
+        const storage = memoryStorage();
+        const local = localStore(storage);
+        // Another program saved the folder; this one's copy hasn't seen it.
+        const agentStore: AgentStore = stale
+          ? {
+              ...local,
+              get: (key) =>
+                key.startsWith("buzz.agents.conversation-folder")
+                  ? null
+                  : local.get(key),
+            }
+          : local;
+        await assignConversationFolder(local, scope, self, channel, folder);
+        const f = setup(
+          {
+            capabilities: { ...capabilities, sessionCapabilities: {} },
+            hold: true,
+          },
+          {
+            storage,
+            agentStore,
+            solo: true,
+            canvas: workspaceCanvas({
+              folders: ["~/Development/app"],
+              canvas: "Use the design system.",
+            }),
+          },
+        );
+        f.sync(config);
+        await f.deliver(message("1", "@Opal hi"), config).run;
+        await vi.waitFor(() =>
+          expect(f.fake.harnesses[0]?.turns).toHaveLength(1),
+        );
+        const [harness] = f.fake.harnesses;
+        const turn = harness?.turns[0];
+        await harness?.mcp(turn?.sessionId ?? "", "tools/call", {
+          name: "send",
+          arguments: { path: "note.md", audience: "everyone" },
+        });
+        turn?.finish();
+        await vi.waitFor(() =>
+          expect(localSessions(storage, self).load(channel)).toHaveProperty(
+            "context",
+          ),
+        );
+        return {
+          cwd: harness?.opened[0]?.cwd,
+          reads: f.fileReads,
+          canvas: turn?.text ?? "",
+          context: localSessions(storage, self).load(channel)?.context,
+        };
+      };
+      const known = await run(false);
+      const missed = await run(true);
+      expect(missed.cwd).toBe(folder);
+      expect(missed.reads).toEqual([folder]);
+      expect(missed.canvas).toContain("They are for reading.");
+      // The same session, saved as one opened in the folder.
+      expect(missed.context).toBe(known.context);
+    });
+
+    it("refuses a folder given once the conversation started in the workspace", async () => {
+      const config = await confirmed({ workspace });
+      const f = setup({ capabilities });
+      f.sync(config);
+      await f.deliver(a, config).run;
+      await vi.waitFor(() =>
+        expect(f.fake.harnesses[0]?.turns).toHaveLength(1),
+      );
+      expect(f.fake.harnesses[0]?.opened[0]).toMatchObject({ cwd: workspace });
+      await expect(assign(localStore(f.storage), a.id)).rejects.toThrow(
+        ALREADY_STARTED,
+      );
+      f.fake.harnesses[0]?.turns[0]?.finish();
     });
 
     it("tells a Solo chat given a folder that its Canvas folders are for reading", async () => {
