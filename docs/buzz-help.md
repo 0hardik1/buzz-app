@@ -148,6 +148,10 @@ In a Codex agent’s settings, open **Huddle voice** in the **Settings** tab to 
   This lets the key direct your Buzz coding agents to run commands as you.
   Authorize only keys you recognize: the proof has no time or event-kind limits. Your private key stays
   in Buzz. This does not join the agent to a community or sign it in to an organization.
+- **Settings → Buzz → Software updates** shows the app version and, on desktop,
+  separate native-image and loaded-frontend source revisions under **Build details**.
+  Their clean, dirty, or unknown labels describe build-time source state; they do
+  not attest to files or APIs currently running on a host.
 - The back of your Identity badge shows known backup and recovery details below
   the private-key strip and scrolls when its details run long. Buzz starts checking
   when the Identity page opens. The back always explains that the key is stored
@@ -601,8 +605,8 @@ Quitting Buzz also turns it off.
   from someone with permission.
 - **Workspaces** can hold any mix of chats, channels, forums and DMs. Use **Move to…**
   in a conversation’s menu or drag the row to a workspace. Unfiled items appear
-  in **Solo**, **Team**, **Forums**, or **Direct messages**. Reorder any section,
-  including **Starred**, by dragging its heading or using **Move up** and
+  in **Solo**, **Team** (channels and forums), or **Direct messages**. Reorder
+  any section, including **Starred**, by dragging its heading or using **Move up** and
   **Move down** in its **…** menu. Escape cancels a drag.
   The arrow beside a workspace’s creation icon offers **New chat**, **New channel**
   and **New DM**. The last choice becomes that workspace’s icon and primary action.
@@ -833,7 +837,10 @@ Quitting Buzz also turns it off.
     none, says so instead of searching. Searching one conversation, by `in:`
     or ⌘F, shows the same Messages results; where the relay supports it,
     **Sort messages** in the field orders text matches by most relevant or
-    most recent.
+    most recent for that search. **Sort messages by** in Settings →
+    Appearance → Conversations sets the order each new search starts with on
+    this device; unset, it is most relevant. Text searches across
+    conversations, and on relays without sorting, stay most relevant.
   - `after:`, `before:`, `on:` a date (`YYYY-MM-DD`, `today`, `yesterday`), and
     `during:` a day, month (`2026-10`, `october`), or year, in local time, or a
     rolling period ending today (`7d`, `4w`, `3m`, `1y`). `after:` includes its
@@ -1207,7 +1214,7 @@ Quitting Buzz also turns it off.
   Messages and plugin pages share the saved width within the same community
   and identity; narrow windows use a navigation drawer instead.
 - **Sidebar sections** default to **Solo**, **Starred**, your workspaces,
-  **Team**, **Forums**, then **Direct messages**. After an upgrade from the
+  **Team**, then **Direct messages**. After an upgrade from the
   separate Solo and Team sidebars, Buzz keeps their order: workspaces from the
   previous Solo sidebar, **Solo**, **Starred**, workspaces from the previous
   Team sidebar, then **Team**. A saved section order takes precedence.
@@ -1225,8 +1232,8 @@ Quitting Buzz also turns it off.
   sidebar preferences.
 - **Moving conversations** works by dragging or choosing **Move to…** from the
   row’s menu. Workspaces and **Starred** accept any type. Unfiled conversations
-  return to the home for their type, **Solo**, **Team**, **Forums** or
-  **Direct messages**.
+  return to the home for their type: **Solo** for chats, **Team** for channels
+  and forums, or **Direct messages**.
 - Saved workspaces, stars, mutes, sorting and filters update while connected in
   hosts that support saved sidebar preferences. Moving a starred conversation
   to a workspace or home section from the sidebar clears its star.
@@ -1704,8 +1711,9 @@ If an agent reports incompatible synced settings, choose the **Previous Versions
   there, and fail until there is one, or while Codex's sign-in is for another
   workspace. Codex's harness defaults offer that sign-in while Codex is signed
   out. API key and keyring sign-ins can't run them.
-- **Agent gateway access**: in builds that route local agents through a gateway,
-  a refused sign-in or access check stops the turn and asks you to sign in again.
+- **Agent gateway access**: for local agents whose harness uses Buzz to forward
+  requests through a gateway, a refused sign-in or access check stops the turn
+  and asks you to sign in again.
   Later turns stay blocked while access is rechecked, even if that check stalls
   or loses its connection. A successful access check lets the agent run again.
   If access is still being checked after a few seconds, the turn stops and asks
@@ -1771,6 +1779,19 @@ If an agent reports incompatible synced settings, choose the **Previous Versions
   settings files, including a gateway app's. Claude agents running on a
   remote execution target are not attributed either; Buzz leaves their
   Claude settings alone.
+- Where a build enables it, local Codex agents add Buzz context when the
+  active provider is configured on the agent gateway's HTTPS origin. Codex
+  uses its configured provider for model discovery and inference. A new
+  message in the same Buzz thread joins a running turn and is attributed to
+  the message that started it. A message from another thread, or after the
+  agent's gateway access changed, waits and runs as its own turn. A running
+  turn is never stopped for attribution. When Codex uses another provider,
+  runs on another machine, or uses an active voice session's retained setup,
+  its turns run without that context, and Activity shows "Ran without the
+  Buzz context" with the reason.
+  When the gateway access check is pending or denied, turns and **Compact
+  session** run with Codex's own settings and Activity shows "Ran without
+  gateway attribution" with the reason.
 - **Agents → Your teams → Previous versions**, in a team's editor, lists the
   saved versions of a team that syncs to a community, the same way. Reverting
   restores its instructions and keeps its current name; members are not
@@ -1792,6 +1813,15 @@ If an agent reports incompatible synced settings, choose the **Previous Versions
 - **Activity**, where the agent type provides it, shows sessions and their
   transcripts in the agent's profile. An open transcript updates by itself
   while the agent works; **Refresh transcript** stays at the top as you scroll.
+  Once goose agents run through the agent gateway, a goose turn woken in a
+  conversation by a plugin, watch or timer that ran without the gateway shows
+  "Ran without the agent gateway" beside its prompt only while the app keeps
+  running; goose compacting the conversation can remove the prompt and its
+  note. A wake run outside a conversation shows no note.
+  If Buzz routes a Goose turn through the gateway, choose Thread or Channel
+  session scope. A gateway-routed Goose turn in Community scope shows an error.
+  While goose uses the gateway, compaction requires gateway access. If access
+  is still being checked, try again once the check finishes.
   A turn's **Thread** or **Channel** label
   opens that conversation. Choosing an agent in the activity under a message,
   or a Working now agent whose conversation is known, opens that

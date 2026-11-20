@@ -152,8 +152,8 @@ coordinates must satisfy the recipe contract.
 Enabled sidebar pages such as Activity stay fixed above the scrolling conversation
 list. When the pinned rows run out of vertical space, scroll their area to see
 the rest. The conversation sections default to **Solo**, **Starred**,
-workspaces, **Team**, **Forums**, and **Direct messages**. After an upgrade from
-the separate Solo and Team sidebars, the previous Solo workspaces come first,
+workspaces, **Team** (channels and forums), and **Direct messages**. After an
+upgrade from the separate Solo and Team sidebars, the previous Solo workspaces come first,
 then **Solo**, **Starred**, the previous Team workspaces and **Team**.
 Reorder them by dragging their headings or using **Move up** and **Move down**.
 The saved order syncs with workspace placement.
@@ -252,7 +252,8 @@ A–Z writes a null register and removes that group's legacy override.
 Filters use the same bounded group-register shape in a separate `channel-workspace-filter`
 coordinate: Unreads is `unreads`, Active is `active`, and All
 writes a null reset tombstone. An optional top-level `activeWindowSeconds` map
-stores each group’s duration in whole-day seconds; absence means 30 days. Presets
+stores each group’s duration in whole-day seconds; absence means 30 days. The
+Active dialog offers 1, 3, 7, 30 and 90 days. Presets
 and custom values share this representation. Apply publishes mode and duration
 in one encrypted update, and both hosts confirm both values on readback. Other
 modes preserve the last duration; section removal clears it. Older fixed-window
