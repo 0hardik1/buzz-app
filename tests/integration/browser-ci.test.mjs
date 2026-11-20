@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isDeepStrictEqual } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import test from "node:test";
 import { parse } from "yaml";
 import { imageEngines } from "../../scripts/check-browser-image.mjs";
@@ -86,13 +86,15 @@ test("native protection produces upload evidence and preserves a failed test sta
   }
 });
 
-test("Linux shards and macOS recording discover every CI functional test/project exactly once", (t) => {
+test("Linux shards and macOS recording discover every CI functional test/project exactly once", {
+  concurrency: 3,
+}, async (t) => {
   const command = browser.match(
     /^ {8}run: .+ -- (\.\/bin\/pnpm test:browser:ci .+)$/m,
   )?.[1];
   assert.ok(command, "functional invocation must exist");
-  const discover = (args, weights = "") => {
-    const result = spawnSync(
+  const discover = async (args, weights = "") => {
+    const result = await promisify(execFile)(
       "pnpm",
       ["--silent", ...args, "--list", "--reporter=json"],
       {
@@ -102,8 +104,6 @@ test("Linux shards and macOS recording discover every CI functional test/project
         env: { ...process.env, PWTEST_SHARD_WEIGHTS: weights },
       },
     );
-    assert.equal(result.error, undefined);
-    assert.equal(result.status, 0, result.stderr);
     const report = JSON.parse(result.stdout);
     assert.deepEqual(report.errors, []);
     const collect = (suites) =>
@@ -121,7 +121,7 @@ test("Linux shards and macOS recording discover every CI functional test/project
       ]);
     return collect(report.suites);
   };
-  const expected = discover([
+  const expected = await discover([
     "test:browser",
     "--project",
     "chromium",
@@ -138,26 +138,39 @@ test("Linux shards and macOS recording discover every CI functional test/project
   );
   assert.equal(functional.env.PWTEST_SHARD_WEIGHTS, `\${{ matrix.weights }}`);
   const jobs = browserJobs();
-  const changedEngines = new Set();
-  for (const { engine, shard, shards, weights } of jobs) {
-    assert.equal(weights.split(":").length, shards);
-    // Run the same command and shard count as CI.
-    const expanded = command
+  const selections = new Map();
+  const argumentsFor = ({ engine, shard, shards }) =>
+    command
       .replaceAll(/\$\{\{ matrix\.engine \}\}/g, engine)
       .replaceAll(/\$\{\{ matrix\.shard \}\}/g, shard)
-      .replaceAll(/\$\{\{ matrix\.shards \}\}/g, shards);
-    const args = expanded.replace(/^\.\/bin\/pnpm /, "").split(/\s+/);
-    const selected = discover(args, weights);
-    // Some shards can keep the same tests. Find a changed shard for each engine
-    // so this still catches Playwright ignoring the weights after an upgrade.
+      .replaceAll(/\$\{\{ matrix\.shards \}\}/g, shards)
+      .replace(/^\.\/bin\/pnpm /, "")
+      .split(/\s+/);
+  // Node owns the bounded scheduling and subtest failure reporting.
+  await Promise.all(
+    jobs.map((entry) =>
+      t.test(`${entry.engine}/${entry.shard}`, async () => {
+        const { engine, shard, shards, weights } = entry;
+        assert.equal(weights.split(":").length, shards);
+        const selected = await discover(argumentsFor(entry), weights);
+        assert.ok(selected.length > 0, `${engine}/${shard} must select tests`);
+        assert.ok(selected.every((id) => id.startsWith(`${engine}:`)));
+        selections.set(entry, selected);
+      }),
+    ),
+  );
+  const changedEngines = new Set();
+  for (const entry of jobs) {
+    const { engine, shard } = entry;
+    const selected = selections.get(entry);
+    assert.ok(selected, `${engine}/${shard} discovery must succeed`);
+    // Preserve the weighted/unweighted comparison in matrix order.
     if (
       !changedEngines.has(engine) &&
-      !isDeepStrictEqual(selected, discover(args))
+      !isDeepStrictEqual(selected, await discover(argumentsFor(entry)))
     ) {
       changedEngines.add(engine);
     }
-    assert.ok(selected.length > 0, `${engine}/${shard} must select tests`);
-    assert.ok(selected.every((id) => id.startsWith(`${engine}:`)));
     actual.push(...selected);
     t.diagnostic(`${engine}/${shard}: ${selected.length} functional tests`);
   }
@@ -176,7 +189,7 @@ test("Linux shards and macOS recording discover every CI functional test/project
     / -- (\.\/bin\/pnpm test:browser .+)$/,
   )?.[1];
   assert.ok(recordingCommand, "macOS must execute the recording cases");
-  const mac = discover(
+  const mac = await discover(
     recordingCommand.replace(/^\.\/bin\/pnpm /, "").split(/\s+/),
   );
   assert.ok(mac.length > 0, "macOS recording must select tests");
