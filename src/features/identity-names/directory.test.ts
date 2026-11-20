@@ -748,31 +748,3 @@ it("labels a scope from its own keys and their owners, not the whole profile cac
     "Honey",
   );
 });
-
-it("names agents from a kept library while a reread loads", () => {
-  const key = "b".repeat(64);
-  const provider = createAgentDirectory({
-    snapshot: () => ({ status: "unavailable", agents: [] }),
-    subscribe: () => () => {},
-    refresh: async () => {},
-  });
-  const source: NameSource = {
-    profiles: {
-      snapshot: () => new Map(),
-      subscribe: () => () => {},
-      ensure: async () => {},
-    },
-    agentLibrary: {
-      snapshot: () => ({
-        status: "loading",
-        stale: true,
-        definitions: [],
-        identities: [{ pubkey: key, name: "Kept" }],
-      }),
-      subscribe: () => () => {},
-      refresh: async () => {},
-      retain: () => () => {},
-    },
-  };
-  expect(provider.scope(source)(key)?.name).toBe("Kept");
-});

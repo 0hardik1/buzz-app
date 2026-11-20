@@ -7961,32 +7961,36 @@ it("reads the list again on refresh and clears the error a failed read left", as
   expect(service.snapshot().error).toBeUndefined();
 });
 
-it("reads a failed list again on its own and keeps the last list through a later failure", async () => {
-  vi.useFakeTimers();
-  onTestFinished(() => {
-    vi.useRealTimers();
-  });
+const listed = {
+  pubkey: bot,
+  relay: "wss://relay.example.test",
+  owner: viewer,
+  type: "example/echo",
+  name: "Echo",
+  deleted: false,
+};
+function listedService(native = fakeNative([listed])) {
   const ctx = new Context();
   ctx.provide("pluginStatus", {
     isActive: () => true,
     subscribe: () => () => {},
   });
-  const identity = {
-    pubkey: bot,
-    relay: "wss://relay.example.test",
-    owner: viewer,
-    type: "example/echo",
-    name: "Echo",
-    deleted: false,
-  };
-  const native = fakeNative([identity]);
-  native.list.mockRejectedValueOnce(new Error("Temporary list failure"));
-  const service = new AgentsService(
+  return new AgentsService(
     ctx,
     fakeCommunities(fakeRelay()).communities,
     native,
     memoryStorage(),
   );
+}
+
+it("reads a failed list again on its own and keeps the last list through a later failure", async () => {
+  vi.useFakeTimers();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const native = fakeNative([listed]);
+  native.list.mockRejectedValueOnce(new Error("Temporary list failure"));
+  const service = listedService(native);
   await vi.advanceTimersByTimeAsync(0);
   expect(service.local()).toMatchObject({ status: "error", agents: [] });
   expect(service.local().stale).toBeUndefined();
@@ -8012,26 +8016,8 @@ it("reads a failed list again on its own and keeps the last list through a later
 });
 
 it("republishes nothing from a failed list, and a replaced refresh waits for the newer list", async () => {
-  const ctx = new Context();
-  ctx.provide("pluginStatus", {
-    isActive: () => true,
-    subscribe: () => () => {},
-  });
-  const identity = {
-    pubkey: bot,
-    relay: "wss://relay.example.test",
-    owner: viewer,
-    type: "example/echo",
-    name: "Echo",
-    deleted: false,
-  };
-  const native = fakeNative([identity]);
-  const service = new AgentsService(
-    ctx,
-    fakeCommunities(fakeRelay()).communities,
-    native,
-    memoryStorage(),
-  );
+  const native = fakeNative([listed]);
+  const service = listedService(native);
   await vi.waitFor(() => expect(service.local().status).toBe("ready"));
   await vi.waitFor(() => expect(native.publishProfile).toHaveBeenCalled());
   native.publishProfile.mockClear();
@@ -8040,7 +8026,7 @@ it("republishes nothing from a failed list, and a replaced refresh waits for the
   await service.refresh();
   expect(service.local()).toMatchObject({ status: "error", stale: true });
   expect(native.publishProfile).not.toHaveBeenCalled();
-  const reads: ((rows: (typeof identity)[]) => void)[] = [];
+  const reads: ((rows: (typeof listed)[]) => void)[] = [];
   native.list.mockImplementation(
     () => new Promise((resolve) => reads.push(resolve)),
   );
@@ -8050,11 +8036,11 @@ it("republishes nothing from a failed list, and a replaced refresh waits for the
   });
   const second = service.refresh();
   await vi.waitFor(() => expect(reads).toHaveLength(2));
-  reads[0]?.([identity]);
+  reads[0]?.([listed]);
   await new Promise((resolve) => setTimeout(resolve, 0));
   // The replaced read's caller waits for the newer list.
   expect(firstDone).toBe(false);
-  reads[1]?.([{ ...identity, name: "Renamed" }]);
+  reads[1]?.([{ ...listed, name: "Renamed" }]);
   await Promise.all([first, second]);
   expect(service.local()).toMatchObject({
     status: "ready",
