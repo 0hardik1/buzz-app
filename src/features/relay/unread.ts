@@ -3230,7 +3230,12 @@ export function createUnread({
             await dm;
             return;
           }
-          const event = requireMessage(target, id);
+          let event: RelayEvent;
+          try {
+            event = requireMessage(target, id);
+          } catch {
+            return; // Outside a channel, its bottom row may not be retained.
+          }
           // A broadcast reply is shown in the channel but never its cutoff.
           if (!rootId && threadReference(event)) return;
           // Catch-up moves the main read mark: a channel's to its newest
