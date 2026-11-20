@@ -7845,6 +7845,48 @@ it("a dwell in a public channel the viewer has not joined reads its mentions amo
   lease.dispose();
 });
 
+it("a diff message mention in a public channel the viewer has not joined is not Activity", () => {
+  const h = setup();
+  h.emit([
+    roster(h.relay, "lobby", [h.alice.pubkey], 10),
+    metadata(h.relay, "lobby", "lobby", 10, [["t", "stream"], ["public"]]),
+  ]);
+  // Activity's history read never asks for kind 40008, so after a reconnect
+  // nothing would list it again.
+  const diff = signed(h.alice, {
+    kind: 40008,
+    content: "--- a\n+++ b",
+    created_at: 20,
+    tags: [
+      ["h", "lobby"],
+      ["p", h.viewer.pubkey],
+    ],
+  });
+  const mention = message(h.alice, "lobby", "mention", 21, [
+    ["p", h.viewer.pubkey],
+  ]);
+  h.emit([diff, mention]);
+  expect(
+    h.session.unread.inbox().items.flatMap((item) => item.messageIds),
+  ).toEqual([mention.id]);
+});
+
+it("mark all reads mentions in a public channel the viewer has not joined", async () => {
+  const h = setup();
+  h.emit([
+    roster(h.relay, "lobby", [h.alice.pubkey], 10),
+    metadata(h.relay, "lobby", "lobby", 10, [["t", "stream"], ["public"]]),
+  ]);
+  const mention = message(h.alice, "lobby", "mention", 20, [
+    ["p", h.viewer.pubkey],
+  ]);
+  h.emit([mention]);
+  expect(h.session.unread.attention("lobby", mention.id).unread).toBe(true);
+  const results = await h.session.unread.markAllChannelsRead();
+  expect(results).toHaveLength(1);
+  expect(h.session.unread.attention("lobby", mention.id).unread).toBe(false);
+});
+
 it("a dwell at a bottom mention too tall to observe, in a channel the viewer has not joined, reads only that mention", async () => {
   const h = setup();
   h.emit([

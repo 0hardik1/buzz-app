@@ -278,7 +278,8 @@ export interface UnreadCapability {
     channelId: string,
     rootId: string,
   ): () => Promise<ReadMutationResult>;
-  /** `markChannelRead` serialised over every accessible listed channel that still
+  /** `markChannelRead` serialised over every accessible listed channel, and
+   * each unjoined public channel holding retained mentions, that still
    * shows unread evidence or a local mark. Channels with nothing to clear are
    * skipped, so an already-read community costs no writes. One failing channel
    * does not stop the rest; the first failure is rethrown after the sweep.
@@ -620,15 +621,17 @@ export function createUnread({
         (channel) =>
           channel.id === id && !channel.cached && member(channel.members),
       ) || outside(id);
-  /** Outside a channel, only its mentions of the viewer are evidence. A batch
-   * read newest first carries an edit or deletion before its target; `decided`
-   * keeps shared targets from being walked once per path. */
+  /** Outside a channel, only its mentions of the viewer are evidence, in the
+   * kinds Activity reads again (not diffs, 40008). A batch read newest first
+   * carries an edit or deletion before its target; `decided` keeps shared
+   * targets from being walked once per path. */
   const outsideEvidence = (
     event: RelayEvent,
     incoming: ReadonlyMap<string, RelayEvent>,
     decided: Map<string, boolean>,
   ): boolean => {
-    if (contentKind(event)) return mentionsViewer(event);
+    if (contentKind(event))
+      return event.kind !== 40008 && mentionsViewer(event);
     const known = decided.get(event.id);
     if (known !== undefined) return known;
     const result = event.tags.every(([name, id = ""]) => {
@@ -1614,20 +1617,28 @@ export function createUnread({
     snapshots.set(key, value);
     return value;
   }
+  /** The channel list, then channels missing from it that hold retained
+   * evidence, such as outside channels. */
+  function evidenceChannels() {
+    indexEvidence();
+    const listed = channels.list().channels;
+    const ids = new Set(listed.map((channel) => channel.id));
+    return [
+      ...listed,
+      ...[...byChannel.keys()].flatMap((id) => {
+        const channel = ids.has(id) ? undefined : channels.get?.(id);
+        return channel ? [channel] : [];
+      }),
+    ];
+  }
   function inbox(): InboxSnapshot {
     if (inboxSnapshot && !inboxDirty) return inboxSnapshot;
     inboxDirty = false;
     indexEvidence();
     const state = reads.state();
     const items: InboxItem[] = [];
-    const listed = channels.list().channels;
-    const ids = new Set(listed.map((channel) => channel.id));
-    const others = [...byChannel.keys()].flatMap((id) => {
-      const channel = ids.has(id) ? undefined : channels.get?.(id);
-      return channel ? [channel] : [];
-    });
     if (!closed)
-      for (const channel of [...listed, ...others]) {
+      for (const channel of evidenceChannels()) {
         if (
           channel.huddle ||
           channel.metadataPending ||
@@ -2089,11 +2100,11 @@ export function createUnread({
     saved = undefined;
     followsChanged();
   });
-  function purge() {
+  function purge(repairs = true) {
     // A revoke/regrant must not revive a transaction accepted under the old access epoch.
     epoch++;
     pendingForcedMessages.clear();
-    forget();
+    if (repairs) forget();
     for (const channelId of channelReadGenerations.keys())
       if (!allowed(channelId)) channelReadGenerations.delete(channelId);
     for (const [key, lookup] of lookups)
@@ -2214,12 +2225,13 @@ export function createUnread({
     archivedKey = nextArchived;
     if (next === accessKey) {
       if (delisted) {
-        // purge() abandons a running repair, so it must run again.
+        // purge() abandons a running repair, so it must run again. Outside
+        // mentions never come from repair batches, so batch marks stand.
         if (refresh) {
           sampled = false;
           repairAgain = true;
         }
-        purge();
+        purge(false);
       } else if (changed.size || archiveChanged) publish(changed);
     } else {
       accessKey = next;
@@ -3277,7 +3289,8 @@ export function createUnread({
             return;
           }
           // Outside a channel, a dwell reads only what it shows: the bottom row
-          // it reached, exactly, and a thread's reply reminders, never a mark.
+          // it reached, exactly, and never a mark. Only a retained bottom row
+          // (a mention) places a thread's bottom, to clear its reply reminders.
           const away = outside(channelId);
           if (away) {
             await this.observe([id]);
@@ -3919,9 +3932,8 @@ export function createUnread({
       // Decide the sweep from the list at invocation; channels granted later wait
       // for the next explicit action, like arrivals after a per-channel cut.
       const clickedAt = Math.floor(Date.now() / 1000);
-      const selected = channels
-        .list()
-        .channels.filter((channel) => allowed(channel.id))
+      const selected = evidenceChannels()
+        .filter((channel) => allowed(channel.id))
         .filter((channel) => {
           const current = compute({ kind: "channel", channelId: channel.id });
           // The sidebar can be quiet while unopened replies still have receipts.
@@ -4106,7 +4118,7 @@ export function createUnread({
       );
     },
     accept,
-    purge,
+    purge: () => purge(),
     /** `covered`: the membership route's replay was continuous, so read state
      * resumes from it instead of reading its snapshot again. */
     /** A repair is still owed: evidence (see `owing`) or read-state markers. */

@@ -99,7 +99,10 @@ feed-owned reconciliation buffer and deletion-count abort.
 
 One exception to membership: a listed public stream or forum the viewer reads
 without joining (`outsideChannel`) contributes only messages that `p`-tag the
-viewer. Addressed history reads an unknown or stale channel's metadata first,
+viewer. Activity reads no forum posts (kinds 45001 and 45003), so in practice
+only streams add rows. Diff messages (kind 40008) from these channels are not
+admitted, since Activity's history read never lists them again. Mark all as read
+also reads these channels. Addressed history reads an unknown or stale channel's metadata first,
 once discovery is ready, and its signed metadata alone decides eligibility. A
 read that skipped an unknown channel because discovery was not ready runs again
 once it is. Signed metadata that hides the channel, or a disconnect that leaves
@@ -112,7 +115,9 @@ relay leaves a deleted one out of the next page, and marks each incomplete until
 its check finishes.
 A dwell in the channel reads the mentions it shows and skips its other rows. A
 dwell at the bottom reads only the bottom row it reached, even one too tall to
-show whole; in a thread it also clears the device's reminders on replies there.
+show whole. When that row is a mention in a thread, the dwell also clears the
+device's reminders on the thread's replies; any other row is not retained, so it
+cannot place the thread's bottom.
 It never moves the channel's or thread's read mark, which would read older
 mentions it did not show. The channel's thread roots are never retained, so a
 reply mention's root is fetched for grouping even once it is read, in one read
