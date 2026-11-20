@@ -54,8 +54,9 @@ export const apply: PluginModule["apply"] = (ctx) => {
     // Without a Pi upstream in this build, every agent keeps its own
     // providers, as the runner sends every turn without the gateway.
     upstreamFor(HARNESS) ? GATEWAY_SEAM : undefined,
-    (agent, signal, channelId) =>
-      readyOwnerReads(agents.relay(agent.key), agent, signal, channelId),
+    (agent, signal, channelId, what) =>
+      readyOwnerReads(agents.relay(agent.key), agent, signal, channelId, what),
+    (key) => agents.relay(key)?.snapshot().scope,
   );
   ctx.agentProtection.registerModels({
     label: "Pi",
@@ -101,11 +102,15 @@ export const apply: PluginModule["apply"] = (ctx) => {
     hooks: { events: ["beforeTool", "afterTool"] },
     retire: (pubkey) => runtime.retire(pubkey),
     protection: true,
+    conversationFolders: true,
+    conversationSections: true,
+    notes: true,
     title: "Pi",
     icon: PiLogoIcon,
     description:
       "Pi on this computer, with any provider Pi supports. Each thread it is mentioned in is one continuing conversation.",
     defaults: () => ({ config: DEFAULT_CONFIG }),
+    settingsProposal: { compactAt: true },
     readModelSettings: (saved) =>
       readModelSettings(config(saved), { provider: true }),
     Create,
@@ -126,13 +131,15 @@ export const apply: PluginModule["apply"] = (ctx) => {
     adopt: (carry, saved) => ({
       ...saved,
       instructions: carry.instructions ?? saved.instructions,
+      scope: carry.sessionScope ?? saved.scope,
       workspace: carry.workspace ?? saved.workspace,
     }),
     carry: (saved) => {
-      const { instructions, workspace } = config(saved);
+      const { instructions, workspace, scope } = config(saved);
       return {
         ...(instructions.trim() && { instructions }),
         ...(workspace !== DEFAULT_CONFIG.workspace && { workspace }),
+        ...(scope !== DEFAULT_CONFIG.scope && { sessionScope: scope }),
       };
     },
     summary: (agent) => {
@@ -145,6 +152,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     }),
     sessions: {
       list: (key) => runtime.sessions(key),
+      ready: (key, conversation) => runtime.listed(key, conversation),
       subscribe: (listener) => runtime.subscribe(listener),
     },
     tabs: [

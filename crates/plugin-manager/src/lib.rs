@@ -60,6 +60,20 @@ pub struct Discovery {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
 }
+/// The sections of an agent's base instructions that a plugin can replace:
+/// those marked `plugin` in `src/features/agent-harness/sections/index.ts`,
+/// which a test checks against this list. An ID never leaves this list: a
+/// section's earlier IDs stay when it is renamed, and its ID stays when the
+/// section goes or a plugin can no longer replace it. Every installed manifest is checked each time the installed
+/// plugins are read, so a removed ID would stop them all from loading.
+pub const AGENT_PROMPT_SECTIONS: &[&str] = &[
+    "callbacks",
+    "routing",
+    "publishing",
+    "progress",
+    "working-location",
+    "autonomy",
+];
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HostGrants {
@@ -71,6 +85,10 @@ pub struct HostGrants {
     /// Execution targets may run these native agent types.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub agent_execution: Vec<String>,
+    /// The plugin may give these sections of an agent's base instructions its
+    /// own text, in the conversations it manages.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_prompt_sections: Vec<String>,
     #[serde(default)]
     pub commands: Vec<HostCommand>,
     #[serde(default)]
@@ -249,6 +267,7 @@ impl Manifest {
         if let Some(host) = &self.host {
             if host.agent_hooks.len() > 16
                 || host.agent_execution.len() > 16
+                || host.agent_prompt_sections.len() > 16
                 || host.commands.len() > 16
                 || host.network_origins.len() > 16
                 || host.processes.len() > 16
@@ -271,6 +290,17 @@ impl Manifest {
                 valid_id(kind)?;
                 if !execution_types.insert(key) {
                     return Err("Duplicate agent execution type".into());
+                }
+            }
+            let mut prompt_sections = std::collections::HashSet::new();
+            for id in &host.agent_prompt_sections {
+                if !AGENT_PROMPT_SECTIONS.contains(&id.as_str()) {
+                    return Err(format!(
+                        "A plugin cannot replace the agent prompt section \"{id}\""
+                    ));
+                }
+                if !prompt_sections.insert(id) {
+                    return Err("Duplicate agent prompt section".into());
                 }
             }
             if let Some(grant) = &host.federated_identity {
@@ -447,6 +477,18 @@ fn gateway_grant(mut manifest: Manifest, gateway: Option<&gateway::Native>) -> M
     }
     manifest
 }
+/// A plugin an organization bundles into its own build: `src/bundled/org.json`,
+/// which packagers may replace with `src/bundled/org.ts`. Empty in OSS builds.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OrgPlugin {
+    manifest: Manifest,
+    enabled_by_default: bool,
+}
+fn org_plugins() -> Vec<OrgPlugin> {
+    serde_json::from_str(include_str!("../../../src/bundled/org.json"))
+        .expect("organization plugins")
+}
 pub fn bundled_manifests() -> Vec<Manifest> {
     bundled_manifests_for(agent_gateway())
 }
@@ -481,7 +523,7 @@ fn bundled_manifests_for(gateway: Option<&gateway::Native>) -> Vec<Manifest> {
             ..HostGrants::default()
         }
     });
-    vec![
+    let mut manifests = vec![
         serde_json::from_str(include_str!(
             "../../../src/bundled/mesh-compute/manifest.json"
         ))
@@ -497,10 +539,6 @@ fn bundled_manifests_for(gateway: Option<&gateway::Native>) -> Vec<Manifest> {
             .expect("bundled mermaid manifest"),
         serde_json::from_str(include_str!("../../../src/bundled/charts/manifest.json"))
             .expect("bundled charts manifest"),
-        serde_json::from_str(include_str!(
-            "../../../src/bundled/file-viewer/manifest.json"
-        ))
-        .expect("bundled file viewer manifest"),
         serde_json::from_str(include_str!(
             "../../../src/bundled/identity-naming/manifest.json"
         ))
@@ -573,16 +611,22 @@ fn bundled_manifests_for(gateway: Option<&gateway::Native>) -> Vec<Manifest> {
             "../../../src/bundled/plugin-development/manifest.json"
         ))
         .expect("plugin development manifest"),
+        serde_json::from_str(include_str!(
+            "../../../src/bundled/performance-diagnostics/manifest.json"
+        ))
+        .expect("performance diagnostics manifest"),
         serde_json::from_str(include_str!("../../../src/bundled/focus/manifest.json"))
             .expect("focus manifest"),
         serde_json::from_str(include_str!(
             "../../../src/bundled/changesets/manifest.json"
         ))
         .expect("changesets manifest"),
-    ]
-    .into_iter()
-    .map(|manifest| gateway_grant(manifest, gateway))
-    .collect()
+    ];
+    manifests.extend(org_plugins().into_iter().map(|plugin| plugin.manifest));
+    manifests
+        .into_iter()
+        .map(|manifest| gateway_grant(manifest, gateway))
+        .collect()
 }
 /// New bundles must opt in to the default-on policy.
 fn enabled_by_default(id: &str) -> bool {
@@ -614,7 +658,9 @@ fn enabled_by_default(id: &str) -> bool {
             | "buzz.relay-staff"
             | "buzz.typesafe"
             | "buzz.plugin-development"
-    )
+    ) || org_plugins()
+        .iter()
+        .any(|plugin| plugin.manifest.id == id && plugin.enabled_by_default)
 }
 /// Bundled ids that older profiles may still hold as installed plugins.
 const FORMERLY_INSTALLED: &[&str] = &["buzz.claude-code", "buzz.codex"];
@@ -1958,6 +2004,10 @@ mod tests {
                 fs::read_to_string(format!("{root}/{}/manifest.json", dirs[name])).unwrap();
             let manifest: Manifest = serde_json::from_str(&manifest).unwrap();
             expected.insert(manifest.id, default);
+        }
+        // `...orgPlugins` adds org.json's, which org.ts gives code.
+        for plugin in super::org_plugins() {
+            expected.insert(plugin.manifest.id, plugin.enabled_by_default);
         }
         let native: BTreeMap<String, bool> = bundled_manifests()
             .into_iter()
@@ -3380,6 +3430,36 @@ mod tests {
         assert!(plugin.enabled);
         assert_eq!(plugin.revision, first);
         assert_eq!(plugin.previous, None);
+    }
+    #[test]
+    fn validates_agent_prompt_sections() {
+        for (ids, valid) in [
+            (vec!["working-location"], true),
+            (vec!["working-location", "progress"], true),
+            (super::AGENT_PROMPT_SECTIONS.to_vec(), true),
+            // Locked, owner-only, host-variant and unknown sections.
+            (vec!["trust"], false),
+            (vec!["etiquette"], false),
+            (vec!["session-model"], false),
+            (vec!["no-such-section"], false),
+            (vec!["progress", "progress"], false),
+            (vec!["Progress"], false),
+        ] {
+            let manifest: super::Manifest = serde_json::from_value(serde_json::json!({
+                "id": "policy", "name": "Policy", "apiVersion": 1,
+                "host": { "agentPromptSections": ids },
+            }))
+            .unwrap();
+            assert_eq!(manifest.validate().is_ok(), valid, "{ids:?}");
+        }
+        // A manifest that declares none is saved as it was.
+        let manifest: super::Manifest = serde_json::from_value(serde_json::json!({
+            "id": "policy", "name": "Policy", "apiVersion": 1, "host": { "files": true },
+        }))
+        .unwrap();
+        assert!(!serde_json::to_string(&manifest)
+            .unwrap()
+            .contains("agentPromptSections"));
     }
     #[test]
     fn validates_agent_type_grants() {
