@@ -51,7 +51,9 @@ export function ReminderEditor({
   currentSession.current = session;
   const scope = scopeOf(connection);
   const target = entry.target;
+  const retiredVisit = useRef<string | undefined>(undefined);
   const active =
+    entry.id !== retiredVisit.current &&
     target.kind === "page" &&
     target.pluginId === "buzz.reminders" &&
     target.pageId === "reminders" &&
@@ -67,6 +69,9 @@ export function ReminderEditor({
     (closing: NonNullable<typeof draft>) => {
       const { route: _, ...page } = closing.target;
       const key = targetKey(closing.target);
+      const current = navigator.snapshot().entry;
+      // Browser dismissal publishes its destination only after native traversal.
+      if (targetKey(current.target) === key) retiredVisit.current = current.id;
       navigator.dismiss((visit) => targetKey(visit) === key, page);
     },
     [navigator],

@@ -459,7 +459,10 @@ it("ages due labels while open, with no reminder or live events", async () => {
   }
 });
 
-function page(source: Reminder[] | Reminders) {
+function page(
+  source: Reminder[] | Reminders,
+  navigator = reminderNavigation(),
+) {
   const state = { status: "ready" as const, reminders: source };
   const reminders = Array.isArray(source)
     ? ({
@@ -473,7 +476,6 @@ function page(source: Reminder[] | Reminders) {
     viewer,
     session: { reminders, ...sessionParts },
   };
-  const navigator = reminderNavigation();
   render(
     <ReminderHost
       relay={
@@ -588,6 +590,41 @@ it("restores an unsaved draft through Back and Forward but retires explicitly cl
   }
 });
 
+it.each(["Cancel", "Set reminder"])(
+  "does not recreate an editor while %s waits for native dismissal",
+  async (action) => {
+    const user = userEvent.setup();
+    const navigator = reminderNavigation();
+    let finishDismiss!: () => void;
+    const state = { status: "ready", hydrated: true, reminders: [] };
+    page(
+      {
+        snapshot: () => state,
+        subscribe: () => () => {},
+        create: async () => {},
+      } as unknown as Reminders,
+      {
+        ...navigator,
+        dismiss: (visits, fallback) => {
+          finishDismiss = () => navigator.dismiss(visits, fallback);
+        },
+      },
+    );
+    await user.click(screen.getByRole("button", { name: "New reminder" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Reminder text" }),
+      "Finish this draft",
+    );
+    await user.click(screen.getByRole("button", { name: action, exact: true }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => finishDismiss());
+    await user.click(screen.getByRole("button", { name: "New reminder" }));
+    expect(screen.getByRole("textbox", { name: "Reminder text" })).toHaveValue(
+      "",
+    );
+  },
+);
+
 it("keeps a pending save alive through page traversal and retires it on completion", async () => {
   const user = userEvent.setup();
   let finish!: () => void;
@@ -640,7 +677,14 @@ it("retires the draft on session replacement and ignores the old save's completi
   });
   const firstCreate = vi.fn(() => save);
   const secondCreate = vi.fn(async () => {});
-  const navigator = reminderNavigation();
+  const navigation = reminderNavigation();
+  let finishDismiss!: () => void;
+  const navigator: Navigation = {
+    ...navigation,
+    dismiss: (visits, fallback) => {
+      finishDismiss = () => navigation.dismiss(visits, fallback);
+    },
+  };
   const mount = (create: typeof secondCreate | undefined) => {
     const connection = {
       status: "ready",
@@ -686,6 +730,7 @@ it("retires the draft on session replacement and ignores the old save's completi
     );
     rerender(mount(secondCreate));
     expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => finishDismiss());
     await open();
     const text = screen.getByRole("textbox", { name: "Reminder text" });
     expect(text).toHaveValue("");
