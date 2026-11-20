@@ -1,5 +1,9 @@
 import type { DetailTab } from "../../features/messages/DetailTabContext";
-import type { ComposerHandle } from "../../features/messages/composer-overlay";
+import {
+  type ComposerHandle,
+  type ComposerName,
+  threadComposer,
+} from "../../features/messages/composer-overlay";
 import type {
   InlineOpener,
   PanelRenderer,
@@ -1132,6 +1136,15 @@ export function useConversationTabs({
     panelTrigger,
     openConversationLink,
     openConversationThread,
+    /** Whether a thread tab here holds `name`, a thread's composer: it shows
+     * the thread once selected. */
+    holdsComposer: (name: ComposerName) =>
+      tabState.tabs.some(
+        (tab) =>
+          tab.kind === "thread" &&
+          !!tabChannel(tab) &&
+          threadComposer(tab.channelId, rootOfTab(tab)) === name,
+      ),
     openLinkedThread,
     /** Whether a tab for this conversation could show it. */
     canOpenConversation: (channelId: string) =>

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createNavigationController } from "../navigation/controller";
 import { createMemoryHistory } from "../navigation/history";
 import type { OpenTarget } from "../navigation/targets";
@@ -274,5 +274,62 @@ describe("history", () => {
         .filter((item) => item.open)
         .map((item) => [entryId(item.target), item.placement]),
     ).toEqual([[`details:${id(2)}`, "dialog"]]);
+  });
+  // Details over a thread tab's reply box, as that tab's sheet: Back to their
+  // visit, after a visit that showed nothing, brings them back to wait for it.
+  function overTab(channelId: string) {
+    const setup_ = setup();
+    const { navigation, opener } = setup_;
+    const box = createComposerHandle(threadComposer(channelId, id(9)));
+    void navigation.open({
+      ...conversation,
+      reader: { kind: "details", messageId: id(1) },
+    });
+    opener.store.set(() =>
+      opened([], { ...details(id(1), box) }, 1, [
+        navigation.snapshot().entry.id,
+      ]),
+    );
+    void navigation.open({ ...conversation, messageId: id(3) });
+    expect(setup_.open()).toEqual([]);
+    navigation.back();
+    const placed = () =>
+      opener.store
+        .get()
+        .filter((item) => item.open)
+        .map((item) => [item.placement, !!item.waiting]);
+    return { ...setup_, placed };
+  }
+
+  it("details over a thread tab wait for it while a tab holds its reply box", () => {
+    const { opener, placed } = overTab("D");
+    expect(placed()).toEqual([["inline", true]]);
+    opener.settle("C", (name) => name === threadComposer("D", id(9)));
+    expect(placed()).toEqual([["inline", true]]);
+  });
+
+  it("details over a thread tab give up once no tab holds its reply box", () => {
+    // Another channel's: they close, as leaving that channel does.
+    const other = overTab("D");
+    other.opener.settle("C", () => false);
+    expect(other.placed()).toEqual([]);
+    // This channel's: they open as they would without it, in a dialog.
+    const own = overTab("C");
+    own.opener.settle("C", () => false);
+    expect(own.placed()).toEqual([["dialog", false]]);
+  });
+
+  it("details over a thread tab give up when its reply box does not come back soon", () => {
+    vi.useFakeTimers();
+    try {
+      const { opener, placed } = overTab("C");
+      opener.settle("C", () => true);
+      vi.advanceTimersByTime(4999);
+      expect(placed()).toEqual([["inline", true]]);
+      vi.advanceTimersByTime(1);
+      expect(placed()).toEqual([["dialog", false]]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

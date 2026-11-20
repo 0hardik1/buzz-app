@@ -98,6 +98,9 @@ export type Placed = InlineEntry & {
    * conversation mounts again: it waits, unshown, for a composer of the same
    * name. */
   waiting?: boolean | undefined;
+  /** Waits only while a tab still holds its composer, and not for long:
+   * its composer is a thread tab's, which may not come back. */
+  briefly?: boolean | undefined;
 };
 
 /** What it reads: opening the same thing again replaces it. */
@@ -438,6 +441,12 @@ export type InlineOpener = Readonly<{
   outlet(handle: ComposerHandle): () => void;
   sent(composer: ComposerHandle): void;
   composerGone(composer: ComposerHandle): void;
+  /** The page has drawn `channelId`: what waits for a thread tab's composer
+   * that no tab `holds` stops waiting. */
+  settle(
+    channelId: string | undefined,
+    holds: (name: ComposerName) => boolean,
+  ): void;
   /** A tab closing for good takes what was ever open over its composer, at
    * any visit, that has nowhere else to open: returns their visits, for the
    * tab's dismissal to retire. */
@@ -535,18 +544,45 @@ export function createOpener(
       const returning =
         !!name &&
         (picture.some((other) => provides(other) === name) ||
-          name === channelComposerOf(target) ||
-          // With nowhere else to open, it waits for the thread its address
-          // names, as another channel's side tab.
-          (!item.openAsTab && name === readerComposerOf(target)));
+          name === channelComposerOf(target));
       if (returning) return { ...item, waiting: true };
+      // With nowhere else to open, it waits for its thread's tab, as another
+      // channel's side tab, while that tab lasts: see `settle`.
+      if (name && !item.openAsTab)
+        return { ...item, waiting: true, briefly: true };
     }
+    return elsewhere(item);
+  };
+  /** Where an entry opens without its composer: its tab, else a dialog. */
+  const elsewhere = (item: Placed) => {
     if (item.openAsTab) {
       queueMicrotask(() => item.openAsTab?.());
       return undefined;
     }
-    return { ...item, placement: "dialog" as const, waiting: false };
+    return {
+      ...item,
+      placement: "dialog" as const,
+      waiting: false,
+      briefly: false,
+    };
   };
+  // What waits for a thread tab gives up when no tab holds its composer, or
+  // when its composer has not come back soon: a tab can stay without one, as
+  // over an archived channel. It then opens as it would without a composer,
+  // in its own channel; elsewhere it closes, as leaving that channel does.
+  let drawn: string | undefined;
+  const brief = (item: Placed) => item.open && !!item.waiting && !!item.briefly;
+  const giveUp = (gives: (item: Placed) => boolean) =>
+    store.set((items) =>
+      items.some((item) => brief(item) && gives(item))
+        ? items.flatMap((item) => {
+            if (!(brief(item) && gives(item))) return [item];
+            if (channelOf(item) !== drawn) return [];
+            const placed = elsewhere(item);
+            return placed ? [placed] : [];
+          })
+        : items,
+    );
   const arrive = () => {
     if (!history || pushing) return;
     const snapshot = history.navigator.snapshot();
@@ -588,6 +624,17 @@ export function createOpener(
         () => ++sequence,
       ),
     );
+    const waits = new Set(
+      store
+        .get()
+        .filter(brief)
+        .map((item) => item.opening ?? item.key),
+    );
+    if (waits.size)
+      setTimeout(
+        () => giveUp((item) => waits.has(item.opening ?? item.key)),
+        BRIEF_WAIT_MS,
+      );
   };
   /** Closes what reads `id` for good; see InlineOpener.dismiss. */
   const dismiss = (id: string) => {
@@ -685,15 +732,23 @@ export function createOpener(
       const named = outlets.get(handle.name) ?? new Set();
       named.add(handle);
       outlets.set(handle.name, named);
-      // An entry waiting for a composer of this name opens over it.
+      // An entry waiting for a composer of this name opens over it; one
+      // waiting for a thread tab, once the tab's reply box is there.
+      const binds = (item: Placed) =>
+        !!item.waiting &&
+        item.composer?.name === handle.name &&
+        (!item.briefly || shows(handle));
       const rebind = () =>
         store.set((items) =>
-          items.some(
-            (item) => item.waiting && item.composer?.name === handle.name,
-          )
+          items.some(binds)
             ? items.map((item) =>
-                item.waiting && item.composer?.name === handle.name
-                  ? { ...item, composer: handle, waiting: false }
+                binds(item)
+                  ? {
+                      ...item,
+                      composer: handle,
+                      waiting: false,
+                      briefly: false,
+                    }
                   : item,
               )
             : items,
@@ -716,6 +771,10 @@ export function createOpener(
     },
     composerGone: (composer) =>
       store.set((items) => composerGone(items, composer)),
+    settle: (channelId, holds) => {
+      drawn = channelId;
+      giveUp((item) => !holds(item.composer?.name as ComposerName));
+    },
     retire: (name) => {
       const over = (list: readonly Placed[]) => {
         const ids = withStack(
@@ -749,14 +808,10 @@ const channelComposerOf = (target: OpenTarget | undefined) =>
   target?.kind === "conversation"
     ? channelComposer(target.channelId)
     : undefined;
-/** The thread a reader's address reads over. */
-const readerComposerOf = (target: OpenTarget | undefined) =>
-  target?.kind === "conversation" && target.reader?.rootId
-    ? threadComposer(
-        target.reader.channelId ?? target.channelId,
-        target.reader.rootId,
-      )
-    : undefined;
+
+const noVisits = () => () => {};
+/** How long a reader waits for its thread tab's reply box. */
+const BRIEF_WAIT_MS = 5000;
 
 /** The opener rows use: their workspace's, or one of their own that opens
  * readers in dialogs where there is no workspace, as in search previews. */
@@ -782,6 +837,8 @@ export function useInlineContainerList(
   renderPanel?: PanelRenderer,
   history?: InlineHistory,
   inline = true,
+  /** Whether a thread tab of the drawn conversation holds a composer. */
+  holds?: { current: ((name: ComposerName) => boolean) | undefined },
 ) {
   const [store] = useState(createStore);
   const panels = useRef(renderPanel);
@@ -802,6 +859,19 @@ export function useInlineContainerList(
         : undefined,
     [opener, navigator],
   );
+  // Once the visit's conversation is drawn, its thread tabs say which
+  // composers come back. This runs before leaving's cleanup below, which
+  // would close what still waits.
+  useSyncExternalStore(
+    navigator?.subscribe ?? noVisits,
+    () => navigator?.snapshot().entry.id,
+    () => navigator?.snapshot().entry.id,
+  );
+  useEffect(() => {
+    const target = navigator?.snapshot().entry.target;
+    if (target?.kind === "conversation" && target.channelId === channelId)
+      opener.settle(channelId, (name) => !!holds?.current?.(name));
+  });
   useEffect(() => {
     store.set((items) =>
       left(

@@ -569,6 +569,43 @@ test("Back to details over another channel's thread tab opens them again", async
   await expect.poll(() => hashTarget(page)).toEqual(at);
 });
 
+test("Back to details over this channel and another channel's thread tab opens both again", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const { reader } = await openOtherChannelDetails(page, app);
+  const details = app.append(
+    "primary",
+    "alpha",
+    `Brief alpha\n\n${"Alpha detail. ".repeat(60)}\n\nAlpha end.`,
+    false,
+    false,
+    undefined,
+    undefined,
+    [["audience", "details"]],
+  );
+  await row(page, details).getByRole("button", { name: "Show more" }).click();
+  const own = () => sheets(page).filter({ hasText: "Alpha end." });
+  await expect(own()).toHaveCount(1);
+  await expect(reader()).toContainText("The end.");
+  const at = await hashTarget(page);
+  expect(at.reader).toMatchObject({ messageId: details.id });
+  await channel(page, "Beta").first().click();
+  await expect(
+    page.getByRole("textbox", { name: "Message #Beta" }),
+  ).toBeVisible();
+  await back(page);
+  await expect(
+    page.getByRole("textbox", { name: "Message #Alpha" }),
+  ).toBeVisible();
+  await expect(betaTab(page)).toBeVisible();
+  await expect.poll(() => hashTarget(page)).toEqual(at);
+  await expect(own()).toHaveCount(1);
+  await expect(reader()).toContainText("The end.");
+  await expect(sheets(page)).toHaveCount(2);
+});
+
 test("closing another channel's thread tab retires the details over it", async ({
   page,
   app,

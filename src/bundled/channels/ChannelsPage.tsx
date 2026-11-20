@@ -11,6 +11,7 @@ import {
 } from "../../features/messages/inline-containers";
 import {
   type ComposerHandle,
+  type ComposerName,
   type MediaReviewOrigin,
   composerChannel,
   composerThread,
@@ -1480,10 +1481,13 @@ function ChannelWorkspace({
   }, [mediaReviews.length, showingMediaReviews]);
   // Threads, panels and details read over their composers.
   const panelRenderer = useRef<PanelRenderer>(undefined);
+  const threadTabsHold = useRef<(name: ComposerName) => boolean>(undefined);
   const containers = useInlineContainerList(
     currentId,
     (target, controls) => panelRenderer.current?.(target, controls),
     useMemo(() => ({ navigator, address: inlineAddress }), [navigator]),
+    true,
+    threadTabsHold,
   );
   inlineOpener.current = containers.opener;
   // Closing a thread's tab retires the visits that selected it, and those of
@@ -1646,6 +1650,7 @@ function ChannelWorkspace({
         entry.panel.channelMenu.eligible(current, queries)
       ),
   });
+  threadTabsHold.current = secondary.holdsComposer;
   panelRenderer.current = secondary.renderInlinePanel;
   const focusConversation = useRef(false);
   const closeAllTabs = () => {

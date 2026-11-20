@@ -71,7 +71,13 @@ thread of that channel adds no visit. Such a sheet belongs to that tab, not to
 the selected channel: selecting another channel leaves it open while the tab
 is, Back to details there waits for the tab's composer, and closing the tab
 retires their visits with the tab's own, wherever they are in history. A diff
-keeps its visits: it can still open in its own tab.
+keeps its visits: it can still open in its own tab. Every saved details sheet
+over a thread tab waits for its own tab, so Back brings back each of them, not
+only the one the address names. The wait ends when no thread tab holds that
+composer, as after the tab closes some other way or its channel leaves, or
+when its reply box does not come back within five seconds, as over an archived
+channel; the details then open as they would without a composer: a dialog in
+their own channel, and closed in another.
 
 A `reader` address holds the message's kind (`details` or `diff`), its id,
 and the root of its thread when it is a reply, which names the composer it
