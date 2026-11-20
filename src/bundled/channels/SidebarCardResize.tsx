@@ -190,8 +190,8 @@ export function SidebarCardResize({
                 if (event.detail === 0) handle.current?.focus();
               }}
             >
+              <ArrowDownIcon aria-hidden="true" />
               {waiting.count}
-              <ArrowDownIcon size={15} aria-hidden="true" />
             </Button>
           </span>
         )}
