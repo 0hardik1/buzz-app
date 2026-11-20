@@ -310,6 +310,8 @@ export function ChannelInventory({
   const list = useChannelRoster(queries.channels, {
     activity: true,
     preview: pluginSorted,
+    // Cards default to the Active filter, which reads activity values
+    // directly, so activity changes can't be skipped by Recent rank here.
   });
   const rosterRecovers = useRecoveryOwns(queries, (live) =>
     rosterRecovering(live.roster),

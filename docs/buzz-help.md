@@ -261,6 +261,10 @@ In a Codex agent’s settings, open **Huddle voice** in the **Settings** tab to 
   means nothing is unread, or its unread isn't known yet, for example because that
   community isn't connected or was closed to make room for one you opened. Only
   the first 24 communities get badges at startup; others show one once opened.
+- To reorder communities, drag one in the switcher, or use **Move up** and
+  **Move down** in its right-click menu. The order is saved on this device and
+  sets the numbered shortcuts: ⌘1 is Personal space and ⌘2–9 follow the
+  communities in order. A newly joined community goes last.
 - Community owners and admins manage access in the community's **Membership**
   settings (also reached from **Invite to community** in the community picker's
   right-click menu). **Members** shows the roster and updates as membership changes arrive.
@@ -754,7 +758,10 @@ Quitting Buzz also turns it off.
   dots, and do not contribute to the sidebar’s floating **N unread** buttons or
   their avatar previews. The macOS Dock unread dot follows the rows: a muted channel
   lights it only for a mention of you or **Mark as unread**, and a muted DM still lights it.
-  Muting does not mark messages or threads as read.
+  Muted channels show only direct mentions in Activity, including its sidebar
+  preview and unread count. Marking an ordinary Activity row unread does not
+  override the mute. Muted DMs still appear. Unmuting shows retained activity
+  again with its read state intact.
   In a channel's or DM's main message box, typing `/mute` by itself toggles
   Mute for it, and a toast confirms it once saved. The command is not posted as
   a message. If the change cannot be saved, a notice offers **Retry** instead. Thread
