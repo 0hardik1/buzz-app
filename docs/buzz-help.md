@@ -896,9 +896,13 @@ Quitting Buzz also turns it off.
   you typed. The keyword order shows first; the reordered list replaces it a
   moment later, and a small sparkle appears at the end of the Messages heading
   (hover it to see **Reranked**). If you've already moved the
-  highlight or chosen a result, the order stays as it is. The provider sees the query and those
-  messages' text, conversation names and authors. Newest-first and filter-only
-  searches aren't reranked.
+  highlight or chosen a result, the order stays as it is. Other things equal,
+  it favors messages people wrote over agent or workflow output, then ones
+  that mention you, then ones in conversations you're in. The provider sees
+  the query and those messages' text, dates, conversation names and authors,
+  and whether each is a direct message, yours, from an agent or workflow,
+  mentions you, or is in a conversation you're in. Newest-first and filter-only searches aren't
+  reranked.
 - **Ask an agent**: start with `ask:` to write a question for your default
   agent, or choose **Ask** under a long query. Enter opens New chat with the
   question addressed to that agent; press Enter again to send it. If New chat
