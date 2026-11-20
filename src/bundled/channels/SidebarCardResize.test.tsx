@@ -25,8 +25,10 @@ type Mark = "dm" | "mention" | "channel" | "muted";
 function Card({
   rows,
   marks = {},
+  seeAll,
 }: {
   rows: number;
+  seeAll?: { full: boolean; hidden: boolean; open(): void };
   /** Unread on a row: a DM, a mention of you, ordinary channel backlog, or a
    * mention in a muted channel. */
   marks?: Record<number, Mark>;
@@ -39,6 +41,7 @@ function Card({
         height={height}
         onResize={resize}
         onToggle={toggle}
+        seeAll={seeAll}
       >
         {Array.from({ length: rows }, (_, index) => `Row ${index}`).map(
           (row) => (
@@ -362,4 +365,19 @@ it("makes rows past the card's edge inert and lands a saved height on a whole ro
     false,
     false,
   ]);
+});
+
+it("ends a card cut short with See all, and shows every row with no grip once in", () => {
+  const open = vi.fn();
+  const { rerender } = render(
+    <Card rows={3} seeAll={{ full: false, hidden: false, open }} />,
+  );
+  // Every row shows and the filter hides none: nothing more to see.
+  expect(screen.queryByRole("button", { name: "See all in Work" })).toBeNull();
+  rerender(<Card rows={3} seeAll={{ full: false, hidden: true, open }} />);
+  fireEvent.click(screen.getByRole("button", { name: "See all in Work" }));
+  expect(open).toHaveBeenCalledOnce();
+  rerender(<Card rows={3} seeAll={{ full: true, hidden: true, open }} />);
+  expect(screen.queryByRole("button", { name: "See all in Work" })).toBeNull();
+  expect(screen.queryByLabelText("Resize Work")).toBeNull();
 });
