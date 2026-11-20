@@ -15,6 +15,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { ChannelSummary, Profile } from "../../features/relay/contracts";
 import type { RelaySession } from "../../features/relay/session";
 import type { UnreadSnapshot } from "../../features/relay/unread";
+import type { InboxItem, InboxSnapshot } from "../../features/relay/inbox";
 import type { PresenceStatus } from "../../features/presence/presence";
 import { ChannelSidebarItem } from "./ChannelSidebarItem";
 import { UnreadBadge } from "./UnreadBadge";
@@ -42,6 +43,12 @@ function owner(profiles = new Map<string, Profile>()) {
     items: [],
     coverage: "observed",
     freshness: "observed",
+  };
+  const inboxListeners = new Set<() => void>();
+  let inbox: InboxSnapshot = {
+    status: "ready",
+    items: [],
+    freshness: "unknown",
   };
   const session = {
     channels: { prepare: vi.fn() },
@@ -83,17 +90,26 @@ function owner(profiles = new Map<string, Profile>()) {
         return () => listeners.delete(listener);
       },
       activity: () => activity,
-      inbox: () => ({
-        status: "ready" as const,
-        items: [],
-        freshness: "unknown" as const,
-      }),
-      subscribeInbox: () => () => {},
+      inbox: () => inbox,
+      subscribeInbox: (listener: () => void) => {
+        inboxListeners.add(listener);
+        return () => inboxListeners.delete(listener);
+      },
       subscribeActivity: () => () => {},
     },
   } as unknown as RelaySession;
   return {
     session,
+    inbox(items: Partial<InboxItem>[]) {
+      inbox = {
+        status: "ready",
+        items: items.map(
+          (item) => ({ channelId: "alpha", ...item }) as InboxItem,
+        ),
+        freshness: "observed",
+      };
+      for (const listener of inboxListeners) listener();
+    },
     profiles,
     listeners,
     mute(value: boolean) {
@@ -645,6 +661,25 @@ it("keeps Solo unread labels and markers independent of mute", () => {
   act(() => state.unread(0));
   expect(label()).toBeNull();
   expect(view.container.querySelector("[data-channel-unread]")).toBeNull();
+});
+
+it("marks a row as waiting only while Activity holds an unread conversation for it", () => {
+  const state = owner();
+  const view = render(
+    <UnreadBadge session={state.session} channelId="alpha" />,
+  );
+  const waiting = () => view.container.querySelector("[data-channel-waiting]");
+  act(() => state.unread(2));
+  // Ordinary backlog alone, or a read Activity conversation, isn't waiting.
+  expect(waiting()).toBeNull();
+  act(() => state.inbox([{ unreadCount: 0, manual: false }]));
+  expect(waiting()).toBeNull();
+  act(() => state.inbox([{ unreadCount: 1, manual: false }]));
+  expect(waiting()).toBeInTheDocument();
+  act(() =>
+    state.inbox([{ channelId: "beta", unreadCount: 1, manual: false }]),
+  );
+  expect(waiting()).toBeNull();
 });
 
 it.each([

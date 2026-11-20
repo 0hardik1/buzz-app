@@ -291,15 +291,15 @@ test("the Drafts & sent row shares channel rows' columns and inset without movin
     await expect
       .poll(() =>
         drafts.evaluate((row) => {
-          const starred = document.querySelector(
-            '[data-sidebar-section="starred"]',
+          const firstSection = document.querySelector(
+            '[aria-label="Subscribed channels"] [data-sidebar-section]:not([data-sidebar-section="pages"])',
           );
-          if (!starred) return undefined;
+          if (!firstSection) return undefined;
           // Page rows live in the Plugins card; cards sit one panel gap (0.5rem) apart.
           const card = row.closest("[data-sidebar-card]");
           if (!card) return undefined;
           const gap =
-            starred.getBoundingClientRect().top -
+            firstSection.getBoundingClientRect().top -
             card.getBoundingClientRect().bottom;
           const rem = parseFloat(
             getComputedStyle(document.documentElement).fontSize,

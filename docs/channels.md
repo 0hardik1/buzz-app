@@ -150,14 +150,16 @@ sidebar coordinates must match what the sidebar signer produces, and recipe
 coordinates must satisfy the recipe contract.
 
 The sidebar defaults to **Plugins** (apps and sidebar pages such as Activity),
-**Favorites**, personal workspaces, **Solo**, **Team**, **Forums**, and
-**Direct messages**. Each section is its own card; **Forums** shows once you
-have a forum. Reorder cards by dragging their header or using **Move up** and
-**Move down**. The saved order syncs with workspace placement. Double-click a
-workspace's header to rename it in place. A card shows its first ten rows;
-drag its bottom edge to show more or fewer, or double-click the edge (or
-press Enter on it) to show every row and back. Rows past a card's edge are
-skipped by the keyboard until the card shows them.
+**Solo**, **Favorites**, personal workspaces, **Team**, **Forums**, and
+**Direct messages**. After an upgrade from the separate Solo and Team
+sidebars, the previous Solo workspaces come first, then **Solo**,
+**Favorites**, the previous Team workspaces and **Team**. Each section is its
+own card; **Forums** shows once you have a forum. Reorder cards by dragging
+their header or using **Move up** and **Move down**. The saved order syncs with
+workspace placement. Double-click a workspace's header to rename it in place.
+A card shows its first ten rows; drag its bottom edge to show more or fewer, or
+double-click the edge (or press Enter on it) to show every row and back. Rows
+past a card's edge are skipped by the keyboard until the card shows them.
 
 Drag a chat, channel, forum or DM into any workspace, into Favorites, or back
 to its home section. The row’s **Move to…** menu offers the same destinations.
@@ -259,8 +261,12 @@ Like sorting, this is whole-record last-write-wins; another client sees changes
 when it loads or refreshes preferences, without a new automatic reconciliation loop.
 
 Workspaces use a compact encrypted `channel-workspaces` record with sections,
-assignments, section order, and removal markers. The first edit saves the
-combined legacy projection. Older desktop and mobile clients read their
+assignments, section order, and removal markers. Until that record exists,
+the sidebar shows the combined legacy projection, in the upgrade order above.
+The first edit of any kind saves that projection, including its section
+order, so the order no longer depends on the legacy records. Loading never
+saves. A saved record without a section order, such as one saved by an earlier
+build, uses the default order. Older desktop and mobile clients read their
 original coordinates. Their writes cannot replace the unified record. An
 upgraded client can import previously unseen workspaces and filings. A saved
 unified placement or removal of a known legacy entry takes precedence, even

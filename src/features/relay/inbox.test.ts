@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { type InboxItem, inboxMentioners } from "./inbox";
+import { type InboxItem, inboxMentioners, inboxUnreadChannels } from "./inbox";
 
 const item = (fields: Partial<InboxItem>): InboxItem => ({
   id: "room:root",
@@ -57,4 +57,13 @@ it("leaves workflow mentions faceless and orders people newest first", () => {
       mention("bob", 20),
     ]).get("room"),
   ).toEqual(["bob", "alice"]);
+});
+
+it("counts a channel as waiting only while one of its conversations is unread", () => {
+  const unread = (items: InboxItem[]) =>
+    inboxUnreadChannels({ status: "ready", items, freshness: "observed" });
+  // A read conversation lingers in Activity but leaves its channel's backlog alone.
+  expect(unread([item({ unreadCount: 0, manual: false })])).toEqual(new Set());
+  expect(unread([item({ unreadCount: 2 })])).toEqual(new Set(["room"]));
+  expect(unread([item({ manual: true })])).toEqual(new Set(["room"]));
 });

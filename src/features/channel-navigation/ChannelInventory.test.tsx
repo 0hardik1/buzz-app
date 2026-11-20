@@ -2450,7 +2450,7 @@ it("keeps owned and unfiled shared Solo chats out of Team without removing acces
     .getByLabelText("Team", { selector: "summary" })
     .closest("[data-sidebar-section]");
   const solo = screen
-    .getByLabelText("Solo chats", { selector: "summary" })
+    .getByLabelText("Solo", { selector: "summary" })
     .closest("[data-sidebar-section]");
   expect(solo).toContainElement(screen.getByRole("button", { name: "beta" }));
   expect(team).not.toContainElement(
@@ -2541,10 +2541,10 @@ it("moves a saved group from its menu, rolls back a failed save, and retries it"
     expect(order).toHaveBeenLastCalledWith(
       [
         "pages",
+        "solo",
         "starred",
         "group:later",
         "group:work",
-        "solo",
         "channels",
         "forums",
         "dms",

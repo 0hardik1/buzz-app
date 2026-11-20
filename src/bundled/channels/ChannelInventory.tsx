@@ -106,7 +106,7 @@ import { ChannelCopyLinkMenuItem } from "./ChannelCopyLinkMenuItem";
 import { ChannelSidebarItem } from "./ChannelSidebarItem";
 import { ChannelSidebarRows } from "../../features/channel-navigation/ChannelSidebarRows";
 import { activeChannelRows } from "../../features/channel-navigation/active-channel-rows";
-import type { UnreadDmPreview } from "./SidebarUnread";
+import { type UnreadDmPreview, unreadPreviews } from "./SidebarUnread";
 import {
   ChannelSidebarDnd,
   DraggableChannel,
@@ -147,7 +147,6 @@ import {
 } from "../../features/channel-navigation/ChannelNavigationState";
 import { splitPartition } from "../../features/relay/partition";
 import styles from "./Channels.module.css";
-import { avatarMedia } from "../../shared/avatar-source";
 import { inboxMentioners } from "../../features/relay/inbox";
 import { selectProfiles } from "../../features/relay/profile-selection";
 import { useBestieConversation } from "../../app/shell/bestie-context";
@@ -419,33 +418,17 @@ export function ChannelInventory({
         .ensure(missingMentioners.split(":"), "background")
         .catch(() => {});
   }, [queries.profiles, missingMentioners]);
-  const unreadDmPreviews = useMemo(() => {
-    const previews = new Map<string, UnreadDmPreview>();
-    for (const channel of channels) {
-      if (channel.channelType !== "dm" || channel.participants?.length !== 1)
-        continue;
-      const profile = dmProfiles.get(channel.participants[0] ?? "");
-      previews.set(channel.id, {
-        name: channel.name,
-        src: avatarMedia(profile?.picture, queries.media),
-        isAgent: profile?.isAgent,
-      });
-    }
-    for (const [channelId, authors] of mentioners) {
-      if (previews.has(channelId)) continue;
-      // Only people's faces: agents and workflows that mention you still
-      // count, but stay out of the stack. Wait for a profile to know.
-      const profile = authors
-        .map((author) => mentionerProfiles.get(author))
-        .find((candidate) => candidate && !candidate.isAgent);
-      if (!profile) continue;
-      previews.set(channelId, {
-        name: profile.name ?? "Someone",
-        src: avatarMedia(profile.picture, queries.media),
-      });
-    }
-    return previews;
-  }, [channels, dmProfiles, mentioners, mentionerProfiles, queries]);
+  const unreadDmPreviews = useMemo(
+    () =>
+      unreadPreviews(
+        channels,
+        dmProfiles,
+        mentioners,
+        mentionerProfiles,
+        queries.media,
+      ),
+    [channels, dmProfiles, mentioners, mentionerProfiles, queries.media],
+  );
   const workingIds = useSyncExternalStore(
     queries.agentActivity.subscribeWorking,
     queries.agentActivity.workingSnapshot,

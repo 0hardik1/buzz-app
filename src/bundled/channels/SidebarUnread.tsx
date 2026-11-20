@@ -18,12 +18,52 @@ import {
   waitsOnYou,
 } from "./conversation-rows";
 import styles from "./Channels.module.css";
+import { avatarMedia } from "../../shared/avatar-source";
+import type { ChannelSummary, Profile } from "../../features/relay/contracts";
 
 export type UnreadDmPreview = {
   name: string;
   src?: string | undefined;
   isAgent?: boolean | undefined;
 };
+
+type PreviewProfile = Pick<Profile, "name" | "picture" | "isAgent">;
+
+/** The face the edge cue shows for each channel: a 1:1 DM's person, otherwise
+ * the newest person who mentioned you there. */
+export function unreadPreviews(
+  channels: readonly ChannelSummary[],
+  dmProfiles: ReadonlyMap<string, PreviewProfile>,
+  mentioners: ReadonlyMap<string, readonly string[]>,
+  mentionerProfiles: ReadonlyMap<string, PreviewProfile>,
+  media: Parameters<typeof avatarMedia>[1],
+) {
+  const previews = new Map<string, UnreadDmPreview>();
+  for (const channel of channels) {
+    if (channel.channelType !== "dm" || channel.participants?.length !== 1)
+      continue;
+    const profile = dmProfiles.get(channel.participants[0] ?? "");
+    previews.set(channel.id, {
+      name: channel.name,
+      src: avatarMedia(profile?.picture, media),
+      isAgent: profile?.isAgent,
+    });
+  }
+  for (const [channelId, authors] of mentioners) {
+    if (previews.has(channelId)) continue;
+    // Only people's faces: agents and workflows that mention you still
+    // count, but stay out of the stack. Wait for a profile to know.
+    const profile = authors
+      .map((author) => mentionerProfiles.get(author))
+      .find((candidate) => candidate && !candidate.isAgent);
+    if (!profile) continue;
+    previews.set(channelId, {
+      name: profile.name ?? "Someone",
+      src: avatarMedia(profile.picture, media),
+    });
+  }
+  return previews;
+}
 
 type EdgeTarget = {
   /** The row to reveal, or the card's badge when the row is past its edge. */

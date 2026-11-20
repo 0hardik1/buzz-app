@@ -9,7 +9,11 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useState } from "react";
-import { SidebarUnread, type UnreadDmPreview } from "./SidebarUnread";
+import {
+  SidebarUnread,
+  type UnreadDmPreview,
+  unreadPreviews,
+} from "./SidebarUnread";
 import { SidebarSection } from "./SidebarSection";
 import { UnreadBadge } from "./UnreadBadge";
 import {
@@ -479,3 +483,26 @@ it.each([
     }
   },
 );
+
+it("shows the newest person who mentioned you, never an agent", () => {
+  const people = new Map([
+    ["agent", { name: "Helper", isAgent: true }],
+    ["alice", { name: "Alice", picture: "https://example.test/a.png" }],
+  ]);
+  const previews = (authors: string[]) =>
+    unreadPreviews(
+      [],
+      new Map(),
+      new Map([["room", authors]]),
+      people,
+      undefined,
+    );
+  // The agent mentioned you last, but the stack shows Alice.
+  expect(previews(["agent", "alice"]).get("room")).toEqual({
+    name: "Alice",
+    src: "https://example.test/a.png",
+  });
+  // An agent alone, or someone whose profile hasn't loaded, shows no face.
+  expect(previews(["agent"]).has("room")).toBe(false);
+  expect(previews(["unknown"]).has("room")).toBe(false);
+});
