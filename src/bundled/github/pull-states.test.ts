@@ -2148,3 +2148,148 @@ it("reads a remembered merged pull request again once it was read a day ago", as
     stop();
   }
 });
+
+it.each([
+  [
+    "a public read GitHub fails",
+    undefined,
+    async () => new Response(null, { status: 502 }),
+  ],
+  [
+    "gh unavailable and the public read failing to fetch",
+    mockGh(async () => {
+      throw new GhUnavailable("signed out");
+    }),
+    async () => {
+      throw new TypeError("Failed to fetch");
+    },
+  ],
+])(
+  "keeps showing what was remembered of a link through %s, not taken for read",
+  async (_, gh, failing) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const remembered = createRememberedStates(null);
+    remembered.remember(
+      [[pull, { state: "open", title: "Kept" }]],
+      Date.now() - PULL_REFRESH_MS * 10,
+    );
+    let answer: (url: string) => Promise<Response> = failing;
+    const fetch = vi.fn((url: string) => answer(url));
+    vi.stubGlobal("fetch", fetch);
+    const states = createPullStates(gh, { remembered });
+    const stop = states.watch(pull, () => {});
+    try {
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(states.get(pull)).toEqual({ state: "open", title: "Kept" });
+      expect(states.readAt(pull)).toBeUndefined();
+      expect(remembered.get(pull)).toEqual({ state: "open", title: "Kept" });
+
+      answer = async () =>
+        new Response(JSON.stringify({ title: "Read", state: "open" }));
+      await vi.advanceTimersByTimeAsync(PULL_SLOW_REFRESH_MS);
+      expect(states.get(pull)).toMatchObject({ state: "open", title: "Read" });
+    } finally {
+      stop();
+    }
+  },
+);
+
+it("keeps showing what was remembered of a link whose page of a read GitHub failed", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const urls = Array.from(
+    { length: PULLS_PER_READ + 1 },
+    (_, i) => `https://github.com/block/buzz-app/pull/${i + 1}`,
+  );
+  const last = urls.at(-1) ?? "";
+  const remembered = createRememberedStates(null);
+  remembered.remember(
+    [[last, { state: "open", title: "Kept" }]],
+    Date.now() - PULL_REFRESH_MS * 10,
+  );
+  const gh = mockGh(async (_query: string, variables: Variables) => {
+    if (variables.p0 === PULLS_PER_READ + 1) throw new GitHubError("HTTP 502");
+    return Object.fromEntries(
+      Object.keys(variables)
+        .filter((key) => key.startsWith("p"))
+        .map((key) => [`r${key.slice(1)}`, rollup("OPEN")]),
+    );
+  });
+  const states = createPullStates(gh, { remembered });
+  const stop = urls.map((url) => states.watch(url, () => {}));
+  try {
+    await vi.waitFor(() => expect(states.get(urls[0] ?? "")).toBeDefined());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states.get(last)).toEqual({ state: "open", title: "Kept" });
+    expect(remembered.get(last)).toEqual({ state: "open", title: "Kept" });
+    expect(states.readAt(last)).toBeUndefined();
+  } finally {
+    for (const unwatch of stop) unwatch();
+  }
+});
+
+it("reads a remembered merged pull request once its day is up, and again while that read fails", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const remembered = createRememberedStates(null);
+  remembered.remember(
+    [[pull, { state: "merged", title: "Shipped" }]],
+    Date.now() - PULL_REFRESH_MS,
+  );
+  let down = true;
+  const gh = mockGh(async () => {
+    if (down) throw new GitHubError("HTTP 502");
+    return { r0: rollup("MERGED", { title: "Shipped" }) };
+  });
+  const states = createPullStates(gh, { remembered });
+  const stop = states.watch(pull, () => {});
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(gh).not.toHaveBeenCalled();
+    // Only merged links shown, nothing else wakes the store.
+    await vi.advanceTimersByTimeAsync(REMEMBERED_FOR_MS);
+    expect(gh).toHaveBeenCalledOnce();
+    expect(states.get(pull)).toEqual({ state: "merged", title: "Shipped" });
+    down = false;
+    await vi.advanceTimersByTimeAsync(PULL_SLOW_REFRESH_MS);
+    expect(gh).toHaveBeenCalledTimes(2);
+    expect(states.readAt(pull)).toBeDefined();
+    // Read this session, a merged one is not read again.
+    await vi.advanceTimersByTimeAsync(REMEMBERED_FOR_MS * 2);
+    expect(gh).toHaveBeenCalledTimes(2);
+  } finally {
+    stop();
+  }
+});
+
+it("spends a public poll's reads on links that show nothing before those remembered", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  const fetch = vi.fn(
+    async (_url: string) =>
+      new Response(JSON.stringify({ title: "A", state: "open" })),
+  );
+  vi.stubGlobal("fetch", fetch);
+  const shown = pulls.slice(0, PUBLIC_READS_PER_POLL);
+  const blank = pulls[PUBLIC_READS_PER_POLL] ?? "";
+  const remembered = createRememberedStates(null);
+  remembered.remember(
+    shown.map((url) => [url, { state: "open", title: "Old" }] as const),
+    Date.now() - PULL_SLOW_REFRESH_MS * 2,
+  );
+  const states = createPullStates(undefined, { remembered });
+  // The one showing nothing is watched last, so watch order alone would
+  // leave it out of the poll.
+  const stop = [...shown, blank].map((url) => states.watch(url, () => {}));
+  try {
+    await vi.waitFor(() =>
+      expect(fetch).toHaveBeenCalledTimes(PUBLIC_READS_PER_POLL),
+    );
+    expect(fetch.mock.calls.map(([url]) => url)).toContain(
+      "https://api.github.com/repos/block/repo-10/pulls/1",
+    );
+    await vi.waitFor(() =>
+      expect(states.get(blank)).toEqual({ state: "open", title: "A" }),
+    );
+  } finally {
+    for (const unwatch of stop) unwatch();
+  }
+});

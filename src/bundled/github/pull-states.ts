@@ -7,6 +7,7 @@
 import { loadGitHubChecks, type CheckSummary } from "./checks";
 import {
   GitHubRateLimited,
+  GitHubUnavailable,
   loadGitHubDetails,
   type GitHubDetails,
 } from "./data";
@@ -608,7 +609,7 @@ async function readPage(
     const pull = repository?.pullRequest;
     if (!repository || !pull)
       return failure?.type === "NOT_FOUND" || !failure
-        ? new Error(
+        ? new GitHubUnavailable(
             "GitHub couldn’t find this, or your GitHub account can’t see it.",
           )
         : new Error(failure.message);
@@ -700,7 +701,7 @@ async function readPublicState(
   const details = await loadGitHubDetails(reference, signal);
   if (reference.kind === "issue") {
     if (details.pullRequest)
-      throw new Error(
+      throw new GitHubUnavailable(
         "GitHub has a pull request, not an issue, at this number.",
       );
     return issueOf(
@@ -822,6 +823,10 @@ export function createPullStates(
   const readAt = new Map<string, number>();
   /** What links show of `url`: what was read, or else what was remembered. */
   const shown = (url: string) => states.get(url) ?? remembered?.get(url);
+  /** Whether links show only what was remembered of `url`, which nothing
+   * this session has read yet. */
+  const rememberedOnly = (url: string) =>
+    !states.has(url) && remembered?.get(url) !== undefined;
   /** When each was last polled, read or not, so it is due again its
    * readers' interval after, and a public poll takes the longest unpolled. */
   const polledAt = new Map<string, number>();
@@ -919,8 +924,17 @@ export function createPullStates(
    * level, else its readers' interval after it was last polled. */
   const dueAt = (url: string) => {
     const polled = lastPolled(url);
+    // One shown only as remembered is read once its day is up, even a merged
+    // one, and every few minutes while that read fails, until it is read.
+    const every =
+      rememberedOnly(url) && document.visibilityState === "visible"
+        ? Math.min(
+            interval(url),
+            polledAt.has(url) ? PULL_SLOW_REFRESH_MS : REMEMBERED_FOR_MS,
+          )
+        : interval(url);
     return Math.max(
-      polled === undefined || needed.has(url) ? 0 : polled + interval(url),
+      polled === undefined || needed.has(url) ? 0 : polled + every,
       notBefore.get(url) ?? 0,
     );
   };
@@ -1092,6 +1106,12 @@ export function createPullStates(
               ? new Error("GitHub did not answer")
               : undefined;
         const prior = states.get(url);
+        // GitHub answered that it is not there, or not for this account,
+        // rather than failing for the moment.
+        const gone = error instanceof GitHubUnavailable;
+        // A read that failed for the moment leaves links showing what was
+        // remembered, which is still not taken for read.
+        const kept = !!error && !gone && rememberedOnly(url);
         // A failed read keeps what was last read, and when, with why it
         // failed: readers show the latest data the store has.
         const state = !error
@@ -1099,7 +1119,7 @@ export function createPullStates(
           : typeof prior === "object"
             ? prior
             : "failed";
-        if (!error || state === "failed") readAt.set(url, now);
+        if (!error || (state === "failed" && !kept)) readAt.set(url, now);
         polledAt.set(url, now);
         notBefore.delete(url);
         if (plannedAll(url)) needed.delete(url);
@@ -1112,14 +1132,15 @@ export function createPullStates(
           unreadable.delete(url);
         }
         if (error?.message !== failed) failing.push(url);
-        // GitHub answered for others but not this one, so it is gone or
-        // out of reach: links show it unavailable rather than as it was.
-        if (state === "failed") lost.push(url);
-        else if (!error) read.push([url, state]);
+        // Gone or out of reach: links show it unavailable rather than as it
+        // was.
+        if (gone && state === "failed") lost.push(url);
+        else if (!error && state !== "failed") read.push([url, state]);
         const at = readAt.get(url) ?? now;
         for (const { resolve } of asked.get(url)?.waiting ?? [])
           resolve({ state, readAt: at, error });
         asked.delete(url);
+        if (kept) continue;
         // An unchanged state keeps its object, so whoever shows it is left be.
         if (same(states.get(url), state)) continue;
         states.set(url, state);
