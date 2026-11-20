@@ -576,10 +576,7 @@ it("restores an unsaved draft through Back and Forward but retires explicitly cl
   ).toHaveValue("Keep this draft");
   for (const dismissal of ["Cancel", "Close", "Escape"]) {
     if (dismissal === "Escape") await user.keyboard("{Escape}");
-    else
-      await user.click(
-        screen.getByRole("button", { name: dismissal, exact: true }),
-      );
+    else await user.click(screen.getByRole("button", { name: dismissal }));
     act(() => navigator.back());
     act(() => navigator.forward());
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -615,7 +612,7 @@ it.each(["Cancel", "Set reminder"])(
       screen.getByRole("textbox", { name: "Reminder text" }),
       "Finish this draft",
     );
-    await user.click(screen.getByRole("button", { name: action, exact: true }));
+    await user.click(screen.getByRole("button", { name: action }));
     expect(screen.queryByRole("dialog")).toBeNull();
     act(() => finishDismiss());
     await user.click(screen.getByRole("button", { name: "New reminder" }));
