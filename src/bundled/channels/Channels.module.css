@@ -428,6 +428,9 @@
   place-items: center;
   color: var(--text-subtle);
   transition: transform 160ms ease-out;
+  /* Decorative: a click lands on the summary itself, so WebKit's Tab starts
+     from the heading rather than from the icon inside it. */
+  pointer-events: none;
 }
 details:not([open]) > summary .sectionChevron {
   transform: rotate(-90deg);
