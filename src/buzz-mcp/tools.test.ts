@@ -559,20 +559,23 @@ it("refuses an everyone message over 128 words, or a brief over 50", async () =>
 });
 
 it("holds an edit's replacement to the length limit of the message's own audience", async () => {
-  const sent = (id: string, audience?: string) =>
+  const sent = (id: string, ...audiences: string[]) =>
     event({
       id,
       pubkey: me,
-      tags: [["h", "chan"], ...(audience ? [["audience", audience]] : [])],
+      tags: [["h", "chan"], ...audiences.map((value) => ["audience", value])],
     });
   const everyone = "4".repeat(64);
   const details = "5".repeat(64);
   const agents = "6".repeat(64);
+  // Shown as details, as the renderer reads any details tag.
+  const mixed = "7".repeat(64);
   const { client, published } = fake([
     ...community,
     sent(everyone),
     sent(details, "details"),
     sent(agents, "agents"),
+    sent(mixed, "everyone", "details"),
   ]);
   const context = { channel: "chan" };
   const long = Array.from({ length: 51 }, () => "word").join(" ");
@@ -582,6 +585,9 @@ it("holds an edit's replacement to the length limit of the message's own audienc
     edit(everyone, Array.from({ length: 129 }, () => "word").join(" ")),
   ).rejects.toThrow("This is 129 words, too long for everyone");
   await expect(edit(details, `${long}\n\nThe rest.`)).rejects.toThrow(
+    "The brief, the first paragraph, is 51 words",
+  );
+  await expect(edit(mixed, long)).rejects.toThrow(
     "The brief, the first paragraph, is 51 words",
   );
   expect(published).toHaveLength(0);

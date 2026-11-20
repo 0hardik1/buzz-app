@@ -11,7 +11,7 @@ import {
   detailsDraftErrors,
 } from "../features/relay/channel-details-protocol";
 import { lengthRefusals } from "../features/developer/length-refusals";
-import { detailsBrief } from "../features/relay/audience";
+import { detailsBrief, messageAudience } from "../features/relay/audience";
 import {
   lifecycleChannelId,
   lifecycleTemplate,
@@ -783,11 +783,7 @@ const HANDLERS: Readonly<Record<string, Handler>> = {
     const content = required(args, "text");
     // The replacement keeps the message's audience, so it meets that
     // audience's length limit as a send would.
-    const audience = tag(target, "audience");
-    checkLength(
-      audience === "agents" || audience === "details" ? audience : "everyone",
-      content,
-    );
+    checkLength(messageAudience(target) ?? "everyone", content);
     if (!tools.client.effectiveEdit)
       throw new Error("This host cannot obtain effective edit state.");
     const effective = await tools.client.effectiveEdit(id, channel);
