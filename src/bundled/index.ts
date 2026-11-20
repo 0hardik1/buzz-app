@@ -54,6 +54,8 @@ import focusManifest from "./focus/manifest.json";
 import * as focus from "./focus";
 import remindersManifest from "./reminders/manifest.json";
 import * as reminders from "./reminders";
+import tasksManifest from "./tasks/manifest.json";
+import * as tasks from "./tasks";
 import reposManifest from "./repos/manifest.json";
 import * as repos from "./repos";
 import changesetsManifest from "./changesets/manifest.json";
@@ -200,6 +202,11 @@ export const bundledPlugins: readonly BundledPlugin[] = [
   {
     manifest: { ...remindersManifest, apiVersion: 1 },
     module: reminders,
+    enabledByDefault: false,
+  },
+  {
+    manifest: { ...tasksManifest, apiVersion: 1 },
+    module: tasks,
     enabledByDefault: false,
   },
   {

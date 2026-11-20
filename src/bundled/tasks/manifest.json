@@ -1,0 +1,7 @@
+{
+  "id": "buzz.tasks",
+  "name": "Tasks",
+  "apiVersion": 1,
+  "description": "Shared agent tasks with why, done conditions, evidence links and append-only logs.",
+  "discovery": { "category": "productivity", "tags": ["tasks", "agents"] }
+}

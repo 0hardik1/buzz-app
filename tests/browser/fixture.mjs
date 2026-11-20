@@ -2427,6 +2427,30 @@ export const test = base.extend({
           acceptReadPublication(community, body);
           return send(response, { accepted: true, event_id: body.id });
         }
+        if (route === "sign" && body.kind === 45010) {
+          const content = JSON.parse(body.content);
+          expect(content.version).toBe(4);
+          expect(["open", "waiting", "done", "dropped"]).toContain(
+            content.state,
+          );
+          expect(content.log.length).toBeGreaterThan(0);
+          return send(response, finalizeEvent(body, userKey));
+        }
+        if (route === "publish" && body.kind === 45010) {
+          expect(verifyEvent(body)).toBe(true);
+          expect(body.pubkey).toBe(viewer);
+          const tag = (name) => body.tags.find(([key]) => key === name)?.[1];
+          expect(tag("type")).toBe("buzz.task");
+          expect(channelIds).toContain(tag("h"));
+          expect(["create", "update"]).toContain(tag("op"));
+          const coordinate = `45010:${body.pubkey}:${tag("d")}:${tag("type")}`;
+          const previous = readEvents.get(community).get(coordinate);
+          expect(tag("prev")).toBe(previous?.id);
+          if (tag("op") === "create") expect(previous).toBeUndefined();
+          else expect(previous).toBeDefined();
+          readEvents.get(community).set(coordinate, body);
+          return send(response, { accepted: true, event_id: body.id });
+        }
         if (soloChannels.length && route === "sign") {
           expect(body.kind).toBe(9);
           return send(response, finalizeEvent(body, userKey));
