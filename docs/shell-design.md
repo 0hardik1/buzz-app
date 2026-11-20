@@ -145,6 +145,15 @@ semantic tokens, UI authoring rules and the local component reference.
   focus to main once retry removes it, even if reconnect temporarily remounts
   the shell. A new opening or focus elsewhere cancels this
   handoff. A selected dock page is a separately focusable, labelled tabpanel.
+  The desktop host action `go-to-dock` (`app/shell/DockKeys.tsx`) is the
+  keyboard way in. On macOS it belongs to the native Window → Go to Dock item,
+  so the dispatcher leaves ⌘D to the menu, and the item works while a guest
+  page has focus. Off Apple it is a web shortcut, and browser builds don't
+  register it. Dock mode numbers the first nine tabs. Digits, Return and Space
+  open an app with `"content"` focus, and Escape restores the previous focus.
+  The open's own attempt (`onAttempt`) decides whether its tabpanel takes focus
+  when the page didn't. Bestie opens with `"preserve"` and hands the cursor to
+  its conversation composer, through a one-shot request bound to that attempt.
   Dock destinations retain exact selection; sidebar-placed pages select Messages,
   and non-primary or missing destinations leave every dock tile unselected.
   Sidebar page links retain their exact route and focus main content when

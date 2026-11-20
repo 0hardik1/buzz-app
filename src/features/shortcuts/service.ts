@@ -14,6 +14,9 @@ import {
   isBindingList,
   matches,
   normalizeShortcut,
+  resolveBindings,
+  sameBinding,
+  type BindingRow,
   type KeyBinding,
   type NormalizedShortcut,
   type Shortcut,
@@ -75,8 +78,11 @@ export class ShortcutsService extends Service implements Shortcuts {
       ? undefined
       : window,
     overrides?: BindingOverrides,
+    /** Chords a native menu owns on this platform: dispatch leaves them to it. */
+    native: readonly KeyBinding[] = [],
   ) {
     super(ctx, "shortcuts");
+    this.native = Object.freeze(native.map((chord) => Object.freeze(chord)));
     this.contributions = createContributions<NormalizedShortcut>(ctx);
     const apple = /Mac|iPhone|iPad/.test(host?.navigator.platform ?? "");
     // The effective chord is resolved at match time, so a rebind never requires
@@ -85,8 +91,22 @@ export class ShortcutsService extends Service implements Shortcuts {
     // key such as "constructor") means the default, so dispatch cannot throw.
     const bindingsFor = (shortcut: NormalizedShortcut, key: string) => {
       const override = overrides?.resolve(key);
-      return isBindingList(override) ? override : shortcut.binding;
+      if (!isBindingList(override)) return shortcut.binding;
+      if (!this.native.length || !matchesNative(override)) return override;
+      // A saved override on a native chord: resolve the whole table, as
+      // Settings does, so a restored default never takes another's chord.
+      return (
+        resolveBindings(
+          this.bindingRows(),
+          (row) => overrides?.resolve(row),
+          this.native,
+        ).get(key)?.effective ?? []
+      );
     };
+    const matchesNative = (bindings: readonly KeyBinding[]) =>
+      bindings.some((binding) =>
+        this.native.some((chord) => sameBinding(chord, binding)),
+      );
     const dispatch = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
@@ -95,6 +115,9 @@ export class ShortcutsService extends Service implements Shortcuts {
         event.getModifierState("AltGraph")
       )
         return;
+      // The native menu owns these: no web action runs and nothing is
+      // prevented, so the key equivalent reaches it.
+      if (matches(this.native, event, apple)) return;
       const editable = inEditable(event);
       const modal =
         modalOpen() ||
@@ -164,6 +187,23 @@ export class ShortcutsService extends Service implements Shortcuts {
   }
   /** Host composition only: runs a host shortcut if it is eligible now. */
   readonly runHost: (id: string) => boolean;
+  /** Chords owned by a native menu on this platform; never matched here. */
+  readonly native: readonly KeyBinding[];
+  /** Every dispatcher action in Settings order: host by order, then contributions. */
+  bindingRows(): BindingRow[] {
+    return [
+      ...[...this.hostBindings.values()]
+        .sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : 1))
+        .map((shortcut) => ({
+          key: shortcut.id,
+          defaults: shortcut.binding,
+          local: shortcut.local,
+        })),
+      ...[...this.contributions.snapshot()]
+        .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+        .map((shortcut) => ({ key: shortcut.key, defaults: shortcut.binding })),
+    ];
+  }
   snapshot = () => this.contributions.snapshot();
   subscribe = (listener: () => void) => this.contributions.subscribe(listener);
   register(shortcut: Shortcut) {

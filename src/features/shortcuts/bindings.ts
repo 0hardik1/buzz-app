@@ -119,3 +119,62 @@ export function inEditable(event: KeyboardEvent) {
     );
   });
 }
+
+/** One dispatcher action as the resolver sees it, in presentation order. */
+export type BindingRow = Readonly<{
+  key: string;
+  defaults: readonly KeyBinding[];
+  /** A field matches it itself; it competes only with other field-local rows. */
+  local?: boolean;
+}>;
+/** What applies now for one action. `masked` names a saved override that a
+ * native chord took over; `restored` says whether its default came back. */
+export type ResolvedBinding = Readonly<{
+  effective: readonly KeyBinding[];
+  masked?: Readonly<{ override: readonly KeyBinding[]; restored: boolean }>;
+}>;
+
+const answersTo = (chords: readonly KeyBinding[], binding: KeyBinding) =>
+  chords.some((chord) => sameBinding(chord, binding));
+
+/**
+ * Effective chords for every action at once, shared by dispatch and Settings.
+ * A native chord (a menu accelerator that must reach the native menu) masks
+ * any saved override equal to it. The masked action gets its default back only
+ * if no other action answers to it and it is not native itself; otherwise it
+ * is unbound, so the other assignment is kept. Among masked
+ * actions sharing a default, the earlier row takes it. Saved preferences are
+ * never rewritten here.
+ */
+export function resolveBindings(
+  rows: readonly BindingRow[],
+  override: (key: string) => readonly KeyBinding[] | undefined,
+  native: readonly KeyBinding[],
+): ReadonlyMap<string, ResolvedBinding> {
+  const resolved = new Map<string, ResolvedBinding>();
+  const masked: { row: BindingRow; override: readonly KeyBinding[] }[] = [];
+  for (const row of rows) {
+    const saved = override(row.key);
+    if (!isBindingList(saved))
+      resolved.set(row.key, { effective: row.defaults });
+    else if (!saved.some((binding) => answersTo(native, binding)))
+      resolved.set(row.key, { effective: saved });
+    else masked.push({ row, override: saved });
+  }
+  for (const { row, override: saved } of masked) {
+    const taken = (binding: KeyBinding) =>
+      answersTo(native, binding) ||
+      rows.some(
+        (other) =>
+          other.key !== row.key &&
+          !!other.local === !!row.local &&
+          answersTo(resolved.get(other.key)?.effective ?? [], binding),
+      );
+    const restored = !row.defaults.some(taken);
+    resolved.set(row.key, {
+      effective: restored ? row.defaults : [],
+      masked: { override: saved, restored },
+    });
+  }
+  return resolved;
+}
