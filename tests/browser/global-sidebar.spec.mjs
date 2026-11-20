@@ -91,10 +91,8 @@ test("a replacement sidebar unmounts Messages and returning restores its view", 
   await page.screenshot({
     path: info.outputPath("page-sidebar-replacement.png"),
   });
-  await page
-    .getByRole("navigation", { name: "Apps dock" })
-    .getByRole("tab", { name: "Messages", exact: true })
-    .click();
+  // The retired rail was the way back; Messages is no longer a listed page.
+  await openPage(page, "Messages");
   await expect(list).toBeVisible();
   await expect
     .poll(() => list.evaluate((element) => element.scrollTop))

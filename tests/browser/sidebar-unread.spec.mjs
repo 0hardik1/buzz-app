@@ -66,6 +66,19 @@ const inView = (page, id) =>
       rect.bottom <= viewport.bottom
     );
   });
+// Cards clip to their first rows; these journeys scroll the whole roster, so
+// each card with more rows shows all of them first, as its grip's Enter does.
+const showAllRows = async (page) => {
+  for (const grip of await sidebar(page)
+    .getByRole("separator", { name: /^Resize / })
+    .all()) {
+    const all = await grip.getAttribute("aria-valuemax");
+    if ((await grip.getAttribute("aria-valuenow")) === all) continue;
+    await grip.focus();
+    await grip.press("Enter");
+    await expect(grip).toHaveAttribute("aria-valuenow", all);
+  }
+};
 const heads = (app) =>
   app.report.queries.filter(
     ({ filter }) => filter.kinds?.includes(9) && filter["#h"]?.length === 1,
@@ -76,6 +89,7 @@ test("DM hide control removes a row and a new message restores it", async ({
   app,
 }, info) => {
   await open(page, app);
+  await showAllRows(page);
   const dm = row(page, "dm-030");
   await expect(dm).toBeVisible();
   const badge = dm.locator("[data-channel-unread]");
@@ -279,6 +293,7 @@ test("edge controls follow scroll and reveal the nearest unread without selectio
     app.relay.releaseEose("alpha");
     await opening;
   }
+  await showAllRows(page);
   // The selected channel's row is quiet: opening it saw its unread.
   const selected = row(page, "alpha");
   await expect(selected).toHaveAttribute("aria-current", "page");
@@ -426,6 +441,7 @@ test("resizing, collapsed groups and new unread evidence update only the display
   app,
 }) => {
   await open(page, app);
+  await showAllRows(page);
   await expect(row(page, "dm-090").getByRole("img")).toHaveCount(1);
   await expect(cue(page, "below")).toBeVisible();
   // Messages behind the Team heading sit above the DMs in this scrollport.
@@ -531,6 +547,7 @@ test("session changes discard the previous sidebar targets and manual unread sti
   });
   try {
     await open(page, app);
+    await showAllRows(page);
     await expect(cue(page, "below")).toBeVisible();
     await selectCommunity(page, "Secondary");
     await expect(
@@ -560,6 +577,7 @@ test("session changes discard the previous sidebar targets and manual unread sti
     await expect(
       page.getByText("Updating sidebar details…", { exact: true }),
     ).toHaveCount(0);
+    await showAllRows(page);
     await scroll(page, 1800);
     await expect(cue(page, "above")).toBeVisible();
     // Completing delayed preferences must not replace the user's newer viewport.

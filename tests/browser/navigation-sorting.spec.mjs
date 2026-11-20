@@ -909,9 +909,13 @@ test("section sort applies immediately, rolls back on failure, and persists retr
   await expect.poll(order).toEqual(alphaOrder);
   await page.unroute("**/sidebar-sort");
   // Error ownership is session-scoped, not coupled to the dismissed menu/page.
-  await page.getByRole("tab", { name: "Agents", exact: true }).first().click();
-  await expect(sidebar).toBeHidden();
-  await expect(error).toBeHidden();
+  await page
+    .getByRole("navigation", { name: "Pages", exact: true })
+    .getByRole("button", { name: "Agents", exact: true })
+    .click();
+  // The sidebar, and the session-owned error in it, stay beside the page.
+  await expect(sidebar).toBeVisible();
+  await expect(error).toBeVisible();
   await openPage(page, "Messages");
   await expect(sidebar).toBeVisible();
   await expect(error).toBeVisible();

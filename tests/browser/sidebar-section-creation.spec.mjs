@@ -344,10 +344,7 @@ test("New options → New workspace keeps selected artwork centered at enlarged 
   const saved = blob.sections.find(({ name }) => name === "From New");
   expect(saved?.icon).toBe("🚌");
   const section = page.locator(`[data-sidebar-section="group:${saved.id}"]`);
-  // Opening the new chat draft closes the narrow navigation drawer.
-  await page
-    .getByRole("button", { name: "Show navigation", exact: true })
-    .click();
+  // Creating a workspace opens no chat, so the narrow drawer stays open on it.
   await expect(section.locator("summary")).toHaveAccessibleName("From New");
   await page.reload();
   await openPage(page, "Messages");

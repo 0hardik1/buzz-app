@@ -81,7 +81,10 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   const y = own.y + own.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
-  await page.mouse.move(x, y - 40, { steps: 4 });
+  // The pointer's half of the neighbour decides the side, so aim at the upper
+  // half of the group above: its insertion edge is "before" that group.
+  const above = await header(page, "missing").boundingBox();
+  await page.mouse.move(x, above.y + above.height / 4, { steps: 4 });
   await expect(laptop).toHaveAttribute("data-section-dragging");
   await expect(
     page.locator('[data-sidebar-section="group:missing"]'),
