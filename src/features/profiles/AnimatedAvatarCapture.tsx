@@ -271,7 +271,7 @@ export function AnimatedAvatarCapture({
           <span role="status" className="relative grid place-items-center">
             <span
               aria-hidden="true"
-              className="size-6 rounded-full border-4 border-current/10 border-t-current motion-safe:animate-[spin_500ms_linear_infinite]"
+              className="size-6 rounded-full border-4 border-[var(--border-standard)] border-t-current motion-safe:animate-[spin_500ms_linear_infinite]"
             />
             <span className="sr-only">Starting camera…</span>
           </span>
@@ -533,7 +533,7 @@ export function AnimatedAvatarCapture({
                 <IconButton
                   shape="round"
                   variant="outline"
-                  size="large"
+                  size="md"
                   aria-label="Outline"
                   title={
                     composition.personOutline
@@ -584,7 +584,7 @@ export function AnimatedAvatarCapture({
               <span role="status" className="inline-flex items-center gap-2">
                 <span
                   aria-hidden="true"
-                  className="size-4 rounded-full border-2 border-current/30 border-t-current motion-safe:animate-[spin_500ms_linear_infinite]"
+                  className="size-4 rounded-full border-2 border-[var(--border-standard)] border-t-current motion-safe:animate-[spin_500ms_linear_infinite]"
                 />
                 Saving
               </span>

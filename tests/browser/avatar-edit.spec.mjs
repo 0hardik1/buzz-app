@@ -829,11 +829,15 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
     Math.max(...captionTops.flat()) - Math.min(...captionTops.flat()),
   ).toBeLessThan(1);
   const outline = page.getByRole("button", { name: "Outline", exact: true });
-  await expect(outline).toHaveCSS("padding", "12px");
   const glyph = outline.locator("span[aria-hidden]");
   await expect(glyph).toHaveCSS("width", "16px");
   await expect(glyph).toHaveCSS("height", "16px");
-  expect((await outline.boundingBox()).width).toBeLessThanOrEqual(42);
+  const buttonBox = await outline.boundingBox();
+  const glyphBox = await glyph.boundingBox();
+  expect(glyphBox.x - buttonBox.x).toBeCloseTo(12, 0);
+  expect(glyphBox.y - buttonBox.y).toBeCloseTo(12, 0);
+  expect(buttonBox.width - glyphBox.width).toBeCloseTo(24, 0);
+  expect(buttonBox.height - glyphBox.height).toBeCloseTo(24, 0);
   await outline.click();
   await expect(outline).toHaveAttribute("aria-pressed", "false");
   await page.getByRole("button", { name: "Background", exact: true }).click();

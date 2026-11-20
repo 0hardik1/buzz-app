@@ -6,7 +6,7 @@
 .capture[data-phase="review"],
 .capture[data-phase="saving"] {
   row-gap: var(--space-6);
-  padding-inline: 2px;
+  padding-inline: var(--space-half);
 }
 .stage {
   position: relative;
@@ -142,13 +142,6 @@ canvas.preview:active {
 .framing input {
   flex: 1;
   min-width: 0;
-}
-.framing button[data-icon-size] {
-  width: max-content;
-  height: auto;
-  min-width: 0;
-  min-height: 0;
-  padding: var(--space-3);
 }
 .outlineGlyph {
   display: block;
