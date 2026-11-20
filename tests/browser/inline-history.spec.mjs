@@ -559,7 +559,7 @@ test("Back to details over another channel's thread tab opens them again", async
   ).toBeVisible();
   await expect(betaTab(page)).toBeVisible();
   await expect(reader()).toContainText("The end.");
-  expect(await hashTarget(page)).toEqual(at);
+  await expect.poll(() => hashTarget(page)).toEqual(at);
 });
 
 test("closing another channel's thread tab retires the details over it", async ({
@@ -582,18 +582,17 @@ test("closing another channel's thread tab retires the details over it", async (
   await tab.click({ button: "middle" });
   await expect(tab).toHaveCount(0);
   await back(page);
-  // No step lands on the closed reader's address, which has neither its tab
-  // nor its sheet.
-  for (;;) {
-    const target = await hashTarget(page);
-    if (target.reader?.channelId === "beta")
-      throw new Error(
-        `Forward reached the closed reader ${JSON.stringify(target)}`,
-      );
-    if (await forward(page).isDisabled()) break;
-    await forward(page).click();
-    await expect.poll(() => hashTarget(page)).not.toEqual(target);
-  }
+  await expect
+    .poll(async () => (await hashTarget(page)).channelId)
+    .toBe("beta");
+  // Forward returns to Alpha and stops there: no step lands on the closed
+  // reader's address, which has neither its tab nor its sheet.
+  await forward(page).click();
+  await expect
+    .poll(async () => (await hashTarget(page)).channelId)
+    .toBe("alpha");
+  expect((await hashTarget(page)).reader).toBeUndefined();
+  await expect(forward(page)).toBeDisabled();
   await expect(tab).toHaveCount(0);
   await expect(sheets(page)).toHaveCount(0);
 });
@@ -687,12 +686,12 @@ test("closing another channel's thread tab keeps a diff over it, for its own tab
     ...details,
     reader: { ...details.reader, kind: "diff", messageId: change.id },
   });
+  // Each swap waits for the sheet it opens, then for the other to close.
+  await expect(reader().filter({ hasNotText: "The end." })).toHaveCount(1);
   await expect(reader()).toHaveCount(1);
-  await expect(reader()).not.toContainText("The end.");
   await back(page);
-  // Once the diff has closed.
+  await expect(reader().filter({ hasText: "The end." })).toHaveCount(1);
   await expect(reader()).toHaveCount(1);
-  await expect(reader()).toContainText("The end.");
   await back(page);
   await expect(reader()).toHaveCount(0);
   await tab.click({ button: "middle" });
@@ -701,9 +700,8 @@ test("closing another channel's thread tab keeps a diff over it, for its own tab
   // its own tab.
   await forward(page).click();
   await expect(page.getByRole("tab", { name: /a\.ts/ })).toBeVisible();
-  expect((await hashTarget(page)).reader).toMatchObject({
-    kind: "diff",
-    messageId: change.id,
-  });
+  await expect
+    .poll(async () => (await hashTarget(page)).reader)
+    .toMatchObject({ kind: "diff", messageId: change.id });
   await expect(sheets(page)).toHaveCount(0);
 });
