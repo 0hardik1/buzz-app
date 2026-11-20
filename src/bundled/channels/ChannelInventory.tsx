@@ -136,6 +136,7 @@ import {
   sidebarHome,
   sidebarDropRowKinds,
   orderContributedSidebarSections,
+  recentAt,
 } from "./sidebar-sections";
 import { activityTranscript } from "./working-agents";
 import { SidebarContributionSection } from "../../features/channel-navigation/SidebarContributionSection";
@@ -307,11 +308,15 @@ export function ChannelInventory({
   const pluginSorted = appliedSorts.some(
     (mode) => mode !== "alpha" && mode !== "recent",
   );
+  // Set from the rendered cards below; assumed until they render, since
+  // cards default to the Active filter.
+  const [activeFiltered, setActiveFiltered] = useState(true);
   const list = useChannelRoster(queries.channels, {
     activity: true,
     preview: pluginSorted,
-    // Cards default to the Active filter, which reads activity values
-    // directly, so activity changes can't be skipped by Recent rank here.
+    // Recent order is the only reader of activity then; most messages land in
+    // a chat that already leads, so they leave the sidebar alone.
+    ...(pluginSorted || activeFiltered ? {} : { rank: recentAt }),
   });
   const rosterRecovers = useRecoveryOwns(queries, (live) =>
     rosterRecovering(live.roster),
@@ -557,6 +562,12 @@ export function ChannelInventory({
   useEffect(() => {
     if (needsActivity) return queries.channels.demandActivity?.();
   }, [needsActivity, queries.channels]);
+  const cardsActiveFiltered = cards.some(
+    ({ key }) => sectionFilter(key) === "active",
+  );
+  useEffect(() => {
+    if (preferencesSettled) setActiveFiltered(cardsActiveFiltered);
+  }, [preferencesSettled, cardsActiveFiltered]);
   const startup = useSidebarStartup(
     queries,
     list,
