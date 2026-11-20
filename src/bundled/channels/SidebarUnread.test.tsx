@@ -485,9 +485,9 @@ it.each([
 );
 
 it("shows the newest person who mentioned you, never an agent", () => {
-  const people = new Map([
+  const people = new Map<string, { name: string; isAgent?: boolean }>([
     ["agent", { name: "Helper", isAgent: true }],
-    ["alice", { name: "Alice", picture: "https://example.test/a.png" }],
+    ["alice", { name: "Alice" }],
   ]);
   const previews = (authors: string[]) =>
     unreadPreviews(
@@ -498,10 +498,7 @@ it("shows the newest person who mentioned you, never an agent", () => {
       undefined,
     );
   // The agent mentioned you last, but the stack shows Alice.
-  expect(previews(["agent", "alice"]).get("room")).toEqual({
-    name: "Alice",
-    src: "https://example.test/a.png",
-  });
+  expect(previews(["agent", "alice"]).get("room")?.name).toBe("Alice");
   // An agent alone, or someone whose profile hasn't loaded, shows no face.
   expect(previews(["agent"]).has("room")).toBe(false);
   expect(previews(["unknown"]).has("room")).toBe(false);

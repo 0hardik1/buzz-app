@@ -157,7 +157,7 @@ export function sidebarSections<T extends ChannelSummary>(
     if (key === "forums" && !forums && !draftSections.has(key)) return [];
     const mode = preferences?.sort?.[group ? `section:${group.id}` : key];
     rows.sort(
-      mode === "recent" || (mode === undefined && key === "solo")
+      mode === "recent" || (mode === undefined && key !== SIDEBAR_PAGES_SECTION)
         ? compareRecent
         : compareName,
     );

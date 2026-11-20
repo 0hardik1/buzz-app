@@ -270,11 +270,21 @@ export function ChannelInventory({
           saved === "recent" ||
           rowSortModes.some((mode) => mode.id === saved))
         ? saved
-        : key === "solo"
-          ? "recent"
-          : "alpha";
+        : key === SIDEBAR_PAGES_SECTION
+          ? "alpha"
+          : "recent";
     },
     [preferences.data, rowSortModes],
+  );
+  // Unsaved cards show the last 30 days, so the most active rise into view;
+  // Favorites and Plugins are picked by hand and always show everything.
+  const sectionFilter = useCallback(
+    (key: string): "all" | "unreads" | "active" =>
+      preferences.data?.filters?.[
+        key.startsWith("group:") ? `section:${key.slice(6)}` : key
+      ] ??
+      (key === "starred" || key === SIDEBAR_PAGES_SECTION ? "all" : "active"),
+    [preferences.data],
   );
   const appliedSorts = Object.keys(preferences.data?.sort ?? {}).map((key) =>
     sectionSort(key.startsWith("section:") ? `group:${key.slice(8)}` : key),
@@ -282,10 +292,8 @@ export function ChannelInventory({
   const pluginSorted = appliedSorts.some(
     (mode) => mode !== "alpha" && mode !== "recent",
   );
-  const needsActivity =
-    pluginSorted ||
-    appliedSorts.includes("recent") ||
-    Object.values(preferences.data?.filters ?? {}).includes("active");
+  // Cards default to recent and the last 30 days, which both need activity.
+  const needsActivity = true;
   const soloActivity = useCallback(
     (channel: ChannelSummary) => eligibleSolo(channel, viewer),
     [viewer],
@@ -973,10 +981,7 @@ export function ChannelInventory({
           : section,
       ),
     Object.fromEntries(
-      Object.entries(preferences.data?.filters ?? {}).map(([key, mode]) => [
-        key.startsWith("section:") ? `group:${key.slice(8)}` : key,
-        mode,
-      ]),
+      sortedSections.map(({ key }) => [key, sectionFilter(key)]),
     ),
     current?.id,
     queries.unread,
@@ -1958,12 +1963,7 @@ export function ChannelInventory({
                         filter={
                           preferences.data
                             ? {
-                                value:
-                                  preferences.data.filters?.[
-                                    section.key.startsWith("group:")
-                                      ? `section:${section.key.slice(6)}`
-                                      : section.key
-                                  ] ?? "all",
+                                value: sectionFilter(section.key),
                                 disabled: !preferences.filterWritable,
                                 activeWindowSeconds:
                                   preferences.data.activeWindowSeconds?.[
