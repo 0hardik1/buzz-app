@@ -23,20 +23,17 @@ export function withProviderWords(
   return `${explanation}\n\n${who} said:\n${quote}`;
 }
 
-/** The explanation for a failed turn whose request never reached `who`'s
- * provider because a network gateway answered it instead, or undefined when
- * the error doesn't say so. Cloudflare Access answers a lapsed WARP session
- * with its sign-in page: Claude reports "server cloudflare" with an HTML
- * body, other clients a redirect to the Cloudflare Access login. Other
- * proxies show up as Claude's "proxy or gateway intercepting the request". */
+/** The explanation for a failed turn that a network gateway answered in
+ * place of `who`'s provider, or undefined when the error doesn't say so.
+ * Claude reports such an answer (often an HTML sign-in or block page) as a
+ * "proxy or gateway intercepting the request"; other clients show a redirect
+ * to a Cloudflare Access login. Not every computer has a VPN or gateway, and
+ * the error doesn't say which one answered, so the advice names none for
+ * certain. */
 export function interceptedWords(who: string, error: string) {
-  if (
-    /\bserver cloudflare\b|\bcloudflare ?access\b|cloudflareaccess\.com/i.test(
-      error,
-    )
+  return /\bproxy or gateway intercepting\b|\bcloudflare ?access\b|cloudflareaccess\.com/i.test(
+    error,
   )
-    return `Cloudflare answered instead of ${who}'s provider, so the request never reached it. Cloudflare WARP has likely disconnected or needs you to sign in again. Reconnect it, then mention me again.`;
-  if (/\bproxy or gateway intercepting\b/i.test(error))
-    return `A proxy or gateway answered instead of ${who}'s provider, so the request never reached it. Check this computer's VPN or proxy connection, then mention me again.`;
-  return undefined;
+    ? `A network gateway answered instead of ${who}'s provider. If this computer uses a VPN, proxy or access gateway (such as Cloudflare WARP), it may have disconnected or need you to sign in again. Reconnect it, then mention me again.`
+    : undefined;
 }

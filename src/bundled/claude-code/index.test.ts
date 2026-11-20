@@ -277,11 +277,11 @@ it.each([true, false])(
       `Anthropic rejected Claude's API key. It may have been revoked or run out of credit. Head to [Settings](${settings}) to replace it.\n\nClaude said:\n> Invalid API key · Fix external API key`,
     );
     expect(runtime?.explain("Error: overloaded")).toBe("Error: overloaded");
-    // A lapsed WARP session answers with Cloudflare's page, not Anthropic.
+    // A gateway, such as a lapsed VPN sign-in, answered instead of Anthropic.
     const intercepted =
       "API Error: API returned an empty or malformed response (HTTP 200) — check for a proxy or gateway intercepting the request. Response: content-type html, body is an HTML page, 67064 bytes, request-id absent, server cloudflare";
     expect(runtime?.explain(intercepted)).toBe(
-      `Cloudflare answered instead of Claude's provider, so the request never reached it. Cloudflare WARP has likely disconnected or needs you to sign in again. Reconnect it, then mention me again.\n\nClaude said:\n> ${intercepted}`,
+      `A network gateway answered instead of Claude's provider. If this computer uses a VPN, proxy or access gateway (such as Cloudflare WARP), it may have disconnected or need you to sign in again. Reconnect it, then mention me again.\n\nClaude said:\n> ${intercepted}`,
     );
   },
 );

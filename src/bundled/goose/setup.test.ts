@@ -1016,10 +1016,10 @@ describe("explainTurn", () => {
     expect(explainTurn(error, settings)).toBe(error);
   });
 
-  it("says a lapsed WARP session answered when Cloudflare Access did", () => {
+  it("says a gateway answered when Cloudflare Access did", () => {
     const error = "Request failed: redirected to Cloudflare Access login";
     expect(explainTurn(error, settings)).toBe(
-      `Cloudflare answered instead of goose's provider, so the request never reached it. Cloudflare WARP has likely disconnected or needs you to sign in again. Reconnect it, then mention me again.\n\ngoose said:\n> ${error}`,
+      `A network gateway answered instead of goose's provider. If this computer uses a VPN, proxy or access gateway (such as Cloudflare WARP), it may have disconnected or need you to sign in again. Reconnect it, then mention me again.\n\ngoose said:\n> ${error}`,
     );
   });
 });

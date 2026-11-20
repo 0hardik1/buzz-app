@@ -510,11 +510,11 @@ it("quotes at most 500 characters of Codex's words, marking the cut", () => {
   );
 });
 
-it("says a lapsed WARP session answered when Cloudflare Access did", () => {
+it("says a gateway answered when Cloudflare Access did", () => {
   const words =
     "unexpected status 302 Found, url: https://example.cloudflareaccess.com/cdn-cgi/access/login";
   expect(explainTurn(`Codex could not finish: ${words}.`, SETTINGS)).toBe(
-    `Cloudflare answered instead of Codex's provider, so the request never reached it. Cloudflare WARP has likely disconnected or needs you to sign in again. Reconnect it, then mention me again.\n\nCodex said:\n> ${words}`,
+    `A network gateway answered instead of Codex's provider. If this computer uses a VPN, proxy or access gateway (such as Cloudflare WARP), it may have disconnected or need you to sign in again. Reconnect it, then mention me again.\n\nCodex said:\n> ${words}`,
   );
 });
 
