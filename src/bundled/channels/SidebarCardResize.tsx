@@ -23,8 +23,6 @@ const ALL_ROWS = Number.MAX_SAFE_INTEGER;
 const learnedScope = "device";
 const learnedKey = "sidebar:grip-learned";
 const learn = () => writeView(learnedScope, learnedKey, true);
-/** A clip of nothing: the list shows every row. */
-const UNCLIPPED = 0;
 
 function savedHeights(scope: string, key: string): Record<string, number> {
   const saved = readView<unknown>(scope, key, {});
@@ -80,8 +78,6 @@ export function SidebarCardResize({
   height,
   onResize,
   onToggle,
-  unclipped = false,
-  footer,
   children,
 }: {
   label: string;
@@ -91,10 +87,6 @@ export function SidebarCardResize({
   onResize(height: number): void;
   /** Switch between full and the height from before full. */
   onToggle(): void;
-  /** Show every row and set the grip aside, as a filtered view does. */
-  unclipped?: boolean | undefined;
-  /** Sits between the rows and the grip. */
-  footer?: ReactNode;
   children: ReactNode;
 }) {
   const list = useRef<HTMLDivElement>(null);
@@ -111,9 +103,9 @@ export function SidebarCardResize({
   // Apply the saved height before paint, and again whenever rows come, go or
   // first get a size (a card opened after starting closed).
   useLayoutEffect(() => {
-    saved.current = unclipped ? UNCLIPPED : height;
-    if (list.current && !stop.current) clip(list.current, saved.current);
-  }, [height, unclipped]);
+    saved.current = height;
+    if (list.current && !stop.current) clip(list.current, height);
+  }, [height]);
   useEffect(() => {
     const rows = list.current;
     if (!rows) return;
@@ -139,11 +131,7 @@ export function SidebarCardResize({
 
   return (
     <>
-      <div
-        ref={list}
-        className={styles.cardRows}
-        data-unclipped={unclipped || undefined}
-      >
+      <div ref={list} className={styles.cardRows}>
         {children}
       </div>
       {height === ALL_ROWS && count > MAX_ROWS && (
@@ -151,9 +139,8 @@ export function SidebarCardResize({
           View all coming soon
         </p>
       )}
-      {footer}
       {/* Only a card with more than one row has anything to hide. */}
-      {count > 1 && !unclipped && (
+      {count > 1 && (
         <Tooltip
           side="bottom"
           closeOnClick={false}
@@ -270,10 +257,7 @@ export function SidebarCardResize({
   );
 }
 
-/**
- * Clip the list to a saved height: ten rows when unset, fifty when full,
- * none when unclipped.
- */
+/** Clip the list to a saved height: ten rows when unset, fifty when full. */
 function clip(list: HTMLElement, height: number | undefined) {
   let limit = height;
   if (height === undefined || height === ALL_ROWS) {

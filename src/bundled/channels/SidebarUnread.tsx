@@ -6,7 +6,6 @@ import {
   ArrowUpIcon,
 } from "../../shared/design-system/icons/index";
 import {
-  createContext,
   useEffect,
   useRef,
   useState,
@@ -22,36 +21,12 @@ export type UnreadDmPreview = {
   isAgent?: boolean | undefined;
 };
 
-/** One-person DMs by channel, for faces on unread cues inside the sidebar. */
-export const UnreadDmPreviews = createContext<
-  ReadonlyMap<string, UnreadDmPreview> | undefined
->(undefined);
-
 type EdgeTarget = {
   row: HTMLButtonElement;
   channelId: string;
   attention: boolean;
 };
 type Edges = { above: EdgeTarget[]; below: EdgeTarget[] };
-
-/**
- * Whether an unread row is addressed to you: a DM, a mention of you or a
- * reply in a thread you follow. Shared by every unread cue in the sidebar.
- */
-export function waitsForYou(row: Element) {
-  return (
-    row.getAttribute("data-channel-type") === "dm" ||
-    row.querySelector('[data-priority="true"]') !== null ||
-    row.querySelector("[data-channel-activity]") !== null
-  );
-}
-
-/** Whether a row has unread evidence that muting has not silenced. */
-export function audiblyUnread(row: Element) {
-  return [...row.querySelectorAll(UNREAD_MARKERS)].some(
-    (marker) => !marker.hasAttribute("data-channel-muted"),
-  );
-}
 
 /** Geometry over rendered unread destinations, not another unread store. */
 function unreadEdges(list: HTMLElement): Edges {
@@ -77,7 +52,10 @@ function unreadEdges(list: HTMLElement): Edges {
     const anchor = closed?.querySelector("summary") ?? row;
     const rect = anchor.getBoundingClientRect();
     if (!rect.height || !rect.width) continue;
-    const attention = waitsForYou(row);
+    const attention =
+      row.getAttribute("data-channel-type") === "dm" ||
+      row.querySelector('[data-priority="true"]') !== null ||
+      row.querySelector("[data-channel-activity]") !== null;
     const target = { row, channelId, attention };
     if (rect.bottom <= viewport.top) edges.above.push(target);
     else if (rect.top >= viewport.top + list.clientHeight)
@@ -373,9 +351,7 @@ export function SidebarUnread({
       contentRef={content}
       overlay={edgeCues}
     >
-      <UnreadDmPreviews.Provider value={dmPreviews}>
-        {children}
-      </UnreadDmPreviews.Provider>
+      {children}
     </SidebarList>
   );
 }
