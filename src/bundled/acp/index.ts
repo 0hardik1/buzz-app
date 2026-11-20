@@ -67,6 +67,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   });
   agents.register<Config>({
     id: TYPE_ID,
+    conversationSections: true,
     title: "ACP agent",
     description:
       "Any harness that speaks the Agent Client Protocol, from a preset or a command you confirm.",

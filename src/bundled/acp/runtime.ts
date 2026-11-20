@@ -24,8 +24,17 @@ import {
   type SessionsOptions,
 } from "../../features/agent-harness/acp/agent-sessions";
 import { readTranscript } from "../../features/agent-harness/acp/transcript";
-import { ownerCanvas, readProject } from "../../features/agent-harness/project";
-import { placeOf } from "../../features/agent-harness/sections/compose";
+import {
+  ownerCanvas,
+  readProject,
+  worksElsewhere,
+} from "../../features/agent-harness/project";
+import {
+  placeOf,
+  replacedSections,
+  sectionsOf,
+} from "../../features/agent-harness/sections/compose";
+import type { SectionChoices } from "../../features/agent-harness/sections/choices";
 import {
   FRESH,
   type Generation,
@@ -132,12 +141,15 @@ type Snap = Readonly<{
   added: string;
   /** Its model is synced: one the harness doesn't offer is refused. */
   syncedModel?: true;
+  /** The base prompt's section choices for its conversation, taken as the
+   * session is pinned: its prompt and Canvas both use these. */
+  sections?: SectionChoices;
 }>;
 
 /** Everything a session is opened with, so a saved one resumes only while
  * none of it changed. The launch counts by its confirmation digest, never
  * its env values. */
-const contextOf = ({ config: c, team, name, added }: Snap) =>
+const contextOf = ({ config: c, team, name, added, sections }: Snap) =>
   digest(
     JSON.stringify([
       c.approval,
@@ -147,6 +159,7 @@ const contextOf = ({ config: c, team, name, added }: Snap) =>
       name ?? "",
       added,
       c.scope,
+      replacedSections(sections),
     ]),
   );
 
@@ -513,6 +526,7 @@ export class AcpRuntime {
           unpaid,
           solo,
           resumed,
+          pinned,
         );
         const wakePrompt = wake
           ? ((await wakeText?.()) ?? wake.text)
@@ -714,6 +728,7 @@ export class AcpRuntime {
     owed: readonly string[] = [],
     solo = topLevel,
     resumed = false,
+    pinned?: Snap,
   ) {
     const snapshot = this.relay(self)?.snapshot();
     const session = snapshot?.status === "ready" ? snapshot.session : undefined;
@@ -739,6 +754,8 @@ export class AcpRuntime {
                   session.channelWrites.startingCanvas(channelId),
                 )
             : undefined,
+          // Its serving session's choices: the ones its prompt has.
+          worksElsewhere(undefined, pinned?.sections),
         )
       : Promise.resolve(undefined);
     let earlier: readonly EventData[] = [];
@@ -902,7 +919,7 @@ export class AcpRuntime {
       ...(entry.syncedModel ? { syncedModel: true } : {}),
     });
     const launchFor = async (
-      { config: c, team, name }: Snap,
+      { config: c, team, name, sections }: Snap,
       conversation?: string,
     ) => {
       const memory = await this.core(agent);
@@ -915,6 +932,7 @@ export class AcpRuntime {
           instructions: c.instructions,
           team,
           ...(memory === undefined ? {} : { memory }),
+          sections,
           place: placeOf(conversation),
         }),
       };
@@ -945,8 +963,11 @@ export class AcpRuntime {
       configOptions: true,
       // Each session runs on the settings it opened with. Only a saved change
       // (a new `localKey`) closes it; a new launch is a new generation.
-      pin: (): Pinned<Snap> => {
-        const snapshot = snap();
+      pin: (conversation): Pinned<Snap> => {
+        // Its conversation's choices as they are now, so a change makes the
+        // next turn a new session's, a busy one's included.
+        const sections = sectionsOf(entry.handle, conversation);
+        const snapshot: Snap = { ...snap(), ...(sections ? { sections } : {}) };
         return {
           snapshot,
           context: contextOf(snapshot),
@@ -958,6 +979,7 @@ export class AcpRuntime {
             // A model turning synced is refused from then on, not only in
             // sessions opened after.
             snapshot.syncedModel ?? false,
+            replacedSections(snapshot.sections),
           ]),
           generation: entry.generation,
         };

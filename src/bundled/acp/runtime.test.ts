@@ -1,3 +1,5 @@
+import { workspaceCanvas } from "../../features/solo/workspace";
+import type { SectionChoices } from "../../features/agent-harness/sections/choices";
 import { RESUMED_PROMPT } from "../../buzz-mcp/prompt";
 // ACP agents' turns, end to end against a fake plain-ACP harness.
 import { describe, expect, it, vi } from "vitest";
@@ -685,6 +687,171 @@ describe("AcpRuntime", () => {
     );
     timer.fake.harnesses[0]?.turns[0]?.finish();
     await done;
+  });
+
+  describe("section choices", () => {
+    const capabilities = {
+      mcpCapabilities: { http: true },
+      sessionCapabilities: { systemPrompt: {} },
+    };
+    const promptOf = (opened: Record<string, unknown> | undefined) =>
+      (opened?.systemPrompt as { content: { text: string }[] } | undefined)
+        ?.content[0]?.text ?? "";
+    const terse: SectionChoices = {
+      owner: { etiquette: { mode: "custom", text: "Be terse." } },
+    };
+    const inThread = (event: RelayEvent, root: string) => ({
+      ...event,
+      tags: [...event.tags, ["e", root, "", "reply"]],
+    });
+    /** A handle whose choices are read per thread root, as the host's are. */
+    const choosing = (agent: object) => {
+      const choices = new Map<string, SectionChoices>();
+      return {
+        choices,
+        agent: {
+          ...agent,
+          promptSections: (_channelId?: string, root?: string) =>
+            root ? choices.get(root) : undefined,
+        },
+      };
+    };
+
+    it("gives a busy conversation's next turn a new session once its choices change, and leaves others alone", async () => {
+      const config = await confirmed();
+      const f = setup({ capabilities });
+      f.sync(config);
+      const { choices, agent } = choosing(f.agent);
+      const extra = { agent } as unknown as Partial<Delivery>;
+      const [a, b] = ["1".repeat(64), "3".repeat(64)];
+      await f.deliver(message("1", "@Opal A"), config, undefined, extra).run;
+      await f.deliver(message("3", "@Opal B"), config, undefined, extra).run;
+      await vi.waitFor(() =>
+        expect(f.fake.harnesses[0]?.turns).toHaveLength(2),
+      );
+      const [harness] = f.fake.harnesses;
+      const [first, other] = harness?.turns ?? [];
+      // A is still busy when its choices change.
+      choices.set(a, terse);
+      await f.deliver(
+        inThread(message("2", "@Opal A again"), a),
+        config,
+        undefined,
+        extra,
+      ).run;
+      other?.finish();
+      await f.deliver(
+        inThread(message("4", "@Opal B again"), b),
+        config,
+        undefined,
+        extra,
+      ).run;
+      first?.finish();
+      await vi.waitFor(() => expect(harness?.turns).toHaveLength(4));
+      const turns = harness?.turns ?? [];
+      // The fake numbers its sessions in the order they open.
+      const prompts = new Map(
+        (harness?.opened ?? []).map((opened, i) => [
+          `session-${i + 1}`,
+          promptOf(opened),
+        ]),
+      );
+      const [againA, againB] = [
+        turns.find((turn) => turn.text.includes("A again")),
+        turns.find((turn) => turn.text.includes("B again")),
+      ];
+      // A's next turn runs on a successor, with the new choices.
+      expect(againA?.sessionId).not.toBe(first?.sessionId);
+      expect(prompts.get(againA?.sessionId ?? "")).toContain("Be terse.");
+      expect(prompts.get(first?.sessionId ?? "")).not.toContain("Be terse.");
+      // B's choices never changed: it keeps its session.
+      expect(againB?.sessionId).toBe(other?.sessionId);
+      for (const turn of harness?.turns ?? []) turn.finish();
+    });
+
+    it("keeps a session's prompt on the choices it was pinned with when they change during its launch", async () => {
+      let release = () => {};
+      let reads = 0;
+      const core = () => {
+        reads++;
+        return reads > 1
+          ? Promise.resolve(null)
+          : new Promise<null>((resolve) => {
+              release = () => resolve(null);
+            });
+      };
+      const config = await confirmed();
+      const f = setup({ capabilities }, { core });
+      f.sync(config);
+      const { choices, agent } = choosing(f.agent);
+      const extra = { agent } as unknown as Partial<Delivery>;
+      const a = "1".repeat(64);
+      const run = f.deliver(
+        message("1", "@Opal A"),
+        config,
+        undefined,
+        extra,
+      ).run;
+      await vi.waitFor(() => expect(reads).toBe(1));
+      // Changed while the launch reads its memory.
+      choices.set(a, terse);
+      release();
+      await run;
+      await vi.waitFor(() =>
+        expect(f.fake.harnesses[0]?.turns).toHaveLength(1),
+      );
+      const [harness] = f.fake.harnesses;
+      const [first] = harness?.turns ?? [];
+      expect(promptOf(harness?.opened[0])).not.toContain("Be terse.");
+      first?.finish();
+      // The next turn is a new session's, on the choices as they are now.
+      await f.deliver(
+        inThread(message("2", "@Opal A again"), a),
+        config,
+        undefined,
+        extra,
+      ).run;
+      await vi.waitFor(() => expect(harness?.turns).toHaveLength(2));
+      expect(harness?.turns[1]?.sessionId).not.toBe(first?.sessionId);
+      expect(promptOf(harness?.opened[1])).toContain("Be terse.");
+      harness?.turns[1]?.finish();
+    });
+
+    it("tells a Solo chat's agent its Canvas folders are for reading when a plugin moves its work", async () => {
+      const config = await confirmed();
+      const f = setup(
+        { capabilities },
+        {
+          solo: true,
+          canvas: workspaceCanvas({
+            folders: ["~/Development/app"],
+            canvas: "Use the design system.",
+          }),
+        },
+      );
+      f.sync(config);
+      const moved: SectionChoices = {
+        plugin: {
+          id: "plugin",
+          sections: { "working-location": "Work in the plugin's folder." },
+        },
+      };
+      const agent = { ...f.agent, promptSections: () => moved };
+      await f.deliver(message("1", "@Opal hi"), config, undefined, {
+        agent,
+      } as unknown as Partial<Delivery>).run;
+      await vi.waitFor(() =>
+        expect(f.fake.harnesses[0]?.turns).toHaveLength(1),
+      );
+      const [harness] = f.fake.harnesses;
+      const text = harness?.turns[0]?.text ?? "";
+      expect(text).toContain("They are for reading.");
+      expect(text).not.toContain("This chat's work happens in these folders");
+      expect(promptOf(harness?.opened[0])).toContain(
+        "Work in the plugin's folder.",
+      );
+      harness?.turns[0]?.finish();
+    });
   });
 
   it("closes sessions with session/close only when advertised", async () => {
