@@ -227,6 +227,36 @@ it("subscribes before reading the table and replaces a notified scan", async () 
   expect(listeners.size).toBe(0);
 });
 
+it("uses a complete current read when incremental storage sync is unavailable", async () => {
+  const current = event(fields, "e".repeat(64), otherId, 10);
+  const collection = {
+    subscribe: () => () => {},
+    page: async () => ({ entries: [entry(event(fields))] }),
+    refreshError: async () => null,
+    close: vi.fn(),
+  };
+  const storage = {
+    open: vi.fn(() => collection),
+  } as unknown as ArtifactStorage;
+  const read = vi.fn(async (_filters: readonly unknown[]) => [current]);
+  const source = {
+    snapshotRead: read,
+    relayAuthor: "relay",
+  } as unknown as RelaySession;
+  const table = openTasksTable(storage, source);
+  await vi.waitFor(() => expect(table.snapshot().status).toBe("ready"));
+  expect(table.snapshot().tasks.map((task) => task.id)).toEqual([otherId]);
+  expect(read.mock.calls[0]?.[0]).toEqual([
+    {
+      artifact: "current",
+      kinds: [45010],
+      "#type": ["buzz.task"],
+      limit: 500,
+    },
+  ]);
+  table.close();
+});
+
 it("projects newest activity first, including a state index", () => {
   const projected = taskCollection.project(entry(event(fields)));
   expect(projected.map(({ index, value }) => [index, value])).toEqual([

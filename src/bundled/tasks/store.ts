@@ -227,9 +227,13 @@ export type TasksTable = Readonly<{
  * notification. This is the documented fallback for hosts without per-id
  * change hints; a notification restarts the whole bounded-page scan.
  */
-export function openTasksTable(storage: ArtifactStorage): TasksTable {
+export function openTasksTable(
+  storage: ArtifactStorage,
+  source?: RelaySession,
+): TasksTable {
   let collection = storage.open(taskCollection);
   const listeners = new Set<() => void>();
+  const lifetime = new AbortController();
   let state: TasksState = { status: "loading", tasks: [] };
   let generation = 0;
   let closed = false;
@@ -256,7 +260,24 @@ export function openTasksTable(storage: ArtifactStorage): TasksTable {
         }
         after = page.next;
       } while (after && own === generation && !closed);
-      const error = await held.refreshError();
+      let error = await held.refreshError();
+      // The browser host may not expose incremental artifact sync. A complete
+      // current read is authoritative; cached rows remain useful if it fails.
+      if (source && !source.artifactIncremental) {
+        try {
+          const current = await readTasks(source, lifetime.signal);
+          if (current.complete) tasks.clear();
+          for (const task of current.tasks) tasks.set(task.id, task);
+          if (!current.complete)
+            error = "The relay returned the first 500 tasks; more may exist.";
+        } catch (reason) {
+          if (lifetime.signal.aborted) return;
+          error =
+            reason instanceof Error
+              ? reason.message
+              : "Couldn’t refresh tasks from the relay.";
+        }
+      }
       if (own !== generation || closed) return;
       publish({
         status: "ready",
@@ -293,6 +314,7 @@ export function openTasksTable(storage: ArtifactStorage): TasksTable {
       if (closed) return;
       closed = true;
       generation++;
+      lifetime.abort();
       stop();
       collection.close();
       listeners.clear();

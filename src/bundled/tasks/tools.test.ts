@@ -88,6 +88,25 @@ function place(channel: string, type = "stream", isHuddle = false): Event {
   };
 }
 
+function roster(
+  access: "writable" | "owner-read-only" | "agent-not-member" | "agent-guest",
+): Event {
+  return {
+    id: "39002".padEnd(64, "0"),
+    pubkey: relayAuthor,
+    created_at: 1,
+    kind: 39002,
+    content: "",
+    tags: [
+      ["d", home],
+      ["p", viewer, "", "owner"],
+      ...(access !== "agent-not-member"
+        ? [["p", agent, "", access === "agent-guest" ? "guest" : "bot"]]
+        : []),
+    ],
+  };
+}
+
 function answer(events: Event[], filters: Filter[]) {
   const filter = filters[0] ?? {};
   return events.filter((event) => {
@@ -111,7 +130,11 @@ function answer(events: Event[], filters: Filter[]) {
 function setup(
   heads: Event[] | ((signed: Signed[]) => Event[]) = [],
   publishImpl?: (event: Event) => Promise<string>,
-  access: "writable" | "owner-read-only" | "agent-not-member" = "writable",
+  access:
+    | "writable"
+    | "owner-read-only"
+    | "agent-not-member"
+    | "agent-guest" = "writable",
 ) {
   const signed: Signed[] = [];
   const currentHeads = () =>
@@ -121,7 +144,7 @@ function setup(
     viewer,
     relayAuthor,
     snapshotRead: vi.fn(async (filters: Filter[]) =>
-      answer([...currentHeads(), ...places], filters),
+      answer([...currentHeads(), ...places, roster(access)], filters),
     ),
     channels: {
       get: vi.fn(() => ({
@@ -156,6 +179,7 @@ function setup(
           ...places.filter(
             (item) => !item.tags.some(([, value]) => value === secret),
           ),
+          roster(access),
         ],
         filters,
       ),
@@ -267,7 +291,11 @@ it("never creates in a home the agent cannot read", async () => {
 });
 
 it("refuses owner-signed writes outside a writable shared membership", async () => {
-  for (const access of ["owner-read-only", "agent-not-member"] as const) {
+  for (const access of [
+    "owner-read-only",
+    "agent-not-member",
+    "agent-guest",
+  ] as const) {
     const created = setup([], undefined, access);
     await expect(
       created.call("tasks_create", {

@@ -32,15 +32,6 @@ export const historySize = 640;
 // The built app, React, services, verification, IndexedDB and Virtua stay real.
 // Layout journeys use synthetic broker HTTP; live journeys retain the production
 // broker/subscriber and model only the upstream relay policy with ephemeral keys.
-const incrementalArtifacts = {
-  version: 1,
-  overlapSeconds: 120,
-  pageRows: 100,
-  currentRows: 100,
-  responseBytes: 8388608,
-  permanentChannelsOnly: true,
-  checkpointLifetimeSeconds: 2592000,
-};
 
 export const test = base.extend({
   productionBroker: [false, { option: true }],
@@ -2354,11 +2345,6 @@ export const test = base.extend({
                   ],
                 }
               : {}),
-            ...(artifactSync
-              ? {
-                  artifacts: { incremental: incrementalArtifacts },
-                }
-              : {}),
             ...(readState
               ? {
                   read_state_snapshot: {
@@ -2445,9 +2431,6 @@ export const test = base.extend({
         if (route === "session") {
           report.sessions.push(saved ? requestedCommunity : community);
           return send(response, {
-            ...(artifactSync
-              ? { artifactIncremental: incrementalArtifacts }
-              : {}),
             viewer,
             relayAuthor: getPublicKey(relayKey),
             writeKinds:
@@ -2599,48 +2582,6 @@ export const test = base.extend({
           throw new Error(
             `Unexpected fixture request: ${request.method} ${request.url}`,
           );
-        if (
-          artifactSync &&
-          body.length === 1 &&
-          body[0].artifact === "incremental"
-        ) {
-          const request = body[0];
-          const rows = answer(community, request.query);
-          const wanted = request.artifactIds
-            ? new Set(request.artifactIds)
-            : undefined;
-          const selected = wanted
-            ? [...readEvents.get(community).keys()]
-                .filter((key) => wanted.has(key.split(":")[2]))
-                .map((key) => readEvents.get(community).get(key))
-            : rows;
-          const artifactIds = new Set(
-            selected.map((event) => event.tags.find(([key]) => key === "d")[1]),
-          );
-          return send(response, {
-            version: 1,
-            startedAt: new Date().toISOString(),
-            ...(wanted
-              ? {}
-              : {
-                  overlapSeconds: 120,
-                  nextCursor: null,
-                  checkpoint: `fixture-${Date.now()}`,
-                }),
-            changes: [
-              ...selected.map((event) => ({
-                type: "upsert",
-                artifactId: event.tags.find(([key]) => key === "d")[1],
-                event,
-              })),
-              ...(wanted
-                ? [...wanted]
-                    .filter((id) => !artifactIds.has(id))
-                    .map((artifactId) => ({ type: "remove", artifactId }))
-                : []),
-            ],
-          });
-        }
         expect(body.length).toBeGreaterThan(0);
         expect(body.length).toBeLessThanOrEqual(
           body.every(

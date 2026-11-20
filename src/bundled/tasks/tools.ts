@@ -155,8 +155,31 @@ async function writableHome(
   signal: AbortSignal,
 ) {
   await readableHome(reads, home, signal);
+  const read = reads.snapshotRead;
+  const author = reads.relayAuthor;
+  if (!read || !author)
+    throw new Error("This community can’t verify the task’s home.");
   const place = session.channels.get?.(home);
+  const [roster] = await read(
+    [
+      {
+        kinds: [39002],
+        authors: [author],
+        "#d": [home],
+        limit: 1,
+      },
+    ],
+    { signal },
+  );
+  const entries = roster?.tags.filter(
+    ([name, pubkey]) => name === "p" && pubkey === agent,
+  );
+  const role = entries?.length === 1 ? entries[0]?.[3] : undefined;
   if (
+    roster?.pubkey !== author ||
+    !entries?.length ||
+    entries.some((entry) => entry[3] === "guest") ||
+    !["owner", "admin", "member", "bot"].includes(role ?? "") ||
     !place ||
     place.pending ||
     place.archived ||

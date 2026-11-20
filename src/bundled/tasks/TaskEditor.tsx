@@ -87,6 +87,7 @@ export function TaskEditor({
   save(value: TaskSave): Promise<void>;
 }) {
   const titleInput = useRef<HTMLInputElement>(null);
+  const openedTask = useRef(task);
   const [title, setTitle] = useState(task?.title ?? "");
   const [why, setWhy] = useState(task?.why ?? "");
   const [doneWhen, setDoneWhen] = useState(task?.done_when ?? "");
@@ -106,7 +107,18 @@ export function TaskEditor({
       const fields = task
         ? reviseTask(
             task,
-            { title, why, done_when: doneWhen, state, links: parsed },
+            {
+              ...(title !== openedTask.current?.title ? { title } : {}),
+              ...(why !== openedTask.current?.why ? { why } : {}),
+              ...(doneWhen !== openedTask.current?.done_when
+                ? { done_when: doneWhen }
+                : {}),
+              ...(state !== openedTask.current?.state ? { state } : {}),
+              ...(JSON.stringify(parsed) !==
+              JSON.stringify(openedTask.current?.links ?? [])
+                ? { links: parsed }
+                : {}),
+            },
             note,
           )
         : createTaskFields(

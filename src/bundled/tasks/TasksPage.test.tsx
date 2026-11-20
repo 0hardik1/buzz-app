@@ -96,6 +96,7 @@ function setup(rows: ArtifactEntry[] = [], writable = true) {
   const session = {
     viewer,
     relayAuthor: "e".repeat(64),
+    artifactIncremental: {},
     snapshotRead,
     ...(writable ? { configArtifactWriter: { sign, publish } } : {}),
     channels: {
@@ -253,7 +254,16 @@ it("keeps the draft and rebases its base after a conflicting save", async () => 
   app.publish.mockRejectedValueOnce(
     new PublishRejected("rejected", "conflict: stale prev"),
   );
-  const theirs = reviseTask(base, {}, "A teammate added context.", 101);
+  const theirLink = {
+    kind: "pr" as const,
+    url: "https://github.com/block/buzz-app/pull/42",
+  };
+  const theirs = reviseTask(
+    base,
+    { state: "waiting", links: [theirLink] },
+    "A teammate added context.",
+    101,
+  );
   app.snapshotRead.mockResolvedValue([event(theirs, "c".repeat(64))] as never);
   render(<TasksPage relay={app.relay} storage={app.storage} />);
   await userEvent.click(
@@ -280,9 +290,10 @@ it("keeps the draft and rebases its base after a conflicting save", async () => 
     tags: string[][];
   };
   expect(second.tags).toContainEqual(["prev", "c".repeat(64)]);
-  expect(
-    (JSON.parse(second.content) as TaskFields).log.map((entry) => entry.note),
-  ).toEqual([
+  const rebased = JSON.parse(second.content) as TaskFields;
+  expect(rebased.state).toBe("waiting");
+  expect(rebased.links).toEqual([theirLink]);
+  expect(rebased.log.map((entry) => entry.note)).toEqual([
     "Created task.",
     "A teammate added context.",
     "My draft must survive the conflict.",

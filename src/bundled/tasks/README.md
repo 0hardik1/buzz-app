@@ -3,7 +3,9 @@
 A shared, synced task record for agent work. Tasks are **NIP-AR artifacts**,
 not process-local todos or a new SQL table. The page reads the plugin's durable
 IndexedDB artifact collection; the host synchronizes that collection with the
-relay. A task inherits read/write access from its home channel or Solo chat.
+relay. Where incremental sync is unavailable, the table makes a bounded current
+relay read instead. A task inherits read/write access from its home channel or
+Solo chat.
 
 ## Record
 
@@ -33,11 +35,11 @@ dated note; closing evidence belongs in that note and supporting URLs in
 watchdog or CI inference. This plugin deliberately has no assignee, mandate,
 priority, project-group, or automatic status system.
 
-The UI does not auto-rebase a draft after a conflict: it keeps the draft and
-asks the person to reopen the current record. Agent updates re-read and reapply
-intent up to three times, preserving concurrent log notes. Creates choose their
-UUID before publication so an uncertain result can be checked without making a
-duplicate task.
+After a conflict, the UI keeps the draft and rebases onto the current record;
+only fields the person changed from the revision they opened are reapplied, so
+other field edits and log notes survive. Agent updates likewise re-read and
+reapply intent up to three times. Creates choose their UUID before publication
+so an uncertain result can be checked without making a duplicate task.
 
 ## Agent tools
 
@@ -47,8 +49,9 @@ duplicate task.
 - `tasks_note`: append a progress/evidence note and optional links.
 
 Agent reads use the agent's own relay connection. Saves use the session's narrow
-artifact writer, so the relay applies the owner's current write access. A home
-must be readable by the agent and be an unarchived channel or Solo chat.
+artifact writer only when the owner's current channel entry is writable, the
+home is an unarchived channel or Solo chat, and the agent's signed roster entry
+has a non-guest member role. The relay still enforces current write access.
 
 ## Limits
 
@@ -56,4 +59,4 @@ A finite agent list reads at most 500 matching relay rows and explicitly says
 when it may be incomplete; its output is capped at 50. Task content is checked
 against 120 KB, below the shared artifact limit. There is no background refresh
 timer: the host's artifact sync and collection notifications keep the table
-current.
+current; the current-read fallback runs when the table opens or refreshes.

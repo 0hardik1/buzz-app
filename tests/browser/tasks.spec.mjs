@@ -86,8 +86,8 @@ test("creates and updates Task v2 records in a contained responsive table", asyn
   );
   await expect(workspace.getByRole("table")).toContainText("Waiting");
 
-  // A reload discards the local save overlay. Artifact sync must restore the
-  // signed current revision into IndexedDB and then into this table.
+  // A reload discards the local save overlay. On hosts without incremental
+  // artifact sync, the table must restore the signed current relay revision.
   await page.reload();
   await open(page, app);
   await page.getByRole("tab", { name: "Tasks", exact: true }).click();

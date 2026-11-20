@@ -160,7 +160,10 @@ function ConnectedTasks({
         "Someone else updated this task. Your draft is still here; review their latest log note, then save again.",
       );
     }
-    table.setSaved(result.task);
+    table.setSaved(
+      result.task,
+      editor?.kind === "edit" ? editor.task.revision : undefined,
+    );
   };
   const editing = editor?.kind === "edit" ? editor.task : undefined;
   return (
