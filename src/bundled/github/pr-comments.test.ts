@@ -101,6 +101,11 @@ it("reads file pages, outer thread cursors, and nested comment cursors", async (
       ?.comments[0]?.body,
   ).toBe("Second");
   const replies = await api.loadComments("thread-1", "1");
+  const input = state.calls.at(-1)?.input as { query?: string } | undefined;
+  const query = input?.query;
+  expect(query).toContain("id path diffSide line isOutdated");
+  expect(query).toContain("pullRequest{id headRefOid baseRefOid}");
+  expect(query).toContain("root:comments(first:1){nodes{databaseId}}");
   expect(replies.items[0]?.body).toBe("Reply");
   expect(replies).toMatchObject({
     pullId: "pull-fixture",
