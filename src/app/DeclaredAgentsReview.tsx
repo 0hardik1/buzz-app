@@ -69,10 +69,12 @@ export function DeclaredAgentsReview({
           );
         })}
       </div>
-      <p className="mb-0 mt-3 text-muted" role="note">
-        You review each checked agent, and pick its type and model, before it’s
-        created. Instructions shape how an agent behaves; they don’t give it any
-        access.
+      <p className="mb-0 mt-3" role="note">
+        <strong>These instructions control what the agent does.</strong> An
+        agent can use everything its harness allows, which can include running
+        commands, reading and changing your files, and using your credentials on
+        this computer. Only add agents from plugins you trust. You review each
+        checked agent, and its full instructions, before it’s created.
       </p>
     </section>
   );

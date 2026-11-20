@@ -2056,7 +2056,7 @@ through the same owner review as an agent's `agent_create` request; the
 request names no type. Approval saves the declaring plugin's note
 (`{ declaredAgent: id }`, tag `declared-agent`) in the agent's synced
 settings. Agents with that note, and pending requests from the same plugin,
-are not offered again. Declaring an agent grants nothing beyond `host`.
+are not offered again. The plugin gains no host access from declaring agents, but the instructions steer an agent that can use everything its harness allows; the install review says so.
 
 ### Declaring host access
 

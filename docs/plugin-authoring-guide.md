@@ -297,7 +297,7 @@ A plugin can ship agents by listing them in `manifest.json`. A plugin may consis
 ```
 
 - At most 16 agents. `id` follows the plugin id rules and must stay the same across releases. `name` is 1-80 bytes, `picture` an HTTPS URL, `instructions` up to 64 KiB.
-- The install review lists the agents with a checkbox each. After install, each checked agent opens the owner's Create agent review in the selected community, where they pick its type and model. Declaring an agent creates nothing and grants nothing beyond `host`.
+- The install review lists the agents with a checkbox each. After install, each checked agent opens the owner's Create agent review in the selected community, where they pick its type and model. Declaring an agent creates nothing. The instructions do decide what the agent does with everything its harness allows, such as running commands and reading files on the owner's computer, so the review warns the owner to add agents only from plugins they trust.
 - Buzz saves a note under the plugin's id on each agent it creates, so reinstalling or updating the plugin does not offer an agent that already exists. Disabling or removing the plugin keeps its agents.
 - Older Buzz versions reject manifests with this key.
 
