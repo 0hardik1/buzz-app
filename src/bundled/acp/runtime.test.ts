@@ -630,6 +630,63 @@ describe("AcpRuntime", () => {
     expect(fake.harnesses[0]?.turns[0]?.text).not.toContain(INSTRUCTIONS);
   });
 
+  it("tells each session what it is: a thread, a whole conversation or a standalone run", async () => {
+    const capabilities = {
+      mcpCapabilities: { http: true },
+      sessionCapabilities: { systemPrompt: {} },
+    };
+    const promptOf = (opened: Record<string, unknown> | undefined) =>
+      (opened?.systemPrompt as { content: { text: string }[] } | undefined)
+        ?.content[0]?.text ?? "";
+    const config = await confirmed();
+    // A thread in a channel.
+    const thread = setup({ capabilities });
+    thread.sync(config);
+    await thread.deliver(message("1", "@Opal hello"), config).run;
+    await vi.waitFor(() =>
+      expect(thread.fake.harnesses[0]?.opened).toHaveLength(1),
+    );
+    expect(promptOf(thread.fake.harnesses[0]?.opened[0])).toContain(
+      "This session is one thread",
+    );
+    // A Solo chat, one whole conversation.
+    const solo = setup({ capabilities }, { solo: true });
+    solo.sync(config);
+    await solo.deliver(message("1", "@Opal hello"), config).run;
+    await vi.waitFor(() =>
+      expect(solo.fake.harnesses[0]?.opened).toHaveLength(1),
+    );
+    expect(promptOf(solo.fake.harnesses[0]?.opened[0])).toContain(
+      "This session is one whole conversation",
+    );
+    // A timer's run, which joins none.
+    const timer = setup({ capabilities });
+    timer.sync(config);
+    const done = timer.runtime.runOnce({
+      delivery: {
+        agent: {
+          key: self,
+          pubkey: self,
+          name: "Opal",
+          owner: alice,
+          relay: "wss://acp.example",
+        },
+        config,
+      } as unknown as Delivery,
+      key: "timer",
+      signal: new AbortController().signal,
+      prompt: async () => "wake",
+    });
+    await vi.waitFor(() =>
+      expect(timer.fake.harnesses[0]?.turns).toHaveLength(1),
+    );
+    expect(promptOf(timer.fake.harnesses[0]?.opened[0])).toContain(
+      "This run joins no conversation",
+    );
+    timer.fake.harnesses[0]?.turns[0]?.finish();
+    await done;
+  });
+
   it("closes sessions with session/close only when advertised", async () => {
     for (const close of [false, true]) {
       const config = await confirmed();

@@ -25,6 +25,7 @@ import {
 } from "../../features/agent-harness/acp/agent-sessions";
 import { readTranscript } from "../../features/agent-harness/acp/transcript";
 import { ownerCanvas, readProject } from "../../features/agent-harness/project";
+import { placeOf } from "../../features/agent-harness/sections/compose";
 import {
   FRESH,
   type Generation,
@@ -900,7 +901,10 @@ export class AcpRuntime {
       added: addedKey(this.added()),
       ...(entry.syncedModel ? { syncedModel: true } : {}),
     });
-    const launchFor = async ({ config: c, team, name }: Snap) => {
+    const launchFor = async (
+      { config: c, team, name }: Snap,
+      conversation?: string,
+    ) => {
       const memory = await this.core(agent);
       return {
         workspace: c.workspace,
@@ -911,6 +915,7 @@ export class AcpRuntime {
           instructions: c.instructions,
           team,
           ...(memory === undefined ? {} : { memory }),
+          place: placeOf(conversation),
         }),
       };
     };

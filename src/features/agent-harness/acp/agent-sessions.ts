@@ -280,9 +280,10 @@ export type SessionsOptions<S = unknown> = Readonly<{
    * `hooks.select`, and a field Buzz set reopens fresh for the default. */
   configOptions?: true;
   /** Opt-in: each session pins its settings once, which then replace
-   * `fingerprint`, `launch` and `choice` for it. */
-  pin?(): Pinned<S>;
-  launchFor?(pinned: S): Promise<Launch>;
+   * `fingerprint`, `launch` and `choice` for it. Both are given the
+   * conversation the session is for: none for a one-off turn. */
+  pin?(conversation?: string): Pinned<S>;
+  launchFor?(pinned: S, conversation?: string): Promise<Launch>;
   /** A turn's pick from the pinned snapshot and the message's own. */
   pickFor?(
     pinned: S,
@@ -571,7 +572,7 @@ export class AgentSessions<S = unknown> {
         const live = this.live.get(key);
         if (!live) break;
         // A pinned session opened before a local save takes no new message.
-        if (live.claim && this.stale(live)) {
+        if (live.claim && this.stale(live, key)) {
           this.retire(key);
           break;
         }
@@ -588,7 +589,7 @@ export class AgentSessions<S = unknown> {
         if (
           !live.session.open ||
           (!live.session.busy &&
-            (this.stale(live) ||
+            (this.stale(live, key) ||
               this.leveled(live, effort) ||
               !this.fits(live.session, turn)))
         ) {
@@ -642,7 +643,7 @@ export class AgentSessions<S = unknown> {
       place?.leave();
     }
     // Pinned, owned and leased before anything is awaited.
-    const pinned = this.options.pin?.();
+    const pinned = this.options.pin?.(key);
     const claim = pinned && { epoch: ++this.epochs, pinned };
     if (claim) this.claims.set(key, claim);
     const lease = pinned && this.options.process.hold?.(pinned.generation);
@@ -1156,14 +1157,14 @@ export class AgentSessions<S = unknown> {
    * next fall idle. With `pin`, every session pinned before a local save is
    * retired at once, opening and busy ones included. */
   reconfigure() {
-    if (this.options.pin) {
-      const { localKey } = this.options.pin();
+    const { pin } = this.options;
+    if (pin) {
       for (const [key, claim] of [...this.claims])
-        if (claim.pinned.localKey !== localKey) this.retire(key);
+        if (claim.pinned.localKey !== pin(key).localKey) this.retire(key);
       return;
     }
     for (const [key, live] of this.live)
-      if (!live.session.busy && this.stale(live)) this.drop(key, live);
+      if (!live.session.busy && this.stale(live, key)) this.drop(key, live);
   }
 
   /** Like `dispose()`, then resolves once every session it opened, or was
@@ -1264,12 +1265,13 @@ export class AgentSessions<S = unknown> {
   private launchOf(claim: Claim<unknown> | undefined, conversation?: string) {
     const { launchFor } = this.options;
     return claim && launchFor
-      ? launchFor(claim.pinned.snapshot as S)
+      ? launchFor(claim.pinned.snapshot as S, conversation)
       : this.options.launch(conversation);
   }
-  private stale(live: Live) {
+  private stale(live: Live, key: string) {
     const { pin } = this.options;
-    if (live.claim && pin) return live.claim.pinned.localKey !== pin().localKey;
+    if (live.claim && pin)
+      return live.claim.pinned.localKey !== pin(key).localKey;
     return live.fingerprint !== this.options.fingerprint();
   }
   /** A turn's model, effort and their sources: from its session's pinned
@@ -1687,7 +1689,7 @@ export class AgentSessions<S = unknown> {
     const settled = await sent;
     if (this.live.get(key) === live) {
       this.touch(key, live);
-      if (!live.session.busy && this.stale(live)) this.drop(key, live);
+      if (!live.session.busy && this.stale(live, key)) this.drop(key, live);
     }
     return settled;
   }
