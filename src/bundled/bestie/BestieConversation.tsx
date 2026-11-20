@@ -280,10 +280,14 @@ export function BestieConversation({
     void navigator.open(target);
     return true;
   };
-  // Threads, panels and details read over the conversation while it shows.
+  // Bestie reads nothing inline: threads and panels open their tabs, and
+  // details a dialog.
   const panelRenderer = useRef<PanelRenderer>(undefined);
-  const containers = useInlineContainerList(channel.id, (target, controls) =>
-    panelRenderer.current?.(target, controls),
+  const containers = useInlineContainerList(
+    channel.id,
+    (target, controls) => panelRenderer.current?.(target, controls),
+    undefined,
+    false,
   );
   const secondary = useConversationTabs({
     containers: containers.opener,

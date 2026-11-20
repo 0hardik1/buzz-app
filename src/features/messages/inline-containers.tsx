@@ -668,18 +668,20 @@ export function useInlineContainers() {
 
 /** One conversation workspace's entries. Composers draw what is over them;
  * `dialogs` draws what opened without a composer. Leaving `channelId` closes
- * them. */
+ * them. A workspace that reads nothing inline (`inline` false) opens each
+ * request in its tab, else a dialog. */
 export function useInlineContainerList(
   channelId: string | undefined,
   renderPanel?: PanelRenderer,
   history?: InlineHistory,
+  inline = true,
 ) {
   const [store] = useState(createStore);
   const panels = useRef(renderPanel);
   useLayoutEffect(() => {
     panels.current = renderPanel;
   });
-  const opener = useMemo(() => createOpener(store, panels), [store]);
+  const [opener] = useState(() => createOpener(store, panels, inline));
   const navigator = history?.navigator;
   const address = useRef(history?.address);
   address.current = history?.address;
