@@ -114,6 +114,7 @@ export class NotificationsService extends Service implements Notifications {
   private permissionGeneration = 0;
   private permissionRequest: Promise<void> | undefined;
   private scheduled = false;
+  private refreshDockBadge = () => this.indicator.setBadgeCount(undefined);
   private state: NotificationSnapshot;
   constructor(
     ctx: Context,
@@ -188,6 +189,7 @@ export class NotificationsService extends Service implements Notifications {
       const sync = () => {
         stopBadge();
         stopBadge = () => {};
+        this.refreshDockBadge = () => this.indicator.setBadgeCount(undefined);
         const badges = this.dockBadges.snapshot();
         const bundled = badges.filter(isBundledContribution);
         const candidates = bundled.length > 0 ? bundled : badges;
@@ -223,6 +225,7 @@ export class NotificationsService extends Service implements Notifications {
           return;
         }
         const stopGates = this.subscribeGates(update);
+        this.refreshDockBadge = update;
         stopBadge = () => {
           active = false;
           try {
@@ -239,6 +242,7 @@ export class NotificationsService extends Service implements Notifications {
       return () => {
         stopContributions();
         stopBadge();
+        this.refreshDockBadge = () => this.indicator.setBadgeCount(undefined);
         this.indicator.setBadgeCount(undefined);
       };
     });
@@ -270,6 +274,7 @@ export class NotificationsService extends Service implements Notifications {
     this.seen.clear();
     this.publish({ viewer, error: null });
     this.preferences.selectViewer(viewer);
+    this.refreshDockBadge();
   }
   updatePreferences(patch: Partial<NotificationPreferences>) {
     return this.preferences.update(patch);

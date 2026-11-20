@@ -314,6 +314,25 @@ it("lets one plugin own a bounded Dock count and restores the host dot on disabl
   await flush();
   expect(setBadgeCount).toHaveBeenLastCalledWith(undefined);
 });
+it("recomputes the Dock count when the viewer changes without a plugin callback", async () => {
+  const t = setup();
+  const setBadgeCount = vi.spyOn(t.service.indicator, "setBadgeCount");
+  let count = 5;
+  t.install({
+    inject: ["notifications"],
+    apply(ctx) {
+      ctx.notifications.dockBadge({
+        id: "viewer-unread",
+        count: () => count,
+        subscribe: () => () => {},
+      });
+    },
+  });
+  await vi.waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(5));
+  count = 0;
+  t.service.selectViewer("b".repeat(64));
+  expect(setBadgeCount).toHaveBeenLastCalledWith(0);
+});
 it("keeps the host dot when Dock badge subscription setup fails", async () => {
   const t = setup();
   const setBadgeCount = vi.spyOn(t.service.indicator, "setBadgeCount");

@@ -142,3 +142,15 @@ it("uses a bounded plugin count while positive and restores the ordinary dot", a
   h.dock.setBadgeCount(Number.NaN);
   expect(h.set).toHaveBeenLastCalledWith("•");
 });
+it("makes a viewer-switch badge clear win over a pending native count", async () => {
+  const h = setup();
+  await h.dock.refresh();
+  const pending = deferred<void>();
+  h.set.mockImplementationOnce(() => pending.promise);
+  h.dock.setBadgeCount(5);
+  expect(h.set.mock.calls).toEqual([[null], ["5"]]);
+  h.dock.setBadgeCount(0);
+  pending.resolve();
+  await vi.waitFor(() => expect(h.set).toHaveBeenLastCalledWith(null));
+  expect(h.set.mock.calls).toEqual([[null], ["5"], [null]]);
+});
