@@ -583,8 +583,11 @@ machine so each gets its own worktree. The run writes
 versions, every command and exit code) and a `summary.md` that a review body can
 quote, including what the run did **not** prove. It fails if the worktree
 moved, gained changes, or the pull request head moved on the remote during the
-run. Exit codes: 0 passed, 1 a lane or final check failed, 2 the run could not
-start (usage, an unresolved target or base, or a failed selection).
+run. Both files are rewritten as each lane starts and finishes, so a run that
+is killed partway keeps the lanes it finished, shows `result: "incomplete"`, and
+makes no exact-head claim. Exit codes: 0 passed, 1 a lane or final check failed,
+2 the run could not start (usage, an unresolved target or base, or a failed
+selection).
 
 The reviewed code runs as you, with only a short allowlist of environment
 variables (path, home, locale, proxy and toolchain locations; no tokens or
