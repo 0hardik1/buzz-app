@@ -41,6 +41,26 @@ export type InboxItem = Readonly<{
   /** Explicit prefixes; a thread prefix never acknowledges its top-level root. */
   readThrough: readonly Readonly<{ target: ReadTarget; messageId: string }>[];
 }>;
+/** Whether a conversation counts as unread in Activity. */
+export const hasUnread = (item: InboxItem) =>
+  item.unreadCount > 0 || item.manual;
+
+const unreadChannelCache = new WeakMap<InboxSnapshot, ReadonlySet<string>>();
+/**
+ * Channels with a conversation unread in Activity: DMs, mentions of you and
+ * replies in threads you follow. Ordinary channel backlog is not among them.
+ */
+export function inboxUnreadChannels(inbox: InboxSnapshot) {
+  let channels = unreadChannelCache.get(inbox);
+  if (!channels) {
+    channels = new Set(
+      inbox.items.filter(hasUnread).map((item) => item.channelId),
+    );
+    unreadChannelCache.set(inbox, channels);
+  }
+  return channels;
+}
+
 export type InboxSnapshot = Readonly<{
   status: "idle" | "loading" | "ready" | "error";
   items: readonly InboxItem[];

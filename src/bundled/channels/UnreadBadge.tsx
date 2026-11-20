@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { RelaySession } from "../../features/relay/session";
 import { rowUnread } from "../../features/relay/unread";
+import { inboxUnreadChannels } from "../../features/relay/inbox";
 import styles from "./Channels.module.css";
 
 type UnreadSnapshot = ReturnType<RelaySession["unread"]["snapshot"]>;
@@ -73,6 +74,10 @@ export function useUnreadState(
     getActivity,
   );
   const muted = useConfirmedMute(session, channelId);
+  // Unread in Activity, which is what the sidebar's cues and badges count.
+  const waiting = useSyncExternalStore(session.unread.subscribeInbox, () =>
+    inboxUnreadChannels(session.unread.inbox()).has(channelId),
+  );
   const { observedCount: count, attentionCount } = shown(snapshot);
   const manual = snapshot.manual !== "none";
   const unread = rowUnread(snapshot, dm, muted);
@@ -88,6 +93,7 @@ export function useUnreadState(
     ordinary,
     threadCount,
     muted,
+    waiting,
   };
 }
 
@@ -118,6 +124,7 @@ export function UnreadBadge({
     ordinary,
     threadCount,
     muted,
+    waiting,
   } = useUnreadState(session, channelId, dm);
   const unread =
     labelUnread === "all" || preserveUnread
@@ -169,6 +176,7 @@ export function UnreadBadge({
           aria-hidden="true"
         />
       )}
+      {waiting && !muted && <span data-channel-waiting="" hidden />}
       {mentionCount > 0 && threadCount === 0 && (
         <span className="sr-only">{`${mentionLabel}${stale}`}</span>
       )}

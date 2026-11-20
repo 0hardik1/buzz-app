@@ -187,6 +187,12 @@ export function fixture(
       },
       subscribe: (_target, listener) => subscribe(listener),
       activity: () => threads,
+      inbox: () => ({
+        status: "ready" as const,
+        items: [],
+        freshness: "unknown" as const,
+      }),
+      subscribeInbox: () => () => {},
       subscribeActivity: (_id, listener) => subscribe(listener),
       markThrough,
     },

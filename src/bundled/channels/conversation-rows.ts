@@ -4,15 +4,12 @@ export const CONVERSATION_LIST_LABEL = "Subscribed channels";
 export const UNREAD_MARKERS = "[data-channel-unread], [data-channel-activity]";
 
 /**
- * Whether a row's unread waits on you: a DM, a mention of you or a reply in a
- * thread you follow. Ordinary channel backlog does not.
+ * Whether a row's unread waits on you: it is unread in Activity, as a DM, a
+ * mention of you or a reply in a thread you follow. Ordinary channel backlog
+ * is not.
  */
 export function waitsOnYou(row: Element) {
-  return (
-    row.getAttribute("data-channel-type") === "dm" ||
-    row.querySelector('[data-priority="true"]') !== null ||
-    row.querySelector("[data-channel-activity]") !== null
-  );
+  return row.querySelector("[data-channel-waiting]") !== null;
 }
 
 /** Whether a row shows unread that has not been muted. */

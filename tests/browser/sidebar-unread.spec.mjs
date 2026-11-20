@@ -548,7 +548,7 @@ test("resizing, collapsed groups and new unread evidence update only the display
   await expectCueHidden(page, "below");
 });
 
-test("session changes discard the previous sidebar targets, and manual unread alone earns no cue", async ({
+test("session changes discard the previous sidebar targets and manual unread still participates", async ({
   page,
   app,
 }) => {
@@ -598,8 +598,8 @@ test("session changes discard the previous sidebar targets, and manual unread al
     ).toHaveCount(0);
     await showAllRows(page);
     await scroll(page, 1800);
-    // Marked unread is ordinary backlog here: bold, but not a cue.
-    await expectCueHidden(page, "above");
+    // Marked unread shows in Activity, so it earns a cue.
+    await expect(cue(page, "above")).toBeVisible();
     // Completing delayed preferences must not replace the user's newer viewport.
     const refreshed = page.waitForResponse(
       (response) =>
@@ -612,6 +612,8 @@ test("session changes discard the previous sidebar targets, and manual unread al
     expect(await list(page).evaluate((element) => element.scrollTop)).toBe(
       1800,
     );
+    await cue(page, "above").click();
+    await expect.poll(() => inView(page, "alpha")).toBe(true);
     await expect(
       row(page, "alpha").locator(
         '[data-channel-unread][data-priority="false"]',

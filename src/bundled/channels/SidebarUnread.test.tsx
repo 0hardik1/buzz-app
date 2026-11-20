@@ -16,6 +16,7 @@ import {
   createRelaySession,
   type RelaySession,
 } from "../../features/relay/session";
+import type { InboxItem } from "../../features/relay/inbox";
 
 // Controlled geometry tests the production projection, not browser layout.
 // Real scrolling, clipping and collapsed-section geometry remain browser checks.
@@ -83,6 +84,7 @@ function row(id: string, top: number, onClick = vi.fn()) {
       {id}
       <span data-channel-unread="" />
       <span data-channel-activity="" />
+      <span data-channel-waiting="" hidden />
     </button>
   );
 }
@@ -128,7 +130,8 @@ it("reveals the heading for an unread chat in a closed Solo workspace", async ()
             data-solo-destination-id="chat"
           >
             Solo chat
-            <span data-channel-unread="" data-priority="true" />
+            <span data-channel-unread="" />
+            <span data-channel-waiting="" hidden />
           </button>
         </SidebarSection>
       </SidebarUnread>
@@ -398,6 +401,12 @@ it.each([
           ]
         : [],
     };
+    // Activity counts this conversation, so it waits on you.
+    const inbox = {
+      status: "ready" as const,
+      freshness: "observed" as const,
+      items: [{ channelId: "muted", unreadCount: 1 } as InboxItem],
+    };
     let muted = false;
     const listeners = new Set<() => void>();
     const session: RelaySession = {
@@ -406,6 +415,7 @@ it.each([
         ...base.unread,
         snapshot: () => snapshot,
         activity: () => activity,
+        inbox: () => inbox,
       },
       sidebarPreferences: {
         ...base.sidebarPreferences,

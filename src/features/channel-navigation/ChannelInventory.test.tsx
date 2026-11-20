@@ -989,6 +989,12 @@ it("opens an Activity mention at its message, with no thread root", async () => 
   h.session.unread = {
     ...unread,
     activity: (id) => snapshots.get(id) ?? unread.activity(id),
+    inbox: () => ({
+      status: "ready" as const,
+      items: [],
+      freshness: "unknown" as const,
+    }),
+    subscribeInbox: () => () => {},
     subscribeActivity: () => () => {},
   };
   // The sidebar reads back the attempt it started to hand off focus return.

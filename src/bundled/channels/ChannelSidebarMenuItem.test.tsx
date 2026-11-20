@@ -49,6 +49,12 @@ it("keeps menu choices in sync with ordinary, attention, thread and working side
       activity: () => activity,
       subscribe: (_target: unknown, listener: () => void) =>
         subscribe(unreadListeners, listener),
+      inbox: () => ({
+        status: "ready" as const,
+        items: [],
+        freshness: "unknown" as const,
+      }),
+      subscribeInbox: () => () => {},
       subscribeActivity: (_id: string, listener: () => void) =>
         subscribe(unreadListeners, listener),
     },

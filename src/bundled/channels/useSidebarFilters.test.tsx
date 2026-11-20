@@ -186,6 +186,12 @@ it("reacts to message, manual and thread unread evidence and cleans up filtered 
     }),
     subscribe: (_target: unknown, listener: () => void) =>
       subscribe(listeners, listener),
+    inbox: () => ({
+      status: "ready" as const,
+      items: [],
+      freshness: "unknown" as const,
+    }),
+    subscribeInbox: () => () => {},
     subscribeActivity: (_id: string, listener: () => void) =>
       subscribe(activityListeners, listener),
   };

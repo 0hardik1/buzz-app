@@ -110,12 +110,19 @@ export function SidebarCardResize({
     );
   }, []);
   // The badge's width, so the last row that shows can make room beside it.
+  // It grows with another digit or a larger text size, so keep it measured.
   const badge = useCallback((node: HTMLSpanElement | null) => {
-    if (node)
+    if (!node) return;
+    const measure = () =>
       list.current?.style.setProperty(
         "--card-badge-width",
         `${node.offsetWidth}px`,
       );
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const sized = new ResizeObserver(measure);
+    sized.observe(node);
+    return () => sized.disconnect();
   }, []);
   const saved = useRef(height);
   // The hint explains the grip until it has been used once.
@@ -146,9 +153,7 @@ export function SidebarCardResize({
       attributeFilter: [
         "data-channel-unread",
         "data-channel-muted",
-        "data-channel-activity",
-        "data-channel-type",
-        "data-priority",
+        "data-channel-waiting",
       ],
     });
     const sized =

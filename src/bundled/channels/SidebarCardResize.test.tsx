@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SidebarCardResize, useSidebarCardHeight } from "./SidebarCardResize";
 
@@ -14,44 +20,55 @@ beforeEach(() => {
   });
 });
 
-type Mark = "dm" | "mention" | "channel";
+type Mark = "dm" | "mention" | "channel" | "muted";
 
 function Card({
   rows,
   marks = {},
 }: {
   rows: number;
-  /** Unread on a row: a DM, a mention of you, or ordinary channel backlog. */
+  /** Unread on a row: a DM, a mention of you, ordinary channel backlog, or a
+   * mention in a muted channel. */
   marks?: Record<number, Mark>;
 }) {
   const [height, resize, toggle] = useSidebarCardHeight("scope", "group:work");
   return (
-    <SidebarCardResize
-      label="Work"
-      height={height}
-      onResize={resize}
-      onToggle={toggle}
-    >
-      {Array.from({ length: rows }, (_, index) => `Row ${index}`).map((row) => (
-        <div key={row} data-card-row="">
-          <button
-            type="button"
-            data-channel-id={row}
-            data-channel-type={
-              marks[Number(row.slice(4))] === "dm" ? "dm" : "stream"
-            }
-          >
-            {row}
-            {marks[Number(row.slice(4))] && (
-              <span
-                data-channel-unread=""
-                data-priority={marks[Number(row.slice(4))] !== "channel"}
-              />
-            )}
-          </button>
-        </div>
-      ))}
-    </SidebarCardResize>
+    <div data-testid="card" data-height={String(height)}>
+      <SidebarCardResize
+        label="Work"
+        height={height}
+        onResize={resize}
+        onToggle={toggle}
+      >
+        {Array.from({ length: rows }, (_, index) => `Row ${index}`).map(
+          (row) => (
+            <div key={row} data-card-row="">
+              <button
+                type="button"
+                data-channel-id={row}
+                data-channel-type={
+                  marks[Number(row.slice(4))] === "dm" ? "dm" : "stream"
+                }
+              >
+                {row}
+                {marks[Number(row.slice(4))] && (
+                  <span
+                    data-channel-unread=""
+                    data-channel-muted={
+                      marks[Number(row.slice(4))] === "muted" ? "" : undefined
+                    }
+                  />
+                )}
+                {marks[Number(row.slice(4))] &&
+                  marks[Number(row.slice(4))] !== "channel" && (
+                    <span data-channel-waiting="" hidden />
+                  )}
+              </button>
+            </div>
+          ),
+        )}
+      </SidebarCardResize>
+    </div>
   );
 }
 
@@ -174,6 +191,165 @@ it("opens only as far as the lowest unread that waits on you", () => {
   );
   expect(list.style.maxHeight).toBe(`${4 * ROW}px`);
   expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
+});
+
+it("follows a marker that changes in place, and leaves muted ones out", async () => {
+  const { rerender } = render(<Card rows={5} marks={{ 4: "channel" }} />);
+  layOut();
+  const grip = screen.getByRole("separator", { name: "Resize Work" });
+  for (const _ of [1, 2]) fireEvent.keyDown(grip, { key: "ArrowUp" });
+  expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
+  // The same row's backlog becomes a mention of you.
+  rerender(<Card rows={5} marks={{ 4: "mention" }} />);
+  await act(async () => {});
+  expect(
+    screen.getByRole("button", {
+      name: "Show 1 unread conversation below in Work",
+    }),
+  ).toBeInTheDocument();
+  // Then its channel is muted, without the row re-rendering.
+  await act(async () => {
+    document
+      .querySelector('[data-channel-id="Row 4"] [data-channel-unread]')
+      ?.setAttribute("data-channel-muted", "");
+  });
+  expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
+});
+
+it("never counts a muted conversation past the edge", () => {
+  render(<Card rows={5} marks={{ 3: "muted", 4: "dm" }} />);
+  layOut();
+  const grip = screen.getByRole("separator", { name: "Resize Work" });
+  for (const _ of [1, 2]) fireEvent.keyDown(grip, { key: "ArrowUp" });
+  expect(
+    screen.getByRole("button", {
+      name: "Show 1 unread conversation below in Work",
+    }),
+  ).toBeInTheDocument();
+});
+
+it("hands focus to the grip when the badge is used from the keyboard", () => {
+  render(<Card rows={5} marks={{ 3: "mention" }} />);
+  layOut();
+  const grip = screen.getByRole("separator", { name: "Resize Work" });
+  for (const _ of [1, 2]) fireEvent.keyDown(grip, { key: "ArrowUp" });
+  const badge = screen.getByRole("button", {
+    name: "Show 1 unread conversation below in Work",
+  });
+  badge.focus();
+  // Keyboard activation clicks with no pointer detail.
+  fireEvent.click(badge, { detail: 0 });
+  expect(badge).not.toBeInTheDocument();
+  expect(grip).toHaveFocus();
+});
+
+it("remembers full, not a pixel height, when the badge opens to the last row", () => {
+  render(<Card rows={5} marks={{ 4: "dm" }} />);
+  const list = layOut();
+  const grip = screen.getByRole("separator", { name: "Resize Work" });
+  for (const _ of [1, 2]) fireEvent.keyDown(grip, { key: "ArrowUp" });
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Show 1 unread conversation below in Work",
+    }),
+  );
+  expect(list.style.maxHeight).toBe("");
+  expect(screen.getByTestId("card")).toHaveAttribute(
+    "data-height",
+    String(Number.MAX_SAFE_INTEGER),
+  );
+});
+
+/** Stand in for layout: the badge's width, and the observers watching it. */
+function measureBadge() {
+  let width = 24;
+  const observers: { run: () => void; target?: Element | undefined }[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      entry: { run: () => void; target?: Element | undefined };
+      constructor(run: () => void) {
+        this.entry = { run };
+        observers.push(this.entry);
+      }
+      observe(target: Element) {
+        this.entry.target = target;
+      }
+      unobserve() {}
+      disconnect() {
+        this.entry.target = undefined;
+      }
+    },
+  );
+  const spy = vi
+    .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+    .mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute("data-card-waiting") ? width : 0;
+    });
+  return {
+    resize(next: number) {
+      width = next;
+      act(() => {
+        for (const observer of observers)
+          if (observer.target?.hasAttribute("data-card-waiting"))
+            observer.run();
+      });
+    },
+    restore() {
+      spy.mockRestore();
+      vi.unstubAllGlobals();
+    },
+  };
+}
+
+const nine = {
+  2: "dm",
+  3: "dm",
+  4: "dm",
+  5: "dm",
+  6: "dm",
+  7: "dm",
+  8: "dm",
+  9: "dm",
+  10: "dm",
+} as const;
+
+it("makes more room beside the badge when its count gains a digit", async () => {
+  const badge = measureBadge();
+  try {
+    const { rerender } = render(<Card rows={12} marks={nine} />);
+    const list = layOut();
+    const grip = screen.getByRole("separator", { name: "Resize Work" });
+    for (const _ of Array.from({ length: 10 }))
+      fireEvent.keyDown(grip, { key: "ArrowUp" });
+    expect(list.style.getPropertyValue("--card-badge-width")).toBe("24px");
+    rerender(<Card rows={12} marks={{ ...nine, 11: "mention" }} />);
+    await act(async () => {});
+    expect(
+      screen.getByRole("button", {
+        name: "Show 10 unread conversations below in Work",
+      }),
+    ).toHaveTextContent("10");
+    badge.resize(32);
+    expect(list.style.getPropertyValue("--card-badge-width")).toBe("32px");
+  } finally {
+    badge.restore();
+  }
+});
+
+it("makes more room beside the badge when the text gets larger", () => {
+  const badge = measureBadge();
+  try {
+    render(<Card rows={5} marks={{ 4: "dm" }} />);
+    const list = layOut();
+    const grip = screen.getByRole("separator", { name: "Resize Work" });
+    for (const _ of [1, 2]) fireEvent.keyDown(grip, { key: "ArrowUp" });
+    expect(list.style.getPropertyValue("--card-badge-width")).toBe("24px");
+    badge.resize(40);
+    expect(list.style.getPropertyValue("--card-badge-width")).toBe("40px");
+  } finally {
+    badge.restore();
+  }
 });
 
 it("hints at the grip until it has been dragged or double-clicked once", () => {

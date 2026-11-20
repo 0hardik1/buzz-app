@@ -83,6 +83,12 @@ function owner(profiles = new Map<string, Profile>()) {
         return () => listeners.delete(listener);
       },
       activity: () => activity,
+      inbox: () => ({
+        status: "ready" as const,
+        items: [],
+        freshness: "unknown" as const,
+      }),
+      subscribeInbox: () => () => {},
       subscribeActivity: () => () => {},
     },
   } as unknown as RelaySession;
