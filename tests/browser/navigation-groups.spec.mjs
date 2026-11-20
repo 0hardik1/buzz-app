@@ -29,6 +29,8 @@ async function openMove(page, row, channelName = "Beta") {
   await expect(menu).toBeVisible();
   return menu;
 }
+/** Shortly after the fixture's history, which dates from November 2023. */
+const fixtureNow = new Date(1_700_100_000_000);
 const rowIn = (page, section) =>
   page.locator(`[data-sidebar-section="${section}"] [data-channel-id="beta"]`);
 const sidebar = (page) =>
@@ -364,7 +366,8 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
     app.report.sidebarPublications.find(
       ({ coordinate }) => coordinate === "channel-workspace-sort",
     ).blob.groups,
-  ).toEqual({ channels: "recent" });
+    // Recent is the default, which is saved as no entry.
+  ).toEqual({});
   await page.unroute("**/sidebar-sort");
   await page.reload();
   await expect(beta).toBeVisible();
@@ -807,6 +810,9 @@ test("Create new supports cancel, moves before publication, and retries the same
   await page.addInitScript(() =>
     localStorage.setItem("buzz-appearance.v1", "dark"),
   );
+  // A workspace made here starts on the last 30 days; keep the page clock
+  // beside the fixture's November 2023 history so its rows stay in view.
+  await page.clock.setFixedTime(fixtureNow);
   await open(page, app);
   const beta = rowIn(page, "group:work");
   await expect(beta).toBeVisible();
@@ -1203,6 +1209,9 @@ scrollTest(
 // Browser-owned integration: menu/dialog portals, encrypted saves, and
 // retained sidebar placement across app changes and reload.
 test("Move and Create persist across apps", async ({ page, app }) => {
+  // A workspace made here starts on the last 30 days; keep the page clock
+  // beside the fixture's November 2023 history so its rows stay in view.
+  await page.clock.setFixedTime(fixtureNow);
   await open(page, app);
   await openPage(page, "Workflows");
   const projects = page.getByRole("heading", {
