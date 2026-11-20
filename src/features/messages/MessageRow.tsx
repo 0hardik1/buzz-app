@@ -1023,6 +1023,24 @@ function MessageRowContent({
   const forwardNote = timeReply?.content ?? row.forward?.note;
   // Details read as their brief, which opens into their own viewer.
   const details = row.audience === "details";
+  // A verified relay's reader is titled with the agent it relays, as its line
+  // is, never with the signer.
+  const relayedAgent = row.relayedFrom?.verified
+    ? row.relayedFrom.agent
+    : undefined;
+  const relayedProfile = relayedAgent
+    ? directory.profiles.get(relayedAgent)
+    : undefined;
+  const reader = relayedAgent
+    ? {
+        name: resolveName(
+          relayedAgent,
+          relayedProfile?.name ?? relayedAgent.slice(0, 10),
+        ),
+        picture: avatarMedia(relayedProfile?.picture, media),
+        agent: agentPubkeys?.has(relayedAgent) || relayedProfile?.isAgent,
+      }
+    : { name, picture, agent: avatarShape === "squircle" };
   const body =
     bodyContent ??
     (row.forward ? (
@@ -1096,14 +1114,14 @@ function MessageRowContent({
     ) : details ? (
       <DetailsMessage
         messageId={row.id}
-        author={name}
+        author={reader.name}
         avatar={
           <Avatar
-            src={picture}
+            src={reader.picture}
             alt=""
-            fallback={name}
+            fallback={reader.name}
             size="small"
-            shape={avatarShape}
+            shape={reader.agent ? "squircle" : "circle"}
           />
         }
         createdAt={row.createdAt}

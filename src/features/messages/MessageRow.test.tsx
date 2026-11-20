@@ -3790,6 +3790,46 @@ it("shows details as their brief, whose Show more opens them whole", async () =>
   }
 });
 
+it("titles a relayed details reader with the agent it relays, not the signer", async () => {
+  const subscribe = () => () => {};
+  const profiles = new Map([["zerk", { name: "Zerk", isAgent: true }]]);
+  const session = {
+    viewer: "owner",
+    channels: {
+      list: () => ({ status: "ready", channels: [] }),
+      subscribeList: subscribe,
+    },
+    messages: {},
+    profiles: { snapshot: () => profiles, subscribe },
+  } as unknown as RelaySession;
+  const row = {
+    ...detailsRow(),
+    authorId: "owner",
+    relayedFrom: { agent: "zerk", verified: true },
+  };
+  try {
+    renderDom(
+      <MessageRow
+        row={row}
+        session={session}
+        viewer="owner"
+        profile={{ name: "Gil" }}
+        media={() => undefined}
+        onOpenLink={() => false}
+        day={false}
+        retry={undefined}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Zerk: / }));
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    const dialog = await screen.findByRole("dialog", { name: "Zerk" });
+    expect(within(dialog).getByText("It keeps its place")).toBeVisible();
+    expect(screen.queryByRole("dialog", { name: "Gil" })).toBeNull();
+  } finally {
+    cleanup();
+  }
+});
+
 it("offers Show more for a single brief only when it runs past its lines", () => {
   const height = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
