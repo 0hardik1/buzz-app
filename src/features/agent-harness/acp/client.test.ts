@@ -1953,6 +1953,41 @@ describe("reading a transcript", () => {
     expect(harness.started[0]?.killed).toBe(true);
   });
 
+  it("reads a replayed request as Buzz framed it, past a long context and across chunks", async () => {
+    const id = "e".repeat(64);
+    const pubkey = "a".repeat(64);
+    const prompt = [
+      "<thread-context>",
+      `{"content":${JSON.stringify("x".repeat(8_000))}}`,
+      "</thread-context>",
+      "<buzz-event>",
+      JSON.stringify({ id, pubkey, content: "Ship it" }),
+      `Request: ${JSON.stringify("Ship it")}`,
+      "</buzz-event>",
+    ].join("\n");
+    const cut = prompt.indexOf("</buzz-event>") + 4;
+    const harness = fakeHarness({
+      capabilities: { mcpCapabilities: { http: true }, loadSession: true },
+      replay: [prompt.slice(0, cut), prompt.slice(cut)].map((text) => ({
+        sessionUpdate: "user_message_chunk",
+        content: { type: "text", text },
+      })),
+    });
+    const transcript = await readTranscript({
+      start: () => start(harness),
+      cwd: "/work",
+      sessionId: "old",
+      threadOf: () => undefined,
+    });
+    const [turn] = transcript?.turns ?? [];
+    expect(turn?.triggeringEventIds).toEqual([id]);
+    expect(turn?.items[0]).toMatchObject({
+      type: "prompt",
+      text: "Ship it",
+      authorPubkey: pubkey,
+    });
+  });
+
   const read = (replay: Record<string, unknown>[]) => {
     const harness = fakeHarness({
       capabilities: { mcpCapabilities: { http: true }, loadSession: true },

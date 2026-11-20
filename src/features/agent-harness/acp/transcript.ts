@@ -1,11 +1,14 @@
 // Reads a saved session's transcript through standard ACP: a short-lived
 // harness process replays it with `session/load`, and its updates become
 // `Transcript` turns. Nothing is prompted, and no Buzz tools are given.
-import type {
-  ToolItem,
-  Transcript,
-  TranscriptItem,
-  TranscriptTurn,
+import {
+  promptEventIds,
+  promptMessage,
+  promptSections,
+  type ToolItem,
+  type Transcript,
+  type TranscriptItem,
+  type TranscriptTurn,
 } from "../../agents/activity-transcript";
 import { abortable } from "./agent-sessions";
 import { optionState } from "./options";
@@ -134,7 +137,35 @@ class Rebuild {
   result(threadOf: TranscriptRead["threadOf"]): Transcript {
     const turns = this.turns.map(({ size: _size, prefix, ...turn }) => {
       const threadRootId = prefix ? threadOf(prefix) : undefined;
-      return { ...turn, threadRootId, partial: turn.partial || this.evicted };
+      let triggeringEventIds = turn.triggeringEventIds;
+      // Each prompt read as Buzz framed it, once all its chunks are in: an
+      // unterminated section, as a cut one is, stays plain text.
+      const items = turn.items.map((item) => {
+        if (item.type !== "prompt") return item;
+        const sections = promptSections(item.text);
+        const message = promptMessage(sections);
+        if (!triggeringEventIds.length)
+          triggeringEventIds = promptEventIds(sections);
+        return {
+          ...item,
+          text:
+            message.text ||
+            sections.find((section) => section.tag === "text")?.body ||
+            item.text,
+          ...(message.author ? { author: message.author } : {}),
+          ...(message.authorPubkey
+            ? { authorPubkey: message.authorPubkey }
+            : {}),
+          sections,
+        };
+      });
+      return {
+        ...turn,
+        items,
+        triggeringEventIds,
+        threadRootId,
+        partial: turn.partial || this.evicted,
+      };
     });
     return { turns };
   }
@@ -168,13 +199,15 @@ class Rebuild {
       ...(messageId ? { messageId } : {}),
       item: this.prompt as unknown as Text,
     };
-    // Only a prompt's start is kept: enough for `threadOf`, never the whole.
-    const room = PREFIX_LIMIT - this.prompt.text.length;
+    // A prompt is kept up to one item's bound, so a long context still
+    // reaches its request; `threadOf` reads only its start.
+    const room = ITEM_LIMIT - this.prompt.text.length;
     const kept = text.slice(0, Math.max(0, room));
+    if (kept.length < text.length) turn.partial = true;
     if (kept && this.admit(turn, bytes(kept))) {
       this.prompt.text += kept;
       if (turn.prefix.length < PREFIX_LIMIT && turn.items[0] === this.prompt)
-        turn.prefix = this.prompt.text;
+        turn.prefix = this.prompt.text.slice(0, PREFIX_LIMIT);
     }
   }
 
