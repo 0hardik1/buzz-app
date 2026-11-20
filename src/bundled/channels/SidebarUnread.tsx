@@ -48,6 +48,9 @@ function unreadEdges(list: HTMLElement): Edges {
     const closed = row
       .closest("[data-sidebar-section]")
       ?.querySelector("details:not([open])");
+    // Rows past a resized card's edge can't be scrolled to, so they never
+    // count toward the above or below cue.
+    if (!closed && row.closest("[data-card-clipped]")) continue;
     const anchor = closed?.querySelector("summary") ?? row;
     const rect = anchor.getBoundingClientRect();
     if (!rect.height || !rect.width) continue;
@@ -223,6 +226,7 @@ export function SidebarUnread({
         "data-channel-id",
         "data-priority",
         "data-moving",
+        "data-card-clipped",
       ],
     });
     if (cue && upper && action) {

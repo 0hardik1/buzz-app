@@ -231,6 +231,24 @@ it("counts each destination once and suppresses any with a partly visible copy",
   expect(screen.getAllByRole("button", { name: "duplicate" })[0]).toHaveFocus();
 });
 
+it("leaves rows past a resized card's edge out of the edge cues", async () => {
+  render(
+    <SidebarUnread>
+      {row("reachable", 340)}
+      <div data-card-row="" data-card-clipped="">
+        {row("clipped", 380)}
+      </div>
+    </SidebarUnread>,
+  );
+  await measure();
+  const pill = screen.getByRole("button", {
+    name: "1 unread conversation below",
+  });
+  fireEvent.click(pill);
+  await measure();
+  expect(screen.getByRole("button", { name: "reachable" })).toHaveFocus();
+});
+
 it("refreshes artwork and shapes without waiting for geometry or adding unread state", async () => {
   const children = [row("dm", 340), row("group-dm", 370), row("self-dm", 400)];
   const view = render(
