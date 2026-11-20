@@ -697,8 +697,9 @@ it("uses relay section filters across navigation and remount", async () => {
   const mounted = render(h.view("alpha"));
   await screen.findByRole("button", { name: "gamma" });
   await chooseView(user, "Team", "Unreads");
+  // A fading row is hidden from role queries; wait until it has left the DOM.
   await waitFor(() =>
-    expect(screen.queryByRole("button", { name: "beta" })).toBeNull(),
+    expect(document.querySelector('[data-channel-id="beta"]')).toBeNull(),
   );
   expect(screen.getByRole("button", { name: "alpha" })).toBeVisible();
   mounted.rerender(h.view("beta"));
