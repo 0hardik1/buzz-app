@@ -561,15 +561,22 @@ function mount(
       status: AgentLibrarySnapshot["status"] = "ready",
       error?: string,
       stale?: boolean,
+      retrying?: boolean,
     ) {
       act(() => {
-        const { error: _previous, stale: _stale, ...rest } = library;
+        const {
+          error: _previous,
+          stale: _stale,
+          retrying: _retrying,
+          ...rest
+        } = library;
         library = {
           ...rest,
           identities,
           status,
           ...(error ? { error } : {}),
           ...(stale ? { stale: true as const } : {}),
+          ...(retrying ? { retrying: true as const } : {}),
         };
         for (const listener of libraryListeners) listener();
       });
@@ -13351,10 +13358,13 @@ it("keeps a saved Solo chat's pill seeded from the kept agent list when a reread
   h.retarget({ shown: true });
   expect(sendingTo("Bea")).toBeInTheDocument();
   expect(h.commands().audience?.loading).toBeUndefined();
-  // A failure with nothing kept offers the choice rather than loading forever.
-  h.setLibrary([], "error", "Could not read");
+  // A failure with nothing kept keeps loading while it retries on its own,
+  // and offers the choice only when nothing will retry.
+  h.setLibrary([], "error", "Could not read", false, true);
   h.retarget({ shown: false });
   h.retarget({ shown: true });
+  expect(h.commands().audience?.loading).toBe(true);
+  h.setLibrary([], "error", "Could not read");
   expect(sendingTo("")).toBeInTheDocument();
   expect(h.commands().audience?.loading).toBeUndefined();
   h.unmount();

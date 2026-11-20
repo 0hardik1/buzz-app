@@ -73,8 +73,11 @@ test("a Solo chat alone with an agent tags it while a background read-state snap
     name: `Sending to ${agent.name}. Change agents`,
     exact: true,
   });
-  // The composer shows no standing notice (#2948); the failed read offers
-  // Retry in its picker.
+  // The composer shows no standing notice (#2948); the failed read says in
+  // its picker that it is retrying, and offers no Retry button.
+  const retrying = page.getByText("Couldn't load agents. Retrying…", {
+    exact: true,
+  });
   const retry = page.getByRole("button", {
     name: "Retry agent list",
     exact: true,
@@ -114,16 +117,17 @@ test("a Solo chat alone with an agent tags it while a background read-state snap
     await expect.poll(() => refused).toBeGreaterThan(0);
     // The failed reread shows quietly in the pill's menu.
     await pill.click();
-    await expect(retry).toBeVisible();
+    await expect(retrying).toBeVisible();
+    await expect(retry).toHaveCount(0);
     // The relay answers again. The snapshot is still running, so the
     // automatic retry must not wait for it.
     inventoryAnswered = true;
-    await expect(retry).toHaveCount(0, { timeout: 20_000 });
+    await expect(retrying).toHaveCount(0, { timeout: 20_000 });
     await expect(pill).toBeVisible();
   } finally {
     gate.resolve();
   }
   // The snapshot completing changes nothing about the addressed agent.
   await expect(pill).toBeVisible();
-  await expect(retry).toHaveCount(0);
+  await expect(retrying).toHaveCount(0);
 });

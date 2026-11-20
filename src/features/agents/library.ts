@@ -29,6 +29,9 @@ export type AgentLibrarySnapshot = AgentLibrary &
      * loads or failed, or a partial reread's, in which a failed source shows
      * its last rows. Agent choices count them as complete but not current. */
     stale?: true;
+    /** A failed read will read again on its own: reading again can fix it
+     * and something still needs the list. */
+    retrying?: true;
   }>;
 const empty = { definitions: Object.freeze([]), identities: Object.freeze([]) };
 
@@ -83,9 +86,18 @@ export function createAgentLibrary(
     status: read ? "idle" : "unavailable",
   };
   const listeners = new Set<() => void>();
+  const retries = (next: AgentLibrarySnapshot) =>
+    !closed && !hard && demands.size > 0 && !!next.error;
   function publish(next: AgentLibrarySnapshot) {
-    snapshot = Object.freeze(next);
+    const { retrying: _retrying, ...rest } = next;
+    snapshot = Object.freeze(
+      retries(rest) ? { ...rest, retrying: true as const } : rest,
+    );
     for (const listener of listeners) notify(listener);
+  }
+  /** Gaining the first demand or losing the last can change `retrying`. */
+  function reflectDemand() {
+    if (retries(snapshot) !== !!snapshot.retrying) publish(snapshot);
   }
   /** The kept whole read, marked stale, for a snapshot that is not current. */
   function kept(): Pick<AgentLibrarySnapshot, "stale"> {
@@ -202,11 +214,13 @@ export function createAgentLibrary(
       retain({ refresh: refreshOnRetain = true } = {}) {
         const demand = {};
         demands.add(demand);
+        reflectDemand();
         if (refreshOnRetain) void refresh();
         else scheduleRetry();
         return () => {
           demands.delete(demand);
           if (!demands.size) cancelRetry();
+          reflectDemand();
         };
       },
       subscribe(listener: () => void) {

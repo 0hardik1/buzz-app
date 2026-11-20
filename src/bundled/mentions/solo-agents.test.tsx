@@ -505,7 +505,8 @@ it("an agents-only audience pill replaces the mention button and never inserts a
   test.library.dispose();
 });
 
-it("an empty audience pill shows loading while its default is worked out", () => {
+it("an empty audience pill stays silent for a second, then shows the shared spinner", () => {
+  vi.useFakeTimers();
   const test = setup();
   const view = render(
     <MentionPicker
@@ -527,9 +528,53 @@ it("an empty audience pill shows loading while its default is worked out", () =>
   );
   const pill = screen.getByRole("button", { name: "Loading agents" });
   expect(pill).toHaveAttribute("aria-busy", "true");
-  expect(pill).toBeEnabled();
+  expect(pill).not.toHaveAttribute("data-loading");
+  expect(pill).toHaveTextContent(/^$/);
+  act(() => vi.advanceTimersByTime(1000));
+  expect(pill).toHaveAttribute("data-loading");
+  expect(pill).toHaveTextContent("Loading agents");
   expect(screen.queryByRole("button", { name: "Choose agent" })).toBeNull();
   view.unmount();
+  test.library.dispose();
+  vi.useRealTimers();
+});
+
+it.each([
+  [false, "says it is retrying"],
+  [true, "offers Retry when reading again cannot help"],
+])("a failed agent list (hard: %s) %s", async (hard) => {
+  const test = setup();
+  const failure = Object.assign(
+    new Error("down"),
+    hard ? { retry: false } : {},
+  );
+  const library = createAgentLibrary(async () => {
+    throw failure;
+  });
+  Object.assign(test.session, {
+    agentLibrary: library.queries,
+    agentChoices: createAgentChoices({
+      scope: "test",
+      library: library.queries,
+      signal: new AbortController().signal,
+    }),
+  });
+  const { view } = renderAudiencePicker(test, []);
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "Choose agent" }));
+  const retry = { name: "Retry agent list" };
+  if (hard) {
+    expect(await screen.findByRole("button", retry)).toBeVisible();
+    expect(screen.queryByText(/Retrying/)).toBeNull();
+  } else {
+    expect(
+      await screen.findByText("Couldn't load agents. Retrying…"),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", retry)).toBeNull();
+  }
+  view.unmount();
+  library.dispose();
   test.library.dispose();
 });
 

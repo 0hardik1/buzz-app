@@ -1025,7 +1025,7 @@ alone does not grant DM eligibility. Existing DMs can reopen without agent-contr
 evidence, through the normal relay-confirmed DM open.
 
 A snapshot exposes `identities`, `selectable`, `archives`, `definitions`, `status`,
-`pending`, `complete`, `current` and a separate `templates` projection. `status:
+`pending`, `complete`, `current`, `retrying` and a separate `templates` projection. `status:
 ready` means usable, not complete. `complete` means a whole list is held: the last
 whole read of each source keeps counting, marked `stale`, while a reread loads,
 after it fails and across a dropped connection, so seeding, mentions and sending
@@ -1035,7 +1035,10 @@ unavailable; anything that acts on an agent's absence (automatic-recipient
 inference, Bestie promotion, telling an outside reference from your agent) must
 honor `current`, since a kept list can lack an agent made since. A failed read
 retries on its own with jittered backoff while the list is needed, unless reading
-again cannot fix it; explicit Retry and reconnect still reread.
+again cannot fix it (the library snapshot then has `retry: false`); explicit Retry
+and reconnect still reread. `retrying` marks a failure that will read again on its
+own: the agent menu then says so instead of offering Retry, and a pill with no
+agent yet keeps loading.
 
 Do not build another agent inventory in a plugin. `useAgentChoices(session,
 includeLegacy, archive)` retains the projection while mounted, which preserves

@@ -323,7 +323,10 @@ it("retries a failed read on its own with jittered backoff while the list is nee
     const owner = createAgentLibrary(read);
     const release = owner.queries.retain();
     await vi.advanceTimersByTimeAsync(0);
-    expect(owner.queries.snapshot().status).toBe("error");
+    expect(owner.queries.snapshot()).toMatchObject({
+      status: "error",
+      retrying: true,
+    });
     await vi.advanceTimersByTimeAsync(2_000);
     expect(read).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(3_999);
@@ -336,7 +339,9 @@ it("retries a failed read on its own with jittered backoff while the list is nee
     await owner.queries.refresh();
     await vi.advanceTimersByTimeAsync(120_000);
     expect(read).toHaveBeenCalledTimes(4);
+    expect(owner.queries.snapshot()).not.toHaveProperty("retrying");
     const again = owner.queries.retain({ refresh: false });
+    expect(owner.queries.snapshot().retrying).toBe(true);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(read).toHaveBeenCalledTimes(5);
     // A hard failure, thrown or partial, waits for Retry.
@@ -357,6 +362,7 @@ it("retries a failed read on its own with jittered backoff while the list is nee
       error: "Relay inventory unavailable",
     });
     expect(owner.queries.snapshot()).not.toHaveProperty("retry");
+    expect(owner.queries.snapshot()).not.toHaveProperty("retrying");
     await vi.advanceTimersByTimeAsync(120_000);
     expect(read).toHaveBeenCalledTimes(7);
     again();

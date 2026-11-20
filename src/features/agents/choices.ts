@@ -110,6 +110,9 @@ export type AgentChoicesSnapshot = Omit<AgentLibrarySnapshot, "identities"> & {
    * one gone, a lone automatic recipient) wait for this. */
   current: boolean;
   pending: boolean;
+  /** A source failed and will read again on its own; absent when nothing
+   * failed, or when only an explicit retry can help. */
+  retrying?: true;
 };
 
 /** One read-only projection of existing sources. No directory scan, timer, runner
@@ -263,6 +266,10 @@ export function createAgentChoices({
       ),
       archives: archive,
       ...(errors.length ? { error: errors.join(" ") } : {}),
+      // The native list retries on its own tick; the library says.
+      ...(errors.length && (!legacy.error || legacy.retrying)
+        ? { retrying: true as const }
+        : {}),
     };
     cached = { legacy, local, archive, value };
     return value;

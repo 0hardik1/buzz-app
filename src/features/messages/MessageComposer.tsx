@@ -2363,16 +2363,17 @@ function Composer({
         : undefined,
     ).join(",");
   });
-  // While the history or a first agent list is still being read, the pill
-  // shows loading, not "Choose agent". A read that failed with nothing to
-  // keep offers the choice (and Retry) until its automatic retry starts.
+  // While the history or a first agent list is still being read, or a failed
+  // read will retry on its own, the pill shows loading, not "Choose agent".
+  // Only a failure nothing will retry offers the choice (and Retry).
   const seedReading = useSyncExternalStore(subscribeAgents, () => {
     if (!seekingAgents || defaultMention) return false;
     const history = session.channels.window?.(channelId);
     return (
       (!replaced &&
         (history?.status === "idle" || history?.status === "loading")) ||
-      session.agentChoices.snapshot().pending
+      session.agentChoices.snapshot().pending ||
+      !!session.agentChoices.snapshot().retrying
     );
   });
   const awaitingSeed = routing && lastAgents === undefined && seedReading;
