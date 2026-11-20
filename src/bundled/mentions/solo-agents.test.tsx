@@ -505,6 +505,34 @@ it("an agents-only audience pill replaces the mention button and never inserts a
   test.library.dispose();
 });
 
+it("an empty audience pill shows loading while its default is worked out", () => {
+  const test = setup();
+  const view = render(
+    <MentionPicker
+      scope="scope"
+      session={test.session}
+      channelId="parent"
+      disabled={false}
+      inviteAgents
+      audience={{
+        recipients: [],
+        named: false,
+        loading: true,
+        only: vi.fn(),
+        toggle: vi.fn(),
+      }}
+      select={vi.fn(() => true)}
+      focusDraft={vi.fn()}
+    />,
+  );
+  const pill = screen.getByRole("button", { name: "Loading agents" });
+  expect(pill).toHaveAttribute("aria-busy", "true");
+  expect(pill).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Choose agent" })).toBeNull();
+  view.unmount();
+  test.library.dispose();
+});
+
 it("clicking an agent row in the pill menu toggles that agent and keeps the menu open", async () => {
   const test = setup(),
     user = userEvent.setup(),

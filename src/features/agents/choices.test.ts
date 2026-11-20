@@ -618,3 +618,38 @@ it("leaves an agent whose Delete started out of template lineups and defaults", 
     agent.pubkey,
   ]);
 });
+
+it("counts kept lists as complete while a reread loads or failed, but not as current", async () => {
+  const native = localAgentsFixture([agent]);
+  const legacy = { pubkey: "cd".repeat(32), name: "Legacy" };
+  let fail = false;
+  const library = createAgentLibrary(async () => {
+    if (fail) throw new Error("offline");
+    return { definitions: [], identities: [legacy] };
+  });
+  const lifetime = new AbortController();
+  const choices = createAgentChoices({
+    scope,
+    library: library.queries,
+    native,
+    archives: archiveFixture(),
+    signal: lifetime.signal,
+  });
+  expect(choices.snapshot()).toMatchObject({ complete: false, current: false });
+  await choices.refresh();
+  expect(choices.snapshot()).toMatchObject({ complete: true, current: true });
+  fail = true;
+  await library.queries.refresh();
+  native.set({ status: "error", error: "Could not list agents", stale: true });
+  expect(choices.snapshot()).toMatchObject({ complete: true, current: false });
+  expect(choices.snapshot().selectable.map((row) => row.pubkey)).toEqual([
+    legacy.pubkey,
+    agent.pubkey,
+  ]);
+  expect(choices.snapshot().error).toContain("Could not list agents");
+  // A local list that never loaded is not a kept list.
+  native.set({ status: "error", error: "Could not list agents", agents: [] });
+  expect(choices.snapshot()).toMatchObject({ complete: false, current: false });
+  lifetime.abort();
+  library.dispose();
+});

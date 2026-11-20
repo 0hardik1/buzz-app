@@ -2340,6 +2340,9 @@ function Composer({
       (history?.status === "idle" || history?.status === "loading")
     )
       return undefined;
+    // Without any whole agent list yet, the pill waits rather than offering a
+    // choice. A kept list counts while a reread loads or after it failed.
+    if (!session.agentChoices.snapshot().complete) return undefined;
     // Once typed mentions replaced the remembered agents, the history is
     // skipped. A reference is never a remembered agent.
     const admitted = mentionAdmission(
@@ -2360,6 +2363,19 @@ function Composer({
         : undefined,
     ).join(",");
   });
+  // While the history or a first agent list is still being read, the pill
+  // shows loading, not "Choose agent". A read that failed with nothing to
+  // keep offers the choice (and Retry) until its automatic retry starts.
+  const seedReading = useSyncExternalStore(subscribeAgents, () => {
+    if (!seekingAgents || defaultMention) return false;
+    const history = session.channels.window?.(channelId);
+    return (
+      (!replaced &&
+        (history?.status === "idle" || history?.status === "loading")) ||
+      session.agentChoices.snapshot().pending
+    );
+  });
+  const awaitingSeed = routing && lastAgents === undefined && seedReading;
   const seededAgents: readonly MentionRecipient[] = !routing
     ? []
     : defaultMention
@@ -2592,7 +2608,7 @@ function Composer({
     let references: readonly string[] = [];
     if (explicit.some((key) => !channel.members?.includes(key))) {
       // Only your agents join. Anyone else outside the chat is a reference,
-      // as in a DM; only a complete agent read can tell a name is not yours.
+      // as in a DM; only a current agent read can tell a name is not yours.
       await session.agentChoices.refresh();
       if (!currentAdmission())
         throw new Error("The session changed. Review its channel and retry.");
@@ -2602,7 +2618,7 @@ function Composer({
           !channel.members?.includes(key) &&
           outsideMentionReferences(channel, agents.identities, key),
       );
-      if (references.length && !agents.complete)
+      if (references.length && !agents.current)
         throw new Error("Could not load your agents. Retry.");
     }
     const recipients = explicit.filter((key) => !references.includes(key));
@@ -4026,7 +4042,11 @@ function Composer({
                     disabled={editingDisabled}
                     inviteAgents={agentChoices && !editing.target}
                     recipients={recipients}
-                    audience={audience}
+                    audience={
+                      audience && awaitingSeed
+                        ? { ...audience, loading: true }
+                        : audience
+                    }
                     {...toolCommands}
                   />
                 ) : (

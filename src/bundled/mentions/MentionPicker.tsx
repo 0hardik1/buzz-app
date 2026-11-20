@@ -239,6 +239,7 @@ export function MentionPicker({
                 variant="subtle"
                 size="sm"
                 disabled={disabled}
+                aria-busy={!audience.recipients.length && !!audience.loading}
                 ref={trigger}
                 type="button"
                 aria-label={
@@ -246,7 +247,9 @@ export function MentionPicker({
                     ? `Sending to ${audience.recipients
                         .map((person) => person.name)
                         .join(", ")}. Change agents`
-                    : "Choose agent"
+                    : audience.loading
+                      ? "Loading agents"
+                      : "Choose agent"
                 }
               >
                 <AvatarStack
@@ -261,7 +264,8 @@ export function MentionPicker({
                     shape: "squircle",
                   }))}
                 />
-                {audience.recipients[0]?.name ?? "Choose agent"}
+                {audience.recipients[0]?.name ??
+                  (audience.loading ? "Loading agents" : "Choose agent")}
                 <CaretDownIcon size={12} aria-hidden="true" />
               </Button>
             ) : (
