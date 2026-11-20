@@ -210,7 +210,7 @@ it("keeps focus on a different chat after an Enter-save finishes", async () => {
   );
   expect(destination).toHaveFocus();
 });
-it("shows only chats under a plugin restriction and restores the other sections after", async () => {
+it("shows only chats and the Plugins card under a plugin restriction and restores the other sections after", async () => {
   let restrictions: readonly RegisteredSidebarRestriction[] = [];
   const listeners = new Set<() => void>();
   const publish = (next: readonly RegisteredSidebarRestriction[]) => {
@@ -305,7 +305,8 @@ it("shows only chats under a plugin restriction and restores the other sections 
   expect(screen.queryByRole("tab")).toBeNull();
   expect(screen.queryByRole("tabpanel")).toBeNull();
   expect(screen.getByText("Focusing")).toBeVisible();
-  expect(screen.queryByRole("button", { name: "Inbox" })).toBeNull();
+  // Focus keeps the Plugins card, so its pages stay reachable.
+  expect(screen.getByRole("button", { name: "Inbox" })).toBeVisible();
   expect(screen.getByRole("button", { name: /^Planning/ })).toBeVisible();
   expect(
     screen.queryByRole("button", { name: "More actions for Team" }),
