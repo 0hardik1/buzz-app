@@ -156,6 +156,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Dependency policy
         run: ./bin/cargo-deny --locked check
+      - name: Prepare optional native build configuration
+        # Both native build scripts watch this file. When it is missing, Cargo
+        # rebuilds them on every invocation, even when nothing changed.
+        # An empty file keeps CI defaults; explicit environment settings still win.
+        run: touch .env.local
       - name: Rust formatting
         run: ./bin/cargo fmt --all --check
       - name: Rust lint
