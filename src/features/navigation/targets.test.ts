@@ -164,6 +164,17 @@ describe("open target boundary", () => {
     });
     expect(targetKey(diff)).not.toBe(targetKey(target));
     expect(targetKey(diff)).not.toBe(targetKey(conversation));
+    // A reader in another channel's thread tab names that channel.
+    const beside = parseOpenTarget({
+      ...conversation,
+      reader: { kind: "details", messageId: "c".repeat(64), channelId: "b" },
+    });
+    expect(beside.kind === "conversation" && beside.reader).toEqual({
+      kind: "details",
+      messageId: "c".repeat(64),
+      channelId: "b",
+    });
+    expect(parseOpenTarget(JSON.parse(JSON.stringify(beside)))).toEqual(beside);
     for (const reader of [
       null,
       {},
@@ -172,6 +183,8 @@ describe("open target boundary", () => {
       { kind: "diff", messageId: "invalid" },
       { kind: "diff", messageId: "a".repeat(64), rootId: "invalid" },
       { kind: "diff", messageId: "a".repeat(64), action: "delete" },
+
+      { kind: "diff", messageId: "a".repeat(64), channelId: "-bad" },
     ])
       expect(() => parseOpenTarget({ ...conversation, reader })).toThrow();
   });

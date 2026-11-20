@@ -57,8 +57,16 @@ conversation. Moving to another page inside a panel is a visit too. Back
 closes the newest sheet; Forward reopens it where it was, or in its tab, or a
 dialog, when that composer is gone. Close, Escape and a press on the scrim
 retire the sheet's visits, and those of the sheets open on it, so neither Back
-nor Forward shows it again. Open as tab keeps the address, adding no visit.
+nor Forward shows it again; so does a send that closes the details over its
+composer. Open as tab keeps the address, adding no visit. Arriving at a visit
+the sheets have not seen, as from a link or another address in the same
+channel, keeps only the sheets that address names and what they are open on.
 Media viewers are not addresses: they dismiss only themselves.
+
+A sheet never selects another channel. Over another channel's thread tab, its
+address stays this conversation's: a reader names its message's channel as
+`reader.channelId`, a link panel drops that channel's thread root, and a
+thread of that channel adds no visit.
 
 A `reader` address holds the message's kind (`details` or `diff`), its id,
 and the root of its thread when it is a reply, which names the composer it
@@ -69,7 +77,8 @@ the reader over that conversation's composer, or in a dialog when no composer
 is on screen. A diff falls back to its tab instead; details never get a tab.
 A deleted or missing message fails as a missing message link does, and no
 sheet opens: a reader is drawn from its row, so it shows only while the row is
-there.
+there. A reader of another channel opens only from that channel's row, as in
+its thread tab; without one the address shows this conversation.
 
 ## Keep lifecycle and access guards
 

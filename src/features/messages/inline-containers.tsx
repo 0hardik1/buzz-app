@@ -323,6 +323,36 @@ export function restored(
   }
   return next;
 }
+/** A visit not seen here, as a link or a typed address makes, shows what it
+ * names: the rest closes, keeping what the named entries are open on. */
+export function arrived(
+  list: readonly Placed[],
+  names: (item: Placed) => boolean,
+) {
+  const keep = new Set(
+    list.filter((item) => item.open && names(item)).map((item) => item.target),
+  );
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const item of list) {
+      if (!item.open || keep.has(item.target)) continue;
+      const name = provides(item);
+      if (
+        name &&
+        list.some(
+          (other) => keep.has(other.target) && other.composer?.name === name,
+        )
+      ) {
+        keep.add(item.target);
+        grew = true;
+      }
+    }
+  }
+  return closeAll(
+    list,
+    openIds(list, (item) => !keep.has(item.target)),
+  );
+}
 /** An entry that finished leaving. */
 export const removed = (list: readonly Placed[], key: number) =>
   list.filter((item) => item.key !== key);
@@ -519,9 +549,22 @@ export function createOpener(
     if (id === shown) return;
     shown = id;
     const picture = pictures.get(id);
-    // A dismissal's return keeps what is open; a visit not seen here yet
-    // starts with what is open now.
-    if (!picture || dismissing) {
+    // A dismissal's return keeps what is open.
+    if (dismissing) {
+      record();
+      return;
+    }
+    // A visit not seen here yet keeps only what its address names.
+    if (!picture) {
+      const { target } = snapshot.entry;
+      const key = targetKey(target);
+      const { address } = history;
+      store.set((items) =>
+        arrived(items, (item) => {
+          const at = address(item, target);
+          return !!at && targetKey(at) === key;
+        }),
+      );
       record();
       return;
     }
@@ -533,6 +576,32 @@ export function createOpener(
         () => ++sequence,
       ),
     );
+  };
+  /** Closes what reads `id` for good; see InlineOpener.dismiss. */
+  const dismiss = (id: string) => {
+    const { visits, openings } = dismissed(store.get(), id);
+    store.set((items) => closed(items, id));
+    // No visit shows it again, Back included.
+    forget(openings);
+    if (!history || !visits.length) return;
+    const { navigator } = history;
+    const current = navigator.snapshot().entry;
+    // What remains returns to the address of the newest thing still open,
+    // else to the conversation itself.
+    const top = store
+      .get()
+      .filter((item) => item.open && item.visits?.length)
+      .at(-1);
+    const fallback =
+      (top && history.address(top, current.target)) ??
+      history.address(undefined, current.target);
+    if (!fallback) return;
+    dismissing = true;
+    try {
+      navigator.dismiss(visits, fallback);
+    } finally {
+      dismissing = false;
+    }
   };
   return {
     open: (request) => {
@@ -555,31 +624,7 @@ export function createOpener(
       store.set((items) => movedToTab(items, id));
       if (moving) forget(new Set([moving.opening ?? moving.key]), false);
     },
-    dismiss: (id) => {
-      const { visits, openings } = dismissed(store.get(), id);
-      store.set((items) => closed(items, id));
-      // No visit shows it again, Back included.
-      forget(openings);
-      if (!history || !visits.length) return;
-      const { navigator } = history;
-      const current = navigator.snapshot().entry;
-      // What remains returns to the address of the newest thing still open,
-      // else to the conversation itself.
-      const top = store
-        .get()
-        .filter((item) => item.open && item.visits?.length)
-        .at(-1);
-      const fallback =
-        (top && history.address(top, current.target)) ??
-        history.address(undefined, current.target);
-      if (!fallback) return;
-      dismissing = true;
-      try {
-        navigator.dismiss(visits, fallback);
-      } finally {
-        dismissing = false;
-      }
-    },
+    dismiss,
     navigate: (id, target) => {
       const item = store
         .get()
@@ -638,7 +683,17 @@ export function createOpener(
         if (!named.size) outlets.delete(handle.name);
       };
     },
-    sent: (composer) => store.set((items) => sent(items, composer)),
+    // A send closes the details over its composer as ✕ does, visits and all.
+    sent: (composer) => {
+      for (const id of openIds(
+        store.get(),
+        (item) => item.composer === composer && !!behavior(item).closesOnSend,
+      ))
+        if (
+          store.get().some((item) => item.open && entryId(item.target) === id)
+        )
+          dismiss(id);
+    },
     composerGone: (composer) =>
       store.set((items) => composerGone(items, composer)),
     store,

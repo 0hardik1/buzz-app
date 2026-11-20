@@ -309,3 +309,207 @@ test("Forward to a diff whose reply box is gone opens its tab", async ({
   await expect(page.getByRole("tab", { name: /a\.ts/ })).toBeVisible();
   await expect(sheets(page)).toHaveCount(0);
 });
+
+const channel = (page, name) =>
+  page
+    .getByRole("link", { name, exact: true })
+    .or(page.getByRole("button", { name, exact: true }));
+const hashTarget = (page) =>
+  page.evaluate(() =>
+    JSON.parse(
+      decodeURIComponent(location.hash.slice(1)).replace(/^buzz=/, ""),
+    ),
+  );
+// A visit within the same document, as an in-app link makes.
+const visitWithin = (page, target) =>
+  page.evaluate((target) => {
+    location.hash = `buzz=${encodeURIComponent(JSON.stringify(target))}`;
+  }, target);
+
+test.describe("a send", () => {
+  test.use({ sendChannels: ["alpha"] });
+
+  test("that closes details retires their visit, as ✕ does", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    const details = app.append(
+      "primary",
+      "alpha",
+      longDetails,
+      false,
+      false,
+      undefined,
+      undefined,
+      [["audience", "details"]],
+    );
+    await channel(page, "Beta").first().click();
+    await expect(
+      page.getByRole("textbox", { name: "Message #Beta" }),
+    ).toBeVisible();
+    await channel(page, "Alpha").first().click();
+    const composer = page.getByRole("textbox", { name: "Message #Alpha" });
+    await expect(composer).toBeVisible();
+    await row(page, details).getByRole("button", { name: "Show more" }).click();
+    await expect(sheets(page)).toHaveCount(1);
+    await composer.click();
+    await composer.pressSequentially("Thanks");
+    await composer.press("Enter");
+    await expect(sheets(page)).toHaveCount(0);
+    // Back steps past the closed reader, straight to Beta.
+    await back(page);
+    await expect(
+      page.getByRole("textbox", { name: "Message #Beta" }),
+    ).toBeVisible();
+    await forward(page).click();
+    await expect(composer).toBeVisible();
+    await expect(forward(page)).toBeDisabled();
+    expect((await hashTarget(page)).reader).toBeUndefined();
+    await page.reload();
+    await expect(composer).toBeVisible();
+    await expect(row(page, details)).toBeVisible();
+    await expect(sheets(page)).toHaveCount(0);
+  });
+});
+
+test("a visit to a missing reader address within the page closes the open reader", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const details = app.append(
+    "primary",
+    "alpha",
+    longDetails,
+    false,
+    false,
+    undefined,
+    undefined,
+    [["audience", "details"]],
+  );
+  await row(page, details).getByRole("button", { name: "Show more" }).click();
+  await expect(sheets(page)).toHaveCount(1);
+  const target = await hashTarget(page);
+  await visitWithin(page, {
+    ...target,
+    reader: { ...target.reader, messageId: "e".repeat(64) },
+  });
+  await expect(page.getByText("This message isn’t available.")).toBeVisible();
+  await expect(sheets(page)).toHaveCount(0);
+});
+
+test("a visit to another message within the page closes the open reader", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const details = app.append(
+    "primary",
+    "alpha",
+    longDetails,
+    false,
+    false,
+    undefined,
+    undefined,
+    [["audience", "details"]],
+  );
+  const other = app.append("primary", "alpha", "Another message", false);
+  await row(page, details).getByRole("button", { name: "Show more" }).click();
+  await expect(sheets(page)).toHaveCount(1);
+  const { reader, ...conversation } = await hashTarget(page);
+  expect(reader).toBeDefined();
+  await visitWithin(page, { ...conversation, messageId: other.id });
+  await expect(row(page, other)).toBeVisible();
+  await expect(sheets(page)).toHaveCount(0);
+  // Back returns to the reader's visit, which shows it again.
+  await back(page);
+  await expect(sheets(page)).toContainText("The end.");
+});
+
+// A thread of another channel, opened as a tab beside this one from its link.
+async function openOtherChannelTab(page, app, reply) {
+  const root = app.append("primary", "beta", "Beta root", false, false);
+  const inner = reply(root);
+  const link = app.append(
+    "primary",
+    "alpha",
+    `See <buzz://message?channel=beta&id=${inner.id}&thread=${root.id}>`,
+    false,
+  );
+  await row(page, link).getByRole("link").first().click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Open link" }).click();
+  const thread = page.getByRole("complementary", {
+    name: "Thread",
+    exact: true,
+  });
+  await expect(thread.locator(`[data-message-id="${inner.id}"]`)).toBeVisible();
+  return { thread, inner, link };
+}
+async function staysOnAlpha(page) {
+  await expect(
+    page.getByRole("textbox", { name: "Message #Alpha" }),
+  ).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Thread · Beta" })).toBeVisible();
+  expect((await hashTarget(page)).channelId).toBe("alpha");
+}
+
+test("details over another channel's thread tab keep the selected channel", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  const { thread, link } = await openOtherChannelTab(page, app, (root) =>
+    app.append(
+      "primary",
+      "beta",
+      longDetails,
+      false,
+      false,
+      root.id,
+      undefined,
+      [["audience", "details"]],
+    ),
+  );
+  await thread.getByRole("button", { name: "Show more" }).click();
+  const reader = () => thread.locator("[data-details-sheet-surface]");
+  await expect(reader()).toContainText("The end.");
+  await staysOnAlpha(page);
+  await back(page);
+  await expect(reader()).toHaveCount(0);
+  await staysOnAlpha(page);
+  await forward(page).click();
+  await expect(reader()).toContainText("The end.");
+  await staysOnAlpha(page);
+  // Reloaded without that tab, the address opens this channel, and does not
+  // look for the other channel's message in it.
+  await page.reload();
+  await expect(
+    page.getByRole("textbox", { name: "Message #Alpha" }),
+  ).toBeVisible();
+  expect((await hashTarget(page)).channelId).toBe("alpha");
+  await expect(row(page, link)).toBeVisible();
+  await expect(page.getByText("This message isn’t available.")).toHaveCount(0);
+  await expect(sheets(page)).toHaveCount(0);
+});
+
+test("a link panel over another channel's thread tab keeps the selected channel", async ({
+  page,
+  app,
+}) => {
+  await routePull(page);
+  await open(page, app);
+  const { thread } = await openOtherChannelTab(page, app, (root) =>
+    app.append("primary", "beta", `See ${pull}`, false, false, root.id),
+  );
+  await thread.locator(`a[href="${pull}"]`).click();
+  const panel = () => thread.locator("[data-details-sheet-surface]");
+  await expect(panel()).toContainText("A PR");
+  await staysOnAlpha(page);
+  await back(page);
+  await expect(panel()).toHaveCount(0);
+  await staysOnAlpha(page);
+  await forward(page).click();
+  await expect(panel()).toContainText("A PR");
+  await staysOnAlpha(page);
+});

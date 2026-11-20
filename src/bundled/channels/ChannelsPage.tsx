@@ -3204,8 +3204,11 @@ function inlineAddress(
   const base = conversationOf(current);
   if (!entry) return base;
   const { target } = entry;
+  // Reading never selects another channel: what opens over another channel's
+  // thread tab keeps this conversation's address, naming only what it reads.
   switch (target.kind) {
     case "thread":
+      if (target.channelId !== current.channelId) return undefined;
       return current.threadRootId === target.rootId &&
         current.channelId === target.channelId &&
         !current.detail &&
@@ -3219,15 +3222,17 @@ function inlineAddress(
           };
     case "panel": {
       const opening = target.opening as PanelOpening;
+      // A root of another channel would name a thread this one lacks.
+      const rootId =
+        opening.channelId === current.channelId ? opening.rootId : undefined;
       return current.detail?.target === opening.target &&
-        current.detail.rootId === opening.rootId
+        current.detail.rootId === rootId
         ? current
         : {
             ...base,
-            channelId: opening.channelId,
             detail: {
               target: opening.target,
-              ...(opening.rootId ? { rootId: opening.rootId } : {}),
+              ...(rootId ? { rootId } : {}),
             },
           };
     }
@@ -3239,13 +3244,16 @@ function inlineAddress(
         return current;
       const name = entry.composer?.name ?? "";
       const rootId = composerThread(name);
+      const channelId = composerChannel(name);
       return {
         ...base,
-        channelId: composerChannel(name) || current.channelId,
         reader: {
           kind: target.kind,
           messageId: target.messageId,
           ...(rootId ? { rootId } : {}),
+          ...(channelId && channelId !== current.channelId
+            ? { channelId }
+            : {}),
         },
       };
     }
@@ -3269,7 +3277,8 @@ function useInlineVisit(
     if (!navigation || target?.kind !== "conversation") return navigation;
     if (presented) return { ...navigation, target: conversationOf(target) };
     const reader = target.reader;
-    if (!reader || target.messageId) return navigation;
+    // Another channel's reader opens from its tab's row, if that is here.
+    if (!reader || target.messageId || reader.channelId) return navigation;
     return {
       ...navigation,
       target: {
