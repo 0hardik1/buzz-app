@@ -148,6 +148,8 @@ import {
 import { splitPartition } from "../../features/relay/partition";
 import styles from "./Channels.module.css";
 import { avatarMedia } from "../../shared/avatar-source";
+import { inboxMentioners } from "../../features/relay/inbox";
+import { selectProfiles } from "../../features/relay/profile-selection";
 import { useBestieConversation } from "../../app/shell/bestie-context";
 
 /** The sidebar entry selected by a destination, excluding nested message state. */
@@ -385,6 +387,36 @@ export function ChannelInventory({
     queries.profiles,
     queries.names,
   );
+  // Who mentioned you, so the edge cue can show their face beside DMs'.
+  const inbox = useSyncExternalStore(
+    queries.unread.subscribeInbox,
+    () => queries.unread.inbox(),
+    () => queries.unread.inbox(),
+  );
+  const mentioners = useMemo(() => inboxMentioners(inbox), [inbox]);
+  const mentionerKey = [...new Set(mentioners.values())].sort().join(":");
+  const mentionerIds = useMemo(
+    () => (mentionerKey ? mentionerKey.split(":") : []),
+    [mentionerKey],
+  );
+  const mentionerSelection = useMemo(
+    () => selectProfiles(queries.profiles, mentionerIds),
+    [queries.profiles, mentionerIds],
+  );
+  const mentionerProfiles = useSyncExternalStore(
+    mentionerSelection.subscribe,
+    mentionerSelection.snapshot,
+    mentionerSelection.snapshot,
+  );
+  const missingMentioners = mentionerIds
+    .filter((id) => !mentionerProfiles.has(id))
+    .join(":");
+  useEffect(() => {
+    if (missingMentioners)
+      void queries.profiles
+        .ensure(missingMentioners.split(":"), "background")
+        .catch(() => {});
+  }, [queries.profiles, missingMentioners]);
   const unreadDmPreviews = useMemo(() => {
     const previews = new Map<string, UnreadDmPreview>();
     for (const channel of channels) {
@@ -397,8 +429,17 @@ export function ChannelInventory({
         isAgent: profile?.isAgent,
       });
     }
+    for (const [channelId, author] of mentioners) {
+      if (previews.has(channelId)) continue;
+      const profile = mentionerProfiles.get(author);
+      previews.set(channelId, {
+        name: profile?.name ?? "Someone",
+        src: avatarMedia(profile?.picture, queries.media),
+        isAgent: profile?.isAgent,
+      });
+    }
     return previews;
-  }, [channels, dmProfiles, queries]);
+  }, [channels, dmProfiles, mentioners, mentionerProfiles, queries]);
   const workingIds = useSyncExternalStore(
     queries.agentActivity.subscribeWorking,
     queries.agentActivity.workingSnapshot,
