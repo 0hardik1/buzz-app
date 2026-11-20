@@ -528,18 +528,12 @@
   }
   /* Header controls keep the solid shell color beneath them and their focus
      rings, so their ink and fills keep the pairing they were designed for.
-     The sidebar, also on the tint, gets the same color as a rounded surface;
-     the conversation's card is already opaque. */
+     The sidebar's cards and the conversation's card are already opaque, so
+     the backdrop shows in the gaps between them. */
   .shell-background > .shell-backdrop ~ .shell-header > * {
     border-radius: var(--radius-pill);
     background: var(--bg-app);
     box-shadow: 0 0 0 var(--space-2) var(--bg-app);
-  }
-  .shell-background
-    > .shell-backdrop
-    ~ :where(.shell-workspace :is(.shell-sidebar, .shell-sidebar-default)) {
-    border-radius: var(--radius-container);
-    background: var(--bg-app);
   }
 }
 
