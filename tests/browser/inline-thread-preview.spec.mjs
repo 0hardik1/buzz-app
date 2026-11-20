@@ -123,6 +123,66 @@ test("closing a thread opened from a preview returns focus to its root's row", a
   await expect(page.locator(".buzz-preview-card-positioner")).toHaveCount(0);
 });
 
+// An inline sheet is an overlay, not a history entry: dismissing the thread a
+// visit opened retires that visit, so Forward can't reopen it.
+for (const dismiss of ["Escape", "Close"])
+  test(`dismissing a visited inline thread with ${dismiss} retires its visit`, async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    const history = app.histories.get("primary/alpha");
+    const root = history.find((row) => row.content === "Thread root 0");
+    const button = (name) => page.getByRole("button", { name, exact: true });
+    const visit = () =>
+      page.evaluate(() => {
+        const { target } = window.fixtureNavigation.snapshot().entry;
+        return { channelId: target.channelId, thread: target.threadRootId };
+      });
+    await page.locator('button[data-channel-id="beta"]').click();
+    await expect(timeline(page)).toHaveAttribute(
+      "data-channel-timeline",
+      "beta",
+    );
+    await page.locator('button[data-channel-id="alpha"]').hover();
+    await page
+      .getByRole("dialog", { name: "Activity in Alpha" })
+      .getByRole("button", { name: /Open unread thread from/ })
+      .filter({ hasText: "Broadcast descendant" })
+      .click();
+    await expect(
+      sheet(page).locator(`[data-message-id="${root.id}"]`),
+    ).toBeVisible();
+    if (dismiss === "Escape") await page.keyboard.press("Escape");
+    else await button("Close thread").click();
+    await expect(sheet(page)).toBeHidden();
+    await expect(timeline(page)).toHaveAttribute(
+      "data-channel-timeline",
+      "alpha",
+    );
+    await expect.poll(visit).toEqual({ channelId: "alpha" });
+    await button("Go back").click();
+    await expect(timeline(page)).toHaveAttribute(
+      "data-channel-timeline",
+      "beta",
+    );
+    await expect(sheet(page)).toBeHidden();
+    // Forward returns to the conversation the visit left, not its thread.
+    await button("Go forward").click();
+    await expect(timeline(page)).toHaveAttribute(
+      "data-channel-timeline",
+      "alpha",
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.fixtureNavigation.snapshot().status),
+      )
+      .toBe("opened");
+    expect(await visit()).toEqual({ channelId: "alpha" });
+    await expect(sheet(page)).toHaveCount(0);
+    await expect(threadTab(page)).toHaveCount(0);
+  });
+
 // An older thread's root sits above the loaded history: the visit reads older
 // pages until it finds the root, then reads the thread there, not in a tab.
 test.describe("with a root above the loaded history", () => {

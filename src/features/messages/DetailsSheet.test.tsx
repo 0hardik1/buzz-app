@@ -239,3 +239,36 @@ it("mounts its content in the document, so content effects see the page", async 
   expect(seen.length).toBeGreaterThan(0);
   expect(seen).not.toContain(false);
 });
+
+it("hands a thread to its tab only after its composer finishes sending", async () => {
+  const pane = document.createElement("div");
+  const composer = document.createElement("form");
+  pane.append(composer);
+  document.body.append(pane);
+  const host = { pane, composer, viewport: pane, container: pane };
+  const handoffs: string[] = [];
+  render(
+    <DetailsSheet
+      open
+      onOpenChange={() => {}}
+      title="Thread"
+      host={host}
+      containsComposer
+      promotable
+      onOpenAsTab={() => handoffs.push("tab")}
+    >
+      <form data-message-composer="" aria-busy="true" aria-label="Reply" />
+    </DetailsSheet>,
+  );
+  const reply = await screen.findByRole("form", { name: "Reply" });
+  const openAsTab = screen.getByRole("button", { name: "Open as tab" });
+  fireEvent.click(openAsTab);
+  // A second press while it waits must not hand off twice.
+  fireEvent.click(openAsTab);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(handoffs).toEqual([]);
+  reply.setAttribute("aria-busy", "false");
+  await waitFor(() => expect(handoffs).toEqual(["tab"]));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(handoffs).toEqual(["tab"]);
+});
