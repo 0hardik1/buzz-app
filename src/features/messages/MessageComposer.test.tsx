@@ -4107,6 +4107,36 @@ it("offers to import an old Buzz agent before a new chat's opening send", async 
   });
 });
 
+it("drops a new chat's opening send whose draft changed during the import lookup", async () => {
+  const { agents } = oldBuzzAgents();
+  const late = deferred<Awaited<ReturnType<Agents["portable"]>>>();
+  Object.assign(agents, { portable: () => late.promise });
+  const h = mountNewSoloChat("Cached", first.pubkey, agents);
+  await waitFor(() => expect(pillSendingTo("Cached")).toBeInTheDocument());
+  h.fill("hello");
+  h.submit();
+  h.fill("hello again");
+  await act(async () =>
+    late.resolve({ agents: [], teams: [], warnings: [] } as never),
+  );
+  expect(h.submitted).not.toHaveBeenCalled();
+});
+
+it("asks again after a new chat's opening send without importing", async () => {
+  const { agents, port } = oldBuzzAgents();
+  const h = mountNewSoloChat("Cached", first.pubkey, agents);
+  await waitFor(() => expect(pillSendingTo("Cached")).toBeInTheDocument());
+  h.fill("hello");
+  h.submit();
+  await screen.findByRole("dialog", { name: "Import Honey?" });
+  fireEvent.click(screen.getByRole("button", { name: "Just send" }));
+  await waitFor(() => expect(h.submitted).toHaveBeenCalledOnce());
+  // The chat may still fail to start, so the prompt stays on offer.
+  h.submit();
+  await screen.findByRole("dialog", { name: "Import Honey?" });
+  expect(port).not.toHaveBeenCalled();
+});
+
 it("never offers to import someone a Solo chat only references", async () => {
   const outsider = { pubkey: "9a".repeat(32), name: "Outsider" };
   const { agents, port } = oldBuzzAgents([outsider]);

@@ -2943,6 +2943,16 @@ function Composer({
         declinedImports = decision;
       }
       if (submission) {
+        // The lookup yielded; an edited or stopped draft is not this send.
+        attempt.signal.throwIfAborted();
+        if (
+          valueRef.current !== captured ||
+          !sameAttachmentSelection(
+            attachments.store.snapshot(),
+            capturedAttachments,
+          )
+        )
+          return;
         // SoloDraft filters the captured choices against its final recipient set.
         submission.submit(
           captured,
@@ -2952,7 +2962,6 @@ function Composer({
           ownSoloConversation ? capturedPicks : undefined,
           ownSoloConversation ? capturedPicksRevision : undefined,
         );
-        oldAgents.decline(declinedImports);
         return;
       }
       let references: readonly string[] = [];
