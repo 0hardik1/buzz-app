@@ -603,6 +603,19 @@ Quitting Buzz also turns it off.
   name alone does not guarantee a notification. Selecting someone outside the
   channel does not grant access; inviting them requires an explicit decision
   from someone with permission.
+  **Side chats**: in a channel or forum thread, a reply that tags only one of
+  your own agents goes to a private Solo chat with that agent instead. It
+  opens beside the thread with your message and a link to the message you
+  replied to. The thread gets one line, such as “Sam is asking Helper →”, that
+  links to the chat and notifies nobody; others can't open the chat. Later
+  replies tagging that agent in the thread reuse the chat its line links, and
+  the line reopens it after a restart. Each agent message in the chat has
+  **Post to thread**, which puts its text in the thread's message box to edit
+  and send yourself; on this computer only. Check **Also post to thread** in
+  the message box to send to the thread as usual. Tagging an agent outside
+  the channel first asks whether to invite it, since the agent can read the
+  thread only if it can read the channel. Messages with attachments,
+  forwards or several tags post normally.
 - **Workspaces** can hold any mix of chats, channels, forums and DMs. Use **Move to…**
   in a conversation’s menu or drag the row to a workspace. Unfiled items appear
   in **Solo**, **Team** (channels and forums), or **Direct messages**. Reorder

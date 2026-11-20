@@ -143,6 +143,7 @@ import styles from "./Messages.module.css";
 import { messageViewKey } from "./view-key";
 import { isEmojiOnly, usesLargeEmojiPresentation } from "./emoji-size";
 import {
+  hasDraftContent,
   legacyFollowupDraft,
   MAX_DRAFT_GIFS,
   mentionBoundary,
@@ -343,6 +344,11 @@ export type MessageComposerProps = {
   onCommand?:
     | ((command: string, signal: AbortSignal) => boolean | Promise<boolean>)
     | undefined;
+  /** A text-only message may go elsewhere instead, once its recipients are
+   * settled. Resolve true when the owner took it; the draft then clears. */
+  divert?:
+    | ((message: { draft: MentionDraft; content: string }) => Promise<boolean>)
+    | undefined;
   /** Inbox may retire only after saving the replacement or confirming no draft remains. */
   onDraftSaved?: (() => void) | undefined;
   /** Before a focused form detaches, its host can hand focus to retained content. */
@@ -536,6 +542,7 @@ function Composer({
   placeholder,
   onSend,
   onCommand,
+  divert,
   onDraftSaved,
   onFocusedRemoval,
   editMessages,
@@ -1581,10 +1588,10 @@ function Composer({
         return;
       }
       // An explicit successful recovery may replace only the cleared follow-up,
-      // never a meaningful unsaved edit. Ordinary external revisions keep their
-      // conflict behavior.
+      // never a meaningful unsaved edit, and any revision may replace an empty
+      // draft. Other external revisions keep their conflict behavior.
       if (
-        recovering &&
+        (recovering || !hasDraftContent(valueRef.current)) &&
         !valueRef.current.text.trim() &&
         !valueRef.current.recipients.length &&
         !composerMarkdown(valueRef.current).trim() &&
@@ -3031,6 +3038,29 @@ function Composer({
         threadRootId && mediaTimeSeconds !== undefined
           ? mediaTimeReply(mediaTimeSeconds, composerMarkdown(captured))
           : composerMarkdown(captured);
+      if (
+        divert &&
+        !tokens.length &&
+        !captured.forward &&
+        !captured.chatCards?.length &&
+        !captured.gifs?.length &&
+        !capturedAttachments.length
+      ) {
+        setSending(true);
+        setError(undefined);
+        if (await divert({ draft: captured, content })) {
+          if (valueRef.current !== captured) return;
+          const cleared = mentionDraft("");
+          saveDraft(cleared);
+          completion.invalidate();
+          caret.current = undefined;
+          input.current?.reset(cleared);
+          automaticTag.current = undefined;
+          seedClosed.current = false;
+          return;
+        }
+        attempt.signal.throwIfAborted();
+      }
       // Alone with agents, the toolbar keeps the agents; the next draft starts empty.
       const next = routing
         ? mentionDraft("")

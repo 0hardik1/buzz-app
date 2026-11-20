@@ -11,7 +11,7 @@ import {
 } from "@testing-library/react";
 import { StrictMode } from "react";
 import { renderToString } from "react-dom/server";
-import { afterEach, expect, it, onTestFinished, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { ThreadPanel, type ThreadPanelProps } from "./ThreadPanel";
 import { selectNewestMessage } from "./message-selection";
 import type { MessageRowProps } from "./MessageRow";
@@ -108,9 +108,12 @@ vi.mock("./MessageComposer", () => ({
     placeholder,
     focusRequest,
     threadSeed,
+    trailingTool,
+    divert,
   }: MessageComposerProps) => (
     <section
       aria-label="Composer"
+      data-divert={!!divert}
       data-root={threadRootId}
       data-seed={threadSeed?.mentions.join(",")}
       data-channel={channelId}
@@ -123,9 +126,25 @@ vi.mock("./MessageComposer", () => ({
       <button type="button" onClick={() => onSend?.("own-reply")}>
         Send fixture reply
       </button>
+      {divert && (
+        <button
+          type="button"
+          onClick={() =>
+            void divert({
+              draft: { text: "@Doo look", recipients: [] },
+              content: "@Doo look",
+            })
+          }
+        >
+          Divert fixture reply
+        </button>
+      )}
+      {trailingTool}
     </section>
   ),
 }));
+const askInSideChat = vi.hoisted(() => vi.fn(async () => "side"));
+vi.mock("../solo/side-chat", () => ({ askInSideChat }));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -3548,4 +3567,76 @@ it("reveals a completed step selected by an exact thread link", async () => {
   expect(
     screen.getByRole("button", { name: /Collapse activity history/ }),
   ).toBeVisible();
+});
+
+describe("side chats", () => {
+  function inChannel(channelType: NonNullable<ChannelSummary["channelType"]>) {
+    const h = messagesHarness();
+    const list: ChannelList = {
+      status: "ready",
+      channels: [{ id: "channel", name: "General", channelType }],
+    };
+    Object.assign(h.session, {
+      scope: "scope",
+      channelWrites: { available: true },
+      channels: {
+        list: () => list,
+        get: () => list.channels[0],
+        subscribeList: () => () => {},
+      },
+    });
+    const onOpenLink = vi.fn(() => true);
+    Object.assign(h.props, { onOpenLink });
+    h.render();
+    return { ...h, onOpenLink };
+  }
+  const composer = () => screen.getByRole("region", { name: "Composer" });
+
+  it.each(["stream", "forum"] as const)(
+    "diverts agent requests in a shared %s thread to a side chat beside it",
+    async (channelType) => {
+      const h = inChannel(channelType);
+      const also = screen.getByRole("checkbox", {
+        name: "Also post to thread",
+      });
+      expect(also).not.toBeChecked();
+      expect(composer()).toHaveAttribute("data-divert", "true");
+      fireEvent.click(
+        screen.getByRole("button", { name: "Divert fixture reply" }),
+      );
+      await waitFor(() =>
+        expect(h.onOpenLink).toHaveBeenCalledWith("buzz://channel/side"),
+      );
+      expect(askInSideChat).toHaveBeenCalledWith(
+        h.session,
+        "scope",
+        expect.objectContaining({
+          content: "@Doo look",
+          replyTo: row,
+          rootId: row.id,
+          asker: formatPublicKey(viewer),
+        }),
+      );
+      // Also post to thread sends the ordinary way, and resets after a send.
+      fireEvent.click(also);
+      expect(also).toBeChecked();
+      expect(composer()).toHaveAttribute("data-divert", "false");
+      fireEvent.click(
+        screen.getByRole("button", { name: "Send fixture reply" }),
+      );
+      expect(also).not.toBeChecked();
+      expect(composer()).toHaveAttribute("data-divert", "true");
+    },
+  );
+
+  it.each(["dm", "solo"] as const)(
+    "leaves %s threads as they are",
+    (channelType) => {
+      inChannel(channelType);
+      expect(composer()).toHaveAttribute("data-divert", "false");
+      expect(
+        screen.queryByRole("checkbox", { name: "Also post to thread" }),
+      ).toBeNull();
+    },
+  );
 });

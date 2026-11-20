@@ -4,6 +4,7 @@ import { MessagesSidebar } from "./MessagesSidebar";
 import { soloSidebarSource } from "./SoloSidebarSource";
 import { teamSidebarSource } from "./TeamSidebarSource";
 import { StartLinkedChat, canStartLinkedChatFrom } from "./StartLinkedChat";
+import { PostToThread, canPostToThread } from "./PostToThread";
 import { ChannelCompletion } from "./ChannelCompletion";
 import { channelQuery } from "./channel-query";
 import { isChannelRoute } from "../../features/channel-navigation/routes";
@@ -12,7 +13,11 @@ import { ChannelsPage } from "./ChannelsPage";
 import { ConversationWorkspace, PageTabs } from "./PageTabs";
 import { registerCanvas } from "./canvas-panel";
 import { ChannelTemplateSettings } from "./ChannelTemplateSettings";
-import { ChatCircleIcon, CopyIcon } from "../../shared/design-system/icons";
+import {
+  ChatCircleIcon,
+  CopyIcon,
+  ForwardIcon,
+} from "../../shared/design-system/icons";
 import { isApplePlatform } from "../../features/shortcuts/format";
 import type { ArchiveShortcut, ReadShortcut } from "./ChannelsPage";
 import {
@@ -93,6 +98,21 @@ export const apply: PluginModule["apply"] = (ctx) => {
         navigation={navigator}
         channelId={message.channelId}
         message={message}
+      />
+    ),
+  });
+  ctx.conversation.registerMessageAction({
+    id: "post-to-thread",
+    title: "Post to thread",
+    placement: "toolbar",
+    icon: () => <ForwardIcon size={16} aria-hidden="true" />,
+    matches: canPostToThread,
+    component: ({ message, session, open, close }) => (
+      <PostToThread
+        message={message}
+        session={session}
+        open={open}
+        close={close}
       />
     ),
   });

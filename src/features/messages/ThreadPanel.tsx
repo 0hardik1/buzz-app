@@ -69,6 +69,8 @@ import { messageViewKey } from "./view-key";
 import { useKnownAgentPubkeys } from "../agents/use-known";
 import { JumpToLatestButton } from "./JumpToLatestButton";
 import { correctScrollTop } from "./scroll-correction";
+import { Checkbox } from "../../shared/design-system/ui/Checkbox";
+import { askInSideChat } from "../solo/side-chat";
 
 export type ThreadPanelProps = {
   intro?: ReactNode;
@@ -2199,6 +2201,18 @@ function ThreadMessages({
     )
       history.focus({ preventScroll: true });
   }, [session.channels, channelId]);
+  // In a shared thread, a message to your agent goes to a side chat unless
+  // it is also for the thread.
+  const sideChats =
+    useListedChannel(
+      session.channels,
+      channelId,
+      (channel) =>
+        channel?.channelType === "stream" || channel?.channelType === "forum",
+    ) &&
+    channelAccess === "member" &&
+    !!session.channelWrites?.available;
+  const [alsoPost, setAlsoPost] = useState(false);
   // The reply composer, and the activity lane its TypingIndicator needs.
   const composerRoot =
     !preview &&
@@ -2507,6 +2521,38 @@ function ThreadMessages({
           channelName={channelName}
           placeholder={replyPlaceholder(composerRoot)}
           threadRootId={composerRoot.id}
+          trailingTool={
+            sideChats ? (
+              <Checkbox
+                size="sm"
+                label="Also post to thread"
+                checked={alsoPost}
+                onCheckedChange={setAlsoPost}
+              />
+            ) : undefined
+          }
+          divert={
+            sideChats && !alsoPost
+              ? async ({ draft, content }) => {
+                  const viewer = session.viewer ?? "";
+                  const chat = await askInSideChat(session, scope, {
+                    draft,
+                    content,
+                    replyTo: selectedParent ?? composerRoot,
+                    rootId: composerRoot.id,
+                    rows,
+                    asker: resolveName(
+                      viewer,
+                      session.profiles.snapshot().get(viewer)?.name ??
+                        formatPublicKey(viewer) ??
+                        "Someone",
+                    ),
+                  });
+                  if (chat) onOpenLink(`buzz://channel/${chat}`);
+                  return !!chat;
+                }
+              : undefined
+          }
           threadSeed={threadSeed}
           replyParentId={replyParent}
           disabled={
@@ -2557,6 +2603,7 @@ function ThreadMessages({
           onDraftSaved={onDraftSaved}
           onSend={(id) => {
             onSend?.(id);
+            setAlsoPost(false);
             targetAnchor.current = undefined;
             positioned.current = true;
             follow.current = !selectedParent;

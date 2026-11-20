@@ -12452,6 +12452,15 @@ it("empties for a draft cleared elsewhere, and a stale composer never restores i
   expect(viewRevision("scope", "draft:channel")).toBeNull();
 });
 
+it("loads a revision written elsewhere into a draft emptied here", () => {
+  const h = mount();
+  h.fill("Typed then removed");
+  h.fill("");
+  act(() => writeView("scope", "draft:channel", "Written elsewhere"));
+  expect(h.input()).toHaveValue("Written elsewhere");
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 it("compares before local edits and Send even if the storage event has not arrived", async () => {
   const h = mount();
   h.fill("Local body");
@@ -17610,4 +17619,74 @@ it("pastes a copied forward literally inside a code block", async () => {
   expect(
     screen.queryByRole("button", { name: "Remove forwarded message" }),
   ).not.toBeInTheDocument();
+});
+
+describe("a thread composer with a divert", () => {
+  const root = "f".repeat(64);
+  it("hands a settled text message to its owner, posts nothing and clears the draft", async () => {
+    const divert = vi.fn<NonNullable<MessageComposerProps["divert"]>>(
+      async () => true,
+    );
+    const h = mount({ threadRootId: root, divert });
+    h.fill("what changed? ");
+    act(() => h.commands().insertMention(first));
+    fireEvent.submit(screen.getByRole("form"));
+    await waitFor(() => expect(divert).toHaveBeenCalledOnce());
+    const { draft, content } = divert.mock.calls[0]?.[0] ?? {};
+    expect(draft?.recipients.map((item) => item.pubkey)).toEqual([
+      first.pubkey,
+    ]);
+    expect(content).toBe("what changed? @Honey ");
+    await waitFor(() => expect(h.input().value).toBe(""));
+    expect(h.messages.reply).not.toHaveBeenCalled();
+    expect(h.messages.send).not.toHaveBeenCalled();
+    // Text the owner later puts in this draft shows here, unsent.
+    act(() => {
+      writeView("scope", `draft:channel:thread:${root}`, "From the side chat");
+    });
+    await waitFor(() => expect(h.input().value).toBe("From the side chat"));
+    expect(screen.queryByText(/changed elsewhere/)).toBeNull();
+    expect(h.messages.reply).not.toHaveBeenCalled();
+  });
+
+  it("posts to the thread as today when the owner declines", async () => {
+    const divert = vi.fn(async () => false);
+    const h = mount({ threadRootId: root, divert });
+    h.fill("hello ");
+    act(() => h.commands().insertMention(first));
+    fireEvent.submit(screen.getByRole("form"));
+    await waitFor(() => expect(h.messages.reply).toHaveBeenCalledOnce());
+    expect(h.messages.reply.mock.calls[0]?.slice(0, 4)).toEqual([
+      "channel",
+      root,
+      "hello @Honey ",
+      [first.pubkey],
+    ]);
+  });
+
+  it("warns that an agent outside the channel is not in it before diverting", async () => {
+    const divert = vi.fn(async () => true);
+    const h = mount({ threadRootId: root, divert });
+    const list = {
+      status: "ready",
+      channels: [
+        { id: "channel", channelType: "stream", members: [second.pubkey] },
+      ],
+    };
+    Object.assign(h.session, {
+      channels: { ...h.session.channels, list: () => list },
+      memberAdditions: { add: vi.fn() },
+    });
+    h.retarget({});
+    h.fill("look ");
+    act(() => h.commands().insertMention(first));
+    fireEvent.submit(screen.getByRole("form"));
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      "Honey is not in this channel.",
+    );
+    expect(divert).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send anyway" }));
+    await waitFor(() => expect(divert).toHaveBeenCalledOnce());
+    expect(h.messages.reply).not.toHaveBeenCalled();
+  });
 });
