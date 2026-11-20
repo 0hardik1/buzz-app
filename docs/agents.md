@@ -2142,8 +2142,15 @@ app's record of the session it started says it is the agent's. That record is
 kept apart from saved prompts, for 32 days from the session's start, longer than
 Usage reads back, with no limit on how many sessions it holds. Each day's starts
 are saved as one value, and a day's value is removed once all of it is past
-keeping. The snapshot has no `channelId`, and a session from before that
-record was kept is not counted.
+keeping, by the agent's next standalone turn. Each session is added to the
+record whether or not Usage is on, as its id and start time only, never its
+prompt or reply; the key of the timer or watch that started it is kept with it
+only while the Usage plugin is on (its settings card is registered), so a
+Claude, Goose or Pi turn run while Usage was off is counted once Usage is on,
+under "Other" in "By routine" when that list shows; Codex keeps no session for
+such a turn, so it is not counted. Removing the agent removes the record. The
+snapshot has no `channelId`, and a session from before that record was kept is
+not counted.
 
 Codex finds the agent's threads through app-server by the agent's name in their
 thread names, keeps those whose rollout's developer instructions name the agent's
@@ -2161,6 +2168,20 @@ counts it by when it last answered.
 
 All three read only the harness's own session history; none reads Buzz's saved
 agent activity or turn metrics.
+
+A harness may also set `wake` on a session snapshot: the key of the standalone
+turn that started it (`timer/ID`, `watch/ID`, `catch-up/ID` or `source/ID`), as
+`AgentType.runOnce` was given it. Claude, Goose and Pi take it from the key
+their `runOnce` recorded with the session in the agent's standalone sessions,
+never from the prompt; Codex keeps no session for such a turn, so it sets none.
+Setting it takes the session's `revision` again, so the revision covers it. The
+Usage page groups the period's cost by agent and key under "By routine", since
+each agent names its own timers and watches, counting a watch's catch-up turns
+under `watch/ID`, with the sessions that have none under "Other", and shows no
+such list while no session has one. An agent set to one session per community
+runs its timers and watches in that shared session, not a standalone one, so
+their cost counts under "Other" there; the period's total is unchanged. A
+harness that does not set it works unchanged.
 
 Where a harness recorded no cost, Usage estimates it from the token counts at the
 provider's published API list prices, including a model's long-prompt rates and,
