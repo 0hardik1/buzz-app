@@ -1184,6 +1184,7 @@ export function createRelaySession(
             subscribe: (listener) => statuses.queries.subscribe(listener),
           },
           revokeAccess,
+          previewAccessRestored: activity.refreshLocal,
           rosterComplete: dropStrandedSends,
           // The viewer's own lookups make a channel known to the viewer's
           // traffic, as without any `attend`; rechecks do not.
