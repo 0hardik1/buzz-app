@@ -350,7 +350,12 @@ export function createTabs({
     );
   }
 
-  function SettingsTab({ agent, save, settingsHost }: AgentViewProps<Config>) {
+  function SettingsTab({
+    agent,
+    save,
+    settingsHost,
+    settingsContent,
+  }: AgentViewProps<Config>) {
     const form = useId();
     const saved = readConfig(agent.config);
     const [draft, setDraft] = useState(saved);
@@ -702,6 +707,8 @@ export function createTabs({
             )}
           </Dialog>
         )}
+        {/* What the host adds, such as the agent's version history. */}
+        {settingsContent}
         <AgentSaveButton
           form={form}
           saving={busy}

@@ -429,6 +429,24 @@ it("shows the harness's sign-in methods as its text and rechecks on demand", asy
   ).toBeInTheDocument();
 });
 
+it("shows what the host adds to Settings, such as version history", () => {
+  const { SettingsTab } = createTabs({
+    check: vi.fn(),
+    cache: modelCache(localStorage),
+    runtime: fakeRuntime(),
+  });
+  render(
+    <SettingsTab
+      agent={{ key: "p1", pubkey: "p1", config: start } as Agent<Config>}
+      save={async () => {}}
+      settingsContent={<button type="button">Previous versions</button>}
+    />,
+  );
+  expect(
+    screen.getByRole("button", { name: "Previous versions" }),
+  ).toBeInTheDocument();
+});
+
 it("lists conversations and says when the harness can't replay them", async () => {
   const rows: Conversation[] = [
     {
