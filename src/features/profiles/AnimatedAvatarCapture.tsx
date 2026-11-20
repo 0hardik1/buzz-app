@@ -4,6 +4,7 @@ import { Button } from "../../shared/design-system/ui/Button";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Select } from "../../shared/design-system/ui/Select";
 import {
+  CircleNotchIcon,
   ImageIcon,
   PaletteIcon,
   UserIcon,
@@ -267,6 +268,17 @@ export function AnimatedAvatarCapture({
           aria-label="Camera preview"
           className={styles.preview}
         />
+        {phase === "starting" && (
+          <span role="status" className="relative grid place-items-center">
+            <CircleNotchIcon
+              aria-hidden="true"
+              size={24}
+              className="motion-safe:animate-spin"
+            />
+            <span className="sr-only">Starting camera…</span>
+          </span>
+        )}
+
         {phase === "recording" && (
           <svg
             className={styles.timerRing}
@@ -598,11 +610,9 @@ export function AnimatedAvatarCapture({
           </Button>
         </>
       )}
-      {(phase === "starting" || phase === "saving") && (
+      {phase === "saving" && (
         <p role="status" className="text-body-sm">
-          {phase === "starting"
-            ? "Starting camera…"
-            : "Uploading animated avatar…"}
+          Uploading animated avatar…
         </p>
       )}
       {error && (
