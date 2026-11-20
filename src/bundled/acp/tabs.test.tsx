@@ -618,19 +618,32 @@ describe("History focus", () => {
   }
   const actions = () => screen.getAllByRole("button", { name: "Transcript" });
   const back = () => screen.getByRole("button", { name: "Back to profile" });
+  // The shared panel announces a read only after a delay; it is busy at once.
+  const reading = () => document.querySelector('[aria-busy="true"]');
 
   it("moves into Back while loading, keeping the list mounted, and goes back", async () => {
     history(() => new Promise(() => {}));
     actions()[1]?.focus();
     await userEvent.keyboard("{Enter}");
-    expect(screen.getByRole("status")).toHaveTextContent("Reading…");
+    expect(reading()).not.toBeNull();
     expect(back()).toHaveFocus();
     expect(actions()).toHaveLength(2);
     await userEvent.keyboard("{Enter}");
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(reading()).toBeNull();
     expect(
       screen.queryByRole("button", { name: "Back to profile" }),
     ).toBeNull();
+  });
+
+  it("reads an open transcript again on Refresh", async () => {
+    const transcript = vi.fn(async () => ({ turns: [] }));
+    history(transcript);
+    await userEvent.click(actions()[0] as HTMLElement);
+    await waitFor(() => expect(transcript).toHaveBeenCalledTimes(1));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Refresh transcript" }),
+    );
+    await waitFor(() => expect(transcript).toHaveBeenCalledTimes(2));
   });
 
   it("moves into Back once loaded", async () => {
@@ -663,7 +676,7 @@ describe("History focus", () => {
     await userEvent.click(actions()[1] as HTMLElement);
     first(undefined);
     await act(async () => {});
-    expect(screen.getByRole("status")).toHaveTextContent("Reading…");
+    expect(reading()).not.toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 

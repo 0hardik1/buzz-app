@@ -9,10 +9,10 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { Transcript } from "../../features/agents/activity-transcript";
-import { ActivityTranscript } from "../../features/agents/ActivityTranscript";
 import { AgentSaveButton } from "../../features/agents/AgentSaveButton";
 import { AgentInstructions } from "../../features/agents/AgentInstructions";
 import { useOpenTranscript } from "../../features/agents/OpenedConversation";
+import { TranscriptPanel } from "../../features/agents/TranscriptPanel";
 import type {
   AgentCreateProps,
   AgentViewProps,
@@ -761,43 +761,11 @@ export function createTabs({
     );
     const shown = transcript.open;
     const open = shown?.key;
-    // Read again once the open conversation's session changes or its work
-    // ends.
+    // Read again once the open conversation's session changes, and as its
+    // work starts and ends: never on a timer, since each read starts a
+    // harness process.
     const openRow = rows.find((row) => row.key === open);
-    const session = openRow?.session;
-    const idle = openRow?.status !== "Working";
-    const [read, setRead] = useState<
-      | { status: "loading" }
-      | { status: "done"; transcript: Transcript & { missing?: number } }
-      | { status: "error"; error: string }
-    >();
-    // biome-ignore lint/correctness/useExhaustiveDependencies: read again when the session changes or its work ends
-    useEffect(() => {
-      if (open === undefined) return;
-      const abort = new AbortController();
-      setRead({ status: "loading" });
-      runtime
-        .transcript(agent.key, open, abort.signal)
-        .then(
-          (transcript) =>
-            // A read cancelled by the next one never overwrites it.
-            !abort.signal.aborted &&
-            setRead(
-              transcript
-                ? { status: "done", transcript }
-                : {
-                    status: "error",
-                    error: "This harness can't replay its transcripts.",
-                  },
-            ),
-        )
-        .catch(
-          (reason) =>
-            !abort.signal.aborted &&
-            setRead({ status: "error", error: message(reason) }),
-        );
-      return () => abort.abort();
-    }, [agent.key, open, session, idle]);
+    const working = openRow?.status === "Working";
     return (
       <>
         {rows.length ? (
@@ -834,23 +802,25 @@ export function createTabs({
             backLabel="Back to profile"
             onBack={transcript.back}
           >
-            {read?.status === "loading" && <p role="status">Reading…</p>}
-            {read?.status === "error" && (
-              <p role="alert" className="buzz-field-error">
-                {read.error}
-              </p>
-            )}
-            {read?.status === "done" && !!read.transcript.missing && (
-              <p className="m-0 text-body-sm text-subtle">{MISSING}</p>
-            )}
-            {read?.status === "done" && (
-              <ActivityTranscript
-                transcript={read.transcript}
-                agentName={agent.name}
-                openConversation={openConversation}
-                state={() => undefined}
-              />
-            )}
+            <TranscriptPanel
+              agent={agent}
+              read={(signal) =>
+                runtime.transcript(agent.key, shown.key, signal)
+              }
+              readKey={`${agent.key}\u0000${shown.key}`}
+              readAgain={openRow?.session ?? ""}
+              working={working}
+              refreshWhileWorking={false}
+              openConversation={openConversation}
+              reading="Reading the transcript…"
+              failed="Could not read the transcript"
+              missing={<p>This harness can't replay its transcripts.</p>}
+              notes={(transcript) =>
+                !!transcript.missing && (
+                  <p className="m-0 text-body-sm text-subtle">{MISSING}</p>
+                )
+              }
+            />
           </PanelSubview>
         )}
       </>
