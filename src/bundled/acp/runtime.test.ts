@@ -1379,6 +1379,49 @@ describe("AcpRuntime", () => {
       await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(2));
     });
 
+    it("answers a request a saved mark showed only as context once, across restarts", async () => {
+      const config = await confirmed({ scope: "channel" });
+      const capabilities = {
+        mcpCapabilities: { http: true },
+        loadSession: true,
+      };
+      const first = at(message("5", "@Opal first"), 105);
+      const tie = at(message("6", "@Opal same second"), 105);
+      const one = setup({ capabilities });
+      one.sync(config);
+      await one.deliver(first, config).run;
+      await vi.waitFor(() =>
+        expect(one.fake.harnesses[0]?.turns).toHaveLength(1),
+      );
+      await flush(20);
+      one.runtime.dispose();
+      // A mark saved before marks named their requests: both ids, no requests.
+      const saved = localSessions(one.storage, self);
+      const record = saved.get(channel);
+      saved.set(channel, {
+        ...record,
+        covered: { at: 105, ids: [first.id, tie.id] },
+      } as NonNullable<typeof record>);
+      const relayed = { read: async () => [first, tie] };
+      const two = setup({ capabilities }, { storage: one.storage, ...relayed });
+      two.sync(config);
+      await two.deliver(tie, config).run;
+      await vi.waitFor(() =>
+        expect(two.fake.harnesses[0]?.turns).toHaveLength(1),
+      );
+      await flush(20);
+      two.runtime.dispose();
+      const three = setup(
+        { capabilities },
+        { storage: one.storage, ...relayed },
+      );
+      three.sync(config);
+      await three.deliver(tie, config).run;
+      await vi.waitFor(() => expect(three.workingUntil).toHaveBeenCalled());
+      await three.workingUntil.mock.calls[0]?.[0];
+      expect(three.fake.harnesses.flatMap((h) => h.turns)).toEqual([]);
+    });
+
     it("keeps identity coverage across a resume", async () => {
       const config = await confirmed({ scope: "channel" });
       const capabilities = {
@@ -2343,29 +2386,48 @@ describe("AcpRuntime", () => {
     expect(runtime.signIn(self)).toEqual({ methods: [{ name: "Log in" }] });
   });
 
-  it("keeps the sign-in state through a stopped turn on the same launch", async () => {
-    const config = await confirmed();
-    const { fake, deliver, sync, runtime } = setup({
-      hold: true,
-      authMethods: [{ id: "login", name: "Log in" }],
-    });
-    sync(config);
-    await deliver(message("1", "@Opal one"), config).run;
-    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
-    fake.harnesses[0]?.turns[0]?.fail(-32000, "Sign in first");
-    await vi.waitFor(() =>
-      expect(runtime.signIn(self)).toEqual({ methods: [{ name: "Log in" }] }),
-    );
-    const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
-    await deliver(message("2", "@Opal two"), config, undefined, {
-      interruptible,
-    }).run;
-    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(2));
-    await interruptible.mock.calls[0]?.[0]();
-    fake.harnesses[0]?.turns[1]?.finish("cancelled");
-    await flush(50);
-    expect(runtime.signIn(self)).toEqual({ methods: [{ name: "Log in" }] });
-  });
+  it.each(["stopped", "undelivered"])(
+    "keeps the sign-in state through a %s turn on the same launch",
+    async (outcome) => {
+      const config = await confirmed();
+      const { fake, deliver, sync, runtime, workingUntil } = setup({
+        hold: true,
+        authMethods: [{ id: "login", name: "Log in" }],
+      });
+      sync(config);
+      await deliver(message("1", "@Opal one"), config).run;
+      await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+      fake.harnesses[0]?.turns[0]?.fail(-32000, "Sign in first");
+      await vi.waitFor(() =>
+        expect(runtime.signIn(self)).toEqual({ methods: [{ name: "Log in" }] }),
+      );
+      const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
+      await deliver(message("2", "@Opal two"), config, undefined, {
+        interruptible,
+        ...(outcome === "undelivered" ? { current: () => false } : {}),
+      }).run;
+      if (outcome === "stopped") {
+        await vi.waitFor(() =>
+          expect(fake.harnesses[0]?.turns).toHaveLength(2),
+        );
+        await interruptible.mock.calls[0]?.[0]();
+        fake.harnesses[0]?.turns[1]?.finish("cancelled");
+      }
+      // Subscribed before the turn's settle step runs; it ends by notifying.
+      const notified = new Promise<void>((resolve) => {
+        const stop = runtime.subscribe(() => {
+          stop();
+          resolve();
+        });
+      });
+      expect(await workingUntil.mock.calls[1]?.[0]).toMatchObject({
+        ok: true,
+        [outcome]: true,
+      });
+      await notified;
+      expect(runtime.signIn(self)).toEqual({ methods: [{ name: "Log in" }] });
+    },
+  );
 
   it("sets the sign-in state when a standalone turn's session needs a login", async () => {
     const config = await confirmed();
