@@ -2107,6 +2107,43 @@ describe("AcpRuntime", () => {
     expect(loaded).toEqual(["session-1", "session-2"]);
   });
 
+  it("keeps a conversation saved before history was kept through New and replacement", async () => {
+    const config = await confirmed({ scope: "channel" });
+    const legacy = () => {
+      const one = setup({
+        capabilities: { mcpCapabilities: { http: true }, loadSession: true },
+      });
+      // Saved with only its resume pointer.
+      localSessions(one.storage, self).set(channel, { at: 1, id: "A" });
+      one.sync(config);
+      return one;
+    };
+    // New with no live session: A stays in the history, not resumable.
+    const fresh = legacy();
+    const subject = { ...fresh.agent, config } as unknown as Parameters<
+      AcpRuntime["session"]
+    >[0];
+    await fresh.runtime.session(subject, { channelId: channel }, "new");
+    const cleared = localSessions(fresh.storage, self).get(channel);
+    expect(cleared?.id).toBeUndefined();
+    expect(cleared?.sessions).toEqual(["A"]);
+    await fresh.deliver(message("1", "@Opal one"), config).run;
+    await vi.waitFor(() =>
+      expect(fresh.fake.harnesses[0]?.turns).toHaveLength(1),
+    );
+    expect(fresh.fake.harnesses[0]?.sent("session/load")).toHaveLength(0);
+    // Replaced, since what A opened with is unknown: A stays beside B.
+    const replaced = legacy();
+    await replaced.deliver(message("1", "@Opal one"), config).run;
+    await vi.waitFor(() =>
+      expect(replaced.fake.harnesses[0]?.turns).toHaveLength(1),
+    );
+    await flush(20);
+    const saved = localSessions(replaced.storage, self).get(channel);
+    expect(saved?.id).toBe("session-1");
+    expect(saved?.sessions).toEqual(["session-1", "A"]);
+  });
+
   it("shows the sessions it can still load when an older one is gone", async () => {
     const said = (text: string) => ({
       sessionUpdate: "user_message_chunk",

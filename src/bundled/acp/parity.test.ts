@@ -38,7 +38,8 @@ describe("saved conversations", () => {
       overridden: { model: true, effort: true },
     });
     store.drop("c/r");
-    expect(store.load("c/r")).toEqual({ at: 5 });
+    // The pointer goes; its session stays in the history.
+    expect(store.load("c/r")).toEqual({ at: 5, sessions: ["s1"] });
     expect(localSessions(localStorage, "other").list()).toEqual([]);
   });
 });

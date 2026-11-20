@@ -49,9 +49,16 @@ export function localSessions(
     }
   };
   const load = (key: string) => readAll()[agent]?.[key];
-  /** `saved`'s history, validated and bounded. */
+  /** `saved`'s history, validated and bounded. It takes in the resume
+   * pointer, which a conversation saved before history was kept has alone. */
   const history = (saved: SavedConversation | undefined) => {
-    const sessions = savedConversation(saved)?.sessions;
+    const valid = savedConversation(saved);
+    const sessions = valid
+      ? savedConversation({
+          at: valid.at,
+          sessions: [...(valid.sessions ?? []), saved?.id],
+        })?.sessions
+      : undefined;
     return sessions?.length ? { sessions } : {};
   };
   return {
