@@ -914,11 +914,14 @@ export class AcpRuntime {
         if (conversation !== undefined)
           entry.store.remember(conversation, session);
         if (resumed) return;
-        void this.prompts(agent).save(session, [{ label: "", text }], {
-          at: Date.now(),
-          title: title ?? "",
-          conversation: conversation ?? null,
-        });
+        void this.prompts(agent)
+          .save(session, [{ label: "", text }], {
+            at: Date.now(),
+            title: title ?? "",
+            conversation: conversation ?? null,
+          })
+          // A standalone start is listed once it is kept.
+          .then(() => this.notify());
       },
       resume: true,
       configOptions: true,
@@ -1010,6 +1013,25 @@ export class AcpRuntime {
           },
         ];
       })
+      // A standalone turn's session, such as a watch's or a timer's, joins
+      // no conversation: listed on its own.
+      .concat(
+        this.prompts(agent)
+          .sessions()
+          .flatMap(({ id, at, title, conversation }): Conversation[] =>
+            conversation === null && at !== undefined
+              ? [
+                  {
+                    key: `${STANDALONE}${id}`,
+                    channelId: "",
+                    at,
+                    title: title || "Standalone turn",
+                    replayable: true,
+                  },
+                ]
+              : [],
+          ),
+      )
       .sort((a, b) => b.at - a.at);
     this.lists.set(agent, list);
     return list;
@@ -1035,17 +1057,22 @@ export class AcpRuntime {
     // The working session too, before any turn of it succeeded: shown only,
     // never saved as the one to resume.
     const live = entry?.sessions.serving(key)?.sessionId;
-    const ids = [
-      ...new Set([
-        ...replayable(entry?.store.load(key)),
-        ...(live ? [live] : []),
-      ]),
-    ];
+    const standalone = key.startsWith(STANDALONE)
+      ? key.slice(STANDALONE.length)
+      : undefined;
+    const ids = standalone
+      ? [standalone]
+      : [
+          ...new Set([
+            ...replayable(entry?.store.load(key)),
+            ...(live ? [live] : []),
+          ]),
+        ];
     if (!entry || !ids.length) return undefined;
     const launch = entry.config;
     const { generation } = entry;
     const cwd = await this.resolveDirectory(launch.workspace);
-    const [channelId, root] = key.split("/");
+    const [channelId, root] = standalone ? [] : key.split("/");
     // Each of its sessions in turn, oldest first. One the harness can no
     // longer load is left out, and the rest still shown.
     let transcript: Transcript | undefined;
@@ -1114,6 +1141,9 @@ export class AcpRuntime {
 
 /** The sessions of a saved conversation a transcript replays, oldest first:
  * its history and its resume pointer. */
+/** Starts a standalone session's History key. */
+const STANDALONE = "standalone:";
+
 const replayable = (saved: SavedConversation | undefined): string[] => {
   const history = savedConversation(saved)?.sessions ?? [];
   return [...new Set([...history].reverse().concat(saved?.id ?? []))];

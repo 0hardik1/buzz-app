@@ -2007,6 +2007,29 @@ describe("reading a transcript", () => {
     content: { type: "text", text },
   });
 
+  it("marks a session's start only when its replay keeps its first prompt", async () => {
+    const asked = (text: string) => ({
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text },
+    });
+    const whole = await read([asked("one"), said("ok", "m1")]);
+    expect(whole?.turns.map((turn) => turn.newSession)).toEqual([true]);
+    // Its oldest turn cut away: the start isn't shown.
+    const cut = await read([
+      asked("one"),
+      said("ok", "m1"),
+      asked("two"),
+      said("ok", "m2"),
+      asked("three"),
+    ]);
+    expect(cut?.turns.length).toBeGreaterThan(0);
+    expect(cut?.turns.some((turn) => turn.newSession)).toBe(false);
+    // No prompt first: it starts partway through.
+    const late = await read([said("ok", "m1"), asked("two")]);
+    expect(late?.turns.length).toBeGreaterThan(0);
+    expect(late?.turns.some((turn) => turn.newSession)).toBe(false);
+  });
+
   it("keeps a single turn within its item limit", async () => {
     const replay = [...Array(8).keys()].map((i) => said("hi", `m${i}`));
     const transcript = await read(replay);

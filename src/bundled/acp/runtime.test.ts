@@ -2144,6 +2144,43 @@ describe("AcpRuntime", () => {
     expect(saved?.sessions).toEqual(["session-1", "A"]);
   });
 
+  it("lists a standalone turn's session in History, with its transcript", async () => {
+    const config = await confirmed();
+    const { fake, runtime, sync } = setup({
+      capabilities: { mcpCapabilities: { http: true }, loadSession: true },
+    });
+    sync(config);
+    const done = await runtime.runOnce({
+      delivery: {
+        agent: { key: self, pubkey: self, name: "Opal", owner: alice },
+        config,
+        current: () => true,
+      } as unknown as Delivery,
+      key: "timer",
+      signal: new AbortController().signal,
+      prompt: async () => "wake",
+    });
+    expect(done).toMatchObject({ ok: true });
+    await vi.waitFor(() =>
+      expect(runtime.conversations(self).map((row) => row.title)).toEqual([
+        "Standalone turn",
+      ]),
+    );
+    const [row] = runtime.conversations(self);
+    expect(row?.replayable).toBe(true);
+    const before = fake.harnesses.length;
+    await runtime.transcript(
+      self,
+      row?.key ?? "",
+      new AbortController().signal,
+    );
+    const loaded = fake.harnesses
+      .slice(before)
+      .flatMap((h) => h.sent("session/load"))
+      .map((m) => m.params?.sessionId);
+    expect(loaded).toEqual(["session-1"]);
+  });
+
   it("shows the sessions it can still load when an older one is gone", async () => {
     const said = (text: string) => ({
       sessionUpdate: "user_message_chunk",

@@ -135,7 +135,7 @@ class Rebuild {
   }
 
   result(threadOf: TranscriptRead["threadOf"]): Transcript {
-    const turns = this.turns.map(({ size: _size, prefix, ...turn }) => {
+    const turns = this.turns.map(({ size: _size, prefix, ...turn }, index) => {
       const threadRootId = prefix ? threadOf(prefix) : undefined;
       let triggeringEventIds = turn.triggeringEventIds;
       // Each prompt read as Buzz framed it, once all its chunks are in: an
@@ -164,6 +164,10 @@ class Rebuild {
         items,
         triggeringEventIds,
         threadRootId,
+        // The session starts here only when the replay kept its first turn
+        // from its prompt on; a cut history stays continued.
+        newSession:
+          index === 0 && !this.evicted && turn.items[0]?.type === "prompt",
         partial: turn.partial || this.evicted,
       };
     });
