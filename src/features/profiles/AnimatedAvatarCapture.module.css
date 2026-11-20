@@ -150,6 +150,13 @@ canvas.preview:active {
   flex: 1;
   min-width: 0;
 }
+.framing button[data-icon-size] {
+  width: max-content;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-3);
+}
 .outlineGlyph {
   display: block;
   width: 1rem;
