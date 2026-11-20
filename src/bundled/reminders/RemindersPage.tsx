@@ -73,7 +73,6 @@ import {
   navigableTarget,
   presetHint,
 } from "./model";
-import { RemindDialog } from "./RemindDialog";
 import { scopeOf, useReminders } from "./react";
 import styles from "./Reminders.module.css";
 import { avatarMedia } from "../../shared/avatar-source";
@@ -93,18 +92,6 @@ export function RemindersPage({
   const { connection, reminders, state } = useReminders(relay);
   const now = useSyncExternalStore(clock.subscribe, clock.read, clock.read);
   const [error, setError] = useState<string>();
-  const [draft, setDraft] = useState<{
-    session: RelaySession;
-    scope: string;
-  }>();
-  const session =
-    connection.status === "ready" ? connection.session : undefined;
-  const partition = connection.scope;
-  if (
-    draft &&
-    (!reminders || draft.session !== session || draft.scope !== partition)
-  )
-    setDraft(undefined);
   // The store whose Retry read is pending; a replaced store's never counts.
   const [retrying, setRetrying] = useState<Reminders>();
   const page = useRef<HTMLDivElement>(null);
@@ -189,26 +176,27 @@ export function RemindersPage({
               />
             }
             actions={
-              reminders && session && partition ? (
+              reminders && scope ? (
                 <IconButton
                   size="sm"
                   variant="ghost"
                   aria-label="New reminder"
                   title="New reminder"
                   icon={<PlusIcon size="1rem" />}
-                  onClick={() => setDraft({ session, scope: partition })}
+                  onClick={() =>
+                    void navigator.open({
+                      version: 1,
+                      kind: "page",
+                      pluginId: "buzz.reminders",
+                      pageId: "reminders",
+                      scope,
+                      route: { version: 1, params: "new" },
+                    })
+                  }
                 />
               ) : undefined
             }
           />
-          {draft && (
-            <RemindDialog
-              session={draft.session}
-              close={() =>
-                setDraft((current) => (current === draft ? undefined : current))
-              }
-            />
-          )}
           {error && (
             <p role="alert" className={styles.notice}>
               {error}
@@ -588,7 +576,7 @@ function ReminderRow({
     <span className={styles.content}>
       <span
         id={`${id}-preview`}
-        className={`text-body ${pending ? "text-standard" : "text-subtle"} ${styles.preview}`}
+        className={`text-body ${pending ? "text-standard" : "text-subtle"} ${styles.preview} ${!reminder.target?.preview ? styles.note : ""}`}
         data-message={open && reminder.target?.preview ? "" : undefined}
       >
         {preview || sender}

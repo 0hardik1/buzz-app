@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { type ReactNode, useLayoutEffect, useRef } from "react";
+import {
+  type ReactNode,
+  useLayoutEffect,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import {
   act,
   cleanup,
@@ -17,15 +22,62 @@ import {
   type Reminders,
 } from "../../features/relay/reminders";
 import type { RelayData } from "../../features/relay/service";
-import type { Navigation } from "../../features/navigation/controller";
+import {
+  createNavigationController,
+  type Navigation,
+} from "../../features/navigation/controller";
+import { createMemoryHistory } from "../../features/navigation/history";
+import { ReminderEditor } from "./RemindDialog";
 import userEvent from "@testing-library/user-event";
 import { RemindersPage } from "./RemindersPage";
 import { apply } from "./index";
 import { mediaUrl } from "../../features/relay/transport";
 
-afterEach(cleanup);
+const controllers = new Set<ReturnType<typeof createNavigationController>>();
+afterEach(() => {
+  cleanup();
+  for (const controller of controllers) controller.dispose();
+  controllers.clear();
+});
 
-const viewer = "v";
+const viewer = "a".repeat(64);
+const reminderPage = {
+  version: 1,
+  kind: "page",
+  pluginId: "buzz.reminders",
+  pageId: "reminders",
+  scope: { communityOrigin: "https://community", viewer },
+} as const;
+function reminderNavigation() {
+  const controller = createNavigationController(createMemoryHistory());
+  controllers.add(controller);
+  void controller.navigation.open(reminderPage);
+  return controller.navigation;
+}
+function ReminderHost({
+  relay,
+  navigator,
+}: {
+  relay: RelayData;
+  navigator: Navigation;
+}) {
+  const { entry } = useSyncExternalStore(
+    navigator.subscribe,
+    navigator.snapshot,
+  );
+  return (
+    <>
+      {entry.target.kind === "page" && (
+        <RemindersPage
+          relay={relay}
+          navigator={navigator}
+          clock={{ subscribe: () => () => {}, read: () => now }}
+        />
+      )}
+      <ReminderEditor relay={relay} navigator={navigator} />
+    </>
+  );
+}
 const now = 1_000_000;
 const reminder = (
   id: string,
@@ -310,6 +362,7 @@ it("recovers a failed first history read through Retry, then notifies", async ()
       relay: { snapshot: () => connection, subscribe: () => () => {} },
       notifications: { register: () => ({ submit }) },
       pages: {
+        registerOverlay() {},
         register: (page: { component: () => ReactNode }) => {
           Page = page.component;
         },
@@ -377,6 +430,7 @@ it("ages due labels while open, with no reminder or live events", async () => {
       relay: { snapshot: () => connection, subscribe: () => () => {} },
       notifications: { register: () => ({ submit: () => Promise.resolve() }) },
       pages: {
+        registerOverlay() {},
         register: (page: { component: () => ReactNode }) => {
           Page = page.component;
         },
@@ -419,18 +473,19 @@ function page(source: Reminder[] | Reminders) {
     viewer,
     session: { reminders, ...sessionParts },
   };
+  const navigator = reminderNavigation();
   render(
-    <RemindersPage
+    <ReminderHost
       relay={
         {
           snapshot: () => connection,
           subscribe: () => () => {},
         } as unknown as RelayData
       }
-      navigator={{ open: vi.fn() } as unknown as Navigation}
-      clock={{ subscribe: () => () => {}, read: () => now }}
+      navigator={navigator}
     />,
   );
+  return navigator;
 }
 
 it("adds custom text from the empty page and lists it without a message link", async () => {
@@ -463,7 +518,7 @@ it("adds custom text from the empty page and lists it without a message link", a
     query: async () => [],
     publish,
   });
-  page(capability);
+  const navigator = page(capability);
   const trigger = screen.getByRole("button", { name: "New reminder" });
   expect(screen.getByText("Loading reminders…")).toBeVisible();
   await act(async () => recover());
@@ -474,16 +529,19 @@ it("adds custom text from the empty page and lists it without a message link", a
   const save = dialog.getByRole("button", { name: "Set reminder" });
   await user.type(text, "   ");
   expect(save).toBeDisabled();
-  await user.type(text, "Renew insurance");
+  await user.type(text, "Renew insurance{Enter}Review deductible");
   await user.click(save);
   expect(await dialog.findByRole("alert")).toHaveTextContent(
     "could not be saved",
   );
-  expect(text).toHaveValue("   Renew insurance");
+  expect(text).toHaveValue("   Renew insurance\nReview deductible");
   const before = Math.floor(Date.now() / 1000);
   await user.click(save);
   const row = within(await screen.findByRole("listitem"));
-  expect(row.getByText("Renew insurance", { exact: true })).toBeVisible();
+  expect(
+    row.getByText("Renew insurance Review deductible", { exact: true })
+      .textContent,
+  ).toBe("Renew insurance\nReview deductible");
   expect(
     row.queryByRole("button", { name: /Open message|Open conversation/ }),
   ).toBeNull();
@@ -491,6 +549,86 @@ it("adds custom text from the empty page and lists it without a message link", a
   expect(due).toBeGreaterThanOrEqual(before + 30 * 60);
   expect(due).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 30 * 60);
   expect(publish).toHaveBeenCalledTimes(2);
+  act(() => navigator.back());
+  act(() => navigator.forward());
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("restores an unsaved draft through Back and Forward but retires explicitly closed visits", async () => {
+  const user = userEvent.setup();
+  const navigator = page([]);
+  await user.click(screen.getByRole("button", { name: "New reminder" }));
+  await user.type(
+    screen.getByRole("textbox", { name: "Reminder text" }),
+    "Keep this draft",
+  );
+  act(() => navigator.back());
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText("No reminders yet")).toBeVisible();
+  act(() => navigator.back());
+  expect(screen.queryByRole("button", { name: "New reminder" })).toBeNull();
+  act(() => navigator.forward());
+  act(() => navigator.forward());
+  expect(
+    await screen.findByRole("textbox", { name: "Reminder text" }),
+  ).toHaveValue("Keep this draft");
+  for (const dismissal of ["Cancel", "Close", "Escape"]) {
+    if (dismissal === "Escape") await user.keyboard("{Escape}");
+    else
+      await user.click(
+        screen.getByRole("button", { name: dismissal, exact: true }),
+      );
+    act(() => navigator.back());
+    act(() => navigator.forward());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "New reminder" }));
+    expect(
+      await screen.findByRole("textbox", { name: "Reminder text" }),
+    ).toHaveValue("");
+  }
+});
+
+it("keeps a pending save alive through page traversal and retires it on completion", async () => {
+  const user = userEvent.setup();
+  let finish!: () => void;
+  const saved = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const create = vi.fn(() => saved);
+  const state = { status: "ready", hydrated: true, reminders: [] };
+  const navigator = page({
+    snapshot: () => state,
+    subscribe: () => () => {},
+    create,
+  } as unknown as Reminders);
+  await user.click(screen.getByRole("button", { name: "New reminder" }));
+  await user.type(
+    screen.getByRole("textbox", { name: "Reminder text" }),
+    "Save once",
+  );
+  try {
+    await user.click(screen.getByRole("button", { name: "Set reminder" }));
+    act(() => navigator.back());
+    act(() => navigator.back());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => navigator.forward());
+    act(() => navigator.forward());
+    expect(
+      await screen.findByRole("textbox", { name: "Reminder text" }),
+    ).toHaveValue("Save once");
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(create).toHaveBeenCalledExactlyOnceWith(
+      undefined,
+      expect.any(Number),
+      "Save once",
+    );
+    act(() => navigator.back());
+  } finally {
+    await act(async () => finish());
+  }
+  act(() => navigator.forward());
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(create).toHaveBeenCalledTimes(1);
 });
 
 it("retires the draft on session replacement and ignores the old save's completion", async () => {
@@ -502,6 +640,7 @@ it("retires the draft on session replacement and ignores the old save's completi
   });
   const firstCreate = vi.fn(() => save);
   const secondCreate = vi.fn(async () => {});
+  const navigator = reminderNavigation();
   const mount = (create: typeof secondCreate | undefined) => {
     const connection = {
       status: "ready",
@@ -517,15 +656,14 @@ it("retires the draft on session replacement and ignores the old save's completi
       },
     };
     return (
-      <RemindersPage
+      <ReminderHost
         relay={
           {
             snapshot: () => connection,
             subscribe: () => () => {},
           } as unknown as RelayData
         }
-        navigator={{ open: vi.fn() } as unknown as Navigation}
-        clock={{ subscribe: () => () => {}, read: () => now }}
+        navigator={navigator}
       />
     );
   };
