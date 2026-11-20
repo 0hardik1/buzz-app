@@ -3402,6 +3402,7 @@ function Composer({
               const handed = {
                 next: mentionDraft(""),
                 revision: savedRevision,
+                retirementCursor,
               };
               recoveryFor(session).set(recoveryKey, handed);
               setAccepted(handed);

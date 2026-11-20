@@ -41,12 +41,15 @@ async function askInSolo(page) {
   const dialog = page.getByRole("dialog", { name: "Pollen can’t reply here" });
   await dialog.getByRole("button", { name: "Ask in a Solo chat" }).click();
   await expect(dialog).toBeHidden();
-  const toast = page.getByRole("dialog", {
-    name: "Asked Pollen in your Solo chat from #launch.",
-  });
-  // An earlier ask's confirmation may still be showing above it.
-  await expect(toast.last()).toBeVisible();
-  return toast.last();
+  // An earlier ask's confirmation may still be showing: the stack puts the
+  // newest in front.
+  const toast = page
+    .locator('[data-sonner-toast][data-front="true"]')
+    .getByRole("dialog", {
+      name: "Asked Pollen in your Solo chat from #launch.",
+    });
+  await expect(toast).toBeVisible();
+  return toast;
 }
 
 test("a Viewing-only agent is asked in your Solo chat, which later asks from the channel continue", async ({
@@ -424,6 +427,20 @@ test("a refused chat gives the question back when clearing the draft had failed"
     .click();
   const composer = page.getByRole("textbox", { name: "Message launch" });
   await mention(page, composer, "are we still on for Thursday?");
+  // Edits are saved after a pause in typing; wait until the question is saved.
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Object.keys(localStorage).some(
+          (key) =>
+            key.includes('"draft:') &&
+            localStorage
+              .getItem(key)
+              ?.includes("are we still on for Thursday?"),
+        ),
+      ),
+    )
+    .toBe(true);
   // The saved question can't be replaced with the cleared draft.
   await page.evaluate(() => {
     const set = Storage.prototype.setItem;
