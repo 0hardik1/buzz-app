@@ -560,6 +560,34 @@ it("refuses an everyone message over 128 words, or a brief over 50", async () =>
   expect(published).toHaveLength(2);
 });
 
+it.each([
+  {
+    audience: "everyone",
+    text: Array.from({ length: 129 }, () => "word").join(" "),
+    error: "This is 129 words, too long for everyone",
+  },
+  {
+    audience: "details",
+    text: `${Array.from({ length: 51 }, () => "word").join(" ")}\n\nThe rest.`,
+    error: "The brief, the first paragraph, is 51 words",
+  },
+])(
+  "refuses an overlong $audience message before reading or uploading its files",
+  async ({ audience, text, error }) => {
+    const { client, published } = fake(community);
+    await expect(
+      callTool(client, { channel: "chan", root }, "send", {
+        text,
+        audience,
+        files: ["shot.png", "docs/plan.pdf"],
+      }),
+    ).rejects.toThrow(error);
+    expect(client.read).not.toHaveBeenCalled();
+    expect(client.upload).not.toHaveBeenCalled();
+    expect(published).toHaveLength(0);
+  },
+);
+
 it("holds an edit's replacement to the length limit of the message's own audience", async () => {
   const sent = (id: string, ...audiences: string[]) =>
     event({
