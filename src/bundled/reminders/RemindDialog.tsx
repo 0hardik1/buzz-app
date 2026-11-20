@@ -93,7 +93,7 @@ export function ReminderEditor({
   return draft && draft.session === session ? (
     <RemindDialog
       session={draft.session}
-      open={active && targetKey(target) === targetKey(draft.target)}
+      isOpen={active && targetKey(target) === targetKey(draft.target)}
       visit
       close={() => {
         if (currentSession.current === draft.session) retire(draft);
@@ -107,13 +107,13 @@ export function RemindDialog({
   message,
   session,
   close,
-  open = true,
+  isOpen = true,
   visit = false,
 }: {
   message?: ChannelMessage;
   session: RelaySession;
   close(): void;
-  open?: boolean;
+  isOpen?: boolean;
   visit?: boolean;
 }) {
   const fields = useRef<HTMLDivElement>(null);
@@ -172,7 +172,7 @@ export function RemindDialog({
     <Dialog
       size="compact"
       bodyLayout="scroll"
-      open={open}
+      open={isOpen}
       visit={visit}
       dismissOnOutsideClick={false}
       onOpenChange={(open) => !open && close()}
