@@ -1186,8 +1186,3 @@ html[data-keyboard-navigation]
     animation: none;
   }
 }
-
-/* The card's view options popover: labelled choice groups, stacked. */
-.viewOptions {
-  display: grid;
-}

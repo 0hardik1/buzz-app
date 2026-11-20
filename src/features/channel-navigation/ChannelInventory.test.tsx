@@ -137,40 +137,61 @@ const defaultPages = (
   </nav>
 );
 
-/** Opens a card's View options popover. */
-async function viewOptions(
+/** Opens a card's Filter menu from its header button. */
+async function filterMenu(
   user: ReturnType<typeof userEvent.setup>,
   title: string,
 ) {
   await user.click(
     screen.getByRole("button", {
-      name: new RegExp(`^View options for ${title}(, filtered)?$`),
+      name: new RegExp(`^Filter ${title}(, filtered)?$`),
     }),
   );
-  return screen.findByRole("dialog", { name: `Filter & sort for ${title}` });
+  return screen.findByRole("menu", { name: `Filter ${title}` });
 }
-/** Picks one choice in a card's View options, then closes it. */
+/** Opens a card's ••• menu, then its Sort submenu. */
+async function sortMenu(
+  user: ReturnType<typeof userEvent.setup>,
+  title: string,
+) {
+  await user.click(
+    screen.getByRole("button", { name: `More actions for ${title}` }),
+  );
+  await user.click(await screen.findByRole("menuitem", { name: "Sort" }));
+  return screen.findByRole("menu", { name: `Sort ${title}` });
+}
+/** Picks one choice in a card's Filter menu or Sort submenu, then closes the
+ * menus. */
 async function chooseView(
   user: ReturnType<typeof userEvent.setup>,
   title: string,
   name: string,
 ) {
-  const popup = await viewOptions(user, title);
-  const unreads = within(popup).getByRole("switch", { name: "Unreads only" });
-  if (name === "Unreads") {
-    if (unreads.getAttribute("aria-checked") !== "true")
-      fireEvent.click(unreads);
-  } else if (name === "All") {
-    // Every conversation: all time, then Unreads only off.
-    await user.click(
-      within(popup).getByRole("combobox", { name: "Time range" }),
-    );
-    await user.click(await screen.findByRole("option", { name: "All" }));
-    if (unreads.getAttribute("aria-checked") === "true")
-      fireEvent.click(unreads);
-  } else fireEvent.click(within(popup).getByRole("radio", { name }));
+  if (name === "Unreads" || name === "All") {
+    const menu = await filterMenu(user, title);
+    const unreads = within(menu).getByRole("menuitemcheckbox", {
+      name: "Unreads only",
+    });
+    if (name === "Unreads") {
+      if (unreads.getAttribute("aria-checked") !== "true")
+        fireEvent.click(unreads);
+    } else {
+      // Every conversation: all time, then Unreads only off.
+      await user.click(
+        within(menu).getByRole("menuitemradio", { name: "All" }),
+      );
+      if (unreads.getAttribute("aria-checked") === "true")
+        fireEvent.click(unreads);
+    }
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(menu).not.toBeInTheDocument());
+    return;
+  }
+  const menu = await sortMenu(user, title);
+  fireEvent.click(within(menu).getByRole("menuitemradio", { name }));
   await user.keyboard("{Escape}");
-  await waitFor(() => expect(popup).not.toBeInTheDocument());
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 }
 
 function fixture(
@@ -3571,10 +3592,11 @@ it.each([
       act(() => registry.disable());
       await waitFor(() => expect(order()).toEqual(["alpha", "beta", "gamma"]));
       expect(sort[preferenceKey]).toBe("plugin:fixture0/order/reverse");
-      const options = await viewOptions(user, label);
+      const options = await sortMenu(user, label);
       expect(
-        within(options).queryByRole("radio", { name: "Reverse name" }),
+        within(options).queryByRole("menuitemradio", { name: "Reverse name" }),
       ).toBeNull();
+      await user.keyboard("{Escape}");
       await user.keyboard("{Escape}");
       act(() => registry.enable());
       await waitFor(() => expect(order()).toEqual(["gamma", "beta", "alpha"]));
@@ -3627,9 +3649,9 @@ it.each(["throw", "non-finite"] as const)(
         ].map((el) => el.getAttribute("data-channel-id")),
       ).toEqual(["alpha", "beta", "gamma"]);
       const user = userEvent.setup();
-      const options = await viewOptions(user, "Team");
+      const options = await sortMenu(user, "Team");
       expect(
-        within(options).getByRole("radio", { name: "Broken sort" }),
+        within(options).getByRole("menuitemradio", { name: "Broken sort" }),
       ).toHaveAttribute("aria-checked", "true");
     } finally {
       prefs.dispose();

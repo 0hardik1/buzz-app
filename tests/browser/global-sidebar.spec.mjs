@@ -3,7 +3,9 @@ import {
   chooseViewOption,
   expectViewOption,
   openPage,
-  openViewOptions,
+  closeMenus,
+  openFilterMenu,
+  openSortMenu,
 } from "./navigation.mjs";
 
 test.use({
@@ -98,12 +100,12 @@ test("a replacement sidebar unmounts Messages and returning restores its view", 
     .toBe(180);
   await expect(work.locator("details").first()).not.toHaveAttribute("open");
   await page.screenshot({ path: info.outputPath("messages-after-return.png") });
-  const workOptions = await openViewOptions(page, "Work");
+  const workOptions = await openFilterMenu(page, "Work");
   await expectViewOption(workOptions, "Unreads");
-  await page.keyboard.press("Escape");
+  await closeMenus(page);
   await expect(workOptions).toHaveCount(0);
-  const team = await openViewOptions(page, "Team");
+  const team = await openSortMenu(page, "Team");
   await expect(
-    team.getByRole("radio", { name: "Recent", exact: true }),
+    team.getByRole("menuitemradio", { name: "Recent", exact: true }),
   ).toHaveAttribute("aria-checked", "true");
 });

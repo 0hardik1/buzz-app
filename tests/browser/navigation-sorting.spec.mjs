@@ -1,14 +1,16 @@
 import { test, expect } from "./fixture.mjs";
 import { animationsSettled } from "./animations.mjs";
 import { open } from "./timeline.mjs";
-import { openPage, openViewOptions } from "./navigation.mjs";
+import {
+  closeMenus,
+  moreActionsButton,
+  openPage,
+  openSortMenu,
+} from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 
-/** A card's Sort choices, in its open View options popover. */
-async function sortChoices(page, title) {
-  const popup = await openViewOptions(page, title);
-  return popup.getByRole("radiogroup", { name: "Sort", exact: true });
-}
+/** A card's Sort choices, in its ••• menu's open Sort submenu. */
+const sortChoices = openSortMenu;
 
 // Team starts on an explicit A–Z so journeys can exercise the switch to Recent.
 test.use({
@@ -527,9 +529,9 @@ test("keeps a stationary selected row visible while its neighbors exchange place
   const motion = await holdSidebarMotion(page);
   try {
     await (await sortChoices(page, "Team"))
-      .getByRole("radio", { name: "Recent", exact: true })
+      .getByRole("menuitemradio", { name: "Recent", exact: true })
       .click();
-    await page.keyboard.press("Escape");
+    await closeMenus(page);
     await expect
       .poll(() =>
         rows.evaluateAll((elements) =>
@@ -611,9 +613,9 @@ test("retargets an unfinished slide without jumping or losing focus", async ({
   const section = page.locator('[data-sidebar-section="channels"]');
   const rows = section.locator("[data-channel-id]");
   await (await sortChoices(page, "Team"))
-    .getByRole("radio", { name: "Recent", exact: true })
+    .getByRole("menuitemradio", { name: "Recent", exact: true })
     .click();
-  await page.keyboard.press("Escape");
+  await closeMenus(page);
   const cedar = section.locator('[data-channel-id="cedar"]');
   const willow = section.locator('[data-channel-id="willow"]');
   const settled = () =>
@@ -840,9 +842,7 @@ test.describe("section sort persistence", () => {
     });
     const channels = sidebar.locator('[data-sidebar-section="channels"]');
     const work = sidebar.locator('[data-sidebar-section="group:work"]');
-    const trigger = channels.getByRole("button", {
-      name: /^View options for Team(, filtered)?$/,
-    });
+    const trigger = moreActionsButton(channels, "Team");
     const rows = channels.locator("[data-channel-id]");
     const order = () =>
       rows.evaluateAll((elements) =>
@@ -864,10 +864,9 @@ test.describe("section sort persistence", () => {
     const startupActivity = activity();
     expect(startupActivity.length).toBeGreaterThan(2);
     expect(new Set(startupActivity).size).toBe(startupActivity.length);
-    const popup = page.getByRole("dialog", {
-      name: "Filter & sort for Team",
-      exact: true,
-    });
+    const popup = page
+      .getByRole("menu", { name: "Sort Team", exact: true })
+      .and(page.locator(":not([data-closed])"));
     async function openSort() {
       await sortChoices(page, "Team");
       await expect(channels.locator("details")).toHaveAttribute("open", "");
@@ -877,11 +876,10 @@ test.describe("section sort persistence", () => {
       clip: { x: 0, y: 0, width: 540, height: 460 },
     });
     await openSort();
-    const menu = popup.getByRole("radiogroup", { name: "Sort", exact: true });
-    await expect(menu.getByRole("radio", { name: "A–Z" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const menu = popup;
+    await expect(
+      menu.getByRole("menuitemradio", { name: "A–Z" }),
+    ).toHaveAttribute("aria-checked", "true");
     let release, started;
     const held = new Promise((resolve) => {
       release = resolve;
@@ -901,22 +899,23 @@ test.describe("section sort persistence", () => {
       });
     });
     try {
-      await menu.getByRole("radio", { name: "Recent" }).click();
+      await menu.getByRole("menuitemradio", { name: "Recent" }).click();
       await requestStarted;
-      await page.keyboard.press("Escape");
+      await closeMenus(page);
       await expect(popup).not.toBeVisible();
       await expect(trigger).toBeFocused();
       await expect(page.getByText(/Saving(?: sidebar changes)?…/)).toHaveCount(
         0,
       );
       await openSort();
-      await expect(menu.getByRole("radio", { name: "A–Z" })).toBeEnabled();
-      await expect(menu.getByRole("radio", { name: "Recent" })).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
+      await expect(
+        menu.getByRole("menuitemradio", { name: "A–Z" }),
+      ).toBeEnabled();
+      await expect(
+        menu.getByRole("menuitemradio", { name: "Recent" }),
+      ).toHaveAttribute("aria-checked", "true");
       await expect.poll(order).not.toEqual(alphaOrder);
-      await page.keyboard.press("Escape");
+      await closeMenus(page);
     } finally {
       release();
     }
@@ -967,10 +966,9 @@ test.describe("section sort persistence", () => {
     await expect(cedar).toBeFocused();
     await expect.poll(order).toEqual(recentOrder);
     await openSort();
-    await expect(menu.getByRole("radio", { name: "Recent" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    await expect(
+      menu.getByRole("menuitemradio", { name: "Recent" }),
+    ).toHaveAttribute("aria-checked", "true");
     await expect(popup).toHaveCSS("opacity", "1");
     await page.screenshot({
       path: testInfo.outputPath("sidebar-sort-menu.png"),
@@ -982,23 +980,24 @@ test.describe("section sort persistence", () => {
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
-    await page.keyboard.press("Escape");
+    await closeMenus(page);
     await expect(popup).not.toBeVisible();
     const workMenu = await sortChoices(page, "Work");
-    await expect(workMenu.getByRole("radio", { name: "A–Z" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    await expect(
+      workMenu.getByRole("menuitemradio", { name: "A–Z" }),
+    ).toHaveAttribute("aria-checked", "true");
     await confirmedSort(() =>
-      workMenu.getByRole("radio", { name: "Recent" }).click(),
+      workMenu.getByRole("menuitemradio", { name: "Recent" }).click(),
     );
-    await page.keyboard.press("Escape");
+    await closeMenus(page);
     await expect(workMenu).not.toBeVisible();
     expect(app.report.sidebarPublications.at(-1).blob.groups).toEqual({});
     await expect.poll(order).toEqual(recentOrder);
     await openSort();
-    await confirmedSort(() => menu.getByRole("radio", { name: "A–Z" }).click());
-    await page.keyboard.press("Escape");
+    await confirmedSort(() =>
+      menu.getByRole("menuitemradio", { name: "A–Z" }).click(),
+    );
+    await closeMenus(page);
     await expect(menu).not.toBeVisible();
     await expect.poll(order).toEqual(alphaOrder);
     expect(app.report.sidebarPublications.at(-1).blob.groups).toEqual({
@@ -1014,7 +1013,7 @@ test.describe("section sort persistence", () => {
     await expect(cedar).toBeFocused();
     await sortChoices(page, "Work");
     await expect(
-      workMenu.getByRole("radio", { name: "Recent" }),
+      workMenu.getByRole("menuitemradio", { name: "Recent" }),
     ).toHaveAttribute("aria-checked", "true");
     expect(app.report.unexpected).toEqual([]);
   });
@@ -1076,11 +1075,11 @@ test.describe("activity read failures", () => {
     async function setSort(mode) {
       await openSort();
       const saved = page.waitForResponse("**/sidebar-sort");
-      await menu.getByRole("radio", { name: mode }).click();
+      await menu.getByRole("menuitemradio", { name: mode }).click();
       const response = await saved;
       expect(response.ok()).toBe(true);
       await response.finished();
-      await page.keyboard.press("Escape");
+      await closeMenus(page);
       await expect(menu).not.toBeVisible();
     }
     const notifications = page.getByRole("region", {
@@ -1125,11 +1124,14 @@ test.describe("activity read failures", () => {
       await setSort("A–Z");
       await failRecent(5);
       await openSort();
-      await expect(menu.getByRole("radio", { name: "Recent" })).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
-      await page.keyboard.press("Escape");
+      await expect(
+        menu.getByRole("menuitemradio", { name: "Recent" }),
+      ).toHaveAttribute("aria-checked", "true");
+      // Click away rather than Escape twice: the second Escape out of a submenu
+      // also reaches Mark as read, which refreshes activity and so would clear
+      // the failure this journey retries.
+      await page.mouse.click(700, 500);
+      await expect(page.getByRole("menu")).toHaveCount(0);
       await notifications.getByRole("button", { name: "Retry" }).click();
       await expect.poll(() => attempts).toBe(6);
       await expect(warning).toHaveCount(0);
@@ -1137,10 +1139,9 @@ test.describe("activity read failures", () => {
         .poll(async () => (await order()).slice(0, 3))
         .toEqual(["willow", "maple", "cedar"]);
       await openSort();
-      await expect(menu.getByRole("radio", { name: "Recent" })).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
+      await expect(
+        menu.getByRole("menuitemradio", { name: "Recent" }),
+      ).toHaveAttribute("aria-checked", "true");
       expect(app.report.unexpected).toEqual([]);
     } finally {
       releaseFailure();
@@ -1315,7 +1316,9 @@ test.describe("sorting with lifecycle visibility", () => {
     await expect(composer).toHaveCount(0);
     // Opening Sort proves saved preference decoding and sidebar startup settled.
     await expect(
-      (await sortChoices(page, "Team")).getByRole("radio", { name: "Recent" }),
+      (await sortChoices(page, "Team")).getByRole("menuitemradio", {
+        name: "Recent",
+      }),
     ).toHaveAttribute("aria-checked", "true");
     await expect
       .poll(

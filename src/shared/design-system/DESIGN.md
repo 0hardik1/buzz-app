@@ -1052,11 +1052,6 @@ width. Both controls use the same sm/md/lg scale. Existing names
 remain compatibility aliases: primary/solid → prominent, quiet → subtle,
 compact/toolbar → sm, default → md, large → lg. Do not add new alias call sites.
 Buzz's tint and chrome icon variants remain for composer and backdrop actions.
-`IconButton tone="accent"` colors only the icon (`--icon-accent`, deeper
-than a selected row's fill so it doesn't read as hover, and 3:1 on sidebar
-surfaces) while the action's state is on, such as a card's view options button while the card is
-filtered; the variant's fill, hover and pressed states are unchanged. Its
-accessible name says the state too; color alone does not carry it.
 
 Proposed: when a trigger changes between icon-only and labelled content, keep one
 `Button` mounted and switch `shape="icon"` / `shape="capsule"`. The icon shape
@@ -1137,10 +1132,6 @@ InputGroup. Use `prefix` for ordinary text before masked dots.
 `Checkbox` and `Radio` default to 40px rows with 20px controls. For compact
 inline choices, use `size="sm"`: 32px rows, 16px controls, and an 8px label gap.
 Pair small radios with `RadioGroup size="sm"` to remove the extra group gap.
-For a short set of single-select options side by side, such as a view filter,
-use `Radio variant="chip"` inside `RadioGroup layout="wrap"`: compact pills that
-wrap at the container's edge. Unselected chips have no fill; the selected one
-fills, never a check or dot. Name the group with a `Field` label.
 Compact filter popovers use `padding="list"`; keep room around a scrolling
 choice list for the shared keyboard focus ring.
 
@@ -1264,8 +1255,7 @@ spacing. Use `size="compact"` with list padding for short account/action surface
 width and 16px corners. `MenuPopup size="compact"` uses the same corner, inset, row and
 hover treatment for short action lists. Content and wide popovers retain 24px corners.
 Name it with PopoverTitle or aria-label; PopoverDescription connects
-supporting copy. `PopoverTitle emphasis="quiet"` names a compact popover of
-settings in small, subtle text, like a menu group label. Hover opening is optional and remains configured by its feature.
+supporting copy. Hover opening is optional and remains configured by its feature.
 Use `padding="none"` for an embedded picker that owns its internal spacing, such as
 emoji/GIF content.
 Dropdown menus, submenus, and popovers use a quicker version of the form dropdown

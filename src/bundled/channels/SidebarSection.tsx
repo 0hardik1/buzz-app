@@ -1,7 +1,9 @@
 import {
-  SidebarViewOptions,
+  SidebarFilterButton,
+  SidebarViewMenuItems,
   type SidebarViewFilter,
-} from "./SidebarViewOptions";
+  type SidebarViewSort,
+} from "./SidebarViewMenus";
 import { FadingLabel } from "./FadingLabel";
 import {
   useEffect,
@@ -49,7 +51,6 @@ import {
 } from "./useSidebarSeeAll";
 import type { RelaySession } from "../../features/relay/session";
 import type { ChannelSummary } from "../../features/relay/contracts";
-import type { SidebarSortMode } from "../../features/relay/sidebar-sort";
 import { SidebarGroupIcon } from "./SidebarGroupIcon";
 import { SidebarStarIcon } from "./SidebarStarIcon";
 import { SidebarCardResize, useSidebarCardHeight } from "./SidebarCardResize";
@@ -124,13 +125,7 @@ export function SidebarSection({
   createSection?:
     | { available: boolean; open: (trigger: HTMLButtonElement) => void }
     | undefined;
-  sort?:
-    | {
-        value: SidebarSortMode;
-        modes?: readonly { id: SidebarSortMode; label: string }[];
-        change: (mode: SidebarSortMode) => void;
-      }
-    | undefined;
+  sort?: SidebarViewSort | undefined;
   filter?: SidebarViewFilter | undefined;
   channels?:
     | {
@@ -180,7 +175,19 @@ export function SidebarSection({
   );
   const unreadsFirst = useSidebarUnreadsFirst(heightScope)(sectionKey);
   // The menu unmounts while hidden, so it must not reopen when shown again.
-  if (hideMoreActions && menuOpen) setMenuOpen(false);
+  const unreadsFirstChoice = heightScope
+    ? {
+        on: unreadsFirst,
+        set: (on: boolean) =>
+          setSidebarUnreadsFirst(heightScope, sectionKey, on),
+      }
+    : undefined;
+  const displayChoice =
+    iconView && heightScope ? { value: display, set: setDisplay } : undefined;
+  // View choices stay reachable when the card's own actions are hidden.
+  const viewChoices = !!(filter || sort || unreadsFirstChoice || displayChoice);
+  const showMenu = !hideMoreActions || viewChoices;
+  if (!showMenu && menuOpen) setMenuOpen(false);
   const [removeOpen, setRemoveOpen] = useState(false);
   const seeingAll = useSidebarSeeAll() === sectionKey;
   const returning = useSidebarSeeAllReturning();
@@ -260,7 +267,7 @@ export function SidebarSection({
           revealActions
           actions={
             <>
-              {!hideMoreActions && (
+              {showMenu && (
                 <MenuRoot open={menuOpen} onOpenChange={setMenuOpen}>
                   <MenuTrigger
                     ref={actionsTrigger}
@@ -277,7 +284,19 @@ export function SidebarSection({
                     align="end"
                     aria-label={`More actions for ${title}`}
                   >
-                    {createSection && (
+                    <SidebarViewMenuItems
+                      title={title}
+                      filter={filter}
+                      sort={sort}
+                      unreadsFirst={unreadsFirstChoice}
+                      display={displayChoice}
+                    />
+                    {viewChoices &&
+                      !hideMoreActions &&
+                      (createSection || move || menuActions) && (
+                        <MenuSeparator />
+                      )}
+                    {!hideMoreActions && createSection && (
                       <MenuItem
                         disabled={!createSection.available}
                         onClick={() => {
@@ -292,7 +311,7 @@ export function SidebarSection({
                         Create workspace
                       </MenuItem>
                     )}
-                    {move && (
+                    {!hideMoreActions && move && (
                       <>
                         <MenuItem
                           disabled={!move.up}
@@ -320,9 +339,10 @@ export function SidebarSection({
                         </MenuItem>
                       </>
                     )}
-                    {menuActions?.(() => setMenuOpen(false), actionsTrigger)}
+                    {!hideMoreActions &&
+                      menuActions?.(() => setMenuOpen(false), actionsTrigger)}
 
-                    {canRemove && (
+                    {!hideMoreActions && canRemove && (
                       <>
                         <MenuSeparator />
                         <MenuItem
@@ -343,27 +363,7 @@ export function SidebarSection({
                   </MenuPopup>
                 </MenuRoot>
               )}
-              {(filter || sort || heightScope) && (
-                <SidebarViewOptions
-                  title={title}
-                  filter={filter}
-                  sort={sort}
-                  unreadsFirst={
-                    heightScope
-                      ? {
-                          on: unreadsFirst,
-                          set: (on) =>
-                            setSidebarUnreadsFirst(heightScope, sectionKey, on),
-                        }
-                      : undefined
-                  }
-                  display={
-                    iconView && heightScope
-                      ? { value: display, set: setDisplay }
-                      : undefined
-                  }
-                />
-              )}
+              {filter && <SidebarFilterButton title={title} filter={filter} />}
               {headerActions}
               {newMessage && (
                 <IconButton

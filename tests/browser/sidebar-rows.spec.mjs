@@ -6,7 +6,7 @@ import {
   closeSettings,
   selectSettingsSection,
   settleShellToggle,
-  openViewOptions,
+  openSortMenu,
 } from "./navigation.mjs";
 import { setPluginEnabled } from "./plugin-settings.mjs";
 import { animationsSettled } from "./animations.mjs";
@@ -46,16 +46,16 @@ appTest(
     await expect(
       section.locator('[data-plugin-row="decorated"] [data-channel-id="beta"]'),
     ).toBeVisible();
-    const options = await openViewOptions(page, "Team");
+    const options = await openSortMenu(page, "Team");
     await expect(
-      options.getByRole("radio", { name: "Reverse name" }),
+      options.getByRole("menuitemradio", { name: "Reverse name" }),
     ).toBeVisible();
     await animationsSettled(options, { subtree: true });
     await page.screenshot({
       path: testInfo.outputPath("sidebar-rows-sort-menu.png"),
     });
     const saved = page.waitForResponse("**/sidebar-sort");
-    await options.getByRole("radio", { name: "Reverse name" }).click();
+    await options.getByRole("menuitemradio", { name: "Reverse name" }).click();
     const response = await saved;
     expect(response.ok()).toBe(true);
     await response.finished();

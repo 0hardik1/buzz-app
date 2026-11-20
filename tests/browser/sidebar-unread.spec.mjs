@@ -1,4 +1,4 @@
-import { selectCommunity, viewOptionsButton } from "./navigation.mjs";
+import { filterButton, selectCommunity } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 import { test as base, expect } from "./fixture.mjs";
 import { streamEvidence } from "./stream-evidence.mjs";
@@ -525,7 +525,7 @@ test("resizing, collapsed groups and new unread evidence update only the display
     list(page).getByRole("button", { name: "More actions for Team" }),
   ).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(viewOptionsButton(list(page), "Team")).toBeFocused();
+  await expect(filterButton(list(page), "Team")).toBeFocused();
   await page.keyboard.press("Tab");
   // Disabled header actions are skipped; traversal still reaches rows only
   // after the available header controls.

@@ -644,22 +644,6 @@ for (const family of accentFamilies) {
             `${family}/${level}/${mode}: --border-accent on ${surfaceRole} — ${ratio === null ? "unresolved color" : `${ratio.toFixed(3)}:1`}, needs 3:1`,
           );
       }
-      // An icon on state (a filtered card's view options) sits on the sidebar
-      // card at rest, on hover and on press, and on other panels' actions.
-      for (const surfaceRole of [
-        ...BOUNDARY_SURFACES,
-        "--affordance-sidebar-hover",
-        "--affordance-panel-hover",
-        "--affordance-subtle-pressed",
-      ]) {
-        const icon = resolve(map, "--icon-accent");
-        const surface = resolve(map, surfaceRole);
-        const ratio = icon && surface ? wcagRatio(icon, surface) : null;
-        if (ratio === null || ratio < 3)
-          boundaryFailures.push(
-            `${family}/${level}/${mode}: --icon-accent on ${surfaceRole} — ${ratio === null ? "unresolved color" : `${ratio.toFixed(3)}:1`}, needs 3:1`,
-          );
-      }
       for (const baseRole of MESSAGE_ICON_ROLES) {
         for (const [role, surfaceRole] of [
           [baseRole, "--surface-message"],

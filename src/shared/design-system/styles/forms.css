@@ -285,38 +285,7 @@
   .buzz-choice[data-variant="row"]:not(:has([data-disabled])):hover {
     background: var(--interaction-hover);
   }
-  .buzz-radio-group[data-layout="wrap"] {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1);
-  }
-  /* A compact pill: no fill at rest, so the chosen one's fill stands out. */
-  .buzz-choice[data-variant="chip"] {
-    position: relative;
-    min-height: var(--space-6);
-    padding: var(--space-half) var(--space-2);
-    border-radius: var(--radius-pill);
-    background: transparent;
-    color: var(--text-subtle);
-    @apply text-body-sm;
-  }
-  .buzz-choice[data-variant="chip"] > span {
-    overflow-wrap: normal;
-    white-space: nowrap;
-  }
-  .buzz-choice[data-variant="chip"]:not(:has([data-disabled])):hover {
-    background: var(--interaction-hover);
-    color: var(--text-standard);
-  }
-  .buzz-choice[data-variant="chip"]:has([data-checked]) {
-    background: var(--interaction-selected);
-    color: var(--interaction-selected-text);
-  }
-  .buzz-choice[data-variant="chip"] .buzz-choice-label {
-    color: inherit;
-  }
   .buzz-radio[data-variant="tile"],
-  .buzz-radio[data-variant="chip"],
   .buzz-radio[data-variant="row"] {
     position: absolute;
     inset: 0;

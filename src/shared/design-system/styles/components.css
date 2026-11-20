@@ -703,11 +703,6 @@
     background: var(--affordance-accent);
     color: var(--text-accent);
   }
-  /* An icon action whose state is on, such as a filtered view, colors only its
-     icon; the button keeps its variant's fill, hover and pressed states. */
-  .buzz-button[data-icon-tone="accent"]:not([data-disabled]) {
-    color: var(--icon-accent);
-  }
   .buzz-button[data-muted]:not([data-disabled]) {
     color: var(--text-subtle);
   }
@@ -1816,7 +1811,7 @@
 
   .navigation-section-heading[data-disclosure]
     .navigation-section-heading-actions
-    [data-icon-variant]:not([data-disabled], [data-icon-tone]) {
+    [data-icon-variant]:not([data-disabled]) {
     color: inherit;
   }
 
@@ -2851,11 +2846,6 @@
     background: var(--interaction-row-hover);
     outline-offset: -2px;
   }
-  /* A compact popover is narrow, so its preference rows keep a tighter gap
-     and a short title beside its choice, such as Time range, stays on one line. */
-  .buzz-popover-popup[data-size="compact"] .buzz-preference-row {
-    gap: var(--space-3);
-  }
   .buzz-popover-popup[data-size="wide"] {
     width: 24rem;
   }
@@ -2868,9 +2858,6 @@
   }
   .buzz-popover-title {
     margin: 0;
-  }
-  .buzz-popover-title[data-emphasis="quiet"] {
-    color: var(--text-subtle);
   }
   .buzz-popover-description {
     margin: var(--space-2) 0 0;

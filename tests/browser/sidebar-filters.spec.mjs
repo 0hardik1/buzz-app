@@ -2,12 +2,15 @@ import { test, expect } from "./fixture.mjs";
 import {
   chooseDate,
   chooseViewOption,
+  closeMenus,
   dateChoice,
   expectViewOption,
+  filterButton,
+  openFilterMenu,
   openPage,
-  openViewOptions,
-  unreadsSwitch,
-  viewOptionsButton,
+  openSortMenu,
+  unreadsFirst,
+  unreadsOnly,
 } from "./navigation.mjs";
 import { join } from "node:path";
 import { fixtureRelayUrl } from "../relay-config.ts";
@@ -25,14 +28,15 @@ test.use({
   historyCounts: { alpha: 1, beta: 1, gamma: 1, delta: 1 },
 });
 
-// A card's view options popover holds its filter, sort and layout. Its button
-// names the card and says when the card is filtered.
-const viewOptions = openViewOptions;
+// A card's header Filter button opens its filter menu, and the same choices sit
+// under Filter in its ••• menu, beside Sort and Layout. The button names the
+// card and says when the card is filtered.
+const viewOptions = openFilterMenu;
 const show = chooseViewOption;
 
-// Browser-only contract: popover choices, save recovery and the real broker's
+// Browser-only contract: menu choices, save recovery and the real broker's
 // encrypted preference readback must agree after a document reload.
-test("section filters save activity windows from the view options popover", async ({
+test("section filters save activity windows from the Filter menu", async ({
   page,
   app,
 }, testInfo) => {
@@ -87,36 +91,25 @@ test("section filters save activity windows from the view options popover", asyn
       path: join(process.env.BUZZ_FILTER_CAPTURE_DIR, `${name}.png`),
     });
   };
-  const trigger = viewOptionsButton(page, "Team");
+  const trigger = filterButton(page, "Team");
   const checked = expectViewOption;
   await shot("01-all");
   let popup = await viewOptions(page, "Team");
   await checked(popup, "All");
   await expect(trigger).toHaveAttribute("data-icon-variant", "ghost");
-  await shot("02-view-options");
-  await unreadsSwitch(popup).click();
+  await shot("02-filter-menu");
+  await unreadsOnly(popup).click();
   await expect
     .poll(() => app.report.sidebarPublications?.at(-1)?.blob.groups.channels)
     .toBe("unreads");
   await checked(popup, "Unreads");
-  // A filtered card's icon takes the accent, and its name says so.
-  await expect(trigger).toHaveAccessibleName("View options for Team, filtered");
-  await expect(trigger).toHaveAttribute("data-icon-tone", "accent");
+  // A filtered card's button keeps the card's action color; its name says so.
+  await expect(trigger).toHaveAccessibleName("Filter Team, filtered");
+  await expect(trigger).not.toHaveAttribute("data-icon-tone");
   await expect(trigger).toHaveAttribute("data-icon-variant", "ghost");
-  // The accent reaches the icon through the heading's quiet action color.
-  const iconColor = () =>
-    trigger.evaluate((button) => {
-      const probe = document.createElement("span");
-      probe.style.color = "var(--icon-accent)";
-      button.append(probe);
-      const expected = getComputedStyle(probe).color;
-      probe.remove();
-      return getComputedStyle(button).color === expected;
-    });
-  await expect.poll(iconColor).toBe(true);
   await shot("03-unreads");
   // Date combines with Unreads: both are saved together.
-  await chooseDate(page, popup, "7 days");
+  await chooseDate(popup, "7 days");
   await expect
     .poll(() => app.report.sidebarPublications.at(-1)?.blob)
     .toMatchObject({
@@ -126,13 +119,17 @@ test("section filters save activity windows from the view options popover", asyn
     });
   await checked(popup, "Unreads");
   await checked(popup, "7 days");
-  // Unreads first has nothing to reorder while Unreads is on.
-  await expect(
-    popup.getByRole("switch", { name: "Unreads first", exact: true }),
-  ).toBeDisabled();
   await shot("04-unreads-seven-days");
+  // Unreads first, under Sort, has nothing to reorder while Unreads is on.
+  await page.keyboard.press("Escape");
+  await expect(popup).toHaveCount(0);
+  const sort = await openSortMenu(page, "Team");
+  await expect(unreadsFirst(sort)).toBeDisabled();
+  await shot("04b-sort-menu");
+  await closeMenus(page);
+  popup = await viewOptions(page, "Team");
   // Turning Unreads off keeps the date.
-  await unreadsSwitch(popup).click();
+  await unreadsOnly(popup).click();
   await expect
     .poll(() => app.report.sidebarPublications.at(-1)?.blob.groups.channels)
     .toBe("active");
@@ -154,16 +151,16 @@ test("section filters save activity windows from the view options popover", asyn
   await expect.poll(revealed).toBe("0");
   await page.getByLabel("Team", { exact: true }).hover();
   await expect.poll(revealed).toBe("1");
-  // More actions, then view options, then new.
+  // More actions, then Filter, then new.
   const xs = await section
     .locator(".navigation-section-heading-actions button")
     .evaluateAll((buttons) =>
       buttons.map((button) => button.getAttribute("aria-label")),
     );
   expect(xs.indexOf("More actions for Team")).toBeLessThan(
-    xs.indexOf("View options for Team, filtered"),
+    xs.indexOf("Filter Team, filtered"),
   );
-  expect(xs.indexOf("View options for Team, filtered")).toBe(
+  expect(xs.indexOf("Filter Team, filtered")).toBe(
     xs.indexOf("More actions for Team") + 1,
   );
   await shot("06-filtered-button");
@@ -183,7 +180,7 @@ test("section filters save activity windows from the view options popover", asyn
       body: JSON.stringify({ error: "Filter could not be saved. Try again." }),
     });
   });
-  await chooseDate(page, popup, "30 days");
+  await chooseDate(popup, "30 days");
   const retry = page.getByRole("button", { name: "Retry filter", exact: true });
   await expect(retry).toBeVisible();
   await page.keyboard.press("Escape");
@@ -199,11 +196,11 @@ test("section filters save activity windows from the view options popover", asyn
     )
     .toBe(30 * 86400);
   // Any time range is a filter, 30 days included.
-  await expect(trigger).toHaveAccessibleName("View options for Team, filtered");
+  await expect(trigger).toHaveAccessibleName("Filter Team, filtered");
   popup = await viewOptions(page, "Team");
   await checked(popup, "30 days");
   await page.emulateMedia({ colorScheme: "dark" });
-  await shot("07-view-options-dark");
+  await shot("07-filter-menu-dark");
   await page.keyboard.press("Escape");
   await show(page, "Work", "Today");
   const work = page.locator('[data-sidebar-section="group:work"]');
@@ -238,8 +235,9 @@ test("section filters save activity windows from the view options popover", asyn
   });
   await page.reload();
   popup = await viewOptions(page, "Work");
-  await expect(unreadsSwitch(popup)).toBeDisabled();
-  await expect(dateChoice(popup)).toBeDisabled();
+  await expect(unreadsOnly(popup)).toBeDisabled();
+  await expect(dateChoice(popup, "Today")).toBeDisabled();
+  await expect(dateChoice(popup, "All")).toBeDisabled();
   await checked(popup, "Today");
   await shot("11-read-only");
 });
@@ -305,7 +303,7 @@ test("failed activity reads explain the filter and recover on Retry", async ({
   ).toBeVisible();
   const popup = await viewOptions(page, "Team");
   try {
-    await chooseDate(page, popup, "30 days");
+    await chooseDate(popup, "30 days");
     await requested;
     await expect(unknown).toBeVisible();
   } finally {
@@ -507,13 +505,13 @@ test.describe("with a saved workspace filter", () => {
     await openPage(page, "Messages");
     const options = await viewOptions(page, "Work");
     await expectViewOption(options, "All");
-    await expect(unreadsSwitch(options)).not.toBeChecked();
+    await expect(unreadsOnly(options)).not.toBeChecked();
   });
 });
 
-// See all keeps the card's filter behind the same view options button, so
-// what's selected always matches the list; choosing there changes the card too.
-test("See all shares the card's view options and filter", async ({
+// See all keeps the card's filter behind the same Filter button, so what's
+// selected always matches the list; choosing there changes the card too.
+test("See all shares the card's Filter button and filter", async ({
   page,
   app,
 }, testInfo) => {
@@ -562,15 +560,15 @@ test("See all shares the card's view options and filter", async ({
     exact: true,
   });
   const resize = page.getByRole("separator", { name: "Resize sidebar" });
-  // The popover, then the filtered card and an unfiltered one on hover, at
+  // The Filter menu, then the filtered card and an unfiltered one on hover, at
   // the default and narrowest widths.
   const capture = async (name) => {
     const popup = await viewOptions(page, "Team");
     await settle();
-    await page.screenshot({ path: testInfo.outputPath(`${name}-popover.png`) });
+    await page.screenshot({ path: testInfo.outputPath(`${name}-menu.png`) });
     await page.keyboard.press("Escape");
     await expect(popup).toHaveCount(0);
-    await viewOptionsButton(page, "Team").blur();
+    await filterButton(page, "Team").blur();
     await page.getByLabel("Team", { exact: true }).hover();
     await settle();
     await sidebar.screenshot({
@@ -587,7 +585,7 @@ test("See all shares the card's view options and filter", async ({
     await page.mouse.move(0, 0);
   };
   let popup = await viewOptions(page, "Team");
-  await chooseDate(page, popup, "7 days");
+  await chooseDate(popup, "7 days");
   await page.keyboard.press("Escape");
   await expect(rowFor("delta")).toHaveCount(0);
   await capture("card-default");
@@ -622,8 +620,8 @@ test("See all shares the card's view options and filter", async ({
   await expect(page.getByRole("tablist", { name: "Filter Team" })).toHaveCount(
     0,
   );
-  await expect(viewOptionsButton(page, "Team")).toHaveAccessibleName(
-    "View options for Team, filtered",
+  await expect(filterButton(page, "Team")).toHaveAccessibleName(
+    "Filter Team, filtered",
   );
   await expect(rowFor("gamma")).toBeVisible();
   await expect(rowFor("delta")).toHaveCount(0);
@@ -633,12 +631,10 @@ test("See all shares the card's view options and filter", async ({
   await resize.press("End");
 
   popup = await viewOptions(page, "Team");
-  await chooseDate(page, popup, "All");
+  await chooseDate(popup, "All");
   await page.keyboard.press("Escape");
   await expect(rowFor("delta")).toBeVisible();
-  await expect(viewOptionsButton(page, "Team")).toHaveAccessibleName(
-    "View options for Team",
-  );
+  await expect(filterButton(page, "Team")).toHaveAccessibleName("Filter Team");
 });
 
 // Back from See all returns the reader to the scroll position they left and
@@ -672,7 +668,7 @@ test("Back from See all restores the sidebar scroll and marks See all", async ({
     .getByRole("button", { name: "Design", exact: true })
     .click();
   const popup = await viewOptions(page, "Team");
-  await chooseDate(page, popup, "7 days");
+  await chooseDate(popup, "7 days");
   await page.keyboard.press("Escape");
   const seeAll = page.getByRole("button", {
     name: "See all in Team",

@@ -269,67 +269,119 @@ export function pageChoice(group, name) {
     .or(group.getByRole("row", { name, exact: true }));
 }
 
-/** A card's View options button. Its name says when the card is filtered. */
-export function viewOptionsButton(scope, title) {
+/** A card's ••• button, which holds its structural actions and, under Filter,
+ * Sort and Layout, its view choices. */
+export function moreActionsButton(scope, title) {
   return scope.getByRole("button", {
-    name: new RegExp(`^View options for ${title}(, filtered)?$`),
+    name: `More actions for ${title}`,
+    exact: true,
   });
 }
 
-/** Opens a card's View options popover. Focus reveals its hover-only button. */
-export async function openViewOptions(page, title, scope = page) {
-  const button = viewOptionsButton(scope, title);
+/** A card's filter icon button. Its name says when the card is filtered. */
+export function filterButton(scope, title) {
+  return scope.getByRole("button", {
+    name: new RegExp(`^Filter ${title}(, filtered)?$`),
+  });
+}
+
+/** A menu by name, skipping one still closing. */
+export function openMenu(page, name) {
+  return page
+    .getByRole("menu", { name, exact: true })
+    .and(page.locator(":not([data-closed])"));
+}
+
+/** Opens a card's Filter menu from its header icon. Focus reveals its
+ * hover-only button. Choosing in it keeps the menu open. */
+export async function openFilterMenu(page, title, scope = page) {
+  const button = filterButton(scope, title);
   await button.focus();
   await button.click();
-  // Skip a popover still closing.
-  const popup = page
-    .getByRole("dialog", { name: `Filter & sort for ${title}`, exact: true })
-    .and(page.locator(":not([data-closed])"));
-  await expect(popup).toBeVisible();
-  return popup;
+  const menu = openMenu(page, `Filter ${title}`);
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
+/** Opens a card's ••• menu, then its Sort submenu, which holds the sort
+ * choices and Unreads first. Choosing in it keeps the menus open. */
+export async function openSortMenu(page, title, scope = page) {
+  const button = moreActionsButton(scope, title);
+  await button.focus();
+  await button.click();
+  await expect(openMenu(page, `More actions for ${title}`)).toBeVisible();
+  await page
+    .getByRole("menuitem", { name: "Sort", exact: true })
+    .and(page.locator(":not([data-closed])"))
+    .click();
+  const menu = openMenu(page, `Sort ${title}`);
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
+/** Escapes until no menu or submenu is open. Each Escape gets time to finish
+ * closing before the next, which could otherwise reach something else. */
+export async function closeMenus(page) {
+  const menus = page.getByRole("menu");
+  for (let i = 0; i < 3; i++) {
+    if ((await menus.count()) === 0) return;
+    await page.keyboard.press("Escape");
+    try {
+      await expect(menus).toHaveCount(0, { timeout: 1000 });
+      return;
+    } catch {}
+  }
+  await expect(menus).toHaveCount(0);
 }
 
 const DATES = new Set(["All", "Today", "3 days", "7 days", "30 days"]);
 
-/** View options' Unreads switch, which combines with its Date. */
-export function unreadsSwitch(popup) {
-  return popup.getByRole("switch", { name: "Unreads only", exact: true });
+/** The Filter menu's Unreads only checkbox, which combines with its Date. */
+export function unreadsOnly(menu) {
+  return menu.getByRole("menuitemcheckbox", {
+    name: "Unreads only",
+    exact: true,
+  });
 }
 
-/** View options' Time range dropdown. */
-export function dateChoice(popup) {
-  return popup.getByRole("combobox", { name: "Time range", exact: true });
+/** The Filter menu's Unreads first checkbox lives under Sort. */
+export function unreadsFirst(menu) {
+  return menu.getByRole("menuitemcheckbox", {
+    name: "Unreads first",
+    exact: true,
+  });
 }
 
-/** Picks a Time range in an open View options popover. */
-export async function chooseDate(page, popup, name) {
-  await dateChoice(popup).click();
-  await page.getByRole("option", { name, exact: true }).click();
-  await expect(page.getByRole("listbox")).toHaveCount(0);
+/** One Time range choice in an open Filter menu. */
+export function dateChoice(menu, name) {
+  return menu.getByRole("menuitemradio", { name, exact: true });
 }
 
-/** Expects View options to show `name`: Unreads, a Date, or a choice. */
-export async function expectViewOption(popup, name) {
-  if (name === "Unreads") await expect(unreadsSwitch(popup)).toBeChecked();
-  else if (DATES.has(name)) await expect(dateChoice(popup)).toContainText(name);
+/** Picks a Time range in an open Filter menu, which stays open. */
+export async function chooseDate(menu, name) {
+  await dateChoice(menu, name).click();
+}
+
+/** Expects a menu to show `name`: Unreads, a Date, or a sort choice. */
+export async function expectViewOption(menu, name) {
+  if (name === "Unreads") await expect(unreadsOnly(menu)).toBeChecked();
   else
     await expect(
-      popup.getByRole("radio", { name, exact: true }),
-    ).toHaveAttribute("aria-checked", "true");
+      menu.getByRole("menuitemradio", { name, exact: true }),
+    ).toBeChecked();
 }
 
-/** Picks one View options choice, such as Unreads, a Date or A–Z, then closes
- * it. All shows every conversation: Unreads off, all dates. */
+/** Picks one Filter choice, such as Unreads or a Date, then closes the menu.
+ * All shows every conversation: Unreads off, all dates. */
 export async function chooseViewOption(page, title, name, scope = page) {
-  const popup = await openViewOptions(page, title, scope);
-  // Click rather than check: a failed save puts the switch back.
-  const unreads = unreadsSwitch(popup);
+  const menu = await openFilterMenu(page, title, scope);
+  // Click rather than check: a failed save puts the checkbox back.
+  const unreads = unreadsOnly(menu);
   if (name === "Unreads") {
     if (!(await unreads.isChecked())) await unreads.click();
   } else if (DATES.has(name)) {
-    await chooseDate(page, popup, name);
+    await chooseDate(menu, name);
     if (name === "All" && (await unreads.isChecked())) await unreads.click();
-  } else await popup.getByRole("radio", { name, exact: true }).click();
-  await page.keyboard.press("Escape");
-  await expect(popup).toHaveCount(0);
+  } else throw new Error(`Not a Filter choice: ${name}`);
+  await closeMenus(page);
 }
