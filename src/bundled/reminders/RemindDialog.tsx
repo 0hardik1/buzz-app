@@ -160,7 +160,7 @@ export function RemindDialog({
   return (
     <Dialog
       size="compact"
-      bodyLayout={message ? "flow" : "scroll"}
+      bodyLayout="scroll"
       open={open}
       visit={visit}
       dismissOnOutsideClick={false}
