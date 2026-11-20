@@ -1147,6 +1147,85 @@ it("renders each framed workspace once with creation controls and restores the o
   }
 });
 
+it("keeps a workspace name editor through a write outage, and a late save never closes a newer edit", async () => {
+  const h = createSoloRegionFixture(viewer);
+  const groups = {
+    sections: [
+      { id: "work", name: "Work", order: 0 },
+      { id: "mixed", name: "Mixed", order: 1 },
+    ],
+    assignments: { chat: "work", "public-row": "mixed" },
+  };
+  let failReads = false;
+  const read = vi.fn(async () => {
+    if (failReads) throw new Error("offline");
+    return { ...groups, starred: [], muted: [] };
+  });
+  let release = () => {};
+  const renameSection = vi.fn(
+    () => new Promise<typeof groups>((done) => (release = () => done(groups))),
+  );
+  const preferences = createSidebarPreferencesStore({
+    available: true,
+    read,
+    renameSection,
+  });
+  await preferences.queries.ensure();
+  Object.assign(h.session, { sidebarPreferences: preferences.queries });
+  h.roster([
+    {
+      id: "chat",
+      name: "Chat",
+      channelType: "solo",
+      creator: viewer,
+      cached: true,
+    },
+    { id: "public-row", name: "Public channel", channelType: "stream" },
+  ]);
+  const view = render(
+    <ToastProvider>
+      <PrimarySidebar
+        relay={h.relay}
+        navigator={h.navigator}
+        target={conversationTarget(h.scope, "chat")}
+      >
+        {null}
+      </PrimarySidebar>
+    </ToastProvider>,
+  );
+  const user = userEvent.setup();
+  try {
+    await user.dblClick(await screen.findByLabelText("Work"));
+    const work = screen.getByRole("textbox", { name: "Workspace name" });
+    await user.keyboard("Studio");
+    // Writes go away while the editor is open; the draft stays.
+    failReads = true;
+    await act(() => preferences.queries.refresh().catch(() => {}));
+    expect(preferences.queries.sectionRenameWritable).toBe(false);
+    expect(work).toHaveValue("Studio");
+    failReads = false;
+    await act(() => preferences.queries.refresh());
+    expect(preferences.queries.sectionRenameWritable).toBe(true);
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(renameSection).toHaveBeenCalledOnce());
+    // A newer edit opens on another workspace before the first save lands.
+    await user.dblClick(screen.getByLabelText("Mixed"));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("textbox", { name: "Workspace name" }),
+      ).toHaveValue("Mixed"),
+    );
+    await act(async () => release());
+    expect(screen.getByRole("textbox", { name: "Workspace name" })).toHaveValue(
+      "Mixed",
+    );
+  } finally {
+    view.unmount();
+    preferences.dispose();
+    await h.dispose();
+  }
+});
+
 it("shows a disabled region's chat in Solo while leaving its saved filing dormant", async () => {
   const h = createSoloRegionFixture(viewer);
   const saved = {
