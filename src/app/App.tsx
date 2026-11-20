@@ -52,6 +52,7 @@ import { registerAppShortcuts } from "./shortcuts";
 import type { AppServices } from "./services";
 import { Settings } from "./Settings";
 import { SettingsSidebar } from "./SettingsSidebar";
+import { revealSetting } from "./settings-search";
 import { pendingManaged } from "../plugins/managed";
 import { RecoveryScreen } from "./RecoveryScreen";
 import { PageView } from "../features/pages/PageView";
@@ -563,7 +564,7 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
     );
   const openSettingsSection = (section: string, pluginId?: string) => {
     const client = services.communities.snapshot();
-    void services.navigation.open({
+    return services.navigation.open({
       version: 1,
       kind: "settings",
       section,
@@ -897,6 +898,11 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
                   ? { selected: route.target.section }
                   : {})}
                 onSection={openSettingsSection}
+                onSetting={(entry) => {
+                  void openSettingsSection(entry.section).then((result) => {
+                    if (result.status === "opened") revealSetting(entry);
+                  });
+                }}
               />
             ),
           }}
