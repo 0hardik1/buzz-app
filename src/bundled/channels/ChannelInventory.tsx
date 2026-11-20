@@ -54,6 +54,7 @@ import {
 } from "../../features/solo/draft-projects";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import {
+  HOME_SIDEBAR_SECTIONS,
   SIDEBAR_PAGES_SECTION,
   workspaceSectionOrder,
 } from "../../features/relay/sidebar-preferences";
@@ -77,6 +78,7 @@ import {
 import { useSidebarRowUnread } from "../../features/channel-navigation/useSidebarRowUnread";
 import {
   defaultSidebarSort,
+  sidebarSortNeedsActivity,
   type SidebarSortMode,
 } from "../../features/relay/sidebar-sort";
 import type { SidebarFrame } from "../../features/channel-navigation/SidebarFrame";
@@ -306,23 +308,30 @@ export function ChannelInventory({
   const pluginSorted = appliedSorts.some(
     (mode) => mode !== "alpha" && mode !== "recent",
   );
-  // Cards default to recent and the last 30 days, which both need activity.
-  const needsActivity = true;
-  const soloActivity = useCallback(
-    (channel: ChannelSummary) => eligibleSolo(channel, viewer),
-    [viewer],
-  );
-  const soloRecent = sectionSort("solo") === "recent";
+  // Cards default to Recent and the last 30 days, which both need activity;
+  // the session reads it on its own only for saved choices. Wait for saved
+  // choices first, so an all-A–Z sidebar never reads activity at startup.
+  const preferencesSettled =
+    !!preferences.data ||
+    preferences.status === "error" ||
+    preferences.status === "unsupported";
+  const needsActivity =
+    preferencesSettled &&
+    [
+      ...HOME_SIDEBAR_SECTIONS,
+      ...(preferences.data?.sections ?? []).map(({ id }) => `group:${id}`),
+    ].some(
+      (key) =>
+        sidebarSortNeedsActivity(sectionSort(key)) ||
+        sectionFilter(key) === "active",
+    );
   const list = useChannelRoster(queries.channels, {
-    activity: needsActivity || (soloRecent && soloActivity),
+    activity: needsActivity,
     preview: pluginSorted,
   });
-  // The session reads activity only for saved sorts; Solo's default needs it
-  // too, but only while there are Solo chats to order.
-  const soloOrdered = soloRecent && list.channels.some(soloActivity);
   useEffect(() => {
-    if (soloOrdered) return queries.channels.demandActivity?.();
-  }, [soloOrdered, queries.channels]);
+    if (needsActivity) return queries.channels.demandActivity?.();
+  }, [needsActivity, queries.channels]);
   const rosterRecovers = useRecoveryOwns(queries, (live) =>
     rosterRecovering(live.roster),
   );
@@ -333,7 +342,13 @@ export function ChannelInventory({
         !mode.startsWith("plugin:") ||
         rowSortModes.some((available) => available.id === mode),
     );
-  const startup = useSidebarStartup(queries, list, preferences, sortModesReady);
+  const startup = useSidebarStartup(
+    queries,
+    list,
+    preferences,
+    sortModesReady,
+    needsActivity,
+  );
   const [activityErrorDismissed, setActivityErrorDismissed] = useState(false);
   useEffect(() => {
     if (list.activityStatus !== "error") setActivityErrorDismissed(false);
@@ -1192,8 +1207,10 @@ export function ChannelInventory({
     mode: "all" | "unreads" | "active",
     activeWindowSeconds?: number | null,
   ) => {
-    setSidebarFilterAll(scope, key, mode === "all");
-    const saved = key.startsWith("group:") ? `section:${key.slice(6)}` : key;
+    // Menus pass the card key (group:x); Retry passes the saved key (section:x).
+    const card = key.startsWith("section:") ? `group:${key.slice(8)}` : key;
+    const saved = card.startsWith("group:") ? `section:${card.slice(6)}` : card;
+    setSidebarFilterAll(scope, card, mode === "all");
     // All lives on this device; with no saved filter to clear, the relay
     // already says All. A failed choice it replaces is retired either way.
     if (mode === "all" && preferences.data?.filters?.[saved] === undefined) {
