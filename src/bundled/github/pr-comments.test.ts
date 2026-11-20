@@ -120,7 +120,7 @@ it("does not reconcile under a changed GitHub viewer", async () => {
   state.viewer = "another-reviewer";
   expect(await api.reconcile(result.attempt)).toEqual(result);
 });
-it("coalesces simultaneous sends before any awaits", async () => {
+it("coalesces simultaneous calls for the same operation before dispatch", async () => {
   const { api, snapshot, anchor, state } = await setup();
   const [first, second] = await Promise.all([
     api.create(snapshot, anchor, "Same draft", "operation"),
@@ -141,6 +141,38 @@ it("allows intentional identical text with a new operation but reuses the first 
   ).toBe("sent");
   expect(state.comments).toHaveLength(2);
 });
+it.each(["success", "timeout"] as const)(
+  "rejects changed payloads for a %s operation",
+  async (mode) => {
+    const { api, snapshot, anchor, state } = await setup();
+    state.mode = mode;
+    const first = await api.create(snapshot, anchor, "Same", "operation");
+    for (const [target, body] of [
+      [anchor, "Changed"],
+      [{ ...anchor, line: 5001 }, "Same"],
+    ] as const)
+      expect(
+        await api.create(snapshot, target, body, "operation"),
+      ).toMatchObject({
+        status: "failed",
+        error: { kind: "validation" },
+      });
+    if (first.status === "unknown") {
+      const sent = await api.reconcile(first.attempt);
+      expect(sent).toEqual({
+        status: "sent",
+        comment: { id: "comment-1", url: state.comments[0]?.html_url },
+      });
+      expect(await api.create(snapshot, anchor, "Same", "operation")).toEqual(
+        sent,
+      );
+    }
+    expect(state.calls.filter((call) => call.args[0] === "POST")).toHaveLength(
+      1,
+    );
+  },
+);
+
 it("keeps an unknown attempt unresolved when reconciliation finds no unique match", async () => {
   const { api, snapshot, anchor, state } = await setup();
   state.mode = "timeout";
@@ -264,8 +296,8 @@ it("reads file pages, outer thread cursors, and nested comment cursors", async (
     thread: {
       id: "thread-1",
       path: "src/example.ts",
-      side: "RIGHT",
-      line: 5001,
+      side: anchor.side,
+      line: anchor.line,
       outdated: false,
       rootCommentId: 1,
     },
@@ -299,7 +331,7 @@ it("normalizes inaccessible PR/thread GraphQL reads", async () => {
     kind: "forbidden",
   });
 });
-it("retains receipts for coalesced operation aliases while allowing a fresh draft", async () => {
+it("retains queued same-operation receipts while allowing a fresh draft", async () => {
   const { api, snapshot, anchor, state } = await setup();
   state.mode = "hold";
   let posted: () => void = () => {};
@@ -311,16 +343,32 @@ it("retains receipts for coalesced operation aliases while allowing a fresh draf
   };
   const first = api.create(snapshot, anchor, "Same", "operation-A");
   await started;
-  const alias = api.create(snapshot, anchor, "Same", "operation-B");
+  const queued = api.create(snapshot, anchor, "Same", "operation-A");
+  expect(
+    await api.create(snapshot, anchor, "Changed", "operation-A"),
+  ).toMatchObject({
+    status: "failed",
+    error: { kind: "validation" },
+  });
   state.release();
   const receipt = await first;
-  expect(await alias).toEqual(receipt);
+  expect(await queued).toEqual(receipt);
   expect(await api.create(snapshot, anchor, "Same", "operation-A")).toEqual(
     receipt,
   );
-  expect(await api.create(snapshot, anchor, "Same", "operation-B")).toEqual(
-    receipt,
-  );
+  expect(
+    await api.create(snapshot, anchor, "Changed", "operation-A"),
+  ).toMatchObject({
+    status: "failed",
+    error: { kind: "validation" },
+  });
+  expect(receipt).toEqual({
+    status: "sent",
+    comment: {
+      id: "comment-1",
+      url: "https://github.com/example-org/sample/pull/1#discussion_r1",
+    },
+  });
   expect(state.comments).toHaveLength(1);
   state.mode = "success";
   expect(

@@ -63,7 +63,7 @@ export type CommentPage = Page<Comment> & {
   base: string;
 };
 export type WriteResult =
-  | { status: "sent"; comment: Comment }
+  | { status: "sent"; comment: Pick<Comment, "id" | "url"> }
   | { status: "stale" }
   | { status: "failed"; error: PrCommentError }
   | { status: "unknown"; attempt: string };
@@ -159,14 +159,6 @@ type RestComment = {
   original_line: number | null;
   in_reply_to_id?: number;
 };
-const commentOf = (value: RestComment): Comment => ({
-  id: value.node_id,
-  databaseId: value.id,
-  body: value.body,
-  author: value.user?.login ?? "deleted user",
-  avatarUrl: value.user?.avatar_url,
-  url: value.html_url,
-});
 const commentFields = `id databaseId body author { login avatarUrl } url`;
 type GraphComment = Omit<Comment, "author"> & {
   author: { login: string; avatarUrl?: string } | null;
@@ -267,13 +259,14 @@ export function createPrComments(
     anchor: Anchor | undefined;
     root: number | undefined;
     body: string;
-    key: string;
     baseline: Set<number>;
-    result: Promise<WriteResult>;
   };
-  const attempts = new Map<string, Attempt>();
-  const keys = new Map<string, string>();
-  const operations = new Map<string, string>();
+  type Operation = {
+    fingerprint: string;
+    result: Promise<WriteResult>;
+    pending?: Attempt | undefined;
+  };
+  const operations = new Map<string, Operation>();
   async function send(
     snapshot: Snapshot,
     anchor: Anchor | undefined,
@@ -293,7 +286,7 @@ export function createPrComments(
           "validation",
         ),
       };
-    const key = JSON.stringify([
+    const payload = JSON.stringify([
       snapshot.repository.toLowerCase(),
       snapshot.number,
       snapshot.viewer,
@@ -306,30 +299,25 @@ export function createPrComments(
       snapshot.viewer,
       operation,
     ]);
-    const priorOperation = operations.get(operationKey);
-    if (priorOperation) {
-      const prior = attempts.get(priorOperation);
-      if (prior)
-        return prior.key === key
-          ? prior.result
-          : {
-              status: "failed",
-              error: new PrCommentError(
-                "Submission changed while delivery was pending",
-                "validation",
-              ),
-            };
-    }
-    const existing = keys.get(key);
-    if (existing) {
-      const attempt = attempts.get(existing);
-      if (attempt) {
-        operations.set(operationKey, existing);
-        return attempt.result;
-      }
-    }
-    const id = crypto.randomUUID();
-    // Register before the first await so other panels share the same operation.
+    const hash = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(payload),
+    );
+    const fingerprint = Array.from(new Uint8Array(hash), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+    const prior = operations.get(operationKey);
+    if (prior)
+      return prior.fingerprint === fingerprint
+        ? prior.result
+        : {
+            status: "failed",
+            error: new PrCommentError(
+              "Submission changed while delivery was pending",
+              "validation",
+            ),
+          };
+    // Admit synchronously before any network request can dispatch a write.
     let finish: (result: WriteResult) => void = () => {};
     const result = new Promise<WriteResult>((resolve) => {
       finish = resolve;
@@ -339,13 +327,10 @@ export function createPrComments(
       anchor,
       root,
       body,
-      key,
       baseline: new Set(),
-      result,
     };
-    operations.set(operationKey, id);
-    keys.set(key, id);
-    attempts.set(id, attempt);
+    const record: Operation = { fingerprint, result, pending: attempt };
+    operations.set(operationKey, record);
     let dispatched = false;
     try {
       const previous = await allComments(snapshot);
@@ -357,9 +342,7 @@ export function createPrComments(
         current.base.sha !== snapshot.base
       ) {
         finish({ status: "stale" });
-        keys.delete(key);
         operations.delete(operationKey);
-        attempts.delete(id);
         return result;
       }
       if ((await viewer()) !== snapshot.viewer)
@@ -395,8 +378,11 @@ export function createPrComments(
       );
       if (!created.id || !created.html_url)
         throw new Error("GitHub did not return a comment receipt");
-      finish({ status: "sent", comment: commentOf(created) });
-      keys.delete(key);
+      record.pending = undefined;
+      finish({
+        status: "sent",
+        comment: { id: created.node_id, url: created.html_url },
+      });
     } catch (error) {
       const definite =
         !dispatched ||
@@ -408,10 +394,8 @@ export function createPrComments(
           status: "failed",
           error: error instanceof PrCommentError ? error : failure(error),
         });
-        keys.delete(key);
         operations.delete(operationKey);
-        attempts.delete(id);
-      } else finish({ status: "unknown", attempt: id });
+      } else finish({ status: "unknown", attempt: operationKey });
     }
     return result;
   }
@@ -594,10 +578,12 @@ export function createPrComments(
     reply: (snapshot, root, body, operation) =>
       send(snapshot, undefined, root, body, operation),
     async reconcile(id) {
-      const attempt = attempts.get(id);
-      if (!attempt) return { status: "unknown", attempt: id };
-      const prior = await attempt.result;
+      const record = operations.get(id);
+      if (!record) return { status: "unknown", attempt: id };
+      const prior = await record.result;
       if (prior.status === "sent") return prior;
+      const attempt = record.pending;
+      if (!attempt) return { status: "unknown", attempt: id };
       try {
         if ((await viewer()) !== attempt.snapshot.viewer)
           return { status: "unknown", attempt: id };
@@ -617,10 +603,10 @@ export function createPrComments(
         if (matches.length === 1 && matches[0]) {
           const sent = {
             status: "sent",
-            comment: commentOf(matches[0]),
+            comment: { id: matches[0].node_id, url: matches[0].html_url },
           } as const;
-          attempt.result = Promise.resolve(sent);
-          keys.delete(attempt.key);
+          record.pending = undefined;
+          record.result = Promise.resolve(sent);
           return sent;
         }
       } catch {

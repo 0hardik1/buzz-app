@@ -6,12 +6,15 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+import { webcrypto } from "node:crypto";
 import { useEffect } from "react";
 import type { DiffComments } from "../diffs/DiffViewer";
 import { PrFiles } from "./PrFiles";
 import { createInlineDelivery } from "./inline-delivery";
+import { createPanelMemory } from "./panel-memory";
 import {
   createPrComments,
   type Comment,
@@ -23,6 +26,8 @@ import {
   githubCommentHost,
 } from "../../../tests/fixtures/github-comment-host";
 
+vi.stubGlobal("crypto", webcrypto);
+afterAll(() => vi.unstubAllGlobals());
 afterEach(cleanup);
 
 const diffRender = vi.hoisted(() => vi.fn());
@@ -219,10 +224,15 @@ it.each([
   const fixture = githubCommentHost();
   const transport = createPrComments(fixture.host);
   if (!transport) throw new Error("Missing adapter");
-  seed(fixture.state);
-  seed(fixture.state, "Late reply", 2, 1);
-  fixture.state.pageSize = 1;
   const snapshot = await transport.loadSnapshot(fixturePull);
+  await transport.create(
+    snapshot,
+    { ...snapshot, path: "src/example.ts", side: "RIGHT", line: 5001 },
+    "Comment 1",
+    "seed",
+  );
+  await transport.reply(snapshot, 1, "Late reply", "seed-reply");
+  fixture.state.pageSize = 1;
   const loadThreads = vi.spyOn(transport, "loadThreads");
   const api = {
     ...transport,
@@ -252,6 +262,7 @@ it.each([
       pull={fixturePull}
       head={snapshot.head}
       base={snapshot.base}
+      delivery={createInlineDelivery()}
     />,
   );
   fireEvent.click(
@@ -367,6 +378,66 @@ it("keeps an in-flight lock and unknown receipt after cancel and remount", async
   await screen.findByRole("link", { name: "View on GitHub" });
   expect(state.calls.filter((call) => call.args[0] === "POST")).toHaveLength(2); // seed + one submission
   expect(delivery.get().unknown).toBe(false);
+});
+
+it("admits only one submission across two panels and duplicate gestures", async () => {
+  const fixture = githubCommentHost();
+  const api = createPrComments(fixture.host);
+  if (!api) throw new Error("Missing adapter");
+  const snapshot = await api.loadSnapshot(fixturePull);
+  await api.create(
+    snapshot,
+    { ...snapshot, path: "src/example.ts", side: "RIGHT", line: 5001 },
+    "Existing thread",
+    "seed",
+  );
+  const memory = createPanelMemory();
+  const views = [
+    "https://github.com/Example-org/Sample/pull/1",
+    "https://github.com/example-org/sample/pull/1",
+  ].map((url) =>
+    render(
+      <PrFiles
+        api={api}
+        pull={fixturePull}
+        head={snapshot.head}
+        base={snapshot.base}
+        delivery={memory.delivery(url)}
+      />,
+    ),
+  );
+  const forms: HTMLFormElement[] = [];
+  for (const view of views) {
+    const panel = within(view.container);
+    fireEvent.click(await panel.findByRole("button", { name: "Reply" }));
+    const input = panel.getByRole("textbox", { name: "Comment" });
+    fireEvent.change(input, { target: { value: "Same" } });
+    const form = input.closest("form");
+    if (!form) throw new Error("Missing composer");
+    forms.push(form);
+  }
+  fixture.state.mode = "hold";
+  for (const form of forms) {
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+  }
+  await waitFor(() =>
+    expect(
+      fixture.state.calls.filter((call) => call.args[0] === "POST"),
+    ).toHaveLength(2),
+  );
+  await act(async () => {
+    fixture.state.release();
+  });
+  await waitFor(() =>
+    expect(
+      memory.delivery("https://github.com/example-org/sample/pull/1").get()
+        .busy,
+    ).toBe(false),
+  );
+  expect(
+    fixture.state.comments.filter((row) => row.body === "Same"),
+  ).toHaveLength(1);
 });
 
 it("opens a composer before the pending thread read finishes", async () => {
