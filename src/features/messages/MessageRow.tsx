@@ -4,6 +4,7 @@ import { requestWork, isSettledWork } from "../agents/request-work";
 import { ActivityDisclosure } from "./ActivityDisclosure";
 import { ActivityOutcome } from "./ActivityOutcome";
 import { AgentResponsePreview } from "./AgentResponsePreview";
+import { useChannelActivitySubscription } from "../agents/use-channel-agent-activity";
 import { useSpringLoaded } from "./spring-loaded-drag";
 import { useActivityIndicator } from "./use-activity-indicator";
 import type { ActivityRowPresentation } from "./activity-presentation";
@@ -167,7 +168,7 @@ export type MessageRowProps = {
   participantProfiles?: ReadonlyMap<string, Profile> | undefined;
   agentPubkeys?: ReadonlySet<string> | undefined;
   canOpenLink?: ((target: string) => boolean) | undefined;
-  media(url: string, size?: "small"): string | undefined;
+  media(url: string, size?: "small", channel?: string): string | undefined;
   /** Receives the thread the link was opened from: the row’s root, or the row. */
   onOpenLink(url: string, origin?: MessageLinkOrigin): boolean;
   day: boolean;
@@ -226,8 +227,9 @@ function useCompletedMessageWork(
   activity: RelaySession["agentActivity"] | undefined,
   row: ChannelMessage,
 ) {
+  const subscribe = useChannelActivitySubscription(activity, row.channelId);
   const read = () => {
-    const snapshot = activity?.snapshot();
+    const snapshot = activity?.snapshot(row.channelId);
     if (!snapshot) return false;
     const published = (snapshot.local ?? []).filter(
       (work) =>
@@ -249,7 +251,7 @@ function useCompletedMessageWork(
       )
     );
   };
-  return useSyncExternalStore(activity?.subscribe ?? noSubscribe, read, read);
+  return useSyncExternalStore(subscribe, read, read);
 }
 
 const FullMessageRow = memo(function MessageRow(props: MessageContentProps) {
@@ -780,6 +782,10 @@ function MessageRowContent({
       previous.push(attachment);
     else attachmentGroups.push([attachment]);
   }
+  // A message's images are saved with its channel, so losing the channel
+  // forgets them.
+  const attachmentMedia = (url: string, size?: "small") =>
+    media(url, size, row.channelId);
   const attachmentContent = (copied = false) =>
     attachmentGroups.some(
       (group) => copiedUrls.has(group[0]?.url ?? "") === copied,
@@ -808,7 +814,7 @@ function MessageRowContent({
             const items = previews.map((attachment, index) => {
               const url = safeMessageUrl(attachment.url);
               if (!url) return null;
-              const source = media(url);
+              const source = attachmentMedia(url);
               if (attachment.kind === "file") {
                 const fallback = (
                   <FileAttachment
@@ -871,8 +877,7 @@ function MessageRowContent({
                 );
               }
               if (attachment.kind === "image") {
-                // biome-ignore lint/plugin: Attachment thumbnails, not avatars.
-                const small = media(url, "small");
+                const small = attachmentMedia(url, "small");
                 // Third-party URLs map to themselves: no thumbnail. JPEG
                 // drops alpha, so these formats use the WebP variant.
                 const alpha =
@@ -881,7 +886,7 @@ function MessageRowContent({
                   small === source
                     ? undefined
                     : alpha
-                      ? media(`${alpha[1]}.thumb.webp`)
+                      ? attachmentMedia(`${alpha[1]}.thumb.webp`)
                       : small;
                 const image = (
                   <AttachmentImage
@@ -946,7 +951,7 @@ function MessageRowContent({
                 <MediaAttachment
                   key={url}
                   attachment={{ ...attachment, url }}
-                  media={media}
+                  media={attachmentMedia}
                   compact={images && group.length >= 4 && !!onOpenMediaReview}
                   overlayCount={collapsed && index === 3 ? group.length - 3 : 0}
                   label={
@@ -2444,8 +2449,12 @@ function useThreadAgents(
     get,
   );
   // Subscribe to this thread's working agents, not every activity step.
+  const subscribeWork = useChannelActivitySubscription(
+    session?.agentActivity,
+    channelId,
+  );
   const getWork = () => {
-    const activity = session?.agentActivity?.snapshot();
+    const activity = session?.agentActivity?.snapshot(channelId);
     const typers = threadWorkingAgents(
       activity,
       keys ? keys.split(",") : [],
@@ -2466,11 +2475,7 @@ function useThreadAgents(
       typers.length > 0 && typers.every((agent) => breathing(local.get(agent)));
     return `${waiting ? "waiting" : "working"}:${typers.join(",")}`;
   };
-  const work = useSyncExternalStore(
-    session?.agentActivity?.subscribe ?? noSubscribe,
-    getWork,
-    getWork,
-  );
+  const work = useSyncExternalStore(subscribeWork, getWork, getWork);
   const [state, joined = ""] = work.split(/:(.*)/s);
   const typers = joined ? joined.split(",") : [];
   const hasWork = typers.length > 0;

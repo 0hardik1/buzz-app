@@ -3498,6 +3498,7 @@ html[data-keyboard-navigation] .rawDiff:focus-visible {
 }
 .activityExpansion {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(var(--activity-reveal-min, 0px), 1fr);
 }
 .activityExpansionContent {
@@ -4331,6 +4332,9 @@ html[data-keyboard-navigation]
 }
 .relayedHeader > .relayedChat > * {
   margin-inline: 0;
+}
+.relayedHeader:not([data-open]) > .relayedChat {
+  max-inline-size: 20rem;
 }
 .relayedPreview {
   flex: 1 1 0;

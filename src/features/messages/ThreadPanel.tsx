@@ -19,7 +19,7 @@ import { ActivityExpansion } from "./ActivityExpansion";
 import { ActivityGroupPreview } from "./ActivityGroupPreview";
 import {
   activityPresentation,
-  useChannelActivitySnapshot,
+  useActivityHistorySnapshot,
   useStableRowActivity,
 } from "./activity-presentation";
 import { activityRuns, relayedRuns } from "./activity-groups";
@@ -690,10 +690,9 @@ function ThreadMessages({
     view.snapshot,
     view.snapshot,
   );
-  const threadChannels = useMemo(() => new Set([channelId]), [channelId]);
-  const activitySnapshot = useChannelActivitySnapshot(
+  const activitySnapshot = useActivityHistorySnapshot(
     session.agentActivity,
-    threadChannels,
+    channelId,
   );
   const stableActivity = useStableRowActivity();
   const resolvedRoot = snapshot.root?.id;
@@ -800,7 +799,7 @@ function ThreadMessages({
     void profileGeneration;
     if (authors)
       void session.profiles
-        .ensure(authors.split(":"), "background")
+        .ensure(authors.split(":"), "background", { withStatuses: true })
         .catch(() => {});
   }, [session.profiles, authors, profileGeneration]);
   const profiles = useRowProfiles(session.profiles, rows);
