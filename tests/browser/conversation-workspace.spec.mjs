@@ -44,13 +44,18 @@ async function expectBottom(page, region) {
 
 async function readEarlier(page, region) {
   await region.hover();
-  // Linux WebKit animates a wheel and can end it early when a row measures
-  // mid-scroll, so read on up as a reader would. Each wheel ends settled.
-  await expect(async () => {
+  // Linux WebKit can finish a wheel gesture short of the requested distance.
+  let distance = await gap(region);
+  for (let gesture = 0; gesture < 4; gesture++) {
     await wheel(page, -450, region);
-    expect(await gap(region)).toBeGreaterThan(200);
-  }).toPass({ timeout: 10_000 });
-  await settle(page, region);
+    const next = await gap(region);
+    expect(next, "reading gesture moves away from bottom").toBeGreaterThan(
+      distance,
+    );
+    if (next > 200) return;
+    distance = next;
+  }
+  expect(distance, "reading position is above bottom").toBeGreaterThan(200);
 }
 
 async function openReplyTab(app, region) {

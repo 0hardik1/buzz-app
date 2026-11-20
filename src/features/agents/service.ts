@@ -2645,6 +2645,7 @@ export class AgentsService extends Service implements Agents {
           if (!identity.deleted) this.followRecommendedHarness(identity);
       },
       watchReadFailuresChanged: () => queueMicrotask(() => this.notify()),
+      transitionChanged: () => this.notify(),
       ready: (key) => this.ready(key),
       reloading: (key) => this.reloading(key),
       settle: async (agent, signal, gateway) => {
@@ -3855,7 +3856,7 @@ export class AgentsService extends Service implements Agents {
           const client = appClient(handle, {
             signal,
             relayAuthor: source.relayAuthor?.(),
-            signingAuthority: source.workflowAuthority(),
+            signingAuthority: source.workflowAuthority() ?? null,
             check: () => {
               handle.attention.enabled();
               if (reads().connection !== source.connection)
@@ -3924,6 +3925,7 @@ export class AgentsService extends Service implements Agents {
       const connectionSource = ownerReads(this.relay(key), pubkeyOf(key));
       if (!connectionSource)
         throw new Error("The agent's community is not connected");
+      const current = this.runners.attentionCommandCurrent(key);
       const spawn = host.spawn.bind(host);
       return spawnAgentCommand(
         {
@@ -3951,8 +3953,10 @@ export class AgentsService extends Service implements Agents {
             };
           },
           check: () => {
-            if (!handle.attention.enabled())
-              throw new Error("Attention is off");
+            if (!current())
+              throw new Error(
+                "This agent can no longer run the Attention command",
+              );
             if (
               ownerReads(this.relay(key), pubkeyOf(key))?.connection !==
               connectionSource.connection
@@ -4095,7 +4099,8 @@ export class AgentsService extends Service implements Agents {
       sources.reconcile(
         this.attentionProvider(source),
         source,
-        this.state.running.filter((agent) => this.runners.runs(agent.key)),
+        this.state.running.filter(({ key }) => this.runners.runs(key)),
+        (key) => this.runners.transitioning(key),
       );
     const unsubscribe = this.subscribe(update);
     update();
@@ -4383,7 +4388,7 @@ export class AgentsService extends Service implements Agents {
             signal,
             check,
             relayAuthor: source.relayAuthor?.(),
-            signingAuthority: source.workflowAuthority(),
+            signingAuthority: source.workflowAuthority() ?? null,
             // Where the agent's type reads them outside its turns, if it can.
             read: async (path) => {
               const current = this.agent(key);

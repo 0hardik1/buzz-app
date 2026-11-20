@@ -52,6 +52,7 @@ import { bytesToHex } from "nostr-tools/utils";
 import { finalizeEvent, generateSecretKey } from "nostr-tools";
 import {
   afterEach,
+  assert,
   beforeAll,
   beforeEach,
   describe,
@@ -102,7 +103,13 @@ import {
 } from "../decisions/service";
 import { TypeSafeKey } from "../../bundled/typesafe/key";
 import { typesafeProvider } from "../../bundled/typesafe";
-import { CATCH_UP_PREFIX, MENTIONS, readCheckpoints } from "./catch-up";
+import {
+  CATCH_UP_PREFIX,
+  MENTIONS,
+  readCheckpoints,
+  streamKey,
+  writeCheckpoints,
+} from "./catch-up";
 import { CHANNEL_KINDS } from "../relay/live";
 import { fileStore, loadAgentStorage, type AgentStore } from "./state";
 import { readInterrupted, writeInterrupted } from "./interrupted";
@@ -11043,6 +11050,232 @@ it("does not catch up after a restart on a message it already heard live", async
   }
 });
 
+it("saves interleaved replay once per tick and recovers without redelivering it", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], now: 1_700_000_000_000 });
+  const start = nowSeconds();
+  const storage = memoryStorage();
+  const save = vi.spyOn(storage, "set");
+  const first = await setup({ storage, identities: [echo] });
+  try {
+    await first.service.save(bot, {
+      attentionEnabled: true,
+      attention: {
+        "watch/chat": {
+          ...chat["watch/chat"],
+          authors: [author.pubkey],
+          channels: [channel, lobby],
+        },
+        "watch/channel": null,
+      },
+    });
+    const agent = first.service.find(bot);
+    assert.exists(agent);
+    const checkpoints = [channel, lobby].map((id) =>
+      streamKey(agent.key, "watch/chat", id),
+    );
+    await vi.waitFor(() =>
+      expect(
+        checkpoints.map((key) => readCheckpoints(storage)[key]?.through),
+      ).toEqual([start, start]),
+    );
+    vi.setSystemTime((start + 1) * 1000);
+    const other = keypair();
+    const sent = Array.from({ length: 120 }, (_, index) => {
+      const channelId = index % 2 ? lobby : channel;
+      const matches = index < 10 && channelId === channel;
+      return {
+        channelId,
+        replay: true as const,
+        events: [
+          eventDto(
+            message(
+              matches ? author : other,
+              channelId,
+              matches ? `matched ${index / 2}` : `other ${index}`,
+              start + 1,
+            ),
+          ),
+        ],
+      };
+    });
+    for (let index = 0; index < sent.length; index += 12) {
+      save.mockClear();
+      for (const batch of sent.slice(index, index + 12)) first.emit(batch);
+      await settle();
+      expect(
+        save.mock.calls.filter(([key]) => key.startsWith(CATCH_UP_PREFIX)),
+      ).toHaveLength(1);
+    }
+    expect(heard(first.run)).toEqual([
+      "matched 0",
+      "matched 1",
+      "matched 2",
+      "matched 3",
+      "matched 4",
+    ]);
+    expect(
+      checkpoints
+        .flatMap(
+          (key) =>
+            readCheckpoints(storage)[key]?.heard?.map(({ id }) => id) ?? [],
+        )
+        .sort(),
+    ).toEqual(sent.flatMap(({ events }) => events.map(({ id }) => id)).sort());
+    save.mockClear();
+    for (const batch of sent.slice(0, 12)) first.emit(batch);
+    await settle();
+    expect(heard(first.run)).toHaveLength(5);
+    expect(
+      save.mock.calls.filter(([key]) => key.startsWith(CATCH_UP_PREFIX)),
+    ).toHaveLength(0);
+
+    first.connect(false);
+    vi.setSystemTime((start + 2) * 1000);
+    const second = await setup({
+      storage,
+      identities: [echo],
+      history: [
+        ...sent.flatMap(({ events }) => events),
+        posted("unheard", start + 1),
+      ],
+    });
+    try {
+      await vi.waitFor(() => expect(heard(second.run)).toEqual(["unheard"]));
+    } finally {
+      await second.ctx.fiber.dispose();
+    }
+  } finally {
+    await first.ctx.fiber.dispose();
+    vi.useRealTimers();
+  }
+});
+
+it.each([false, true])(
+  "replays only unsaved events after a native checkpoint failure (another writer: %s)",
+  async (anotherWriter) => {
+    vi.useFakeTimers({ toFake: ["Date"], now: 1_700_000_000_000 });
+    const start = nowSeconds();
+    const disk = new Map<string, string>();
+    const entered = runnerGate();
+    const release = runnerGate();
+    let writeFromPeer: (() => Promise<void>) | undefined;
+    let failNext = false;
+    const save = vi.fn(async (key: string, value: string | null) => {
+      if (key.startsWith(CATCH_UP_PREFIX) && failNext) {
+        failNext = false;
+        entered.resolve();
+        await release.promise;
+        throw new Error("Transient write failure");
+      }
+      if (value === null) disk.delete(key);
+      else disk.set(key, value);
+    });
+    const open = () =>
+      fileStore(new Map(disk), save, undefined, async (key) => {
+        const value = disk.get(key) ?? null;
+        // A peer can save after a native read took its snapshot and before a
+        // retry uses that snapshot.
+        if (key.startsWith(CATCH_UP_PREFIX)) await writeFromPeer?.();
+        return value;
+      });
+    const storage = open();
+    const first = await setup({
+      storage,
+      identities: [echo],
+    });
+    try {
+      await first.service.save(bot, {
+        attentionEnabled: true,
+        attention: { ...chat, "watch/channel": null },
+      });
+      const agent = first.service.find(bot);
+      assert.exists(agent);
+      const checkpoint = streamKey(agent.key, "watch/chat", channel);
+      const progress = () => readCheckpoints(open())[checkpoint];
+      await vi.waitFor(() => expect(progress()?.through).toBe(start));
+      vi.setSystemTime((start + 1) * 1000);
+      const saved = posted("saved", start + 1);
+      first.emit({ replay: true, channelId: channel, events: [saved] });
+      await vi.waitFor(() =>
+        expect(progress()?.heard?.map(({ id }) => id)).toEqual([saved.id]),
+      );
+      vi.setSystemTime((start + 3) * 1000);
+      const events = [
+        posted("first", start + 2),
+        posted("second", start + 3),
+      ] as const;
+      save.mockClear();
+      failNext = true;
+      first.emit({
+        replay: true,
+        channelId: channel,
+        events: [...events, events[0]],
+      });
+      await entered.promise;
+      const newer = posted("newer", start + 4);
+      const settled = anotherWriter ? [saved, ...events, newer] : [saved];
+      if (anotherWriter) {
+        const peer = open();
+        const previous = readCheckpoints(peer);
+        writeFromPeer = async () => {
+          writeFromPeer = undefined;
+          await writeCheckpoints(
+            peer,
+            {
+              ...previous,
+              [checkpoint]: {
+                through: start,
+                heard: settled.map(({ id, created_at }) => ({
+                  id,
+                  created_at,
+                })),
+              },
+            },
+            previous,
+          );
+        };
+      }
+      release.resolve();
+      await vi.waitFor(() =>
+        expect(heard(first.run)).toEqual(["saved", "first", "second"]),
+      );
+      // A failed native write rolls the local copy back before its rejection
+      // reaches the service. Drain its promise callbacks before counting.
+      await settle();
+      await writeFromPeer?.();
+      expect(
+        save.mock.calls.filter(([key]) => key.startsWith(CATCH_UP_PREFIX)),
+      ).toHaveLength(anotherWriter ? 2 : 1);
+      expect(progress()?.heard?.map(({ id }) => id)).toEqual(
+        settled.map(({ id }) => id),
+      );
+
+      first.connect(false);
+      vi.setSystemTime((start + 5) * 1000);
+      const second = await setup({
+        storage: open(),
+        identities: [echo],
+        history: [saved, ...events, newer, posted("unheard", start + 5)],
+      });
+      try {
+        await vi.waitFor(() =>
+          expect(heard(second.run)).toEqual(
+            anotherWriter
+              ? ["unheard"]
+              : ["first", "second", "newer", "unheard"],
+          ),
+        );
+      } finally {
+        await second.ctx.fiber.dispose();
+      }
+    } finally {
+      release.resolve();
+      await first.ctx.fiber.dispose();
+      vi.useRealTimers();
+    }
+  },
+);
+
 it.each([
   { label: "every message matches", rate: 5, matching: 5, only: false },
   { label: "one in ten matches", rate: 10, matching: 1, only: true },
@@ -16433,6 +16666,72 @@ describe("Attention plugin sources", () => {
         });
     },
   );
+  it.each(["switches", "refuses the switch"])(
+    "delivers a completed source's accepted wake when retype %s",
+    async (outcome) => {
+      const jev = fakeJev();
+      const decision = runnerGate<DecisionResult>();
+      jev.decide.mockReturnValueOnce(decision.promise);
+      const { service, run, plugin, native, watching } = await sourceFixture({
+        jev,
+      });
+      const replacement = vi.fn(async () => {});
+      plugin.agents.register({
+        id: "replacement",
+        title: "Replacement",
+        defaults: () => ({ config: {} }),
+        run: replacement,
+      });
+      const produce = vi.fn(
+        async ({ emit }: Parameters<AttentionSource["run"]>[0]) => {
+          emit("final command output");
+        },
+      );
+      plugin.agents.addAttentionSource({ id: "command", run: produce });
+      try {
+        await service.create({ type: "example/echo", name: "Echo" });
+        await service.save(bot, {
+          attentionEnabled: true,
+          attention: {
+            ...watches,
+            "watch/pr": {
+              ...watches["watch/pr"],
+              classifier: {
+                questions: { relevant: { question: "Relevant?" } },
+              },
+            },
+          },
+        });
+        await vi.waitFor(() =>
+          expect(service.find(bot)?.sourceRuns?.["watch/pr"]).toBeDefined(),
+        );
+        if (outcome === "switches") {
+          await service.retype(bot, "example/replacement");
+        } else {
+          native.setType.mockRejectedValueOnce(new Error("Switch refused"));
+          await expect(
+            service.retype(bot, "example/replacement"),
+          ).rejects.toThrow("Switch refused");
+        }
+        decision.resolve(answered(0.9));
+        const receiving = outcome === "switches" ? replacement : run;
+        await vi.waitFor(() =>
+          expect(receiving).toHaveBeenCalledExactlyOnceWith(
+            expect.objectContaining({
+              trigger: expect.objectContaining({
+                type: "attention",
+                text: expect.stringContaining("final command output"),
+              }),
+            }),
+          ),
+        );
+        expect(produce).toHaveBeenCalledOnce();
+      } finally {
+        decision.resolve(answered(0.9));
+        await watching?.dispose();
+      }
+    },
+  );
   it("reserves a classified source's queue slot until delivery", async () => {
     const jev = fakeJev();
     let answer!: (value: DecisionResult) => void;
@@ -20440,6 +20739,103 @@ it.each(["command"])(
       }),
     );
     await watching?.dispose();
+  },
+);
+
+it.each(["starting", "running", "refused", "refused after notification"])(
+  "reconciles a command watch after a %s harness switch",
+  async (state) => {
+    const { service, plugin, ctx, native, watching } = await setup();
+    const kill = vi.fn(async () => {});
+    let exit!: (code: number | null) => void;
+    const exited = new Promise<number | null>((resolve) => {
+      exit = resolve;
+    });
+    const starting = runnerGate();
+    if (state !== "starting") starting.resolve();
+    const spawn = vi.fn(heldCommand).mockImplementationOnce(async () => {
+      await starting.promise;
+      return { ...(await heldCommand()), exited, kill };
+    });
+    ctx.provide("host", {
+      spawn,
+      serveMcp: async () => ({
+        url: "http://127.0.0.1/mcp",
+        headers: [],
+        closed: new Promise<void>(() => {}),
+        close: async () => {},
+      }),
+    });
+    plugin.agents.register({
+      id: "replacement",
+      title: "Replacement",
+      defaults: () => ({ config: {} }),
+      run: async () => {},
+    });
+    const core = plugin.extend({
+      pluginOwner: { id: "buzz.agents", revision: "bundled" },
+    });
+    registerAttention({ agents: core.agents });
+    try {
+      await service.create({ type: "example/echo", name: "Echo" });
+      await service.save(bot, {
+        attentionEnabled: true,
+        attention: {
+          "watch/saved": {
+            type: "source",
+            provider: "attention/command",
+            interest_id: "default",
+            enabled: true,
+            config: { command: ["check"] },
+          },
+        },
+      });
+      await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
+      const watch = service.find(bot)?.attention["watch/saved"];
+
+      if (state === "refused" || state === "refused after notification") {
+        const entered = runnerGate();
+        const change = runnerGate();
+        native.setType.mockImplementationOnce(async () => {
+          entered.resolve();
+          await change.promise;
+        });
+        const result = expect(
+          service.retype(bot, "example/replacement"),
+        ).rejects.toThrow("Switch refused");
+        await entered.promise;
+        try {
+          if (state === "refused after notification")
+            await service.saveTeam({
+              name: "Crew",
+              instructions: "",
+              members: [bot],
+            });
+        } finally {
+          change.reject(new Error("Switch refused"));
+          await result;
+        }
+        await settle();
+        expect(service.find(bot)?.type).toBe("example/echo");
+        expect(kill).not.toHaveBeenCalled();
+        expect(spawn).toHaveBeenCalledTimes(1);
+        return;
+      }
+
+      await service.retype(bot, "example/replacement");
+
+      starting.resolve();
+      expect(service.find(bot)?.attention["watch/saved"]).toBe(watch);
+      await vi.waitFor(() => expect(kill).toHaveBeenCalledTimes(1));
+      await settle();
+      expect(spawn).toHaveBeenCalledTimes(1);
+      exit(null);
+      await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2));
+    } finally {
+      starting.resolve();
+      exit(null);
+      await watching?.dispose();
+    }
   },
 );
 
