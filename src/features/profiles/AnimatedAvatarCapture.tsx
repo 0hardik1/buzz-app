@@ -11,7 +11,6 @@ import {
 } from "../../shared/design-system/icons";
 import { scrollAvatarPalette } from "./scroll-avatar-palette";
 import { avatarColors } from "./avatar-colors";
-import { AvatarCustomColor } from "./AvatarCustomColor";
 import editorStyles from "./AvatarEditor.module.css";
 import { uploadAvatar } from "./avatar-upload";
 import { animatedAvatarUrl } from "./animated-avatar";
@@ -83,9 +82,7 @@ export function AnimatedAvatarCapture({
   const [error, setError] = useState("");
   const [segmented, setSegmented] = useState(true);
   const [progress, setProgress] = useState(0);
-  const [customColorOpen, setCustomColorOpen] = useState(false);
   const colorDrag = useRef<{ x: number; left: number } | null>(null);
-  const restoreCustomFocus = useRef(false);
   const [section, setSection] = useState<"You" | "Background" | "Frame">("You");
   const [poster, setPoster] = useState(0);
   const reducedMotion = useReducedMotion();
@@ -196,7 +193,6 @@ export function AnimatedAvatarCapture({
       });
       frames.current = bitmaps;
       setSegmented(recording.backgroundRemoved);
-      setCustomColorOpen(false);
       setSection("You");
       setPoster(0);
       setPlaying(!reducedMotion);
@@ -432,7 +428,6 @@ export function AnimatedAvatarCapture({
                   aria-pressed={section === label}
                   icon={<Icon />}
                   onClick={() => {
-                    setCustomColorOpen(false);
                     setSection(label);
                   }}
                 />
@@ -454,91 +449,59 @@ export function AnimatedAvatarCapture({
           </div>
           {section === "Background" && (
             <div className={styles.controls}>
-              {customColorOpen ? (
-                <AvatarCustomColor
-                  color={composition.backdropColor ?? "#FFE75C"}
-                  disabled={disabled}
-                  onChange={(backdropColor) =>
-                    setComposition({ ...composition, backdropColor })
-                  }
-                  onClose={() => {
-                    restoreCustomFocus.current = true;
-                    setCustomColorOpen(false);
-                  }}
-                />
-              ) : (
-                <fieldset
-                  className={styles.colorRow}
-                  ref={(row) => {
-                    if (!row) return;
-                    row.addEventListener("wheel", scrollAvatarPalette, {
-                      passive: false,
-                    });
-                    return () =>
-                      row.removeEventListener("wheel", scrollAvatarPalette);
-                  }}
-                  onPointerDown={(event) => {
-                    if (event.pointerType === "mouse" && event.button === 0)
-                      colorDrag.current = {
-                        x: event.clientX,
-                        left: event.currentTarget.scrollLeft,
-                      };
-                  }}
-                  onPointerMove={(event) => {
-                    if (!event.buttons || !colorDrag.current) return;
-                    const distance = event.clientX - colorDrag.current.x;
-                    if (
-                      Math.abs(distance) < 4 &&
-                      !event.currentTarget.hasPointerCapture(event.pointerId)
-                    )
-                      return;
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                    event.currentTarget.scrollLeft =
-                      colorDrag.current.left - distance;
-                  }}
-                  onPointerUp={() => {
-                    colorDrag.current = null;
-                  }}
-                  onPointerCancel={() => {
-                    colorDrag.current = null;
-                  }}
-                  aria-label="Background colors"
-                >
-                  {[null, ...avatarColors].map((color) => (
-                    <button
-                      key={color ?? "clear"}
-                      type="button"
-                      className={editorStyles.swatch}
-                      aria-label={color ?? "Transparent background"}
-                      aria-pressed={composition.backdropColor === color}
-                      style={{ backgroundColor: color ?? "transparent" }}
-                      onClick={() =>
-                        setComposition({ ...composition, backdropColor: color })
-                      }
-                    >
-                      {color ? null : "∅"}
-                    </button>
-                  ))}
+              <fieldset
+                className={styles.colorRow}
+                ref={(row) => {
+                  if (!row) return;
+                  row.addEventListener("wheel", scrollAvatarPalette, {
+                    passive: false,
+                  });
+                  return () =>
+                    row.removeEventListener("wheel", scrollAvatarPalette);
+                }}
+                onPointerDown={(event) => {
+                  if (event.pointerType === "mouse" && event.button === 0)
+                    colorDrag.current = {
+                      x: event.clientX,
+                      left: event.currentTarget.scrollLeft,
+                    };
+                }}
+                onPointerMove={(event) => {
+                  if (!event.buttons || !colorDrag.current) return;
+                  const distance = event.clientX - colorDrag.current.x;
+                  if (
+                    Math.abs(distance) < 4 &&
+                    !event.currentTarget.hasPointerCapture(event.pointerId)
+                  )
+                    return;
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  event.currentTarget.scrollLeft =
+                    colorDrag.current.left - distance;
+                }}
+                onPointerUp={() => {
+                  colorDrag.current = null;
+                }}
+                onPointerCancel={() => {
+                  colorDrag.current = null;
+                }}
+                aria-label="Background colors"
+              >
+                {[null, ...avatarColors].map((color) => (
                   <button
+                    key={color ?? "clear"}
                     type="button"
-                    ref={(button) => {
-                      if (button && restoreCustomFocus.current) {
-                        restoreCustomFocus.current = false;
-                        button.focus();
-                      }
-                    }}
-                    className={editorStyles.customColor}
-                    aria-label="Custom background color"
-                    aria-pressed={
-                      !!composition.backdropColor &&
-                      !avatarColors.includes(
-                        composition.backdropColor.toUpperCase(),
-                      )
+                    className={editorStyles.swatch}
+                    aria-label={color ?? "Transparent background"}
+                    aria-pressed={composition.backdropColor === color}
+                    style={{ backgroundColor: color ?? "transparent" }}
+                    onClick={() =>
+                      setComposition({ ...composition, backdropColor: color })
                     }
-                    onClick={() => setCustomColorOpen(true)}
-                  />
-                </fieldset>
-              )}
+                  >
+                    {color ? null : "∅"}
+                  </button>
+                ))}
+              </fieldset>
             </div>
           )}
           {section === "You" && (

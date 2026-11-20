@@ -826,7 +826,7 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   const swatches = page
     .getByRole("group", { name: "Background colors" })
     .getByRole("button");
-  await expect(swatches).toHaveCount(25);
+  await expect(swatches).toHaveCount(24);
   const row = page.getByRole("group", { name: "Background colors" });
   await row.dispatchEvent("wheel", {
     deltaY: 200,
@@ -839,11 +839,7 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   const preset = page.getByRole("button", { name: "#FFE75C", exact: true });
   await preset.click();
   await expect(preset).toHaveAttribute("aria-pressed", "true");
-  await expect(swatches.last()).toHaveAccessibleName("Custom background color");
-  await swatches.last().click();
-  await expect(page.getByLabel("Color spectrum")).toBeVisible();
-  await page.getByRole("button", { name: "Use color" }).click();
-  await expect(swatches.last()).toBeFocused();
+  await expect(swatches.last()).toHaveAccessibleName("#000000");
   await page.getByRole("button", { name: "Transparent background" }).click();
   await page.getByRole("button", { name: "Frame", exact: true }).click();
   const filmstrip = page.getByRole("slider", { name: "Still frame" });
