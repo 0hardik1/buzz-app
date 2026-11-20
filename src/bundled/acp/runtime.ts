@@ -856,18 +856,21 @@ export class AcpRuntime {
       const workspace =
         (pinned as Snap | undefined)?.config.workspace ??
         entry.config.workspace;
-      const client = handle && {
-        ...appClient(handle, {
-          // The serving work's lifetime: nothing acts after it ends.
-          ...(signal && { signal, callSignal: signal }),
-          relayAuthor: this.relay(agent)?.snapshot().session.relayAuthor,
-          signingAuthority:
-            this.relay(agent)?.snapshot().session.workflowAuthority,
-          read: (path) => this.readFile(path, workspace),
-          memories: (slug) => this.memories(agent, slug),
-          remembered: () => this.forgetMemories(agent),
-        }),
-      };
+      // Built again after a wait through a reload, so a call carries the
+      // community's details as they are then.
+      const client = () =>
+        handle && {
+          ...appClient(handle, {
+            // The serving work's lifetime: nothing acts after it ends.
+            ...(signal && { signal, callSignal: signal }),
+            relayAuthor: this.relay(agent)?.snapshot().session.relayAuthor,
+            signingAuthority:
+              this.relay(agent)?.snapshot().session.workflowAuthority,
+            read: (path) => this.readFile(path, workspace),
+            memories: (slug) => this.memories(agent, slug),
+            remembered: () => this.forgetMemories(agent),
+          }),
+        };
       const context = place?.context ?? {};
       return respond(client, context, message, this.added());
     };

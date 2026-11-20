@@ -365,6 +365,48 @@ describe("AcpRuntime", () => {
     expect(session.agentMemories.read).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    "builds a call's client again once its community's reload settles (stopped: %s)",
+    async (stop) => {
+      const config = await confirmed();
+      const { fake, deliver, sync, session, agent, published } = setup({
+        hold: true,
+      });
+      let reloaded!: () => void;
+      const settle = vi.fn(
+        () => new Promise<void>((resolve) => (reloaded = resolve)),
+      );
+      Object.assign(agent, { settle });
+      sync(config);
+      const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
+      await deliver(message("1", "@Opal hi"), config, undefined, {
+        interruptible,
+      }).run;
+      await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+      const [harness] = fake.harnesses;
+      appClient.mockClear();
+      const call = harness?.mcp(
+        harness.turns[0]?.sessionId ?? "",
+        "tools/call",
+        { name: "send", arguments: { text: "hello", audience: "everyone" } },
+      );
+      await vi.waitFor(() => expect(settle).toHaveBeenCalled());
+      // The community reloaded with a new session and new details.
+      Object.assign(session, { relayAuthor: "new-author" });
+      if (stop) await interruptible.mock.calls[0]?.[0]();
+      reloaded();
+      const answer = JSON.stringify(await call);
+      if (stop) {
+        expect(answer).toMatch(/turn has ended/i);
+        expect(published).toEqual([]);
+      } else
+        expect(appClient.mock.calls.at(-1)?.[1]).toMatchObject({
+          relayAuthor: "new-author",
+        });
+      harness?.turns[0]?.finish(stop ? "cancelled" : undefined);
+    },
+  );
+
   it("refuses a read's result once Stop overtakes it", async () => {
     const config = await confirmed();
     const { fake, deliver, sync, session } = setup({ hold: true });
