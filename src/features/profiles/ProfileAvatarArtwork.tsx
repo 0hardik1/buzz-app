@@ -85,6 +85,12 @@ export function ProfileAvatarArtwork({
   }, [active, animation]);
   const src = active && loaded === animation ? animation : poster;
   return (
-    <AvatarArtwork key={src} src={src} fallback={fallback} loading={loading} />
+    <AvatarArtwork
+      transparent
+      key={src}
+      src={src}
+      fallback={fallback}
+      loading={loading}
+    />
   );
 }

@@ -812,6 +812,16 @@ test("the inline portrait stays still while the open profile preview plays", asy
     .locator(".buzz-avatar img");
   await expect(portrait).toHaveAttribute("src", /animated\.png$/);
   await expect(trigger.locator("img")).toHaveAttribute("src", /still\.png$/);
+  await expect(portrait).toHaveAttribute("data-loaded", "true");
+  await expect(portrait.locator("..")).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await expect(
+    page
+      .getByLabel("Sample person profile preview")
+      .locator('[style*="background-image"]'),
+  ).toHaveCount(0);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(portrait).toHaveAttribute("src", /still\.png$/);
 });

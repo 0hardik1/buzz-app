@@ -49,11 +49,13 @@ const RETRY_DELAYS_MS = [2_000, 10_000, 30_000];
 const failedAvatars = new Map<string, Set<() => void>>();
 
 export function AvatarArtwork({
+  transparent = false,
   src,
   fallback,
   loading,
 }: {
   src: string;
+  transparent?: boolean;
   fallback: ReactNode;
   loading: "eager" | "lazy" | undefined;
 }) {
@@ -114,6 +116,7 @@ export function AvatarArtwork({
       <img
         ref={image}
         src={src}
+        data-transparent={transparent || undefined}
         data-loaded={status === "loaded" ? "true" : undefined}
         alt=""
         loading={loading ?? (outcome === "loaded" ? "eager" : "lazy")}

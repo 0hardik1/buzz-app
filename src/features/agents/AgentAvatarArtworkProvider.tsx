@@ -30,7 +30,12 @@ function renderArtwork(
     return autoPlay ? (
       <ProfileAvatarArtwork key={src} {...animated} {...options} />
     ) : (
-      <AvatarArtwork key={animated.poster} src={animated.poster} {...options} />
+      <AvatarArtwork
+        transparent
+        key={animated.poster}
+        src={animated.poster}
+        {...options}
+      />
     );
   const avatar = packsBySource.get(src);
   return avatar ? (
