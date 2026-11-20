@@ -173,7 +173,6 @@ export function SidebarCardResize({
         {seeAll && !full && (shown < count || seeAll.hidden) && (
           <NavigationItem
             data-card-see-all=""
-            inset
             label="See all"
             aria-label={`See all in ${label}`}
             trailing={<CaretRightIcon size={14} />}
