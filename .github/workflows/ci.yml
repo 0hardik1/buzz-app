@@ -1,42 +1,442 @@
 name: CI
 on:
   workflow_dispatch:
+    inputs:
+      variant:
+        description: Discovery implementation
+        required: true
+        type: choice
+        options:
+          - before
+          - after
 permissions:
   contents: read
+concurrency:
+  group: discovery-full-${{ github.run_id }}
+  cancel-in-progress: false
+env:
+  CI: "true"
+  CARGO_TERM_COLOR: always
 jobs:
-  native:
-    name: Isolated discovery comparison
-    runs-on:
-      group: buzz-runners
-      labels: buzz-ubuntu-x64-16core
-    timeout-minutes: 15
-    env:
-      CI: "true"
+  javascript_checks:
+    if: "true"
+    name: JavaScript checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: a62346e2e59f9554284222d75667320a83007b95
-          fetch-depth: 2
           persist-credentials: false
+          ref: ${{ inputs.variant == 'before' && '92fea89d9cd0df4542d3994ed1ed0ed96844ebce' || 'a62346e2e59f9554284222d75667320a83007b95' }}
       - uses: ./.github/actions/setup
-      - name: Compare sequential and concurrent discovery
-        shell: bash
-        run: |
-          test "$(git rev-parse HEAD)" = a62346e2e59f9554284222d75667320a83007b95
-          test "$(git rev-parse HEAD^)" = 92fea89d9cd0df4542d3994ed1ed0ed96844ebce
-          git show 92fea89d9cd0df4542d3994ed1ed0ed96844ebce:tests/integration/browser-ci.test.mjs > "$RUNNER_TEMP/sequential.mjs"
-          cp tests/integration/browser-ci.test.mjs "$RUNNER_TEMP/concurrent.mjs"
-          mkdir -p test-results/discovery-comparison
-          round=0
-          for variant in sequential concurrent concurrent sequential; do
-            round=$((round + 1))
-            cp "$RUNNER_TEMP/$variant.mjs" tests/integration/browser-ci.test.mjs
-            echo "Round $round: $variant"
-            ./bin/node --test --test-name-pattern='^Linux shards and macOS recording' --test-reporter=spec tests/integration/browser-ci.test.mjs 2>&1 | tee "test-results/discovery-comparison/$round-$variant.log"
-          done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+      - name: Lint and types
+        run: ./bin/pnpm check
+      - name: Frontend build
+        run: ./bin/pnpm exec vite build
+  javascript:
+    if: "true"
+    name: JavaScript (${{ matrix.shard }}/8)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+          - 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          name: discovery-comparison
-          path: test-results/discovery-comparison
+          persist-credentials: false
+          ref: ${{ inputs.variant == 'before' && '92fea89d9cd0df4542d3994ed1ed0ed96844ebce' || 'a62346e2e59f9554284222d75667320a83007b95' }}
+      - uses: ./.github/actions/setup
+      - name: Vitest shard
+        env:
+          BUZZ_TEST_WORKERS: "2"
+        run: ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/ci/vitest.json evidence=test-results/ci/vitest-timing.json title="Vitest shard ${{ matrix.shard }}/8" -- ./bin/pnpm exec vitest run --shard=${{ matrix.shard }}/8 --reporter=default --reporter=json --outputFile=test-results/ci/vitest.json
+      - name: Vitest timing evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vitest-timing-${{ matrix.shard }}
+          path: test-results/ci
           retention-days: 7
+  agent_protection:
+    if: "true"
+    name: Protected agents (macOS)
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.variant == 'before' && '92fea89d9cd0df4542d3994ed1ed0ed96844ebce' || 'a62346e2e59f9554284222d75667320a83007b95' }}
+      - uses: ./.github/actions/setup
+      - name: Install pinned Pi test dependencies
+        run: |
+          source bin/activate-hermit
+          cd src/bundled/pi/deps
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Real Pi tools, recovery and host
+        env:
+          PI_DEPS: ${{ github.workspace }}/src/bundled/pi/deps
+        run: ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/protection/vitest.json evidence=test-results/protection/timing.json title="Protected Pi" -- ./bin/pnpm exec vitest run src/bundled/pi/protection.live.test.ts src/bundled/pi/host.live.test.ts --reporter=default --reporter=json --outputFile=test-results/protection/vitest.json
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          key: agent-protection
+          save-if: "false"
+      - name: Install exact protected Claude fixture
+        run: ./bin/node scripts/install-protected-claude-test.mjs
+      - name: Native Claude protection boundary
+        env:
+          BUZZ_TEST_WORKERS: "2"
+          CLAUDE_PROTECTION_BIN: ${{ github.workspace }}/target/protected-claude-test/claude
+        run: ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/protection/native-vitest.json evidence=test-results/protection/native-timing.json title="Native security hooks" -- ./bin/pnpm exec vitest run src/bundled/claude-code/protection.live.test.ts --reporter=default --reporter=json --outputFile=test-results/protection/native-vitest.json
+      - name: Native approval-state and window-state tests
+        run: |
+          mkdir -p test-results/protection
+          set -o pipefail
+          ./bin/cargo test --manifest-path src-tauri/Cargo.toml --locked --lib -- host_process host_command window_state::tests 2>&1 | tee test-results/protection/native.log
+      - name: Protection test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: agent-protection
+          path: test-results/protection
+          retention-days: 7
+  native:
+    if: "true"
+    name: Rust and tool integration
+    runs-on:
+      group: buzz-runners
+      labels: buzz-ubuntu-x64-16core
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.variant == 'before' && '92fea89d9cd0df4542d3994ed1ed0ed96844ebce' || 'a62346e2e59f9554284222d75667320a83007b95' }}
+      - uses: ./.github/actions/setup
+      - name: Tauri system libraries
+        run: |
+          # Azure package downloads can stall until the whole job expires:
+          # https://github.com/actions/runner-images/issues/14594
+          # Keep the image's official HTTPS archive and security fallbacks.
+          sudo sed -i '\|^http://azure\.archive\.ubuntu\.com/ubuntu/|d' /etc/apt/apt-mirrors.txt
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y dbus-daemon libwebkit2gtk-4.1-dev build-essential libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+      - name: Install isolated pinned Rust toolchain
+        run: |
+          export RUSTUP_HOME="$RUNNER_TEMP/buzz-rustup"
+          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
+          ./bin/rustup toolchain install
+          ./bin/rustup default "$(./bin/rustup show active-toolchain | cut -d ' ' -f1)"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          key: native
+          save-if: "false"
+      - name: Dependency policy
+        run: ./bin/cargo-deny --locked check
+      - name: Rust formatting
+        run: ./bin/cargo fmt --all --check
+      - name: Rust lint
+        run: ./bin/cargo clippy --workspace --locked --all-targets -- -D warnings
+      - name: Bundled buzz CLI
+        run: ./bin/node scripts/test-buzz-cli.mjs
+      - name: All Rust tests and doctests
+        run: ./bin/cargo test --workspace --locked
+      - name: FI Builderlab build and grant tests
+        env:
+          BUZZ_BUILD_FEDERATED_IDENTITY_CONFIG: '{"version":1,"id":"ci-fi","identityOrigin":"https://identity.example.test","communityHosts":["relay.example.test"],"adapterBase":"https://identity.example.test/api/goose/nip-fa","apiBasePath":"/api/goose/"}'
+          BUZZ_BUILDERLAB_URL: ""
+        run: |
+          ./bin/cargo test -p buzzodz-plugins --lib --locked
+          ./bin/cargo test -p Buzz --lib --locked host_request
+          ./bin/pnpm exec vite build
+      - name: FI opt-out build and grant tests
+        env:
+          BUZZ_BUILD_FEDERATED_IDENTITY_CONFIG: ""
+        run: |
+          ./bin/cargo test -p buzzodz-plugins --lib --locked
+          ./bin/cargo test -p Buzz --lib --locked host_request
+      - name: Scheduled agent command identity
+        run: ./bin/node scripts/test-agent-command.mjs
+      - name: All Node integration tests
+        run: ./bin/node --test tests/integration/*.test.mjs
+  measurements:
+    if: "true"
+    name: Browser measurements
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --init --ipc=host
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOME: /root
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.variant == 'before' && '92fea89d9cd0df4542d3994ed1ed0ed96844ebce' || 'a62346e2e59f9554284222d75667320a83007b95' }}
+      - name: Trust this container workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: ./.github/actions/setup
+        with:
+          browsers: "true"
+      - name: Serial Chromium and WebKit measurements
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
+        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Browser measurements" -- ./bin/pnpm test:browser:ci --project '*-measurements' --workers=1 --reporter=list,json
+      - name: Chromium classic-scrollbar layout
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser-classic-scrollbars/ci-report.json
+        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser-classic-scrollbars/ci-report.json evidence=test-results/browser-classic-scrollbars/ci-timing.json title="Browser classic scrollbars" -- ./bin/pnpm test:browser:ci --project chromium-classic-scrollbars --no-deps --reporter=list,json
+      - name: Broker scale check
+        env:
+          BUZZ_BROKER_SCALE: "true"
+        run: |
+          ./bin/node scripts/ci-test-report.mjs kind=vitest report=test-results/broker-scale/vitest.json evidence=test-results/broker-scale/timing.json title="Broker scale" -- ./bin/pnpm exec vitest run browser-host/relay-broker-live.test.mjs -t "100,000" --reporter=default --reporter=json --outputFile=test-results/broker-scale/vitest.json
+          ./bin/node -e 'if (require("./test-results/broker-scale/vitest.json").numPassedTests !== 1) { console.error("The 100,000-channel scale check did not run"); process.exit(1); }'
+      - name: Measurement evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-measurements
+          path: |
+            test-results/browser
+            test-results/browser-classic-scrollbars
+            test-results/broker-scale
+          retention-days: 7
+  perf_smoke:
+    if: "true"
+    name: Perf suite smoke check
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --init --ipc=host
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOME: /root
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.variant == 'before' && '92fea89d9cd0df4542d3994ed1ed0ed96844ebce' || 'a62346e2e59f9554284222d75667320a83007b95' }}
+      - name: Trust this container workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: ./.github/actions/setup
+        with:
+          browsers: "true"
+          browser-engine: chromium
+      - name: Perf suite smoke check
+        run: ./bin/pnpm perf --scenario all --repeat 1 --cpu 4
+      - name: Perf evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: perf-smoke
+          path: test-results/perf
+          retention-days: 7
+  browser_fixture:
+    if: "true"
+    name: Native browser fixture
+    runs-on:
+      group: buzz-runners
+      labels: buzz-ubuntu-x64-8core
+    timeout-minutes: 15
+    outputs:
+      artifact-id: ${{ steps.fixture-upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.variant == 'before' && '92fea89d9cd0df4542d3994ed1ed0ed96844ebce' || 'a62346e2e59f9554284222d75667320a83007b95' }}
+      - uses: ./.github/actions/setup
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          key: browser-fixture
+          save-if: "false"
+      - name: Build native browser fixture
+        timeout-minutes: 8
+        run: ./bin/cargo build --locked -p buzzodz-plugins --example fixture-bridge --bin buzzodz --target-dir target/browser-fixture
+      - name: Package same-revision native fixture
+        run: |
+          mkdir -p target/browser-artifact
+          cp target/browser-fixture/debug/examples/fixture-bridge target/browser-fixture/debug/buzzodz target/browser-artifact/
+          git rev-parse HEAD > target/browser-artifact/revision
+          cd target/browser-artifact
+          sha256sum fixture-bridge buzzodz > SHA256SUMS
+          tar -cf ../browser-fixture.tar fixture-bridge buzzodz revision SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: fixture-upload
+        with:
+          name: browser-fixture-${{ github.sha }}-${{ github.run_attempt }}
+          path: target/browser-fixture.tar
+          if-no-files-found: error
+          retention-days: 7
+  browser:
+    if: "true"
+    name: Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})
+    needs:
+      - browser_fixture
+    runs-on:
+      group: buzz-runners
+      labels: buzz-ubuntu-x64-8core
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --init --ipc=host
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOME: /root
+      BUZZ_BROWSER_FIXTURE_DIR: target/ci-browser-fixture
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        engine:
+          - chromium
+          - webkit
+        shard:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+          - 8
+          - 9
+          - 10
+          - 11
+          - 12
+          - 13
+          - 14
+          - 15
+          - 16
+          - 17
+          - 18
+        exclude:
+          - engine: chromium
+            shard: 12
+          - engine: chromium
+            shard: 13
+          - engine: chromium
+            shard: 14
+          - engine: chromium
+            shard: 15
+          - engine: chromium
+            shard: 16
+          - engine: chromium
+            shard: 17
+          - engine: chromium
+            shard: 18
+        include:
+          - engine: chromium
+            shards: 11
+          - engine: webkit
+            shards: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.variant == 'before' && '92fea89d9cd0df4542d3994ed1ed0ed96844ebce' || 'a62346e2e59f9554284222d75667320a83007b95' }}
+      - name: Trust this container workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: ./.github/actions/setup
+        with:
+          browsers: "true"
+          browser-engine: ${{ matrix.engine }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.browser_fixture.outputs.artifact-id }}
+          merge-multiple: true
+          path: target/ci-browser-fixture
+      - name: Verify native browser fixture
+        run: |
+          cd target/ci-browser-fixture
+          tar -xf browser-fixture.tar
+          test "$(cat revision)" = "$(git rev-parse HEAD)"
+          sha256sum --check SHA256SUMS
+          test -x fixture-bridge
+          test -x buzzodz
+      - name: Functional journeys
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
+        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})" -- ./bin/pnpm test:browser:ci --project ${{ matrix.engine }} --no-deps --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,json
+      - name: Browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-journeys-${{ matrix.engine }}-${{ matrix.shard }}
+          path: test-results/browser
+          retention-days: 7
+  media_recorder:
+    if: "true"
+    name: WebKit recording (macOS)
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.variant == 'before' && '92fea89d9cd0df4542d3994ed1ed0ed96844ebce' || 'a62346e2e59f9554284222d75667320a83007b95' }}
+      - uses: ./.github/actions/setup
+      - name: Install pinned WebKit
+        run: ./bin/pnpm exec playwright install webkit
+      - name: Recording journeys
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
+        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="WebKit recording (macOS)" -- ./bin/pnpm test:browser --project webkit --grep @media-recorder --no-deps --reporter=list,json
+      - name: Recording evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-media-recorder-webkit
+          path: test-results/browser
+          retention-days: 7
+  required:
+    name: CI required
+    if: always()
+    needs:
+      - javascript_checks
+      - javascript
+      - native
+      - measurements
+      - perf_smoke
+      - browser_fixture
+      - browser
+      - media_recorder
+      - agent_protection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every lane and every shard
+        env:
+          JAVASCRIPT_CHECKS: ${{ needs.javascript_checks.result }}
+          JAVASCRIPT: ${{ needs.javascript.result }}
+          NATIVE: ${{ needs.native.result }}
+          MEASUREMENTS: ${{ needs.measurements.result }}
+          PERF_SMOKE: ${{ needs.perf_smoke.result }}
+          FIXTURE: ${{ needs.browser_fixture.result }}
+          BROWSER: ${{ needs.browser.result }}
+          MEDIA_RECORDER: ${{ needs.media_recorder.result }}
+          AGENT_PROTECTION: ${{ needs.agent_protection.result }}
+        run: |
+          for result in "$JAVASCRIPT_CHECKS" "$JAVASCRIPT" "$NATIVE" "$MEASUREMENTS" "$PERF_SMOKE" "$FIXTURE" "$BROWSER" "$MEDIA_RECORDER" "$AGENT_PROTECTION"; do
+            test "$result" = success || exit 1
+          done
+run-name: Discovery full CI comparison — ${{ inputs.variant }}
