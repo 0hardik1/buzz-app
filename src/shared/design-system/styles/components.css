@@ -1669,7 +1669,8 @@
   /* Auto layout: the label fills and truncates, the actions hug. Nothing is
      positioned over the row or reserves width for something else. */
   /* The label keeps room for its title; actions that would cover it wrap to
-     their own row instead, as at narrow widths with enlarged text. */
+     their own row instead, as at narrow widths with enlarged text. Shown
+     actions wider than even their own row wrap among themselves. */
   .navigation-section-heading {
     display: flex;
     flex-wrap: wrap;
@@ -1689,7 +1690,10 @@
   .navigation-section-heading-actions {
     display: flex;
     flex: none;
+    flex-wrap: wrap;
+    max-width: 100%;
     align-items: center;
+    justify-content: flex-end;
     margin-inline-start: auto;
   }
 
@@ -1779,7 +1783,11 @@
     opacity: 0;
   }
 
+  /* Hidden actions stay on one start-aligned line, so they take no height and
+     overflow away from the label. */
   .navigation-section-heading-actions[data-navigation-reveal] {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
     max-width: 0;
     overflow: hidden;
   }
@@ -1792,15 +1800,19 @@
       [data-context-menu-present] > .navigation-section-heading
     )
     [data-navigation-reveal] {
+    flex-wrap: wrap;
+    justify-content: flex-end;
     opacity: 1;
-    max-width: none;
+    max-width: 100%;
     overflow: visible;
   }
 
   @media (hover: none) {
     .navigation-section-heading [data-navigation-reveal] {
+      flex-wrap: wrap;
+      justify-content: flex-end;
       opacity: 1;
-      max-width: none;
+      max-width: 100%;
       overflow: visible;
     }
   }
