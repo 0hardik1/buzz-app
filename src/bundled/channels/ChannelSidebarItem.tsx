@@ -40,7 +40,12 @@ import { ChannelSidebarTile } from "./ChannelSidebarTile";
 import { SidebarCardDisplayContext } from "./SidebarCardDisplay";
 import { DmTypingBadge } from "./DmTypingBadge";
 import { usePresenceStatus } from "../../features/presence/react";
-import { UnreadBadge, ordinaryUnread, useConfirmedMute } from "./UnreadBadge";
+import {
+  UnreadBadge,
+  UnreadCount,
+  ordinaryUnread,
+  useConfirmedMute,
+} from "./UnreadBadge";
 import { SoloChatTitle } from "../../features/solo/SoloChatTitle";
 import { useWorkingAgents } from "./useWorkingAgents";
 import { WorkingAgentsBadge } from "./WorkingAgentsBadge";
@@ -359,11 +364,19 @@ function ChannelSidebarItemCore({
         <>
           <span className={styles.indicatorStack} data-channel-indicators="">
             <span className={styles.indicatorLayer}>
-              <UnreadBadge
-                session={session}
-                channelId={channel.id}
-                dm={channel.channelType === "dm"}
-              />
+              {tiled ? (
+                <UnreadCount
+                  session={session}
+                  channelId={channel.id}
+                  dm={channel.channelType === "dm"}
+                />
+              ) : (
+                <UnreadBadge
+                  session={session}
+                  channelId={channel.id}
+                  dm={channel.channelType === "dm"}
+                />
+              )}
             </span>
             <WorkingAgentsBadge
               agents={agents}

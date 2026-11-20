@@ -1,4 +1,5 @@
 import { Button } from "../../shared/design-system/ui/Button";
+import { CountBadge } from "../../shared/design-system/ui/CountBadge";
 import {
   useCallback,
   useMemo,
@@ -196,6 +197,38 @@ export function UnreadBadge({
     </>
   );
 }
+/** Unread on an identity tile: a corner count of unread messages and thread
+ * replies, quiet when muted. Marked unread with nothing counted keeps the dot. */
+export function UnreadCount({
+  session,
+  channelId,
+  dm = false,
+}: {
+  session: RelaySession;
+  channelId: string;
+  dm?: boolean;
+}) {
+  const { count, unread, threadCount, muted, waiting } = useUnreadState(
+    session,
+    channelId,
+    dm,
+  );
+  const messages = unread ? (count ?? 0) : 0;
+  const total = messages + threadCount;
+  if (muted || total === 0)
+    return <UnreadBadge session={session} channelId={channelId} dm={dm} />;
+  return (
+    <span data-channel-unread="" data-channel-unread-count="">
+      <CountBadge
+        count={total}
+        label={`${total} unread ${total === 1 ? "message" : "messages"}`}
+        placement="corner"
+      />
+      {waiting && <span data-channel-waiting="" hidden />}
+    </span>
+  );
+}
+
 export function UnreadOptions({
   session,
   channelId,

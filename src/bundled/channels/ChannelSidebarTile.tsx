@@ -35,6 +35,7 @@ export function ChannelSidebarTile({
         size="fill"
         shape={profile?.isAgent ? "squircle" : "circle"}
         statusBadge={presence}
+        statusBadgeSize="small"
       />
     );
   return <ChannelAvatar name={channel.name} size="fill" />;

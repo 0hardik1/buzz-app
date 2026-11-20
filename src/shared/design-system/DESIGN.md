@@ -2192,6 +2192,9 @@ button (beneath horizontal docks); badges overlay the tile. CountBadge uses a co
 corner capsule straddling the top-right edge, with `surface-dock-count` and
 `text-dock-count` keeping dark fill and readable accent ink in both modes. The
 shell scrollport preserves gutter space for the full capsule and focus ring.
+Outside the dock, `placement="corner"` gives CountBadge the same dark capsule
+for an identity tile's top-right corner, ringed in the panel surface. Avatar's
+`statusBadgeSize="small"` shrinks presence where that count leads.
 A tile with a page preview shows its label on keyboard focus and while its preview is closed.
 Up/Down arrow keys move focus in the side dock without selecting; Enter, Space or
 pointer selection changes the page while focus stays on its tab. Horizontal dock
