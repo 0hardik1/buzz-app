@@ -171,9 +171,13 @@ test.describe("workspace heading resize", () => {
                 .querySelector(".buzz-split-button")
                 .getBoundingClientRect();
               const bounds = row.getBoundingClientRect();
+              // After the label on its row, or on its own row below it where
+              // it would otherwise cover the label.
+              const below = control.top >= label.bottom - 0.5;
               return (
-                label.right <= control.left + 0.5 &&
-                control.right <= bounds.right + 0.5
+                (below || label.right <= control.left + 0.5) &&
+                control.right <= bounds.right + 0.5 &&
+                control.bottom <= bounds.bottom + 0.5
               );
             }),
           )

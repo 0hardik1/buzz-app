@@ -349,7 +349,8 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
   let sorted, moved;
   try {
     const sortMenu = await openSort();
-    await sortMenu.getByRole("radio", { name: "Recent" }).click();
+    // Recent is the default, so A–Z is the choice that saves.
+    await sortMenu.getByRole("radio", { name: "A–Z" }).click();
     await page.keyboard.press("Escape");
     await sortStarted.promise;
     const moveMenu = await openMove(page, rowIn(page, "channels"));
@@ -360,7 +361,7 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
     await expect(rowIn(page, "channels")).toHaveCount(0);
     const pendingSort = await openSort();
     await expect(
-      pendingSort.getByRole("radio", { name: "Recent" }),
+      pendingSort.getByRole("radio", { name: "A–Z" }),
     ).toHaveAttribute("aria-checked", "true");
     await page.keyboard.press("Escape");
   } finally {
@@ -378,14 +379,13 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
     app.report.sidebarPublications.find(
       ({ coordinate }) => coordinate === "channel-workspace-sort",
     ).blob.groups,
-    // Recent is the default, which is saved as no entry.
-  ).toEqual({});
+  ).toEqual({ channels: "alpha" });
   await page.unroute("**/sidebar-sort");
   await page.reload();
   await expect(beta).toBeVisible();
   const restoredSort = await openSort();
   await expect(
-    restoredSort.getByRole("radio", { name: "Recent" }),
+    restoredSort.getByRole("radio", { name: "A–Z" }),
   ).toHaveAttribute("aria-checked", "true");
 });
 

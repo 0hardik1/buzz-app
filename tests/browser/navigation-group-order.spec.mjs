@@ -338,7 +338,9 @@ test("group landing edge follows list order when text size changes during a drag
   // At enlarged text sizes, grab the header's leading edge, clear of its actions.
   await page.mouse.move(initial.x + 12, initial.y + initial.height / 2);
   await page.mouse.down();
-  await page.mouse.move(enlarged.x + 12, enlarged.y + enlarged.height / 2, {
+  // An empty card's header center is its center, where either side is a
+  // sub-pixel tie; the lower part of the header is unambiguously after.
+  await page.mouse.move(enlarged.x + 12, enlarged.y + enlarged.height * 0.75, {
     steps: 8,
   });
   await expect(missing).toHaveAttribute("data-drop-edge", "after");
@@ -363,7 +365,7 @@ test("group landing edge follows list order when text size changes during a drag
   expect(initial.y).toBeGreaterThan(target.y);
   await page.mouse.move(
     target.x + target.width / 2,
-    target.y + target.height / 2,
+    target.y + target.height * 0.75,
   );
   await expect(missing).toHaveAttribute("data-drop-edge", "after");
   await page.mouse.up();
