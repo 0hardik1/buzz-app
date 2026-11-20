@@ -1072,6 +1072,7 @@ export function ChannelInventory({
       ),
     ),
     list.activityStatus === "ready",
+    waitingChannels,
   );
   // Menu dismissal may run before a moved row mounts at its new placement.
   // Only an actual filter exclusion should return focus to a section summary.

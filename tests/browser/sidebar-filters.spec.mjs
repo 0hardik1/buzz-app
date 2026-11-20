@@ -378,6 +378,19 @@ test.describe("filter action focus", () => {
         ),
       { viewer: app.viewer, relay: fixtureRelayUrl },
     );
+    // Unreads keeps what needs you, so Archive's unread message mentions you.
+    app.histories.set("primary/delta", [
+      ...(app.histories.get("primary/delta") ?? []),
+      app.signPeer({
+        kind: 9,
+        tags: [
+          ["h", "delta"],
+          ["p", app.viewer],
+        ],
+        content: "Can you take a look?",
+        created_at: 1700000950,
+      }),
+    ]);
     await page.goto(app.origin);
     await openPage(page, "Messages");
     // Filters preserve the current channel; keep it away from the row whose

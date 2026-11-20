@@ -17,7 +17,10 @@ export type { SidebarFilterMode as SidebarFilter } from "../../features/relay/si
 import type { SidebarFilterMode as SidebarFilter } from "../../features/relay/sidebar-preferences";
 export const SIDEBAR_ACTIVE_WINDOW = DEFAULT_ACTIVE_WINDOW_SECONDS * 1000;
 
-/** Filter only the existing section roster; the current destination always stays. */
+/** Filter only the existing section roster; the current destination always stays.
+ * Unreads keeps what needs you, the same set Unreads first leads with: DMs,
+ * mentions and replies in threads you follow (`needsYou`), plus conversations
+ * you marked unread. Other new messages don't count. */
 export function useSidebarFilters(
   sections: ReturnType<typeof sidebarSections>,
   filters: Readonly<Record<string, SidebarFilter>>,
@@ -25,6 +28,7 @@ export function useSidebarFilters(
   unread: UnreadCapability,
   windows: Readonly<Record<string, number>> = {},
   activityReady = true,
+  needsYou: ReadonlySet<string> = new Set(),
 ) {
   const ids = JSON.stringify(
     sections.flatMap((section) =>
@@ -33,7 +37,7 @@ export function useSidebarFilters(
         : [],
     ),
   );
-  const unreadSet = useUnreadChannelIds(unread, ids, true);
+  const marked = useUnreadChannelIds(unread, ids, true, true);
   const [clock, tick] = useState(0);
   const now = Date.now();
   let nextExpiry = Infinity;
@@ -51,7 +55,8 @@ export function useSidebarFilters(
       return (
         channel.id === current ||
         mode === "all" ||
-        (mode === "unreads" && unreadSet.has(channel.id)) ||
+        (mode === "unreads" &&
+          (needsYou.has(channel.id) || marked.has(channel.id))) ||
         (mode === "active" &&
           (channel.lastActivityAt === undefined
             ? !channel.activityKnown && !activityReady
@@ -94,13 +99,16 @@ export function channelHasUnread(
   );
 }
 
-/** Channels among `ids` (a JSON id array) with unread messages or threads.
+/** Channels among `ids` (a JSON id array) with unread messages or threads, or
+ * with `markedOnly`, just those marked unread by hand.
  * `shown` asks what their rows show instead: the sidebar's Unreads filter
  * follows the rows, while search still leads with every unread conversation. */
 export function useUnreadChannelIds(
   unread: UnreadCapability,
   ids: string,
   shown = false,
+  /** Only conversations marked unread by hand. */
+  markedOnly = false,
 ) {
   const targets = useMemo(
     () =>
@@ -126,10 +134,14 @@ export function useUnreadChannelIds(
     () =>
       JSON.stringify(
         targets
-          .filter((target) => channelHasUnread(unread, target.channelId, shown))
+          .filter((target) =>
+            markedOnly
+              ? unread.snapshot(target).manual !== "none"
+              : channelHasUnread(unread, target.channelId, shown),
+          )
           .map((target) => target.channelId),
       ),
-    [targets, unread, shown],
+    [targets, unread, shown, markedOnly],
   );
   const unreadIds = useSyncExternalStore(subscribe, snapshot, snapshot);
   return useMemo(() => new Set<string>(JSON.parse(unreadIds)), [unreadIds]);

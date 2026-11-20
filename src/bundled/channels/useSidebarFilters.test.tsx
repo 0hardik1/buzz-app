@@ -199,33 +199,53 @@ it("reacts to message, manual and thread unread evidence and cleans up filtered 
     ["alpha", "beta", "gamma"].map((id) => ({ id, name: id })),
   );
   const { result, rerender, unmount } = renderHook(
-    ({ current, mode }) =>
-      useSidebarFilters(sections, { channels: mode }, current, unread),
-    { initialProps: { current: "alpha", mode: "unreads" as SidebarFilter } },
+    ({ current, mode, needsYou }) =>
+      useSidebarFilters(
+        sections,
+        { channels: mode },
+        current,
+        unread,
+        {},
+        true,
+        needsYou,
+      ),
+    {
+      initialProps: {
+        current: "alpha",
+        mode: "unreads" as SidebarFilter,
+        needsYou: new Set<string>(),
+      },
+    },
   );
   const ids = () =>
     result.current
       .find(({ key }) => key === "channels")
       ?.rows.map(({ id }) => id);
   expect(ids()).toEqual(["alpha"]);
+  // New messages that don't need you leave a conversation out.
   act(() => {
     states.set("beta", { count: 1 });
+    states.set("gamma", { count: 0, thread: true });
+    for (const listener of listeners) listener();
+    for (const listener of activityListeners) listener();
+  });
+  expect(ids()).toEqual(["alpha"]);
+  // A hand-marked conversation counts.
+  act(() => {
+    states.set("beta", { count: 0, manual: true });
     for (const listener of listeners) listener();
   });
   expect(ids()).toEqual(["alpha", "beta"]);
-  act(() => {
-    states.set("beta", { count: 0, manual: true });
-    states.set("gamma", { count: 0, thread: true });
-    for (const listener of activityListeners) listener();
-  });
+  // So does one that needs you: a DM, a mention or a followed thread reply.
+  rerender({ current: "alpha", mode: "unreads", needsYou: new Set(["gamma"]) });
   expect(ids()).toEqual(["alpha", "beta", "gamma"]);
   act(() => {
     states.clear();
     for (const listener of listeners) listener();
   });
-  rerender({ current: "beta", mode: "unreads" });
+  rerender({ current: "beta", mode: "unreads", needsYou: new Set() });
   expect(ids()).toEqual(["beta"]);
-  rerender({ current: "beta", mode: "all" });
+  rerender({ current: "beta", mode: "all", needsYou: new Set() });
   expect(listeners.size).toBe(0);
   expect(activityListeners.size).toBe(0);
   unmount();
