@@ -1,4 +1,7 @@
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { createNavigationController } from "../navigation/controller";
+import { createMemoryHistory } from "../navigation/history";
+import type { OpenTarget } from "../navigation/targets";
 import {
   type ComposerHandle,
   channelComposer,
@@ -8,6 +11,8 @@ import {
 import {
   closed,
   composerGone,
+  createOpener,
+  createStore,
   entryId,
   type InlineEntry,
   type InlineRequest,
@@ -114,4 +119,160 @@ it("closes a channel's entries when the workspace leaves it", () => {
   // Staying in the channel changes nothing.
   const same = open([], thread("R"));
   expect(left(same, "C")).toBe(same);
+});
+
+describe("history", () => {
+  const scope = {
+    viewer: "a".repeat(64),
+    communityOrigin: "https://example.org",
+  };
+  const conversation = {
+    version: 1,
+    kind: "conversation",
+    scope,
+    channelId: "C",
+  } as const;
+  // Addresses as the channel workspace gives them: one per entry.
+  const address = (entry: InlineEntry | undefined): OpenTarget =>
+    !entry
+      ? conversation
+      : entry.target.kind === "panel"
+        ? { ...conversation, detail: { target: entry.target.title } }
+        : entry.target.kind === "thread"
+          ? {
+              ...conversation,
+              messageId: entry.target.rootId,
+              threadRootId: entry.target.rootId,
+            }
+          : {
+              ...conversation,
+              reader: {
+                kind: entry.target.kind,
+                messageId: entry.target.messageId,
+              },
+            };
+  function setup() {
+    const history = createMemoryHistory(conversation);
+    const { navigation } = createNavigationController(history);
+    const opener = createOpener(createStore(), { current: undefined });
+    opener.attachHistory({ navigator: navigation, address });
+    const open = () =>
+      opener.store
+        .get()
+        .filter((item) => item.open)
+        .map((item) =>
+          item.target.kind === "panel"
+            ? item.target.title
+            : entryId(item.target),
+        );
+    return { navigation, opener, open };
+  }
+  const id = (n: number) => n.toString(16).padStart(64, "0");
+
+  it("visits each opening; Back closes it, Forward reopens it, and ✕ retires it", () => {
+    const { navigation, opener, open } = setup();
+    opener.open({
+      target: { kind: "details", messageId: id(1) },
+      composer: channel,
+      trigger: null,
+    });
+    const visit = navigation.snapshot().entry;
+    expect(visit.target).toMatchObject({ reader: { kind: "details" } });
+    expect(opener.presents(visit.id)).toBe(true);
+    expect(open()).toEqual([`details:${id(1)}`]);
+    navigation.back();
+    expect(open()).toEqual([]);
+    navigation.forward();
+    expect(open()).toEqual([`details:${id(1)}`]);
+    opener.dismiss(`details:${id(1)}`);
+    expect(open()).toEqual([]);
+    expect(navigation.snapshot().canGoForward).toBe(false);
+    expect(navigation.snapshot().entry.target).toEqual(conversation);
+  });
+
+  it("opening what the visit already names adds no visit", () => {
+    const { navigation, opener } = setup();
+    const request: InlineRequest = {
+      target: { kind: "details", messageId: id(1) },
+      composer: channel,
+      trigger: null,
+    };
+    opener.open(request);
+    const visit = navigation.snapshot().entry.id;
+    opener.open(request);
+    expect(navigation.snapshot().entry.id).toBe(visit);
+  });
+
+  it("makes each page a panel moves to a visit, and ✕ retires them all", () => {
+    const { navigation, opener, open } = setup();
+    const page = (title: string) =>
+      ({ kind: "panel", channelId: "C", title, opening: undefined }) as const;
+    opener.open({ target: page("first"), composer: channel, trigger: null });
+    opener.navigate("panel:C:", page("second"));
+    expect(open()).toEqual(["second"]);
+    navigation.back();
+    expect(open()).toEqual(["first"]);
+    navigation.back();
+    expect(open()).toEqual([]);
+    navigation.forward();
+    navigation.forward();
+    expect(open()).toEqual(["second"]);
+    opener.dismiss("panel:C:");
+    expect(navigation.snapshot().canGoForward).toBe(false);
+    navigation.back();
+    expect(open()).toEqual([]);
+  });
+
+  it("✕ forgets an opening in every visit, so Forward to a later one shows nothing of it", () => {
+    const { navigation, opener, open } = setup();
+    opener.open({
+      target: {
+        kind: "thread",
+        channelId: "C",
+        rootId: id(1),
+        messageId: id(1),
+      },
+      composer: channel,
+      trigger: null,
+    });
+    opener.open({
+      target: { kind: "details", messageId: id(2) },
+      composer: replyBox(id(1)),
+      trigger: null,
+    });
+    navigation.back();
+    expect(open()).toEqual([threadComposer("C", id(1))]);
+    opener.dismiss(threadComposer("C", id(1)));
+    navigation.forward();
+    expect(open()).toEqual([]);
+  });
+
+  it("a thread moved to its tab leaves what was open on it to open the usual way", () => {
+    const { navigation, opener } = setup();
+    opener.open({
+      target: {
+        kind: "thread",
+        channelId: "C",
+        rootId: id(1),
+        messageId: id(1),
+      },
+      composer: channel,
+      trigger: null,
+    });
+    opener.open({
+      target: { kind: "details", messageId: id(2) },
+      composer: replyBox(id(1)),
+      trigger: null,
+    });
+    navigation.back();
+    opener.moveToTab(threadComposer("C", id(1)));
+    navigation.forward();
+    // Details have no tab: with the reply box gone, they open in a dialog.
+    expect(
+      opener.store
+        .get()
+        .filter((item) => item.open)
+        .map((item) => [entryId(item.target), item.placement]),
+    ).toEqual([[`details:${id(2)}`, "dialog"]]);
+  });
 });

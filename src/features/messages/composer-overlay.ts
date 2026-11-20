@@ -21,6 +21,9 @@ export const threadComposer = (
 ): ComposerName => `thread:${channelId}:${rootId}`;
 /** The channel a composer writes to. */
 export const composerChannel = (name: ComposerName) => name.split(":")[1] ?? "";
+/** The thread a reply box writes to; none for a channel's composer. */
+export const composerThread = (name: ComposerName) =>
+  name.startsWith("thread:") ? name.split(":")[2] : undefined;
 
 /** One conversation's composer, as the content below it sees it: its name,
  * and the form shown for it once mounted. What a row opens reads over the

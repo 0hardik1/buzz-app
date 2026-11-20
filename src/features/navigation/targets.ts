@@ -89,6 +89,14 @@ export type OpenTarget = Readonly<{ join?: JoinPresentation }> &
         forward?: string;
         /** Read-only content selected beside this conversation; never an action. */
         detail?: Readonly<{ target: string; rootId?: string }>;
+        /** A details or diff message read over the composer of its own
+         * conversation: its thread's reply box when `rootId` names one. Read
+         * only; never an action. */
+        reader?: Readonly<{
+          kind: "details" | "diff";
+          messageId: string;
+          rootId?: string;
+        }>;
       }>
   );
 
@@ -455,6 +463,7 @@ export function parseOpenTarget(input: unknown): OpenTarget {
           "panel",
           "forward",
           "detail",
+          "reader",
         ]);
         if (value.threadRootId !== undefined && value.messageId === undefined)
           throw invalid();
@@ -481,6 +490,22 @@ export function parseOpenTarget(input: unknown): OpenTarget {
               : {}),
           });
         }
+        let reader:
+          | { kind: "details" | "diff"; messageId: string; rootId?: string }
+          | undefined;
+        if (value.reader !== undefined) {
+          const input = record(value.reader);
+          fields(input, ["kind", "messageId", "rootId"]);
+          if (input.kind !== "details" && input.kind !== "diff")
+            throw invalid();
+          reader = Object.freeze({
+            kind: input.kind,
+            messageId: text(input.messageId, hex).toLowerCase(),
+            ...(input.rootId !== undefined
+              ? { rootId: text(input.rootId, hex).toLowerCase() }
+              : {}),
+          });
+        }
         target = {
           version: 1,
           kind: "conversation",
@@ -501,6 +526,7 @@ export function parseOpenTarget(input: unknown): OpenTarget {
             ? { forward: text(value.forward, hex).toLowerCase() }
             : {}),
           ...(detail ? { detail } : {}),
+          ...(reader ? { reader } : {}),
         };
         break;
       }

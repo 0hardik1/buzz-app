@@ -14,6 +14,7 @@ import {
   RowKeepAlive,
   useInlineContainers,
   useReaderSlot,
+  useRequestedReader,
 } from "./inline-containers";
 import styles from "./Messages.module.css";
 
@@ -87,6 +88,7 @@ export function DetailsMessage({
   // A send from its composer closes it.
   const show = () =>
     opener.open({ target, composer, trigger: trigger.current });
+  useRequestedReader(opener, target, show);
   return (
     <div className={styles.detailsPreview} data-clipped={clipped || undefined}>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: Show more is the keyboard path; this only widens the pointer target. */}

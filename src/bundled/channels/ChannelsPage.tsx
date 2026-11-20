@@ -4,12 +4,16 @@ import { MediaReviewViewer } from "../../features/messages/MediaReviewViewer";
 import { DetailTabContext } from "../../features/messages/DetailTabContext";
 import {
   InlineContainers,
+  type InlineEntry,
+  type InlineOpener,
   type PanelRenderer,
   useInlineContainerList,
 } from "../../features/messages/inline-containers";
 import {
   type ComposerHandle,
   type MediaReviewOrigin,
+  composerChannel,
+  composerThread,
   threadComposer,
 } from "../../features/messages/composer-overlay";
 import { StartLinkedChat, canStartLinkedChat } from "./StartLinkedChat";
@@ -369,7 +373,7 @@ function ChannelWorkspace({
   panels,
   scope,
   companion,
-  navigation,
+  navigation: pageNavigation,
   navigator,
   viewer,
   agents,
@@ -395,6 +399,9 @@ function ChannelWorkspace({
   archive?: ArchiveShortcut | undefined;
   read?: ReadShortcut | undefined;
 }) {
+  // What reads over the composers takes part in history; see useInlineVisit.
+  const inlineOpener = useRef<InlineOpener>(undefined);
+  const navigation = useInlineVisit(pageNavigation, inlineOpener.current);
   const messageDraft =
     navigation?.target.kind === "page"
       ? newMessage(navigation.target.route?.params)
@@ -1473,9 +1480,33 @@ function ChannelWorkspace({
   }, [mediaReviews.length, showingMediaReviews]);
   // Threads, panels and details read over their composers.
   const panelRenderer = useRef<PanelRenderer>(undefined);
-  const containers = useInlineContainerList(currentId, (target, controls) =>
-    panelRenderer.current?.(target, controls),
+  const containers = useInlineContainerList(
+    currentId,
+    (target, controls) => panelRenderer.current?.(target, controls),
+    useMemo(() => ({ navigator, address: inlineAddress }), [navigator]),
   );
+  inlineOpener.current = containers.opener;
+  const presentedVisit =
+    !!pageNavigation && containers.opener.presents(pageNavigation.entryId);
+  // A visit to a reader's address (a reload, a link) reads as its message's;
+  // its row opens the reader once it is on screen.
+  const requestedReader =
+    pageNavigation?.target.kind === "conversation" &&
+    !containers.opener.presents(pageNavigation.entryId)
+      ? pageNavigation.target.reader
+      : undefined;
+  useLayoutEffect(() => {
+    containers.opener.requestReader(
+      requestedReader && {
+        kind: requestedReader.kind,
+        messageId: requestedReader.messageId,
+      },
+    );
+  }, [containers.opener, requestedReader]);
+  // An inline opening's own visit completes at once: it is already shown.
+  useLayoutEffect(() => {
+    if (presentedVisit) pageNavigation?.complete({ status: "opened" });
+  }, [pageNavigation, presentedVisit]);
   const secondary = useConversationTabs({
     containers: containers.opener,
     state: tabState,
@@ -1755,7 +1786,7 @@ function ChannelWorkspace({
       tabState.enterVisit(
         `${navigation.entryId}:${detail ? "detail" : routedThread ? "thread" : "channel"}`,
         detail && !detailReply ? undefined : routedThread,
-        !!detail,
+        !!detail || presentedVisit,
         detail && currentId
           ? { channelId: currentId, target: detail.target }
           : undefined,
@@ -1849,6 +1880,7 @@ function ChannelWorkspace({
     currentId,
     panels,
     panelTrigger,
+    presentedVisit,
   ]);
   const mounted = useRef(false);
   const channel = useRef(current?.id);
@@ -3133,4 +3165,104 @@ export function ConversationIcon({
   ) : (
     <Icon size="1rem" />
   );
+}
+
+/** The conversation an address is in, without what reads over it. */
+type ConversationTarget = Extract<OpenTarget, { kind: "conversation" }>;
+const conversationOf = (target: ConversationTarget): ConversationTarget => ({
+  version: 1,
+  kind: "conversation",
+  scope: target.scope,
+  channelId: target.channelId,
+});
+
+/**
+ * The address of what reads over a composer, so opening it is a visit: a
+ * thread reads from its root, a panel by its target, a details or diff
+ * message as a reader over its own conversation. The current address stands
+ * when it already names the entry, so opening it again adds no visit.
+ */
+function inlineAddress(
+  entry: InlineEntry | undefined,
+  current: OpenTarget,
+): OpenTarget | undefined {
+  if (current.kind !== "conversation") return undefined;
+  const base = conversationOf(current);
+  if (!entry) return base;
+  const { target } = entry;
+  switch (target.kind) {
+    case "thread":
+      return current.threadRootId === target.rootId &&
+        current.channelId === target.channelId &&
+        !current.detail &&
+        !current.reader
+        ? current
+        : {
+            ...base,
+            channelId: target.channelId,
+            messageId: target.rootId,
+            threadRootId: target.rootId,
+          };
+    case "panel": {
+      const opening = target.opening as PanelOpening;
+      return current.detail?.target === opening.target &&
+        current.detail.rootId === opening.rootId
+        ? current
+        : {
+            ...base,
+            channelId: opening.channelId,
+            detail: {
+              target: opening.target,
+              ...(opening.rootId ? { rootId: opening.rootId } : {}),
+            },
+          };
+    }
+    default: {
+      if (
+        current.reader?.kind === target.kind &&
+        current.reader.messageId === target.messageId
+      )
+        return current;
+      const name = entry.composer?.name ?? "";
+      const rootId = composerThread(name);
+      return {
+        ...base,
+        channelId: composerChannel(name) || current.channelId,
+        reader: {
+          kind: target.kind,
+          messageId: target.messageId,
+          ...(rootId ? { rootId } : {}),
+        },
+      };
+    }
+  }
+}
+
+/**
+ * The visit the page presents. A visit an inline opening made shows as its
+ * plain conversation: what is open over its composers already shows the rest,
+ * and the visit is complete. A reader's address otherwise reads as its
+ * message's, revealed in the timeline or its thread, and fails as a missing
+ * message does.
+ */
+function useInlineVisit(
+  navigation: PageNavigation | undefined,
+  opener: InlineOpener | undefined,
+) {
+  const presented = !!navigation && !!opener?.presents(navigation.entryId);
+  return useMemo(() => {
+    const target = navigation?.target;
+    if (!navigation || target?.kind !== "conversation") return navigation;
+    if (presented) return { ...navigation, target: conversationOf(target) };
+    const reader = target.reader;
+    if (!reader || target.messageId) return navigation;
+    return {
+      ...navigation,
+      target: {
+        ...target,
+        messageId: reader.messageId,
+        ...(reader.rootId ? { threadRootId: reader.rootId } : {}),
+      },
+    };
+  }, [navigation, presented]);
 }

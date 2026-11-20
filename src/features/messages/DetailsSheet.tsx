@@ -345,6 +345,7 @@ export function DetailsSheet({
   children,
   containsComposer = false,
   height = "content",
+  tall = false,
   readerOnly = false,
   headerActions,
   onClosed,
@@ -368,6 +369,9 @@ export function DetailsSheet({
   containsComposer?: boolean;
   /** Media stages need a bounded working area; threads hug their contents. */
   height?: "content" | "stable";
+  /** Takes the full height while true, as a thread does under a panel, and
+   * settles back to its content after. */
+  tall?: boolean;
   /** Inspector content owns its scrollport and does not expose an editor. */
   readerOnly?: boolean;
   headerActions?: ReactNode;
@@ -501,6 +505,7 @@ export function DetailsSheet({
           data-contained-composer={containsComposer || undefined}
           data-reader-only={readerOnly || undefined}
           data-height={height}
+          data-tall={tall || undefined}
           style={style}
           // The sheet takes focus itself: its first header action would show
           // a focus tooltip that the first Escape closes instead of the

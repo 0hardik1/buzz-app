@@ -49,13 +49,27 @@ Closing an inactive tab must not change the selected content.
 
 ### Inline sheets
 
-With the Inline setting, threads, details, diffs, media and link panels open on
-a sheet over their conversation. A sheet is a transient overlay, like a
-popover, not a history entry: opening one from a row records no visit, and
-Back/Forward does not restore it. A visit that opens a sheet, such as a thread
-preview, is retired when the sheet is closed with Close or Escape, so Back never
-shows a sheet that was dismissed. Open as tab makes the content a content tab,
-which then follows the rules above.
+With the Inline setting, threads, details, diffs and link panels open on a
+sheet over the composer of their conversation, as a dialog where no composer
+is on screen. Opening one is a visit to its address: a thread by its root, a
+panel by its target, a details or diff message as a `reader` over its own
+conversation. Moving to another page inside a panel is a visit too. Back
+closes the newest sheet; Forward reopens it where it was, or in its tab, or a
+dialog, when that composer is gone. Close, Escape and a press on the scrim
+retire the sheet's visits, and those of the sheets open on it, so neither Back
+nor Forward shows it again. Open as tab keeps the address, adding no visit.
+Media viewers are not addresses: they dismiss only themselves.
+
+A `reader` address holds the message's kind (`details` or `diff`), its id,
+and the root of its thread when it is a reply, which names the composer it
+reads over. Arriving at one without its sheet, as after a reload or from a
+link, resolves the message first, the way a message link does: revealed in the
+timeline, or in its thread. Once the message's row is on screen, the row opens
+the reader over that conversation's composer, or in a dialog when no composer
+is on screen. A diff falls back to its tab instead; details never get a tab.
+A deleted or missing message fails as a missing message link does, and no
+sheet opens: a reader is drawn from its row, so it shows only while the row is
+there.
 
 ## Keep lifecycle and access guards
 

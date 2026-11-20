@@ -4,6 +4,7 @@ import {
   RowKeepAlive,
   useInlineContainers,
   useReaderSlot,
+  useRequestedReader,
 } from "../../features/messages/inline-containers";
 import {
   type ComponentProps,
@@ -72,6 +73,8 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
   useEffect(() => (open ? keepMounted?.() : undefined), [open, keepMounted]);
   const expand = useRef<HTMLButtonElement>(null);
   const files = useMemo(() => parsePatch(message.content), [message.content]);
+  const show = useRef<() => void>(undefined);
+  useRequestedReader(opener, target, () => show.current?.());
   const meta = message.diff;
   if (!meta) return null;
   const repoUrl = meta.repoUrl ? safeMessageUrl(meta.repoUrl) : undefined;
@@ -96,6 +99,20 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
     </p>
   );
   const reader = <DiffReader viewer={viewer} warning={warning} />;
+  show.current = () =>
+    opener.open({
+      target,
+      composer,
+      trigger: expand.current,
+      openAsTab:
+        openTab &&
+        (() =>
+          openTab({
+            id: `diff:${message.id}`,
+            title,
+            content: reader,
+          })),
+    });
   return (
     <>
       <section className={styles.card} aria-label={`Diff: ${title}`}>
@@ -117,21 +134,7 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
             size="sm"
             aria-label="Expand diff"
             icon={<ArrowsOutIcon size={16} aria-hidden="true" />}
-            onClick={() =>
-              opener.open({
-                target,
-                composer,
-                trigger: expand.current,
-                openAsTab:
-                  openTab &&
-                  (() =>
-                    openTab({
-                      id: `diff:${message.id}`,
-                      title,
-                      content: reader,
-                    })),
-              })
-            }
+            onClick={() => show.current?.()}
           />
         </header>
         {meta.description && (

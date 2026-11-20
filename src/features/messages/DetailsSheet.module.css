@@ -212,6 +212,28 @@ html[data-keyboard-navigation] :is(.scrim, .content) {
   z-index: 2;
   padding-bottom: var(--space-4);
 }
+.sheet[data-height="content"][data-contained-composer] {
+  min-height: 0;
+  transition: min-height var(--duration-settle) var(--easing-enter);
+}
+/* A thread under a panel or diff takes the full height, so the reader over
+   its reply box is not as small as a short thread; it settles back after. */
+.sheet[data-height="content"][data-contained-composer][data-tall] {
+  min-height: calc(
+    var(--frame-height, 100dvh) -
+    var(--composer-bottom) +
+    var(--sheet-gap) -
+    var(--sheet-top)
+  );
+}
+html[data-keyboard-navigation] .sheet[data-contained-composer] {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet[data-contained-composer] {
+    transition: none;
+  }
+}
 .headerMaterial {
   display: block;
   position: absolute;
@@ -312,4 +334,17 @@ html[data-keyboard-navigation]
   > .body
   > .reader {
   flex: 0 1 auto;
+}
+
+/* Under a panel or diff, the tall thread fills its height down to its reply
+   box. Last, so it outranks the content-height rules above. */
+.sheet[data-height="content"][data-tall] > .content,
+.sheet[data-height="content"][data-tall] > .content > .body,
+.sheet[data-height="content"][data-tall] > .content > .body > .reader,
+.sheet[data-height="content"][data-tall]
+  > .content
+  > .body
+  > .reader
+  :is([data-thread-history-frame], [data-message-scroller]) {
+  flex: 1 1 auto;
 }
