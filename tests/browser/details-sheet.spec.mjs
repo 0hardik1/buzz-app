@@ -153,14 +153,18 @@ test("a diff tab keeps its layout on Expand and outlives its branch", async ({
   await row.getByRole("button", { name: "Reply", exact: true }).click();
   const sheet = page.getByRole("dialog");
   await sheet.getByRole("button", { name: /^View 1 reply/ }).click();
+  // The sheet fits its content, so it resizes when the highlighted diff
+  // replaces the raw patch, and Open as tab moves with it.
+  await expect(sheet.locator("diffs-container pre").first()).toBeVisible();
   await sheet.getByRole("button", { name: "Open as tab", exact: true }).click();
   await expect(sheet).toBeHidden();
   const tabs = page.getByRole("tablist", { name: "Panel tabs" });
   const threadTab = tabs.getByRole("tab", { name: /primary alpha message 0/ });
   await page.getByRole("button", { name: /^View 1 reply/ }).click();
-  const expand = page
-    .getByRole("region", { name: "Diff: a.ts" })
-    .getByRole("button", { name: "Expand diff" });
+  const card = page.getByRole("region", { name: "Diff: a.ts" });
+  const expand = card.getByRole("button", { name: "Expand diff" });
+  // Expand moves when the highlighted diff replaces the raw patch.
+  await expect(card.locator("diffs-container pre").first()).toBeVisible();
   await expand.click();
   const reader = page.getByRole("dialog");
   await reader

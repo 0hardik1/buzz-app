@@ -41,6 +41,14 @@ async function openThread(page, root) {
   return sheet;
 }
 
+// The card shows the raw patch until its highlighter loads, then the
+// narrower highlighted diff: Expand moves with it, and a press that starts
+// before the swap can end beside the button.
+async function expandDiff(card) {
+  await expect(card.locator("diffs-container pre").first()).toBeVisible();
+  await card.getByRole("button", { name: "Expand diff" }).click();
+}
+
 // Back closes it, Forward opens it again, and ✕ takes it out of both.
 async function journey(page, { opened, close, reopened }) {
   await expect(opened()).toHaveCount(1);
@@ -146,10 +154,7 @@ test("diff: Back, Forward, ✕, Forward", async ({ page, app }) => {
     undefined,
     40008,
   );
-  await page
-    .getByRole("region", { name: "Diff: a.ts" })
-    .getByRole("button", { name: "Expand diff" })
-    .click();
+  await expandDiff(page.getByRole("region", { name: "Diff: a.ts" }));
   await journey(page, {
     opened: () => sheets(page),
     close: () =>
@@ -296,10 +301,7 @@ test("Forward to a diff whose reply box is gone opens its tab", async ({
     page,
     sheet.getByRole("region", { name: "Thread messages", exact: true }),
   );
-  await sheet
-    .getByRole("region", { name: "Diff: a.ts" })
-    .getByRole("button", { name: "Expand diff" })
-    .click();
+  await expandDiff(sheet.getByRole("region", { name: "Diff: a.ts" }));
   const reader = () => sheet.locator("[data-details-sheet-surface]");
   await expect(reader()).toHaveCount(1);
   await back(page);
