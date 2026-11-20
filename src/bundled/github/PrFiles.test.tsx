@@ -204,15 +204,18 @@ it("loads all three reply pages without confusing ownership with pagination", as
       base={snapshot.base}
     />,
   );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Load more replies" }),
+  const firstMore = (await screen.findByText("Load more replies")).closest(
+    "button",
   );
+  if (!firstMore) throw new Error("Missing pagination button");
+  fireEvent.click(firstMore);
   await screen.findByText("Comment 200");
-  fireEvent.click(screen.getByRole("button", { name: "Load more replies" }));
+  const lastMore = screen.getByText("Load more replies").closest("button");
+  if (!lastMore) throw new Error("Missing pagination button");
+  fireEvent.click(lastMore);
   await screen.findByText("Comment 201");
-  expect(
-    screen.queryByRole("button", { name: "Load more replies" }),
-  ).toBeNull();
+  expect(lastMore.isConnected).toBe(false);
+  expect(screen.queryByText("Load more replies")).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.getByText("Comment 1")).toBeTruthy();
   expect(loadThreads).toHaveBeenCalledTimes(1);
