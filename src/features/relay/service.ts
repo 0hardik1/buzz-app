@@ -6,7 +6,8 @@ import type { PresenceActivity } from "../presence/activity";
 import type { Context } from "@deepseek-ai/cordis";
 import { createRelaySession, type RelaySession } from "./session";
 import { createHeadPersistence } from "./persistence";
-import { clearNativeMedia, nativeChannelMedia } from "./native";
+import { clearNativeMedia, nativeChannelMedia, nativeMediaUrl } from "./native";
+import { nativeIdentityEnabled } from "../identity/service";
 import { savedVerifiedProfileAuthority } from "./verified-profile";
 import {
   relayPartition,
@@ -15,7 +16,8 @@ import {
 } from "./partition";
 import { isTransientFailure, ReadError, readErrorKind } from "./errors";
 import { RECOVERY_DELAYS_MS } from "./recovery";
-import type { ReadTransport } from "./transport";
+import { mediaUrl, type ReadTransport } from "./transport";
+import { retryFailedImages } from "../../shared/design-system/useReadyImage";
 import { refusalOfError, type CommunityRefusal } from "./http-admission";
 /** The snapshot's error for a refusal heard after connecting, for logs and
  * diagnostics; what it offers follows `refusal`, never this text. */
@@ -212,7 +214,15 @@ export function provideRelay(
                 "Reconnect to update saved conversations.",
               ),
             ),
-          media: () => undefined,
+          // The same URLs the connection will use, so restored avatars show
+          // their saved images at once instead of after it connects.
+          media: (url, size) =>
+            mediaUrl(
+              url,
+              nativeIdentityEnabled() ? nativeMediaUrl : undefined,
+              resume.scope,
+              size,
+            ),
           ...(verifyStored ? { verifyStored } : {}),
         },
         {
@@ -458,6 +468,9 @@ export function provideRelay(
               : {}),
           });
           ready = true;
+          // Restored images keep their URLs across this handoff, so one that
+          // failed while offline would otherwise not be requested again.
+          retryFailedImages();
           store.session.channels.ensureList();
           reopening = reopen;
           if (reopen) reopenListed(store, reopen);

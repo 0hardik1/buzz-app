@@ -256,13 +256,15 @@ export type SessionsOptions<S = unknown> = Readonly<{
   /** Where each conversation's last use is saved. */
   store?: SessionStore;
   /** Told of each session opened, with the prompt and title it was opened
-   * with, and the conversation it opened for: none for a one-off turn.
+   * with, and the conversation it opened for: none for a one-off turn. A
+   * one-off turn's also gets its label, as `runOnce` was given it.
    * `resumed`: a saved session reopened, which today's prompt never started. */
   started?(
     sessionId: string,
     systemPrompt: string,
     title?: string,
     conversation?: string,
+    wake?: string,
     resumed?: boolean,
   ): void;
   /** The tags a session opens with, for the conversation it opens for:
@@ -369,6 +371,8 @@ export class AgentSessions<S = unknown> {
   private readonly live = new Map<string, Live>();
   /** One-off turns running or starting, by label. */
   private readonly once = new Map<string, Live | undefined>();
+  /** The label each open one-off turn was given. */
+  private readonly onceLabels = new Map<string, string>();
   private onceCount = 0;
   /** Sessions opening, which `shutdown` waits for. */
   private readonly opens = new Set<Promise<Live>>();
@@ -1083,6 +1087,7 @@ export class AgentSessions<S = unknown> {
     if (this.disposed) return this.stopped;
     const key = `${label} #${++this.onceCount}`;
     this.once.set(key, undefined);
+    this.onceLabels.set(key, label);
     this.options.onChange?.();
     // Pinned like a conversation's, but never an owner: it saves nothing.
     const pinned = this.options.pin?.();
@@ -1139,6 +1144,7 @@ export class AgentSessions<S = unknown> {
       };
     } finally {
       this.once.delete(key);
+      this.onceLabels.delete(key);
       // One that opens after the turn was given up is closed once it has.
       if (live) await this.close(live);
       else void opening.then((late) => this.close(late)).catch(() => undefined);
@@ -1559,6 +1565,7 @@ export class AgentSessions<S = unknown> {
       launch.systemPrompt,
       title,
       this.once.has(key) ? undefined : key,
+      this.onceLabels.get(key),
       session.resumed,
     );
     // Removed meanwhile: the callers are gone, and `shutdown` waits for this.

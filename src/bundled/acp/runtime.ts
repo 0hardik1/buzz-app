@@ -923,7 +923,7 @@ export class AcpRuntime {
       onChange: () => this.notify(),
       // Only a new session's prompt is its own: a resumed one started with
       // whatever it was sent then.
-      started: (session, text, title, conversation, resumed) => {
+      started: (session, text, title, conversation, _wake, resumed) => {
         if (conversation !== undefined)
           entry.store.remember(conversation, session);
         if (resumed) return;
