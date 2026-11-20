@@ -835,7 +835,8 @@ pub async fn browser_focus(
 }
 
 /// Makes the trusted main view first responder, so keys reach the app after
-/// a native shortcut left a guest page. Only the main view may ask.
+/// a native shortcut left a guest page. Only the main view may ask. Answers
+/// true only when the main view really holds the keyboard afterwards.
 #[tauri::command]
 pub async fn focus_main_view<R: tauri::Runtime>(
     app: AppHandle<R>,
@@ -850,10 +851,10 @@ pub async fn focus_main_view<R: tauri::Runtime>(
         let focused = main_window_accepts_focus(&handle)
             && handle.get_webview_window("main").is_some_and(|main| {
                 // The webview, not the window: a guest can be first responder
-                // inside an already focused window.
-                AsRef::<tauri::Webview<R>>::as_ref(&main)
-                    .set_focus()
-                    .is_ok()
+                // inside an already focused window. AppKit can refuse the
+                // transfer while Wry still reports success, so check it.
+                let main = AsRef::<tauri::Webview<R>>::as_ref(&main);
+                main.set_focus().is_ok() && platform::main_view_focused(main)
             });
         let _ = sender.try_send(focused);
     })

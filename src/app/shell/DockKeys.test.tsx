@@ -568,6 +568,27 @@ it("browser builds register nothing", () => {
   expect(onSelect).not.toHaveBeenCalled();
 });
 
+it("off Apple, a shortcut saved on Ctrl+D before this version keeps it", () => {
+  const { shortcuts, bindings, draft } = setup();
+  const focusComposer = vi.fn();
+  act(() => {
+    shortcuts.registerHost({
+      id: "focus-composer",
+      title: "Focus message box",
+      binding: { key: "l", mod: true },
+      order: 10,
+      allowInEditable: true,
+      run: focusComposer,
+    });
+    bindings.set("focus-composer", { key: "d", mod: true });
+  });
+  draft.focus();
+  ctrlD();
+  expect(focusComposer).toHaveBeenCalledTimes(1);
+  expect(draft).toHaveFocus();
+  expect(shortcuts.resolved().get(GO_TO_DOCK)?.effective).toEqual([]);
+});
+
 it("off Apple, a terminal keeps Ctrl+D", () => {
   const terminal = (
     <div className="xterm">

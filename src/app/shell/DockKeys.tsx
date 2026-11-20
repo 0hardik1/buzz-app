@@ -344,29 +344,34 @@ export function useDockKeys({
   useEffect(() => {
     if (!shortcuts || !desktop) return;
     let guest: string | null = null;
-    const remove = shortcuts.registerHost({
-      id: GO_TO_DOCK,
-      title: "Go to dock",
-      binding: GO_TO_DOCK_BINDING,
-      order: HOST_SHORTCUT_ORDER.goToDock,
-      allowInEditable: true,
-      // Off Apple, Ctrl+D in a terminal is end of input.
-      ...(native ? {} : { when: () => !inTerminal() }),
-      run: () => {
-        if (mode.current) {
-          const focused = document.activeElement?.closest('[role="tab"]');
-          const key = focused?.getAttribute("data-tab-value");
-          if (key && dockList()?.contains(focused ?? null)) {
-            actions.current?.open(key);
-            return;
+    const remove = shortcuts.registerHost(
+      {
+        id: GO_TO_DOCK,
+        title: "Go to dock",
+        binding: GO_TO_DOCK_BINDING,
+        order: HOST_SHORTCUT_ORDER.goToDock,
+        allowInEditable: true,
+        // Off Apple, Ctrl+D in a terminal is end of input.
+        ...(native ? {} : { when: () => !inTerminal() }),
+        run: () => {
+          if (mode.current) {
+            const focused = document.activeElement?.closest('[role="tab"]');
+            const key = focused?.getAttribute("data-tab-value");
+            if (key && dockList()?.contains(focused ?? null)) {
+              actions.current?.open(key);
+              return;
+            }
+            // Focus left the dock without a focusout, as WebKit does when the
+            // focused tab is removed: start again from here.
+            actions.current?.end();
           }
-          // Focus left the dock without a focusout, as WebKit does when the
-          // focused tab is removed: start again from here.
-          actions.current?.end();
-        }
-        actions.current?.enter(guest);
+          actions.current?.enter(guest);
+        },
       },
-    });
+      // Ctrl+D is new in this version: off macOS, a shortcut someone already
+      // saved on it keeps it, and Go to dock is unbound until given a key.
+      { yields: true },
+    );
     if (!native) return remove;
     const request = (event: Event) => {
       const detail = (event as CustomEvent<{ browserSessionId?: unknown }>)

@@ -17,8 +17,8 @@ describe("resolveBindings", () => {
     // shortcut already uses stays with the saved one, and the new one is unbound.
     const resolved = resolve(
       [
-        { key: "go-to-dock", defaults: [dock], host: true },
-        { key: "focus-composer", defaults: [focus], host: true },
+        { key: "go-to-dock", defaults: [dock], yields: true },
+        { key: "focus-composer", defaults: [focus] },
       ],
       { "focus-composer": [dock] },
       [],
@@ -27,10 +27,27 @@ describe("resolveBindings", () => {
     expect(resolved.get("go-to-dock")).toEqual({ effective: [] });
   });
 
+  it("a reset host action gets its default back even when a plugin action saved it", () => {
+    // Rebind Search, give its freed chord to a plugin action, then reset
+    // Search: Search answers to its default again, listed as shared.
+    const resolved = resolve(
+      [
+        { key: "search", defaults: [focus] },
+        { key: "go-to-dock", defaults: [dock], yields: true },
+        { key: "plugin/action", defaults: [other] },
+      ],
+      { "plugin/action": [focus] },
+      [],
+    );
+    expect(resolved.get("search")).toEqual({ effective: [focus] });
+    expect(resolved.get("plugin/action")).toEqual({ effective: [focus] });
+    expect(resolved.get("go-to-dock")).toEqual({ effective: [dock] });
+  });
+
   it("lists a plugin default someone assigned elsewhere as shared, for them to settle", () => {
     const resolved = resolve(
       [
-        { key: "saved", defaults: [focus], host: true },
+        { key: "saved", defaults: [focus] },
         { key: "plugin/action", defaults: [home] },
       ],
       { saved: [home] },
@@ -43,7 +60,7 @@ describe("resolveBindings", () => {
   it("keeps the free aliases of a default when another action holds one", () => {
     const resolved = resolve(
       [
-        { key: "search", defaults: [focus, home], host: true },
+        { key: "search", defaults: [focus, home], yields: true },
         { key: "b", defaults: [other] },
       ],
       { b: [home] },
@@ -55,8 +72,8 @@ describe("resolveBindings", () => {
   it("a field-local override and a global default never take each other's chord", () => {
     const resolved = resolve(
       [
-        { key: "global", defaults: [focus], host: true },
-        { key: "field", defaults: [home], local: true, host: true },
+        { key: "global", defaults: [focus], yields: true },
+        { key: "field", defaults: [home], local: true },
       ],
       { field: [focus] },
       [],
@@ -68,8 +85,8 @@ describe("resolveBindings", () => {
   it("a native default keeps its chord over a saved override the native chord masks", () => {
     const resolved = resolve(
       [
-        { key: "go-to-dock", defaults: [dock], host: true },
-        { key: "focus-composer", defaults: [focus], host: true },
+        { key: "go-to-dock", defaults: [dock], yields: true },
+        { key: "focus-composer", defaults: [focus] },
       ],
       { "focus-composer": [dock] },
     );

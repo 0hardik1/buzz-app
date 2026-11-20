@@ -656,13 +656,16 @@ it("upgrade profile off macOS: a saved Ctrl+D keeps its action and the new dock 
   try {
     const dock = vi.fn();
     const focus = vi.fn();
-    service.registerHost({
-      id: "go-to-dock",
-      title: "Go to dock",
-      binding: dockChord,
-      order: 72,
-      run: dock,
-    });
+    service.registerHost(
+      {
+        id: "go-to-dock",
+        title: "Go to dock",
+        binding: dockChord,
+        order: 72,
+        run: dock,
+      },
+      { yields: true },
+    );
     service.registerHost({
       id: "focus-composer",
       title: "Focus message box",
@@ -683,6 +686,58 @@ it("upgrade profile off macOS: a saved Ctrl+D keeps its action and the new dock 
     expect(dock).toHaveBeenCalledTimes(1);
     expect(focus).toHaveBeenCalledTimes(1);
   } finally {
+    await root.fiber.dispose();
+    bindings.dispose();
+  }
+});
+
+it("reset after a plugin took the freed chord: the host action answers to its default again", async () => {
+  const b = browser(false),
+    root = new Context();
+  const plugged = vi.fn();
+  const runtime = new PluginRuntime(root, async () => ({
+    inject: ["shortcuts"],
+    apply(ctx) {
+      ctx.shortcuts.register(shortcut(plugged));
+    },
+  }));
+  const bindings = createShortcutBindings(undefined);
+  const service = new ShortcutsService(root, b.host, bindings, []);
+  try {
+    runtime.reconcile([plugin("a")]);
+    await vi.waitFor(() => expect(service.snapshot()).toHaveLength(1));
+    const focus = vi.fn();
+    service.registerHost({
+      id: "focus-composer",
+      title: "Focus message box",
+      binding: focusChord,
+      order: 10,
+      run: focus,
+    });
+    service.registerHost(
+      {
+        id: "go-to-dock",
+        title: "Go to dock",
+        binding: dockChord,
+        order: 72,
+        run: vi.fn(),
+      },
+      { yields: true },
+    );
+    // Move Focus message box off Ctrl+L, give Ctrl+L to the plugin, reset.
+    bindings.set("focus-composer", homeChord);
+    bindings.set("a/action", focusChord);
+    bindings.set("focus-composer", null);
+    expect(service.resolved().get("focus-composer")?.effective).toEqual([
+      focusChord,
+    ]);
+    expect(service.resolved().get("a/action")?.effective).toEqual([focusChord]);
+    // The host action keeps priority on the shared chord, as before.
+    b.key("l");
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(plugged).not.toHaveBeenCalled();
+  } finally {
+    await runtime.dispose();
     await root.fiber.dispose();
     bindings.dispose();
   }

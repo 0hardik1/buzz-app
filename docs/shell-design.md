@@ -152,9 +152,10 @@ semantic tokens, UI authoring rules and the local component reference.
   register it. Dock mode numbers the first nine tabs. Digits, Return and Space
   open an app with `"content"` focus, and Escape restores the previous focus.
   A key the dock used stays its own until it is released, so a held Return
-  never reaches the tab. A saved shortcut outranks a host default
-  (`resolveBindings`), so off Apple an older custom Ctrl+D leaves `go-to-dock`
-  unbound, and hints read the same resolved table.
+  never reaches the tab. `go-to-dock` registers with `yields`: a saved
+  shortcut already on its default wins (`resolveBindings`), so off Apple an
+  older custom Ctrl+D leaves it unbound. Other defaults stay shared, so Reset
+  always brings one back. Hints read the same resolved table.
   The open's own attempt (`onAttempt`) decides whether its tabpanel takes focus
   when the page didn't. Bestie opens with `"preserve"` and hands the cursor to
   its conversation composer, through a one-shot request bound to that attempt.

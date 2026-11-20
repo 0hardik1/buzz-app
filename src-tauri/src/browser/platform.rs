@@ -582,6 +582,36 @@ mod macos {
     }
 }
 
+/// Whether the trusted main view, or a view inside it, is first responder.
+/// Wry's `focus` drops `makeFirstResponder`'s answer, so this asks AppKit.
+/// Guest pages are siblings of the main view, never inside it.
+#[cfg(target_os = "macos")]
+pub(super) fn main_view_focused<R: tauri::Runtime>(main: &tauri::Webview<R>) -> bool {
+    use objc2_app_kit::NSView;
+    use objc2_web_kit::WKWebView;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let asked = main.with_webview(move |webview| {
+        let view = unsafe { &*webview.inner().cast::<WKWebView>() };
+        let focused = view
+            .window()
+            .and_then(|window| window.firstResponder())
+            .is_some_and(|responder| {
+                responder
+                    .downcast_ref::<NSView>()
+                    .is_some_and(|focused| focused.isDescendantOf(view))
+            });
+        let _ = sender.send(focused);
+    });
+    // On the UI thread the callback has run before `with_webview` returns.
+    asked.is_ok() && receiver.try_recv().unwrap_or(false)
+}
+
+/// Elsewhere there is no first responder to check; the focus call decides.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn main_view_focused<R: tauri::Runtime>(_main: &tauri::Webview<R>) -> bool {
+    true
+}
+
 #[cfg(target_os = "macos")]
 pub(super) fn resize_guest(
     guest: &WebView,

@@ -126,8 +126,9 @@ export type BindingRow = Readonly<{
   defaults: readonly KeyBinding[];
   /** A field matches it itself; it competes only with other field-local rows. */
   local?: boolean;
-  /** The host's own action: its defaults change between versions. */
-  host?: boolean;
+  /** A default added after people may have saved its chord elsewhere: it gives
+   * way to that saved assignment instead of competing with it. */
+  yields?: boolean;
 }>;
 /** What applies now for one action. `masked` names a saved override that a
  * native chord took over; `restored` says whether its default came back. */
@@ -141,10 +142,10 @@ const answersTo = (chords: readonly KeyBinding[], binding: KeyBinding) =>
 
 /**
  * Effective chords for every action at once, shared by dispatch and Settings.
- * A saved override outranks a host action's default: a host default someone
- * already assigned elsewhere, such as one a newer version ships with, is left
- * to that assignment, and a host action with no default left is unbound.
- * Plugin defaults stay listed as shared, for the person to settle.
+ * A yielding default (one a newer version added, such as Go to dock's Ctrl+D)
+ * is left to a saved override that already uses it, and a yielding action with
+ * no default left is unbound. Every other default stays listed as shared, for
+ * the person to settle, so resetting an action always brings its default back.
  * A native chord (a menu accelerator that must reach the native menu) masks
  * any saved override equal to it. The masked action gets its default back only
  * if no other action answers to it and it is not native itself; otherwise it
@@ -165,7 +166,7 @@ export function resolveBindings(
   for (const row of rows) {
     const saved = override(row.key);
     if (!isBindingList(saved)) {
-      if (row.host) defaulted.push(row);
+      if (row.yields) defaulted.push(row);
       else resolved.set(row.key, { effective: row.defaults });
     } else if (!saved.some((binding) => answersTo(native, binding))) {
       resolved.set(row.key, { effective: saved });

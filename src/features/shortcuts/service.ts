@@ -23,7 +23,8 @@ import {
 export type { KeyBinding, NormalizedShortcut, Shortcut } from "./bindings";
 export type RegisteredShortcut = Contribution<NormalizedShortcut>;
 /** Host-only: a field matches it itself, so it is listed in Settings but never reserved or run. */
-export type HostShortcut = NormalizedShortcut & Readonly<{ local: boolean }>;
+export type HostShortcut = NormalizedShortcut &
+  Readonly<{ local: boolean; yields: boolean }>;
 export type Shortcuts = {
   register(shortcut: Shortcut): void;
   snapshot(): readonly RegisteredShortcut[];
@@ -216,7 +217,7 @@ export class ShortcutsService extends Service implements Shortcuts {
           key: shortcut.id,
           defaults: shortcut.binding,
           local: shortcut.local,
-          host: true,
+          yields: shortcut.yields,
         })),
       ...[...this.contributions.snapshot()]
         .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
@@ -229,10 +230,18 @@ export class ShortcutsService extends Service implements Shortcuts {
     this.contributions.register(this.ctx, normalizeShortcut(shortcut));
   }
   /** Host composition only; not part of the injected plugin contract. */
-  registerHost(shortcut: Shortcut, { local = false } = {}) {
+  registerHost(
+    shortcut: Shortcut,
+    {
+      local = false,
+      /** The default gives way to a saved shortcut on the same chord. */
+      yields = false,
+    } = {},
+  ) {
     const entry: HostShortcut = Object.freeze({
       ...normalizeShortcut(shortcut),
       local,
+      yields,
     });
     if (this.hostBindings.has(entry.id))
       throw new Error(`Host shortcut already registered: ${entry.id}`);
