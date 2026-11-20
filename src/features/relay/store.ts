@@ -1390,10 +1390,13 @@ export function createChannelStore(
       !records.some((record) => record.channelId === options.initialChannelId)
     )
       reveal?.();
+    let full = false;
     while (records.length) {
       const priorityIndex = records.findIndex(
         (record) => record.channelId === intent,
       );
+      // Once the cache is full, only a channel opened meanwhile still restores.
+      if (full && priorityIndex < 0) break;
       const [record] = records.splice(
         priorityIndex >= 0 ? priorityIndex : 0,
         1,
@@ -1533,7 +1536,14 @@ export function createChannelStore(
         // Evidence subscribers can synchronously revoke access or clear caches too.
         if (disposed || generation !== epoch || !authorized(record.channelId))
           return;
-        heads.set(record.channelId, head);
+        // Records arrive newest first, so each is less recent than every head
+        // already held. Stopping at the first that does not fit keeps the
+        // newest, and skips verifying records that would be evicted.
+        if (record.channelId === intent) heads.set(record.channelId, head);
+        else if (!heads.setOldest(record.channelId, head)) {
+          full = true;
+          continue;
+        }
         const state = windows.get(record.channelId);
         if (
           state &&
