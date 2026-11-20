@@ -33,16 +33,20 @@ function Card({ rows }: { rows: number }) {
 }
 
 /** jsdom has no layout: stack rows at a fixed pitch from the list's top. */
-function layOut() {
+function layOut(pitch = ROW) {
   const rows = [...document.querySelectorAll<HTMLElement>("[data-card-row]")];
   const list = rows[0]?.parentElement as HTMLElement;
   for (const [index, row] of rows.entries())
     row.getBoundingClientRect = () =>
-      ({ top: index * ROW, bottom: (index + 1) * ROW }) as DOMRect;
+      ({ top: index * pitch, bottom: (index + 1) * pitch }) as DOMRect;
   list.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
-  Object.defineProperty(list, "scrollHeight", { value: rows.length * ROW });
+  Object.defineProperty(list, "scrollHeight", {
+    value: rows.length * pitch,
+    configurable: true,
+  });
   Object.defineProperty(list, "offsetHeight", {
-    get: () => Number.parseFloat(list.style.maxHeight) || rows.length * ROW,
+    get: () => Number.parseFloat(list.style.maxHeight) || rows.length * pitch,
+    configurable: true,
   });
   return list;
 }
@@ -151,4 +155,37 @@ it("shows ten rows until changed, full shows every row, and full toggles back to
   } finally {
     restore();
   }
+});
+
+it("makes rows past the card's edge inert and lands a saved height on a whole row", () => {
+  render(<Card rows={5} />);
+  const list = layOut();
+  const grip = screen.getByLabelText("Resize Work");
+  // Release between rows two and three, then change the text size so the
+  // saved height no longer falls on a row edge.
+  fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 160 });
+  fireEvent.pointerMove(window, { pointerId: 1, clientY: 70 });
+  fireEvent.pointerUp(window, { pointerId: 1, clientY: 70 });
+  expect(list.style.maxHeight).toBe(`${2 * ROW}px`);
+  const rows = [...list.querySelectorAll<HTMLElement>("[data-card-row]")];
+  expect(rows.map((row) => row.inert)).toEqual([
+    false,
+    false,
+    true,
+    true,
+    true,
+  ]);
+  expect(rows[2]).toHaveAttribute("data-card-clipped");
+  // Larger text: rows are now 40px tall, so 64px is nearest to row two's end.
+  layOut(40);
+  fireEvent.doubleClick(grip);
+  fireEvent.doubleClick(grip);
+  expect(list.style.maxHeight).toBe("80px");
+  expect(rows.map((row) => row.inert)).toEqual([
+    false,
+    false,
+    true,
+    true,
+    true,
+  ]);
 });

@@ -129,7 +129,7 @@ export function SidebarCardResize({
 
   return (
     <>
-      <div ref={list} className={styles.cardRows}>
+      <div ref={list} className={styles.cardRows} data-card-rows="">
         {children}
       </div>
       {/* Only a card with more than one row has anything to hide. */}
@@ -212,7 +212,7 @@ export function SidebarCardResize({
                 if (event.type !== "pointerup" || next === start)
                   return clip(rows, height);
                 learn();
-                const settled = nearest(rows, next);
+                const settled = nearest(stops(rows), next);
                 const target = settled >= max ? ALL_ROWS : settled;
                 if (target === height) clip(rows, height);
                 else onResize(target);
@@ -250,15 +250,36 @@ export function SidebarCardResize({
   );
 }
 
-/** Clip the list to a saved height: ten rows when unset, none when full. */
+/**
+ * Clip the list to a saved height: ten rows when unset, none when full. A
+ * saved height lands on a whole row even after text size changes. Rows past
+ * the clip are inert, so focus and the keyboard skip what the card hides.
+ */
 function clip(list: HTMLElement, height: number | undefined) {
-  let limit = height === ALL_ROWS ? undefined : height;
-  if (height === undefined) {
-    const ends = stops(list);
-    limit = ends.length >= DEFAULT_ROWS ? ends[DEFAULT_ROWS - 1] : undefined;
+  const ends = stops(list);
+  const full = ends.at(-1) ?? 0;
+  // A hidden card has no layout, so every stop is zero: keep the saved
+  // height as it is until the card is shown and can be measured.
+  if (!full) {
+    list.style.maxHeight =
+      height !== undefined && height !== ALL_ROWS ? `${height}px` : "";
+    return;
   }
-  // A hidden card has no layout, so every stop is zero; it clips once shown.
-  list.style.maxHeight = limit ? `${limit}px` : "";
+  const limit =
+    height === ALL_ROWS
+      ? undefined
+      : height === undefined
+        ? ends[DEFAULT_ROWS - 1]
+        : nearest(ends, height);
+  const clipped = limit !== undefined && limit < full;
+  list.style.maxHeight = clipped ? `${limit}px` : "";
+  list
+    .querySelectorAll<HTMLElement>("[data-card-row]")
+    .forEach((row, index) => {
+      const hidden = clipped && (ends[index - 1] ?? 0) >= limit;
+      row.inert = hidden;
+      row.toggleAttribute("data-card-clipped", hidden);
+    });
 }
 
 /** Where the list ends after each of its rows. */
@@ -274,8 +295,8 @@ function stops(list: HTMLElement) {
 }
 
 /** The whole-row height closest to a dragged one. */
-function nearest(list: HTMLElement, height: number) {
-  return stops(list).reduce(
+function nearest(ends: readonly number[], height: number) {
+  return ends.reduce(
     (best, end) =>
       Math.abs(end - height) < Math.abs(best - height) ? end : best,
     Number.POSITIVE_INFINITY,

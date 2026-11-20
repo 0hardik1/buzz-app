@@ -58,7 +58,8 @@ export function expandSidebarSection(scope: string, key: string) {
 /**
  * Show the current destination (`aria-current="page"`) in the sidebar
  * viewport. Rows hidden by a collapsed section or session list are shown
- * through the header or parent row that represents them. Returns false while
+ * through the header or parent row that represents them, and rows past a
+ * resized card's edge through the card. Returns false while
  * no current entry is laid out yet; otherwise returns the offset that shows it.
  */
 function revealCurrent(viewport: HTMLElement): number | false {
@@ -69,6 +70,9 @@ function revealCurrent(viewport: HTMLElement): number | false {
     for (let node: HTMLElement | null = entry; node && node !== viewport; ) {
       if (node.hidden && node.previousElementSibling instanceof HTMLElement)
         owner = node.previousElementSibling;
+      // A row past a resized card's edge is shown through the card's rows.
+      else if (node.hasAttribute("data-card-clipped"))
+        owner = node.closest<HTMLElement>("[data-card-rows]") ?? owner;
       node = node.parentElement;
     }
     return owner.getBoundingClientRect();

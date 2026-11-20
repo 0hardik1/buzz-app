@@ -1067,7 +1067,9 @@ html[data-keyboard-navigation]
    inside the full height. */
 .cardRows {
   display: flow-root;
-  overflow: hidden;
+  /* Clip, not hidden: rows past the edge can never be scrolled into view
+     inside the card, by focus or otherwise. */
+  overflow: clip;
 }
 /* Releases and key steps settle onto a whole row; the drag itself follows the
    pointer exactly. */
