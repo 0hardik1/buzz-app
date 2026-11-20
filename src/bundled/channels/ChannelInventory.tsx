@@ -11,6 +11,7 @@ import { ConvertToChannel } from "../../features/solo/ConvertToChannel";
 import { useChatConversions } from "../../features/solo/conversion";
 import { canEditLifetime } from "../../features/solo/Lifetime";
 import { TeamSidebarSections, TeamSidebarSection } from "./TeamSidebarSource";
+import { useSidebarSeeAll } from "./useSidebarSeeAll";
 import type { WorkspaceSidebarComposition } from "./sidebar-environment";
 import { revealCreatedChannel } from "../../features/channel-navigation/created-channel";
 import {
@@ -972,6 +973,7 @@ export function ChannelInventory({
         : sections,
     [sections, rowSortModes, sectionSort, rowUnread, queries.unread],
   );
+  const seeAll = useSidebarSeeAll();
   const filteredSections = useSidebarFilters(
     sortedSections
       .filter(({ key }) => !workspaceFrames.has(key))
@@ -981,7 +983,11 @@ export function ChannelInventory({
           : section,
       ),
     Object.fromEntries(
-      sortedSections.map(({ key }) => [key, sectionFilter(key)]),
+      sortedSections.map(({ key }) => [
+        key,
+        // A card opened with "See all" lists every conversation it has.
+        key === seeAll ? ("all" as const) : sectionFilter(key),
+      ]),
     ),
     current?.id,
     queries.unread,

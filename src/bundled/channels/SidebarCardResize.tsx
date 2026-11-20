@@ -10,6 +10,8 @@ import {
 import { readView, subscribeView, writeView } from "../../shared/view-state";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import { Button } from "../../shared/design-system/ui/Button";
+import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
+import { CaretRightIcon } from "../../shared/design-system/icons";
 import { hasUnmutedUnread, waitsOnYou } from "./conversation-rows";
 import styles from "./Channels.module.css";
 
@@ -76,9 +78,10 @@ export function useSidebarCardHeight(scope: string, card: string) {
  */
 export function SidebarCardResize({
   label,
-  height,
+  height: savedHeight,
   onResize,
   onToggle,
+  seeAll,
   children,
 }: {
   label: string;
@@ -88,8 +91,16 @@ export function SidebarCardResize({
   onResize(height: number): void;
   /** Switch between full and the height from before full. */
   onToggle(): void;
+  /**
+   * Going one level into the card: `full` while it is open there, which shows
+   * every row with no grip. Otherwise a card cut short, by its edge or by
+   * rows its filter leaves out (`hidden`), ends with a "See all" row.
+   */
+  seeAll?: { full: boolean; hidden: boolean; open(): void } | undefined;
   children: ReactNode;
 }) {
+  const full = !!seeAll?.full;
+  const height = full ? ALL_ROWS : savedHeight;
   const list = useRef<HTMLDivElement>(null);
   const handle = useRef<HTMLHRElement>(null);
   const stop = useRef<() => void>(undefined);
@@ -159,6 +170,15 @@ export function SidebarCardResize({
         <div ref={list} className={styles.cardRows} data-card-rows="">
           {children}
         </div>
+        {seeAll && !full && (shown < count || seeAll.hidden) && (
+          <NavigationItem
+            data-card-see-all=""
+            label="See all"
+            aria-label={`See all in ${label}`}
+            trailing={<CaretRightIcon size={14} />}
+            onClick={seeAll.open}
+          />
+        )}
         {waiting.count > 0 && (
           <div className={styles.cardWaiting} data-card-waiting="">
             <Button
@@ -185,7 +205,7 @@ export function SidebarCardResize({
         )}
       </div>
       {/* Only a card with more than one row has anything to hide. */}
-      {count > 1 && (
+      {count > 1 && !full && (
         <Tooltip
           side="bottom"
           closeOnClick={false}
