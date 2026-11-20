@@ -547,3 +547,73 @@ test.describe("with no saved Team filter", () => {
     expect(app.report.sidebarPublications?.length ?? 0).toBe(published);
   });
 });
+
+test.describe("with a saved workspace filter", () => {
+  test.use({ showAllCards: [] });
+
+  // Menus name a workspace card group:x while Retry names its saved key
+  // section:x. A retried All must still be remembered for the card itself.
+  test("a retried All on a workspace card survives readback", async ({
+    page,
+    app,
+  }) => {
+    const filter = async () => {
+      await page
+        .getByRole("button", { name: "More actions for Work", exact: true })
+        .click();
+      await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+    };
+    const choose = async (name) => {
+      await filter();
+      await page.getByRole("menuitemradio", { name, exact: true }).click();
+    };
+    const filterSaves = () =>
+      (app.report.sidebarPublications ?? []).filter(({ blob }) =>
+        JSON.stringify(blob).includes("section:work"),
+      ).length;
+    await page.goto(app.origin);
+    await openPage(page, "Messages");
+    await choose("Unreads");
+    await expect.poll(filterSaves).toBe(1);
+
+    const pattern = "**/sidebar-filter";
+    await page.route(pattern, (route) => {
+      app.report.sidebarPreferenceFailures ??= [];
+      app.report.sidebarPreferenceFailures.push(route.request().url());
+      return route.fulfill({
+        status: 502,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Filter could not be saved." }),
+      });
+    });
+    await choose("All");
+    const retry = page.getByRole("button", {
+      name: "Retry filter",
+      exact: true,
+    });
+    await expect(retry).toBeVisible();
+    await page.unroute(pattern);
+    const published = app.report.sidebarPublications.length;
+    await retry.click();
+    await expect(retry).toHaveCount(0);
+    await expect
+      .poll(() => app.report.sidebarPublications.length)
+      .toBeGreaterThan(published);
+
+    // The device remembers All under the card's own key, never the saved one.
+    const remembered = () =>
+      page.evaluate(() =>
+        Object.keys(localStorage)
+          .filter((key) => key.includes('"sidebar:filter-all"'))
+          .flatMap((key) => Object.keys(JSON.parse(localStorage[key]))),
+      );
+    await expect.poll(remembered).toEqual(["group:work"]);
+
+    await page.reload();
+    await openPage(page, "Messages");
+    await filter();
+    await expect(
+      page.getByRole("menuitemradio", { name: "All", exact: true }),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+});
