@@ -294,7 +294,9 @@ function clip(list: HTMLElement, height: number | undefined): number {
     .querySelectorAll<HTMLElement>("[data-card-row]")
     .forEach((row, index) => {
       const hidden = clipped && (ends[index - 1] ?? 0) >= limit;
-      row.inert = hidden;
+      // Only undo inertness this clip gave: a row leaving the list keeps its own.
+      if (hidden) row.inert = true;
+      else if (row.hasAttribute("data-card-clipped")) row.inert = false;
       row.toggleAttribute("data-card-clipped", hidden);
       if (!hidden) shown++;
     });

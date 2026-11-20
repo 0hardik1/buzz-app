@@ -183,7 +183,7 @@ it("makes rows past the card's edge inert and lands a saved height on a whole ro
   fireEvent.pointerUp(window, { pointerId: 1, clientY: 70 });
   expect(list.style.maxHeight).toBe(`${2 * ROW}px`);
   const rows = [...list.querySelectorAll<HTMLElement>("[data-card-row]")];
-  expect(rows.map((row) => row.inert)).toEqual([
+  expect(rows.map((row) => row.inert === true)).toEqual([
     false,
     false,
     true,
@@ -196,11 +196,21 @@ it("makes rows past the card's edge inert and lands a saved height on a whole ro
   fireEvent.doubleClick(grip);
   fireEvent.doubleClick(grip);
   expect(list.style.maxHeight).toBe("80px");
-  expect(rows.map((row) => row.inert)).toEqual([
+  expect(rows.map((row) => row.inert === true)).toEqual([
     false,
     false,
     true,
     true,
     true,
+  ]);
+  // A row leaving the list is inert on its own; clipping never wakes it.
+  (rows[0] as HTMLElement).inert = true;
+  fireEvent.doubleClick(grip);
+  expect(rows.map((row) => row.inert === true)).toEqual([
+    true,
+    false,
+    false,
+    false,
+    false,
   ]);
 });
