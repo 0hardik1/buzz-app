@@ -21,7 +21,7 @@ const DIAGNOSTICS_LABELS = [
   "Partial roster",
   "Refresh groups and stars",
   "Refresh messages",
-  "Mark read through loaded messages",
+  "Mark as read through loaded messages",
   "Read sync:",
   "Live updates:",
   "Last rejection:",
