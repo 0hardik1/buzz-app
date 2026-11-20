@@ -1,6 +1,6 @@
 import { hoverMessage } from "./message-actions.mjs";
 import { test, expect } from "./fixture.mjs";
-import { open } from "./timeline.mjs";
+import { open, virtuaIdle } from "./timeline.mjs";
 
 test.use({ threadPlacement: "inline", historyCounts: { alpha: 1, beta: 0 } });
 
@@ -291,6 +291,11 @@ test("Forward to a diff whose reply box is gone opens its tab", async ({
     40008,
   );
   const sheet = await openThread(page, root);
+  // A press lands only once the thread's rows stop moving under it.
+  await virtuaIdle(
+    page,
+    sheet.getByRole("region", { name: "Thread messages", exact: true }),
+  );
   await sheet
     .getByRole("region", { name: "Diff: a.ts" })
     .getByRole("button", { name: "Expand diff" })
