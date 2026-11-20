@@ -803,7 +803,7 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   await expect(ring).toBeVisible();
   await page.evaluate(() => window.finishAvatarRecording());
   await expect(ring).toHaveCount(0);
-  const tools = ["You", "Background", "Still photo", "Retake the recording"];
+  const tools = ["You", "Background", "Photo", "Retake the recording"];
   const widths = await Promise.all(
     tools.map((name) =>
       page
@@ -814,6 +814,20 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
     ),
   );
   expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(1);
+  const captionTops = await Promise.all(
+    tools.map((name) =>
+      page.getByRole("button", { name, exact: true }).evaluate((button) => {
+        const caption = button.nextElementSibling;
+        const range = document.createRange();
+        range.selectNodeContents(caption);
+        return Array.from(range.getClientRects(), (rect) => rect.top);
+      }),
+    ),
+  );
+  expect(captionTops.every((lines) => lines.length === 1)).toBe(true);
+  expect(
+    Math.max(...captionTops.flat()) - Math.min(...captionTops.flat()),
+  ).toBeLessThan(1);
   const outline = page.getByRole("button", { name: "Outline", exact: true });
   await expect(outline).toHaveCSS("padding", "12px");
   const glyph = outline.locator("span[aria-hidden]");
@@ -849,7 +863,7 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   );
   await transparent.click();
   await expect(transparent).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Still photo", exact: true }).click();
+  await page.getByRole("button", { name: "Photo", exact: true }).click();
   const scrubber = page.getByRole("slider", {
     name: "Choose your still photo",
   });
@@ -859,9 +873,7 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   const last = await page
     .getByRole("button", { name: "Retake the recording" })
     .boundingBox();
-  const save = await page
-    .getByRole("button", { name: "Use animated avatar" })
-    .boundingBox();
+  const save = await page.getByRole("button", { name: "Done" }).boundingBox();
   const bounds = await scrubber.boundingBox();
   for (const row of [save, bounds]) {
     expect(Math.abs(first.x - row.x)).toBeLessThan(1);
@@ -873,9 +885,7 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   await expect(scrubber).toHaveValue("1");
   await scrubber.press("End");
   await expect(scrubber).toHaveValue("2");
-  await page
-    .getByRole("button", { name: "Use animated avatar", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByText("Profile updated", { exact: true }).waitFor();
   const picture = await page.evaluate(

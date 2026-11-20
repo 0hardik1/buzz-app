@@ -121,9 +121,7 @@ it("uploads the poster and animation before applying the mobile-compatible URL",
   fireEvent.click(
     await screen.findByRole("button", { name: "Record 3 seconds" }),
   );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Use animated avatar" }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "Done" }));
   await waitFor(() => expect(uploadAvatar).toHaveBeenCalledTimes(2));
   expect(capture.stopAvatarCamera).toHaveBeenCalledWith(stream);
   expect(apply).not.toHaveBeenCalled();

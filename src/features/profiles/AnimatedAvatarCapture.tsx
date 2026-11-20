@@ -83,9 +83,7 @@ export function AnimatedAvatarCapture({
   const [segmented, setSegmented] = useState(true);
   const [progress, setProgress] = useState(0);
   const colorDrag = useRef<{ x: number; left: number } | null>(null);
-  const [section, setSection] = useState<"You" | "Background" | "Still photo">(
-    "You",
-  );
+  const [section, setSection] = useState<"You" | "Background" | "Photo">("You");
   const [poster, setPoster] = useState(0);
   const reducedMotion = useReducedMotion();
   const [composition, setComposition] = useState(initialComposition);
@@ -113,7 +111,7 @@ export function AnimatedAvatarCapture({
       index += direction;
     };
     draw();
-    if (section === "Still photo" || reducedMotion) return;
+    if (section === "Photo" || reducedMotion) return;
     const timer = window.setInterval(draw, 1000 / 12);
     return () => window.clearInterval(timer);
   }, [phase, poster, composition, section, reducedMotion]);
@@ -426,7 +424,7 @@ export function AnimatedAvatarCapture({
               [
                 ["You", UserIcon],
                 ["Background", PaletteIcon],
-                ["Still photo", ImageIcon],
+                ["Photo", ImageIcon],
               ] as const
             ).map(([label, Icon]) => (
               <div key={label}>
@@ -554,7 +552,7 @@ export function AnimatedAvatarCapture({
               />
             </div>
           )}
-          {section === "Still photo" && (
+          {section === "Photo" && (
             <div className={styles.controls}>
               <label className="text-label-sm">
                 <span className="sr-only">Choose your still photo</span>
@@ -579,7 +577,7 @@ export function AnimatedAvatarCapture({
             disabled={disabled || !community}
             onClick={() => void save()}
           >
-            Use animated avatar
+            Done
           </Button>
         </>
       )}
