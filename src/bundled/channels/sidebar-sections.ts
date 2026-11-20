@@ -4,6 +4,7 @@ import {
   workspaceSectionOrder,
   type SidebarPreferences,
 } from "../../features/relay/sidebar-preferences";
+import { defaultSidebarSort } from "../../features/relay/sidebar-sort";
 
 export function isChannelSectionKey(key: string) {
   return key === "channels" || key.startsWith("group:");
@@ -157,7 +158,7 @@ export function sidebarSections<T extends ChannelSummary>(
     if (key === "forums" && !forums && !draftSections.has(key)) return [];
     const mode = preferences?.sort?.[group ? `section:${group.id}` : key];
     rows.sort(
-      mode === "recent" || (mode === undefined && key !== SIDEBAR_PAGES_SECTION)
+      (mode ?? defaultSidebarSort(key)) === "recent"
         ? compareRecent
         : compareName,
     );

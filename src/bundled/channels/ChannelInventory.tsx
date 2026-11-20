@@ -75,7 +75,10 @@ import {
   type RegisteredSidebarRows,
 } from "../../features/channel-navigation/sidebar-rows-service";
 import { useSidebarRowUnread } from "../../features/channel-navigation/useSidebarRowUnread";
-import type { SidebarSortMode } from "../../features/relay/sidebar-sort";
+import {
+  defaultSidebarSort,
+  type SidebarSortMode,
+} from "../../features/relay/sidebar-sort";
 import type { SidebarFrame } from "../../features/channel-navigation/SidebarFrame";
 import { Button } from "../../shared/design-system/ui/Button";
 import {
@@ -280,9 +283,7 @@ export function ChannelInventory({
           saved === "recent" ||
           rowSortModes.some((mode) => mode.id === saved))
         ? saved
-        : key === SIDEBAR_PAGES_SECTION
-          ? "alpha"
-          : "recent";
+        : defaultSidebarSort(key);
     },
     [preferences.data, rowSortModes],
   );

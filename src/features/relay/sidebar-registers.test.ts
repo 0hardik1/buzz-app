@@ -294,10 +294,16 @@ it("keeps plugin choices outside builtin metadata and invalidates only a changed
       projectSidebarPreferences(undefined, undefined, undefined, changed).sort,
     ).toEqual(mode === "alpha" ? {} : { channels: mode });
   }
+  // The default (Recent) is stored as absence and clears the plugin binding.
+  const recent = editSidebarSortRecord(current, 3, "channels", "recent", 4000);
+  expect(
+    projectSidebarPreferences(undefined, undefined, undefined, recent).sort,
+  ).toEqual({ dms: "recent" });
+  // A non-default built-in choice is stored explicitly.
   const alpha = editSidebarSortRecord(current, 3, "channels", "alpha", 4000);
   expect(
     projectSidebarPreferences(undefined, undefined, undefined, alpha).sort,
-  ).toEqual({ dms: "recent" });
+  ).toEqual({ channels: "alpha", dms: "recent" });
   for (const invalid of [
     "plugin:x",
     "plugin:a/b/",

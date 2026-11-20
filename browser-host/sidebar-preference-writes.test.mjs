@@ -549,12 +549,12 @@ it("accepts split UTF-8 sort intents above the other routes' 2 KiB budget", asyn
     (_, i) => `${i}-${"é".repeat(100)}`,
   );
   const group = `section:${sectionIds[0]}`;
-  const intent = { group, mode: "recent", sectionIds };
+  const intent = { group, mode: "alpha", sectionIds };
   expect(Buffer.byteLength(JSON.stringify(intent))).toBeGreaterThan(2048);
   expect(Buffer.byteLength(JSON.stringify(intent))).toBeLessThan(32 * 1024);
   const response = await h.post(intent, undefined, "sidebar-sort");
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ groups: { [group]: "recent" } });
+  expect(await response.json()).toEqual({ groups: { [group]: "alpha" } });
   expect(h.calls.map(({ url }) => new URL(url).pathname)).toEqual([
     "/query",
     "/query",
@@ -569,7 +569,7 @@ it("serializes different sidebar endpoints through one relay queue", async () =>
   const star = h.post({ channelId: "alpha", starred: true });
   await held.started.promise;
   const sort = h.post(
-    { group: "channels", mode: "recent", sectionIds: [] },
+    { group: "channels", mode: "alpha", sectionIds: [] },
     undefined,
     "sidebar-sort",
   );

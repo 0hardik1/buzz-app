@@ -1,4 +1,8 @@
-import { isSidebarSortMode, type SidebarSortMode } from "./sidebar-sort.ts";
+import {
+  defaultSidebarSort,
+  isSidebarSortMode,
+  type SidebarSortMode,
+} from "./sidebar-sort.ts";
 import type { SidebarGroups } from "./sidebar-preferences.ts";
 
 export const MAX_WORKSPACES = 200;
@@ -574,9 +578,10 @@ export function editSidebarSortRecord(
       : current;
   // Older A–Z writers tombstone with null and skip equal values. A distinct
   // alpha anchor lets their explicit choice supersede the plugin binding.
+  // The group's default is stored as absence; Solo always keeps its choice.
   const anchor = plugin
     ? "alpha"
-    : group === "solo" || mode === "recent"
+    : group === "solo" || mode !== defaultSidebarSort(group)
       ? mode
       : null;
   const next = editSidebarRecord(

@@ -4,7 +4,13 @@ import { open } from "./timeline.mjs";
 import { openPage } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 
-test.use({ productionBroker: true, savedSidebar: true, sortingSidebar: true });
+// Team starts on an explicit A–Z so journeys can exercise the switch to Recent.
+test.use({
+  productionBroker: true,
+  savedSidebar: true,
+  sortingSidebar: true,
+  initialSidebarSort: { channels: "alpha" },
+});
 
 // Pause real WAAPI animations at creation, before a busy renderer can finish
 // them. Seeking still exercises the browser's actual keyframes and geometry.

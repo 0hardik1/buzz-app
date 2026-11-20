@@ -345,8 +345,8 @@ it("creates a section, moves a channel, stars, mutes and sorts with encrypted re
     ),
   ).toEqual(["c1"]);
   expect(
-    await transport.writeSidebarSort?.(`section:${id}`, "recent", [id], signal),
-  ).toEqual({ [`section:${id}`]: "recent" });
+    await transport.writeSidebarSort?.(`section:${id}`, "alpha", [id], signal),
+  ).toEqual({ [`section:${id}`]: "alpha" });
   expect(
     await transport.writeSidebarStar?.(
       { channelId: "c1", starred: false },
@@ -366,7 +366,7 @@ it("creates a section, moves a channel, stars, mutes and sorts with encrypted re
   };
   expect(star.channels.c1?.starred).toBe(false); // tombstone retained
   expect(
-    await transport.writeSidebarSort?.(`section:${id}`, "alpha", [id], signal),
+    await transport.writeSidebarSort?.(`section:${id}`, "recent", [id], signal),
   ).toEqual({});
   expect(
     await transport.writeSidebarAssignment?.({ channelId: "c1" }, signal),
@@ -501,7 +501,7 @@ it("reads the authoritative legacy projection and writes only the unified coordi
   });
   expect(records.get("channel-sections")).toBeDefined();
   expect(
-    await transport.writeSidebarSort?.("channels", "alpha", [], signal),
+    await transport.writeSidebarSort?.("channels", "recent", [], signal),
   ).toEqual({});
   const sort = decode([...records.values()])["channel-workspace-sort"];
   expect(sort).toEqual({
@@ -1090,19 +1090,19 @@ it.each(["channels", "section:work"])(
   "confirms native plugin sort choices for %s through encrypted readback",
   async (group) => {
     const transport = await connectNativeTransport(community);
-    await transport.writeSidebarSort?.("forums", "recent", [], signal);
+    await transport.writeSidebarSort?.("forums", "alpha", [], signal);
     for (const mode of [
       "plugin:example.plugin/rows/reverse",
       "plugin:example.plugin/rows/other",
-      "recent",
       "alpha",
+      "recent",
     ] as const) {
       await expect(
         transport.writeSidebarSort?.(group, mode, ["work"], signal),
       ).resolves.toEqual(
-        mode === "alpha"
-          ? { forums: "recent" }
-          : { forums: "recent", [group]: mode },
+        mode === "recent"
+          ? { forums: "alpha" }
+          : { forums: "alpha", [group]: mode },
       );
     }
   },
