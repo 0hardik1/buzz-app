@@ -71,6 +71,18 @@ export const test = base.extend({
   soloOutsideAgentNames: [[], { option: true }],
   sortingSidebar: [false, { option: true }],
   initialSidebarSort: [{}, { option: true }],
+  /** Fixture activity dates from 2023, so cards list every conversation
+   * instead of the product's 30-day default; null keeps the default. */
+  initialSidebarFilter: [
+    {
+      solo: "all",
+      channels: "all",
+      forums: "all",
+      dms: "all",
+      "section:work": "all",
+    },
+    { option: true },
+  ],
   channelLifecycle: [false, { option: true }],
   memberRoleChanges: [false, { option: true }],
   leaveRosterBeforeAck: [false, { option: true }],
@@ -171,6 +183,7 @@ export const test = base.extend({
       soloOutsideAgentNames,
       sortingSidebar,
       initialSidebarSort,
+      initialSidebarFilter,
       channelLifecycle,
       memberRoleChanges,
       leaveRosterBeforeAck,
@@ -462,6 +475,26 @@ export const test = base.extend({
             ),
           );
         }
+      }
+    }
+    if (initialSidebarFilter) {
+      const key = nip44.v2.utils.getConversationKey(userKey, viewer);
+      for (const community of ["primary", "secondary"]) {
+        if (!readEvents.has(community)) continue;
+        readEvents
+          .get(community)
+          .set(
+            "channel-filter",
+            sign(
+              30078,
+              [["d", "channel-filter"]],
+              nip44.v2.encrypt(
+                JSON.stringify({ version: 1, groups: initialSidebarFilter }),
+                key,
+              ),
+              userKey,
+            ),
+          );
       }
     }
     if (ownSoloChannels.length) {
