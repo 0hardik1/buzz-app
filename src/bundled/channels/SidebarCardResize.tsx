@@ -10,7 +10,6 @@ import {
 import { readView, subscribeView, writeView } from "../../shared/view-state";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import { Button } from "../../shared/design-system/ui/Button";
-import { ArrowDownIcon } from "../../shared/design-system/icons/index";
 import { hasUnmutedUnread, waitsOnYou } from "./conversation-rows";
 import styles from "./Channels.module.css";
 
@@ -180,7 +179,6 @@ export function SidebarCardResize({
                 if (event.detail === 0) handle.current?.focus();
               }}
             >
-              <ArrowDownIcon aria-hidden="true" />
               {waiting.count} unread
             </Button>
           </div>
