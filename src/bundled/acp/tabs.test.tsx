@@ -516,6 +516,28 @@ it("reads an open transcript again when its session's work ends", async () => {
   await waitFor(() => expect(transcript).toHaveBeenCalledTimes(2));
 });
 
+it("says when an open transcript is missing earlier sessions", async () => {
+  const rows: Conversation[] = [
+    { key: "c1", channelId: "c1", at: 1, replayable: true },
+  ];
+  const { HistoryTab } = createTabs({
+    check: vi.fn(),
+    cache: modelCache(localStorage),
+    runtime: fakeRuntime({
+      conversations: () => rows,
+      transcript: async () => ({ turns: [], missing: 1 }),
+    }),
+  });
+  render(
+    <HistoryTab
+      agent={{ key: "p1", pubkey: "p1", config: start } as Agent<Config>}
+      save={async () => {}}
+    />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Transcript" }));
+  expect(await screen.findByText(/this history is incomplete/)).toBeTruthy();
+});
+
 it("shows history times on the owner's clock", () => {
   const at = new Date(2026, 0, 2, 15, 4, 5).getTime();
   const rows: Conversation[] = [

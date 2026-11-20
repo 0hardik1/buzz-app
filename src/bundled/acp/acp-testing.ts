@@ -72,6 +72,8 @@ export function fakeHarness(
     errors?: Readonly<Record<string, { code: number; message: string }>>;
     /** Updates `session/load` replays before it answers. */
     replay?: readonly Record<string, unknown>[];
+    /** Sessions the harness no longer has: loading one fails. */
+    gone?: readonly string[];
   }> = {},
 ) {
   const harnesses: FakeHarness[] = [];
@@ -158,7 +160,12 @@ export function fakeHarness(
           const { id, method, params = {} } = message;
           if (!method || id === undefined || options.silent?.includes(method))
             continue;
-          const error = options.errors?.[method];
+          const error =
+            options.errors?.[method] ??
+            (method === "session/load" &&
+            options.gone?.includes(String(params.sessionId))
+              ? { code: -32002, message: "Session not found" }
+              : undefined);
           if (error) send({ id, error });
           else if (method === "initialize")
             send({

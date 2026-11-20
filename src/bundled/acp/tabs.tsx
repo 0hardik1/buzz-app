@@ -39,6 +39,10 @@ import { READY } from "./harness";
 import { type ModelCache, picks } from "./models";
 import { CUSTOM, preset, PRESETS } from "./presets";
 
+/** Said above a transcript the harness could load only part of. */
+const MISSING =
+  "Some earlier sessions of this conversation can no longer be read, so this history is incomplete.";
+
 const message = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
@@ -167,7 +171,7 @@ export type TabsRuntime = Readonly<{
     agent: string,
     key: string,
     signal: AbortSignal,
-  ): Promise<Transcript | undefined>;
+  ): Promise<(Transcript & { missing?: number }) | undefined>;
 }>;
 
 /** The model and effort pickers for `value`'s launch, from what its sessions
@@ -764,7 +768,7 @@ export function createTabs({
     const idle = openRow?.status !== "Working";
     const [read, setRead] = useState<
       | { status: "loading" }
-      | { status: "done"; transcript: Transcript }
+      | { status: "done"; transcript: Transcript & { missing?: number } }
       | { status: "error"; error: string }
     >();
     // biome-ignore lint/correctness/useExhaustiveDependencies: read again when the session changes or its work ends
@@ -835,6 +839,9 @@ export function createTabs({
               <p role="alert" className="buzz-field-error">
                 {read.error}
               </p>
+            )}
+            {read?.status === "done" && !!read.transcript.missing && (
+              <p className="m-0 text-body-sm text-subtle">{MISSING}</p>
             )}
             {read?.status === "done" && (
               <ActivityTranscript

@@ -190,6 +190,10 @@ type Entry = {
   syncedModel?: boolean;
 };
 
+/** A conversation's transcript, with how many of its sessions the harness
+ * could no longer load. */
+export type AcpTranscript = Transcript & Readonly<{ missing?: number }>;
+
 export class AcpRuntime {
   private readonly agents = new Map<string, Entry>();
   private readonly memoryReads = new MemoryReads();
@@ -1026,7 +1030,7 @@ export class AcpRuntime {
     agent: AgentKey,
     key: string,
     signal: AbortSignal,
-  ): Promise<Transcript | undefined> {
+  ): Promise<AcpTranscript | undefined> {
     const entry = this.agents.get(agent);
     // The working session too, before any turn of it succeeded: shown only,
     // never saved as the one to resume.
@@ -1042,19 +1046,32 @@ export class AcpRuntime {
     const { generation } = entry;
     const cwd = await this.resolveDirectory(launch.workspace);
     const [channelId, root] = key.split("/");
-    // Each of its sessions in turn, oldest first.
+    // Each of its sessions in turn, oldest first. One the harness can no
+    // longer load is left out, and the rest still shown.
     let transcript: Transcript | undefined;
+    let missing = 0;
+    let failure: unknown;
     for (const sessionId of ids) {
-      const read = await readTranscript({
-        start: (o) => start(this.spawn, launch, o),
-        cwd,
-        sessionId,
-        signal,
-        threadOf: (prefix) => root ?? threadIn(prefix),
-      });
+      let read: Transcript | undefined;
+      try {
+        read = await readTranscript({
+          start: (o) => start(this.spawn, launch, o),
+          cwd,
+          sessionId,
+          signal,
+          threadOf: (prefix) => root ?? threadIn(prefix),
+        });
+      } catch (error) {
+        signal.throwIfAborted();
+        missing++;
+        failure = error;
+        continue;
+      }
       if (!read) break;
       transcript = { turns: [...(transcript?.turns ?? []), ...read.turns] };
     }
+    // None it could load: that is the read's failure.
+    if (!transcript && missing) throw failure;
     // A read for an older launch says nothing about the current one.
     if (entry.generation === generation) {
       entry.replays = transcript !== undefined;
@@ -1062,6 +1079,7 @@ export class AcpRuntime {
     }
     return (
       transcript && {
+        ...(missing ? { missing } : {}),
         turns: this.prompts(agent)
           .shown(transcript.turns)
           .map((turn) => ({

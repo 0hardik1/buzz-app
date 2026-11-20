@@ -2107,6 +2107,52 @@ describe("AcpRuntime", () => {
     expect(loaded).toEqual(["session-1", "session-2"]);
   });
 
+  it("shows the sessions it can still load when an older one is gone", async () => {
+    const said = (text: string) => ({
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text },
+    });
+    const { runtime, storage, sync, fake } = setup({
+      capabilities: { mcpCapabilities: { http: true }, loadSession: true },
+      replay: [said("hi")],
+      gone: ["gone-A"],
+    });
+    sync(await confirmed());
+    localSessions(storage, self).set(channel, {
+      at: 1,
+      id: "B",
+      sessions: ["B", "gone-A"],
+    });
+    const read = await runtime.transcript(
+      self,
+      channel,
+      new AbortController().signal,
+    );
+    const loaded = fake.harnesses
+      .flatMap((h) => h.sent("session/load"))
+      .map((m) => m.params?.sessionId);
+    expect(loaded).toEqual(["gone-A", "B"]);
+    expect(read?.missing).toBe(1);
+    expect(read?.turns).toHaveLength(1);
+  });
+
+  it("fails a read when none of its sessions load, and when stopped", async () => {
+    const { runtime, storage, sync } = setup({
+      capabilities: { mcpCapabilities: { http: true }, loadSession: true },
+      gone: ["gone-A"],
+    });
+    sync(await confirmed());
+    localSessions(storage, self).set(channel, { at: 1, id: "gone-A" });
+    await expect(
+      runtime.transcript(self, channel, new AbortController().signal),
+    ).rejects.toThrow("Session not found");
+    const stop = new AbortController();
+    stop.abort();
+    await expect(
+      runtime.transcript(self, channel, stop.signal),
+    ).rejects.toThrow();
+  });
+
   it("retires an agent once its sessions and processes have stopped", async () => {
     const config = await confirmed();
     const { fake, deliver, sync, runtime } = setup({
