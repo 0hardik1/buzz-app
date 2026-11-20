@@ -1,4 +1,14 @@
-import { useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import type { Navigation } from "../../features/navigation/controller";
+import { targetKey, type OpenTarget } from "../../features/navigation/targets";
+import type { RelayData } from "../../features/relay/service";
+import { scopeOf } from "./react";
 import type { ChannelMessage } from "../../features/relay/contracts";
 import type { RelaySession } from "../../features/relay/session";
 import { messagePreview } from "../../features/notifications/content";
@@ -19,14 +29,81 @@ import styles from "./Reminders.module.css";
 
 const MAX_NOTE_LENGTH = 4096;
 
+// The plugin overlay outlives the page, keeping a hidden draft and its save
+// alive during Back/Forward. Only explicit dismissal or completion retires it.
+export function ReminderEditor({
+  relay,
+  navigator,
+}: {
+  relay: RelayData;
+  navigator: Navigation;
+}) {
+  const connection = useSyncExternalStore(relay.subscribe, relay.snapshot);
+  const { entry } = useSyncExternalStore(
+    navigator.subscribe,
+    navigator.snapshot,
+  );
+  const session =
+    connection.status === "ready" && connection.session.reminders
+      ? connection.session
+      : undefined;
+  const currentSession = useRef(session);
+  currentSession.current = session;
+  const scope = scopeOf(connection);
+  const target = entry.target;
+  const active =
+    target.kind === "page" &&
+    target.pluginId === "buzz.reminders" &&
+    target.pageId === "reminders" &&
+    target.route?.version === 1 &&
+    target.route.params === "new" &&
+    target.scope?.viewer === scope?.viewer &&
+    target.scope?.communityOrigin === scope?.communityOrigin;
+  const [draft, setDraft] = useState<{
+    session: RelaySession;
+    target: Extract<OpenTarget, { kind: "page" }>;
+  }>();
+  const retire = useCallback(
+    (closing: NonNullable<typeof draft>) => {
+      const { route: _, ...page } = closing.target;
+      const key = targetKey(closing.target);
+      navigator.dismiss((visit) => targetKey(visit) === key, page);
+    },
+    [navigator],
+  );
+  useEffect(() => {
+    if (draft && draft.session !== session) {
+      retire(draft);
+      setDraft(undefined);
+    } else if (active && session && !draft && target.kind === "page") {
+      setDraft({ session, target });
+    }
+  }, [active, session, draft, target, retire]);
+  return draft && draft.session === session ? (
+    <RemindDialog
+      session={draft.session}
+      open={active && targetKey(target) === targetKey(draft.target)}
+      visit
+      close={() => {
+        if (currentSession.current === draft.session) retire(draft);
+        setDraft((current) => (current === draft ? undefined : current));
+      }}
+    />
+  ) : null;
+}
+
 export function RemindDialog({
   message,
   session,
   close,
+  open = true,
+  visit = false,
 }: {
   message?: ChannelMessage;
   session: RelaySession;
   close(): void;
+  open?: boolean;
+  visit?: boolean;
 }) {
   const fields = useRef<HTMLDivElement>(null);
   const noteInput = useRef<HTMLTextAreaElement>(null);
@@ -39,8 +116,7 @@ export function RemindDialog({
   const [error, setError] = useState<string>();
   const custom = parseCustomDateTime(date, time);
   const preset = TIME_PRESETS.find((item) => item.label === when);
-  const validText =
-    !!message || (note.length <= MAX_NOTE_LENGTH && !!note.trim());
+  const validText = !!message || !!note.trim();
   const submit = async (notBefore: number) => {
     const reminders = session.reminders;
     if (!reminders || saving.current || !validText) return;
@@ -85,7 +161,8 @@ export function RemindDialog({
     <Dialog
       size="compact"
       bodyLayout={message ? "flow" : "scroll"}
-      open
+      open={open}
+      visit={visit}
       dismissOnOutsideClick={false}
       onOpenChange={(open) => !open && close()}
       preventClose={pending}
