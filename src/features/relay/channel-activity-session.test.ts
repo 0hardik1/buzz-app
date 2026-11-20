@@ -34,6 +34,7 @@ function setup() {
       ),
   );
   const publish = vi.fn(async (_event: RelayEvent) => {});
+  const liveRetry = vi.fn();
   const sort: Record<string, SidebarSortMode> = {};
   const filters: Record<string, "active" | "unreads"> = {};
   const owner = createRelaySession(
@@ -63,7 +64,7 @@ function setup() {
       },
       subscribe(callbacks) {
         live = callbacks;
-        return { update() {}, dispose() {}, retry() {} };
+        return { update() {}, dispose() {}, retry: liveRetry };
       },
     },
     { outboxStorage: { load: () => [], save() {} } },
@@ -98,6 +99,7 @@ function setup() {
     pending,
     activity,
     publish,
+    liveRetry,
     wire,
     viewer,
     relay,
@@ -402,6 +404,50 @@ it("retries a transient activity failure quietly and reports a lasting one at on
     expect(h.channels.list().activityStatus).toBe("error");
     await vi.advanceTimersByTimeAsync(10_000);
     expect(h.activity).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.useRealTimers();
+    h.owner.dispose();
+  }
+});
+it("leaves an activity outage past its quiet retries to session recovery, which reads it again", async () => {
+  const h = setup();
+  try {
+    await h.initial();
+    const before = h.channels.list();
+    vi.useFakeTimers();
+    void h.preferences.setSort("channels", "recent", []);
+    await vi.advanceTimersByTimeAsync(0);
+    // The socket stays connected; only the activity read meets the outage,
+    // through the initial read and every quiet retry.
+    for (const wait of [1_000, 2_000, 4_000, 0]) {
+      take(h.pending).reject(
+        new ReadError("unavailable", "Relay read failed (502)"),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      if (wait) {
+        expect(h.channels.list().activityStatus).toBe("loading");
+        await vi.advanceTimersByTimeAsync(wait);
+      }
+    }
+    expect(h.channels.list().activityStatus).toBe("error");
+    expect(h.activity).toHaveBeenCalledTimes(4);
+    expect(h.channels.list().activityTransient).toBe(true);
+    // Recovery, not the sidebar, owns the next read: its first delay.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.activity).toHaveBeenCalledTimes(5);
+    take(h.pending).resolve([message(h.peer, "beta", "recovered", 100)]);
+    await vi.advanceTimersByTimeAsync(0);
+    const after = h.channels.list();
+    expect(after.activityStatus).toBe("ready");
+    expect(after.activityTransient).toBeUndefined();
+    expect(after.channels.find((c) => c.id === "beta")?.lastActivityAt).toBe(
+      100,
+    );
+    expect(h.liveRetry).not.toHaveBeenCalled();
+    expect(after.rosterAsOf).toBe(before.rosterAsOf);
+    expect(after.channels.map(({ id }) => id)).toEqual(
+      before.channels.map(({ id }) => id),
+    );
   } finally {
     vi.useRealTimers();
     h.owner.dispose();
