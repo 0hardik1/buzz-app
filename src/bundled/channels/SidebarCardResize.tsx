@@ -15,8 +15,6 @@ const heightsKey = "sidebar:card-heights";
 const restoreKey = "sidebar:card-restore";
 /** Rows a card shows until its grip is dragged. */
 const DEFAULT_ROWS = 10;
-/** The most rows a card shows; the rest wait for View all. */
-const MAX_ROWS = 50;
 /** The saved height of a card opened full. */
 const ALL_ROWS = Number.MAX_SAFE_INTEGER;
 /** Set once someone drags or double-clicks any grip on this device. */
@@ -68,8 +66,8 @@ export function useSidebarCardHeight(scope: string, card: string) {
 
 /**
  * A card's rows and the grip on its bottom edge. The rows show the first ten
- * until the grip is dragged, then clip to wherever it is left; full shows up
- * to fifty. The drag follows the pointer exactly, then settles onto the
+ * until the grip is dragged, then clip to wherever it is left; full shows
+ * every row. The drag follows the pointer exactly, then settles onto the
  * nearest whole row on release; the bottom stop is full. Double-click toggles
  * full. Rows are the descendants marked `data-card-row`.
  */
@@ -134,11 +132,6 @@ export function SidebarCardResize({
       <div ref={list} className={styles.cardRows}>
         {children}
       </div>
-      {height === ALL_ROWS && count > MAX_ROWS && (
-        <p className={`${styles.cardMore} text-caption`}>
-          View all coming soon
-        </p>
-      )}
       {/* Only a card with more than one row has anything to hide. */}
       {count > 1 && (
         <Tooltip
@@ -257,23 +250,22 @@ export function SidebarCardResize({
   );
 }
 
-/** Clip the list to a saved height: ten rows when unset, fifty when full. */
+/** Clip the list to a saved height: ten rows when unset, none when full. */
 function clip(list: HTMLElement, height: number | undefined) {
-  let limit = height;
-  if (height === undefined || height === ALL_ROWS) {
-    const rows = height === undefined ? DEFAULT_ROWS : MAX_ROWS;
+  let limit = height === ALL_ROWS ? undefined : height;
+  if (height === undefined) {
     const ends = stops(list);
-    limit = ends.length >= rows ? ends[rows - 1] : undefined;
+    limit = ends.length >= DEFAULT_ROWS ? ends[DEFAULT_ROWS - 1] : undefined;
   }
   // A hidden card has no layout, so every stop is zero; it clips once shown.
   list.style.maxHeight = limit ? `${limit}px` : "";
 }
 
-/** Where the list ends after each of its first fifty rows. */
+/** Where the list ends after each of its rows. */
 function stops(list: HTMLElement) {
   const top = list.getBoundingClientRect().top - list.scrollTop;
   const rows = [...list.querySelectorAll<HTMLElement>("[data-card-row]")];
-  return rows.slice(0, MAX_ROWS).map((_, index) => {
+  return rows.map((_, index) => {
     const after = rows[index + 1];
     return Math.round(
       after ? after.getBoundingClientRect().top - top : list.scrollHeight,

@@ -132,24 +132,22 @@ function layOutAhead() {
   };
 }
 
-it("shows ten rows until changed, full stops at fifty, and full toggles back to ten", () => {
+it("shows ten rows until changed, full shows every row, and full toggles back to ten", () => {
   const restore = layOutAhead();
   try {
     render(<Card rows={60} />);
     const list = document.querySelector<HTMLElement>("[data-card-row]")
       ?.parentElement as HTMLElement;
     expect(list.style.maxHeight).toBe(`${10 * ROW}px`);
-    expect(screen.queryByText("View all coming soon")).toBeNull();
     const grip = screen.getByLabelText("Resize Work");
     fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 320 });
     fireEvent.pointerMove(window, { pointerId: 1, clientY: 9000 });
     fireEvent.pointerUp(window, { pointerId: 1, clientY: 9000 });
-    expect(list.style.maxHeight).toBe(`${50 * ROW}px`);
-    expect(screen.getByText("View all coming soon")).toBeInTheDocument();
+    // All sixty rows show, with no cap.
+    expect(list.style.maxHeight).toBe("");
     // Full with nothing to go back to returns to the first ten rows.
     fireEvent.doubleClick(grip);
     expect(list.style.maxHeight).toBe(`${10 * ROW}px`);
-    expect(screen.queryByText("View all coming soon")).toBeNull();
   } finally {
     restore();
   }
