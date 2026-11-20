@@ -7527,6 +7527,77 @@ describe("voice seats", () => {
     f.complete(1, "DONE");
     await f.connection.close();
   });
+  it("sends a typed turn on an open seat the sections the owner changed since", async () => {
+    const f = await seated();
+    const context = (wire: Wire | undefined) =>
+      Object.values(
+        (
+          wire?.params as
+            | { additionalContext?: Record<string, { value: string }> }
+            | undefined
+        )?.additionalContext ?? {},
+      )
+        .map(({ value }) => value)
+        .join("");
+    await f.runtime.run(f.delivery("@Codex first"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    expect(context(f.starts()[0])).not.toContain("<base-section-updates>");
+    f.complete(0, "DONE");
+    await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+    // The owner turns a section off while the seat stays open.
+    const d = f.delivery("@Codex again");
+    await f.runtime.run({
+      ...d,
+      agent: {
+        ...d.agent,
+        promptSections: () => ({ owner: { progress: { mode: "off" } } }),
+      },
+    } as Delivery);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(context(f.starts()[1])).toContain(
+      "\n\n## Progress\n</base-section-updates>",
+    );
+    f.complete(1, "DONE");
+    await f.connection.close();
+  });
+  it("ends a seat on a thread from before sections were kept once the owner changes one, and goes on in a fresh thread", async () => {
+    const f = await seated({}, (f) =>
+      f.storage.set(
+        `buzz.codex.sessions.v18:${scope}:${pubkey}`,
+        JSON.stringify({
+          [JSON.stringify(["channel", "channel"])]: {
+            threadId: "kept",
+            workspace: "/tmp/codex-test",
+          },
+        }),
+      ),
+    );
+    expect(
+      f.sent.find((wire) => wire.method === "thread/resume")?.params,
+    ).toMatchObject({ threadId: "kept" });
+    // The owner turns a section off while the seat stays open.
+    const d = f.delivery("@Codex again");
+    await f.runtime.run({
+      ...d,
+      agent: {
+        ...d.agent,
+        promptSections: () => ({ owner: { progress: { mode: "off" } } }),
+      },
+    } as Delivery);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    expect(f.ended).toHaveBeenCalledWith(
+      new Error(
+        "The base instructions changed. Join the huddle again to use them.",
+      ),
+    );
+    expect(f.sent.some((wire) => wire.method === "thread/start")).toBe(true);
+    expect(
+      (f.starts()[0]?.params as { threadId?: string } | undefined)?.threadId,
+    ).not.toBe("kept");
+    f.complete(0, "DONE");
+    await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+    await f.connection.close();
+  });
   it("does not let queued text overwrite a backend turn arriving during media open", async () => {
     const pending = deferred<Awaited<ReturnType<typeof openVoice>>>();
     const entered = deferred<void>();
@@ -8882,6 +8953,49 @@ describe("a thread that keeps the base sections it started with", () => {
     );
   });
 
+  it("tells a thread and its saved prompt about the same choices when the owner saves during its resume", async () => {
+    const f = resumed({ layout: 1, parts: current.parts });
+    f.storage.set(
+      `buzz.session-prompts.v1:codex:${pubkey}`,
+      JSON.stringify({
+        version: 1,
+        texts: ["The first prompt."],
+        sessions: [["kept", [["base", 0]]]],
+      }),
+    );
+    let choices = {};
+    const naming = deferred<void>();
+    f.held.set("thread/name/set", naming.promise);
+    const turn = (text: string) => {
+      const d = f.delivery(text);
+      return f.runtime.run({
+        ...d,
+        agent: { ...d.agent, promptSections: () => choices },
+      } as Delivery);
+    };
+    await turn("hello");
+    await vi.waitFor(() =>
+      expect(f.sent.some((wire) => wire.method === "thread/name/set")).toBe(
+        true,
+      ),
+    );
+    choices = { owner: { progress: { mode: "off" } } };
+    naming.resolve();
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    // This turn was composed before the save, so it is told nothing.
+    expect(context(f.starts()[0])).not.toContain("<base-section-updates>");
+    f.complete(0, "DONE");
+    await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+    expect(savedPrompts(f.storage)[0]?.[1]).toHaveLength(1);
+    // The next turn is told, and its saved prompt shows it.
+    await turn("again");
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(context(f.starts()[1])).toContain(
+      "## Progress\n</base-section-updates>",
+    );
+    expect(savedPrompts(f.storage)[0]?.[1]).toHaveLength(2);
+  });
+
   it("gives a voice seat's resumed thread the sections that changed, at both starts, and shows them in its saved prompt", async () => {
     vi.stubGlobal("RTCPeerConnection", class {});
     const started = {
@@ -8977,6 +9091,80 @@ describe("a thread that keeps the base sections it started with", () => {
     await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
     expect(binding(f)).toMatchObject({ threadId: "kept" });
     expect(binding(f)).not.toHaveProperty("sections");
+  });
+
+  describe("when the owner chose other sections", () => {
+    const choices = {
+      owner: {
+        progress: { mode: "off" },
+        etiquette: { mode: "custom", text: "Be brief." },
+      },
+    } as const;
+    const chosen = composeBase({ scope: "thread", place: "thread" }, choices);
+    /** A delivery to the agent as the host hands it the owner's choices. */
+    const delivery = (f: ReturnType<typeof fixture>, content: string) => {
+      const result = f.delivery(content);
+      return {
+        ...result,
+        agent: { ...result.agent, promptSections: () => choices },
+      } as Delivery;
+    };
+    const instructions = (f: ReturnType<typeof fixture>) =>
+      String(
+        (
+          f.sent.find((wire) => wire.method === "thread/start")?.params as
+            | { developerInstructions?: string }
+            | undefined
+        )?.developerInstructions,
+      );
+
+    it("starts a new thread on them", async () => {
+      const f = fixture();
+      await f.runtime.run(delivery(f, "first"));
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      expect(instructions(f)).toContain(
+        '\n\n## Etiquette\n<owner-section id="etiquette">\nBe brief.\n</owner-section>\n\n## ',
+      );
+      expect(instructions(f)).not.toContain("## Progress");
+      expect(binding(f).sections).toEqual({ layout: 1, parts: chosen.parts });
+      expect(context(f.starts()[0])).not.toContain("base-section-updates");
+    });
+
+    it("sends them to a thread that started on the default ones", async () => {
+      const f = resumed({ layout: 1, parts: current.parts });
+      await f.runtime.run(delivery(f, "hello"));
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      expect(f.sent.some((wire) => wire.method === "thread/start")).toBe(false);
+      expect(context(f.starts()[0])).toContain(
+        '\n\n## Progress\n\n## Etiquette\n<owner-section id="etiquette">\nBe brief.\n</owner-section>\n</base-section-updates>',
+      );
+      expect(binding(f).sections).toEqual({
+        layout: 1,
+        parts: current.parts,
+        shown: chosen.key,
+      });
+    });
+
+    // Its prompt has no sections for an update to name, so it cannot be
+    // told which ones are off or replaced.
+    it("starts a thread saved before its sections were kept over, once", async () => {
+      const f = resumed();
+      await f.runtime.run(delivery(f, "hello"));
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      expect(f.sent.some((wire) => wire.method === "thread/resume")).toBe(
+        false,
+      );
+      expect(instructions(f)).toContain('<owner-section id="etiquette">');
+      expect(binding(f).threadId).not.toBe("kept");
+      expect(binding(f).sections).toEqual({ layout: 1, parts: chosen.parts });
+      f.complete(0, "DONE");
+      await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+      await f.runtime.run(delivery(f, "again"));
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+      expect(
+        f.sent.filter((wire) => wire.method === "thread/start"),
+      ).toHaveLength(1);
+    });
   });
 });
 

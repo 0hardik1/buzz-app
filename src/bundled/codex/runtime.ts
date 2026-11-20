@@ -42,7 +42,7 @@ import {
   startedSections,
   type StartedSections,
 } from "../../features/agent-harness/sections/compose";
-import type { Facts } from "../../features/agent-harness/sections";
+import { type Facts, LAYOUT } from "../../features/agent-harness/sections";
 import type { AgentKey } from "../../features/agents/membership";
 import { type AgentReads, workflowMarked } from "../../features/agents/reads";
 import {
@@ -281,6 +281,8 @@ type Lane = {
     signal: AbortSignal;
     restore(): Promise<void>;
     rejectedSpeechClosing?: Promise<void>;
+    /** Ends the seat, and tells its owner why. */
+    end(error: Error): void;
   };
   voiceOpening?: true;
 };
@@ -1957,6 +1959,10 @@ export class CodexRuntime {
         lane.voice = {
           loaded,
           signal,
+          end(error) {
+            void close();
+            seat.ended(error);
+          },
           restore: async () => {
             if (settings.scope !== "community") return;
             try {
@@ -3485,7 +3491,10 @@ export class CodexRuntime {
   private async prepare(
     rpc: AppServer,
     // Protected when it has a policy, bound or not yet.
-    agent: Pick<AgentHandle, "key" | "name" | "pubkey" | "relay"> & {
+    agent: Pick<
+      AgentHandle,
+      "key" | "name" | "pubkey" | "relay" | "promptSections"
+    > & {
       protection?: unknown;
     },
     settings: Config,
@@ -3534,7 +3543,10 @@ export class CodexRuntime {
       : undefined;
     // Codex sets it on this thread's commands only; app-server has none.
     const credential = await rpc.toolCredential(agent);
-    const base = composeBase(baseFacts(settings, home, place));
+    // Read once: what the thread is told and what its saved prompt shows
+    // come from the same choices.
+    const choices = agent.promptSections?.();
+    const base = composeBase(baseFacts(settings, home, place), choices);
     const params = {
       model,
       cwd: workspace,
@@ -3563,7 +3575,7 @@ export class CodexRuntime {
     const summary = normalized.config.model_reasoning_summary
       ? {}
       : { summary: "auto" };
-    return { params, model, effort, summary, bridge, base };
+    return { params, model, effort, summary, bridge, base, choices };
   }
   /** Shared thread setup; a voice seat retains it between delegated turns. */
   /** A thread's key in its saved prompts. */
@@ -3600,6 +3612,19 @@ export class CodexRuntime {
     return { ...sections, shown: base.key };
   }
 
+  /** Whether a thread that started with `sections` can be given `base`.
+   * One from before its sections were kept cannot be told which of them
+   * the owner changed, so it starts fresh once. A remote thread is kept by
+   * design, as restarting it would stop the conversation with a reset
+   * error: it keeps the sections it started with until the owner chooses
+   * New. */
+  private keepsSections(
+    sections: Saved["sections"],
+    base: Pick<ReturnType<typeof composeBase>, "custom">,
+  ) {
+    return !base.custom || sections?.layout === LAYOUT || !!this.target;
+  }
+
   async loadThread(
     request: Request,
     entry: Entry,
@@ -3621,16 +3646,17 @@ export class CodexRuntime {
     signal.throwIfAborted();
     const saved = entry.saved[key];
     const existing = resumable(saved, agent.protection);
-    const { params, model, effort, summary, bridge, base } = await this.prepare(
-      rpc,
-      agent,
-      settings,
-      workspace,
-      request,
-      request.synced,
-      home,
-      sessionPlace(request.conversation),
-    );
+    const { params, model, effort, summary, bridge, base, choices } =
+      await this.prepare(
+        rpc,
+        agent,
+        settings,
+        workspace,
+        request,
+        request.synced,
+        home,
+        sessionPlace(request.conversation),
+      );
     if (voiceInstructions) {
       Object.assign(params.config, {
         "realtime.type": "conversational",
@@ -3645,7 +3671,9 @@ export class CodexRuntime {
       const added = this.added();
       const tools = addedKey(added);
       const resuming =
-        existing?.workspace === workspace && (existing.tools ?? "") === tools;
+        existing?.workspace === workspace &&
+        (existing.tools ?? "") === tools &&
+        this.keepsSections(existing.sections, base);
       type Started = { thread: { id: string; cwd: string } };
       const start = () =>
         rpc.request<Started>("thread/start", {
@@ -3713,6 +3741,11 @@ export class CodexRuntime {
       const sections: Saved["sections"] = fresh
         ? startedSections(base.parts)
         : existing?.sections;
+      const facts = baseFacts(
+        settings,
+        home,
+        sessionPlace(request.conversation),
+      );
       return {
         threadId,
         workspace,
@@ -3729,13 +3762,11 @@ export class CodexRuntime {
         resuming,
         fresh,
         base,
+        facts,
         sections,
         updates: fresh
           ? ""
-          : sectionUpdates(
-              existing?.sections,
-              baseFacts(settings, home, sessionPlace(request.conversation)),
-            ),
+          : sectionUpdates(existing?.sections, facts, choices),
       };
     } catch (error) {
       if (threadId) await rpc.releaseThread(threadId).catch(() => {});
@@ -3818,6 +3849,8 @@ export class CodexRuntime {
     let explain: (() => string | undefined) | undefined;
     let turnFailed = false;
     let turnMayBeRunning = adopted !== undefined;
+    /** The voice seat whose thread this turn runs on, if any. */
+    let seat: Lane["voice"];
     try {
       const rpc = await server.opening;
       signal.throwIfAborted();
@@ -3832,7 +3865,26 @@ export class CodexRuntime {
         ready();
         return;
       }
-      const seat = lane.voice;
+      seat = lane.voice;
+      // A seat keeps its loaded thread between turns, and the owner can
+      // change a section meanwhile: its turns get the sections as they are.
+      const choices = seat && agent.promptSections?.();
+      if (
+        seat &&
+        adopted === undefined &&
+        !this.keepsSections(
+          seat.loaded.sections,
+          composeBase(seat.loaded.facts, choices),
+        )
+      ) {
+        // Typed work goes on in a fresh thread, which the seat joins next.
+        seat.end(
+          new Error(
+            "The base instructions changed. Join the huddle again to use them.",
+          ),
+        );
+        seat = undefined;
+      }
       const loaded =
         seat?.loaded ??
         (await this.loadThread(request, entry, key, signal, server, rpc));
@@ -3852,8 +3904,11 @@ export class CodexRuntime {
         resuming,
         fresh,
         sections,
-        updates,
       } = loaded;
+      const base = seat ? composeBase(loaded.facts, choices) : loaded.base;
+      const updates = seat
+        ? sectionUpdates(sections, loaded.facts, choices)
+        : loaded.updates;
       // The seat owns the subscription. The typed follower can claim its
       // native turn only once the typed request is about to be sent.
       if (!seat || adopted !== undefined || settings.scope !== "community")
@@ -3865,7 +3920,7 @@ export class CodexRuntime {
       active.model = model;
       active.effort = effort;
       // The seat owns its retained bridge; individual turns must not close it.
-      hookBridge = lane.voice ? undefined : bridge;
+      hookBridge = seat ? undefined : bridge;
       if (request.adopted !== undefined) {
         ready();
       } else {
@@ -3997,7 +4052,14 @@ export class CodexRuntime {
           );
         active.turnId = turn.turn.id;
         const session = this.promptKey(threadId);
-        const saving = this.showSections(agent.key, entry, key, loaded);
+        // A seat's turns get the sections as they are now, also on the
+        // fresh thread it loaded.
+        const saving = this.showSections(agent.key, entry, key, {
+          ...loaded,
+          fresh: fresh && !seat,
+          base,
+          updates,
+        });
         if (fresh)
           void this.prompts(agent.key).save(session, [
             {
@@ -4137,7 +4199,7 @@ export class CodexRuntime {
       turnAbort.abort(new Error("The Codex turn has ended"));
       try {
         // Loaded-thread rejoin ignores config overrides while subscribed.
-        if (active.threadId && !lane.voice)
+        if (active.threadId && !seat)
           await server.rpc
             .releaseThread(active.threadId)
             .catch(async (error) => {
