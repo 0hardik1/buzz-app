@@ -101,6 +101,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     hooks: { events: ["beforeTool", "afterTool"] },
     retire: (pubkey) => runtime.retire(pubkey),
     protection: true,
+    conversationFolders: true,
     conversationSections: true,
     title: "Pi",
     icon: PiLogoIcon,
@@ -149,6 +150,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     }),
     sessions: {
       list: (key) => runtime.sessions(key),
+      ready: (key, conversation) => runtime.listed(key, conversation),
       subscribe: (listener) => runtime.subscribe(listener),
     },
     tabs: [
