@@ -93,10 +93,28 @@ async function toggleActivity(element) {
   // and a toggle that starts none fails with the panel's state instead of
   // waiting out the test.
   const transition = new Promise((resolve, reject) => {
-    const deadline = performance.now() + 5_000;
+    const started = performance.now();
+    const deadline = started + 5_000;
+    const observations = [];
+    const record = (value) => {
+      if (observations.length < 32)
+        observations.push({ at: performance.now() - started, ...value });
+    };
+    // Record lifecycle writes without forcing style/layout or changing motion.
+    const observer = new MutationObserver((records) => {
+      for (const mutation of records) {
+        if (!mutation.target.className?.includes("audienceBody")) continue;
+        record({
+          attribute: mutation.attributeName,
+          previous: mutation.oldValue,
+          value: mutation.target.getAttribute(mutation.attributeName),
+        });
+      }
+    });
     let frame;
     const done = (animation) => {
       cancelAnimationFrame(frame);
+      observer.disconnect();
       element.removeEventListener("transitionrun", capture);
       animation.pause();
       resolve(animation);
@@ -108,9 +126,19 @@ async function toggleActivity(element) {
       )
         return;
       const animation = running();
+      record({
+        event: event.type,
+        elapsedTime: event.elapsedTime,
+        found: !!animation,
+      });
       if (animation) done(animation);
     };
+    let lastFrame = started;
+    let longestFrameGap = 0;
     const poll = () => {
+      const now = performance.now();
+      longestFrameGap = Math.max(longestFrameGap, now - lastFrame);
+      lastFrame = now;
       const animation = running();
       if (animation) return done(animation);
       if (performance.now() < deadline) {
@@ -118,10 +146,13 @@ async function toggleActivity(element) {
         return;
       }
       element.removeEventListener("transitionrun", capture);
+      observer.disconnect();
       const panel = element.querySelector('[class*="audienceBody"]');
       reject(
         new Error(
           `The toggle started no height transition: ${JSON.stringify({
+            observations,
+            longestFrameGap,
             connected: element.isConnected,
             expanded: element.querySelector("button").ariaExpanded,
             panel: panel && {
@@ -133,6 +164,12 @@ async function toggleActivity(element) {
         ),
       );
     };
+    observer.observe(element, {
+      subtree: true,
+      attributes: true,
+      attributeOldValue: true,
+      attributeFilter: ["data-starting-style", "data-ending-style", "style"],
+    });
     element.addEventListener("transitionrun", capture);
     frame = requestAnimationFrame(poll);
   });
