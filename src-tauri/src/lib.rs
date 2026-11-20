@@ -1,3 +1,4 @@
+mod app_navigation;
 mod archive;
 #[cfg(test)]
 mod build_resources;
@@ -24,6 +25,7 @@ use browser::{
 };
 mod agent_state;
 mod app_agents;
+mod build_identity;
 mod decisions;
 mod deep_links;
 mod dock;
@@ -140,7 +142,8 @@ use host_files::{
 };
 use host_forward::{
     plugin_host_forward_admission, plugin_host_forward_associate, plugin_host_forward_close,
-    plugin_host_forward_open, plugin_host_forward_seal, HostForward,
+    plugin_host_forward_open, plugin_host_forward_register_child, plugin_host_forward_seal,
+    HostForward,
 };
 use host_mcp::{
     plugin_host_mcp_authorize, plugin_host_mcp_close, plugin_host_mcp_pairing,
@@ -836,6 +839,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         federated_identity::socket::relay_socket_close,
         draft_diagnostics::draft_diagnostics_save,
         web_inspector::web_inspector,
+        build_identity::get_build_identity,
         relay_sign,
         relay_decode_read_state,
         relay_sign_read_state,
@@ -876,6 +880,9 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         relay_upload_cancel,
         file_download,
         media_download,
+        relay::media_cache_clear,
+        relay::media_cache_forget,
+        relay::media_cache_usage,
         media_copy_image,
         media_lift_subject,
         subject_lift::media_lift_subject_supported,
@@ -928,6 +935,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         plugin_host_forward_admission,
         plugin_host_forward_open,
         plugin_host_forward_associate,
+        plugin_host_forward_register_child,
         plugin_host_forward_seal,
         plugin_host_forward_close,
         plugin_host_read_file,
@@ -1075,7 +1083,7 @@ pub fn run() {
                 },
             )
             .and_then(|instance| {
-                sign_out::forget_signed_out_key(&instance, identity::remove_current_key)?;
+                sign_out::forget_signed_out_key(&instance, &paths, identity::remove_current_key)?;
                 Ok(instance)
             })
         };
@@ -1115,6 +1123,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(app_navigation::init())
         .manage(federated_identity.clone())
         .manage(federated_identity::access::Registrations::default())
         .manage(federated_identity::socket::Sockets::default())
@@ -1194,6 +1203,12 @@ pub fn run() {
             }
             deep_links::setup(app.handle());
             mesh_compute::setup(app.handle());
+            app.manage(relay::MediaCache::new(
+                app.path()
+                    .app_cache_dir()
+                    .ok()
+                    .map(|path| path.join(relay::MEDIA_CACHE_DIR)),
+            ));
             app.manage(relay::Spools::new(
                 app.path()
                     .app_cache_dir()

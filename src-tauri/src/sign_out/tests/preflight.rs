@@ -415,6 +415,7 @@ fn reviewer_vanished_pending_marker_must_not_make_uncertainty_fatal() {
         app_data: paths.app_data.clone(),
         backups: paths.backups.clone(),
         others: paths.others.clone(),
+        media: paths.media.clone(),
         moves: paths.moves.clone(),
         seeds: paths.seeds.clone(),
         plugin_home: paths.plugin_home.clone(),
