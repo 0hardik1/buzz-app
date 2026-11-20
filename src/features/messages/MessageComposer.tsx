@@ -2909,24 +2909,22 @@ function Composer({
         throw new Error(
           "Only your available agents can be mentioned in Solo chats. Remove the unavailable recipient and retry.",
         );
-      if (submission) {
-        // SoloDraft filters the captured choices against its final recipient set.
-        submission.submit(
-          captured,
-          attachments.store,
-          routing ? capturedRecipients : undefined,
-          ownSoloConversation ? capturedRunPicks : undefined,
-          ownSoloConversation ? capturedPicks : undefined,
-          ownSoloConversation ? capturedPicksRevision : undefined,
-        );
-        return;
-      }
-      let references: readonly string[] = [];
-      let recipients = capturedRecipients.map((item) => item.pubkey);
-      let declinedImports: readonly string[] = [];
-      // An agent only an earlier Buzz runs would not answer; offer it here first.
-      const lookup = oldAgents.find(capturedRecipients);
+      // An agent only an earlier Buzz runs would not answer; offer it here
+      // first. In Solo, a name outside the chat that isn't one of your agents
+      // is only a reference, so it is never offered.
+      const chat = solo ? mentionChannel(session, channelId) : undefined;
+      const yours = pickedAgents(session.agentChoices);
+      const lookup = oldAgents.find(
+        solo
+          ? capturedRecipients.filter(
+              (person) =>
+                chat?.members?.includes(person.pubkey) ||
+                yours?.some((agent) => agent.pubkey === person.pubkey),
+            )
+          : capturedRecipients,
+      );
       const old = lookup instanceof Promise ? await lookup : lookup;
+      let declinedImports: readonly string[] = [];
       if (old.length) {
         setSending(true);
         setError(undefined);
@@ -2944,6 +2942,21 @@ function Composer({
         if (decision === null) return;
         declinedImports = decision;
       }
+      if (submission) {
+        // SoloDraft filters the captured choices against its final recipient set.
+        submission.submit(
+          captured,
+          attachments.store,
+          routing ? capturedRecipients : undefined,
+          ownSoloConversation ? capturedRunPicks : undefined,
+          ownSoloConversation ? capturedPicks : undefined,
+          ownSoloConversation ? capturedPicksRevision : undefined,
+        );
+        oldAgents.decline(declinedImports);
+        return;
+      }
+      let references: readonly string[] = [];
+      let recipients = capturedRecipients.map((item) => item.pubkey);
       if (soloConversation || ownSoloConversation) {
         admission.current = true;
         setAdmitting(true);

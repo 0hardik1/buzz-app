@@ -3875,8 +3875,10 @@ it("keeps a pick through a failed discovery of the agent's same type", async () 
   expect(await honey.sentPick()).toEqual({ effort: "high" });
 });
 
-/** Agents with none here yet, where an earlier Buzz saved `first` and `second`. */
-const oldBuzzAgents = () => {
+/** Agents with none here yet, where an earlier Buzz saved `listed`. */
+const oldBuzzAgents = (
+  listed: readonly { pubkey: string; name: string }[] = [first, second],
+) => {
   const port = vi.fn<Agents["port"]>(async () => ({
     agent: {} as never,
     notes: [],
@@ -3891,7 +3893,7 @@ const oldBuzzAgents = () => {
     find: () => undefined,
     joinable: () => [],
     portable: async () => ({
-      agents: [first, second].map((agent) => ({
+      agents: listed.map((agent) => ({
         ...agent,
         source: "installed",
         relay: "wss://relay.example.test",
@@ -4086,6 +4088,39 @@ it("offers to import an old Buzz agent a Solo chat sends to", async () => {
     pubkey: first.pubkey,
     type: "test/agent",
   });
+});
+
+it("offers to import an old Buzz agent before a new chat's opening send", async () => {
+  const { agents, port } = oldBuzzAgents();
+  const h = mountNewSoloChat("Cached", first.pubkey, agents);
+  await waitFor(() => expect(pillSendingTo("Cached")).toBeInTheDocument());
+  h.fill("hello");
+  h.submit();
+  await screen.findByRole("dialog", { name: "Import Honey?" });
+  expect(h.submitted).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Import and send" }));
+  await waitFor(() => expect(h.submitted).toHaveBeenCalledOnce());
+  expect(port).toHaveBeenCalledExactlyOnceWith({
+    source: "installed",
+    pubkey: first.pubkey,
+    type: "test/agent",
+  });
+});
+
+it("never offers to import someone a Solo chat only references", async () => {
+  const outsider = { pubkey: "9a".repeat(32), name: "Outsider" };
+  const { agents, port } = oldBuzzAgents([outsider]);
+  const { h } = mountSoloAgents({ agents });
+  act(() => {
+    h.commands().insertMention(outsider);
+    h.commands().insertText("ask them");
+  });
+  await choicesLoaded();
+  h.submit();
+  await waitFor(() => expect(h.messages.send).toHaveBeenCalledOnce());
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(port).not.toHaveBeenCalled();
+  expect(h.messages.send.mock.calls[0]?.[2]).toEqual([first.pubkey]);
 });
 
 it("keeps the draft when the import dialog is closed", async () => {
@@ -9515,19 +9550,25 @@ it("a Berd draft with nobody addressed needs a tag to send", async () => {
 const pillSendingTo = (names: string) =>
   screen.getByRole("status", { name: `Sending to ${names}. Change agents` });
 
-function mountNewSoloChat(name: string, pubkey: string) {
-  const h = mount({
-    submission: {
-      draftKey: "new-chat",
-      locked: false,
-      disabled: false,
-      submit: vi.fn(),
+function mountNewSoloChat(name: string, pubkey: string, agents?: Agents) {
+  const submit = vi.fn();
+  const h = mount(
+    {
+      submission: {
+        draftKey: "new-chat",
+        locked: false,
+        disabled: false,
+        submit,
+      },
+      ownSoloConversation: true,
+      soloConversation: true,
+      requireMention: true,
+      defaultMention: { pubkey, name },
     },
-    ownSoloConversation: true,
-    soloConversation: true,
-    requireMention: true,
-    defaultMention: { pubkey, name },
-  });
+    undefined,
+    undefined,
+    agents,
+  );
   h.setLibrary([
     { pubkey: first.pubkey, name: "Cached" },
     { pubkey: second.pubkey, name: "Saved" },
@@ -9535,7 +9576,7 @@ function mountNewSoloChat(name: string, pubkey: string) {
   Object.assign(h.session, {
     channels: { ...h.session.channels, list: () => soloList },
   });
-  return h;
+  return Object.assign(h, { submitted: submit });
 }
 
 it("puts the default agent in a new chat's pill, never the text or a saved draft", async () => {
