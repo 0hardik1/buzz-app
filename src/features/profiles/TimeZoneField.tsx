@@ -88,15 +88,15 @@ export function TimeZoneField({
       {onFollowingChange && (
         <Checkbox
           label="Use this computer’s time zone"
-          checked={following}
+          checked={following && value !== undefined}
           disabled={disabled || value === undefined}
           onCheckedChange={onFollowingChange}
         />
       )}
       {byDefault && value !== undefined && (
         <p className="text-caption text-secondary">
-          This device’s time zone is shared by default. Uncheck and save to stop
-          sharing it.
+          This device’s time zone is shared by default. Uncheck Show my local
+          time and save to stop sharing it.
         </p>
       )}
       <Combobox.Root

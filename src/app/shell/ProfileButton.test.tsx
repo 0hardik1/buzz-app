@@ -877,6 +877,8 @@ it("refreshes the viewer through the real session after roster setup, not a stal
   };
   const snapshot = {
     viewer: viewer.pubkey,
+    status: "ready",
+    relayAvailable: true,
     selected: "https://community.test",
     memberships: [{ id: "https://community.test" }],
     profile: { name: "Local only", picture: "" },
@@ -1260,42 +1262,33 @@ it.each([
   },
 );
 
-it("follows this device's zone in every joined community and rechecks after a join", async () => {
+function followFixture(joined = ["https://first.test"]) {
   resetFollowedTimeZones();
-  const device = new Intl.DateTimeFormat().resolvedOptions().timeZone;
   const listeners = new Set<() => void>();
-  let state = {
-    viewer: "a".repeat(64),
-    selected: null,
-    memberships: [{ id: "https://first.test" }],
-    profile: { name: "Fixture", picture: "" },
+  const fixture = {
+    state: {
+      status: "ready",
+      relayAvailable: true,
+      viewer: "a".repeat(64),
+      // Personal space: no community session to wait for.
+      selected: null,
+      memberships: joined.map((id) => ({ id })),
+      profile: { name: "Fixture", picture: "" },
+    },
+    notify() {
+      for (const listener of listeners) listener();
+    },
   };
-  const subscribe = (fn: () => void) => {
-    listeners.add(fn);
-    return () => {
-      listeners.delete(fn);
-    };
-  };
-  const connection = {
-    status: "ready",
-    viewer: state.viewer,
-    session: { live: { subscribe: () => () => {}, snapshot: () => undefined } },
-  };
+  const connection = { status: "unavailable" };
   const presence = { status: "online", preference: "auto", error: null };
-  const stale = {
-    exists: true,
-    existing: { name: "Fixture", tz: "Pacific/Kiritimati" },
-    profile: { name: "Fixture", picture: "", about: "" },
-  };
-  const inspect = vi
-    .spyOn(communityApi, "inspectProfile")
-    .mockResolvedValue(stale);
-  const publish = vi
-    .spyOn(communityApi, "publishProfile")
-    .mockResolvedValue(undefined);
   const communities = {
-    subscribe,
-    snapshot: () => state,
+    subscribe: (fn: () => void) => {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+      };
+    },
+    snapshot: () => fixture.state,
     presence: { subscribe: () => () => {}, snapshot: () => presence },
     relay: { subscribe: () => () => {}, snapshot: () => connection },
   } as unknown as Communities;
@@ -1314,25 +1307,43 @@ it("follows this device's zone in every joined community and rechecks after a jo
       onSettings={() => {}}
     />,
   );
+  return fixture;
+}
+
+const device = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+const stale = {
+  exists: true,
+  existing: { name: "Fixture", tz: "Pacific/Kiritimati" },
+  profile: { name: "Fixture", picture: "", about: "" },
+};
+
+it("follows this device's zone in every joined community from Personal space and rechecks after a join", async () => {
+  const inspect = vi
+    .spyOn(communityApi, "inspectProfile")
+    .mockResolvedValue(stale);
+  const publish = vi
+    .spyOn(communityApi, "publishProfile")
+    .mockResolvedValue(undefined);
   try {
+    const fixture = followFixture();
     await waitFor(() =>
       expect(publish).toHaveBeenCalledWith(
         "https://first.test",
         stale.profile,
-        {
-          ...stale.existing,
-          tz: device,
-        },
+        { ...stale.existing, tz: device },
       ),
     );
     // Not selected, so it reads without a session.
     expect(inspect).toHaveBeenCalledWith("https://first.test");
     act(() => {
-      state = {
-        ...state,
-        memberships: [...state.memberships, { id: "https://second.test" }],
+      fixture.state = {
+        ...fixture.state,
+        memberships: [
+          ...fixture.state.memberships,
+          { id: "https://second.test" },
+        ],
       };
-      for (const listener of listeners) listener();
+      fixture.notify();
     });
     await waitFor(() =>
       expect(publish).toHaveBeenCalledWith(
@@ -1344,12 +1355,53 @@ it("follows this device's zone in every joined community and rechecks after a jo
     // A notification that changes neither the zone nor the communities reads
     // nothing.
     const reads = inspect.mock.calls.length;
-    act(() => {
-      for (const listener of listeners) listener();
-    });
+    act(() => fixture.notify());
     await new Promise((resolve) => setTimeout(resolve));
     expect(inspect).toHaveBeenCalledTimes(reads);
   } finally {
+    inspect.mockRestore();
+    publish.mockRestore();
+  }
+});
+
+it("retries only the communities a check could not finish, backing off", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "setInterval"] });
+  let failing = true;
+  const inspect = vi
+    .spyOn(communityApi, "inspectProfile")
+    .mockImplementation(async (id) => {
+      if (id === "https://second.test" && failing) throw new Error("offline");
+      return stale;
+    });
+  const publish = vi
+    .spyOn(communityApi, "publishProfile")
+    .mockResolvedValue(undefined);
+  const reads = (id: string) =>
+    inspect.mock.calls.filter(([read]) => read === id).length;
+  try {
+    followFixture(["https://first.test", "https://second.test"]);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(reads("https://second.test")).toBe(1);
+    const first = reads("https://first.test");
+    // First retry after a minute, then two.
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(reads("https://second.test")).toBe(2);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(reads("https://second.test")).toBe(2);
+    failing = false;
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(reads("https://second.test")).toBe(3);
+    expect(publish).toHaveBeenCalledWith("https://second.test", stale.profile, {
+      ...stale.existing,
+      tz: device,
+    });
+    // The community that succeeded was never read again, and nothing is
+    // left to retry.
+    await act(() => vi.advanceTimersByTimeAsync(30 * 60_000));
+    expect(reads("https://first.test")).toBe(first);
+    expect(reads("https://second.test")).toBe(3);
+  } finally {
+    vi.useRealTimers();
     inspect.mockRestore();
     publish.mockRestore();
   }

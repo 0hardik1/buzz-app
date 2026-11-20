@@ -34,6 +34,7 @@ function follow(
   options: {
     zone?: string | undefined;
     signal?: AbortSignal;
+    only?: string[];
     communities?: Communities;
     inspect?: (id: string) => Promise<ReturnType<typeof profileFromEvent>>;
   } = {},
@@ -56,6 +57,7 @@ function follow(
       publish,
       zone: "zone" in options ? options.zone : zone,
       ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.only ? { only: options.only } : {}),
     }),
   };
 }
@@ -70,7 +72,7 @@ it("moves a stale zone to this device's, keeping the profile's other fields", as
       tz: "Pacific/Honolulu",
     },
   });
-  expect(await followed).toBe(true);
+  expect(await followed).toEqual([]);
   expect(publish).toHaveBeenCalledExactlyOnceWith(
     community,
     { name: "Mic", picture: "https://example.org/mic.png", about: "" },
@@ -89,7 +91,7 @@ it("follows in every joined community, not only one", async () => {
     [community]: { name: "Mic", tz: "Pacific/Honolulu" },
     [other]: { name: "Mic" },
   });
-  expect(await followed).toBe(true);
+  expect(await followed).toEqual([]);
   expect(publish).toHaveBeenCalledTimes(2);
   expect(publish).toHaveBeenCalledWith(
     other,
@@ -106,7 +108,7 @@ it.each([
   ["no profile", undefined],
 ])("leaves %s alone", async (_case, content) => {
   const { publish, followed } = follow({ [community]: content });
-  expect(await followed).toBe(true);
+  expect(await followed).toEqual([]);
   expect(publish).not.toHaveBeenCalled();
 });
 
@@ -115,14 +117,14 @@ it("never overwrites a zone pinned on this device", async () => {
   const { publish, inspect, followed } = follow({
     [community]: { name: "Mic", tz: "Europe/Paris" },
   });
-  expect(await followed).toBe(true);
+  expect(await followed).toEqual([]);
   expect(inspect).not.toHaveBeenCalled();
   expect(publish).not.toHaveBeenCalled();
   // Unpinning follows again.
   setTimeZonePinned(community, viewer.pubkey, false);
   expect(timeZonePinned(community, viewer.pubkey)).toBe(false);
   const again = follow({ [community]: { name: "Mic", tz: "Europe/Paris" } });
-  expect(await again.followed).toBe(true);
+  expect(await again.followed).toEqual([]);
   expect(again.publish).toHaveBeenCalledOnce();
 });
 
@@ -143,7 +145,7 @@ it("keeps a zone pinned while its read was in flight", async () => {
   await vi.waitFor(() => expect(inspect).toHaveBeenCalled());
   setTimeZonePinned(community, viewer.pubkey, true);
   release();
-  expect(await followed).toBe(true);
+  expect(await followed).toEqual([]);
   expect(publish).not.toHaveBeenCalled();
 });
 
@@ -172,7 +174,7 @@ it("stands aside for a profile save that is running or started after it began", 
   // A save running when the run begins.
   beginProfileSave(communities);
   const running = follow({ [community]: content }, { communities });
-  expect(await running.followed).toBe(false);
+  expect(await running.followed).toEqual([community]);
   expect(running.publish).not.toHaveBeenCalled();
   endProfileSave(communities);
   // A save that starts and finishes while the strong read is in flight.
@@ -192,7 +194,7 @@ it("stands aside for a profile save that is running or started after it began", 
   beginProfileSave(communities);
   endProfileSave(communities);
   release();
-  expect(await started.followed).toBe(false);
+  expect(await started.followed).toEqual([community]);
   expect(started.publish).not.toHaveBeenCalled();
 });
 
@@ -206,8 +208,8 @@ it("runs one at a time, so a second trigger sees the first's write", async () =>
   await new Promise((resolve) => setTimeout(resolve));
   expect(second.inspect).not.toHaveBeenCalled();
   release();
-  expect(await first.followed).toBe(true);
-  expect(await second.followed).toBe(true);
+  expect(await first.followed).toEqual([]);
+  expect(await second.followed).toEqual([]);
   expect(second.publish).not.toHaveBeenCalled();
 });
 
@@ -226,7 +228,7 @@ it("lets a save wait for a write it has handed to the writer", async () => {
   await new Promise((resolve) => setTimeout(resolve));
   expect(settled).toBe(false);
   release();
-  expect(await followed).toBe(true);
+  expect(await followed).toEqual([]);
   await vi.waitFor(() => expect(settled).toBe(true));
 });
 
@@ -240,7 +242,7 @@ it("reports a failed read or publication so the check can be retried, and still 
       },
     },
   );
-  expect(await unread.followed).toBe(false);
+  expect(await unread.followed).toEqual([community]);
   expect(unread.publish).toHaveBeenCalledExactlyOnceWith(
     other,
     expect.anything(),
@@ -248,7 +250,7 @@ it("reports a failed read or publication so the check can be retried, and still 
   );
   const unpublished = follow({ [community]: { name: "Mic" } });
   unpublished.publish.mockRejectedValueOnce(new Error("offline"));
-  expect(await unpublished.followed).toBe(false);
+  expect(await unpublished.followed).toEqual([community]);
 });
 
 it("publishes nothing once abandoned, after an identity switch, or without a usable device zone", async () => {
@@ -258,7 +260,7 @@ it("publishes nothing once abandoned, after an identity switch, or without a usa
     { [community]: { name: "Mic" } },
     { signal: controller.signal },
   );
-  expect(await aborted.followed).toBe(false);
+  expect(await aborted.followed).toEqual([]);
   expect(aborted.publish).not.toHaveBeenCalled();
   const switched = follow(
     { [community]: { name: "Mic" } },
@@ -267,7 +269,7 @@ it("publishes nothing once abandoned, after an identity switch, or without a usa
   await switched.followed;
   expect(switched.publish).not.toHaveBeenCalled();
   const unzoned = follow({ [community]: { name: "Mic" } }, { zone: undefined });
-  expect(await unzoned.followed).toBe(true);
+  expect(await unzoned.followed).toEqual([]);
   expect(unzoned.inspect).not.toHaveBeenCalled();
 });
 
@@ -277,4 +279,43 @@ it("adds the device zone to a first or untouched profile but keeps an opt-out", 
   expect(withDeviceTimeZone({ name: "Mic" }, undefined)).toEqual({
     name: "Mic",
   });
+});
+
+it("writes nothing to a community left while its read was in flight", async () => {
+  const snapshot = {
+    viewer: viewer.pubkey,
+    memberships: [{ id: community }],
+  };
+  const communities = { snapshot: () => snapshot } as unknown as Communities;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const { publish, inspect, followed } = follow(
+    { [community]: undefined },
+    {
+      communities,
+      inspect: async () => {
+        await held;
+        return profileFromEvent(
+          profile(viewer, { name: "Mic", tz: "Asia/Tokyo" }),
+        );
+      },
+    },
+  );
+  await vi.waitFor(() => expect(inspect).toHaveBeenCalled());
+  snapshot.memberships = [];
+  release();
+  expect(await followed).toEqual([]);
+  expect(publish).not.toHaveBeenCalled();
+});
+
+it("checks only the communities it is given", async () => {
+  const { inspect, followed } = follow(
+    {
+      [community]: { name: "Mic", tz: "Asia/Tokyo" },
+      [other]: { name: "Mic", tz: "Asia/Tokyo" },
+    },
+    { only: [other] },
+  );
+  expect(await followed).toEqual([]);
+  expect(inspect).toHaveBeenCalledExactlyOnceWith(other);
 });

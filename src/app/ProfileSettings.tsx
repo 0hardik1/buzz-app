@@ -41,6 +41,7 @@ import { profileTimeZone } from "../features/profiles/local-time";
 import { TimeZoneField } from "../features/profiles/TimeZoneField";
 import {
   deviceTimeZone,
+  sameTimeZone,
   setTimeZonePinned,
   timeZonePinned,
   withDeviceTimeZone,
@@ -281,9 +282,9 @@ export function ProfileSettings({
       : sharedTz;
   const followChanged =
     followDraft !== undefined && followDraft !== persistedFollow;
-  // A stale followed zone is the background's to fix, not an unsaved edit.
-  const tzChanged =
-    (tzDraft !== undefined || followChanged) && tz !== persistedTz;
+  // Also true while following when the background has not caught the saved
+  // zone up, so Save offers what the box shows.
+  const tzChanged = !sameTimeZone(tz, persistedTz);
   const profileEdited = draft !== null && !profilesEqual(edited, persisted);
   const hasChanges = profileEdited || tzChanged || followChanged;
   // A dispatched save continues after Settings closes, so it is not
@@ -535,6 +536,8 @@ export function ProfileSettings({
                         setError("");
                       }}
                       onFollowingChange={(next) => {
+                        // A pick starts from the zone shown.
+                        if (!next && tz !== undefined) setTzDraft(tz);
                         setFollowDraft(next);
                         setSaved(false);
                         setError("");

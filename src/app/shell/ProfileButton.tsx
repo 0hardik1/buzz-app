@@ -63,6 +63,8 @@ import {
 } from "../../features/profiles/share-time-zone";
 
 const noSubscription = () => () => {};
+// The first wait before retrying communities a time zone check left.
+const followRetryDelay = 60_000;
 // The parent row retains the icon for the saved appearance preference.
 const colorModes = {
   light: { label: "Light", Icon: SunIcon },
@@ -93,6 +95,8 @@ export function ProfileButton({
     profile: localProfile,
     viewer,
     selected,
+    status: clientStatus,
+    relayAvailable,
   } = useSyncExternalStore(communities.subscribe, communities.snapshot);
   const presence = useSyncExternalStore(
     communities.presence.subscribe,
@@ -195,26 +199,24 @@ export function ProfileButton({
     read.catch(() => {});
     return () => controller.abort();
   }, [profiles, viewer, connection.status, session, roster, liveStatus]);
-  const relayReady = connection.status === "ready";
+  // Communities are reached by origin, so this needs no selected session.
+  const canFollow = clientStatus === "ready" && relayAvailable;
   useEffect(() => {
-    if (!viewer || !relayReady) return;
-    // Profiles follow this device's zone: check every community once
-    // connected, and again whenever the zone or the joined communities
-    // change. A failed check waits for the next of these.
+    if (!viewer || !canFollow) return;
+    // Profiles follow this device's zone: check every community at launch,
+    // and again whenever the zone or the joined communities change. Those a
+    // check could not finish are retried alone, backing off to every half
+    // hour.
     const controller = new AbortController();
     let checked: string | undefined;
-    const check = () => {
-      const zone = deviceTimeZone();
-      const joined = communities
-        .snapshot()
-        .memberships.map(({ id }) => id)
-        .join("\n");
-      if (`${zone}\n${joined}` === checked) return;
-      checked = `${zone}\n${joined}`;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let delay = followRetryDelay;
+    const run = (key: string, zone: string | undefined, only?: string[]) =>
       void followDeviceTimeZone({
         viewer,
         communities,
         zone,
+        ...(only ? { only } : {}),
         signal: controller.signal,
         inspect: (id) => {
           // The selected community reads through its session, so its profile
@@ -227,7 +229,30 @@ export function ProfileButton({
             : communityApi.inspectProfile(id);
         },
         publish: communityApi.publishProfile,
-      }).catch(() => {});
+      }).then(
+        (failed) => {
+          if (checked !== key || controller.signal.aborted) return;
+          if (!failed.length) {
+            delay = followRetryDelay;
+            return;
+          }
+          retry = setTimeout(() => run(key, zone, failed), delay);
+          delay = Math.min(delay * 2, 30 * 60_000);
+        },
+        () => {},
+      );
+    const check = () => {
+      const zone = deviceTimeZone();
+      const joined = communities
+        .snapshot()
+        .memberships.map(({ id }) => id)
+        .join("\n");
+      const key = `${zone}\n${joined}`;
+      if (key === checked) return;
+      checked = key;
+      clearTimeout(retry);
+      delay = followRetryDelay;
+      run(key, zone);
     };
     check();
     const unsubscribe = communities.subscribe(check);
@@ -238,8 +263,9 @@ export function ProfileButton({
       unsubscribe();
       window.removeEventListener("focus", check);
       clearInterval(timer);
+      clearTimeout(retry);
     };
-  }, [communities, viewer, relayReady]);
+  }, [communities, viewer, canFollow]);
   const profile = selected ? communityProfile : localProfile;
   const displayName = profile?.name.trim();
   const name =

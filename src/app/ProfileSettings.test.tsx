@@ -1050,7 +1050,7 @@ it("shows a profile without a time zone as sharing this device's, and records un
   const zone = screen.getByRole("combobox", { name: "Time zone" });
   expect(zone).toHaveTextContent(device.replaceAll("_", " "));
   const pending =
-    "This device’s time zone is shared by default. Uncheck and save to stop sharing it.";
+    "This device’s time zone is shared by default. Uncheck Show my local time and save to stop sharing it.";
   expect(screen.getByText(pending)).toBeVisible();
   expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
 
@@ -1318,77 +1318,183 @@ function renderSavedZone(tz: string) {
     />,
     { wrapper: ToastProvider },
   );
-  return publish;
+  return { inspect, publish };
 }
 
-it("follows this computer's time zone by default, without an unsaved change", async () => {
-  renderSavedZone("Pacific/Kiritimati");
+const name = { name: "Community name", picture: "", about: "" };
+const shown = (zone: string) => zone.replaceAll("_", " ");
+// Not this device's zone, whatever zone the tests run in.
+const away =
+  device === "Pacific/Kiritimati" ? "Pacific/Chatham" : "Pacific/Kiritimati";
+
+async function followBox() {
   const follow = await screen.findByRole("checkbox", {
     name: "Use this computer’s time zone",
   });
-  await waitFor(() => expect(follow).toBeChecked());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Show my local time on my profile",
+      }),
+    ).toBeChecked(),
+  );
+  return follow;
+}
+
+async function pick(user: ReturnType<typeof userEvent.setup>, zone: string) {
+  await user.click(screen.getByRole("combobox", { name: "Time zone" }));
+  await user.type(
+    await screen.findByRole("combobox", { name: "Search" }),
+    shown(zone),
+  );
+  await user.click(
+    await screen.findByRole("option", { name: new RegExp(`^${shown(zone)}`) }),
+  );
+}
+
+it("follows this computer's time zone by default, locking the picker", async () => {
+  renderSavedZone(device);
+  const follow = await followBox();
+  expect(follow).toBeChecked();
   const zone = screen.getByRole("combobox", { name: "Time zone" });
-  // The stale saved zone is the background's to fix.
-  expect(zone).toHaveTextContent(device.replaceAll("_", " "));
+  expect(zone).toHaveTextContent(shown(device));
   expect(zone).toBeDisabled();
   expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
 });
 
-it("pins the saved zone when following is turned off, so it is never overwritten", async () => {
-  const publish = renderSavedZone("Pacific/Kiritimati");
-  const user = userEvent.setup();
-  const follow = await screen.findByRole("checkbox", {
-    name: "Use this computer’s time zone",
-  });
+it("offers to save this computer's zone while following when the saved zone lags", async () => {
+  // The background skipped this profile, so the box would otherwise claim a
+  // zone that is not shared.
+  const { publish } = renderSavedZone(away);
+  const follow = await followBox();
   await waitFor(() => expect(follow).toBeChecked());
+  expect(screen.getByRole("combobox", { name: "Time zone" })).toHaveTextContent(
+    shown(device),
+  );
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(publish).toHaveBeenCalledWith("community-id", name, { tz: device }),
+  );
+  expect(await screen.findByText("Profile updated")).toBeVisible();
+  expect(timeZonePinned("community-id", viewer)).toBe(false);
+});
+
+it("starts a pick from the zone shown when following is turned off, and pins it", async () => {
+  const { publish } = renderSavedZone(away);
+  const user = userEvent.setup();
+  const follow = await followBox();
   await user.click(follow);
   const zone = screen.getByRole("combobox", { name: "Time zone" });
   expect(zone).toBeEnabled();
-  expect(zone).toHaveTextContent("Pacific/Kiritimati");
+  // Not the stale saved zone, which saving would lock in.
+  expect(zone).toHaveTextContent(shown(device));
   await user.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
-    expect(publish).toHaveBeenCalledWith(
-      "community-id",
-      { name: "Community name", picture: "", about: "" },
-      { tz: "Pacific/Kiritimati" },
-    ),
+    expect(publish).toHaveBeenCalledWith("community-id", name, { tz: device }),
   );
   expect(await screen.findByText("Profile updated")).toBeVisible();
   expect(timeZonePinned("community-id", viewer)).toBe(true);
   expect(follow).not.toBeChecked();
 });
 
-it("leaves nothing to save after turning following off and on again", async () => {
-  renderSavedZone("Pacific/Kiritimati");
+it("pins a different zone picked after turning following off", async () => {
+  const { publish } = renderSavedZone(device);
   const user = userEvent.setup();
-  const follow = await screen.findByRole("checkbox", {
-    name: "Use this computer’s time zone",
-  });
-  await waitFor(() => expect(follow).toBeChecked());
+  await user.click(await followBox());
+  await pick(user, "Europe/Paris");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(publish).toHaveBeenCalledWith("community-id", name, {
+      tz: "Europe/Paris",
+    }),
+  );
+  expect(await screen.findByText("Profile updated")).toBeVisible();
+  expect(timeZonePinned("community-id", viewer)).toBe(true);
+  expect(screen.getByRole("combobox", { name: "Time zone" })).toHaveTextContent(
+    "Europe/Paris",
+  );
+});
+
+it("leaves nothing to save after picking a zone and following again", async () => {
+  renderSavedZone(device);
+  const user = userEvent.setup();
+  const follow = await followBox();
   await user.click(follow);
+  await pick(user, "Europe/Paris");
   expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
   await user.click(follow);
+  expect(screen.getByRole("combobox", { name: "Time zone" })).toHaveTextContent(
+    shown(device),
+  );
   expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
 });
 
-it("keeps following when publishing a pick fails", async () => {
-  const publish = renderSavedZone("Pacific/Kiritimati");
+it("keeps the pick and following off when publishing it fails", async () => {
+  const { publish } = renderSavedZone(device);
   publish.mockRejectedValueOnce(new Error("Relay unavailable"));
   const user = userEvent.setup();
-  const follow = await screen.findByRole("checkbox", {
-    name: "Use this computer’s time zone",
-  });
-  await waitFor(() => expect(follow).toBeChecked());
+  const follow = await followBox();
   await user.click(follow);
+  await pick(user, "Europe/Paris");
   await user.click(screen.getByRole("button", { name: "Save" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Relay unavailable",
   );
   expect(timeZonePinned("community-id", viewer)).toBe(false);
+  expect(follow).not.toBeChecked();
+  expect(screen.getByRole("combobox", { name: "Time zone" })).toHaveTextContent(
+    "Europe/Paris",
+  );
+  expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
+});
+
+it("keeps a zone pinned when following again is sent but not confirmed", async () => {
+  setTimeZonePinned("community-id", viewer, true);
+  const { inspect, publish } = renderSavedZone(away);
+  // Another client's newer profile replaces what this save published.
+  publish.mockImplementation(async () => {});
+  const user = userEvent.setup();
+  const follow = await followBox();
+  await waitFor(() =>
+    expect(
+      screen.getByRole("combobox", { name: "Time zone" }),
+    ).toHaveTextContent(shown(away)),
+  );
+  await user.click(follow);
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Your profile change is not current",
+  );
+  expect(publish).toHaveBeenCalledWith("community-id", name, { tz: device });
+  expect(inspect).toHaveBeenCalledTimes(3);
+  expect(timeZonePinned("community-id", viewer)).toBe(true);
+});
+
+it("keeps an opt-out through a save while following", async () => {
+  const { publish } = renderSavedZone("");
+  const user = userEvent.setup();
+  const follow = await screen.findByRole("checkbox", {
+    name: "Use this computer’s time zone",
+  });
+  // Nothing is shared, so following shows off.
+  expect(follow).not.toBeChecked();
+  await user.type(
+    await screen.findByLabelText("Profile description (optional)"),
+    "Hello",
+  );
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(publish).toHaveBeenCalledWith(
+      "community-id",
+      { ...name, about: "Hello" },
+      { tz: "" },
+    ),
+  );
 });
 
 it("shares this computer's zone with any save while following", async () => {
-  const publish = renderSavedZone("Pacific/Kiritimati");
+  const { publish } = renderSavedZone(away);
   const user = userEvent.setup();
   const about = await screen.findByLabelText("Profile description (optional)");
   await user.type(about, "Hello");
@@ -1396,7 +1502,7 @@ it("shares this computer's zone with any save while following", async () => {
   await waitFor(() =>
     expect(publish).toHaveBeenCalledWith(
       "community-id",
-      { name: "Community name", picture: "", about: "Hello" },
+      { ...name, about: "Hello" },
       { tz: device },
     ),
   );
@@ -1404,23 +1510,18 @@ it("shares this computer's zone with any save while following", async () => {
 
 it("follows again from a pinned zone, sharing this computer's zone", async () => {
   setTimeZonePinned("community-id", viewer, true);
-  const publish = renderSavedZone("Pacific/Kiritimati");
+  const { publish } = renderSavedZone(away);
   const user = userEvent.setup();
-  const follow = await screen.findByRole("checkbox", {
-    name: "Use this computer’s time zone",
-  });
+  const follow = await followBox();
   const zone = screen.getByRole("combobox", { name: "Time zone" });
-  await waitFor(() => expect(zone).toHaveTextContent("Pacific/Kiritimati"));
+  await waitFor(() => expect(zone).toHaveTextContent(shown(away)));
   expect(follow).not.toBeChecked();
+  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   await user.click(follow);
-  expect(zone).toHaveTextContent(device.replaceAll("_", " "));
+  expect(zone).toHaveTextContent(shown(device));
   await user.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
-    expect(publish).toHaveBeenCalledWith(
-      "community-id",
-      { name: "Community name", picture: "", about: "" },
-      { tz: device },
-    ),
+    expect(publish).toHaveBeenCalledWith("community-id", name, { tz: device }),
   );
   expect(await screen.findByText("Profile updated")).toBeVisible();
   expect(timeZonePinned("community-id", viewer)).toBe(false);

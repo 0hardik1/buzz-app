@@ -66,6 +66,12 @@ const canonical = (zone: string) =>
   new Intl.DateTimeFormat("en-US", { timeZone: zone }).resolvedOptions()
     .timeZone;
 
+/** Whether two usable zones are the same, however this engine spells them
+ * (Asia/Calcutta, Asia/Kolkata); undefined matches only undefined. */
+export function sameTimeZone(a: string | undefined, b: string | undefined) {
+  return a === b || (!!a && !!b && canonical(a) === canonical(b));
+}
+
 type ProfileRead = ReturnType<typeof profileFromEvent>;
 
 /** Whether a background write should set `tz` to `zone`: the profile exists,
@@ -73,9 +79,7 @@ type ProfileRead = ReturnType<typeof profileFromEvent>;
  * profile writer would leave its other fields as they are. */
 function follows({ exists, existing, profile }: ProfileRead, zone: string) {
   if (!exists || existing.tz === "") return false;
-  const shared = profileTimeZone(existing.tz);
-  // Engines spell some zones differently (Asia/Calcutta, Asia/Kolkata).
-  if (shared && canonical(shared) === canonical(zone)) return false;
+  if (sameTimeZone(profileTimeZone(existing.tz), zone)) return false;
   const name = profile.name.trim();
   const written: Record<string, unknown> = {
     name,
@@ -99,11 +103,11 @@ let running: Promise<unknown> = Promise.resolve();
  * there. Reads each profile strongly just before publishing, so a lagging read
  * never reverts a newer profile; never creates a profile or renames anyone;
  * and stands aside while a profile save is running or after one started.
- * Resolves whether every community was checked, so a failed read or
- * publication can be retried. */
+ * Resolves the communities left unchecked by a failed read or publication or
+ * a save, so they can be retried. */
 export function followDeviceTimeZone(
   options: Parameters<typeof follow>[0],
-): Promise<boolean> {
+): Promise<string[]> {
   const current = running.then(() => follow(options));
   running = current.catch(() => {});
   return current;
@@ -116,6 +120,7 @@ async function follow({
   publish,
   signal,
   zone,
+  only,
 }: {
   viewer: string;
   /** The app's communities: whose profiles follow, and whose saves this
@@ -131,27 +136,42 @@ async function follow({
   signal?: AbortSignal;
   /** This device's zone, from `deviceTimeZone()`. */
   zone: string | undefined;
-}): Promise<boolean> {
-  if (!zone) return true;
+  /** Check only these communities, such as the ones a check left. */
+  only?: readonly string[];
+}): Promise<string[]> {
+  if (!zone) return [];
   const saves = profileSaveGeneration(communities);
-  // Pinned before or during the read: the viewer's pick stays.
-  const settled = (community: string) =>
-    !!signal?.aborted ||
-    communities.snapshot().viewer !== viewer ||
-    timeZonePinned(community, viewer);
-  let complete = true;
-  for (const { id } of communities.snapshot().memberships) {
+  // Left, pinned or switched away from before or during the read: nothing
+  // to write.
+  const settled = (community: string) => {
+    const { viewer: current, memberships } = communities.snapshot();
+    return (
+      !!signal?.aborted ||
+      current !== viewer ||
+      !memberships.some(({ id }) => id === community) ||
+      timeZonePinned(community, viewer)
+    );
+  };
+  const ids = communities
+    .snapshot()
+    .memberships.map(({ id }) => id)
+    .filter((id) => !only || only.includes(id));
+  const failed: string[] = [];
+  for (const [index, id] of ids.entries()) {
     if (settled(id)) continue;
-    if (profileSavedSince(communities, saves)) return false;
+    // A save stands this check aside; what it had not reached stays to do.
+    if (profileSavedSince(communities, saves))
+      return [...failed, ...ids.slice(index)];
     let current: ProfileRead;
     try {
       current = await inspect(id);
     } catch {
-      complete = false;
+      failed.push(id);
       continue;
     }
     if (settled(id) || !follows(current, zone)) continue;
-    if (profileSavedSince(communities, saves)) return false;
+    if (profileSavedSince(communities, saves))
+      return [...failed, ...ids.slice(index)];
     try {
       const write = publish(
         id,
@@ -161,10 +181,10 @@ async function follow({
       trackBackgroundProfileWrite(communities, write);
       await write;
     } catch {
-      complete = false;
+      failed.push(id);
     }
   }
-  return complete && !signal?.aborted;
+  return signal?.aborted ? [] : failed;
 }
 
 /** Test seam: forget pinned zones and any run in flight. */
