@@ -370,10 +370,7 @@ export class AgentSessions<S = unknown> {
   private readonly unclosed = new Map<AcpProcess, unknown>();
   /** Each conversation a close failed in, while its process runs: held
    * work refuses it. */
-  private readonly unended = new Map<
-    string,
-    { process: AcpProcess; error: unknown }
-  >();
+  private readonly unended = new Map<string, Map<AcpProcess, unknown>>();
   /** Conversations whose session is opening, and the turn it opened for. */
   /** Messages waiting, in arrival order, for a turn ahead to free their
    * conversation's session. Stop clears them. */
@@ -745,12 +742,7 @@ export class AgentSessions<S = unknown> {
     this.lines.delete(key);
     // Held work is told at once, never waited for, as is work waiting to be.
     for (const waiting of this.waiting.get(key) ?? []) waiting.abort();
-    const held = this.held.get(key);
-    if (held) {
-      held.controller.abort();
-      this.live.get(key)?.session.interrupt();
-      return;
-    }
+    this.held.get(key)?.controller.abort();
     const stopped = new Set<Live>();
     const stop = (item?: Promise<unknown> | Live) => {
       if (item && !(item instanceof Promise) && !stopped.has(item)) {
@@ -886,8 +878,8 @@ export class AgentSessions<S = unknown> {
         .filter((closing) => closing.session.conversation === key)
         .map((closing) => this.strict(closing)),
     );
-    const unended = this.unended.get(key);
-    if (unended?.process.running) throw unended.error;
+    for (const [process, error] of this.unended.get(key) ?? [])
+      if (process.running) throw error;
     if (controller.signal.aborted || this.disposed)
       throw new Error(`${label} was stopped`);
     const saved = savedConversation(store?.get(key));
@@ -1740,8 +1732,10 @@ export class AgentSessions<S = unknown> {
         if (live.process.running) {
           this.unclosed.set(live.process, error);
           const { conversation } = live.session;
-          if (conversation !== undefined)
-            this.unended.set(conversation, { process: live.process, error });
+          if (conversation !== undefined) {
+            const failed = this.unended.get(conversation) ?? new Map();
+            this.unended.set(conversation, failed.set(live.process, error));
+          }
         }
         throw error;
       },
@@ -1766,8 +1760,8 @@ export class AgentSessions<S = unknown> {
       this.replaced.delete(process);
       if (this.process === process) this.process = undefined;
       this.unclosed.delete(process);
-      for (const [key, unended] of this.unended)
-        if (unended.process === process) this.unended.delete(key);
+      for (const [key, failed] of this.unended)
+        if (failed.delete(process) && !failed.size) this.unended.delete(key);
       for (const live of this.closing)
         if (live.process === process) this.closing.delete(live);
       for (const [key, live] of this.live)

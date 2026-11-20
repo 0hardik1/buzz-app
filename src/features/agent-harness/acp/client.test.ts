@@ -1083,6 +1083,25 @@ describe("a pinned session's record", () => {
     sessions.dispose();
   });
 
+  it("is stopped with its successor when Stop comes while New session waits for them", async () => {
+    const harness = fakeHarness({ hold: true });
+    const { sessions } = pinnedSessions(harness);
+    const a = sessions.deliver("chat", "a", 1, { build: build(1) });
+    await until(() => harness.turns.length === 1);
+    sessions.restart();
+    const b = sessions.deliver("chat", "b", 2, { build: build(2) });
+    await until(() => harness.turns.length === 2);
+    const reset = sessions.reset("chat", "new");
+    await flush();
+    await sessions.interrupt("chat");
+    expect(
+      harness.sent("session/cancel").map((m) => m.params?.sessionId),
+    ).toEqual(expect.arrayContaining(["session-1", "session-2"]));
+    for (const turn of harness.turns) turn.finish();
+    await Promise.all([a, b, reset]);
+    sessions.dispose();
+  });
+
   it("is never written by a busy session retired mid-turn, in either finish order", async () => {
     for (const aFirst of [true, false]) {
       const harness = fakeHarness({ hold: true });
@@ -2260,6 +2279,45 @@ describe("holding a conversation", () => {
     expect(order).toEqual(["work session-1", "later"]);
     expect(harness.turns.map((turn) => turn.text)).toEqual(["hello", "later"]);
     expect(harness.sent("session/delete")).toEqual([]);
+  });
+
+  it("refuses work while an older process whose close failed still runs, after a newer one exits", async () => {
+    const harnesses = [0, 1].map(() =>
+      fakeHarness({
+        capabilities: CLOSES,
+        closeError: { code: -32000, message: "close failed" },
+      }),
+    );
+    const [p1, p2] = await Promise.all(harnesses.map((h) => start(h)));
+    let process = p1;
+    let fingerprint = "1";
+    const sessions = new AgentSessions({
+      label: "Harness",
+      resolveDirectory: async (path) => path,
+      tools,
+      process: { get: async () => process as AcpProcess },
+      launch: async () => ({ workspace: "/work", systemPrompt: "" }),
+      choice: () => ({ provider: "", model: "" }),
+      fingerprint: () => fingerprint,
+    });
+    for (const [i, next] of [p1, p2].entries()) {
+      process = next;
+      await sessions.deliver("chat", `turn ${i}`, i + 1);
+      fingerprint = String(i + 2);
+      sessions.reconfigure();
+      await until(() => harnesses[i]?.sent("session/close").length === 1);
+      await flush();
+    }
+    await p2?.kill();
+    await p2?.exited;
+    await flush();
+    const work = vi.fn(async () => undefined);
+    await expect(sessions.exclusive("chat", work)).rejects.toThrow(
+      "close failed",
+    );
+    expect(work).not.toHaveBeenCalled();
+    sessions.dispose();
+    await p1?.kill();
   });
 
   it("never starts its work after a close the harness failed, deleting nothing", async () => {
