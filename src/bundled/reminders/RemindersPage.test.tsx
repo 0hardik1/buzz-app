@@ -633,11 +633,21 @@ it("keeps a pending save alive through page traversal and retires it on completi
   });
   const create = vi.fn(() => saved);
   const state = { status: "ready", hydrated: true, reminders: [] };
-  const navigator = page({
-    snapshot: () => state,
-    subscribe: () => () => {},
-    create,
-  } as unknown as Reminders);
+  const navigation = reminderNavigation();
+  let finishDismiss!: () => void;
+  const navigator = page(
+    {
+      snapshot: () => state,
+      subscribe: () => () => {},
+      create,
+    } as unknown as Reminders,
+    {
+      ...navigation,
+      dismiss: (visits, fallback) => {
+        finishDismiss = () => navigation.dismiss(visits, fallback);
+      },
+    },
+  );
   await user.click(screen.getByRole("button", { name: "New reminder" }));
   await user.type(
     screen.getByRole("textbox", { name: "Reminder text" }),
@@ -659,10 +669,18 @@ it("keeps a pending save alive through page traversal and retires it on completi
       expect.any(Number),
       "Save once",
     );
-    act(() => navigator.back());
+    act(() => {
+      void navigator.open({
+        ...navigator.snapshot().entry.target,
+        join: { viewer, visit: "covering-join" },
+      });
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
   } finally {
     await act(async () => finish());
   }
+  expect(screen.queryByRole("dialog")).toBeNull();
+  act(() => finishDismiss());
   act(() => navigator.forward());
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(create).toHaveBeenCalledTimes(1);

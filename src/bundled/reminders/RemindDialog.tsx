@@ -6,7 +6,11 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { Navigation } from "../../features/navigation/controller";
-import { targetKey, type OpenTarget } from "../../features/navigation/targets";
+import {
+  targetKey,
+  withoutJoin,
+  type OpenTarget,
+} from "../../features/navigation/targets";
 import type { RelayData } from "../../features/relay/service";
 import { scopeOf } from "./react";
 import type { ChannelMessage } from "../../features/relay/contracts";
@@ -54,6 +58,7 @@ export function ReminderEditor({
   const retiredVisit = useRef<string | undefined>(undefined);
   const active =
     entry.id !== retiredVisit.current &&
+    !target.join &&
     target.kind === "page" &&
     target.pluginId === "buzz.reminders" &&
     target.pageId === "reminders" &&
@@ -71,7 +76,8 @@ export function ReminderEditor({
       const key = targetKey(closing.target);
       const current = navigator.snapshot().entry;
       // Browser dismissal publishes its destination only after native traversal.
-      if (targetKey(current.target) === key) retiredVisit.current = current.id;
+      if (targetKey(withoutJoin(current.target)) === key)
+        retiredVisit.current = current.id;
       navigator.dismiss((visit) => targetKey(visit) === key, page);
     },
     [navigator],
