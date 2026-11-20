@@ -100,15 +100,22 @@ async function toggleActivity(element) {
       if (observations.length < 32)
         observations.push({ at: performance.now() - started, ...value });
     };
-    // Record lifecycle writes without forcing style/layout or changing motion.
+    // Capture at the lifecycle microtask: a loaded runner can deliver the next
+    // frame and transitionrun after the entire transition has elapsed.
     const observer = new MutationObserver((records) => {
+      let panelChanged = false;
       for (const mutation of records) {
         if (!mutation.target.className?.includes("audienceBody")) continue;
+        panelChanged = true;
         record({
           attribute: mutation.attributeName,
           previous: mutation.oldValue,
           value: mutation.target.getAttribute(mutation.attributeName),
         });
+      }
+      if (panelChanged) {
+        const animation = running();
+        if (animation) done(animation);
       }
     });
     let frame;
@@ -150,7 +157,7 @@ async function toggleActivity(element) {
       const panel = element.querySelector('[class*="audienceBody"]');
       reject(
         new Error(
-          `The toggle started no height transition: ${JSON.stringify({
+          `No height transition captured: ${JSON.stringify({
             observations,
             longestFrameGap,
             connected: element.isConnected,
