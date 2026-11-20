@@ -853,7 +853,20 @@ test("human animation encodes, uploads both assets and saves a mobile-compatible
   const scrubber = page.getByRole("slider", {
     name: "Choose your still photo",
   });
+  const first = await page
+    .getByRole("button", { name: "You", exact: true })
+    .boundingBox();
+  const last = await page
+    .getByRole("button", { name: "Retake the recording" })
+    .boundingBox();
+  const save = await page
+    .getByRole("button", { name: "Use animated avatar" })
+    .boundingBox();
   const bounds = await scrubber.boundingBox();
+  for (const row of [save, bounds]) {
+    expect(Math.abs(first.x - row.x)).toBeLessThan(1);
+    expect(Math.abs(last.x + last.width - row.x - row.width)).toBeLessThan(1);
+  }
   await scrubber.click({
     position: { x: bounds.width / 2, y: bounds.height / 2 },
   });

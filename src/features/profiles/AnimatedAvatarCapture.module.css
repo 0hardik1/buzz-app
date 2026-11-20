@@ -5,6 +5,7 @@
 }
 .capture[data-phase="review"] {
   row-gap: var(--space-6);
+  padding-inline: 2px;
 }
 .stage {
   position: relative;
@@ -121,7 +122,9 @@ canvas.preview:active {
 .tools {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, var(--size-control-lg));
+  justify-content: space-between;
+  column-gap: 0;
   text-align: center;
 }
 .framing,
