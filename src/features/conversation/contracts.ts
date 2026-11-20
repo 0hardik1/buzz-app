@@ -464,6 +464,8 @@ export type ComposerCompletion = Readonly<{
 export type PageTabTarget = {
   channelId: string;
   threadId?: string;
+  /** Invocation branch within threadId, for a page-owned task conversation. */
+  subthreadId?: string;
   messageId?: string;
   unreadSince?: number;
 };
@@ -473,6 +475,10 @@ export type ConversationWorkspaceProps = {
   session: RelaySession;
   scope: string;
   target: PageTabTarget;
+  /** A fresh signal opens the main transcript at its latest message once.
+   * Scope it to this opening. Omit it on history traversal. An aborted signal
+   * is ignored, and an explicit target.messageId takes precedence. */
+  latestRequest?: AbortSignal | undefined;
   label: string;
   /** Content at the start of history. It scrolls with the messages. */
   intro?: ReactNode;
