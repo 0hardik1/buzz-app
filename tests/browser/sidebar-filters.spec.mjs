@@ -617,3 +617,93 @@ test.describe("with a saved workspace filter", () => {
     ).toHaveAttribute("aria-checked", "true");
   });
 });
+
+// See all keeps the card's filter and shows it as a row, so what's selected
+// always matches the list; choosing there changes the card's filter too.
+test("See all shows the card's filter as a row and shares it", async ({
+  page,
+  app,
+}, testInfo) => {
+  const now = Math.floor(Date.now() / 1000);
+  for (const [id, age] of [
+    ["alpha", 60],
+    ["beta", 2],
+    ["gamma", 0],
+    ["delta", 45],
+  ])
+    app.histories.set(`primary/${id}`, [
+      app.sign({
+        kind: 9,
+        tags: [["h", id]],
+        content: "Project update",
+        created_at: now - age * 86400,
+      }),
+    ]);
+  await page.goto(app.origin);
+  await openPage(page, "Messages");
+  const section = page.locator('[data-sidebar-section="channels"]');
+  const rowFor = (id) => section.locator(`[data-channel-id="${id}"]`);
+  await expect(rowFor("delta")).toBeVisible();
+  // Filters keep the open conversation; open one the filter keeps anyway.
+  await page
+    .getByRole("navigation", { name: "Subscribed channels" })
+    .getByRole("button", { name: "Design", exact: true })
+    .click();
+  await expect(
+    page.getByRole("textbox", { name: "Message #Design" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "More actions for Team", exact: true })
+    .click();
+  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+  await page
+    .getByRole("menuitemradio", { name: "Active", exact: true })
+    .click();
+  await page.getByRole("radio", { name: "7 days", exact: true }).click();
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(rowFor("delta")).toHaveCount(0);
+
+  await page
+    .getByRole("button", { name: "See all in Team", exact: true })
+    .click();
+  const filters = page.getByRole("tablist", { name: "Filter Team" });
+  const tab = (name) => filters.getByRole("tab", { name });
+  await expect(tab(/^Active/)).toHaveAttribute("aria-selected", "true");
+  await expect(tab(/^Active/)).toContainText("7 days");
+  await expect(rowFor("gamma")).toBeVisible();
+  await expect(rowFor("delta")).toHaveCount(0);
+  const settle = () =>
+    page.evaluate(() =>
+      Promise.all(
+        document
+          .getAnimations()
+          .filter(
+            (animation) =>
+              animation.effect?.getComputedTiming().iterations !== Infinity,
+          )
+          .map((animation) => animation.finished.catch(() => {})),
+      ),
+    );
+  const sidebar = page.getByRole("complementary", {
+    name: "Sidebar",
+    exact: true,
+  });
+  await settle();
+  await sidebar.screenshot({ path: testInfo.outputPath("see-all-active.png") });
+  const resize = page.getByRole("separator", { name: "Resize sidebar" });
+  await resize.press("Home");
+  await settle();
+  await sidebar.screenshot({ path: testInfo.outputPath("see-all-narrow.png") });
+  await resize.press("End");
+
+  await tab("All").click();
+  await expect(tab("All")).toHaveAttribute("aria-selected", "true");
+  await expect(rowFor("delta")).toBeVisible();
+  await page
+    .getByRole("button", { name: "More actions for Team", exact: true })
+    .click();
+  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+  await expect(
+    page.getByRole("menuitemradio", { name: "All", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+});
