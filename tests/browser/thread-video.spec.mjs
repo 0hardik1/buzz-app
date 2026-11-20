@@ -116,7 +116,7 @@ for (const placement of ["sheet", "split"]) {
       .toBeGreaterThanOrEqual(2);
     const parentBounds = await thread.boundingBox();
     await thread.locator("[data-video-preview]").hover();
-    await thread.getByRole("button", { name: "Open video fullscreen" }).click();
+    await thread.getByRole("button", { name: "Open video" }).click();
     const dialog = page.getByRole("dialog", { name: "sample.mp4" });
     await expect(dialog).toBeVisible();
     // Media expands beyond both an inline sheet and a side thread's bounds.
@@ -183,9 +183,7 @@ for (const placement of ["sheet", "split"]) {
     });
     try {
       await thread.locator("[data-video-preview]").hover();
-      await thread
-        .getByRole("button", { name: "Open video fullscreen" })
-        .click();
+      await thread.getByRole("button", { name: "Open video" }).click();
       await expect(dialog).toBeVisible();
       const held = await dialog.evaluate((element) => {
         const animations = element.getAnimations();
@@ -266,7 +264,7 @@ test.describe("public channel preview", () => {
       .poll(() => thread.locator("video").evaluate((video) => video.readyState))
       .toBeGreaterThanOrEqual(2);
     await thread.locator("[data-video-preview]").hover();
-    await thread.getByRole("button", { name: "Open video fullscreen" }).click();
+    await thread.getByRole("button", { name: "Open video" }).click();
     const dialog = page.getByRole("dialog", { name: "Video review" });
     await expect(dialog).toBeVisible();
     await expect(dialog).not.toHaveAttribute("data-review-opening");

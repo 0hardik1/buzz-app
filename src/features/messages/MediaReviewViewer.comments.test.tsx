@@ -782,9 +782,8 @@ it.each([false, true])(
     if (fromThread) {
       expect(screen.getByText("0:42").tagName).toBe("SPAN");
       expect(screen.queryByRole("button", { name: "0:42" })).toBeNull();
-      const expand = screen.getAllByRole("button", {
-        name: "Open video fullscreen",
-      })[0];
+      // The thread has a sheet host, so the video opens over it.
+      const expand = screen.getAllByRole("button", { name: "Open video" })[0];
       assert.exists(expand);
       await user.click(expand);
     }
