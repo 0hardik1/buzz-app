@@ -1951,6 +1951,33 @@ describe("AcpRuntime", () => {
     expect(two?.sessionId).not.toBe(one?.sessionId);
   });
 
+  it("shows a working session's transcript before any turn of it is saved", async () => {
+    const config = await confirmed({ scope: "channel" });
+    const { fake, deliver, sync, runtime, storage } = setup({
+      hold: true,
+      capabilities: { mcpCapabilities: { http: true }, loadSession: true },
+    });
+    sync(config);
+    await deliver(message("1", "@Opal one"), config).run;
+    await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(1));
+    expect(runtime.conversations(self)[0]).toMatchObject({
+      status: "Working",
+      session: "session-1",
+      replayable: true,
+    });
+    const before = fake.harnesses.length;
+    await runtime.transcript(self, channel, new AbortController().signal);
+    expect(
+      fake.harnesses
+        .slice(before)
+        .flatMap((h) => h.sent("session/load"))
+        .map((m) => m.params?.sessionId),
+    ).toEqual(["session-1"]);
+    // Viewing it never makes it the one to resume.
+    expect(localSessions(storage, self).get(channel)?.id).toBeUndefined();
+    fake.harnesses[0]?.turns[0]?.finish();
+  });
+
   it("keeps a replaced session's transcript beside the resume pointer", async () => {
     const config = await confirmed({ scope: "channel" });
     const { fake, deliver, sync, runtime, agent, storage } = setup({

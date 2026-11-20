@@ -995,7 +995,9 @@ export class AcpRuntime {
             ...(root ? { root } : {}),
             at,
             ...(view ? { status: view.busy ? "Working" : "Idle" } : {}),
-            replayable: replayable(saved.get(key)).length > 0,
+            ...(view?.sessionId ? { session: view.sessionId } : {}),
+            replayable:
+              !!view?.sessionId || replayable(saved.get(key)).length > 0,
           },
         ];
       })
@@ -1021,7 +1023,15 @@ export class AcpRuntime {
     signal: AbortSignal,
   ): Promise<Transcript | undefined> {
     const entry = this.agents.get(agent);
-    const ids = replayable(entry?.store.load(key));
+    // The working session too, before any turn of it succeeded: shown only,
+    // never saved as the one to resume.
+    const live = entry?.sessions.serving(key)?.sessionId;
+    const ids = [
+      ...new Set([
+        ...replayable(entry?.store.load(key)),
+        ...(live ? [live] : []),
+      ]),
+    ];
     if (!entry || !ids.length) return undefined;
     const launch = entry.config;
     const { generation } = entry;

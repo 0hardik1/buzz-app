@@ -146,8 +146,10 @@ export type Conversation = Readonly<{
   root?: string;
   at: number;
   status?: "Working" | "Idle";
+  /** The live session's id, which a transcript shows while it works. */
+  session?: string;
   title?: string;
-  /** Whether a transcript can be read: a saved harness session. */
+  /** Whether a transcript can be read: a saved or live harness session. */
   replayable: boolean;
 }>;
 
@@ -755,11 +757,17 @@ export function createTabs({
     );
     const shown = transcript.open;
     const open = shown?.key;
+    // Read again once the open conversation's session changes or its work
+    // ends.
+    const openRow = rows.find((row) => row.key === open);
+    const session = openRow?.session;
+    const idle = openRow?.status !== "Working";
     const [read, setRead] = useState<
       | { status: "loading" }
       | { status: "done"; transcript: Transcript }
       | { status: "error"; error: string }
     >();
+    // biome-ignore lint/correctness/useExhaustiveDependencies: read again when the session changes or its work ends
     useEffect(() => {
       if (open === undefined) return;
       const abort = new AbortController();
@@ -785,7 +793,7 @@ export function createTabs({
             setRead({ status: "error", error: message(reason) }),
         );
       return () => abort.abort();
-    }, [agent.key, open]);
+    }, [agent.key, open, session, idle]);
     return (
       <>
         {rows.length ? (

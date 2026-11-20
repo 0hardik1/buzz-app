@@ -476,6 +476,46 @@ it("lists conversations and says when the harness can't replay them", async () =
   expect(screen.queryByRole("button", { name: "Transcript" })).toBeNull();
 });
 
+it("reads an open transcript again when its session's work ends", async () => {
+  let rows: Conversation[] = [
+    {
+      key: "c1",
+      channelId: "c1",
+      at: 1,
+      status: "Working",
+      session: "s1",
+      replayable: true,
+    },
+  ];
+  const listeners = new Set<() => void>();
+  const transcript = vi.fn(async () => ({ turns: [] }));
+  const { HistoryTab } = createTabs({
+    check: vi.fn(),
+    cache: modelCache(localStorage),
+    runtime: fakeRuntime({
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      conversations: () => rows,
+      transcript,
+    }),
+  });
+  render(
+    <HistoryTab
+      agent={{ key: "p1", pubkey: "p1", config: start } as Agent<Config>}
+      save={async () => {}}
+    />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Transcript" }));
+  await waitFor(() => expect(transcript).toHaveBeenCalledTimes(1));
+  act(() => {
+    rows = [{ ...(rows[0] as Conversation), status: "Idle" }];
+    for (const listener of listeners) listener();
+  });
+  await waitFor(() => expect(transcript).toHaveBeenCalledTimes(2));
+});
+
 it("shows history times on the owner's clock", () => {
   const at = new Date(2026, 0, 2, 15, 4, 5).getTime();
   const rows: Conversation[] = [
