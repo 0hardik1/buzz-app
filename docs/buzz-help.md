@@ -1167,7 +1167,16 @@ Quitting Buzz also turns it off.
   and use the Left/Right arrow keys. Double-click the handle to reset the width.
   Messages and plugin pages share the saved width within the same community
   and identity; narrow windows use a navigation drawer instead.
-- **Sidebar sections** collapse independently through their headings. Buzz
+- **Sidebar sections** default to **Solo**, **Starred**, your workspaces,
+  **Team**, **Forums**, then **Direct messages**. After an upgrade from the
+  separate Solo and Team sidebars, Buzz keeps their order: workspaces from the
+  previous Solo sidebar, **Solo**, **Starred**, workspaces from the previous
+  Team sidebar, then **Team**. A saved section order takes precedence.
+  **Solo** and workspaces from the previous Solo sidebar list their newest 7
+  chats; **Show more** reveals up to 10 more and **Show fewer** returns to 7.
+  Other sections start fully listed and offer **Show fewer** past 7 rows. These
+  choices are saved on this device only.
+  Sections collapse independently through their headings. Buzz
   remembers collapsed sections for each community and identity. Unread messages
   or thread replies highlight the headings of collapsed sections. Muted
   conversations are excluded from these highlights.
