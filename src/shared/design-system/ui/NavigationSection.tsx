@@ -36,14 +36,22 @@ export function NavigationSection({
  * while a menu from the heading is open or one of them has focus, and always
  * on touch. Hidden
  * actions take no width, so the label uses that space until they appear.
+ *
+ * `stateAction` leads the actions and reflects the section's state, such as a
+ * filter button. It stays shown while `stateShown`; otherwise it reveals with
+ * the quiet actions. It keeps one place either way, so its popup stays anchored.
  */
 export function NavigationSectionHeading({
   actions,
+  stateAction,
+  stateShown = false,
   disclosure = false,
   revealActions = false,
   children,
 }: {
   actions?: ReactNode;
+  stateAction?: ReactNode;
+  stateShown?: boolean;
   disclosure?: boolean;
   revealActions?: boolean;
   children?: ReactNode;
@@ -54,6 +62,14 @@ export function NavigationSectionHeading({
       data-disclosure={disclosure || undefined}
     >
       <div className="navigation-section-heading-label">{children}</div>
+      {stateAction && (
+        <div
+          className="navigation-section-heading-state"
+          data-navigation-reveal={(revealActions && !stateShown) || undefined}
+        >
+          {stateAction}
+        </div>
+      )}
       {actions && (
         <div
           className="navigation-section-heading-actions"

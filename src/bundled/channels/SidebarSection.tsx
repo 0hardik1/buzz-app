@@ -1,4 +1,7 @@
-import { SidebarActiveDialog, activeWindowLabel } from "./SidebarActiveDialog";
+import {
+  SidebarViewOptions,
+  type SidebarViewFilter,
+} from "./SidebarViewOptions";
 import { FadingLabel } from "./FadingLabel";
 import {
   useEffect,
@@ -11,36 +14,20 @@ import {
   type RefObject,
 } from "react";
 import {
-  MenuGroup,
-  MenuGroupLabel,
   MenuIcon,
   MenuItem,
   MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
   MenuRoot,
   MenuSeparator,
-  MenuSubmenu,
-  MenuSubmenuPopup,
-  MenuSubmenuTrigger,
   MenuTrigger,
-  MenuTrailing,
 } from "../../shared/design-system/ui/Menu";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
-  ArrowsDownUpIcon,
   CaretDownIcon,
   CaretLeftIcon,
-  ChatsCircleIcon,
-  ChatUnreadIcon,
   DotsThreeIcon,
-  Filter2Icon,
-  ListBulletsIcon,
   PlusIcon,
-  SquaresFourIcon,
-  TextAaIcon,
-  TimerIcon,
   TrashIcon,
 } from "../../shared/design-system/icons";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
@@ -50,7 +37,6 @@ import { Field } from "../../shared/design-system/ui/Field";
 import { Input } from "../../shared/design-system/ui/Input";
 import { NavigationSectionHeading } from "../../shared/design-system/ui/NavigationSection";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
-import { Tabs } from "../../shared/design-system/ui/Tabs";
 import {
   setSidebarSeeAll,
   useSidebarSeeAll,
@@ -59,10 +45,8 @@ import {
 import type { RelaySession } from "../../features/relay/session";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import type { SidebarSortMode } from "../../features/relay/sidebar-sort";
-import type { SidebarFilter } from "./useSidebarFilters";
 import { SidebarGroupIcon } from "./SidebarGroupIcon";
 import { SidebarStarIcon } from "./SidebarStarIcon";
-import { ChannelSidebarMenuItem } from "./ChannelSidebarMenuItem";
 import { SidebarCardResize, useSidebarCardHeight } from "./SidebarCardResize";
 import {
   SidebarCardDisplayContext,
@@ -142,15 +126,7 @@ export function SidebarSection({
         change: (mode: SidebarSortMode) => void;
       }
     | undefined;
-  filter?:
-    | {
-        value: SidebarFilter;
-        disabled?: boolean;
-        activeWindowSeconds?: number | undefined;
-        change: (mode: SidebarFilter, seconds?: number) => unknown;
-        dismissError?: () => void;
-      }
-    | undefined;
+  filter?: SidebarViewFilter | undefined;
   channels?:
     | {
         rows: readonly ChannelSummary[];
@@ -212,7 +188,6 @@ export function SidebarSection({
   }, [seeingAll]);
   const pendingToggle = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(pendingToggle.current), []);
-  const [activeOpen, setActiveOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
   const canRemove = !!onRemove && sectionKey.startsWith("group:");
@@ -265,6 +240,30 @@ export function SidebarSection({
       <NavigationSectionHeading
         disclosure
         revealActions
+        stateShown={!!filter?.filtered}
+        stateAction={
+          (filter || sort || heightScope) && (
+            <SidebarViewOptions
+              title={title}
+              filter={filter}
+              sort={sort}
+              unreadsFirst={
+                heightScope
+                  ? {
+                      on: unreadsFirst,
+                      set: (on) =>
+                        setSidebarUnreadsFirst(heightScope, sectionKey, on),
+                    }
+                  : undefined
+              }
+              display={
+                iconView && heightScope
+                  ? { value: display, set: setDisplay }
+                  : undefined
+              }
+            />
+          )
+        }
         actions={
           <>
             {!hideMoreActions && (
@@ -281,216 +280,20 @@ export function SidebarSection({
                   )}
                 />
                 <MenuPopup align="end" aria-label={`More actions for ${title}`}>
-                  {filter && (
-                    <MenuSubmenu>
-                      <MenuSubmenuTrigger>
-                        <MenuIcon>
-                          <Filter2Icon size={14} />
-                        </MenuIcon>
-                        Filter
-                      </MenuSubmenuTrigger>
-                      <MenuSubmenuPopup
-                        aria-label={`Filter ${title}`}
-                        finalFocus={false}
-                      >
-                        <MenuRadioGroup
-                          value={filter.value}
-                          onValueChange={(mode) => {
-                            if (mode === "active") return;
-                            void Promise.resolve(
-                              filter.change(mode as SidebarFilter),
-                            ).catch(() => {});
-                            setMenuOpen(false);
-                          }}
-                        >
-                          <MenuRadioItem
-                            disabled={filter.disabled}
-                            closeOnClick={false}
-                            value="all"
-                          >
-                            <MenuIcon>
-                              <ChatsCircleIcon size={14} />
-                            </MenuIcon>
-                            All
-                          </MenuRadioItem>
-                          <MenuRadioItem
-                            disabled={filter.disabled}
-                            closeOnClick={false}
-                            value="unreads"
-                          >
-                            <MenuIcon>
-                              <ChatUnreadIcon size={14} />
-                            </MenuIcon>
-                            Unreads
-                          </MenuRadioItem>
-                          <MenuRadioItem
-                            disabled={filter.disabled}
-                            closeOnClick={false}
-                            value="active"
-                            onClick={() => {
-                              setMenuOpen(false);
-                              setActiveOpen(true);
-                            }}
-                          >
-                            <MenuIcon>
-                              <TimerIcon size={14} />
-                            </MenuIcon>
-                            Active
-                            {filter.value === "active" && (
-                              <MenuTrailing>
-                                {activeWindowLabel(filter.activeWindowSeconds)}
-                              </MenuTrailing>
-                            )}
-                          </MenuRadioItem>
-                        </MenuRadioGroup>
-                        {channels &&
-                          filter.value !== "all" &&
-                          channels.rows.length > 0 && (
-                            <>
-                              <MenuSeparator />
-                              <MenuGroup>
-                                <MenuGroupLabel emphasis="quiet">
-                                  {filter.value === "unreads"
-                                    ? "No unread messages"
-                                    : `No activity in the last ${activeWindowLabel(filter.activeWindowSeconds)}`}
-                                </MenuGroupLabel>
-                                {channels.rows.map((channel) => {
-                                  const select = () => {
-                                    if (channel.channelType !== "solo")
-                                      onToggle(true);
-                                    channels.select(channel.id);
-                                    setMenuOpen(false);
-                                  };
-                                  return session ? (
-                                    <ChannelSidebarMenuItem
-                                      key={channel.id}
-                                      channel={channel}
-                                      session={session}
-                                      selected={
-                                        channels.selected === channel.id
-                                      }
-                                      onSelect={select}
-                                    />
-                                  ) : (
-                                    <MenuItem
-                                      key={channel.id}
-                                      aria-current={
-                                        channels.selected === channel.id
-                                          ? "page"
-                                          : undefined
-                                      }
-                                      onClick={select}
-                                    >
-                                      {channel.name}
-                                    </MenuItem>
-                                  );
-                                })}
-                              </MenuGroup>
-                            </>
-                          )}
-                      </MenuSubmenuPopup>
-                    </MenuSubmenu>
-                  )}
-                  {sort && (
-                    <MenuSubmenu>
-                      <MenuSubmenuTrigger>
-                        <MenuIcon>
-                          <ArrowsDownUpIcon size={14} />
-                        </MenuIcon>
-                        Sort
-                      </MenuSubmenuTrigger>
-                      <MenuSubmenuPopup
-                        aria-label={`Sort ${title}`}
-                        finalFocus={false}
-                      >
-                        <MenuRadioGroup
-                          value={sort.value}
-                          onValueChange={(mode) => {
-                            sort.change(mode as SidebarSortMode);
-                            setMenuOpen(false);
-                          }}
-                        >
-                          <MenuRadioItem closeOnClick={false} value="recent">
-                            <MenuIcon>
-                              <TimerIcon size={14} />
-                            </MenuIcon>
-                            Recent
-                          </MenuRadioItem>
-                          <MenuRadioItem closeOnClick={false} value="alpha">
-                            <MenuIcon>
-                              <TextAaIcon size={14} />
-                            </MenuIcon>
-                            A–Z
-                          </MenuRadioItem>
-                          {sort.modes?.map((mode) => (
-                            <MenuRadioItem
-                              key={mode.id}
-                              closeOnClick={false}
-                              value={mode.id}
-                            >
-                              <MenuIcon>{null}</MenuIcon>
-                              {mode.label}
-                            </MenuRadioItem>
-                          ))}
-                        </MenuRadioGroup>
-                      </MenuSubmenuPopup>
-                    </MenuSubmenu>
-                  )}
-                  {iconView && heightScope && (
-                    <MenuItem
-                      onClick={() => {
-                        setDisplay(display === "icons" ? "list" : "icons");
-                        setMenuOpen(false);
-                      }}
-                    >
-                      <MenuIcon>
-                        {display === "icons" ? (
-                          <ListBulletsIcon size={14} />
-                        ) : (
-                          <SquaresFourIcon size={14} />
-                        )}
-                      </MenuIcon>
-                      {display === "icons" ? "Show as list" : "Show as icons"}
-                    </MenuItem>
-                  )}
-                  {heightScope && (
-                    <MenuItem
-                      onClick={() => {
-                        setSidebarUnreadsFirst(
-                          heightScope,
-                          sectionKey,
-                          !unreadsFirst,
-                        );
-                        setMenuOpen(false);
-                      }}
-                    >
-                      <MenuIcon>
-                        <ChatUnreadIcon size={14} />
-                      </MenuIcon>
-                      {unreadsFirst
-                        ? "Stop showing unreads first"
-                        : "Show unreads first"}
-                    </MenuItem>
-                  )}
                   {createSection && (
-                    <>
-                      {(filter || sort || iconView || heightScope) && (
-                        <MenuSeparator />
-                      )}
-                      <MenuItem
-                        disabled={!createSection.available}
-                        onClick={() => {
-                          setMenuOpen(false);
-                          if (actionsTrigger.current)
-                            createSection.open(actionsTrigger.current);
-                        }}
-                      >
-                        <MenuIcon>
-                          <PlusIcon size={14} />
-                        </MenuIcon>
-                        Create workspace
-                      </MenuItem>
-                    </>
+                    <MenuItem
+                      disabled={!createSection.available}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        if (actionsTrigger.current)
+                          createSection.open(actionsTrigger.current);
+                      }}
+                    >
+                      <MenuIcon>
+                        <PlusIcon size={14} />
+                      </MenuIcon>
+                      Create workspace
+                    </MenuItem>
                   )}
                   {move && (
                     <>
@@ -552,17 +355,6 @@ export function SidebarSection({
                 title="New message"
                 onClick={newMessage}
                 icon={<PlusIcon strokeWidth={2.5} size={15} />}
-              />
-            )}
-            {activeOpen && filter && (
-              <SidebarActiveDialog
-                seconds={filter.activeWindowSeconds}
-                apply={(seconds) => filter.change("active", seconds)}
-                close={() => {
-                  filter.dismissError?.();
-                  setActiveOpen(false);
-                }}
-                finalFocus={actionsTrigger}
               />
             )}
             {canRemove && (
@@ -683,41 +475,6 @@ export function SidebarSection({
           </details>
         )}
       </NavigationSectionHeading>
-      {seeingAll && filter && open && (
-        // See all keeps the card's filter and shows it in the open, so the
-        // list always matches what's selected. Choices change the card too.
-        <div className={styles.seeAllFilter}>
-          <Tabs
-            label={`Filter ${title}`}
-            variant="segmented"
-            size="sm"
-            value={filter.value}
-            items={[
-              { value: "all", label: "All", disabled: !!filter.disabled },
-              {
-                value: "unreads",
-                label: "Unreads",
-                disabled: !!filter.disabled,
-              },
-              {
-                value: "active",
-                label: "Active",
-                disabled: !!filter.disabled,
-                ...(filter.value === "active" && {
-                  trailing: activeWindowLabel(filter.activeWindowSeconds),
-                }),
-              },
-            ]}
-            onValueChange={(mode) => {
-              if (mode === "active") setActiveOpen(true);
-              else void Promise.resolve(filter.change(mode)).catch(() => {});
-            }}
-            onReselect={(mode) => {
-              if (mode === "active") setActiveOpen(true);
-            }}
-          />
-        </div>
-      )}
       {headerNotice}
       <div
         id={id}

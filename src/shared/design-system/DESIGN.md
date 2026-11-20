@@ -1116,6 +1116,10 @@ InputGroup. Use `prefix` for ordinary text before masked dots.
 `Checkbox` and `Radio` default to 40px rows with 20px controls. For compact
 inline choices, use `size="sm"`: 32px rows, 16px controls, and an 8px label gap.
 Pair small radios with `RadioGroup size="sm"` to remove the extra group gap.
+For a short set of single-select options side by side, such as a view filter,
+use `Radio variant="chip"` inside `RadioGroup layout="wrap"`: compact pills that
+wrap at the container's edge. Selection is the selected fill, never a check or
+dot. Name the group with a `Field` label.
 Compact filter popovers use `padding="list"`; keep room around a scrolling
 choice list for the shared keyboard focus ring.
 

@@ -34,3 +34,25 @@ it("keeps text-only tiles keyboard-selectable, labelled and form-associated", as
   await user.click(screen.getByText("Unavailable"));
   expect(screen.getByRole("radio", { name: "All updates" })).toBeChecked();
 });
+
+it("wraps chip choices that select with arrows and show no indicator", async () => {
+  const user = userEvent.setup();
+  render(
+    <Field label="Show" nativeLabel={false}>
+      <RadioGroup layout="wrap" defaultValue="all" aria-label="Show">
+        <Radio value="all" label="All" variant="chip" />
+        <Radio value="unreads" label="Unreads" variant="chip" />
+        <Radio value="today" label="Today" variant="chip" />
+      </RadioGroup>
+    </Field>,
+  );
+  const group = screen.getByRole("radiogroup", { name: "Show" });
+  expect(group).toHaveAttribute("data-layout", "wrap");
+  expect(group.querySelector(".buzz-radio-indicator")).toBeNull();
+  await user.tab();
+  expect(screen.getByRole("radio", { name: "All" })).toHaveFocus();
+  await user.keyboard("{ArrowRight}");
+  expect(screen.getByRole("radio", { name: "Unreads" })).toBeChecked();
+  await user.click(screen.getByText("Today"));
+  expect(screen.getByRole("radio", { name: "Today" })).toBeChecked();
+});

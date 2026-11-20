@@ -1688,6 +1688,13 @@
     display: none;
   }
 
+  .navigation-section-heading-state {
+    display: flex;
+    flex: none;
+    align-items: center;
+    color: var(--text-subtle);
+  }
+
   /* A disclosure heading's trigger spans the label slot, so the inset is its
      hit area and focus ring; the actions keep a small trailing inset. */
   .navigation-section-heading[data-disclosure] {
@@ -1770,7 +1777,10 @@
     opacity: 0;
   }
 
-  .navigation-section-heading-actions[data-navigation-reveal] {
+  :is(
+    .navigation-section-heading-actions,
+    .navigation-section-heading-state
+  )[data-navigation-reveal] {
     max-width: 0;
     overflow: hidden;
   }
@@ -1779,9 +1789,7 @@
       .navigation-section-heading:hover,
       html[data-keyboard-navigation] .navigation-section-heading:focus-within,
       .navigation-section-heading:has([data-navigation-reveal]:focus-within),
-      .navigation-section-heading:has(
-        [aria-expanded="true"][aria-haspopup="menu"]
-      ),
+      .navigation-section-heading:has([aria-expanded="true"][aria-haspopup]),
       [data-context-menu-present] > .navigation-section-heading
     )
     [data-navigation-reveal] {

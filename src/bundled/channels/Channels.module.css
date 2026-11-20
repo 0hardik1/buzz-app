@@ -1162,10 +1162,6 @@ html[data-keyboard-navigation]
 [data-sidebar-card]:not([data-see-all]) {
   display: none;
 }
-.seeAllFilter {
-  padding-block: var(--space-1) var(--space-2);
-  padding-inline: var(--space-2);
-}
 [data-sidebar-cards] .channelSection[data-see-all] {
   animation: see-all-in var(--duration-panel-enter) var(--easing-enter);
 }
@@ -1189,4 +1185,10 @@ html[data-keyboard-navigation]
   [data-sidebar-cards] .channelSection[data-see-all-returning] {
     animation: none;
   }
+}
+
+/* The card's view options popover: labelled choice groups, stacked. */
+.viewOptions {
+  display: grid;
+  gap: var(--space-3);
 }

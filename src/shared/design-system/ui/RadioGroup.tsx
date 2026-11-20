@@ -8,13 +8,19 @@ import { CheckIcon } from "../icons";
 export function RadioGroup<Value>({
   children,
   size = "md",
+  layout = "stack",
   ...props
-}: Omit<BaseRadioGroup.Props<Value>, "className"> & { size?: "sm" | "md" }) {
+}: Omit<BaseRadioGroup.Props<Value>, "className"> & {
+  size?: "sm" | "md";
+  /** `wrap` flows chip choices in rows, wrapping at the container's edge. */
+  layout?: "stack" | "wrap";
+}) {
   return (
     <BaseRadioGroup
       {...props}
       data-buzz-ui=""
       data-size={size}
+      data-layout={layout}
       className="buzz-radio-group"
     >
       {children}
@@ -32,7 +38,8 @@ export function Radio({
 }: Omit<ComponentProps<typeof BaseRadio.Root>, "className" | "children"> & {
   label: ReactNode;
   description?: ReactNode;
-  variant?: "default" | "card" | "tile" | "row";
+  /** `chip` is a compact pill whose selection is a fill, for `layout="wrap"`. */
+  variant?: "default" | "card" | "tile" | "row" | "chip";
   size?: "sm" | "md";
 }) {
   const generatedId = useId();
@@ -65,7 +72,8 @@ export function Radio({
               <CheckIcon aria-hidden="true" />
             </BaseRadio.Indicator>
           ) : (
-            variant !== "tile" && (
+            variant !== "tile" &&
+            variant !== "chip" && (
               <BaseRadio.Indicator className="buzz-radio-indicator" />
             )
           )}
