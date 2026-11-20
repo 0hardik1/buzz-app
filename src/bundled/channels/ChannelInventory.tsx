@@ -394,7 +394,9 @@ export function ChannelInventory({
     () => queries.unread.inbox(),
   );
   const mentioners = useMemo(() => inboxMentioners(inbox), [inbox]);
-  const mentionerKey = [...new Set(mentioners.values())].sort().join(":");
+  const mentionerKey = [...new Set([...mentioners.values()].flat())]
+    .sort()
+    .join(":");
   const mentionerIds = useMemo(
     () => (mentionerKey ? mentionerKey.split(":") : []),
     [mentionerKey],
@@ -429,13 +431,17 @@ export function ChannelInventory({
         isAgent: profile?.isAgent,
       });
     }
-    for (const [channelId, author] of mentioners) {
+    for (const [channelId, authors] of mentioners) {
       if (previews.has(channelId)) continue;
-      const profile = mentionerProfiles.get(author);
+      // Only people's faces: agents and workflows that mention you still
+      // count, but stay out of the stack. Wait for a profile to know.
+      const profile = authors
+        .map((author) => mentionerProfiles.get(author))
+        .find((candidate) => candidate && !candidate.isAgent);
+      if (!profile) continue;
       previews.set(channelId, {
-        name: profile?.name ?? "Someone",
-        src: avatarMedia(profile?.picture, queries.media),
-        isAgent: profile?.isAgent,
+        name: profile.name ?? "Someone",
+        src: avatarMedia(profile.picture, queries.media),
       });
     }
     return previews;

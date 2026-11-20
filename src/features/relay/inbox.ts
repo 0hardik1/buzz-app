@@ -63,23 +63,30 @@ export function inboxUnreadChannels(inbox: InboxSnapshot) {
 
 const mentionerCache = new WeakMap<
   InboxSnapshot,
-  ReadonlyMap<string, string>
+  ReadonlyMap<string, readonly string[]>
 >();
-/** Who most recently mentioned you in each channel, among unread mentions. */
+/** Everyone with an unread mention of you in each channel, newest first. */
 export function inboxMentioners(inbox: InboxSnapshot) {
   let mentioners = mentionerCache.get(inbox);
   if (!mentioners) {
-    const newest = new Map<string, InboxItem>();
+    const byChannel = new Map<string, InboxItem[]>();
     for (const item of inbox.items) {
-      if (!item.mentioned || !hasUnread(item)) continue;
-      const seen = newest.get(item.channelId);
-      if (!seen || item.createdAt > seen.createdAt)
-        newest.set(item.channelId, item);
+      if (!item.mentioned || item.workflowOwnerId || !hasUnread(item)) continue;
+      byChannel.set(item.channelId, [
+        ...(byChannel.get(item.channelId) ?? []),
+        item,
+      ]);
     }
     mentioners = new Map(
-      [...newest].map(([channelId, item]) => [
+      [...byChannel].map(([channelId, items]) => [
         channelId,
-        item.workflowOwnerId ?? item.authorId,
+        [
+          ...new Set(
+            items
+              .sort((a, b) => b.createdAt - a.createdAt)
+              .map((item) => item.authorId),
+          ),
+        ],
       ]),
     );
     mentionerCache.set(inbox, mentioners);
