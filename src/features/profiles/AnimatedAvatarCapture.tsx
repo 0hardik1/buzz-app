@@ -411,180 +411,188 @@ export function AnimatedAvatarCapture({
           )}
         </div>
       )}
-      {phase === "review" && (
+      {(phase === "review" || phase === "saving") && (
         <>
-          {!segmented && (
-            <p className="text-body-sm">
-              Background removal was unavailable. Your camera background is
-              included.
-            </p>
-          )}
-          <div className={styles.tools}>
-            {(
-              [
-                ["You", UserIcon],
-                ["Background", PaletteIcon],
-                ["Photo", ImageIcon],
-              ] as const
-            ).map(([label, Icon]) => (
-              <div key={label}>
+          <div className="contents" inert={phase === "saving"}>
+            {!segmented && (
+              <p className="text-body-sm">
+                Background removal was unavailable. Your camera background is
+                included.
+              </p>
+            )}
+            <div className={styles.tools}>
+              {(
+                [
+                  ["You", UserIcon],
+                  ["Background", PaletteIcon],
+                  ["Photo", ImageIcon],
+                ] as const
+              ).map(([label, Icon]) => (
+                <div key={label}>
+                  <IconButton
+                    aria-label={label}
+                    shape="round"
+                    size="large"
+                    variant={section === label ? "solid" : "subtle"}
+                    aria-pressed={section === label}
+                    icon={<Icon />}
+                    onClick={() => {
+                      setSection(label);
+                    }}
+                  />
+                  <span className="text-caption">{label}</span>
+                </div>
+              ))}
+              <div>
                 <IconButton
-                  aria-label={label}
+                  aria-label="Retake the recording"
                   shape="round"
                   size="large"
-                  variant={section === label ? "solid" : "subtle"}
-                  aria-pressed={section === label}
-                  icon={<Icon />}
-                  onClick={() => {
-                    setSection(label);
-                  }}
+                  variant="subtle"
+                  icon={<VideoCameraIcon />}
+                  onClick={() => void start()}
+                  disabled={disabled}
                 />
-                <span className="text-caption">{label}</span>
+                <span className="text-caption">Retake</span>
               </div>
-            ))}
-            <div>
-              <IconButton
-                aria-label="Retake the recording"
-                shape="round"
-                size="large"
-                variant="subtle"
-                icon={<VideoCameraIcon />}
-                onClick={() => void start()}
-                disabled={disabled}
-              />
-              <span className="text-caption">Retake</span>
             </div>
-          </div>
-          {section === "Background" && (
-            <div className={styles.controls}>
-              <fieldset
-                className={styles.colorRow}
-                ref={(row) => {
-                  if (!row) return;
-                  row.addEventListener("wheel", scrollAvatarPalette, {
-                    passive: false,
-                  });
-                  return () =>
-                    row.removeEventListener("wheel", scrollAvatarPalette);
-                }}
-                onPointerDown={(event) => {
-                  if (event.pointerType === "mouse" && event.button === 0)
-                    colorDrag.current = {
-                      x: event.clientX,
-                      left: event.currentTarget.scrollLeft,
-                    };
-                }}
-                onPointerMove={(event) => {
-                  if (!event.buttons || !colorDrag.current) return;
-                  const distance = event.clientX - colorDrag.current.x;
-                  if (
-                    Math.abs(distance) < 4 &&
-                    !event.currentTarget.hasPointerCapture(event.pointerId)
-                  )
-                    return;
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  event.currentTarget.scrollLeft =
-                    colorDrag.current.left - distance;
-                }}
-                onPointerUp={() => {
-                  colorDrag.current = null;
-                }}
-                onPointerCancel={() => {
-                  colorDrag.current = null;
-                }}
-                aria-label="Background colors"
-              >
-                {[null, ...avatarColors].map((color) => (
-                  <button
-                    key={color ?? "clear"}
-                    type="button"
-                    className={editorStyles.swatch}
-                    data-transparent={color === null || undefined}
-                    aria-label={color ?? "Transparent background"}
-                    aria-pressed={composition.backdropColor === color}
-                    style={{ backgroundColor: color ?? "transparent" }}
-                    onClick={() =>
-                      setComposition({ ...composition, backdropColor: color })
+            {section === "Background" && (
+              <div className={styles.controls}>
+                <fieldset
+                  className={styles.colorRow}
+                  ref={(row) => {
+                    if (!row) return;
+                    row.addEventListener("wheel", scrollAvatarPalette, {
+                      passive: false,
+                    });
+                    return () =>
+                      row.removeEventListener("wheel", scrollAvatarPalette);
+                  }}
+                  onPointerDown={(event) => {
+                    if (event.pointerType === "mouse" && event.button === 0)
+                      colorDrag.current = {
+                        x: event.clientX,
+                        left: event.currentTarget.scrollLeft,
+                      };
+                  }}
+                  onPointerMove={(event) => {
+                    if (!event.buttons || !colorDrag.current) return;
+                    const distance = event.clientX - colorDrag.current.x;
+                    if (
+                      Math.abs(distance) < 4 &&
+                      !event.currentTarget.hasPointerCapture(event.pointerId)
+                    )
+                      return;
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    event.currentTarget.scrollLeft =
+                      colorDrag.current.left - distance;
+                  }}
+                  onPointerUp={() => {
+                    colorDrag.current = null;
+                  }}
+                  onPointerCancel={() => {
+                    colorDrag.current = null;
+                  }}
+                  aria-label="Background colors"
+                >
+                  {[null, ...avatarColors].map((color) => (
+                    <button
+                      key={color ?? "clear"}
+                      type="button"
+                      className={editorStyles.swatch}
+                      data-transparent={color === null || undefined}
+                      aria-label={color ?? "Transparent background"}
+                      aria-pressed={composition.backdropColor === color}
+                      style={{ backgroundColor: color ?? "transparent" }}
+                      onClick={() =>
+                        setComposition({ ...composition, backdropColor: color })
+                      }
+                    />
+                  ))}
+                </fieldset>
+              </div>
+            )}
+            {section === "You" && (
+              <div className={styles.framing}>
+                <label className="text-label-sm">
+                  Size
+                  <input
+                    type="range"
+                    min={0.7}
+                    max={2}
+                    step={0.01}
+                    value={composition.scale}
+                    onChange={(event) =>
+                      setComposition({
+                        ...composition,
+                        scale: Number(event.target.value),
+                      })
                     }
                   />
-                ))}
-              </fieldset>
-            </div>
-          )}
-          {section === "You" && (
-            <div className={styles.framing}>
-              <label className="text-label-sm">
-                Size
-                <input
-                  type="range"
-                  min={0.7}
-                  max={2}
-                  step={0.01}
-                  value={composition.scale}
-                  onChange={(event) =>
+                </label>
+                <IconButton
+                  shape="round"
+                  variant="outline"
+                  size="large"
+                  aria-label="Outline"
+                  title={
+                    composition.personOutline
+                      ? "Turn outline off"
+                      : "Turn outline on"
+                  }
+                  aria-pressed={composition.personOutline}
+                  icon={
+                    <span aria-hidden="true" className={styles.outlineGlyph} />
+                  }
+                  onClick={() =>
                     setComposition({
                       ...composition,
-                      scale: Number(event.target.value),
+                      personOutline: !composition.personOutline,
                     })
                   }
                 />
-              </label>
-              <IconButton
-                shape="round"
-                variant="outline"
-                size="large"
-                aria-label="Outline"
-                title={
-                  composition.personOutline
-                    ? "Turn outline off"
-                    : "Turn outline on"
-                }
-                aria-pressed={composition.personOutline}
-                icon={
-                  <span aria-hidden="true" className={styles.outlineGlyph} />
-                }
-                onClick={() =>
-                  setComposition({
-                    ...composition,
-                    personOutline: !composition.personOutline,
-                  })
-                }
-              />
-            </div>
-          )}
-          {section === "Photo" && (
-            <div className={styles.controls}>
-              <label className="text-label-sm">
-                <span className="sr-only">Choose your still photo</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={Math.max(0, frames.current.length - 1)}
-                  step={1}
-                  value={poster}
-                  onChange={(event) => {
-                    setPoster(Number(event.target.value));
-                  }}
-                />
-              </label>
-              <p className="text-body-sm text-muted">
-                Shown when your avatar isn’t playing.
-              </p>
-            </div>
-          )}
+              </div>
+            )}
+            {section === "Photo" && (
+              <div className={styles.controls}>
+                <label className="text-label-sm">
+                  <span className="sr-only">Choose your still photo</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, frames.current.length - 1)}
+                    step={1}
+                    value={poster}
+                    onChange={(event) => {
+                      setPoster(Number(event.target.value));
+                    }}
+                  />
+                </label>
+                <p className="text-body-sm text-muted">
+                  Shown when your avatar isn’t playing.
+                </p>
+              </div>
+            )}
+          </div>
           <Button
             variant="prominent"
-            disabled={disabled || !community}
+            aria-busy={phase === "saving"}
+            disabled={disabled || !community || phase === "saving"}
             onClick={() => void save()}
           >
-            Done
+            {phase === "saving" ? (
+              <span role="status" className="inline-flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className="size-4 rounded-full border-2 border-current/30 border-t-current motion-safe:animate-[spin_500ms_linear_infinite]"
+                />
+                Saving
+              </span>
+            ) : (
+              "Done"
+            )}
           </Button>
         </>
-      )}
-      {phase === "saving" && (
-        <p role="status" className="text-body-sm">
-          Uploading animated avatar…
-        </p>
       )}
       {error && (
         <p role="alert" className="text-body-sm text-danger">

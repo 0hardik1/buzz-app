@@ -51,7 +51,7 @@ type Props = {
   personal?: boolean;
   size?: "compact" | "default";
   /** Reuse the active session's already-authorized cached thumbnail in compact previews. */
-  thumbnailMedia?: (url: string, size: "small") => string | undefined;
+  thumbnailMedia?: (url: string, size?: "small") => string | undefined;
   disabled?: boolean;
   onChange(value: string): void;
   onBusyChange?: ((busy: boolean) => void) | undefined;
@@ -86,6 +86,7 @@ export function AvatarEditor(props: Props) {
     props.community,
     props.size === "compact" ? "small" : undefined,
     props.size === "compact" ? props.thumbnailMedia : undefined,
+    props.personal,
   );
   const pictureError = (
     props.personal ? profilePictureError : avatarPictureError
@@ -273,6 +274,7 @@ export function AvatarEditor(props: Props) {
                 data-shape={props.shape ?? "circle"}
               >
                 <Avatar
+                  autoPlay={!!props.personal}
                   src={preview}
                   alt={open ? "Avatar preview" : "Avatar"}
                   fallback={props.name}

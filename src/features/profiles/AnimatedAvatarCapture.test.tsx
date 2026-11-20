@@ -124,6 +124,9 @@ it("uploads the poster and animation before applying the mobile-compatible URL",
   fireEvent.click(await screen.findByRole("button", { name: "Done" }));
   await waitFor(() => expect(uploadAvatar).toHaveBeenCalledTimes(2));
   expect(capture.stopAvatarCamera).toHaveBeenCalledWith(stream);
+  expect(
+    screen.getByRole("button", { name: "Saving", busy: true }),
+  ).toBeDisabled();
   expect(apply).not.toHaveBeenCalled();
   await act(async () =>
     animationUpload.resolve("https://relay.example/animation.png"),

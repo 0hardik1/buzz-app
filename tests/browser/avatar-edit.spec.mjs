@@ -925,3 +925,37 @@ test("the inline portrait stays still while the open profile preview plays", asy
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(portrait).toHaveAttribute("src", /still\.png$/);
 });
+
+test("your profile plays its transparent portrait over the blurred backdrop", async ({
+  page,
+}) => {
+  await page.route("https://example.org/*.png", (route) =>
+    route.fulfill({
+      path:
+        "tests/fixtures/attachment-media/" +
+        new URL(route.request().url()).pathname.slice(1),
+    }),
+  );
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/tests/fixtures/profile-settings.html?animatedProfile");
+  await page.getByRole("button", { name: "Edit human profile" }).click();
+  const hero = page.getByRole("region", { name: "Profile preview" });
+  const portrait = hero.locator(".buzz-avatar img");
+  await expect(portrait).toHaveAttribute(
+    "src",
+    "https://example.org/animated.png",
+  );
+  await expect(portrait.locator("..")).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await expect(hero.locator('[style*="background-image"]')).toHaveCSS(
+    "filter",
+    /blur\(/,
+  );
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(portrait).toHaveAttribute(
+    "src",
+    "https://example.org/still.png",
+  );
+});

@@ -37,7 +37,9 @@ for (const id of ["https://relay.example.test", "https://other.example.test"]) {
         content: JSON.stringify({
           name: "Fixture human",
           about: "This field must survive avatar editing.",
-          picture: "",
+          picture: new URLSearchParams(location.search).has("animatedProfile")
+            ? "https://example.org/still.png#buzz-anim=https%3A%2F%2Fexample.org%2Fanimated.png"
+            : "",
         }),
       },
       profileKey,
@@ -215,15 +217,17 @@ function Fixture() {
       )}
       {human && (
         <section className="rounded-xl bg-surface-panel p-6">
-          <ProfileSettings
-            key={communities.snapshot().selected ?? "local"}
-            communities={communities}
-            community={communities
-              .snapshot()
-              .memberships.find(
-                (item) => item.id === communities.snapshot().selected,
-              )}
-          />
+          <AgentAvatarArtworkProvider>
+            <ProfileSettings
+              key={communities.snapshot().selected ?? "local"}
+              communities={communities}
+              community={communities
+                .snapshot()
+                .memberships.find(
+                  (item) => item.id === communities.snapshot().selected,
+                )}
+            />
+          </AgentAvatarArtworkProvider>
         </section>
       )}
     </main>
