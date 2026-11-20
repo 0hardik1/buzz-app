@@ -11,9 +11,9 @@ fn scope(env: &Env) -> preflight::Scope {
         homes: vec![base.join("home"), base.join("alternate-home")],
     }
 }
-/// The other build's root, with a separate witness store of its own.
+/// The other build's root, bound to `scope`, with a separate witness store.
 fn peer(scope: &preflight::Scope, store: &Arc<Fake>) -> installation::Peer {
-    installation::Peer::new(scope.inventories[1].clone(), store.clone())
+    installation::Peer::new(scope.inventories[1].clone(), scope.clone(), store.clone())
 }
 fn establish(env: &Env, scope: &preflight::Scope) -> Result<installation::Established> {
     installation::establish(
@@ -335,18 +335,37 @@ fn established_namespace_refuses_oversized_valid_json_prefix_and_whitespace() {
 
 use installation::Build;
 
-/// Both supported builds' views of one declared scope: this build at
-/// `inventories[0]` with `env.store`, the other at `inventories[1]` with its own.
+/// Both supported builds' views: this build at `inventories[0]` with `env.store`,
+/// the other at `inventories[1]` with its own store and its own, different scope
+/// (an extra home), as the native builds' backup homes differ.
 struct Builds {
     scope: preflight::Scope,
+    other_scope: preflight::Scope,
     other: Arc<Fake>,
 }
 impl Builds {
     fn new(env: &Env) -> Self {
+        let scope = scope(env);
+        let mut other_scope = scope.clone();
+        other_scope.homes.push(
+            fs::canonicalize(env.temp.path())
+                .unwrap()
+                .join("other-home"),
+        );
+        assert_ne!(scope, other_scope);
         Self {
-            scope: scope(env),
+            scope,
+            other_scope,
             other: Arc::default(),
         }
+    }
+    /// This build's peer: the other's root, bound to the other's own scope.
+    fn peer_of_this(&self) -> installation::Peer {
+        installation::Peer::new(
+            self.scope.inventories[1].clone(),
+            self.other_scope.clone(),
+            self.other.clone(),
+        )
     }
     fn this(&self, env: &Env) -> Result<installation::Established> {
         installation::establish_as(
@@ -354,16 +373,29 @@ impl Builds {
             &self.scope,
             &self.scope.inventories[0],
             env.store.as_ref(),
-            peer(&self.scope, &self.other),
+            self.peer_of_this(),
         )
     }
     fn other(&self, env: &Env) -> Result<installation::Established> {
+        self.other_in(env, &self.other_scope, &self.scope.inventories[1])
+    }
+    /// The other build establishing under `scope` at `root`.
+    fn other_in(
+        &self,
+        env: &Env,
+        scope: &preflight::Scope,
+        root: &Path,
+    ) -> Result<installation::Established> {
         installation::establish_as(
             Build::OTHER,
-            &self.scope,
-            &self.scope.inventories[1],
+            scope,
+            root,
             self.other.as_ref(),
-            installation::Peer::new(self.scope.inventories[0].clone(), env.store.clone()),
+            installation::Peer::new(
+                self.scope.inventories[0].clone(),
+                self.scope.clone(),
+                env.store.clone(),
+            ),
         )
     }
     fn other_state(&self) -> Value {
@@ -407,8 +439,8 @@ fn supported_builds_coexist_in_either_order_and_sign_out_independently() {
         // This build's enrollment is accounted for by its owner in both views.
         observe_sign_outs(&builds.scope.inventories[0], 0).unwrap();
         env.set(ALICE, SENTINEL).unwrap();
-        this.inspect(&builds.scope).unwrap();
-        other.inspect(&builds.scope).unwrap();
+        this.requalify(&builds.scope).unwrap();
+        other.requalify(&builds.other_scope).unwrap();
         // Revisiting either build requalifies its existing pair without a write.
         builds.this(&env).unwrap();
         builds.other(&env).unwrap();
@@ -427,7 +459,7 @@ fn supported_builds_coexist_in_either_order_and_sign_out_independently() {
         assert_eq!(env.status(ALICE), SecretStatus::Missing);
         builds.this(&env).unwrap();
         builds.other(&env).unwrap();
-        other.inspect(&builds.scope).unwrap();
+        other.inspect(&builds.other_scope).unwrap();
         assert_eq!(counts(&builds.other), (1, 0));
         assert_eq!(*builds.other.items.lock().unwrap(), other_witness);
         assert_eq!(
@@ -501,9 +533,9 @@ fn other_build_evidence_qualifies_only_as_its_exact_committed_pair() {
                 builds.this(&env).unwrap();
                 observe_sign_outs(&builds.scope.inventories[0], 0).unwrap();
                 env.set(ALICE, SENTINEL).unwrap();
-                peer_of_other.inspect(&builds.scope).unwrap();
+                peer_of_other.requalify(&builds.other_scope).unwrap();
                 fs::remove_file(env.manager.root.join("registry.json")).unwrap();
-                assert!(peer_of_other.inspect(&builds.scope).is_err());
+                assert!(peer_of_other.inspect(&builds.other_scope).is_err());
                 continue;
             }
         }
@@ -532,16 +564,240 @@ fn other_build_appearing_after_qualification_is_read_once_per_installation() {
     builds.other(&env).unwrap();
     let reads = || builds.other.reads.load(Ordering::SeqCst);
     let before = reads();
-    this.inspect(&builds.scope).unwrap();
+    assert!(this.inspect(&builds.scope).is_err());
+    assert_eq!(
+        reads(),
+        before,
+        "filesystem inspection never opens the store"
+    );
+    this.requalify(&builds.scope).unwrap();
     assert_eq!(reads(), before + 1, "a new peer is read fresh");
     this.inspect(&builds.scope).unwrap();
+    this.requalify(&builds.scope).unwrap();
     assert_eq!(reads(), before + 1, "the same installation is not re-read");
     // A replaced installation is a new peer, read afresh and refused on mismatch.
     let mut state = builds.other_state();
     state["installation"]["installation"]["id"] = json!(fresh());
     builds.write_other_state(&state);
     assert!(this.inspect(&builds.scope).is_err());
+    assert_eq!(reads(), before + 1);
+    assert!(this.requalify(&builds.scope).is_err());
     assert_eq!(reads(), before + 2);
+}
+
+#[test]
+fn peer_witness_is_read_on_the_requalifying_thread() {
+    let env = Env::new();
+    env.ready(SLOT);
+    let builds = Builds::new(&env);
+    let this = builds.this(&env).unwrap();
+    builds.other(&env).unwrap();
+    let readers = Arc::new(Mutex::new(Vec::new()));
+    let seen = readers.clone();
+    *builds.other.on_read.lock().unwrap() = Some(Arc::new(move |_| {
+        seen.lock().unwrap().push(std::thread::current().id());
+    }));
+    this.requalify(&builds.scope).unwrap();
+    // The caller's completion ownership spans the OS read only if it runs here.
+    assert_eq!(*readers.lock().unwrap(), [std::thread::current().id()]);
+}
+
+/// Plant the other build's committed pair, matching its own witness, at its
+/// fixed root but bound to a scope other than its expected one.
+fn plant_misbound_peer(env: &Env, builds: &Builds, case: &str) {
+    let base = fs::canonicalize(env.temp.path()).unwrap();
+    let mut foreign = builds.other_scope.clone();
+    let root = builds.scope.inventories[1].clone();
+    match case {
+        "root" => {
+            let elsewhere = base.join("relocated-inventory");
+            foreign.inventories[1] = elsewhere.clone();
+            builds.other_in(env, &foreign, &elsewhere).unwrap();
+            fs::rename(&elsewhere, &root).unwrap();
+        }
+        "home" => {
+            foreign.homes.push(base.join("stray-home"));
+            builds.other_in(env, &foreign, &root).unwrap();
+        }
+        _ => {
+            foreign.inventories.push(base.join("third-inventory"));
+            builds.other_in(env, &foreign, &root).unwrap();
+        }
+    }
+    let witness: Value =
+        serde_json::from_slice(&builds.other.items.lock().unwrap()[installation::ACCOUNT]).unwrap();
+    assert_eq!(
+        builds.other_state()["installation"]["installation"],
+        witness
+    );
+    assert_eq!(builds.other_state()["installation"]["committed"], true);
+}
+
+#[test]
+fn other_build_pair_bound_elsewhere_refuses_despite_its_matching_witness() {
+    for case in ["root", "home", "declared"] {
+        for join in ["fresh", "established", "finish"] {
+            let env = Env::new();
+            env.ready(SLOT);
+            let builds = Builds::new(&env);
+            let established = (join == "established").then(|| builds.this(&env).unwrap());
+            plant_misbound_peer(&env, &builds, case);
+            if join == "finish" {
+                // The other build refuses beside an intent: park its unchanged
+                // pair while this build's fresh setup fails, then expose it.
+                let parked = env.temp.path().join("parked");
+                fs::rename(&builds.scope.inventories[1], &parked).unwrap();
+                *env.store.fail_add.lock().unwrap() = Some(Error::Denied);
+                assert!(builds.this(&env).is_err());
+                *env.store.fail_add.lock().unwrap() = None;
+                fs::rename(&parked, &builds.scope.inventories[1]).unwrap();
+            }
+            let before = fs::read(builds.scope.inventories[0].join(STATE)).ok();
+            let witness = env.store.items.lock().unwrap().clone();
+            let adds = counts(&env.store);
+            let refused = match &established {
+                Some(observed) => {
+                    observed.requalify(&builds.scope).is_err()
+                        && observed.inspect(&builds.scope).is_err()
+                }
+                None if join == "finish" => installation::finish(
+                    &builds.scope,
+                    &builds.scope.inventories[0],
+                    env.store.as_ref(),
+                    builds.peer_of_this(),
+                )
+                .is_err(),
+                None => builds.this(&env).is_err(),
+            };
+            assert!(refused, "{case}/{join}");
+            assert_eq!(counts(&env.store), adds, "{case}/{join}");
+            assert_eq!(*env.store.items.lock().unwrap(), witness, "{case}/{join}");
+            assert_eq!(
+                fs::read(builds.scope.inventories[0].join(STATE)).ok(),
+                before,
+                "{case}/{join}: no selected intent or commit"
+            );
+        }
+    }
+}
+
+/// Each file's path and bytes.
+type Files = Vec<(PathBuf, Vec<u8>)>;
+
+/// Snapshot of the files a set leaves at the moment of its OS add.
+fn capture_writing(env: &Env, inventory: &Path) -> Arc<Mutex<Files>> {
+    let stash = Arc::new(Mutex::new(Vec::new()));
+    let (inventory, registry, into) = (
+        inventory.to_owned(),
+        env.manager.root.join("registry.json"),
+        stash.clone(),
+    );
+    *env.store.on_add.lock().unwrap() = Some(Arc::new(move |account| {
+        if account == installation::ACCOUNT {
+            return;
+        }
+        let mut files = vec![registry.clone(), inventory.join(STATE)];
+        for entry in fs::read_dir(&inventory).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if name.starts_with("ns-") && name.ends_with(".json") {
+                files.push(path);
+            }
+        }
+        *into.lock().unwrap() = files
+            .into_iter()
+            .map(|path| {
+                let bytes = fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect();
+    }));
+    stash
+}
+
+fn delist(inventory: &Path) {
+    let path = inventory.join(STATE);
+    let mut state: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(state["namespaces"].as_array().unwrap().len(), 1);
+    state["namespaces"] = json!([]);
+    fs::write(path, serde_json::to_vec(&state).unwrap()).unwrap();
+}
+
+#[test]
+fn valid_namespace_and_registry_missing_only_from_the_index_never_qualify() {
+    for owner in ["selected", "peer"] {
+        for phase in ["live", "writing"] {
+            let env = Env::new();
+            env.ready(SLOT);
+            let builds = Builds::new(&env);
+            // The selected view is this build's; the peer view is the other
+            // build's, whose peer is this build's real enrollment.
+            let peer_view = (owner == "peer").then(|| builds.other(&env).unwrap());
+            let this = builds.this(&env).unwrap();
+            let inventory = builds.scope.inventories[0].clone();
+            observe_sign_outs(&inventory, 0).unwrap();
+            env.set(ALICE, SENTINEL).unwrap();
+            if phase == "writing" {
+                let stash = capture_writing(&env, &inventory);
+                env.set(ALICE, "replacement").unwrap();
+                *env.store.on_add.lock().unwrap() = None;
+                for (path, bytes) in stash.lock().unwrap().iter() {
+                    fs::write(path, bytes).unwrap();
+                }
+            }
+            let (scope, observed) = match &peer_view {
+                Some(view) => (&builds.other_scope, view),
+                None => (&builds.scope, &this),
+            };
+            observed.requalify(scope).unwrap();
+            observed.inspect(scope).unwrap();
+            delist(&inventory);
+            let files: Vec<_> = fs::read_dir(&inventory)
+                .unwrap()
+                .chain(fs::read_dir(&env.manager.root).unwrap())
+                .map(|entry| {
+                    let path = entry.unwrap().path();
+                    let bytes = fs::read(&path).ok();
+                    (path, bytes)
+                })
+                .collect();
+            let (ours, theirs) = (counts(&env.store), counts(&builds.other));
+            assert!(observed.inspect(scope).is_err(), "{owner}/{phase}");
+            assert!(observed.requalify(scope).is_err(), "{owner}/{phase}");
+            let fresh = match owner {
+                "peer" => builds.other(&env),
+                _ => builds.this(&env),
+            };
+            assert!(fresh.is_err(), "{owner}/{phase}");
+            for (path, bytes) in files {
+                assert_eq!(fs::read(&path).ok(), bytes, "{owner}/{phase}: {path:?}");
+            }
+            assert_eq!((counts(&env.store), counts(&builds.other)), (ours, theirs));
+        }
+    }
+}
+
+#[test]
+fn unlisted_retired_debt_without_a_live_registry_still_qualifies() {
+    for owner in ["selected", "peer"] {
+        let env = Env::new();
+        env.ready(SLOT);
+        let builds = Builds::new(&env);
+        let peer_view = (owner == "peer").then(|| builds.other(&env).unwrap());
+        let this = builds.this(&env).unwrap();
+        let inventory = builds.scope.inventories[0].clone();
+        observe_sign_outs(&inventory, 0).unwrap();
+        env.set(ALICE, SENTINEL).unwrap();
+        env.manager
+            .secret_clear(PLUGIN, &env.current(), "api-key", ALICE)
+            .unwrap();
+        delist(&inventory);
+        fs::remove_file(env.manager.root.join("registry.json")).unwrap();
+        match &peer_view {
+            Some(view) => view.requalify(&builds.other_scope).unwrap(),
+            None => this.inspect(&builds.scope).unwrap(),
+        }
+    }
 }
 
 #[test]

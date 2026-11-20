@@ -3941,11 +3941,20 @@ and strict registry validation, not root/store availability.
 The release and development builds each own one fixed inventory and OS service
 beside the same app-data homes. Fresh, established and sign-out inspection share
 one classification: the other build's inventory qualifies only as a committed
-record with that build's variant, matched by its own OS witness. That read is
-bounded, read-only and outside metadata locks, and runs once per peer
-installation, including for a peer that appears after boot. Each v3 registry must
-then belong to the namespace of the inventory that indexes it, under that
-inventory's variant. An uncommitted peer, a missing, denied or mismatched peer
+record with that build's variant, bound to the scope that build declares at its
+fixed root (its own identifier's homes and backup home), and matched by its own
+OS witness. A pair bound elsewhere or to another scope refuses, even with a
+matching witness. The witness read is read-only and outside metadata locks, and
+runs once per peer installation, including for a peer that appears after boot.
+Only a completion-owned native worker reads it: boot qualification, a creator,
+**Finish credential setup** or the requalification before sign-out admission.
+Their caller waits a bounded time; the OS read itself is not cancelled, and the
+worker keeps its lease until the read returns. A timeout leaves custody
+unknown, and a late success changes nothing. Other inspections, including
+sign-out's closed phase, read no witness: a peer not already matched refuses.
+Each v3 registry must then be listed in, and belong to the namespace of, the
+inventory that indexes it, under that inventory's variant; an unlisted one is
+only retired debt. An uncommitted peer, a missing, denied or mismatched peer
 witness, or an unindexed registry stays unknown. On macOS, reading the other
 build's witness can show a Keychain prompt; denying it leaves custody unknown.
 Authority covers this build's inventory only. A plain sign-out journals and

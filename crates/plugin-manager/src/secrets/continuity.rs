@@ -9,8 +9,6 @@ use std::sync::Mutex;
 
 pub(super) const ACCOUNT: &str = "installation-continuity-v1";
 const FAILED: &str = "Saved credential installation continuity could not be established";
-/// How long an admission waits for the other build's witness read.
-const PEER_WAIT: Duration = Duration::from_secs(10);
 
 /// Exactly the two supported builds' variants: this one and its peer.
 #[derive(Clone, Copy)]
@@ -60,22 +58,34 @@ impl Record {
     }
 }
 
-/// The other supported build's fixed inventory root and read-only witness store.
+/// The other supported build's fixed inventory root, its own expected scope and
+/// read-only witness store.
 pub struct Peer {
     root: PathBuf,
+    /// The scope that build binds at `root`; a pair bound elsewhere is not its own.
+    expected_scope: Scope,
     store: Arc<dyn SecretStore>,
     /// The peer installation whose witness this observer last read and matched.
     /// Only that exact committed installation skips a fresh read.
     qualified: Mutex<Option<Installation>>,
 }
 impl Peer {
-    pub fn new(root: PathBuf, store: Arc<dyn SecretStore>) -> Self {
+    pub fn new(root: PathBuf, expected_scope: Scope, store: Arc<dyn SecretStore>) -> Self {
         Self {
             root,
+            expected_scope,
             store,
             qualified: Mutex::new(None),
         }
     }
+}
+
+/// Whether a classification may read the other build's OS witness. Only a
+/// caller that owns the native completion lease through the read may.
+#[derive(Clone, Copy)]
+enum PeerRead {
+    Cached,
+    Allowed,
 }
 
 /// An OS-witness-qualified installation observation. Reinspect the declared scope
@@ -87,7 +97,16 @@ pub struct Established {
     peer: Peer,
 }
 impl Established {
+    /// Filesystem only: a peer installation not already read and matched refuses.
     pub fn inspect(&self, scope: &Scope) -> Result<()> {
+        self.classify(scope, PeerRead::Cached)
+    }
+    /// As [`Self::inspect`], reading a new peer's witness synchronously. Call
+    /// only where completion ownership lasts until the OS read returns.
+    pub fn requalify(&self, scope: &Scope) -> Result<()> {
+        self.classify(scope, PeerRead::Allowed)
+    }
+    fn classify(&self, scope: &Scope, peer_read: PeerRead) -> Result<()> {
         if binding(scope, &self.root)? != self.installation.scope {
             return Err(FAILED.into());
         }
@@ -100,6 +119,7 @@ impl Established {
                 committed: true,
             }),
             &self.peer,
+            peer_read,
         )
     }
     /// Whether the other build indexes unretired custody under any of `homes`.
@@ -243,13 +263,13 @@ pub(super) fn establish_as(
                 installation: found,
                 peer,
             };
-            observed.inspect(scope)?;
+            observed.requalify(scope)?;
             Ok(observed)
         }
         (None, None) => {
             // Positive absence of this build's custody evidence; a qualified
             // peer may coexist, anything else refuses.
-            inspect(build, scope, root, None, &peer)?;
+            inspect(build, scope, root, None, &peer, PeerRead::Allowed)?;
             let inventory = Inventory { root };
             inventory.establish()?;
             // Stable completion ownership, not a structural lock. A competing
@@ -315,7 +335,7 @@ pub(super) fn finish_as(
     if intent(build, root, &expected_scope)? != record {
         return Err(FAILED.into());
     }
-    inspect(build, scope, root, Some(&record), &peer)?;
+    inspect(build, scope, root, Some(&record), &peer, PeerRead::Allowed)?;
     match store.read(ACCOUNT) {
         Ok(bytes) if witness(&bytes)? == record.installation => {}
         Err(Error::Absent) => {
@@ -352,7 +372,7 @@ fn commit(
     mut record: Record,
     peer: Peer,
 ) -> Result<Established> {
-    inspect(build, scope, root, Some(&record), &peer)?;
+    inspect(build, scope, root, Some(&record), &peer, PeerRead::Allowed)?;
     {
         let inventory = Inventory { root };
         let _g = inventory.global()?;
@@ -375,7 +395,7 @@ fn commit(
         installation: record.installation,
         peer,
     };
-    observed.inspect(scope)?;
+    observed.requalify(scope)?;
     Ok(observed)
 }
 
@@ -417,15 +437,23 @@ fn namespaces(scope: &Scope, root: &Path, state: &State) -> Result<BTreeMap<Stri
 }
 
 /// One owner's indexed evidence: its variant, record and validated namespaces.
+/// Only `listed` ids are authority; other discovered records are cleanup debt.
 struct Owner {
     variant: &'static str,
     record: Option<Record>,
+    listed: BTreeSet<String>,
     namespaces: BTreeMap<String, Namespace>,
 }
 
-/// A present peer inventory qualifies only as the other build's committed
-/// pair; its witness is read afresh unless this exact installation matched.
-fn qualify_peer(build: Build, scope: &Scope, peer: &Peer) -> Result<Option<Owner>> {
+/// A present peer inventory qualifies only as the other build's committed pair,
+/// bound to its own expected scope at its fixed root. Its witness is read afresh,
+/// when `peer_read` allows, unless this exact installation already matched.
+fn qualify_peer(
+    build: Build,
+    scope: &Scope,
+    peer: &Peer,
+    peer_read: PeerRead,
+) -> Result<Option<Owner>> {
     let Some(state) = state(&peer.root, build.peer)? else {
         return Ok(None);
     };
@@ -433,7 +461,8 @@ fn qualify_peer(build: Build, scope: &Scope, peer: &Peer) -> Result<Option<Owner
         return Err(FAILED.into());
     }
     let record = state.installation.as_ref().ok_or(FAILED)?;
-    if !record.committed {
+    if !record.committed || record.installation.scope != binding(&peer.expected_scope, &peer.root)?
+    {
         return Err(FAILED.into());
     }
     let cached = peer
@@ -442,7 +471,7 @@ fn qualify_peer(build: Build, scope: &Scope, peer: &Peer) -> Result<Option<Owner
         .unwrap_or_else(|e| e.into_inner())
         .clone();
     if cached.as_ref() != Some(&record.installation) {
-        if read_peer(peer)? != record.installation {
+        if matches!(peer_read, PeerRead::Cached) || read_peer(peer)? != record.installation {
             return Err(FAILED.into());
         }
         *peer.qualified.lock().unwrap_or_else(|e| e.into_inner()) =
@@ -451,26 +480,14 @@ fn qualify_peer(build: Build, scope: &Scope, peer: &Peer) -> Result<Option<Owner
     Ok(Some(Owner {
         variant: build.peer,
         record: state.installation.clone(),
+        listed: state.namespaces.iter().cloned().collect(),
         namespaces: namespaces(scope, &peer.root, &state)?,
     }))
 }
 
-/// Bounded so a stalled or prompting read cannot hold admission; read-only, so
-/// a late completion changes nothing.
+/// Synchronous, so the native caller's completion lease spans the OS read.
 fn read_peer(peer: &Peer) -> Result<Installation> {
-    let store = peer.store.clone();
-    let (done, result) = std::sync::mpsc::channel();
-    std::thread::Builder::new()
-        .name("plugin peer continuity".into())
-        .spawn(move || {
-            let _ = done.send(store.read(ACCOUNT));
-        })
-        .map_err(|_| FAILED)?;
-    let bytes = result
-        .recv_timeout(PEER_WAIT)
-        .map_err(|_| FAILED)?
-        .map_err(|_| FAILED)?;
-    witness(&bytes)
+    witness(&peer.store.read(ACCOUNT).map_err(|_| FAILED)?)
 }
 
 /// The one owner-aware classification of the declared scope. `expected` is
@@ -484,6 +501,7 @@ fn inspect(
     root: &Path,
     expected: Option<&Record>,
     peer: &Peer,
+    peer_read: PeerRead,
 ) -> Result<()> {
     if peer.root == root {
         return Err(FAILED.into());
@@ -502,6 +520,10 @@ fn inspect(
     let own = Owner {
         variant: build.this,
         record: expected.cloned(),
+        listed: current
+            .iter()
+            .flat_map(|current| current.namespaces.iter().cloned())
+            .collect(),
         namespaces: match &current {
             Some(current) => namespaces(scope, root, current)?,
             None => BTreeMap::new(),
@@ -516,7 +538,7 @@ fn inspect(
             return Err(FAILED.into());
         }
     }
-    let other = qualify_peer(build, scope, peer)?;
+    let other = qualify_peer(build, scope, peer, peer_read)?;
     let mut home = None;
     let mut observed = BTreeSet::new();
     preflight::walk(scope, |observation| {
@@ -554,7 +576,9 @@ fn inspect(
                     let owner = [Some(&own), other.as_ref()]
                         .into_iter()
                         .flatten()
-                        .find(|owner| owner.namespaces.contains_key(&id))
+                        .find(|owner| {
+                            owner.listed.contains(&id) && owner.namespaces.contains_key(&id)
+                        })
                         .ok_or(FAILED)?;
                     read::inspect_namespace(
                         bytes,

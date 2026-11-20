@@ -3,9 +3,25 @@ use super::super::creators::{exclusive, released_lock};
 use super::*;
 use crate::identity::IdentityHost;
 
+/// The other build's own paths in this data directory: the same shared
+/// homes, but its own backup home, so its scope genuinely differs.
+fn other_paths(paths: &Paths) -> Paths {
+    paths_for(paths.lock.parent().unwrap(), OTHER_KEY)
+}
+
+/// The scope the other build binds at its fixed root.
+fn peer_scope(paths: &Paths) -> secrets::preflight::Scope {
+    let fixed = paths.plugin_peer_inventory().unwrap();
+    other_paths(paths).inspection_scope(Some(&fixed)).unwrap()
+}
+
 /// The other build's fixed root, with a witness store of its own.
 fn peer(paths: &Paths, store: &Arc<Fake>) -> secrets::continuity::Peer {
-    secrets::continuity::Peer::new(paths.plugin_peer_inventory().unwrap(), store.clone())
+    secrets::continuity::Peer::new(
+        paths.plugin_peer_inventory().unwrap(),
+        peer_scope(paths),
+        store.clone(),
+    )
 }
 
 fn slots<'a>(paths: &Paths, vault: &'a Vault, wait: Duration) -> Slots<'a> {
@@ -290,7 +306,12 @@ const OTHER_VARIANT: &str = if cfg!(debug_assertions) {
 /// This build's production slots at its fixed root, beside the other build's.
 fn fixed_slots<'a>(paths: &Paths, vault: &'a Vault, other: &Arc<Fake>) -> Slots<'a> {
     paths
-        .plugin_slots_with_peer(&vault.root, vault.store.clone(), other.clone())
+        .plugin_slots_with_peer(
+            &vault.root,
+            vault.store.clone(),
+            other.clone(),
+            peer_scope(paths),
+        )
         .unwrap()
 }
 
@@ -304,35 +325,32 @@ fn boot_fixed(paths: &Paths, vault: &Vault, other: &Arc<Fake>) -> Instance {
     .unwrap()
 }
 
-/// The other build, installed at its fixed root as it installs itself: a
-/// committed pair, with `identities` enrolled in app data's `other` profile.
-/// Made under this build's rules in scratch space, then re-owned by variant.
+/// The other build, installed at its fixed root under its own scope as it
+/// installs itself: a committed pair, with `identities` enrolled in app data's
+/// `other` profile. Made under this build's rules, then re-owned by variant,
+/// which the binding does not cover. Install before this build exists; a later
+/// appearance parks and exposes the unchanged pair.
 fn install_other(paths: &Paths, identities: &[&str]) -> Arc<Fake> {
-    let data = paths.lock.parent().unwrap();
-    let scratch = tempfile::tempdir_in(data).unwrap();
-    let (root, peer) = (
-        scratch.path().join("inventory"),
-        scratch.path().join("peer"),
-    );
-    let scope = secrets::preflight::Scope {
-        inventories: vec![root.clone(), peer.clone()],
-        homes: vec![scratch.path().join("home")],
-    };
-    let vault = Vault::new(root.clone());
+    let ours = paths.plugin_inventory().unwrap();
+    assert!(!ours.exists(), "the other build installs into fresh data");
+    let fixed = paths.plugin_peer_inventory().unwrap();
+    let vault = Vault::new(fixed.clone());
     secrets::continuity::establish(
-        &scope,
-        &root,
+        &peer_scope(paths),
+        &fixed,
         vault.store.as_ref(),
-        secrets::continuity::Peer::new(peer, Arc::<Fake>::default()),
+        secrets::continuity::Peer::new(
+            ours.clone(),
+            paths.inspection_scope(Some(&ours)).unwrap(),
+            Arc::<Fake>::default(),
+        ),
     )
     .unwrap();
-    secrets::observe_sign_outs(&root, 0).unwrap();
+    secrets::observe_sign_outs(&fixed, 0).unwrap();
     let registry = paths.app_data.join("profiles/other/registry.json");
     if !identities.is_empty() {
         vault.enroll(&paths.app_data, "other", identities);
     }
-    let fixed = paths.plugin_peer_inventory().unwrap();
-    fs::rename(&root, &fixed).unwrap();
     let records = fs::read_dir(&fixed)
         .unwrap()
         .map(|entry| entry.unwrap().path())
@@ -347,6 +365,34 @@ fn install_other(paths: &Paths, identities: &[&str]) -> Arc<Fake> {
     drop(items);
     vault.calls();
     vault.store.clone()
+}
+
+/// The other build's installed files, moved out of discovery unchanged.
+struct Parked {
+    dir: tempfile::TempDir,
+    moved: Vec<PathBuf>,
+}
+
+fn park_other(paths: &Paths) -> Parked {
+    let dir = tempfile::tempdir_in(paths.lock.parent().unwrap()).unwrap();
+    let moved: Vec<_> = [
+        paths.plugin_peer_inventory().unwrap(),
+        paths.app_data.join("profiles/other"),
+    ]
+    .into_iter()
+    .filter(|path| path.exists())
+    .collect();
+    for (index, path) in moved.iter().enumerate() {
+        fs::rename(path, dir.path().join(index.to_string())).unwrap();
+    }
+    Parked { dir, moved }
+}
+
+/// The parked pair reappears exactly where, and as, it was bound.
+fn expose_other(parked: Parked) {
+    for (index, path) in parked.moved.iter().enumerate() {
+        fs::rename(parked.dir.path().join(index.to_string()), path).unwrap();
+    }
 }
 
 /// Exactly the owning variant changes; every other byte stays as written.
@@ -421,21 +467,17 @@ fn supported_builds_share_fixed_data_in_either_order_and_sign_out_independently(
         let (_dir, paths) = fixture();
         let vault = Vault::new(paths.plugin_inventory().unwrap());
         let viewer = IdentityHost::fixture().current_viewer().unwrap().unwrap();
-        let mut other = Arc::<Fake>::default();
-        if other_first {
-            other = install_other(&paths, &[BOB]);
-        }
+        let other = install_other(&paths, &[BOB]);
+        let parked = (!other_first).then(|| park_other(&paths));
         let instance = boot_fixed(&paths, &vault, &other);
         assert!(!instance.h1_unknown(), "other first: {other_first}");
         assert_eq!(other_reads(&other), usize::from(other_first));
         instance.observe_sign_outs(Some(&vault.root)).unwrap();
         let accounts = vault.enroll(&paths.app_data, "default", &[&viewer]);
-        if !other_first {
-            // Quit, then the other build installs beside this one.
-            drop(instance);
-            other = install_other(&paths, &[BOB]);
-        } else {
-            drop(instance);
+        drop(instance);
+        if let Some(parked) = parked {
+            // Quit, then the other build's pair appears beside this one.
+            expose_other(parked);
         }
         let evidence = other_evidence(&paths, &other);
         vault.calls();
@@ -469,11 +511,13 @@ fn other_build_appearing_after_boot_qualifies_fresh_or_refuses() {
     for witness in ["exact", "absent", "replaced"] {
         let (_dir, paths) = fixture();
         let vault = Vault::new(paths.plugin_inventory().unwrap());
+        let installed = install_other(&paths, &[]);
+        let items = std::mem::take(&mut *installed.items.lock().unwrap());
+        let parked = park_other(&paths);
         let other = Arc::<Fake>::default();
         let instance = boot_fixed(&paths, &vault, &other);
         instance.observe_sign_outs(Some(&vault.root)).unwrap();
-        let installed = install_other(&paths, &[]);
-        let items = installed.items.lock().unwrap().clone();
+        expose_other(parked);
         match witness {
             "exact" => *other.items.lock().unwrap() = items,
             "absent" => {}
@@ -696,4 +740,249 @@ fn finish_setup_timeout_keeps_its_lease_until_actual_completion() {
         2,
         "the denied add, then the one late completion"
     );
+}
+
+/// Holds `store`'s next read until the returned sender sends or drops.
+fn hold_read(store: &Fake) -> (mpsc::Receiver<Step>, mpsc::Sender<()>) {
+    let (started, entered) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    *store.read_stall.lock().unwrap() = Some((started, released));
+    (entered, release)
+}
+
+fn active(shared: &Shared) -> usize {
+    shared.gate.lock().unwrap().active
+}
+
+/// Bounded: the released read's owner lets go of its lease.
+fn idle(shared: &Shared) {
+    let start = Instant::now();
+    while active(shared) != 0 {
+        assert!(
+            start.elapsed() < BUDGET,
+            "the completed read keeps its lease"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Booted at the fixed root with the other build's pair parked: it appears
+/// only when exposed, unchanged.
+fn boot_before_other(paths: &Paths, vault: &Vault) -> (Instance, Arc<Fake>, Parked) {
+    let other = install_other(paths, &[]);
+    let parked = park_other(paths);
+    let mut slots = fixed_slots(paths, vault, &other);
+    slots.wait = Duration::from_millis(300);
+    let instance = boot(paths, Some(slots), |_| Ok(()), || Ok(())).unwrap();
+    assert!(!instance.h1_unknown());
+    instance.observe_sign_outs(Some(&vault.root)).unwrap();
+    assert_eq!(other_reads(&other), 0);
+    (instance, other, parked)
+}
+
+#[test]
+fn boot_peer_read_held_past_its_wait_keeps_every_native_lock_until_it_returns() {
+    let (_dir, paths) = fixture();
+    let vault = Vault::new(paths.plugin_inventory().unwrap());
+    let other = install_other(&paths, &[]);
+    let (entered, release) = hold_read(&other);
+    let mut slots = fixed_slots(&paths, &vault, &other);
+    slots.wait = Duration::from_millis(50);
+    assert!(boot(&paths, Some(slots), |_| Ok(()), || Ok(())).is_err());
+    assert_eq!(entered.recv_timeout(BUDGET).unwrap(), Step::Stalled);
+    assert!(!exclusive(&paths.key_lock));
+    assert!(!exclusive(&paths.lock));
+    assert!(!exclusive(&paths.other_key_lock));
+    release.send(()).unwrap();
+    released_lock(&paths.key_lock);
+    released_lock(&paths.lock);
+    released_lock(&paths.other_key_lock);
+    assert_eq!(other_reads(&other), 1);
+    let instance = boot_fixed(&paths, &vault, &other);
+    assert!(!instance.h1_unknown());
+    assert_eq!(other_reads(&other), 1);
+}
+
+#[test]
+fn creator_owns_a_new_peers_read_through_timeout_and_instance_drop() {
+    let (_dir, paths) = fixture();
+    let vault = Vault::new(paths.plugin_inventory().unwrap());
+    let (instance, other, parked) = boot_before_other(&paths, &vault);
+    expose_other(parked);
+    let (entered, release) = hold_read(&other);
+    let shared = instance.shared.clone();
+    // A failing assertion drops `release` before the scope joins the reader.
+    let release = std::thread::scope(|scope| {
+        let release = release;
+        let creator = scope.spawn(|| instance.creator().map(drop));
+        assert_eq!(entered.recv_timeout(BUDGET).unwrap(), Step::Stalled);
+        // The read began under the creator's lease, before any caller timeout.
+        assert_eq!(active(&shared), 1);
+        assert!(!exclusive(&paths.other_key_lock));
+        assert_eq!(creator.join().unwrap(), Err(H1_UNKNOWN.into()));
+        release
+    });
+    assert!(instance.h1_unknown());
+    assert_eq!(
+        sign_out(&instance, &paths, &vault, PLAIN),
+        Err(refuse(H1_UNKNOWN))
+    );
+    assert!(!paths.marker.exists());
+    assert!(!vault.pending());
+    drop(instance);
+    assert_eq!(active(&shared), 1, "the read still owns its lease");
+    assert!(!exclusive(&paths.other_key_lock));
+    assert!(!exclusive(&paths.key_lock));
+    release.send(()).unwrap();
+    idle(&shared);
+    assert!(
+        shared.gate.lock().unwrap().h1_unknown,
+        "late success stays unknown"
+    );
+    drop(shared);
+    released_lock(&paths.other_key_lock);
+    released_lock(&paths.key_lock);
+    assert_eq!(other_reads(&other), 1);
+    let instance = boot_fixed(&paths, &vault, &other);
+    assert!(!instance.h1_unknown());
+    assert_eq!(other_reads(&other), 1);
+}
+
+#[test]
+fn finish_setup_owns_its_peer_read_through_timeout_and_instance_drop() {
+    let (_dir, paths) = fixture();
+    let vault = Vault::new(paths.plugin_inventory().unwrap());
+    let other = install_other(&paths, &[]);
+    let state = vault.root.join("state.json");
+    *vault.store.add_denied.lock().unwrap() = true;
+    drop(boot_fixed(&paths, &vault, &other));
+    *vault.store.add_denied.lock().unwrap() = false;
+    let intent = fs::read(&state).unwrap();
+    let mut slots = fixed_slots(&paths, &vault, &other);
+    slots.wait = Duration::from_millis(300);
+    let instance = boot(&paths, Some(slots), |_| Ok(()), || Ok(())).unwrap();
+    assert!(instance.h1_unknown());
+    other_reads(&other);
+    let (entered, release) = hold_read(&other);
+    let shared = instance.shared.clone();
+    // A failing assertion drops `release` before the scope joins the reader.
+    let release = std::thread::scope(|scope| {
+        let release = release;
+        let finish = scope.spawn(|| instance.finish_credential_setup());
+        assert_eq!(entered.recv_timeout(BUDGET).unwrap(), Step::Stalled);
+        assert_eq!(active(&shared), 1);
+        assert!(!exclusive(&paths.other_key_lock));
+        assert_eq!(fs::read(&state).unwrap(), intent, "nothing commits first");
+        assert_eq!(finish.join().unwrap(), Err(SAVING.into()));
+        release
+    });
+    assert!(instance.finish_credential_setup().is_err());
+    drop(instance);
+    assert_eq!(active(&shared), 1, "the finish still owns its lease");
+    assert!(!exclusive(&paths.other_key_lock));
+    assert_eq!(fs::read(&state).unwrap(), intent);
+    release.send(()).unwrap();
+    idle(&shared);
+    drop(shared);
+    released_lock(&paths.other_key_lock);
+    let committed: serde_json::Value = serde_json::from_slice(&fs::read(&state).unwrap()).unwrap();
+    assert_eq!(committed["installation"]["committed"], true);
+    other_reads(&other);
+    let instance = boot_fixed(&paths, &vault, &other);
+    assert!(!instance.h1_unknown());
+}
+
+fn sign_out_unrevoked(instance: &Instance, paths: &Paths) -> Result<(), Failure> {
+    run(attempt_native(
+        instance,
+        paths,
+        PLAIN,
+        instance.plugin_inventory(),
+        &IdentityHost::fixture(),
+        || async { panic!("refused before revoking") },
+        || {},
+        || async { Ok(()) },
+        || async { panic!("no forced exit") },
+    ))
+}
+
+#[test]
+fn sign_out_owns_a_new_peers_read_before_admission_and_refuses_before_revoking() {
+    let (_dir, paths) = fixture();
+    let vault = Vault::new(paths.plugin_inventory().unwrap());
+    let (instance, other, parked) = boot_before_other(&paths, &vault);
+    expose_other(parked);
+    let (entered, release) = hold_read(&other);
+    let shared = instance.shared.clone();
+    // A failing assertion drops `release` before the scope joins the reader.
+    let release = std::thread::scope(|scope| {
+        let release = release;
+        let attempt = scope.spawn(|| sign_out_unrevoked(&instance, &paths));
+        assert_eq!(entered.recv_timeout(BUDGET).unwrap(), Step::Stalled);
+        // Owned before admission: nothing closed, marked or journaled yet.
+        assert_eq!(active(&shared), 1);
+        assert!(!shared.gate.lock().unwrap().closed);
+        assert!(!paths.marker.exists());
+        assert_eq!(attempt.join().unwrap(), Err(refuse(H1_UNKNOWN)));
+        release
+    });
+    assert!(instance.h1_unknown());
+    assert!(!paths.marker.exists());
+    assert!(!vault.pending());
+    drop(instance);
+    assert_eq!(active(&shared), 1, "the read still owns its lease");
+    release.send(()).unwrap();
+    idle(&shared);
+    assert!(
+        shared.gate.lock().unwrap().h1_unknown,
+        "late success stays unknown"
+    );
+    drop(shared);
+    released_lock(&paths.key_lock);
+    assert_eq!(other_reads(&other), 1);
+    let instance = boot_fixed(&paths, &vault, &other);
+    assert!(!instance.h1_unknown());
+}
+
+#[test]
+fn a_peer_appearing_after_sign_out_admission_refuses_with_no_os_read() {
+    let (_dir, paths) = fixture();
+    let vault = Vault::new(paths.plugin_inventory().unwrap());
+    let (instance, other, parked) = boot_before_other(&paths, &vault);
+    vault.calls();
+    super::super::creators::BEFORE_COMMIT.set(Some(Box::new(move || expose_other(parked))));
+    assert_eq!(
+        sign_out_unrevoked(&instance, &paths),
+        Err(refuse(H1_UNKNOWN))
+    );
+    assert_eq!(other_reads(&other), 0, "closed phase reads no OS witness");
+    assert!(vault.calls().is_empty());
+    assert!(!paths.marker.exists());
+    assert!(!vault.pending());
+    assert!(instance.h1_unknown());
+}
+
+#[test]
+fn production_peer_scope_is_the_other_identifiers_recipe_with_its_own_backup_home() {
+    use super::super::super::legacy_identifier::{CURRENT, DEV};
+    let (this, that) = if cfg!(debug_assertions) {
+        (DEV, CURRENT)
+    } else {
+        (CURRENT, DEV)
+    };
+    let paths = Paths::resolve(this).unwrap();
+    let theirs = Paths::resolve(that).unwrap();
+    let own = paths.inspection_scope(None).unwrap();
+    let peer = paths.peer_inspection_scope().unwrap();
+    assert_eq!(peer.inventories, own.inventories, "both fixed roots");
+    let backup = paths
+        .backups
+        .with_file_name(buzz_credential_store::human_store(!cfg!(debug_assertions)));
+    assert_ne!(backup, paths.backups);
+    assert!(peer.homes.contains(&backup));
+    assert!(!peer.homes.contains(&paths.backups));
+    for home in &theirs.others {
+        assert!(peer.homes.contains(home), "{home:?}");
+    }
+    assert_ne!(peer, own);
 }

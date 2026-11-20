@@ -2062,7 +2062,9 @@ pub(super) mod slots {
         Stalled,
         Booted(Result<(), String>),
     }
-    /// Logs every OS call; a delete may be denied, or stall until released.
+    /// Logs every OS call; a delete may be denied, or stall until released, as
+    /// may an add or a read. A stall takes its gate and holds no lock while
+    /// blocked; dropping the release side, as a failing test does, unblocks it.
     #[derive(Default)]
     struct Fake {
         items: Mutex<HashMap<String, Vec<u8>>>,
@@ -2071,10 +2073,16 @@ pub(super) mod slots {
         stall: Mutex<Option<(mpsc::Sender<Step>, mpsc::Receiver<()>)>>,
         add_stall: Mutex<Option<(mpsc::Sender<Step>, mpsc::Receiver<()>)>>,
         add_denied: Mutex<bool>,
+        read_stall: Mutex<Option<(mpsc::Sender<Step>, mpsc::Receiver<()>)>>,
     }
     impl SecretStore for Fake {
         fn read(&self, account: &str) -> Result<zeroize::Zeroizing<Vec<u8>>, StoreError> {
             self.log.lock().unwrap().push(format!("read {account}"));
+            let stall = self.read_stall.lock().unwrap().take();
+            if let Some((steps, release)) = stall {
+                let _ = steps.send(Step::Stalled);
+                let _ = release.recv();
+            }
             let items = self.items.lock().unwrap();
             let value = items.get(account).ok_or(StoreError::Absent)?;
             Ok(zeroize::Zeroizing::new(value.clone()))

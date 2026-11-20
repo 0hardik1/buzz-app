@@ -71,6 +71,18 @@ impl Paths {
         }
         Ok(scope)
     }
+    /// The scope the other supported build binds at its fixed inventory: its own
+    /// identifier's recipe and backup home under this user's backup parent, in
+    /// this environment. Scope only; the temporary value never migrates or
+    /// cleans up. A pair the peer bound elsewhere or differently refuses.
+    pub(super) fn peer_inspection_scope(&self) -> Result<Scope, String> {
+        let identifier = if cfg!(debug_assertions) { CURRENT } else { DEV };
+        let mut peer = Paths::resolve(identifier).ok_or(super::FAILED)?;
+        peer.backups = self
+            .backups
+            .with_file_name(buzz_credential_store::human_store(!cfg!(debug_assertions)));
+        peer.inspection_scope(Some(&self.plugin_peer_inventory()?))
+    }
     pub(super) fn inspect_continuity(
         &self,
         inventory: Option<&std::path::Path>,

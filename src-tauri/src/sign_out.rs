@@ -180,21 +180,28 @@ impl Paths {
         root: &'a Path,
         store: Arc<dyn buzzodz_plugins::SecretStore>,
     ) -> Result<Slots<'a>, String> {
-        self.plugin_slots_with_peer(root, store, Arc::new(buzzodz_plugins::secrets::PeerStore))
+        self.plugin_slots_with_peer(
+            root,
+            store,
+            Arc::new(buzzodz_plugins::secrets::PeerStore),
+            self.peer_inspection_scope()?,
+        )
     }
 
+    /// `peer_scope` is the scope the other build binds at its fixed inventory.
     pub(crate) fn plugin_slots_with_peer<'a>(
         &self,
         root: &'a Path,
         store: Arc<dyn buzzodz_plugins::SecretStore>,
         peer_store: Arc<dyn buzzodz_plugins::SecretStore>,
+        peer_scope: buzzodz_plugins::secrets::preflight::Scope,
     ) -> Result<Slots<'a>, String> {
         use buzzodz_plugins::secrets::continuity::{self, Peer};
         let scope = self.inspection_scope(Some(root))?;
         let peer_root = self.plugin_peer_inventory()?;
         let peer = {
             let (root, store) = (peer_root.clone(), peer_store.clone());
-            move || Peer::new(root.clone(), store.clone())
+            move || Peer::new(root.clone(), peer_scope.clone(), store.clone())
         };
         let (witness_root, witness_store) = (root.to_owned(), store.clone());
         let (finish_scope, finish_root, finish_store) =
@@ -303,9 +310,10 @@ pub(crate) struct Instance {
     seen: u64,
     h1_unknown: bool,
     inventory: Option<PathBuf>,
+    /// Shared so a completion-owned worker can requalify after the Instance is gone.
     continuity: Option<(
         buzzodz_plugins::secrets::preflight::Scope,
-        buzzodz_plugins::secrets::continuity::Established,
+        Arc<buzzodz_plugins::secrets::continuity::Established>,
     )>,
     finish: Option<FinishSetup>,
     wait: Duration,
@@ -314,6 +322,14 @@ type FinishSetup = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 struct Shared {
     locks: Mutex<Locks>,
     gate: Mutex<Gate>,
+}
+impl Shared {
+    fn mark_h1_unknown(&self) {
+        self.gate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .h1_unknown = true;
+    }
 }
 #[derive(Default)]
 struct Gate {
@@ -356,10 +372,59 @@ fn other_key(path: &Path) -> Result<File, String> {
 #[allow(clippy::incompatible_msrv)]
 impl Instance {
     /// Before establishment/metadata; never wait for the other build's K under
-    /// inherited K/A handles. The lease pins those handles through completion.
+    /// inherited K/A handles. The lease pins those handles through completion,
+    /// including the requalification's OS read of a new peer witness: the caller
+    /// waits a bounded time, while the worker keeps the lease until the read
+    /// returns. A timeout is sticky unknown; late success changes nothing.
     fn creator(&self) -> Result<Creator, String> {
-        self.inspect_continuity()?;
-        self.lease(true)
+        self.requalified(self.lease(true)?)
+    }
+
+    /// Before sign-out admission: owns the requalification like `creator`, so
+    /// sign-out cannot close over a peer read, with the established refusal
+    /// order (unknown, then already signing out). It takes no other-K: it
+    /// writes nothing, and sign-out stays independent of the other build.
+    fn requalify_before_sign_out(&self) -> Result<(), String> {
+        let lease = {
+            let mut gate = self.shared.gate.lock().unwrap_or_else(|e| e.into_inner());
+            if self.h1_unknown || gate.h1_unknown {
+                return Err(H1_UNKNOWN.into());
+            }
+            if gate.closed {
+                return Err(ALREADY.into());
+            }
+            gate.active += 1;
+            Creator {
+                shared: self.shared.clone(),
+                other: None,
+            }
+        };
+        self.requalified(lease).map(drop)
+    }
+
+    /// Requalifies under `lease`, handing the same lease back on timely success.
+    fn requalified(&self, lease: Creator) -> Result<Creator, String> {
+        let Some((scope, established)) = self.continuity.clone() else {
+            return Ok(lease);
+        };
+        let (done, result) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("plugin installation requalify".into())
+            .spawn(move || {
+                let qualified = established.requalify(&scope).is_ok();
+                if !qualified {
+                    lease.shared.mark_h1_unknown();
+                }
+                let _ = done.send(qualified.then_some(lease));
+            })
+            .map_err(|_| SAVING.to_owned())?;
+        match result.recv_timeout(self.wait) {
+            Ok(Some(lease)) => Ok(lease),
+            _ => {
+                self.mark_h1_unknown();
+                Err(H1_UNKNOWN.into())
+            }
+        }
     }
 
     /// `creator` without continuity: setup recovery runs while custody is unknown.
@@ -434,11 +499,7 @@ impl Instance {
     }
 
     fn mark_h1_unknown(&self) {
-        self.shared
-            .gate
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .h1_unknown = true;
+        self.shared.mark_h1_unknown();
     }
 
     /// Only a qualified installation supplies the production journal/count root.
@@ -968,7 +1029,7 @@ pub(crate) fn boot(
             .map(|established| {
                 paths
                     .inspection_scope(slots.as_ref().and_then(|s| s.inventory))
-                    .map(|scope| (scope, established))
+                    .map(|scope| (scope, Arc::new(established)))
             })
             .transpose()?,
     })
@@ -1451,9 +1512,10 @@ where
         None::<&Path>
     };
     if root.is_some() {
+        // Owned requalification of any new peer, before admission closes.
         instance
-            .inspect_continuity()
-            .map_err(|_| refuse(H1_UNKNOWN))?;
+            .requalify_before_sign_out()
+            .map_err(|message| refuse(&message))?;
         if instance.h1_unknown() {
             return Err(refuse(H1_UNKNOWN));
         }
@@ -1481,16 +1543,21 @@ where
         )
     };
     let pending = || buzzodz_plugins::secrets::sign_out_pending(root.ok_or(SAVING)?);
-    // This journal covers only this build's root; erase refuses rather than
-    // wipe homes where the other build keeps custody.
-    let admit = || match &instance.continuity {
-        Some((_, established)) if choices.wipe => {
-            match established.peer_custody_in(&paths.wiped_homes()) {
-                Ok(false) => Ok(()),
-                _ => Err(PEER_CUSTODY.to_owned()),
+    // Closed phase: filesystem-only, so evidence changed since the owned
+    // requalification refuses before revocation. This journal covers only this
+    // build's root; erase refuses rather than wipe homes where the other build
+    // keeps custody.
+    let admit = || {
+        instance.inspect_continuity()?;
+        match &instance.continuity {
+            Some((_, established)) if choices.wipe => {
+                match established.peer_custody_in(&paths.wiped_homes()) {
+                    Ok(false) => Ok(()),
+                    _ => Err(PEER_CUSTODY.to_owned()),
+                }
             }
+            _ => Ok(()),
         }
-        _ => Ok(()),
     };
     let journal = Journal {
         commit: &commit,
