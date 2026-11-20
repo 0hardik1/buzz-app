@@ -1,5 +1,5 @@
 import { test, expect } from "./fixture.mjs";
-import { openPage } from "./navigation.mjs";
+import { chooseViewOption, openPage, openViewOptions } from "./navigation.mjs";
 
 test.use({
   pluginFixtures: true,
@@ -33,13 +33,7 @@ test("a replacement sidebar unmounts Messages and returning restores its view", 
     list.getByRole("button", { name: "Alpha", exact: true }),
   ).toBeVisible();
   const original = await list.elementHandle();
-  await page
-    .getByRole("button", { name: "More actions for Work", exact: true })
-    .press("Enter");
-  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-  await page
-    .getByRole("menuitemradio", { name: "Unreads", exact: true })
-    .click();
+  await chooseViewOption(page, "Work", "Unreads");
   const work = page.locator('[data-sidebar-section="group:work"]');
   await work.locator("summary").click();
   await expect(work.locator("details").first()).not.toHaveAttribute("open");
@@ -99,23 +93,14 @@ test("a replacement sidebar unmounts Messages and returning restores its view", 
     .toBe(180);
   await expect(work.locator("details").first()).not.toHaveAttribute("open");
   await page.screenshot({ path: info.outputPath("messages-after-return.png") });
-  await page
-    .getByRole("button", { name: "More actions for Work", exact: true })
-    .press("Enter");
-  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+  const workOptions = await openViewOptions(page, "Work");
   await expect(
-    page.getByRole("menuitemradio", { name: "Unreads", exact: true }),
+    workOptions.getByRole("radio", { name: "Unreads", exact: true }),
   ).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
-  await page.keyboard.press("Escape");
+  await expect(workOptions).toHaveCount(0);
+  const team = await openViewOptions(page, "Team");
   await expect(
-    page.getByRole("menu", { name: "More actions for Work", exact: true }),
-  ).toHaveCount(0);
-  await page
-    .getByRole("button", { name: "More actions for Team", exact: true })
-    .press("Enter");
-  await page.getByRole("menuitem", { name: "Sort", exact: true }).hover();
-  await expect(
-    page.getByRole("menuitemradio", { name: "Recent", exact: true }),
+    team.getByRole("radio", { name: "Recent", exact: true }),
   ).toHaveAttribute("aria-checked", "true");
 });

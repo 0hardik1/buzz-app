@@ -1,8 +1,14 @@
 import { test, expect } from "./fixture.mjs";
 import { animationsSettled } from "./animations.mjs";
 import { open } from "./timeline.mjs";
-import { openPage } from "./navigation.mjs";
+import { openPage, openViewOptions } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
+
+/** A card's Sort choices, in its open View options popover. */
+async function sortChoices(page, title) {
+  const popup = await openViewOptions(page, title);
+  return popup.getByRole("radiogroup", { name: "Sort", exact: true });
+}
 
 // Team starts on an explicit A–Z so journeys can exercise the switch to Recent.
 test.use({
@@ -512,18 +518,10 @@ test("keeps a stationary selected row visible while its neighbors exchange place
   });
   const motion = await holdSidebarMotion(page);
   try {
-    await section
-      .getByRole("button", { name: "More actions for Team" })
+    await (await sortChoices(page, "Team"))
+      .getByRole("radio", { name: "Recent", exact: true })
       .click();
-    await page
-      .getByRole("menu", { name: "More actions for Team", exact: true })
-      .getByRole("menuitem", { name: "Sort", exact: true })
-      .focus();
-    await page.keyboard.press("ArrowRight");
-    await page
-      .getByRole("menu", { name: "Sort Team", exact: true })
-      .getByRole("menuitemradio", { name: "Recent", exact: true })
-      .click();
+    await page.keyboard.press("Escape");
     await expect
       .poll(() =>
         rows.evaluateAll((elements) =>
@@ -604,16 +602,10 @@ test("retargets an unfinished slide without jumping or losing focus", async ({
   await open(page, app);
   const section = page.locator('[data-sidebar-section="channels"]');
   const rows = section.locator("[data-channel-id]");
-  await section.getByRole("button", { name: "More actions for Team" }).click();
-  await page
-    .getByRole("menu", { name: "More actions for Team", exact: true })
-    .getByRole("menuitem", { name: "Sort", exact: true })
-    .focus();
-  await page.keyboard.press("ArrowRight");
-  await page
-    .getByRole("menu", { name: "Sort Team", exact: true })
-    .getByRole("menuitemradio", { name: "Recent", exact: true })
+  await (await sortChoices(page, "Team"))
+    .getByRole("radio", { name: "Recent", exact: true })
     .click();
+  await page.keyboard.press("Escape");
   const cedar = section.locator('[data-channel-id="cedar"]');
   const willow = section.locator('[data-channel-id="willow"]');
   const settled = () =>
@@ -841,7 +833,7 @@ test.describe("section sort persistence", () => {
     const channels = sidebar.locator('[data-sidebar-section="channels"]');
     const work = sidebar.locator('[data-sidebar-section="group:work"]');
     const trigger = channels.getByRole("button", {
-      name: "More actions for Team",
+      name: /^View options for Team(, filtered)?$/,
     });
     const rows = channels.locator("[data-channel-id]");
     const order = () =>
@@ -864,27 +856,24 @@ test.describe("section sort persistence", () => {
     const startupActivity = activity();
     expect(startupActivity.length).toBeGreaterThan(2);
     expect(new Set(startupActivity).size).toBe(startupActivity.length);
+    const popup = page.getByRole("dialog", {
+      name: "View options for Team",
+      exact: true,
+    });
     async function openSort() {
-      await trigger.click();
+      await sortChoices(page, "Team");
       await expect(channels.locator("details")).toHaveAttribute("open", "");
-      await page
-        .getByRole("menu", { name: "More actions for Team", exact: true })
-        .getByRole("menuitem", { name: "Sort", exact: true })
-        .focus();
-      await page.keyboard.press("ArrowRight");
-      await expect(
-        page.getByRole("menu", { name: "Sort Team", exact: true }),
-      ).toBeVisible();
     }
     await page.screenshot({
       path: testInfo.outputPath("sidebar-sort-alpha.png"),
       clip: { x: 0, y: 0, width: 540, height: 460 },
     });
     await openSort();
-    const menu = page.getByRole("menu", { name: "Sort Team", exact: true });
-    await expect(
-      menu.getByRole("menuitemradio", { name: "A–Z" }),
-    ).toHaveAttribute("aria-checked", "true");
+    const menu = popup.getByRole("radiogroup", { name: "Sort", exact: true });
+    await expect(menu.getByRole("radio", { name: "A–Z" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
     let release, started;
     const held = new Promise((resolve) => {
       release = resolve;
@@ -904,22 +893,21 @@ test.describe("section sort persistence", () => {
       });
     });
     try {
-      await menu.getByRole("menuitemradio", { name: "Recent" }).click();
+      await menu.getByRole("radio", { name: "Recent" }).click();
       await requestStarted;
-      await expect(menu).not.toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(popup).not.toBeVisible();
       await expect(trigger).toBeFocused();
       await expect(page.getByText(/Saving(?: sidebar changes)?…/)).toHaveCount(
         0,
       );
       await openSort();
-      await expect(
-        menu.getByRole("menuitemradio", { name: "A–Z" }),
-      ).toBeEnabled();
-      await expect(
-        menu.getByRole("menuitemradio", { name: "Recent" }),
-      ).toHaveAttribute("aria-checked", "true");
+      await expect(menu.getByRole("radio", { name: "A–Z" })).toBeEnabled();
+      await expect(menu.getByRole("radio", { name: "Recent" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
       await expect.poll(order).not.toEqual(alphaOrder);
-      await page.keyboard.press("Escape");
       await page.keyboard.press("Escape");
     } finally {
       release();
@@ -971,86 +959,38 @@ test.describe("section sort persistence", () => {
     await expect(cedar).toBeFocused();
     await expect.poll(order).toEqual(recentOrder);
     await openSort();
-    await expect(
-      menu.getByRole("menuitemradio", { name: "Recent" }),
-    ).toHaveAttribute("aria-checked", "true");
-    // Real layout verifies that the shared nested-radius recipe reaches both the lone
-    // submenu trigger and grouped radio choices, without feature-local corners.
-    const sort = page
-      .getByRole("menu", { name: "More actions for Team", exact: true })
-      .getByRole("menuitem", { name: "Sort", exact: true });
-    for (const mode of ["light", "dark"]) {
-      await page.evaluate((value) => {
-        document.documentElement.dataset.colorMode = value;
-      }, mode);
-      for (const width of [720, 1000, 1440]) {
-        await page.setViewportSize({ width, height: 950 });
-        const radius = await sort.evaluate((element) => {
-          const popup = element.closest(".buzz-menu-popup");
-          const style = getComputedStyle(popup);
-          return `${Math.max(
-            0,
-            Number.parseFloat(style.borderTopLeftRadius) -
-              Number.parseFloat(style.paddingLeft) -
-              Number.parseFloat(style.borderLeftWidth),
-          )}px`;
-        });
-        for (const item of [
-          sort,
-          menu.getByRole("menuitemradio", { name: "Recent" }),
-          menu.getByRole("menuitemradio", { name: "A–Z" }),
-        ]) {
-          for (const corner of [
-            "top-left",
-            "top-right",
-            "bottom-left",
-            "bottom-right",
-          ]) {
-            await expect(item).toHaveCSS(`border-${corner}-radius`, radius);
-          }
-        }
-      }
-    }
-    await expect(menu).toHaveCSS("opacity", "1");
-    await expect(
-      page.getByRole("menu", { name: "More actions for Team", exact: true }),
-    ).toHaveCSS("opacity", "1");
+    await expect(menu.getByRole("radio", { name: "Recent" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await expect(popup).toHaveCSS("opacity", "1");
     await page.screenshot({
       path: testInfo.outputPath("sidebar-sort-menu.png"),
       clip: { x: 0, y: 0, width: 540, height: 460 },
     });
-    const box = await menu.boundingBox(),
+    const box = await popup.boundingBox(),
       viewport = page.viewportSize();
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
     await page.keyboard.press("Escape");
-    await expect(menu).not.toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(
-      page.getByRole("menu", { name: "More actions for Team", exact: true }),
-    ).not.toBeVisible();
-    await work.getByRole("button", { name: "More actions for Work" }).click();
-    await page
-      .getByRole("menu", { name: "More actions for Work", exact: true })
-      .getByRole("menuitem", { name: "Sort", exact: true })
-      .focus();
-    await page.keyboard.press("ArrowRight");
-    const workMenu = page.getByRole("menu", { name: "Sort Work", exact: true });
-    await expect(
-      workMenu.getByRole("menuitemradio", { name: "A–Z" }),
-    ).toHaveAttribute("aria-checked", "true");
-    await confirmedSort(() =>
-      workMenu.getByRole("menuitemradio", { name: "Recent" }).click(),
+    await expect(popup).not.toBeVisible();
+    const workMenu = await sortChoices(page, "Work");
+    await expect(workMenu.getByRole("radio", { name: "A–Z" })).toHaveAttribute(
+      "aria-checked",
+      "true",
     );
+    await confirmedSort(() =>
+      workMenu.getByRole("radio", { name: "Recent" }).click(),
+    );
+    await page.keyboard.press("Escape");
     await expect(workMenu).not.toBeVisible();
     expect(app.report.sidebarPublications.at(-1).blob.groups).toEqual({});
     await expect.poll(order).toEqual(recentOrder);
     await openSort();
-    await confirmedSort(() =>
-      menu.getByRole("menuitemradio", { name: "A–Z" }).click(),
-    );
+    await confirmedSort(() => menu.getByRole("radio", { name: "A–Z" }).click());
+    await page.keyboard.press("Escape");
     await expect(menu).not.toBeVisible();
     await expect.poll(order).toEqual(alphaOrder);
     expect(app.report.sidebarPublications.at(-1).blob.groups).toEqual({
@@ -1064,14 +1004,9 @@ test.describe("section sort persistence", () => {
     ).toBeEnabled();
     await page.keyboard.press("Escape");
     await expect(cedar).toBeFocused();
-    await work.getByRole("button", { name: "More actions for Work" }).click();
-    await page
-      .getByRole("menu", { name: "More actions for Work", exact: true })
-      .getByRole("menuitem", { name: "Sort", exact: true })
-      .focus();
-    await page.keyboard.press("ArrowRight");
+    await sortChoices(page, "Work");
     await expect(
-      workMenu.getByRole("menuitemradio", { name: "Recent" }),
+      workMenu.getByRole("radio", { name: "Recent" }),
     ).toHaveAttribute("aria-checked", "true");
     expect(app.report.unexpected).toEqual([]);
   });
@@ -1126,25 +1061,18 @@ test.describe("activity read failures", () => {
       );
     await expect(rows.first()).toBeVisible();
     const alphaOrder = await order();
-    const menu = page.getByRole("menu", { name: "Sort Team", exact: true });
+    let menu;
     async function openSort() {
-      await channels
-        .getByRole("button", { name: "More actions for Team" })
-        .click();
-      await page
-        .getByRole("menu", { name: "More actions for Team", exact: true })
-        .getByRole("menuitem", { name: "Sort", exact: true })
-        .focus();
-      await page.keyboard.press("ArrowRight");
-      await expect(menu).toBeVisible();
+      menu = await sortChoices(page, "Team");
     }
     async function setSort(mode) {
       await openSort();
       const saved = page.waitForResponse("**/sidebar-sort");
-      await menu.getByRole("menuitemradio", { name: mode }).click();
+      await menu.getByRole("radio", { name: mode }).click();
       const response = await saved;
       expect(response.ok()).toBe(true);
       await response.finished();
+      await page.keyboard.press("Escape");
       await expect(menu).not.toBeVisible();
     }
     const notifications = page.getByRole("region", {
@@ -1189,10 +1117,10 @@ test.describe("activity read failures", () => {
       await setSort("A–Z");
       await failRecent(5);
       await openSort();
-      await expect(
-        menu.getByRole("menuitemradio", { name: "Recent" }),
-      ).toHaveAttribute("aria-checked", "true");
-      await page.keyboard.press("Escape");
+      await expect(menu.getByRole("radio", { name: "Recent" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
       await page.keyboard.press("Escape");
       await notifications.getByRole("button", { name: "Retry" }).click();
       await expect.poll(() => attempts).toBe(6);
@@ -1201,9 +1129,10 @@ test.describe("activity read failures", () => {
         .poll(async () => (await order()).slice(0, 3))
         .toEqual(["willow", "maple", "cedar"]);
       await openSort();
-      await expect(
-        menu.getByRole("menuitemradio", { name: "Recent" }),
-      ).toHaveAttribute("aria-checked", "true");
+      await expect(menu.getByRole("radio", { name: "Recent" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
       expect(app.report.unexpected).toEqual([]);
     } finally {
       releaseFailure();
@@ -1377,16 +1306,8 @@ test.describe("sorting with lifecycle visibility", () => {
     await expect(archiveNotice).toBeVisible();
     await expect(composer).toHaveCount(0);
     // Opening Sort proves saved preference decoding and sidebar startup settled.
-    await channels
-      .getByRole("button", { name: "More actions for Team" })
-      .click();
-    await page
-      .getByRole("menu", { name: "More actions for Team", exact: true })
-      .getByRole("menuitem", { name: "Sort", exact: true })
-      .focus();
-    await page.keyboard.press("ArrowRight");
     await expect(
-      page.getByRole("menuitemradio", { name: "Recent" }),
+      (await sortChoices(page, "Team")).getByRole("radio", { name: "Recent" }),
     ).toHaveAttribute("aria-checked", "true");
     await expect
       .poll(

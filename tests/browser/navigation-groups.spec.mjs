@@ -1,5 +1,5 @@
 import { openChannelDetails } from "./channel-details.mjs";
-import { openPage, selectCommunity } from "./navigation.mjs";
+import { openPage, selectCommunity, viewOptionsButton } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
 import { holdReadingFocus } from "./reading.mjs";
@@ -330,19 +330,14 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
   // notices (Loading conversations…) that shift the sidebar after a reload.
   // Pointer opening is covered by navigation-sorting.
   const openSort = async () => {
-    await page.getByRole("button", { name: "More actions for Team" }).focus();
+    await viewOptionsButton(page, "Team").focus();
     await page.keyboard.press("Enter");
-    // Opening during a preference refresh can skip the disabled Create item.
-    // Establish keyboard ownership before moving to Sort in either case.
-    await expect(
-      page
-        .getByRole("menu", { name: "More actions for Team", exact: true })
-        .locator('[role="menuitem"][data-highlighted]'),
-    ).toBeVisible();
-    const sort = page.getByRole("menuitem", { name: "Sort", exact: true });
-    await sort.focus();
-    await page.keyboard.press("ArrowRight");
-    return page.getByRole("menu", { name: "Sort Team", exact: true });
+    const options = page.getByRole("dialog", {
+      name: "View options for Team",
+      exact: true,
+    });
+    await expect(options).toBeVisible();
+    return options.getByRole("radiogroup", { name: "Sort", exact: true });
   };
   const sortHeld = gate(),
     sortStarted = gate();
@@ -354,7 +349,8 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
   let sorted, moved;
   try {
     const sortMenu = await openSort();
-    await sortMenu.getByRole("menuitemradio", { name: "Recent" }).click();
+    await sortMenu.getByRole("radio", { name: "Recent" }).click();
+    await page.keyboard.press("Escape");
     await sortStarted.promise;
     const moveMenu = await openMove(page, rowIn(page, "channels"));
     await moveMenu
@@ -364,9 +360,8 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
     await expect(rowIn(page, "channels")).toHaveCount(0);
     const pendingSort = await openSort();
     await expect(
-      pendingSort.getByRole("menuitemradio", { name: "Recent" }),
+      pendingSort.getByRole("radio", { name: "Recent" }),
     ).toHaveAttribute("aria-checked", "true");
-    await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
   } finally {
     // Both writes are held behind the sort gate. Start their response waits
@@ -390,7 +385,7 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
   await expect(beta).toBeVisible();
   const restoredSort = await openSort();
   await expect(
-    restoredSort.getByRole("menuitemradio", { name: "Recent" }),
+    restoredSort.getByRole("radio", { name: "Recent" }),
   ).toHaveAttribute("aria-checked", "true");
 });
 

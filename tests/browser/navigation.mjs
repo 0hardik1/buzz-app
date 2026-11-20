@@ -269,14 +269,36 @@ export function pageChoice(group, name) {
     .or(group.getByRole("row", { name, exact: true }));
 }
 
-/** A card made during a test starts on the last 30 days, and fixture history
- * is from 2023: show the card's every conversation, as its menu's All does. */
-export async function showAllInCard(page, title) {
-  await page
-    .getByRole("button", { name: `More actions for ${title}`, exact: true })
-    .click();
-  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
-  await page.getByRole("menuitemradio", { name: "All", exact: true }).click();
+/** A card's View options button. Its name says when the card is filtered. */
+export function viewOptionsButton(scope, title) {
+  return scope.getByRole("button", {
+    name: new RegExp(`^View options for ${title}(, filtered)?$`),
+  });
+}
+
+/** Opens a card's View options popover. Focus reveals its hover-only button. */
+export async function openViewOptions(page, title, scope = page) {
+  const button = viewOptionsButton(scope, title);
+  await button.focus();
+  await button.click();
+  const popup = page.getByRole("dialog", {
+    name: `View options for ${title}`,
+    exact: true,
+  });
+  await expect(popup).toBeVisible();
+  return popup;
+}
+
+/** Picks one View options choice, such as Unreads or A–Z, then closes it. */
+export async function chooseViewOption(page, title, name, scope = page) {
+  const popup = await openViewOptions(page, title, scope);
+  await popup.getByRole("radio", { name, exact: true }).click();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(popup).toHaveCount(0);
+}
+
+/** A card made during a test starts on the last 30 days, and fixture history
+ * is from 2023: show the card's every conversation, as View options' All does. */
+export function showAllInCard(page, title) {
+  return chooseViewOption(page, title, "All");
 }
