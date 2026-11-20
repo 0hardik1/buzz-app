@@ -485,6 +485,11 @@ test("activity details keep readable text through both handoffs and survive new 
       await expect.poll(() => page.evaluate(() => innerWidth)).toBe(width);
       await virtuaIdle(page);
       for (const open of [true, false]) {
+        // Narrow wrapping can move this row below the viewport. Sample a
+        // visible transition, after scrolling and its measurements finish.
+        await step.scrollIntoViewIfNeeded();
+        await virtuaIdle(page);
+        await expect(step).toBeInViewport();
         const painted = await step.evaluate(toggleActivity);
         expect(painted).toHaveLength(7);
         expect(painted.every((sample) => sample.readable)).toBe(true);
