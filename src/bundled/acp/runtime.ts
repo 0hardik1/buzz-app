@@ -53,7 +53,7 @@ import {
 } from "../../features/agents/service";
 import { soloChat } from "../../features/agents/solo-chat";
 import { sessionPrompts } from "../../features/agents/session-prompts";
-import { localStore } from "../../features/agents/store";
+import { localStore, type AgentStore } from "../../features/agents/store";
 import type { Host } from "../../features/host/service";
 import type { EventData } from "../../features/relay/events";
 import type { RelayData } from "../../features/relay/service";
@@ -214,6 +214,8 @@ export class AcpRuntime {
     private readonly cache?: ModelCache,
     /** Where saved conversations are kept on this device. */
     private readonly storage: Storage = globalThis.localStorage,
+    /** Agent storage, where what each session started with is kept. */
+    private readonly agentStore: AgentStore = localStore(storage),
   ) {}
 
   private get spawn(): Spawn {
@@ -1011,7 +1013,7 @@ export class AcpRuntime {
 
   /** What each of the agent's new sessions was started with. */
   private prompts(agent: AgentKey) {
-    return sessionPrompts(localStore(this.storage), "acp", agent);
+    return sessionPrompts(this.agentStore, "acp", agent);
   }
 
   replays(agent: AgentKey) {

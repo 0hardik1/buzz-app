@@ -18,7 +18,8 @@ import {
   PROMPTS_PREFIX,
   sessionPrompts,
 } from "../../features/agents/session-prompts";
-import { localStore } from "../../features/agents/store";
+import { localStore, type AgentStore } from "../../features/agents/store";
+import { loadAgentStorage } from "../../features/agents/state";
 import { eventDto, type RelayEvent } from "../../features/relay/events";
 import { keypair, signed } from "../../features/relay/testing";
 
@@ -95,8 +96,11 @@ function setup(
     solo = false,
     canvas,
     storage = memoryStorage(),
+    agentStore = localStore(storage),
     workflowAuthority = "workflow-authority",
   }: {
+    /** Agent storage, which desktop keeps apart from `storage`. */
+    agentStore?: AgentStore;
     /** The community's relay workflow key. */
     workflowAuthority?: string;
     /** Where saved conversations and models are kept. */
@@ -187,6 +191,7 @@ function setup(
     added,
     cache,
     storage,
+    agentStore,
   );
   const published: { content: string; tags: string[][] }[] = [];
   const agent = {
@@ -1279,6 +1284,51 @@ describe("AcpRuntime", () => {
         (typeof two.fake.harnesses)[0]
       >;
     }
+
+    it("keeps a session's prompt in agent storage, through the startup move", async () => {
+      const config = await confirmed({ instructions: INSTRUCTIONS });
+      const local = memoryStorage();
+      const saved = new Map<string, string>();
+      const files = {
+        load: async () => Object.fromEntries(saved),
+        set: async (key: string, value: string | null) => {
+          if (value === null) saved.delete(key);
+          else saved.set(key, value);
+        },
+      };
+      const one = setup(
+        { capabilities: resumable },
+        { storage: local, agentStore: await loadAgentStorage(local, files) },
+      );
+      one.sync(config);
+      const root = message("1", "@Opal hello");
+      await one.deliver(root, config).run;
+      await vi.waitFor(() =>
+        expect(one.fake.harnesses[0]?.turns).toHaveLength(1),
+      );
+      await flush(20);
+      one.runtime.dispose();
+      // The next start moves agent keys out of localStorage.
+      const two = setup(
+        {
+          capabilities: resumable,
+          replay: [
+            {
+              sessionUpdate: "user_message_chunk",
+              content: { type: "text", text: "hi" },
+            },
+          ],
+        },
+        { storage: local, agentStore: await loadAgentStorage(local, files) },
+      );
+      two.sync(config);
+      const read = await two.runtime.transcript(
+        self,
+        `${channel}/${root.id}`,
+        new AbortController().signal,
+      );
+      expect(JSON.stringify(read?.turns[0])).toContain(INSTRUCTIONS);
+    });
 
     it("keeps a new session's prompt, and never today's for a resumed one", async () => {
       const config = await confirmed({ instructions: INSTRUCTIONS });

@@ -34,6 +34,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
     (pubkey, signal) => agents.core(pubkey, signal),
     () => agents.tools(),
     cache,
+    localStorage,
+    agents.storage,
   );
   const sync = () => {
     const snapshot = agents.snapshot();
