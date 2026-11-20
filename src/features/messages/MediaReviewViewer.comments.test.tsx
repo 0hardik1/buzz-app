@@ -1125,13 +1125,16 @@ it.each(["verified", "different"] as const)(
       );
       expect(editor).toHaveTextContent("Keep my pending reply");
       expect(editor).toHaveFocus();
-      expect(
-        readView(
-          "review-image",
-          `draft:one:thread:${fixture.sourceRoot}`,
-          null,
-        ),
-      ).toMatchObject({ text: "Keep my pending reply" });
+      // A focused draft saves after its quiet period.
+      await waitFor(() =>
+        expect(
+          readView(
+            "review-image",
+            `draft:one:thread:${fixture.sourceRoot}`,
+            null,
+          ),
+        ).toMatchObject({ text: "Keep my pending reply" }),
+      );
       expect(fixture.sign).not.toHaveBeenCalled();
     } finally {
       fixture.releaseVerification();
