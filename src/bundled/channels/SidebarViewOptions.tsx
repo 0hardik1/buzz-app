@@ -31,7 +31,8 @@ const dates = [
 
 export type SidebarViewFilter = {
   value: SidebarFilter;
-  /** Differs from the card's default, so the button shows it. */
+  /** Unreads only or a time range is on, unlike the default All, so the
+   * button shows it. Sort and layout don't count. */
   filtered?: boolean;
   disabled?: boolean;
   activeWindowSeconds?: number | undefined;
@@ -99,7 +100,10 @@ export function SidebarViewOptions({
       />
       <PopoverPopup size="compact" align="end">
         <div className={styles.viewOptions}>
-          <PopoverTitle emphasis="quiet">Filter &amp; sort</PopoverTitle>
+          <PopoverTitle emphasis="quiet">
+            {/* Every card shares the visible title; its name says which. */}
+            Filter &amp; sort <span className="sr-only">for {title}</span>
+          </PopoverTitle>
           {filter && (
             <SwitchPreferenceRow
               label="Unreads only"

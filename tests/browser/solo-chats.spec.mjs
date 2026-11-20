@@ -1,7 +1,7 @@
 import { pauseClock } from "./clock.mjs";
 import { test, expect } from "./fixture.mjs";
 import { generateSecretKey, verifyEvent } from "nostr-tools";
-import { newChat, openPage, sendOnlyTo, showAllInCard } from "./navigation.mjs";
+import { newChat, openPage, sendOnlyTo } from "./navigation.mjs";
 
 const id = "33333333-3333-4333-8333-333333333333";
 const destination = "55555555-5555-4555-8555-555555555555";
@@ -180,7 +180,6 @@ test.describe("Berd-style Solo project organization", () => {
     const project = section.locator("summary");
     await expect(project).toBeVisible();
     await expect(section.locator("details")).toHaveAttribute("open");
-    await showAllInCard(page, "Work");
     await expect
       .poll(() => app.report.sidebarPublications?.length ?? 0)
       .toBe(1);
@@ -360,7 +359,6 @@ test("dragging a chat between a workspace and Solo saves and reloads like Move t
   await expect(field).toHaveValue("Work");
   await dialog.getByRole("button", { name: "Create and move" }).click();
   await expect(dialog).not.toBeVisible();
-  await showAllInCard(page, "Work");
   await expect(inProject("Alpha")).toBeVisible();
   const work = (await published(1))[id];
 

@@ -11,10 +11,6 @@ import { ConvertToChannel } from "../../features/solo/ConvertToChannel";
 import { useChatConversions } from "../../features/solo/conversion";
 import { canEditLifetime } from "../../features/solo/Lifetime";
 import { TeamSidebarSections, TeamSidebarSection } from "./TeamSidebarSource";
-import {
-  setSidebarFilterAll,
-  useSidebarFilterAll,
-} from "./SidebarFilterChoice";
 import type { WorkspaceSidebarComposition } from "./sidebar-environment";
 import { revealCreatedChannel } from "../../features/channel-navigation/created-channel";
 import {
@@ -289,19 +285,26 @@ export function ChannelInventory({
     },
     [preferences.data, rowSortModes],
   );
-  // Unsaved cards show the last 30 days, so the most active rise into view,
-  // unless All was chosen here; Favorites and Plugins always show everything.
-  const filterAll = useSidebarFilterAll(scope);
+  // Unsaved cards show everything, all time; a filter is something chosen.
   const sectionFilter = useCallback(
     (key: string): "all" | "unreads" | "active" =>
       preferences.data?.filters?.[
         key.startsWith("group:") ? `section:${key.slice(6)}` : key
-      ] ??
-      (key === "starred" || key === SIDEBAR_PAGES_SECTION || filterAll(key)
-        ? "all"
-        : "active"),
-    [preferences.data, filterAll],
+      ] ?? "all",
+    [preferences.data],
   );
+  // Whether a card limits its conversations to a time range: Active always
+  // does; Unreads does when a range is saved beside it.
+  const sectionWindowed = (key: string) => {
+    const mode = sectionFilter(key);
+    return (
+      mode === "active" ||
+      (mode === "unreads" &&
+        preferences.data?.activeWindowSeconds?.[
+          key.startsWith("group:") ? `section:${key.slice(6)}` : key
+        ] !== undefined)
+    );
+  };
   // The filters are Unreads only and Time range; sort and layout aren't.
   // A card is filtered when either narrows it: Unreads only, or any range.
   const sectionFiltered = (key: string) => sectionFilter(key) !== "all";
@@ -311,8 +314,8 @@ export function ChannelInventory({
   const pluginSorted = appliedSorts.some(
     (mode) => mode !== "alpha" && mode !== "recent",
   );
-  // Set from the rendered cards below; assumed until they render, since
-  // cards default to the Active filter.
+  // Set from the rendered cards below; assumed until they render, so a saved
+  // time range never briefly ranks by recency.
   const [activeFiltered, setActiveFiltered] = useState(true);
   const list = useChannelRoster(queries.channels, {
     activity: true,
@@ -559,15 +562,12 @@ export function ChannelInventory({
     preferencesSettled &&
     cards.some(
       ({ key }) =>
-        sidebarSortNeedsActivity(sectionSort(key)) ||
-        sectionFilter(key) === "active",
+        sidebarSortNeedsActivity(sectionSort(key)) || sectionWindowed(key),
     );
   useEffect(() => {
     if (needsActivity) return queries.channels.demandActivity?.();
   }, [needsActivity, queries.channels]);
-  const cardsActiveFiltered = cards.some(
-    ({ key }) => sectionFilter(key) === "active",
-  );
+  const cardsActiveFiltered = cards.some(({ key }) => sectionWindowed(key));
   useEffect(() => {
     if (preferencesSettled) setActiveFiltered(cardsActiveFiltered);
   }, [preferencesSettled, cardsActiveFiltered]);
@@ -1222,9 +1222,8 @@ export function ChannelInventory({
     // Menus pass the card key (group:x); Retry passes the saved key (section:x).
     const card = key.startsWith("section:") ? `group:${key.slice(8)}` : key;
     const saved = card.startsWith("group:") ? `section:${card.slice(6)}` : card;
-    setSidebarFilterAll(scope, card, mode === "all");
-    // All lives on this device; with no saved filter to clear, the relay
-    // already says All. A failed choice it replaces is retired either way.
+    // With no saved filter to clear, the relay already says All. A failed
+    // choice it replaces is retired either way.
     if (mode === "all" && preferences.data?.filters?.[saved] === undefined) {
       preferences.dismissFilterError(saved);
       return Promise.resolve();

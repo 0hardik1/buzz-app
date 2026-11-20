@@ -686,7 +686,9 @@ export function createSidebarPreferencesStore({
           : {
               version: 1,
               groups: data.filters ?? {},
+              // Already projected: each group's window matches its mode.
               activeWindowSeconds: data.activeWindowSeconds,
+              unreadsWindowSeconds: data.activeWindowSeconds,
             },
         data.sectionOrder !== undefined,
       );

@@ -71,12 +71,6 @@ export const test = base.extend({
   soloOutsideAgentNames: [[], { option: true }],
   sortingSidebar: [false, { option: true }],
   initialSidebarSort: [{}, { option: true }],
-  /** Fixture activity dates from 2023, so these cards start on All instead
-   * of the product's 30-day default; an empty list keeps the default. */
-  showAllCards: [
-    ["solo", "channels", "forums", "dms", "group:work"],
-    { option: true },
-  ],
   channelLifecycle: [false, { option: true }],
   memberRoleChanges: [false, { option: true }],
   leaveRosterBeforeAck: [false, { option: true }],
@@ -177,7 +171,6 @@ export const test = base.extend({
       soloOutsideAgentNames,
       sortingSidebar,
       initialSidebarSort,
-      showAllCards,
       channelLifecycle,
       memberRoleChanges,
       leaveRosterBeforeAck,
@@ -2773,27 +2766,6 @@ export const test = base.extend({
           });
           observer.observe(document, { childList: true, subtree: true });
         });
-      // Cards chosen as All on this device, once; reloads keep later choices.
-      if (showAllCards.length)
-        await page.addInitScript(
-          ({ scopes, viewer, cards }) => {
-            for (const relay of scopes) {
-              const key = `buzz-view.v1:${JSON.stringify([`${relay}:${viewer}`, "sidebar:filter-all"])}`;
-              if (localStorage.getItem(key) === null)
-                localStorage.setItem(
-                  key,
-                  JSON.stringify(
-                    Object.fromEntries(cards.map((card) => [card, true])),
-                  ),
-                );
-            }
-          },
-          {
-            scopes: Object.values(JSON.parse(fixtureAliases)),
-            viewer,
-            cards: showAllCards,
-          },
-        );
       await page.addInitScript(
         ({
           viewer,

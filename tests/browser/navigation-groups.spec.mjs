@@ -333,7 +333,7 @@ test("row menu moves and removes a channel optimistically, retaining keyboard na
     await viewOptionsButton(page, "Team").focus();
     await page.keyboard.press("Enter");
     const options = page
-      .getByRole("dialog", { name: "Filter & sort", exact: true })
+      .getByRole("dialog", { name: "Filter & sort for Team", exact: true })
       .and(page.locator(":not([data-closed])"));
     await expect(options).toBeVisible();
     return options.getByRole("radiogroup", { name: "Sort", exact: true });

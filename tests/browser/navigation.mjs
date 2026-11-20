@@ -281,9 +281,9 @@ export async function openViewOptions(page, title, scope = page) {
   const button = viewOptionsButton(scope, title);
   await button.focus();
   await button.click();
-  // Every card's popover shares its title; skip one still closing.
+  // Skip a popover still closing.
   const popup = page
-    .getByRole("dialog", { name: "Filter & sort", exact: true })
+    .getByRole("dialog", { name: `Filter & sort for ${title}`, exact: true })
     .and(page.locator(":not([data-closed])"));
   await expect(popup).toBeVisible();
   return popup;
@@ -296,12 +296,12 @@ export function unreadsSwitch(popup) {
   return popup.getByRole("switch", { name: "Unreads only", exact: true });
 }
 
-/** View options' Date dropdown. */
+/** View options' Time range dropdown. */
 export function dateChoice(popup) {
   return popup.getByRole("combobox", { name: "Time range", exact: true });
 }
 
-/** Picks a Date in an open View options popover. */
+/** Picks a Time range in an open View options popover. */
 export async function chooseDate(page, popup, name) {
   await dateChoice(popup).click();
   await page.getByRole("option", { name, exact: true }).click();
@@ -332,10 +332,4 @@ export async function chooseViewOption(page, title, name, scope = page) {
   } else await popup.getByRole("radio", { name, exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(popup).toHaveCount(0);
-}
-
-/** A card made during a test starts on the last 30 days, and fixture history
- * is from 2023: show the card's every conversation, as View options' All does. */
-export function showAllInCard(page, title) {
-  return chooseViewOption(page, title, "All");
 }

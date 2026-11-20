@@ -205,308 +205,321 @@ export function SidebarSection({
     }
   };
   return (
-    <div
-      ref={dropRef}
-      className={styles.channelSection}
-      data-sidebar-card=""
-      data-sidebar-section={sectionKey}
-      data-drop-target={dropTarget || undefined}
-      data-drop-edge={dropEdge}
-      data-section-dragging={dragging || undefined}
-      data-menu-open={menuOpen || undefined}
-      data-see-all={seeingAll || undefined}
-      data-see-all-returning={returning || undefined}
-    >
+    <>
+      {/* Back is its own card above the one it returns from. */}
       {seeingAll && (
-        <NavigationItem
-          ref={back}
-          data-see-all-back=""
-          icon={<CaretLeftIcon size={14} />}
-          label="Back"
-          aria-label="Back to all cards"
-          onClick={() => {
-            setSidebarSeeAll(undefined);
-            // Back on the main level, focus lands on this card again.
-            requestAnimationFrame(() =>
-              document
-                .querySelector<HTMLElement>(
-                  `[data-sidebar-section="${CSS.escape(sectionKey)}"] summary`,
-                )
-                ?.focus({ preventScroll: true }),
-            );
-          }}
-        />
-      )}
-      <NavigationSectionHeading
-        disclosure
-        revealActions
-        actions={
-          <>
-            {!hideMoreActions && (
-              <MenuRoot open={menuOpen} onOpenChange={setMenuOpen}>
-                <MenuTrigger
-                  ref={actionsTrigger}
-                  render={(props) => (
-                    <IconButton
-                      {...props}
-                      size="compact"
-                      aria-label={`More actions for ${title}`}
-                      icon={<DotsThreeIcon strokeWidth={2.5} size={15} />}
-                    />
-                  )}
-                />
-                <MenuPopup align="end" aria-label={`More actions for ${title}`}>
-                  {createSection && (
-                    <MenuItem
-                      disabled={!createSection.available}
-                      onClick={() => {
-                        setMenuOpen(false);
-                        if (actionsTrigger.current)
-                          createSection.open(actionsTrigger.current);
-                      }}
-                    >
-                      <MenuIcon>
-                        <PlusIcon size={14} />
-                      </MenuIcon>
-                      Create workspace
-                    </MenuItem>
-                  )}
-                  {move && (
-                    <>
-                      <MenuItem
-                        disabled={!move.up}
-                        onClick={() => {
-                          move.up?.();
-                          setMenuOpen(false);
-                        }}
-                      >
-                        <MenuIcon>
-                          <ArrowUpIcon size={14} />
-                        </MenuIcon>
-                        Move up
-                      </MenuItem>
-                      <MenuItem
-                        disabled={!move.down}
-                        onClick={() => {
-                          move.down?.();
-                          setMenuOpen(false);
-                        }}
-                      >
-                        <MenuIcon>
-                          <ArrowDownIcon size={14} />
-                        </MenuIcon>
-                        Move down
-                      </MenuItem>
-                    </>
-                  )}
-                  {menuActions?.(() => setMenuOpen(false), actionsTrigger)}
-
-                  {canRemove && (
-                    <>
-                      <MenuSeparator />
-                      <MenuItem
-                        tone="danger"
-                        onClick={() => {
-                          setRemoveError("");
-                          setMenuOpen(false);
-                          setRemoveOpen(true);
-                        }}
-                      >
-                        <MenuIcon>
-                          <TrashIcon size={14} />
-                        </MenuIcon>
-                        Remove workspace
-                      </MenuItem>
-                    </>
-                  )}
-                </MenuPopup>
-              </MenuRoot>
-            )}
-            {(filter || sort || heightScope) && (
-              <SidebarViewOptions
-                title={title}
-                filter={filter}
-                sort={sort}
-                unreadsFirst={
-                  heightScope
-                    ? {
-                        on: unreadsFirst,
-                        set: (on) =>
-                          setSidebarUnreadsFirst(heightScope, sectionKey, on),
-                      }
-                    : undefined
-                }
-                display={
-                  iconView && heightScope
-                    ? { value: display, set: setDisplay }
-                    : undefined
-                }
-              />
-            )}
-            {headerActions}
-            {newMessage && (
-              <IconButton
-                hint="familiar"
-                size="compact"
-                aria-label="New message"
-                title="New message"
-                onClick={newMessage}
-                icon={<PlusIcon strokeWidth={2.5} size={15} />}
-              />
-            )}
-            {canRemove && (
-              <Dialog
-                size="compact"
-                open={removeOpen}
-                onOpenChange={setRemoveOpen}
-                dismissOnOutsideClick
-                preventClose={removing}
-                initialFocus={cancelRemove}
-                finalFocus={() =>
-                  actionsTrigger.current?.isConnected
-                    ? actionsTrigger.current
-                    : (removalFocus?.() ?? false)
-                }
-                title={`Remove ${title}?`}
-                description={`${channelCount === undefined ? "Assigned conversations" : `${channelCount} ${channelCount === 1 ? "conversation" : "conversations"}`} will return to their default sections.`}
-                actions={
-                  <>
-                    <Button
-                      ref={cancelRemove}
-                      type="button"
-                      disabled={removing}
-                      onClick={() => setRemoveOpen(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      loading={removing}
-                      onClick={() => void remove()}
-                    >
-                      Remove workspace
-                    </Button>
-                  </>
-                }
-              >
-                {removeError && <p role="alert">{removeError}</p>}
-                {removing && (
-                  <p role="status" className="sr-only">
-                    Removing section and waiting for confirmation…
-                  </p>
-                )}
-              </Dialog>
-            )}
-            {createChannel && (
-              <IconButton
-                size="compact"
-                aria-label="Create channel"
-                title={
-                  createChannel.available
-                    ? "Create channel"
-                    : "Channel creation unavailable"
-                }
-                disabled={!createChannel.available}
-                onClick={(event) => createChannel.open(event.currentTarget)}
-                icon={<PlusIcon strokeWidth={2.5} size={15} />}
-              />
-            )}
-          </>
-        }
-      >
-        {rename?.editing ? (
-          <SectionNameEditor
-            title={title}
-            save={rename.save}
-            stop={rename.stop}
+        <div
+          className={styles.channelSection}
+          data-sidebar-card=""
+          data-see-all=""
+          data-see-all-returning={returning || undefined}
+        >
+          <NavigationItem
+            ref={back}
+            data-see-all-back=""
+            icon={<CaretLeftIcon size={14} />}
+            label="Back"
+            aria-label="Back to all cards"
+            onClick={() => {
+              setSidebarSeeAll(undefined);
+              // Back on the main level, focus lands on this card again.
+              requestAnimationFrame(() =>
+                document
+                  .querySelector<HTMLElement>(
+                    `[data-sidebar-section="${CSS.escape(sectionKey)}"] summary`,
+                  )
+                  ?.focus({ preventScroll: true }),
+              );
+            }}
           />
-        ) : (
-          <details open={open}>
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: summary has native keyboard activation. */}
-            <summary
-              ref={dragHandle?.ref}
-              tabIndex={0}
-              {...dragHandle?.listeners}
-              aria-label={title}
-              aria-controls={id}
-              onClick={(event) => {
-                event.preventDefault();
-                clearTimeout(pendingToggle.current);
-                // Keyboard activation has no click count and toggles at once.
-                if (!rename || event.detail === 0) onToggle(!open);
-                else if (event.detail === 1)
-                  pendingToggle.current = setTimeout(
-                    () => onToggle(!open),
-                    DOUBLE_CLICK_MS,
-                  );
-              }}
-              onDoubleClick={
-                rename &&
-                ((event) => {
+        </div>
+      )}
+      <div
+        ref={dropRef}
+        className={styles.channelSection}
+        data-sidebar-card=""
+        data-sidebar-section={sectionKey}
+        data-drop-target={dropTarget || undefined}
+        data-drop-edge={dropEdge}
+        data-section-dragging={dragging || undefined}
+        data-menu-open={menuOpen || undefined}
+        data-see-all={seeingAll || undefined}
+        data-see-all-returning={returning || undefined}
+      >
+        <NavigationSectionHeading
+          disclosure
+          revealActions
+          actions={
+            <>
+              {!hideMoreActions && (
+                <MenuRoot open={menuOpen} onOpenChange={setMenuOpen}>
+                  <MenuTrigger
+                    ref={actionsTrigger}
+                    render={(props) => (
+                      <IconButton
+                        {...props}
+                        size="compact"
+                        aria-label={`More actions for ${title}`}
+                        icon={<DotsThreeIcon strokeWidth={2.5} size={15} />}
+                      />
+                    )}
+                  />
+                  <MenuPopup
+                    align="end"
+                    aria-label={`More actions for ${title}`}
+                  >
+                    {createSection && (
+                      <MenuItem
+                        disabled={!createSection.available}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          if (actionsTrigger.current)
+                            createSection.open(actionsTrigger.current);
+                        }}
+                      >
+                        <MenuIcon>
+                          <PlusIcon size={14} />
+                        </MenuIcon>
+                        Create workspace
+                      </MenuItem>
+                    )}
+                    {move && (
+                      <>
+                        <MenuItem
+                          disabled={!move.up}
+                          onClick={() => {
+                            move.up?.();
+                            setMenuOpen(false);
+                          }}
+                        >
+                          <MenuIcon>
+                            <ArrowUpIcon size={14} />
+                          </MenuIcon>
+                          Move up
+                        </MenuItem>
+                        <MenuItem
+                          disabled={!move.down}
+                          onClick={() => {
+                            move.down?.();
+                            setMenuOpen(false);
+                          }}
+                        >
+                          <MenuIcon>
+                            <ArrowDownIcon size={14} />
+                          </MenuIcon>
+                          Move down
+                        </MenuItem>
+                      </>
+                    )}
+                    {menuActions?.(() => setMenuOpen(false), actionsTrigger)}
+
+                    {canRemove && (
+                      <>
+                        <MenuSeparator />
+                        <MenuItem
+                          tone="danger"
+                          onClick={() => {
+                            setRemoveError("");
+                            setMenuOpen(false);
+                            setRemoveOpen(true);
+                          }}
+                        >
+                          <MenuIcon>
+                            <TrashIcon size={14} />
+                          </MenuIcon>
+                          Remove workspace
+                        </MenuItem>
+                      </>
+                    )}
+                  </MenuPopup>
+                </MenuRoot>
+              )}
+              {(filter || sort || heightScope) && (
+                <SidebarViewOptions
+                  title={title}
+                  filter={filter}
+                  sort={sort}
+                  unreadsFirst={
+                    heightScope
+                      ? {
+                          on: unreadsFirst,
+                          set: (on) =>
+                            setSidebarUnreadsFirst(heightScope, sectionKey, on),
+                        }
+                      : undefined
+                  }
+                  display={
+                    iconView && heightScope
+                      ? { value: display, set: setDisplay }
+                      : undefined
+                  }
+                />
+              )}
+              {headerActions}
+              {newMessage && (
+                <IconButton
+                  hint="familiar"
+                  size="compact"
+                  aria-label="New message"
+                  title="New message"
+                  onClick={newMessage}
+                  icon={<PlusIcon strokeWidth={2.5} size={15} />}
+                />
+              )}
+              {canRemove && (
+                <Dialog
+                  size="compact"
+                  open={removeOpen}
+                  onOpenChange={setRemoveOpen}
+                  dismissOnOutsideClick
+                  preventClose={removing}
+                  initialFocus={cancelRemove}
+                  finalFocus={() =>
+                    actionsTrigger.current?.isConnected
+                      ? actionsTrigger.current
+                      : (removalFocus?.() ?? false)
+                  }
+                  title={`Remove ${title}?`}
+                  description={`${channelCount === undefined ? "Assigned conversations" : `${channelCount} ${channelCount === 1 ? "conversation" : "conversations"}`} will return to their default sections.`}
+                  actions={
+                    <>
+                      <Button
+                        ref={cancelRemove}
+                        type="button"
+                        disabled={removing}
+                        onClick={() => setRemoveOpen(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        loading={removing}
+                        onClick={() => void remove()}
+                      >
+                        Remove workspace
+                      </Button>
+                    </>
+                  }
+                >
+                  {removeError && <p role="alert">{removeError}</p>}
+                  {removing && (
+                    <p role="status" className="sr-only">
+                      Removing section and waiting for confirmation…
+                    </p>
+                  )}
+                </Dialog>
+              )}
+              {createChannel && (
+                <IconButton
+                  size="compact"
+                  aria-label="Create channel"
+                  title={
+                    createChannel.available
+                      ? "Create channel"
+                      : "Channel creation unavailable"
+                  }
+                  disabled={!createChannel.available}
+                  onClick={(event) => createChannel.open(event.currentTarget)}
+                  icon={<PlusIcon strokeWidth={2.5} size={15} />}
+                />
+              )}
+            </>
+          }
+        >
+          {rename?.editing ? (
+            <SectionNameEditor
+              title={title}
+              save={rename.save}
+              stop={rename.stop}
+            />
+          ) : (
+            <details open={open}>
+              {/* biome-ignore lint/a11y/noStaticElementInteractions: summary has native keyboard activation. */}
+              <summary
+                ref={dragHandle?.ref}
+                tabIndex={0}
+                {...dragHandle?.listeners}
+                aria-label={title}
+                aria-controls={id}
+                onClick={(event) => {
                   event.preventDefault();
                   clearTimeout(pendingToggle.current);
-                  rename.start();
-                })
-              }
-            >
-              <span className={styles.sectionLabel}>
-                {sectionKey === "starred" ? (
-                  <SidebarStarIcon />
-                ) : typeof icon === "string" && session ? (
-                  <SidebarGroupIcon icon={icon} session={session} />
-                ) : (
-                  icon
-                )}
-                <FadingLabel className={styles.sectionTitle}>
-                  {title}
-                </FadingLabel>
-              </span>
-              <span
-                className={`${styles.sidebarIcon} ${styles.sectionChevron}`}
-                data-navigation-reveal=""
+                  // Keyboard activation has no click count and toggles at once.
+                  if (!rename || event.detail === 0) onToggle(!open);
+                  else if (event.detail === 1)
+                    pendingToggle.current = setTimeout(
+                      () => onToggle(!open),
+                      DOUBLE_CLICK_MS,
+                    );
+                }}
+                onDoubleClick={
+                  rename &&
+                  ((event) => {
+                    event.preventDefault();
+                    clearTimeout(pendingToggle.current);
+                    rename.start();
+                  })
+                }
               >
-                <CaretDownIcon strokeWidth={2.5} size={15} />
-              </span>
-            </summary>
-          </details>
-        )}
-      </NavigationSectionHeading>
-      {headerNotice}
-      <div
-        id={id}
-        className={styles.sectionContent}
-        inert={!open}
-        hidden={!open}
-      >
-        {display === "icons" ? (
-          // Tiles wrap, so a card of them shows every row and has no grip.
-          <div className={styles.cardTiles} data-card-display="icons">
-            <SidebarCardDisplayContext.Provider value="icons">
+                <span className={styles.sectionLabel}>
+                  {sectionKey === "starred" ? (
+                    <SidebarStarIcon />
+                  ) : typeof icon === "string" && session ? (
+                    <SidebarGroupIcon icon={icon} session={session} />
+                  ) : (
+                    icon
+                  )}
+                  <FadingLabel className={styles.sectionTitle}>
+                    {title}
+                  </FadingLabel>
+                </span>
+                <span
+                  className={`${styles.sidebarIcon} ${styles.sectionChevron}`}
+                  data-navigation-reveal=""
+                >
+                  <CaretDownIcon strokeWidth={2.5} size={15} />
+                </span>
+              </summary>
+            </details>
+          )}
+        </NavigationSectionHeading>
+        {headerNotice}
+        <div
+          id={id}
+          className={styles.sectionContent}
+          inert={!open}
+          hidden={!open}
+        >
+          {display === "icons" ? (
+            // Tiles wrap, so a card of them shows every row and has no grip.
+            <div className={styles.cardTiles} data-card-display="icons">
+              <SidebarCardDisplayContext.Provider value="icons">
+                {children}
+              </SidebarCardDisplayContext.Provider>
+            </div>
+          ) : heightScope ? (
+            <ResizableRows
+              scope={heightScope}
+              card={sectionKey}
+              label={title}
+              seeAll={{
+                full: seeingAll,
+                hidden: !!channels?.rows.length,
+                open: () => {
+                  focusBack.current = true;
+                  setSidebarSeeAll(sectionKey);
+                },
+              }}
+            >
               {children}
-            </SidebarCardDisplayContext.Provider>
-          </div>
-        ) : heightScope ? (
-          <ResizableRows
-            scope={heightScope}
-            card={sectionKey}
-            label={title}
-            seeAll={{
-              full: seeingAll,
-              hidden: !!channels?.rows.length,
-              open: () => {
-                focusBack.current = true;
-                setSidebarSeeAll(sectionKey);
-              },
-            }}
-          >
-            {children}
-          </ResizableRows>
-        ) : (
-          <div>{children}</div>
-        )}
+            </ResizableRows>
+          ) : (
+            <div>{children}</div>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

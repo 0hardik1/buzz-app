@@ -1036,8 +1036,9 @@ width. Both controls use the same sm/md/lg scale. Existing names
 remain compatibility aliases: primary/solid → prominent, quiet → subtle,
 compact/toolbar → sm, default → md, large → lg. Do not add new alias call sites.
 Buzz's tint and chrome icon variants remain for composer and backdrop actions.
-`IconButton tone="accent"` colors only the icon (`--icon-accent`, the same
-accent as a selected row's fill) while the action's state is on, such as a card's view options button while the card is
+`IconButton tone="accent"` colors only the icon (`--icon-accent`, deeper
+than a selected row's fill so it doesn't read as hover, and 3:1 on sidebar
+surfaces) while the action's state is on, such as a card's view options button while the card is
 filtered; the variant's fill, hover and pressed states are unchanged. Its
 accessible name says the state too; color alone does not carry it.
 

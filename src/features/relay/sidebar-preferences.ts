@@ -707,28 +707,6 @@ export function projectSidebarPreferences(
       )
     )
       throw new Error("Invalid sidebar filter mode");
-    const windows = Object.entries(
-      object(
-        data.activeWindowSeconds === undefined ? {} : data.activeWindowSeconds,
-      ),
-    );
-    if (
-      windows.length > (workspaceRecord ? 205 : 104) ||
-      windows.some(([, value]) => !validActiveWindow(value))
-    )
-      throw new Error("Invalid sidebar activity window");
-    result.activeWindowSeconds = Object.fromEntries(
-      windows
-        .map(([key, value]) => [text(key, 264), value as number] as const)
-        .filter(
-          ([key]) =>
-            fixed.has(key) ||
-            liveSections.has(key) ||
-            (sortSectionIds === undefined &&
-              key.startsWith("section:") &&
-              key.length > 8),
-        ),
-    );
     result.filters = Object.fromEntries(
       entries
         .filter(
@@ -738,6 +716,36 @@ export function projectSidebarPreferences(
             entry[1] === "active",
         )
         .map(([key, mode]) => [text(key, 264), mode] as const)
+        .filter(
+          ([key]) =>
+            fixed.has(key) ||
+            liveSections.has(key) ||
+            (sortSectionIds === undefined &&
+              key.startsWith("section:") &&
+              key.length > 8),
+        ),
+    );
+    // Each mode keeps its own windows: `activeWindowSeconds` for Active and
+    // `unreadsWindowSeconds` for Unreads. Older apps left the last Active
+    // window beside Unreads without meaning it, so Unreads reads only its own.
+    const windowsOf = (raw: unknown) => {
+      const windows = Object.entries(object(raw === undefined ? {} : raw));
+      if (
+        windows.length > (workspaceRecord ? 205 : 104) ||
+        windows.some(([, value]) => !validActiveWindow(value))
+      )
+        throw new Error("Invalid sidebar activity window");
+      return windows;
+    };
+    const activeWindows = windowsOf(data.activeWindowSeconds);
+    const unreadsWindows = windowsOf(data.unreadsWindowSeconds);
+    const modes = result.filters;
+    result.activeWindowSeconds = Object.fromEntries(
+      [
+        ...activeWindows.filter(([key]) => modes[key] !== "unreads"),
+        ...unreadsWindows.filter(([key]) => modes[key] === "unreads"),
+      ]
+        .map(([key, value]) => [text(key, 264), value as number] as const)
         .filter(
           ([key]) =>
             fixed.has(key) ||

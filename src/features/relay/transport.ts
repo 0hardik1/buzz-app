@@ -1186,7 +1186,9 @@ export async function connectBrokerTransport(
               {
                 version: 1,
                 groups: value.groups,
+                // Already projected: each group's window matches its mode.
                 activeWindowSeconds: value.activeWindowSeconds,
+                unreadsWindowSeconds: value.activeWindowSeconds,
               },
             );
             return {

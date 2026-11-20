@@ -16,6 +16,7 @@ import {
   readSidebarPreferences,
   workspaceSectionOrder,
 } from "./sidebar-preferences";
+import { editSidebarFilter } from "./sidebar-edits";
 import { keypair, signed, scriptedTransport, flush, roster } from "./testing";
 import type { LiveCallbacks } from "./live";
 import { ReadError } from "./errors";
@@ -775,6 +776,55 @@ it("admits only the complete bounded sidebar batch beyond the normal reader limi
         ...filters.slice(1),
       ]),
     ).toBe(false);
+});
+
+it("keeps a window older apps left beside Unreads from limiting it after upgrade", () => {
+  const project = (record: Record<string, unknown>) =>
+    projectSidebarPreferences(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [],
+      record,
+    );
+  // Older apps kept the last Active window when switching to Unreads, and
+  // read Unreads as every unread regardless of date.
+  const legacy = {
+    version: 1,
+    groups: { channels: "unreads", dms: "active" },
+    activeWindowSeconds: { channels: 7 * 86400, dms: 3 * 86400 },
+  };
+  expect(project(legacy).activeWindowSeconds).toEqual({ dms: 3 * 86400 });
+  // A window chosen beside Unreads now is stored on its own.
+  const chosen = editSidebarFilter(
+    legacy,
+    1,
+    "channels",
+    "unreads",
+    2_000,
+    86400,
+  );
+  expect(chosen.unreadsWindowSeconds).toEqual({ channels: 86400 });
+  expect(chosen.activeWindowSeconds).toEqual(legacy.activeWindowSeconds);
+  expect(project(chosen).activeWindowSeconds).toEqual({
+    channels: 86400,
+    dms: 3 * 86400,
+  });
+  // Back on Active, the card keeps Active's own window.
+  const active = editSidebarFilter(chosen, 2, "channels", "active", 3_000);
+  expect(project(active).activeWindowSeconds).toEqual({
+    channels: 7 * 86400,
+    dms: 3 * 86400,
+  });
+  // All clears both, so neither window returns later.
+  const all = editSidebarFilter(active, 3, "channels", "all", 4_000, null);
+  expect(all.unreadsWindowSeconds).toEqual({});
+  expect(all.activeWindowSeconds).toEqual({ dms: 3 * 86400 });
+  for (const value of [0, 86401, "86400"])
+    expect(() =>
+      project({ ...legacy, unreadsWindowSeconds: { channels: value } }),
+    ).toThrow("Invalid sidebar activity window");
 });
 
 it("projects bounded optional activity windows without changing legacy mode decoding", () => {

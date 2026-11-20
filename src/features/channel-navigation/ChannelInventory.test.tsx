@@ -147,7 +147,7 @@ async function viewOptions(
       name: new RegExp(`^View options for ${title}(, filtered)?$`),
     }),
   );
-  return screen.findByRole("dialog", { name: "Filter & sort" });
+  return screen.findByRole("dialog", { name: `Filter & sort for ${title}` });
 }
 /** Picks one choice in a card's View options, then closes it. */
 async function chooseView(
@@ -4365,7 +4365,18 @@ it("keeps default Solo recency as live activity changes", async () => {
 it("shows an Active card's leading chat again when new activity revives it past its window", async () => {
   const now = Math.floor(Date.now() / 1000);
   const days = 24 * 60 * 60;
-  const h = fixture(undefined, "ready", [
+  const preferences = createSidebarPreferencesStore({
+    available: true,
+    read: async () => ({
+      sections: [],
+      assignments: {},
+      starred: [],
+      muted: [],
+      filters: { channels: "active" },
+    }),
+  });
+  await preferences.queries.ensure();
+  const h = fixture(preferences.queries, "ready", [
     // Exactly one default 30-day window old: expired at the boundary, and
     // still the most recent chat anywhere, so it leads the global rank.
     {

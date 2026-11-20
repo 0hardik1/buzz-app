@@ -121,7 +121,8 @@ test("section filters save activity windows from the view options popover", asyn
     .poll(() => app.report.sidebarPublications.at(-1)?.blob)
     .toMatchObject({
       groups: { channels: "unreads" },
-      activeWindowSeconds: { channels: 7 * 86400 },
+      // Unreads keeps its own window, apart from Active's.
+      unreadsWindowSeconds: { channels: 7 * 86400 },
     });
   await checked(popup, "Unreads");
   await checked(popup, "7 days");
@@ -197,7 +198,7 @@ test("section filters save activity windows from the view options popover", asyn
           ?.channels,
     )
     .toBe(30 * 86400);
-  // Any time range is a filter, even Team's default 30 days.
+  // Any time range is a filter, 30 days included.
   await expect(trigger).toHaveAccessibleName("View options for Team, filtered");
   popup = await viewOptions(page, "Team");
   await checked(popup, "30 days");
@@ -425,8 +426,6 @@ test.describe("filter action focus", () => {
 });
 
 test.describe("with no saved Team filter", () => {
-  test.use({ showAllCards: [] });
-
   // Choosing All after a failed choice retires it: Retry must not bring the
   // failed choice back, and All needs no relay write when none is saved.
   test("All after a failed Unreads save leaves nothing to retry", async ({
@@ -463,8 +462,6 @@ test.describe("with no saved Team filter", () => {
 });
 
 test.describe("with a saved workspace filter", () => {
-  test.use({ showAllCards: [] });
-
   // Menus name a workspace card group:x while Retry names its saved key
   // section:x. A retried All must still be remembered for the card itself.
   test("a retried All on a workspace card survives readback", async ({
@@ -478,14 +475,9 @@ test.describe("with a saved workspace filter", () => {
       ).length;
     await page.goto(app.origin);
     await openPage(page, "Messages");
-    // Unreads keeps the card's 30 days; clearing the date leaves All one
-    // step away, so the failed save below is All alone.
+    // Unreads spans all time by default, so the failed save below is All alone.
     await choose("Unreads");
     await expect.poll(filterSaves).toBe(1);
-    const popup = await viewOptions(page, "Work");
-    await chooseDate(page, popup, "All");
-    await page.keyboard.press("Escape");
-    await expect.poll(filterSaves).toBe(2);
 
     const pattern = "**/sidebar-filter";
     await page.route(pattern, (route) => {
@@ -510,15 +502,6 @@ test.describe("with a saved workspace filter", () => {
     await expect
       .poll(() => app.report.sidebarPublications.length)
       .toBeGreaterThan(published);
-
-    // The device remembers All under the card's own key, never the saved one.
-    const remembered = () =>
-      page.evaluate(() =>
-        Object.keys(localStorage)
-          .filter((key) => key.includes('"sidebar:filter-all"'))
-          .flatMap((key) => Object.keys(JSON.parse(localStorage[key]))),
-      );
-    await expect.poll(remembered).toEqual(["group:work"]);
 
     await page.reload();
     await openPage(page, "Messages");

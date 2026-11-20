@@ -331,8 +331,12 @@ export function editSidebarFilter(
   now = Date.now(),
   activeWindowSeconds?: number | null,
 ): Record<string, unknown> {
+  // Unreads and Active keep separate windows (see projectSidebarPreferences),
+  // so a window older apps left beside Unreads never limits it.
+  const field =
+    mode === "unreads" ? "unreadsWindowSeconds" : "activeWindowSeconds";
   const windows = {
-    ...(current.activeWindowSeconds as Record<string, number> | undefined),
+    ...(current[field] as Record<string, number> | undefined),
   };
   // Active defaults to 30 days. Unreads has no date limit until one is saved,
   // so a window beside it, even 30 days, is always stored.
@@ -346,6 +350,15 @@ export function editSidebarFilter(
   if (activeWindowSeconds === null) delete windows[group];
   else if (activeWindowSeconds !== undefined)
     windows[group] = activeWindowSeconds;
+  // Resetting to All clears Unreads' window too, so it can't come back later.
+  const unreads = current.unreadsWindowSeconds as
+    | Record<string, number>
+    | undefined;
+  const clearUnreads =
+    mode === "all" &&
+    activeWindowSeconds === null &&
+    !!unreads &&
+    Object.hasOwn(unreads, group);
   const next = editSidebarRecord(
     "channel-filter",
     current,
@@ -353,7 +366,15 @@ export function editSidebarFilter(
     [[["g", group], mode === "all" ? null : mode]],
     now,
   );
-  return changed ? { ...next, activeWindowSeconds: windows } : next;
+  const cleared = clearUnreads
+    ? {
+        ...next,
+        unreadsWindowSeconds: Object.fromEntries(
+          Object.entries(unreads).filter(([key]) => key !== group),
+        ),
+      }
+    : next;
+  return changed ? { ...cleared, [field]: windows } : cleared;
 }
 
 export function editSidebarToggle(
