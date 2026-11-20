@@ -269,13 +269,10 @@ export function AnimatedAvatarCapture({
         />
         {phase === "starting" && (
           <span role="status" className="relative grid place-items-center">
-            <picture>
-              <source
-                media="(prefers-reduced-motion: reduce)"
-                srcSet="/buzz-mark.svg"
-              />
-              <img src="/buzz-loading-mark.svg" alt="" width="64" height="44" />
-            </picture>
+            <span
+              aria-hidden="true"
+              className="size-6 rounded-full border-4 border-current/10 border-t-current motion-safe:animate-[spin_500ms_linear_infinite]"
+            />
             <span className="sr-only">Starting camera…</span>
           </span>
         )}
