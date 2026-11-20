@@ -44,9 +44,10 @@ semantic tokens, UI authoring rules and the local component reference.
   Messages comes first, then Inbox, Reminders and Bestie; other contributed pages
   follow by displayed label with a full contribution-key tie-breaker. Sidebar
   navigation and page search share this ordering, independent of plugin
-  activation/re-enable order. Primary pages choose `sidebar` (default, a row in
-  the Messages sidebar) or `dock` (an app in the left dock) placement for
-  contributed pages. `topbar` and `toolbar` are accepted aliases for `dock`.
+  activation/re-enable order. Every primary page is a row in the Messages
+  sidebar's **Plugins** card, which stays visible during Focus. The `dock`
+  placement and its `topbar` and `toolbar` aliases are still accepted and now
+  place the page in the Plugins card too; there is no separate dock.
   The bundled `MessagesSidebar` supplies the conversation sidebar: a capsule All / Solo / Team
   filter above one shared scrollport, Solo projects and chats above Team's channel
   sections, one relay-recovery notice, and the connection fallback. The filter

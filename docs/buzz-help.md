@@ -656,7 +656,7 @@ and are asked to sign in again in Buzz.
   newer message; **Mark as unread** still shows on it. On another device, rows
   with unread mentions, DMs or replies to you light again until you read them.
 - **Communities** have their own channels, people, and agents. Switch with
-  the community switcher at the bottom of the dock; in **Personal space**,
+  the community switcher at the right of the top bar; in **Personal space**,
   Messages offers **Choose a community**, which opens it. Switching
   communities changes the available context. A channel reopens where you
   stopped reading, or at the latest message once you had caught up. You and
@@ -1050,12 +1050,11 @@ and are asked to sign in again in Buzz.
   wide in the top bar.
   Messages shows your workspaces, Favorites and unfiled conversations together.
   Other apps can provide their own sidebar. Pages listed in the Messages
-  sidebar, such as the Drafts & sent plugin, keep Messages selected in the dock. The
-  Messages sidebar stays open unless the page provides its own sidebar, which
-  replaces it.
-  The sidebar and message pane share one surface with a persistent divider;
-  panel headers also have bottom hairlines. Dock icons stay still, highlight
-  on hover, and show instant labels to their right. Bestie uses your
+  sidebar, such as the Drafts & sent plugin, keep the Messages sidebar open.
+  The Messages sidebar stays open unless the page provides its own sidebar,
+  which replaces it. The Plugins card stays during Focus.
+  The sidebar's cards and the conversation float as separate cards on the
+  window's tinted background, without dividing lines. Bestie uses your
   configured avatar.
   The floating **New options** button at the end of the sidebar list opens
   **New chat**, **New channel**, **New DM** and **New workspace**. **Cmd/Ctrl+N**
@@ -1463,7 +1462,7 @@ default Huddle voice.
   availability, and does not prove the agent is ready or running. The settings
   below can deliberately add memory guidance, channel membership, and check-ins.
 - When the optional **Bestie** plugin is on, the saved choice also opens the
-  agent's DM from the first position in the left Apps dock, using the agent's
+  agent's DM from its row in the sidebar's **Plugins** card, using the agent's
   name and avatar. The Messages sidebar omits the duplicate Bestie row. Bestie
   uses the same conversation tabs as Messages: threads open beside the chat (or
   in the main pane, following your thread placement setting), and can be moved,

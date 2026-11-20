@@ -148,15 +148,19 @@ coordinates must satisfy the recipe contract.
 
 The sidebar defaults to **Plugins** (apps and sidebar pages such as Activity),
 **Favorites**, personal workspaces, **Solo**, **Team**, **Forums**, and
-**Direct messages**. Each section is its own card. Reorder cards by dragging
-their grab dots or using **Move up** and **Move down**. The saved order syncs
-with workspace placement.
+**Direct messages**. Each section is its own card; **Forums** shows once you
+have a forum. Reorder cards by dragging their header or using **Move up** and
+**Move down**. The saved order syncs with workspace placement. Double-click a
+workspace's header to rename it in place. A card shows its first ten rows;
+drag its bottom edge to show more or fewer, or double-click the edge (or
+press Enter on it) to show every row and back. Rows past a card's edge are
+skipped by the keyboard until the card shows them.
 
-Drag a chat, channel, forum or DM into any workspace, into Starred, or back to
-its home section. The row’s **Move to…** menu offers the same destinations.
-Moving out of Starred clears the star. The drop target above the first
-workspace opens **Move to new workspace**. **New workspace** in the creation
-menu uses the same settings form and leaves existing placements in place.
+Drag a chat, channel, forum or DM into any workspace, into Favorites, or back
+to its home section. The row’s **Move to…** menu offers the same destinations.
+Moving out of Favorites clears the star. **New workspace** in the creation
+menu leaves existing placements in place and starts no chat in the new
+workspace.
 
 Each workspace heading has a compact creation control. Its arrow opens
 **New chat**, **New channel**, and **New DM**. The last choice becomes that
