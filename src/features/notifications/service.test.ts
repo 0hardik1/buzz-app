@@ -24,8 +24,12 @@ afterEach(async () => {
 function setup() {
   const ctx = new Context();
   contexts.push(ctx);
-  let module: PluginModule = { apply() {} };
-  const runtime = new PluginRuntime(ctx, async () => module);
+  const modules = new Map<string, PluginModule>();
+  const runtime = new PluginRuntime(ctx, async (plugin) => {
+    const module = modules.get(plugin.manifest.id);
+    if (!module) throw new Error(`Missing test module: ${plugin.manifest.id}`);
+    return module;
+  });
   ctx.effect(() => () => runtime.dispose());
   const values = new Map<string, string>();
   const host = {
@@ -85,7 +89,7 @@ function setup() {
       );
     },
     install(value: PluginModule) {
-      module = value;
+      modules.set("test.plugin", value);
       runtime.reconcile([
         {
           manifest: { id: "test.plugin", name: "Test plugin", apiVersion: 1 },
@@ -97,6 +101,20 @@ function setup() {
           error: null,
         },
       ]);
+    },
+    installAll(values: Readonly<Record<string, PluginModule>>) {
+      for (const [id, value] of Object.entries(values)) modules.set(id, value);
+      runtime.reconcile(
+        Object.keys(values).map((id) => ({
+          manifest: { id, name: id, apiVersion: 1 as const },
+          enabled: true,
+          source: "external" as const,
+          revision: "v1",
+          previous: null,
+          reloadable: true,
+          error: null,
+        })),
+      );
     },
     disable() {
       runtime.reconcile([]);
@@ -371,6 +389,49 @@ it("chooses Dock badge ownership by order and falls back when the winner retires
   await vi.waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(2));
   retirePreferred();
   expect(setBadgeCount).toHaveBeenLastCalledWith(9);
+});
+it("keeps the host dot when external plugins compete for Dock ownership", async () => {
+  const t = setup();
+  const setBadgeCount = vi.spyOn(t.service.indicator, "setBadgeCount");
+  t.installAll({
+    "example.preferred": {
+      inject: ["notifications"],
+      apply(ctx) {
+        ctx.notifications.dockBadge({
+          id: "attention",
+          order: -1_000_000,
+          count: () => 99,
+          subscribe: () => () => {},
+        });
+      },
+    },
+    "example.expected": {
+      inject: ["notifications"],
+      apply(ctx) {
+        ctx.notifications.dockBadge({
+          id: "attention",
+          count: () => 2,
+          subscribe: () => () => {},
+        });
+      },
+    },
+  });
+  await vi.waitFor(() =>
+    expect(setBadgeCount).toHaveBeenLastCalledWith(undefined),
+  );
+  t.installAll({
+    "example.expected": {
+      inject: ["notifications"],
+      apply(ctx) {
+        ctx.notifications.dockBadge({
+          id: "attention",
+          count: () => 2,
+          subscribe: () => () => {},
+        });
+      },
+    },
+  });
+  await vi.waitFor(() => expect(setBadgeCount).toHaveBeenLastCalledWith(2));
 });
 it("a gate added while an alert is pending keeps it from showing", async () => {
   const t = setup();

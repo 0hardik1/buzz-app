@@ -1,6 +1,7 @@
 import { createUnreadIndicator } from "./indicator";
 import { Service, type Context } from "@deepseek-ai/cordis";
 import { createContributions } from "../../plugins/contributions";
+import { isBundledContribution } from "../../plugins/provenance";
 import { parseOpenTarget, type OpenTarget } from "../navigation/targets";
 import type { Navigation } from "../navigation/controller";
 import {
@@ -187,7 +188,13 @@ export class NotificationsService extends Service implements Notifications {
       const sync = () => {
         stopBadge();
         stopBadge = () => {};
-        const badge = [...this.dockBadges.snapshot()].sort(
+        const badges = this.dockBadges.snapshot();
+        const bundled = badges.filter(isBundledContribution);
+        const candidates = bundled.length > 0 ? bundled : badges;
+        const owners = new Set(candidates.map(({ pluginId }) => pluginId));
+        const badge = (
+          bundled.length > 0 || owners.size <= 1 ? [...candidates] : []
+        ).sort(
           (a, b) =>
             (a.order ?? 0) - (b.order ?? 0) || a.key.localeCompare(b.key),
         )[0];
