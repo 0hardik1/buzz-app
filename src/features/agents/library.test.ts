@@ -312,6 +312,7 @@ it("retries a failed read on its own with jittered backoff while the list is nee
   expect(libraryRetryDelay(1, () => 0)).toBe(1_000);
   expect(libraryRetryDelay(2, () => 1)).toBe(4_000);
   expect(libraryRetryDelay(20, () => 1)).toBe(60_000);
+  expect(libraryRetryDelay(20, () => 0)).toBe(30_000);
   vi.useFakeTimers();
   vi.spyOn(Math, "random").mockReturnValue(1);
   try {
@@ -333,6 +334,9 @@ it("retries a failed read on its own with jittered backoff while the list is nee
     expect(read).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1);
     expect(owner.queries.snapshot().status).toBe("ready");
+    // A recovered list stops retrying.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(read).toHaveBeenCalledTimes(3);
     // Without demand a failure waits for the next ask; demand restarts it.
     release();
     read.mockRejectedValueOnce(new Error("offline"));
