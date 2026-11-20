@@ -804,12 +804,19 @@ export class PiRuntime {
         agent: agent.key,
         key,
       });
+      // Notes are keyed as replies go: a top-level turn or a community
+      // session's DM takes the channel's.
+      const replyRoot =
+        topLevel || key === channel || (key === COMMUNITY_SESSION && dm)
+          ? undefined
+          : root;
+      let notes: readonly string[] = [];
       let acceptProject: (() => void) | undefined;
-      const prompt = async () => {
+      const turn = async () => {
         const wakePrompt = wake
           ? ((await wakeText?.()) ?? wake.text)
           : undefined;
-        const turn = await this.turn(
+        const turned = await this.turn(
           agent,
           event,
           channel,
@@ -819,24 +826,16 @@ export class PiRuntime {
           solo,
           () => !interrupted && (!current || current()),
         );
-        acceptProject = turn.acceptProject;
-        return this.review(
-          entry,
-          turnPrompt({
-            ...turn,
-            agent: agent.key,
-            channelLevel: topLevel && !solo,
-            ...(wake
-              ? { wake: { ...wake, text: wakePrompt ?? wake.text } }
-              : {}),
-          }),
-          channel,
-          topLevel || key === channel || (key === COMMUNITY_SESSION && dm)
-            ? undefined
-            : root,
-          key,
-        );
+        acceptProject = turned.acceptProject;
+        return turnPrompt({
+          ...turned,
+          agent: agent.key,
+          channelLevel: topLevel && !solo,
+          ...(wake ? { wake: { ...wake, text: wakePrompt ?? wake.text } } : {}),
+        });
       };
+      const prompt = async () =>
+        this.review(entry, await turn(), notes, channel, replyRoot, key);
       // A conversation's tools default to its thread; a conversation shared
       // by several threads is told which to reply in instead.
       const context: Context = topLevel
@@ -868,10 +867,14 @@ export class PiRuntime {
         ...(superseded ? { superseded } : {}),
       });
       const picked = await this.turnOf(entry, agent.key, model, effort, key);
-      const text = await prompt();
+      const turned = await turn();
       this.live(entry, agent.key);
       if (interrupted || (wake && current && !current())) return;
       submitting = true;
+      // Plugins' notes wait until the turn is handed over, so one that fails
+      // or is cancelled before then leaves them for the next.
+      notes = agent.notes?.(channel, replyRoot) ?? [];
+      const text = this.review(entry, turned, notes, channel, replyRoot, key);
       submitted = await this.deliver(
         entry,
         agent.key,
@@ -897,6 +900,8 @@ export class PiRuntime {
         },
         () => !interrupted && (!wake || !current || current()),
       );
+      // Pi answered that it did not take the turn.
+      if (submitted === false) agent.restoreNotes?.(channel, notes, replyRoot);
       if (!submitted) return;
       acceptProject?.();
       if (submitted.session !== undefined)
@@ -1654,22 +1659,23 @@ export class PiRuntime {
     };
   }
 
-  /** `text` with the Buzz tools' end-of-turn note for its conversation, when
-   * they have one. */
+  /** `text` with plugins' notes and the Buzz tools' end-of-turn note for its
+   * conversation, when they have one. */
   private review(
     entry: Entry,
     text: string,
+    notes: readonly string[],
     channelId: string,
     root: string | undefined,
     key: string,
   ) {
-    const note = turnNote(
-      entry.handle,
-      channelId,
-      root,
-      key === COMMUNITY_SESSION,
-    );
-    return note ? `${text}\n\n${note}` : text;
+    return [
+      text,
+      ...notes,
+      turnNote(entry.handle, channelId, root, key === COMMUNITY_SESSION),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
   }
 
   /** Says in the thread that a turn failed, so nobody waits on it. Tells the
