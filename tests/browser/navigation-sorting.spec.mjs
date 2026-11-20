@@ -1077,15 +1077,15 @@ test.describe("section sort persistence", () => {
   });
 });
 
-// Every card sits on an explicit A–Z (Favorites included) and All, so nothing
-// needs activity until Recent is chosen and choosing A–Z retires the read.
+// Every rendered card sits on an explicit A–Z (Favorites included) and All, so
+// nothing needs activity until Recent is chosen and choosing A–Z retires the
+// read. Forums is hidden without forums, so its unset default must not count.
 test.describe("activity read failures", () => {
   test.use({
     initialSidebarSort: {
       starred: "alpha",
       solo: "alpha",
       channels: "alpha",
-      forums: "alpha",
       dms: "alpha",
       "section:work": "alpha",
     },

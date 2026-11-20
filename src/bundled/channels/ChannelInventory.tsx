@@ -54,7 +54,6 @@ import {
 } from "../../features/solo/draft-projects";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import {
-  HOME_SIDEBAR_SECTIONS,
   SIDEBAR_PAGES_SECTION,
   workspaceSectionOrder,
 } from "../../features/relay/sidebar-preferences";
@@ -193,6 +192,7 @@ const noSidebarSections = () => emptyContributions;
 const emptyRowContributions: readonly RegisteredSidebarRows[] = [];
 const noSidebarRows = () => emptyRowContributions;
 const noPendingPlugins = () => true;
+const noSections: ReturnType<typeof sidebarSections> = [];
 const emptySidebarSections: SidebarSections = {
   version: 1,
   snapshot: noSidebarSections,
@@ -308,30 +308,10 @@ export function ChannelInventory({
   const pluginSorted = appliedSorts.some(
     (mode) => mode !== "alpha" && mode !== "recent",
   );
-  // Cards default to Recent and the last 30 days, which both need activity;
-  // the session reads it on its own only for saved choices. Wait for saved
-  // choices first, so an all-A–Z sidebar never reads activity at startup.
-  const preferencesSettled =
-    !!preferences.data ||
-    preferences.status === "error" ||
-    preferences.status === "unsupported";
-  const needsActivity =
-    preferencesSettled &&
-    [
-      ...HOME_SIDEBAR_SECTIONS,
-      ...(preferences.data?.sections ?? []).map(({ id }) => `group:${id}`),
-    ].some(
-      (key) =>
-        sidebarSortNeedsActivity(sectionSort(key)) ||
-        sectionFilter(key) === "active",
-    );
   const list = useChannelRoster(queries.channels, {
-    activity: needsActivity,
+    activity: true,
     preview: pluginSorted,
   });
-  useEffect(() => {
-    if (needsActivity) return queries.channels.demandActivity?.();
-  }, [needsActivity, queries.channels]);
   const rosterRecovers = useRecoveryOwns(queries, (live) =>
     rosterRecovering(live.roster),
   );
@@ -342,13 +322,6 @@ export function ChannelInventory({
         !mode.startsWith("plugin:") ||
         rowSortModes.some((available) => available.id === mode),
     );
-  const startup = useSidebarStartup(
-    queries,
-    list,
-    preferences,
-    sortModesReady,
-    needsActivity,
-  );
   const [activityErrorDismissed, setActivityErrorDismissed] = useState(false);
   useEffect(() => {
     if (list.activityStatus !== "error") setActivityErrorDismissed(false);
@@ -543,22 +516,19 @@ export function ChannelInventory({
       });
   }, []);
   const hasPages = !!pages;
-  const sections = useMemo(
+  const cards = useMemo(
     () =>
-      startup.ready
-        ? sidebarSections(
-            sidebarChannels,
-            preferences.data,
-            new Set([...hiddenDms.hiddenIds, ...dmVisibility.hidden]),
-            chatsOnly,
-            new Set<string>(JSON.parse(activeDraftSections)),
-            regions.managed,
-            hasPages,
-          )
-        : [],
+      sidebarSections(
+        sidebarChannels,
+        preferences.data,
+        new Set([...hiddenDms.hiddenIds, ...dmVisibility.hidden]),
+        chatsOnly,
+        new Set<string>(JSON.parse(activeDraftSections)),
+        regions.managed,
+        hasPages,
+      ),
     [
       hasPages,
-      startup.ready,
       sidebarChannels,
       preferences.data,
       hiddenDms.hiddenIds,
@@ -568,6 +538,32 @@ export function ChannelInventory({
       regions.managed,
     ],
   );
+  // Cards default to Recent and the last 30 days, which both need activity;
+  // the session reads it on its own only for saved choices. Only cards that
+  // render count, and only once saved choices settle, so an all-A–Z sidebar
+  // never reads activity at startup.
+  const preferencesSettled =
+    !!preferences.data ||
+    preferences.status === "error" ||
+    preferences.status === "unsupported";
+  const needsActivity =
+    preferencesSettled &&
+    cards.some(
+      ({ key }) =>
+        sidebarSortNeedsActivity(sectionSort(key)) ||
+        sectionFilter(key) === "active",
+    );
+  useEffect(() => {
+    if (needsActivity) return queries.channels.demandActivity?.();
+  }, [needsActivity, queries.channels]);
+  const startup = useSidebarStartup(
+    queries,
+    list,
+    preferences,
+    sortModesReady,
+    needsActivity,
+  );
+  const sections = startup.ready ? cards : noSections;
   // Projection rejects duplicate ids; optimistic creates skip existing ids.
   // useSidebarFilters keeps every section, filtering only its rows.
   const slotsMounted =
