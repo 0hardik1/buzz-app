@@ -1,6 +1,20 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { matches } from "../features/shortcuts/bindings";
 import { isApplePlatform } from "../features/shortcuts/format";
+import type {
+  ShortcutBindings,
+  ShortcutBindingsSnapshot,
+} from "../features/shortcuts/preferences";
+import {
+  CONVERSATION_SEARCH_BINDING,
+  CONVERSATION_SEARCH_ID,
+} from "./shell/PageSearch";
 import { activeModal } from "../shared/design-system/overlayLayer";
 import { SearchField } from "../shared/design-system/ui/SearchField";
 import { NavigationItem } from "../shared/design-system/ui/NavigationItem";
@@ -9,14 +23,21 @@ import { SidebarNavigation } from "../shared/design-system/ui/SidebarNavigation"
 import type { SettingsGroup } from "./settings-sections";
 import { searchSettings, type SettingSearchEntry } from "./settings-search";
 
+const NO_OVERRIDES: ShortcutBindingsSnapshot = { overrides: {}, error: null };
+const noSubscribe = () => () => {};
+const noOverrides = () => NO_OVERRIDES;
+
 /** Both Settings hosts keep their existing navigation and scroll ownership. */
 export function SettingsSearchNavigation({
   groups,
   children,
   onSection,
   onSetting,
+  shortcutBindings,
 }: {
   groups: readonly SettingsGroup[];
+  /** The person's rebinds; without them the default chord applies. */
+  shortcutBindings?: ShortcutBindings | undefined;
   children: ReactNode;
   onSection: (section: string) => void;
   onSetting: (setting: SettingSearchEntry) => void;
@@ -25,8 +46,14 @@ export function SettingsSearchNavigation({
   const searching = !!query.trim();
   const results = searchSettings(groups, query);
   const field = useRef<HTMLElement>(null);
-  // ⌘F / Ctrl+F finds within Settings, as it searches a conversation
-  // elsewhere. Settings' modal leaves the conversation shortcut ineligible,
+  const { overrides } = useSyncExternalStore(
+    shortcutBindings?.subscribe ?? noSubscribe,
+    shortcutBindings?.snapshot ?? noOverrides,
+  );
+  const binding =
+    overrides[CONVERSATION_SEARCH_ID] ?? CONVERSATION_SEARCH_BINDING;
+  // The conversation search chord (⌘F / Ctrl+F unless rebound) finds within
+  // Settings. Settings' modal leaves the conversation shortcut ineligible,
   // and handling it before the window dispatcher keeps it local.
   useEffect(() => {
     const find = (event: KeyboardEvent) => {
@@ -38,11 +65,7 @@ export function SettingsSearchNavigation({
         !input?.isConnected ||
         (modal && !modal.contains(input)) ||
         input.closest("[hidden], [inert]") ||
-        !matches(
-          [{ key: "f", mod: true }],
-          event,
-          isApplePlatform(navigator.platform),
-        )
+        !matches([binding], event, isApplePlatform(navigator.platform))
       )
         return;
       event.preventDefault();
@@ -51,7 +74,7 @@ export function SettingsSearchNavigation({
     };
     document.addEventListener("keydown", find);
     return () => document.removeEventListener("keydown", find);
-  }, []);
+  }, [binding]);
   return (
     <SidebarNavigation wrapSections>
       <div className="w-full min-w-0">

@@ -75,8 +75,8 @@ if that desktop app is up and running.
 - **Search settings**, above the Settings section list, finds individual
   settings by name or related words (for example "font size") and opens them.
   If a setting is hidden behind another option, it lands on that option
-  without changing it. ⌘F (Ctrl+F elsewhere) focuses it while Settings is
-  open.
+  without changing it. While Settings is open, the **Search this conversation**
+  shortcut (⌘F, Ctrl+F elsewhere, or your rebind) focuses it.
 
 ## Getting started
 

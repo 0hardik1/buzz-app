@@ -1967,6 +1967,7 @@ export function Settings({
             <nav aria-label="Settings sections" className={styles.navigation}>
               <SettingsSearchNavigation
                 groups={groups}
+                shortcutBindings={shortcutBindings}
                 onSection={(id) => {
                   if (onSection) onSection(id);
                   else setSelected(id);

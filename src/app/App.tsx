@@ -894,6 +894,7 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
                 cards={services.settingsCards}
                 communities={services.communities}
                 recommendations={pluginRecommendations}
+                shortcutBindings={services.shortcutBindings}
                 {...(route.target.kind === "settings" && route.target.section
                   ? { selected: route.target.section }
                   : {})}

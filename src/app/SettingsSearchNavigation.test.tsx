@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SettingsSearchNavigation } from "./SettingsSearchNavigation";
@@ -10,6 +10,7 @@ import {
   revealSetting,
 } from "./settings-search";
 import type { SettingsGroup } from "./settings-sections";
+import { createShortcutBindings } from "../features/shortcuts/preferences";
 import { PreferenceRow } from "../shared/design-system/ui/PreferenceRow";
 import { SwitchPreferenceRow } from "../shared/design-system/ui/SwitchPreferenceRow";
 
@@ -128,6 +129,43 @@ it("opens a matching setting by keyboard, clears empty results, and clears Escap
   expect(
     screen.queryByRole("button", { name: "Open Calendar" }),
   ).not.toBeInTheDocument();
+});
+
+it("focuses the search with the conversation search chord, following its rebind", async () => {
+  const user = userEvent.setup();
+  localStorage.clear();
+  const bindings = createShortcutBindings();
+  render(
+    <div role="dialog" aria-modal="true" aria-label="Settings">
+      <SettingsSearchNavigation
+        groups={groups}
+        onSetting={vi.fn()}
+        onSection={vi.fn()}
+        shortcutBindings={bindings}
+      >
+        <button type="button">Normal navigation</button>
+      </SettingsSearchNavigation>
+    </div>,
+  );
+  const search = screen.getByRole("searchbox", { name: "Search settings" });
+  await user.type(search, "sound");
+  screen.getByRole("button", { name: /^Sound/ }).focus();
+  // jsdom reports a non-Apple platform, so the default chord is Ctrl+F.
+  await user.keyboard("{Control>}f{/Control}");
+  expect(search).toHaveFocus();
+  expect([
+    (search as HTMLInputElement).selectionStart,
+    (search as HTMLInputElement).selectionEnd,
+  ]).toEqual([0, "sound".length]);
+
+  act(() => bindings.set("conversation-search", { key: "g", mod: true }));
+  screen.getByRole("button", { name: /^Sound/ }).focus();
+  await user.keyboard("{Control>}f{/Control}");
+  expect(search).not.toHaveFocus();
+  await user.keyboard("{Control>}g{/Control}");
+  expect(search).toHaveFocus();
+  bindings.dispose();
+  localStorage.clear();
 });
 
 it("reveals a switch without toggling it, and falls back to a prerequisite without changing it", () => {
