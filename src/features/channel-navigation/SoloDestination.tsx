@@ -519,12 +519,13 @@ function useDestinationFocus(
     if (!visible) return;
     const node = root.current;
     const region = node?.closest("[data-sidebar-section]");
+    const viewport = node?.closest("nav[data-scroll-fade]");
     return () => {
       const owner = document.activeElement?.closest(
         "[data-solo-destination-root]",
       );
       if (!node || (owner ? owner !== node : !focused.current)) return;
-      queueMicrotask(() => {
+      const restoreFocus = () => {
         if (document.activeElement !== document.body) return;
         // The ref can capture the final order after this effect cleans up.
         const rows = neighbors.current;
@@ -554,12 +555,37 @@ function useDestinationFocus(
             '[data-sidebar-section^="solo-region:"] summary',
           ),
         ];
-        for (const candidate of candidates) {
-          if (!candidate || candidate.closest("[hidden], [inert]")) continue;
+        const available = candidates.filter(
+          (candidate): candidate is HTMLElement =>
+            !!candidate && !candidate.closest("[hidden], [inert]"),
+        );
+        const frame = viewport?.getBoundingClientRect();
+        const inView =
+          frame &&
+          available.find((candidate) => {
+            if (
+              !candidate.hasAttribute("data-solo-destination-id") ||
+              !viewport?.contains(candidate)
+            )
+              return false;
+            const box = candidate.getBoundingClientRect();
+            return (
+              box.height > 0 &&
+              box.top >= frame.top &&
+              box.bottom <= frame.bottom
+            );
+          });
+        // Prefer a visible surviving row. Headings keep their fallback order.
+        inView?.focus({ preventScroll: true });
+        if (document.activeElement !== document.body) return;
+        for (const candidate of available) {
           candidate.focus();
           if (document.activeElement === candidate) break;
         }
-      });
+      };
+      // Cleanup can queue focus recovery before the rest of the commit mutates
+      // the sidebar. Let its mutation observer correct the viewport first.
+      queueMicrotask(() => queueMicrotask(restoreFocus));
     };
   }, [root, channelId, visible]);
   return {

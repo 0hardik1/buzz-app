@@ -103,6 +103,8 @@ function mount(
           toggle,
           retryReveal,
           revealAgain,
+          adjustScrollAnchor: () => {},
+          captureScrollAnchor: { current: undefined },
         }}
       />
     );

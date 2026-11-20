@@ -147,6 +147,7 @@ export function useSidebarView(
   const savedLocation = useRef(view.location).current;
   const intent = useRef(view);
   const list = useRef<HTMLElement>(null);
+  const captureScrollAnchor = useRef<(() => void) | undefined>(undefined);
   const pending = useRef(true);
   const latestLocation = useRef(location);
   useLayoutEffect(
@@ -217,6 +218,7 @@ export function useSidebarView(
     if (list.current.scrollTop === 0)
       moved.current =
         scroll(list.current, intent.current.scrollTop) ?? moved.current;
+    captureScrollAnchor.current?.();
     pending.current = false;
   }, [ready]);
   // A destination without an entry (the Messages landing page before it
@@ -248,6 +250,11 @@ export function useSidebarView(
     if (pending?.explicit ? pending.location === location : !preserve)
       attempt.current();
   }, [preserve, location]);
+  const adjustScrollAnchor = useCallback((top: number) => {
+    const viewport = list.current;
+    if (!viewport || pending.current || reveal.current) return;
+    moved.current = scroll(viewport, top) ?? moved.current;
+  }, []);
   useLayoutEffect(() => {
     attempt.current = () => {
       if (!ready || !reveal.current || !list.current) return;
@@ -259,6 +266,8 @@ export function useSidebarView(
       const { target, top } = destination;
       const { explicit, location } = reveal.current;
       moved.current = scroll(list.current, top) ?? moved.current;
+      // An already visible destination still establishes the new viewport.
+      captureScrollAnchor.current?.();
       intent.current = { ...intent.current, location };
       reveal.current = undefined;
       restored.current = undefined;
@@ -336,6 +345,8 @@ export function useSidebarView(
       toggle,
       retryReveal,
       revealAgain,
+      adjustScrollAnchor,
+      captureScrollAnchor,
     }),
     [
       savedLocation,
@@ -345,6 +356,7 @@ export function useSidebarView(
       toggle,
       retryReveal,
       revealAgain,
+      adjustScrollAnchor,
     ],
   );
 }
