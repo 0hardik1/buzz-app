@@ -1,16 +1,9 @@
-# Temporary browser-only comparison; not a production workflow.
+# Temporary worker-count comparison on balanced shards; not a production workflow.
 name: CI
-run-name: Browser balance ${{ inputs.mode }} / ${{ inputs.repetition }}
+run-name: Balanced browser workers / ${{ inputs.repetition }}
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: Browser shard allocation
-        required: true
-        type: choice
-        options:
-          - baseline
-          - balanced
       repetition:
         description: Comparison identifier
         required: true
@@ -19,7 +12,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: browser-balance-${{ github.run_id }}
+  group: browser-workers-${{ github.run_id }}
   cancel-in-progress: false
 env:
   CI: "true"
@@ -37,12 +30,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5a21469faa8c53d20105d58c592a48f68c6dcf7c
+          ref: be7457b082ea7ecc06ac14feec540e7694857984
       - uses: ./.github/actions/setup
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
         with:
           key: browser-fixture
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: false
       - name: Build native browser fixture
         timeout-minutes: 8
         run: ./bin/cargo build --locked -p buzzodz-plugins --example fixture-bridge --bin buzzodz --target-dir target/browser-fixture
@@ -62,7 +55,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   browser:
-    name: Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})
+    name: Browser journeys (${{ matrix.case.engine }}, ${{ matrix.case.shard }}/${{ matrix.case.shards }}, ${{ matrix.workers }} workers)
     needs:
       - browser_fixture
     runs-on:
@@ -81,61 +74,35 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        engine:
-          - chromium
-          - webkit
-        shard:
-          - 1
-          - 2
-          - 3
-          - 4
-          - 5
-          - 6
-          - 7
-          - 8
-          - 9
-          - 10
-          - 11
-          - 12
-          - 13
-          - 14
-          - 15
-          - 16
-          - 17
-          - 18
-        exclude:
+        workers: [2, 3]
+        case:
           - engine: chromium
-            shard: 12
+            shard: 6
+            shards: 11
+            weights: 115:111:116:106:131:157:138:89:80:175:161
           - engine: chromium
-            shard: 13
-          - engine: chromium
-            shard: 14
-          - engine: chromium
-            shard: 15
-          - engine: chromium
-            shard: 16
-          - engine: chromium
-            shard: 17
-          - engine: chromium
-            shard: 18
-        include:
-          - engine: chromium
+            shard: 8
             shards: 11
             weights: 115:111:116:106:131:157:138:89:80:175:161
           - engine: webkit
+            shard: 14
+            shards: 18
+            weights: 45:70:70:58:58:50:60:69:97:133:74:57:71:61:60:129:140:73
+          - engine: webkit
+            shard: 3
             shards: 18
             weights: 45:70:70:58:58:50:60:69:97:133:74:57:71:61:60:129:140:73
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          ref: 5a21469faa8c53d20105d58c592a48f68c6dcf7c
+          ref: be7457b082ea7ecc06ac14feec540e7694857984
       - name: Trust this container workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: ./.github/actions/setup
         with:
           browsers: "true"
-          browser-engine: ${{ matrix.engine }}
+          browser-engine: ${{ matrix.case.engine }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           artifact-ids: ${{ needs.browser_fixture.outputs.artifact-id }}
@@ -151,13 +118,26 @@ jobs:
           test -x buzzodz
       - name: Functional journeys
         env:
-          PWTEST_SHARD_WEIGHTS: ${{ inputs.mode == 'balanced' && matrix.weights || '' }}
+          PWTEST_SHARD_WEIGHTS: ${{ matrix.case.weights }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/browser/ci-report.json
-        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Browser journeys (${{ matrix.engine }}, ${{ matrix.shard }}/${{ matrix.shards }})" -- ./bin/pnpm test:browser:ci --project ${{ matrix.engine }} --no-deps --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,json
+        run: ./bin/node scripts/ci-test-report.mjs kind=playwright report=test-results/browser/ci-report.json evidence=test-results/browser/ci-timing.json title="Browser journeys (${{ matrix.case.engine }}, ${{ matrix.case.shard }}/${{ matrix.case.shards }}, ${{ matrix.workers }} workers)" -- ./bin/pnpm test:browser:ci --project ${{ matrix.case.engine }} --no-deps --workers=${{ matrix.workers }} --shard=${{ matrix.case.shard }}/${{ matrix.case.shards }} --reporter=list,json
+      - name: Worker resource evidence
+        if: always()
+        run: |
+          mkdir -p test-results/browser
+          ./bin/node --input-type=module - <<'JS' > test-results/browser/worker-resources.json
+          import { readFileSync, existsSync } from 'node:fs';
+          const names = ['memory.peak', 'memory.max', 'memory.events', 'cpu.stat', 'cpu.max'];
+          const values = Object.fromEntries(names.map(name => {
+            const path = `/sys/fs/cgroup/${name}`;
+            return [name, existsSync(path) ? readFileSync(path, 'utf8') : null];
+          }));
+          console.log(JSON.stringify(values, null, 2));
+          JS
       - name: Browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: browser-journeys-${{ matrix.engine }}-${{ matrix.shard }}
+          name: browser-journeys-${{ matrix.case.engine }}-${{ matrix.case.shard }}-workers-${{ matrix.workers }}
           path: test-results/browser
           retention-days: 7
