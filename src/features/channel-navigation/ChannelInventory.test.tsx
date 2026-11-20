@@ -137,6 +137,30 @@ const defaultPages = (
   </nav>
 );
 
+/** Opens a card's View options popover. */
+async function viewOptions(
+  user: ReturnType<typeof userEvent.setup>,
+  title: string,
+) {
+  await user.click(
+    screen.getByRole("button", {
+      name: new RegExp(`^View options for ${title}(, filtered)?$`),
+    }),
+  );
+  return screen.findByRole("dialog", { name: `View options for ${title}` });
+}
+/** Picks one choice in a card's View options, then closes it. */
+async function chooseView(
+  user: ReturnType<typeof userEvent.setup>,
+  title: string,
+  name: string,
+) {
+  const popup = await viewOptions(user, title);
+  fireEvent.click(within(popup).getByRole("radio", { name }));
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(popup).not.toBeInTheDocument());
+}
+
 function fixture(
   sidebarPreferences?: ReturnType<
     typeof createSidebarPreferencesStore
@@ -640,7 +664,7 @@ it.each(["Retry", "Dismiss"] as const)(
   },
 );
 
-it("uses relay section filters across navigation and remount, and offers only hidden channels", async () => {
+it("uses relay section filters across navigation and remount", async () => {
   const user = userEvent.setup();
   let filters: Record<string, SidebarFilterMode> = {};
   const preferences = createSidebarPreferencesStore({
@@ -660,31 +684,11 @@ it("uses relay section filters across navigation and remount, and offers only hi
   const h = fixture(preferences.queries);
   const mounted = render(h.view("alpha"));
   await screen.findByRole("button", { name: "gamma" });
-  await user.click(
-    screen.getByRole("button", { name: "More actions for Team" }),
-  );
-  expect(screen.queryByRole("menuitem", { name: "View All" })).toBeNull();
-  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
-  fireEvent.click(
-    await screen.findByRole("menuitemradio", { name: "Unreads" }),
+  await chooseView(user, "Team", "Unreads");
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "beta" })).toBeNull(),
   );
   expect(screen.getByRole("button", { name: "alpha" })).toBeVisible();
-  expect(screen.queryByRole("button", { name: "beta" })).toBeNull();
-  await user.click(
-    screen.getByRole("button", { name: "More actions for Team" }),
-  );
-  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
-  const betaChoice = await screen.findByRole("menuitem", { name: "beta" });
-  const choices = betaChoice.closest('[role="menu"]');
-  assert(choices instanceof HTMLElement);
-  expect(within(choices).queryByRole("menuitem", { name: "alpha" })).toBeNull();
-  expect(
-    within(choices).getByRole("menuitem", { name: "gamma" }),
-  ).toBeVisible();
-  fireEvent.click(betaChoice);
-  expect(h.navigator.open).toHaveBeenCalledWith(
-    expect.objectContaining({ kind: "conversation", channelId: "beta" }),
-  );
   mounted.rerender(h.view("beta"));
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "beta" })).toBeVisible(),
@@ -710,19 +714,11 @@ it("uses relay section filters across navigation and remount, and offers only hi
     expect(screen.getByRole("button", { name: "alpha" })).toBeVisible(),
   );
   expect(screen.queryByRole("button", { name: "gamma" })).toBeNull();
-  await user.click(
-    screen.getByRole("button", { name: "More actions for Team" }),
-  );
-  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
-  fireEvent.click(await screen.findByRole("menuitemradio", { name: "All" }));
+  await chooseView(user, "Team", "All");
   await waitFor(() => {
     expect(screen.getByRole("button", { name: "beta" })).toBeVisible();
     expect(screen.getByRole("button", { name: "gamma" })).toBeVisible();
   });
-  await user.click(
-    screen.getByRole("button", { name: "More actions for Team" }),
-  );
-  expect(screen.queryByRole("menuitem", { name: "View All" })).toBeNull();
   restored.unmount();
   expect(
     readView("https://relay.test:viewer", "channel-sidebar", {}),
@@ -3492,13 +3488,7 @@ it.each([
           ),
         ].map((el) => el.getAttribute("data-channel-id"));
       expect(order()).toEqual(["alpha", "beta", "gamma"]);
-      await user.click(
-        screen.getByRole("button", { name: `More actions for ${label}` }),
-      );
-      await user.click(await screen.findByRole("menuitem", { name: "Sort" }));
-      fireEvent.click(
-        await screen.findByRole("menuitemradio", { name: "Reverse name" }),
-      );
+      await chooseView(user, label, "Reverse name");
       await waitFor(() => expect(order()).toEqual(["gamma", "beta", "alpha"]));
       expect(writeSort).toHaveBeenCalledWith(
         preferenceKey,
@@ -3512,13 +3502,11 @@ it.each([
       act(() => registry.disable());
       await waitFor(() => expect(order()).toEqual(["alpha", "beta", "gamma"]));
       expect(sort[preferenceKey]).toBe("plugin:fixture0/order/reverse");
-      await user.click(
-        screen.getByRole("button", { name: `More actions for ${label}` }),
-      );
-      await user.click(await screen.findByRole("menuitem", { name: "Sort" }));
+      const options = await viewOptions(user, label);
       expect(
-        screen.queryByRole("menuitemradio", { name: "Reverse name" }),
+        within(options).queryByRole("radio", { name: "Reverse name" }),
       ).toBeNull();
+      await user.keyboard("{Escape}");
       act(() => registry.enable());
       await waitFor(() => expect(order()).toEqual(["gamma", "beta", "alpha"]));
       expect(writeSort).toHaveBeenCalledOnce();
@@ -3570,12 +3558,9 @@ it.each(["throw", "non-finite"] as const)(
         ].map((el) => el.getAttribute("data-channel-id")),
       ).toEqual(["alpha", "beta", "gamma"]);
       const user = userEvent.setup();
-      await user.click(
-        screen.getByRole("button", { name: "More actions for Team" }),
-      );
-      await user.click(await screen.findByRole("menuitem", { name: "Sort" }));
+      const options = await viewOptions(user, "Team");
       expect(
-        await screen.findByRole("menuitemradio", { name: "Broken sort" }),
+        within(options).getByRole("radio", { name: "Broken sort" }),
       ).toHaveAttribute("aria-checked", "true");
     } finally {
       prefs.dispose();
@@ -3727,13 +3712,7 @@ it("updates decorated unread data and a selected unread sort without rewriting p
     expect(renderRow.mock.calls.map(([row]) => row.id)).toEqual(["beta"]);
     expect(order()).toEqual(["alpha", "beta", "gamma"]);
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole("button", { name: "More actions for Team" }),
-    );
-    await user.click(await screen.findByRole("menuitem", { name: "Sort" }));
-    fireEvent.click(
-      await screen.findByRole("menuitemradio", { name: "Unread first" }),
-    );
+    await chooseView(user, "Team", "Unread first");
     await waitFor(() => expect(order()).toEqual(["beta", "alpha", "gamma"]));
     expect(writeSort).toHaveBeenCalledOnce();
     publish(null);
@@ -4312,4 +4291,38 @@ it("keeps default Solo recency as live activity changes", async () => {
   await waitFor(() => expect(soloOrder()).toEqual(["alpha", "beta"]));
   h.publish("beta", { lastActivityAt: now });
   await waitFor(() => expect(soloOrder()).toEqual(["beta", "alpha"]));
+});
+
+it("shows an Active card's leading chat again when new activity revives it past its window", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const days = 24 * 60 * 60;
+  const h = fixture(undefined, "ready", [
+    // Exactly one default 30-day window old: expired at the boundary, and
+    // still the most recent chat anywhere, so it leads the global rank.
+    {
+      id: "alpha",
+      name: "alpha",
+      channelType: "stream",
+      lastActivityAt: now - 30 * days,
+    },
+    {
+      id: "beta",
+      name: "beta",
+      channelType: "stream",
+      lastActivityAt: now - 40 * days,
+    },
+    { id: "gamma", name: "gamma", channelType: "stream" },
+  ]);
+  const team = () =>
+    [
+      ...document.querySelectorAll(
+        '[data-sidebar-section="channels"] [data-channel-id]',
+      ),
+    ].map((row) => row.getAttribute("data-channel-id"));
+  render(h.view("gamma"));
+  await waitFor(() => expect(team()).toEqual(["gamma"]));
+  // Alpha still leads, so its global rank does not change; only the
+  // 30-day filter sees the difference.
+  h.publish("alpha", { lastActivityAt: now });
+  await waitFor(() => expect(team()).toEqual(["alpha", "gamma"]));
 });
