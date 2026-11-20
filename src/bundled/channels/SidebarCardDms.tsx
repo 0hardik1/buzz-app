@@ -27,7 +27,9 @@ function unread(row: Element) {
  * Who is waiting in a card's unread DMs that its cut hides: everything when
  * the card is collapsed, otherwise the rows below its clipped list. Shows up
  * to three faces and a count; clicking shows only those DMs, and the same
- * spot then reads Show all. The view ends by itself once none are unread.
+ * spot then reads Show all. The DM you have open never counts. The view ends
+ * by itself once none are unread; a card it opened then waits for you to
+ * leave the conversation you are in before it collapses again.
  */
 export function SidebarCardDms({
   open,
@@ -35,18 +37,24 @@ export function SidebarCardDms({
   onShow,
   onShowAll,
   onNoneLeft,
+  settling,
+  onSettled,
 }: {
   open: boolean;
   filtering: boolean;
   onShow(): void;
   onShowAll(): void;
   onNoneLeft(): void;
+  /** Collapse once no conversation in the card is open. */
+  settling: boolean;
+  onSettled(): void;
 }) {
   const previews = useContext(UnreadDmPreviews);
   const anchor = useRef<HTMLDivElement>(null);
   const [hidden, setHidden] = useState<HiddenDm[]>([]);
   // Unread DMs in the whole card; unknown until first measured.
   const [total, setTotal] = useState<number>();
+  const [holding, setHolding] = useState(false);
   // Measure before paint, so moving between header and grip never shows the
   // DM-only view without its marked rows.
   useLayoutEffect(() => {
@@ -59,13 +67,16 @@ export function SidebarCardDms({
       const cut = open ? list()?.getBoundingClientRect().bottom : undefined;
       const next: HiddenDm[] = [];
       let count = 0;
+      let selected = false;
       for (const row of card.querySelectorAll<HTMLElement>("[data-card-row]")) {
         const button = row.querySelector<HTMLElement>(
           "button[data-channel-id]",
         );
         const id = button?.dataset.channelId;
         const preview = id ? previews.get(id) : undefined;
-        const waiting = !!button && !!preview && unread(button);
+        const current = row.querySelector("[data-selected]") !== null;
+        selected ||= current;
+        const waiting = !current && !!button && !!preview && unread(button);
         row.toggleAttribute(UNREAD_DM_ROW, waiting);
         if (!waiting || !id || !preview) continue;
         count++;
@@ -75,6 +86,7 @@ export function SidebarCardDms({
         if (below) next.push({ channelId: id, ...preview });
       }
       setTotal(count);
+      setHolding(selected);
       setHidden((previous) =>
         previous.length === next.length &&
         previous.every(
@@ -101,6 +113,7 @@ export function SidebarCardDms({
         "data-channel-muted",
         "data-channel-activity",
         "data-channel-id",
+        "data-selected",
       ],
     });
     const sized =
@@ -121,6 +134,9 @@ export function SidebarCardDms({
   useEffect(() => {
     if (filtering && total === 0) onNoneLeft();
   }, [filtering, total, onNoneLeft]);
+  useEffect(() => {
+    if (settling && !holding) onSettled();
+  }, [settling, holding, onSettled]);
 
   const count = hidden.length;
   const faces = hidden.slice(0, 3);
@@ -168,9 +184,10 @@ export function SidebarCardDms({
                 </span>
               ))}
             </span>
-            <span>·</span>
+            {/* One face says it all; a count starts at two. */}
+            {count > 1 && <span>·</span>}
           </span>
-          <span>{count} unread</span>
+          {count > 1 && <span>{count} unread</span>}
         </Button>
       ) : null}
     </div>

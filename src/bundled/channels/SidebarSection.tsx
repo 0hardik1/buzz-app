@@ -180,12 +180,24 @@ export function SidebarSection({
   const pendingToggle = useRef<ReturnType<typeof setTimeout>>(undefined);
   // Showing only unread DMs; `closed` when the card was collapsed before.
   const [onlyDms, setOnlyDms] = useState<{ closed: boolean }>();
-  const endOnlyDms = useCallback(() => setOnlyDms(undefined), []);
+  // A card the DM-only view opened collapses again once you leave the
+  // conversation you were reading in it.
+  const [settling, setSettling] = useState(false);
+  const closedBefore = onlyDms?.closed ?? false;
+  const endOnlyDms = useCallback(() => {
+    setOnlyDms(undefined);
+    if (closedBefore) setSettling(true);
+  }, [closedBefore]);
+  const settled = useCallback(() => {
+    setSettling(false);
+    onToggle(false);
+  }, [onToggle]);
   const dms = heightScope && (
     <SidebarCardDms
       open={open}
       filtering={!!onlyDms}
       onShow={() => {
+        setSettling(false);
         setOnlyDms({ closed: !open });
         if (!open) onToggle(true);
       }}
@@ -194,6 +206,8 @@ export function SidebarSection({
         setOnlyDms(undefined);
       }}
       onNoneLeft={endOnlyDms}
+      settling={settling && open}
+      onSettled={settled}
     />
   );
   useEffect(() => () => clearTimeout(pendingToggle.current), []);
