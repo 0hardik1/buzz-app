@@ -485,7 +485,7 @@ it.each([
 );
 
 it("shows the newest person who mentioned you, never an agent", () => {
-  const people = new Map<string, { name: string; isAgent?: boolean }>([
+  const people = new Map<string, { name: string; isAgent?: true }>([
     ["agent", { name: "Helper", isAgent: true }],
     ["alice", { name: "Alice" }],
   ]);

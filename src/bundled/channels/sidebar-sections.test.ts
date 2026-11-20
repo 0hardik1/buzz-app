@@ -221,11 +221,12 @@ it("sorts every section independently with deterministic inactive and tie fallba
     ["forums", ["forum-new", "forum-old"]],
     ["dms", []],
   ]);
+  // Unsaved, a section defaults to Recent.
   expect(
     sidebarSections(roster)
       .find(({ key }) => key === "channels")
       ?.rows.map((channel) => channel.id),
-  ).toEqual(["quiet-a", "quiet-b", "a-id", "z-id", "new"]);
+  ).toEqual(["new", "a-id", "z-id", "quiet-a", "quiet-b"]);
 });
 it("Recent places a chat without known activity by when it was created", () => {
   const solo = { channelType: "solo" as const };
@@ -317,7 +318,10 @@ it.each(["starred", "section:work", "channels", "forums", "dms"])(
       assignments: { "a-1": "work", "z-1": "work" },
       starred: ["a-0", "z-0"],
       muted: [],
-      sort: { [key]: "recent" },
+      // Unsaved sections default to Recent, so the rest choose A to Z.
+      sort: Object.fromEntries(
+        keys.map((section) => [section, section === key ? "recent" : "alpha"]),
+      ),
     });
     expect(
       sections

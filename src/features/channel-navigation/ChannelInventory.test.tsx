@@ -939,7 +939,8 @@ it("rebuilds no host row when only a message preview changes", async () => {
   render(h.view("alpha"));
   await screen.findByRole("button", { name: "gamma" });
   rowRender.mockClear();
-  h.publish("beta", { preview: "hello", lastActivityAt: 99 });
+  // Activity would reorder Recent rows; a preview alone changes nothing shown.
+  h.publish("beta", { preview: "hello" });
   expect(rowRender).not.toHaveBeenCalled();
 });
 
@@ -4197,6 +4198,8 @@ it("keeps create-and-move focus pending until the new group slot commits", async
 });
 
 it("keeps a decorated DM's resolved name when its live activity changes", async () => {
+  // Inside the default 30-day window.
+  const now = Math.floor(Date.now() / 1000);
   const registry = rowRegistry({
     version: 1,
     id: "details",
@@ -4220,7 +4223,7 @@ it("keeps a decorated DM's resolved name when its live activity changes", async 
         channelType: "dm",
         visibility: "private",
         participants: [],
-        lastActivityAt: 12,
+        lastActivityAt: now - 12,
       },
     ],
     undefined,
@@ -4228,11 +4231,11 @@ it("keeps a decorated DM's resolved name when its live activity changes", async 
   );
   render(h.view("alpha"));
   expect(
-    await screen.findByText("Notes to self / Notes to self / 12"),
+    await screen.findByText(`Notes to self / Notes to self / ${now - 12}`),
   ).toBeVisible();
-  h.publish("self", { lastActivityAt: 24, preview: "hello" });
+  h.publish("self", { lastActivityAt: now, preview: "hello" });
   expect(
-    await screen.findByText("Notes to self / Notes to self / 24"),
+    await screen.findByText(`Notes to self / Notes to self / ${now}`),
   ).toBeVisible();
   expect(screen.queryByText(/self-metadata/)).toBeNull();
 });
@@ -4287,9 +4290,16 @@ it("re-sorts a plugin order that compares previews on a preview-only publish", a
 });
 
 it("keeps default Solo recency as live activity changes", async () => {
+  // Inside the default 30-day window.
+  const now = Math.floor(Date.now() / 1000);
   const h = fixture(undefined, "ready", [
-    { id: "alpha", name: "Alpha", channelType: "solo", lastActivityAt: 2 },
-    { id: "beta", name: "Beta", channelType: "solo", lastActivityAt: 1 },
+    {
+      id: "alpha",
+      name: "Alpha",
+      channelType: "solo",
+      lastActivityAt: now - 2,
+    },
+    { id: "beta", name: "Beta", channelType: "solo", lastActivityAt: now - 3 },
     { id: "gamma", name: "Gamma", channelType: "stream" },
   ]);
   const soloOrder = () =>
@@ -4300,6 +4310,6 @@ it("keeps default Solo recency as live activity changes", async () => {
     ].map((row) => row.getAttribute("data-channel-id"));
   render(h.view("gamma"));
   await waitFor(() => expect(soloOrder()).toEqual(["alpha", "beta"]));
-  h.publish("beta", { lastActivityAt: 4 });
+  h.publish("beta", { lastActivityAt: now });
   await waitFor(() => expect(soloOrder()).toEqual(["beta", "alpha"]));
 });
