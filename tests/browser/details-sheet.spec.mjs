@@ -700,6 +700,15 @@ test.describe("expanded thread scroll controls", () => {
 
 // Windowing needs real layout, scroll anchoring and focus: jsdom cannot prove
 // the first visible frame or that virtual rows become reachable again.
+// Read up until `row` shows. One long wheel need not reach it: Linux WebKit
+// animates a wheel and can end it early when a row measures mid-scroll.
+async function readUpTo(page, row, deltaY) {
+  await expect(async () => {
+    await page.mouse.wheel(0, deltaY);
+    await expect(row).toBeInViewport({ timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
+}
+
 test("long thread sheet windows replies while preserving reading, branches, and drafts", async ({
   page,
   app,
@@ -790,7 +799,11 @@ test("long thread sheet windows replies while preserving reading, branches, and 
   );
   await settle(page, history);
   await history.hover();
-  await page.mouse.wheel(0, -10000);
+  await readUpTo(
+    page,
+    history.locator(`[data-message-id="${replies[0].id}"]`),
+    -10000,
+  );
   await expect(
     history.locator(`[data-message-id="${replies[0].id}"]`),
   ).toBeInViewport();
@@ -917,7 +930,11 @@ test("long thread sheet keeps an expanded branch mounted after collapsed activit
     .getByRole("textbox", { name: "Reply to thread", exact: true })
     .focus();
   await history.hover();
-  await page.mouse.wheel(0, -100000);
+  await readUpTo(
+    page,
+    history.locator(`[data-message-id="${replies[0].id}"]`),
+    -100000,
+  );
   await expect(
     history.locator(`[data-message-id="${replies[0].id}"]`),
   ).toBeInViewport();
