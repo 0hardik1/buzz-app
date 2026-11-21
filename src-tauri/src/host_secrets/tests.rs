@@ -497,7 +497,10 @@ fn private_enrollment_is_unavailable_without_touching_saved_credentials_or_input
     f.call("set", f.body()).unwrap();
     let (_entered, _user) = f.input();
     let calls = f.store.calls.load(Ordering::SeqCst);
-    assert_eq!(f.call("enroll", f.enrollment()).unwrap_err(), UNAVAILABLE);
+    assert_eq!(
+        f.call("enroll", f.enrollment()).unwrap_err(),
+        json!(UNAVAILABLE).to_string()
+    );
     assert_eq!(f.store.calls.load(Ordering::SeqCst), calls);
     assert!(f
         .app
@@ -514,7 +517,10 @@ fn private_enrollment_is_unavailable_without_touching_saved_credentials_or_input
 fn non_unix_private_enrollment_refuses_without_store_or_input_work() {
     let f = Fixture::ready();
     let (_entered, _user) = f.input();
-    assert_eq!(f.call("enroll", f.enrollment()).unwrap_err(), UNAVAILABLE);
+    assert_eq!(
+        f.call("enroll", f.enrollment()).unwrap_err(),
+        json!(UNAVAILABLE).to_string()
+    );
     assert!(f.call("set", f.body()).is_err());
     assert_eq!(f.store.calls.load(Ordering::SeqCst), 0);
     assert!(f.store.items.lock().unwrap().is_empty());
