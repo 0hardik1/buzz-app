@@ -1,5 +1,7 @@
 import { promptSections } from "../../features/agents/activity-transcript";
 import { openVoice } from "./voice";
+import { Context } from "@deepseek-ai/cordis";
+import { matchFilters } from "nostr-tools/filter";
 import {
   createToolOperation,
   type AgentToolAuthority,
@@ -17,6 +19,8 @@ import {
   conversationKey,
 } from "../../features/agents/conversation-folders";
 import { pubkeyOf } from "../../features/agents/membership";
+import { createSessionAdmissions } from "../../features/agents/session-admission";
+import { memoryStorage } from "../../features/agents/test-fakes";
 import { ownerReads, readyOwnerReads } from "../../features/agents/reads";
 import { ReadError } from "../../features/relay/errors";
 import {
@@ -755,6 +759,206 @@ function fixture(
     release,
   };
 }
+it("keeps resumed Codex idle until a marked reply can route in the runner's community", async () => {
+  const f = fixture();
+  const signer = keypair();
+  const communityOrigin = "https://background.example.org";
+  const event = eventDto(
+    signed(signer, {
+      kind: 9,
+      content: "Continue the invocation",
+      tags: [
+        ["h", "channel"],
+        ["e", root, "", "reply"],
+        ["p", pubkey],
+        ["buzz:invocation-intent", "1", pubkey],
+      ],
+    }),
+  );
+  const ctx = new Context();
+  ctx.provide("pluginStatus", {
+    isActive: () => true,
+    subscribe: () => () => {},
+  });
+  const admissions = createSessionAdmissions(ctx, memoryStorage());
+  let reachableOrigin = "https://selected.example.org";
+  const startedRouting = deferred<void>();
+  const confirmedBinding = deferred<{ root: string; parent: string }>();
+  const route = vi.fn(() => {
+    startedRouting.resolve();
+    return confirmedBinding.promise;
+  });
+  const routeResult = { root, parent: "d".repeat(64) };
+  const base = f.delivery(event.content);
+  const delivery: Delivery = {
+    ...base,
+    agent: { ...base.agent, owner: signer.pubkey },
+    trigger: { type: "mention", event, resumed: true },
+    routeConversation: (placement) =>
+      admissions.route(
+        {
+          ...placement,
+          agent: pubkey,
+          owner: signer.pubkey,
+          harness: "example/codex",
+          communityOrigin,
+          invocationId: event.id,
+          event,
+          resumed: true,
+          signal: base.signal,
+        },
+        true, // Native placement recorded before the signed intent was recognized.
+      ),
+  };
+  try {
+    await ctx
+      .extend({ pluginOwner: { id: "example", revision: "one" } })
+      .plugin((plugin) => {
+        admissions.register(plugin, {
+          id: "tasks",
+          ready: async () => {},
+          matches: (input) => input.communityOrigin === reachableOrigin,
+          invocationIntent: () => true,
+          route,
+          prepare: async () => undefined,
+        });
+      })
+      .await();
+    await expect(f.runtime.run(delivery)).rejects.toThrow(
+      "invocation router is unavailable",
+    );
+    expect(f.starts()).toHaveLength(0);
+
+    reachableOrigin = communityOrigin;
+    const retry = f.runtime.run(delivery);
+    const admitted = expect(retry).resolves.toBeUndefined();
+    try {
+      await Promise.race([
+        startedRouting.promise,
+        retry.then(() => {
+          throw new Error("The retry skipped invocation routing");
+        }),
+      ]);
+      expect(f.starts()).toHaveLength(0);
+    } finally {
+      confirmedBinding.resolve(routeResult);
+    }
+    await admitted;
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    expect(f.runtime.sessions(pubkey)).toMatchObject([
+      { key: JSON.stringify(["channel", routeResult.parent]) },
+    ]);
+    await f.complete();
+  } finally {
+    await ctx.fiber.dispose();
+  }
+});
+
+it("keeps invocation context with its provider turn across a failed start and retry", async () => {
+  const f = fixture();
+  const ctx = new Context();
+  ctx.provide("pluginStatus", {
+    isActive: () => true,
+    subscribe: () => () => {},
+  });
+  const storage = memoryStorage();
+  const admissions = createSessionAdmissions(ctx, storage);
+  const anchor = "d".repeat(64);
+  const calls = new Map<string, number>();
+  const delivery = (text: string) => {
+    const base = f.delivery(text);
+    const { trigger } = base;
+    if (trigger.type !== "mention") throw new Error("Expected mention");
+    return {
+      ...base,
+      config: { ...(base.config as object), scope: "channel" },
+      routeConversation: (
+        placement: Parameters<NonNullable<Delivery["routeConversation"]>>[0],
+      ) =>
+        admissions.route({
+          ...placement,
+          agent: pubkey,
+          owner: base.agent.owner,
+          harness: "example/codex",
+          communityOrigin: "https://relay.example.org",
+          invocationId: trigger.event.id,
+          event: trigger.event,
+          resumed: false,
+          signal: base.signal,
+        }),
+    };
+  };
+  try {
+    await ctx
+      .extend({ pluginOwner: { id: "example", revision: "one" } })
+      .plugin((plugin) => {
+        admissions.register(plugin, {
+          id: "tasks",
+          ready: async () => {},
+          matches: () => true,
+          route: async ({ event, invocationId, savedRoute }) => {
+            if (event?.content !== "TASK_REQUEST") return;
+            const count = (calls.get(invocationId) ?? 0) + 1;
+            calls.set(invocationId, count);
+            if (count > 1) expect(savedRoute).toEqual({ root, parent: anchor });
+            return {
+              root,
+              parent: anchor,
+              turnContext: `TASK_ONLY_CONTEXT_${count}`,
+            };
+          },
+          prepare: async () => undefined,
+        });
+      })
+      .await();
+
+    const task = delivery("TASK_REQUEST");
+    f.failing.add("thread/start");
+    await f.runtime.run(task);
+    await vi.waitFor(() =>
+      expect(f.publish.mock.calls[0]?.[0]).toMatchObject({
+        content: expect.stringContaining("thread/start failed"),
+      }),
+    );
+    expect(f.starts()).toHaveLength(0);
+    const savedPlacement = Array.from(
+      { length: storage.length },
+      (_, index) => {
+        const key = storage.key(index);
+        return key && storage.getItem(key);
+      },
+    ).filter(Boolean);
+    expect(savedPlacement).toContain(JSON.stringify({ root, parent: anchor }));
+    expect(savedPlacement.join("")).not.toContain("TASK_ONLY_CONTEXT");
+    f.failing.delete("thread/start");
+
+    const ordinary = delivery("ORDINARY_REQUEST");
+    await f.runtime.run({
+      ...ordinary,
+      sessionContext: "ORDINARY_ONLY_CONTEXT",
+    });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await f.runtime.run(task);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+
+    const ordinaryPrompt = JSON.stringify(f.starts()[0]?.params);
+    const taskPrompt = JSON.stringify(f.starts()[1]?.params);
+    expect(ordinaryPrompt).toContain("ORDINARY_ONLY_CONTEXT");
+    expect(ordinaryPrompt).not.toContain("TASK_ONLY_CONTEXT");
+    expect(taskPrompt).toContain("TASK_ONLY_CONTEXT_2");
+    expect(taskPrompt).not.toContain("TASK_ONLY_CONTEXT_1");
+    expect(taskPrompt).not.toContain("ORDINARY_ONLY_CONTEXT");
+    const [ordinaryStart, taskStart] = f.starts();
+    expect((taskStart?.params as { threadId: string })?.threadId).not.toBe(
+      (ordinaryStart?.params as { threadId: string })?.threadId,
+    );
+    await f.complete(0);
+    await f.complete(1);
+  } finally {
+    await ctx.fiber.dispose();
+  }
+});
+
 it("hands over promptly and runs conversations independently on one server", async () => {
   const f = fixture();
   await f.runtime.run({
@@ -4381,7 +4585,12 @@ it("leaves a failed first startup unbound so the next mention can start fresh", 
   await f.runtime.run(f.delivery("first"));
   await reading.promise;
   try {
-    expect(f.storage.size).toBe(0);
+    // Only the record that the conversation began in the workspace.
+    expect(
+      [...f.storage.keys()].filter(
+        (key) => !key.includes("conversation-folder"),
+      ),
+    ).toEqual([]);
     expect(f.starts()).toHaveLength(0);
   } finally {
     gate.resolve();
@@ -7596,6 +7805,37 @@ describe("voice seats", () => {
     f.complete(1, "DONE");
     await f.connection.close();
   });
+  it("sends a typed turn on an open seat the session-model section of the owner's current scope", async () => {
+    const f = await seated();
+    const context = (wire: Wire | undefined) =>
+      Object.values(
+        (
+          wire?.params as
+            | { additionalContext?: Record<string, { value: string }> }
+            | undefined
+        )?.additionalContext ?? {},
+      )
+        .map(({ value }) => value)
+        .join("");
+    await f.runtime.run(f.delivery("@Codex first"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    expect(context(f.starts()[0])).not.toContain("<base-section-updates>");
+    f.complete(0, "DONE");
+    await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+    // The owner gives the agent one session per channel while the seat
+    // stays open.
+    const d = f.delivery("@Codex again");
+    await f.runtime.run({
+      ...d,
+      config: { ...(d.config as object), scope: "channel" },
+    } as Delivery);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    const updated = context(f.starts()[1]);
+    expect(updated).toContain("<base-section-updates>");
+    expect(updated).toContain("one per-channel session");
+    f.complete(1, "DONE");
+    await f.connection.close();
+  });
   it("ends a seat on a thread from before sections were kept once the owner changes one, and goes on in a fresh thread", async () => {
     const f = await seated({}, (f) =>
       f.storage.set(
@@ -7623,7 +7863,7 @@ describe("voice seats", () => {
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
     expect(f.ended).toHaveBeenCalledWith(
       new Error(
-        "The base instructions changed. Join the huddle again to use them.",
+        "The base instructions changed, so voice stopped. Wait for the reply to your typed message before you leave, since a Huddle closes when its only person leaves",
       ),
     );
     expect(f.sent.some((wire) => wire.method === "thread/start")).toBe(true);
@@ -8082,12 +8322,17 @@ async function heldRemoteNew(readyReads: ReturnType<typeof vi.fn>) {
   } as unknown as RelayData;
   const reads = ownerReads(replacement, pubkey);
   Object.assign(f.runtime, { readyReads });
-  const first = f.delivery("first");
+  const invocation = "d".repeat(64);
+  const placement = { root, parent: invocation };
+  const first = {
+    ...f.delivery("first"),
+    routeConversation: vi.fn(async () => placement),
+  };
   await f.runtime.run(first);
   await vi.waitFor(() => expect(guests[0]?.starts()).toHaveLength(1));
   await guests[0]?.complete();
   const agent = { ...first.agent, config: first.config } as unknown as Agent;
-  const place = { channelId: "channel", root };
+  const place = { channelId: "channel", root: invocation };
   await vi.waitFor(() =>
     expect(f.runtime.sessionState(agent, place)).toBe("idle"),
   );
@@ -8104,6 +8349,10 @@ async function heldRemoteNew(readyReads: ReturnType<typeof vi.fn>) {
     return { released, reset };
   };
   const handoffs: Promise<unknown>[] = [];
+  const resolveRoute = vi.fn(async (signal: AbortSignal) => {
+    signal.throwIfAborted();
+    return placement;
+  });
   const workflow = (signal: AbortSignal) =>
     f.runtime.run({
       ...f.delivery("@Codex workflow"),
@@ -8125,6 +8374,7 @@ async function heldRemoteNew(readyReads: ReturnType<typeof vi.fn>) {
         ),
       },
       signal,
+      routeConversation: () => resolveRoute(signal),
       workingUntil: (work: Promise<unknown>) => void handoffs.push(work),
     });
   return {
@@ -8136,6 +8386,7 @@ async function heldRemoteNew(readyReads: ReturnType<typeof vi.fn>) {
     holdNew,
     handoffs,
     workflow,
+    resolveRoute,
   };
 }
 
@@ -8185,6 +8436,7 @@ it("gives a workflow mention held behind a remote New a fresh hand-over deadline
     await guest()?.complete();
     await held.handoffs[1];
     await vi.waitFor(() => expect(held.f.publish).toHaveBeenCalledTimes(2));
+    expect(held.resolveRoute).toHaveBeenCalledTimes(2);
   } finally {
     budgets.restore();
     await held.f.runtime.retire(pubkey);
@@ -8347,6 +8599,39 @@ it("keeps New disabled during an open and lets Stop cancel that open", async () 
   expect(guest.spawn).not.toHaveBeenCalled();
 });
 
+it("carries the first invocation context into connected Codex execution", async () => {
+  const guest = fixture();
+  const target = guestTarget(guest);
+  const f = fixture(
+    [],
+    undefined,
+    false,
+    {},
+    undefined,
+    undefined,
+    async () => target,
+  );
+  const placement = { root, parent: "d".repeat(64) };
+  const routeConversation = vi
+    .fn<NonNullable<Delivery["routeConversation"]>>()
+    .mockResolvedValue(placement)
+    .mockResolvedValueOnce({
+      ...placement,
+      turnContext: "Use only the task role",
+    });
+  try {
+    await f.runtime.run({ ...f.delivery("Do the task"), routeConversation });
+    await vi.waitFor(() => expect(guest.starts()).toHaveLength(1));
+    expect(JSON.stringify(guest.starts()[0]?.params)).toContain(
+      "Use only the task role",
+    );
+    expect(routeConversation).toHaveBeenCalledOnce();
+    await guest.complete();
+  } finally {
+    await f.runtime.retire(pubkey);
+  }
+});
+
 it("retries a refused first turn but requires New when an accepted remote rollout is missing", async () => {
   const guest = fixture();
   const target = guestTarget(guest);
@@ -8461,6 +8746,90 @@ it("resumes the durably saved thread even when the host cache has no thread", as
   expect(guest.sent.some((wire) => wire.method === "thread/start")).toBe(false);
   await guest.complete();
 });
+
+it.each([
+  ["keeps", { owner: { progress: { mode: "off" } } }],
+  [
+    "requires New for",
+    {
+      plugin: {
+        id: "example.plugin",
+        sections: { progress: "Report to the task." },
+      },
+    },
+  ],
+] as const)(
+  "%s a remote thread saved before its sections were kept, once the conversation's sections change",
+  async (outcome, choices) => {
+    const conversation = JSON.stringify(["channel", root]);
+    const durable = new Map([
+      [
+        `buzz.codex.sessions.execution.v1:${scope}:${pubkey}:${conversation}`,
+        JSON.stringify({ key: "durable-session", intent: "existing" }),
+      ],
+      [
+        `buzz.codex.sessions.v18:${scope}:${pubkey}:session:durable-session`,
+        JSON.stringify({
+          [conversation]: { threadId: "kept", workspace: "/guest/project" },
+        }),
+      ],
+    ]);
+    const store = fileStore(
+      new Map(),
+      async (key, value) => {
+        if (value === null) durable.delete(key);
+        else durable.set(key, value);
+      },
+      undefined,
+      async (key) => durable.get(key) ?? null,
+    );
+    const guest = fixture();
+    const f = fixture(
+      [],
+      undefined,
+      false,
+      {},
+      undefined,
+      undefined,
+      async () => guestTarget(guest),
+      store,
+    );
+    const result = f.delivery("hello");
+    const delivery = {
+      ...result,
+      agent: { ...result.agent, promptSections: () => choices },
+    } as Delivery;
+    const agent = {
+      ...delivery.agent,
+      config: delivery.config,
+    } as unknown as Agent;
+    await f.runtime.run(delivery);
+    if (outcome === "keeps") {
+      await vi.waitFor(() => expect(guest.starts()).toHaveLength(1));
+      expect(
+        guest.sent.find((wire) => wire.method === "thread/resume")?.params,
+      ).toMatchObject({ threadId: "kept" });
+      await guest.complete();
+      return;
+    }
+    // Its prompt cannot be told about the plugin's text, and a remote
+    // thread does not start over unasked.
+    await vi.waitFor(() =>
+      expect(f.runtime.sessions(pubkey)[0]?.detail).toContain(
+        "The base instructions of this conversation changed. Start a new session to continue.",
+      ),
+    );
+    expect(f.runtime.sessionState(agent, { channelId: "channel", root })).toBe(
+      "idle",
+    );
+    expect(
+      guest.sent.some(
+        (wire) =>
+          wire.method === "thread/resume" || wire.method === "thread/start",
+      ),
+    ).toBe(false);
+  },
+);
 
 it("saves accepted thread state after its first durable write fails", async () => {
   const durable = new Map<string, string>();
@@ -9032,7 +9401,7 @@ describe("a thread that keeps the base sections it started with", () => {
     expect(savedPrompts(f.storage)[0]?.[1]).toHaveLength(2);
   });
 
-  it("gives a voice seat's resumed thread the sections that changed, at both starts, and shows them in its saved prompt", async () => {
+  it("gives a voice seat's resumed thread the sections that changed in its injected message, and shows them in its saved prompt", async () => {
     vi.stubGlobal("RTCPeerConnection", class {});
     const started = {
       layout: 1,
@@ -9084,9 +9453,11 @@ describe("a thread that keeps the base sections it started with", () => {
     expect(injected).toContain(
       "<base-section-updates>\nThese sections replace",
     );
-    // Realtime start adds its instructions as a later developer message, so
-    // they must not say that no sections changed.
-    expect(vi.mocked(openVoice).mock.calls.at(-1)?.[5]).toBe(injected);
+    // Realtime start has a size limit and adds its instructions as a later
+    // developer message, so they say nothing of the sections.
+    const start = vi.mocked(openVoice).mock.calls.at(-1)?.[5];
+    expect(start).toContain("Voice work acts for owner");
+    expect(start).not.toContain("base section updates");
     const [[, parts]] = savedPrompts(f.storage) as [
       [string, [string, string][]],
     ];
@@ -9202,6 +9573,99 @@ describe("a thread that keeps the base sections it started with", () => {
       ).toHaveLength(1);
     });
   });
+
+  describe("when a plugin manages the conversation", () => {
+    const managed = {
+      plugin: {
+        id: "example.plugin",
+        sections: { "working-location": "Work in the task's folder." },
+      },
+    };
+    const wrapper =
+      '## Working location\n<plugin-section id="working-location" plugin="example.plugin">\nWork in the task\'s folder.\n</plugin-section>';
+    /** A delivery to the agent as the host hands it the choices: the
+     * plugin's only in the conversation it manages. */
+    const delivery = (
+      f: ReturnType<typeof fixture>,
+      content: string,
+      threadRoot = root,
+    ) => {
+      const result = f.delivery(content, threadRoot);
+      return {
+        ...result,
+        agent: {
+          ...result.agent,
+          promptSections: (channelId?: string, thread?: string) =>
+            channelId === "channel" && thread === root ? managed : {},
+        },
+      } as Delivery;
+    };
+    const instructions = (f: ReturnType<typeof fixture>) =>
+      f.sent
+        .filter((wire) => wire.method === "thread/start")
+        .map((wire) =>
+          String(
+            (wire.params as { developerInstructions?: string })
+              .developerInstructions,
+          ),
+        );
+
+    it("starts that conversation's thread on the plugin's sections, and no other's", async () => {
+      const f = fixture();
+      await f.runtime.run(delivery(f, "first"));
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      await f.runtime.run(delivery(f, "elsewhere", "d".repeat(64)));
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+      const [here, there] = instructions(f);
+      expect(here).toContain(wrapper);
+      expect(here).not.toContain("Make file changes on a new branch");
+      expect(there).not.toContain("<plugin-section id=");
+      expect(there).toContain("Make file changes on a new branch");
+    });
+
+    it("sends them to a thread that started before the plugin managed it", async () => {
+      const f = resumed({ layout: 1, parts: current.parts });
+      await f.runtime.run(delivery(f, "hello"));
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      expect(f.sent.some((wire) => wire.method === "thread/start")).toBe(false);
+      expect(context(f.starts()[0])).toContain(
+        `\n\n${wrapper}\n</base-section-updates>`,
+      );
+    });
+
+    it("tells a Solo chat to read its Canvas's folders, not to make a worktree", async () => {
+      const f = fixture();
+      asSoloChat(f);
+      f.snapshot.session.canvas.available = true;
+      f.snapshot.session.canvas.read.mockResolvedValue(
+        canvasHead(
+          workspaceCanvas({
+            folders: ["/repos/app"],
+            worktree: { location: "/repos/trees", baseBranch: "main" },
+            canvas: "Use tokens.",
+          }),
+        ),
+      );
+      const result = f.delivery("@Codex solo");
+      await f.runtime.run({
+        ...result,
+        agent: {
+          ...result.agent,
+          // A Solo chat is one conversation, with no thread root.
+          promptSections: (channelId?: string, thread?: string) =>
+            channelId === "channel" && !thread ? managed : {},
+        },
+      } as Delivery);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      expect(instructions(f)[0]).toContain(wrapper);
+      const turn = inputText(f.starts()[0]);
+      expect(turn).toContain(
+        "These folders hold code that is relevant to this chat: `/repos/app`, `/repos/trees`. They are for reading.",
+      );
+      expect(turn).toContain("which your owner wrote");
+      expect(turn).not.toContain("create a new worktree");
+    });
+  });
 });
 
 describe("a conversation given its own folder", () => {
@@ -9238,6 +9702,21 @@ describe("a conversation given its own folder", () => {
     );
     return f;
   };
+
+  it("refuses a folder once the conversation's first thread started in the workspace", async () => {
+    const f = fixture();
+    await f.runtime.run(f.delivery("@Codex hi", root));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await expect(
+      assignConversationFolder(
+        f.store,
+        scope,
+        pubkey,
+        `channel/${root}`,
+        "/repos/worktree",
+      ),
+    ).rejects.toThrow("already started in the agent's workspace");
+  });
 
   it("tells a Solo chat that works there to read its Canvas's folders, not to make a worktree", async () => {
     const f = await withFolder(folders(), "/repos/worktree", "channel");
@@ -9324,7 +9803,10 @@ describe("a conversation given its own folder", () => {
     await f.runtime.run(f.delivery("@Codex first", root));
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
     expect(inputText(f.starts()[0])).toContain("create a new worktree");
-    // Assigned while that turn runs in the agent's workspace.
+    // Assigned while that turn runs in the agent's workspace, as another
+    // program that does not see the conversation's start would.
+    for (const key of f.store.keys())
+      if (f.store.get(key) === "workspace") await f.store.set(key, null);
     await assignConversationFolder(
       f.store,
       scope,
@@ -9487,6 +9969,178 @@ describe("a conversation given its own folder", () => {
     f.complete(0, "DONE");
     await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
   });
+});
+
+it("includes source-root requirements in a new invocation task", async () => {
+  const f = fixture();
+  const d = f.delivery("Implement the above");
+  if (d.trigger.type !== "mention") throw new Error("Expected mention");
+  const source = {
+    ...d.trigger.event,
+    id: root,
+    content: "SOURCE_REQUIREMENT",
+    created_at: d.trigger.event.created_at - 1,
+    tags: [["h", "channel"]],
+  };
+  f.read.mockImplementation(async (...args: unknown[]) =>
+    [source].filter((event) =>
+      matchFilters(args[0] as Parameters<typeof matchFilters>[0], event),
+    ),
+  );
+  await f.runtime.run({
+    ...d,
+    routeConversation: async () => ({
+      root,
+      parent: d.trigger.type === "mention" ? d.trigger.event.id : "",
+    }),
+  });
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  expect(JSON.stringify(f.starts()[0]?.params)).toContain("SOURCE_REQUIREMENT");
+  await f.complete();
+});
+
+it.each(["thread", "channel", "community"])(
+  "keeps a routed %s agent's task session and reply placement",
+  async (scope) => {
+    const f = fixture();
+    const anchor = "d".repeat(64);
+    const routeConversation = async () => ({ root, parent: anchor });
+    const configured = (text: string) => {
+      const delivery = f.delivery(text);
+      return {
+        ...delivery,
+        config: { ...(delivery.config as object), scope },
+      };
+    };
+    const routed = (text: string) => ({
+      ...configured(text),
+      routeConversation,
+    });
+    const threadId = (index: number) =>
+      (f.starts()[index]?.params as { threadId?: string } | undefined)
+        ?.threadId;
+    const first = routed("Start the task");
+    await f.runtime.run(first);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    const initial = f.sent.find(({ method }) => method === "thread/start")
+      ?.params as { developerInstructions: string } | undefined;
+    await f.complete(0, "First task reply");
+    await f.runtime.run(routed("Continue the task"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(threadId(0)).toBeTruthy();
+    expect(threadId(1)).toBe(threadId(0));
+    await f.complete(1, "Second task reply");
+    expect(tagsOf(f)).toEqual([
+      [
+        ["h", "channel"],
+        ["e", root, "", "root"],
+        ["e", anchor, "", "reply"],
+      ],
+      [
+        ["h", "channel"],
+        ["e", root, "", "root"],
+        ["e", anchor, "", "reply"],
+      ],
+    ]);
+    const taskThread = threadId(0);
+    const agent = { ...first.agent, config: first.config } as unknown as Agent;
+    const place = {
+      channelId: "channel",
+      root: anchor,
+      isolated: true,
+    } as const;
+    await vi.waitFor(() =>
+      expect(f.runtime.sessionState(agent, place)).toBe("idle"),
+    );
+    const beforeCompact = f.sent.length;
+    const compacted = f.runtime
+      .session(agent, place, "compact")
+      .catch((error: unknown) => error);
+    try {
+      await vi.waitFor(() =>
+        expect(f.sent.slice(beforeCompact)).toContainEqual(
+          expect.objectContaining({
+            method: "thread/compact/start",
+            params: { threadId: taskThread },
+          }),
+        ),
+      );
+      const compact = f.sent
+        .slice(beforeCompact)
+        .find(({ method }) => method === "thread/resume");
+      expect(initial?.developerInstructions).toEqual(expect.any(String));
+      expect(compact?.params).toMatchObject({
+        threadId: taskThread,
+        developerInstructions: initial?.developerInstructions,
+      });
+    } finally {
+      f.emit({
+        method: "turn/started",
+        params: { threadId: taskThread, turn: { id: "compact" } },
+      });
+      f.emit({
+        method: "turn/completed",
+        params: {
+          threadId: taskThread,
+          turn: { id: "compact", status: "completed" },
+        },
+      });
+      await expect(compacted).resolves.toBeUndefined();
+    }
+    await f.runtime.run(configured("Continue in the source"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
+    expect(threadId(2)).toBeTruthy();
+    expect(threadId(2)).not.toBe(threadId(0));
+    await f.complete(2);
+  },
+);
+
+it("does not start a native turn or publish when task routing rejects", async () => {
+  const f = fixture();
+  await expect(
+    f.runtime.run({
+      ...f.delivery("Task"),
+      routeConversation: async () => {
+        throw new Error("Task binding unavailable");
+      },
+    }),
+  ).rejects.toThrow("Task binding unavailable");
+  expect(f.starts()).toEqual([]);
+  expect(f.publish).not.toHaveBeenCalled();
+});
+
+it("stops a routed community request before Codex starts the turn", async () => {
+  const f = fixture();
+  const delivery = f.delivery("Run the task");
+  const { config } = scoped(delivery);
+  const entered = deferred<void>();
+  const gate = deferred<void>();
+  const interruptible = vi.fn<NonNullable<Delivery["interruptible"]>>();
+  const running = f.runtime.run({
+    ...delivery,
+    config,
+    interruptible,
+    routeConversation: async () => ({ root, parent: "d".repeat(64) }),
+    prepareSession: async () => {
+      entered.resolve();
+      await gate.promise;
+      return undefined;
+    },
+  });
+  try {
+    await entered.promise;
+    const stop = interruptible.mock.calls[0]?.[0];
+    if (!stop) throw new Error("Expected a request stop control");
+    const stopping = expect(stop()).resolves.toBeUndefined();
+    gate.resolve();
+    await Promise.all([running, stopping]);
+    expect(f.sent.some((wire) => wire.method === "thread/start")).toBe(false);
+    expect(f.starts()).toEqual([]);
+    expect(f.publish).not.toHaveBeenCalled();
+  } finally {
+    gate.resolve();
+    await Promise.allSettled([running]);
+  }
 });
 
 it("shares a community session across channels and Solo chats while retaining each reply destination", async () => {

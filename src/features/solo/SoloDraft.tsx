@@ -1,3 +1,5 @@
+import { hostComposerProvenance } from "../messages/mention-draft";
+import { sendWithOwnerMentions } from "../relay/owner-mentions";
 import { linkedDraftKey, readLinkedChat, type LinkedChat } from "./linked-chat";
 import {
   canonicalDetailsName,
@@ -310,7 +312,7 @@ export function SoloDraft({
         settingsRevision = nextSettings;
         setDraftSettings(readDraftSettings(scope, draftKey));
       }
-    });
+    }, [projectKey, settingsKey]);
   }, [scope, draftKey, projectId]);
   const prompt = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -398,6 +400,7 @@ export function SoloDraft({
     picks?: MentionPicks,
     draftPicks?: DraftPicks,
     draftPicksRevision?: string | null,
+    explicitRecipientIds?: readonly string[],
   ) {
     const text = composerMarkdown(draft);
     if (submitting.current || !text.trim() || !available) return;
@@ -621,22 +624,27 @@ export function SoloDraft({
       );
       try {
         signMessageTokens(draftTokens(draft), () =>
-          references.length || Object.keys(firstPicks).length
-            ? session.messages.send(
-                channelId,
-                text,
-                recipients,
-                uploaded,
-                undefined,
-                references,
-                firstPicks,
-              )
-            : session.messages.send(
-                channelId,
-                text,
-                recipients,
-                ...(uploaded.length ? [uploaded] : []),
-              ),
+          sendWithOwnerMentions(
+            session,
+            explicitRecipientIds?.filter((id) => recipients.includes(id)),
+            () =>
+              references.length || Object.keys(firstPicks).length
+                ? session.messages.send(
+                    channelId,
+                    text,
+                    recipients,
+                    uploaded,
+                    undefined,
+                    references,
+                    firstPicks,
+                  )
+                : session.messages.send(
+                    channelId,
+                    text,
+                    recipients,
+                    ...(uploaded.length ? [uploaded] : []),
+                  ),
+          ),
         );
         files.clear();
         writeView(
@@ -894,6 +902,7 @@ export function SoloDraft({
   const composer = (
     <div id="new-chat-prompt" ref={prompt}>
       <MessageComposer
+        evidenceOwner={hostComposerProvenance}
         key={restored.count}
         focusRequest={restored.focus ? restored.count : 0}
         submitRequest={submitRequest}
@@ -936,8 +945,24 @@ export function SoloDraft({
             unsaved.current = held;
           },
           onDraftChange: draftEdited,
-          submit: (draft, files, addressed, picks, draftPicks, revision) => {
-            void start(draft, files, addressed, picks, draftPicks, revision);
+          submit: (
+            draft,
+            files,
+            addressed,
+            picks,
+            draftPicks,
+            revision,
+            explicitRecipientIds,
+          ) => {
+            void start(
+              draft,
+              files,
+              addressed,
+              picks,
+              draftPicks,
+              revision,
+              explicitRecipientIds,
+            );
           },
         }}
       />

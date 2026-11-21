@@ -279,6 +279,9 @@ In a Codex agent’s settings, open **Huddle voice** in the **Settings** tab to 
   **Copy link**, and shared expiry and use limits. On macOS, hover over the QR
   or focus its action with the keyboard to reveal **Share**, which opens the
   system share menu with a QR image and the invite link.
+  **Links** lists the community's invite links with their status, uses and
+  expiry; **Revoke** on a row, or paste a link into **Revoke a link**, stops
+  anyone new from joining with it. People who already joined stay in.
 - To use Buzz on your phone, open Settings → **Mobile app** (**Pair mobile**
   in builds without Builderlab). When you're signed in with Builderlab and your
   account holds this identity's backup, it says to install the app (with store
@@ -493,7 +496,8 @@ Quitting Buzz also turns it off.
   chat. Two or more in a row fold into one line showing the latest one and how
   many more there are; it names their chat when they all came from the same
   one, or says they came from other chats. Select it to list each one. A claim
-  that cannot be verified shows as the sender's ordinary message.
+  that cannot be verified shows as the sender's ordinary message. Long chat
+  names end in an ellipsis. Expand the line to see more of the name.
 
 - Only explicit additions by another member and removals appear as centered
   channel notices; self-joins and voluntary leaves are hidden.
@@ -892,9 +896,13 @@ Quitting Buzz also turns it off.
   you typed. The keyword order shows first; the reordered list replaces it a
   moment later, and a small sparkle appears at the end of the Messages heading
   (hover it to see **Reranked**). If you've already moved the
-  highlight or chosen a result, the order stays as it is. The provider sees the query and those
-  messages' text, conversation names and authors. Newest-first and filter-only
-  searches aren't reranked.
+  highlight or chosen a result, the order stays as it is. Other things equal,
+  it favors messages people wrote over agent or workflow output, then ones
+  that mention you, then ones in conversations you're in. The provider sees
+  the query and those messages' text, dates, conversation names and authors,
+  and whether each is a direct message, yours, from an agent or workflow,
+  mentions you, or is in a conversation you're in. Newest-first and filter-only searches aren't
+  reranked.
 - **Ask an agent**: start with `ask:` to write a question for your default
   agent, or choose **Ask** under a long query. Enter opens New chat with the
   question addressed to that agent; press Enter again to send it. If New chat
@@ -1174,6 +1182,13 @@ Quitting Buzz also turns it off.
   the conversation sidebar available, so you can switch straight back to a chat.
   Saved links to it open the plugin, or offer to turn it on. Use the **Drafts**
   and **Sent** tabs to switch lists; Buzz remembers your choice for this community.
+  Buzz saves conversation drafts when you pause typing or leave the composer. If
+  another window saves a different version while you edit, choose **Load saved
+  draft** or **Keep my draft** before sending. Reloading the same window
+  restores your conflicting text so you can still choose. If another window
+  sends or clears a draft, Buzz uses recent records of those actions to skip
+  restoring the same version. If storage is full or those records have expired,
+  Buzz may still offer the saved conflict for recovery.
   Rows lead with the destination and message text. It lists
   the messages you started but did not send, newest
   change first, with the number of drafts shown beside it in the Messages
@@ -1685,11 +1700,17 @@ If an agent reports incompatible synced settings, choose the **Previous Versions
   agent on this device before the agent's own instructions, one section per
   topic. For Publishing, Progress, Etiquette, Agent Memory, Engineering
   Discipline, Commit identity and Autonomy, choose **Default**, **Off**, or
-  **Custom** with your own text of up to 4 KiB, then **Save**. The other
+  **Custom** with your own text of up to 4 KiB, then **Save**. Default shows
+  the section's text to read and copy; choose Custom to edit it. The other
   sections are always on, or Buzz sets them for the conversation; **All
   sections** shows the default text of each. A plugin that is on can declare
   sections that it replaces in the chats it manages: its install review lists
-  them. Each section that such a plugin declared names the plugin.
+  them. For example, such a plugin can set where an agent's work happens in a
+  chat it manages, except for an agent that runs on another computer. Each section that such a plugin declared names the plugin.
+  When such a plugin first manages a Codex conversation that an earlier Buzz
+  version started, that conversation starts over once, without its earlier
+  context; on another computer, it asks for a new session. The install review
+  says so.
   When you choose Off or Custom for one of them, your own choice also applies
   in those chats. A choice applies to all your
   agents on this device, not on your other devices, and each agent gets it
@@ -1946,6 +1967,14 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
 
 ## Optional features and limits
 
+- Buzz saves channels and messages on this device so they show at once after
+  a restart. The desktop app also saves the images it loads, up to 256 MB
+  across all communities, so it reads them from disk the next time instead of
+  from the community; **Settings → Local settings → Cached data** shows how
+  much is in use. **Clear cache** there forgets what this device saved
+  for that community; Buzz loads it again as needed. Clearing cancels uploads
+  in progress. Losing access to a channel deletes the messages and images
+  saved from it. Leaving a community or signing out also clears it.
 - Desktop packages include a `buzz` command line client. On macOS, use
   `Buzz.app/Contents/Resources/bin/buzz`. Recognized CLI commands sent to the
   old `Contents/MacOS/buzz` path fail with exit code 1 (bad input) instead of
