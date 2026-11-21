@@ -198,7 +198,8 @@ export function UnreadBadge({
   );
 }
 /** Unread on an identity tile: a corner count of unread messages and thread
- * replies, quiet when muted. Marked unread with nothing counted keeps the dot. */
+ * replies, quiet when muted. Marked unread counts at least the message marked,
+ * even after leaving drops it from the observed count. */
 export function UnreadCount({
   session,
   channelId,
@@ -208,13 +209,13 @@ export function UnreadCount({
   channelId: string;
   dm?: boolean;
 }) {
-  const { count, unread, threadCount, muted, waiting } = useUnreadState(
+  const { count, unread, manual, threadCount, muted, waiting } = useUnreadState(
     session,
     channelId,
     dm,
   );
   const messages = unread ? (count ?? 0) : 0;
-  const total = messages + threadCount;
+  const total = Math.max(messages + threadCount, manual ? 1 : 0);
   if (muted || total === 0)
     return <UnreadBadge session={session} channelId={channelId} dm={dm} />;
   return (
