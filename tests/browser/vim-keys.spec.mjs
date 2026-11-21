@@ -151,17 +151,14 @@ test("leader keys follow Buzz's shortcut when it is rebound", async ({
   await page.addInitScript(() => {
     localStorage.setItem(
       "buzz-shortcut-bindings.v1",
-      JSON.stringify({ "global-search": { key: "y", mod: true, shift: true } }),
+      JSON.stringify({ "global-search": { key: "F9" } }),
     );
   });
   await open(page, app);
   await enableVimKeys(page);
   const search = page.getByRole("dialog", { name: "Search Buzz" });
-  const mod = (await page.evaluate(() => /Mac/.test(navigator.platform)))
-    ? "Meta"
-    : "Control";
-  // The rebind is in effect: its new chord opens Search.
-  await page.keyboard.press(`${mod}+Shift+y`);
+  // The rebind is in effect: its new key opens Search.
+  await page.keyboard.press("F9");
   await expect(search).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(search).toHaveCount(0);
