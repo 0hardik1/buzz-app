@@ -1,5 +1,6 @@
 import { workspaceMessageTarget } from "../../features/channel-navigation/new-message-route";
 import { WorkspaceNewMenu } from "./WorkspaceNewMenu";
+import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { visibleSoloRegions } from "./SoloRegions";
 import type { ChatIcon, ChatMenu } from "../../features/conversation/service";
@@ -36,7 +37,10 @@ import { ChannelLifecycleMenu } from "./ChannelLifecycleMenu";
 import { lifecycleNoun } from "./ChannelLifecycleDialog";
 import type { ChannelLifecycleAction } from "../../features/relay/channel-lifecycle-protocol";
 import { useSoloNavigation } from "../../features/channel-navigation/solo-navigation-react";
-import { prepareSoloMove } from "../../features/channel-navigation/solo-navigation";
+import {
+  prepareSoloMove,
+  soloNavigationFor,
+} from "../../features/channel-navigation/solo-navigation";
 import { eligibleSolo } from "../../features/solo/labels";
 import { WorkspaceSettings } from "../../features/solo/WorkspaceSettings";
 import {
@@ -174,6 +178,8 @@ type Inventory = {
   before: ReactNode;
   team(children: ReactNode): ReactNode;
   content: ReactNode;
+  /** The list's last row, after every section and workspace. */
+  listEnd: ReactNode;
   after: ReactNode;
   dialogs: ReactNode;
 };
@@ -1676,25 +1682,14 @@ export function ChannelInventory({
   ) => (
     <WorkspaceNewMenu
       key={`${scope}:${workspace}`}
-      scope={scope}
-      workspace={workspace}
       name={name}
-      channelAvailable={queries.channelCreation.available}
-      dmAvailable={queries.directMessages.available}
+      available={queries.directMessages.available}
       menuAnchor={menuAnchor}
-      choose={(action, trigger) => {
+      start={() => {
         if (relay.snapshot().session !== queries) return;
-        if (action === "chat") newChat(workspace);
-        else if (action === "channel") {
-          createChannelTrigger.current = trigger;
-          setInitialStarred(false);
-          setInitialGroup(workspace);
-          setCreateChannelOpen(true);
-        } else {
-          const partition = splitPartition(scope);
-          if (partition)
-            void navigator.open(workspaceMessageTarget(partition, workspace));
-        }
+        const partition = splitPartition(scope);
+        if (partition)
+          void navigator.open(workspaceMessageTarget(partition, workspace));
       }}
     />
   );
@@ -2251,6 +2246,21 @@ export function ChannelInventory({
         )}
       </>
     ),
+    // Its own card, like every section, so it never floats on the tint.
+    listEnd: (
+      <div className={styles.channelSection} data-sidebar-card="">
+        <NavigationItem
+          variant="row"
+          label="New workspace"
+          icon={<PlusIcon size={16} />}
+          disabled={!preferences.sectionCreationWritable}
+          onClick={(event) => {
+            createSectionTrigger.current = event.currentTarget;
+            setCreatingSection(true);
+          }}
+        />
+      </div>
+    ),
     after: (
       <>
         {cached && connectionError && (
@@ -2489,7 +2499,12 @@ export function ChannelInventory({
             finalFocus={createSectionTrigger}
             close={() => setCreatingSection(false)}
             create={preferences.createSection}
-            onCreated={(id) => sidebar.toggle(`group:${id}`, true)}
+            onCreated={async (id) => {
+              // A source that composes workspaces selects its own new one.
+              if (await soloNavigationFor(queries)?.openCreatedWorkspace(id))
+                return;
+              sidebar.toggle(`group:${id}`, true);
+            }}
           />
         )}
         {creatingFor && !creatingFor.surface?.signal?.aborted && (
