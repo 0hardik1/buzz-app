@@ -435,6 +435,7 @@ export function createChannelStore(
   const windowListeners = new Map<string, Set<Listener>>();
   let intent: string | undefined = options.initialChannelId;
   let current: string | undefined;
+  let navigationHead: { state: WindowState; signal: AbortSignal } | undefined;
   const mediaIntents: string[] = [];
   let hydration: Promise<void> | undefined;
   let revealHydration: (() => void) | undefined;
@@ -693,6 +694,7 @@ export function createChannelStore(
   }
   function evict(state: WindowState) {
     windows.delete(state.channelId);
+    clearHeadNavigation(state);
     state.generation++;
     state.controller?.abort();
     state.noticeRead?.controller.abort();
@@ -1060,6 +1062,7 @@ export function createChannelStore(
   }
   /** Ends a window's reads and leaves it showing only the refusal. */
   function closeWindow(state: WindowState, error: unknown) {
+    clearHeadNavigation(state);
     state.generation++;
     state.controller?.abort();
     state.noticeRead?.controller.abort();
@@ -1151,15 +1154,31 @@ export function createChannelStore(
       page: parseWindow(channelId, cursor, transport.relayAuthor, events),
     };
   }
+  function clearHeadNavigation(state: WindowState) {
+    if (navigationHead?.state === state) navigationHead = undefined;
+  }
+  function headNavigation(channelId: string) {
+    // A click can join a queued hover, refresh, or stream recovery head.
+    // Look up the visit at admission so a departed window loses priority.
+    return () =>
+      navigationHead?.state.channelId === channelId &&
+      windows.get(channelId) === navigationHead.state &&
+      !navigationHead.signal.aborted &&
+      canReadRemote(channelId);
+  }
   async function requestHead(
     channelId: string,
     priority: Priority,
+    signal?: AbortSignal,
   ): Promise<Head> {
     const generation = epoch;
     const startedAt = now();
     const accessVersion = accessVersions.get(channelId) ?? 0;
     const controller = new AbortController();
     controllers.add(controller);
+    const readSignal = signal
+      ? AbortSignal.any([signal, controller.signal])
+      : controller.signal;
     let head: Head;
     try {
       if (disposed || !transport || !canReadRemote(channelId))
@@ -1168,11 +1187,16 @@ export function createChannelStore(
       const { events, notices, page } = await readPage(
         channelId,
         null,
-        { signal: controller.signal, priority },
+        {
+          signal: readSignal,
+          priority,
+          navigation: headNavigation(channelId),
+        },
         true,
       );
       if (
         disposed ||
+        readSignal.aborted ||
         generation !== epoch ||
         accessVersion !== (accessVersions.get(channelId) ?? 0) ||
         !authorized(channelId)
@@ -1256,15 +1280,21 @@ export function createChannelStore(
       setWindow(state, { refreshing: true });
     // The newest notices are read beside the head rather than after it.
     const besideHead = !cursor && state.ceiling === undefined;
+    let settled = true;
     try {
       if (prepared && !cursor) {
-        const head = await requestHead(state.channelId, "foreground");
+        const head = await requestHead(
+          state.channelId,
+          "foreground",
+          controller.signal,
+        );
         if (!live(state, generation)) return;
         adoptHead(state, head);
         return;
       }
       const reading = readPage(state.channelId, cursor, {
         signal: controller.signal,
+        navigation: cursor ? undefined : headNavigation(state.channelId),
       });
       if (besideHead) void fillNotices(state, true);
       const { page } = await reading;
@@ -1310,7 +1340,10 @@ export function createChannelStore(
       void fillNotices(state, !cursor && !besideHead);
       void fetchProfiles(rows);
     } catch (error) {
-      if (isAbort(error) || !live(state, generation)) return;
+      if (isAbort(error) || !live(state, generation)) {
+        settled = false;
+        return;
+      }
       // A denied revalidation must not keep exposing a cached head.
       const denied = readErrorKind(error) === "denied";
       if (denied) {
@@ -1329,7 +1362,10 @@ export function createChannelStore(
             },
       );
     } finally {
-      if (state.controller === controller) state.controller = undefined;
+      if (state.controller === controller) {
+        state.controller = undefined;
+        if (settled && !cursor) clearHeadNavigation(state);
+      }
       // Aborted reads end here too; a newer head read keeps the flag.
       if (
         !state.controller &&
@@ -3929,15 +3965,18 @@ export function createChannelStore(
       warmEligible = eligible;
       void drainWarm();
     },
-    ensure(channelId: string) {
+    ensure(channelId: string, navigation?: AbortSignal) {
       if (disposed || !transport || !authorized(channelId)) return;
       intent = channelId;
       current = channelId;
       const state = touch(channelId);
+      if (navigation && !navigation.aborted)
+        navigationHead = { state, signal: navigation };
       const retained = prepared ? heads.peek(channelId) : undefined;
       if (retained && ["idle", "error"].includes(state.snapshot.status))
         adoptHead(state, retained);
       if (discovery?.isPending(channelId)) {
+        clearHeadNavigation(state);
         // A chat still starting has no history yet; its own sends show locally.
         if (state.snapshot.status === "idle")
           setWindow(state, { status: "ready", hasMore: false });
@@ -3955,7 +3994,10 @@ export function createChannelStore(
         revalidateCached(channelId);
         return;
       }
-      if (transport.demand?.(channelId)) return;
+      if (transport.demand?.(channelId)) {
+        if (state.snapshot.error) clearHeadNavigation(state);
+        return;
+      }
       if (
         state.snapshot.status !== "idle" &&
         state.snapshot.status !== "error"
@@ -3973,6 +4015,8 @@ export function createChannelStore(
           )
             void loadPage(state, null);
         }
+        if (!state.controller || state.snapshot.loadingOlder)
+          clearHeadNavigation(state);
         return;
       }
       const head = prepared ? heads.get(channelId) : undefined;
@@ -3980,7 +4024,10 @@ export function createChannelStore(
         adoptHead(state, head);
         prepareMedia(channelId);
       }
-      if (head && !head.cached && now() - head.savedAt < FRESH_FOR) return;
+      if (head && !head.cached && now() - head.savedAt < FRESH_FOR) {
+        clearHeadNavigation(state);
+        return;
+      }
       if (!head) setWindow(state, { status: "loading", error: undefined });
       void loadPage(state, null);
     },
@@ -4761,6 +4808,7 @@ export function createChannelStore(
         const head = await requestHead(channelId, priority);
         if (!valid())
           throw new DOMException("Stale live catch-up", "AbortError");
+        clearHeadNavigation(retained);
         // Live replay covers minutes; notices from a longer drop come with the
         // head, or by their own read when it had none.
         if (head.noticesRead) {
@@ -4797,6 +4845,7 @@ export function createChannelStore(
           throw new DOMException("Stale live catch-up", "AbortError");
         if (retained.atHead) moveCursor(retained, page.cursor);
         retained.kept = keptAfter();
+        clearHeadNavigation(retained);
         // The descent below the newest notices waits for the floor set here.
         void fillNotices(retained, false);
         // A drop mid-fill has marked the window cached; the stream is retrying.
@@ -4813,6 +4862,7 @@ export function createChannelStore(
       } catch (error) {
         if (!valid())
           throw new DOMException("Stale live catch-up", "AbortError");
+        if (!isAbort(error)) clearHeadNavigation(retained);
         // A denied head has purged in requestHead; a page denied after it must too.
         if (readErrorKind(error) === "denied") {
           denyChannel(channelId, error);
@@ -4839,6 +4889,7 @@ export function createChannelStore(
       const state = windows.get(channelId);
       if (disposed || !state || !authorized(channelId) || isAbort(error))
         return;
+      clearHeadNavigation(state);
       setWindow(state, {
         status: state.snapshot.rows.length ? "ready" : "error",
         freshness: "cached",
