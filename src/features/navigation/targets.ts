@@ -89,16 +89,10 @@ export type OpenTarget = Readonly<{ join?: JoinPresentation }> &
         forward?: string;
         /** Read-only content selected beside this conversation; never an action. */
         detail?: Readonly<{ target: string; rootId?: string }>;
-        /** A details or diff message read over the composer of its own
-         * conversation: its thread's reply box when `rootId` names one. Read
-         * only; never an action. `channelId` names the message's channel when
-         * it is not this one, as in another channel's thread tab beside it. */
-        reader?: Readonly<{
-          kind: "details" | "diff";
-          messageId: string;
-          rootId?: string;
-          channelId?: string;
-        }>;
+        /** A details message read over the composer of its conversation, or
+         * of its thread's reply box when `rootId` names one. Read only; never
+         * an action. */
+        reader?: Readonly<{ messageId: string; rootId?: string }>;
       }>
   );
 
@@ -493,27 +487,14 @@ export function parseOpenTarget(input: unknown): OpenTarget {
               : {}),
           });
         }
-        let reader:
-          | {
-              kind: "details" | "diff";
-              messageId: string;
-              rootId?: string;
-              channelId?: string;
-            }
-          | undefined;
+        let reader: { messageId: string; rootId?: string } | undefined;
         if (value.reader !== undefined) {
           const input = record(value.reader);
-          fields(input, ["kind", "messageId", "rootId", "channelId"]);
-          if (input.kind !== "details" && input.kind !== "diff")
-            throw invalid();
+          fields(input, ["messageId", "rootId"]);
           reader = Object.freeze({
-            kind: input.kind,
             messageId: text(input.messageId, hex).toLowerCase(),
             ...(input.rootId !== undefined
               ? { rootId: text(input.rootId, hex).toLowerCase() }
-              : {}),
-            ...(input.channelId !== undefined
-              ? { channelId: text(input.channelId, channelPattern) }
               : {}),
           });
         }
