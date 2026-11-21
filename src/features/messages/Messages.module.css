@@ -138,6 +138,7 @@
   pointer-events: none;
 }
 .asideFrame {
+  /* ChannelTimeline sets both insets; see its two-way sticky. */
   position: sticky;
   top: 0;
   display: flex;

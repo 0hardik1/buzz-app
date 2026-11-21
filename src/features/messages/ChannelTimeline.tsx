@@ -1172,6 +1172,55 @@ function Timeline({
       element.style.removeProperty("--timeline-aside-width");
     };
   }, [hasAside]);
+  // PROTOTYPE: two-way sticky. The frame is sticky with both insets at the
+  // viewport height less its own, so it stays between top-visible and
+  // bottom-visible. A spacer above it holds its place: after each scroll the
+  // spacer moves it as far as the transcript's rows moved, within that band, so
+  // it travels with the transcript until an edge shows and then stays put.
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    const transcript = transcriptBox.current;
+    const spacer = asideSpacer.current;
+    const frame = asideFrame.current;
+    if (!hasAside || !element || !transcript || !spacer || !frame) return;
+    if (typeof ResizeObserver === "undefined") return;
+    // The frame's top in the scrollport, and a row whose movement it follows.
+    let top = 0;
+    let anchor: { row: Element; top: number } | undefined;
+    const place = (scrolled: boolean) => {
+      const view = element.clientHeight;
+      frame.style.minHeight = `${view}px`;
+      const height = frame.offsetHeight;
+      const band = view - height;
+      frame.style.top = `${band}px`;
+      frame.style.bottom = `${band}px`;
+      if (scrolled && anchor?.row.isConnected)
+        top += anchor.row.getBoundingClientRect().top - anchor.top;
+      top = Math.min(0, Math.max(band, top));
+      const bounds = element.getBoundingClientRect();
+      anchor = undefined;
+      for (const row of transcript.querySelector(":scope > ol")?.children ??
+        []) {
+        const box = row.getBoundingClientRect();
+        if (box.bottom <= bounds.top) continue;
+        anchor = { row, top: box.top };
+        break;
+      }
+      const room = Math.max(0, transcript.offsetHeight - height);
+      spacer.style.height = `${Math.min(room, Math.max(0, element.scrollTop + top))}px`;
+    };
+    place(false);
+    const scrolled = () => place(true);
+    element.addEventListener("scroll", scrolled, { passive: true });
+    const resize = new ResizeObserver(() => place(false));
+    resize.observe(element);
+    resize.observe(frame);
+    resize.observe(transcript);
+    return () => {
+      element.removeEventListener("scroll", scrolled);
+      resize.disconnect();
+    };
+  }, [hasAside]);
   const toggleTrailing = useCallback(() => {
     const element = scroller.current;
     if (!element) return;
