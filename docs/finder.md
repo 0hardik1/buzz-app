@@ -18,9 +18,12 @@ This is a work in progress on the `noah/finder` branch.
 | --- | --- |
 | Matching and ranking (`match.ts`, `corpus.ts`) | Done, with tests and a benchmark |
 | The dialog (`FinderDialog.tsx`) | Done, tried on a fixture page with fake data |
-| Filling the index from your account | Not started |
-| Keeping the index on this device | Not started |
-| ⌘P in the app, and a tool other programs can call | Not started |
+| ⌘P in the app (`index.tsx`) | Done; the plugin is off until you enable it |
+| Filling the index from your account (`sync.ts`) | Done, without tests yet |
+| Saving the index between launches | Not started: it is rebuilt each launch |
+| Clear cache empties the index at once | Not yet: it empties on the next reconnect or restart |
+| Edited messages | Not yet: the finder shows the original text |
+| A tool other programs (Neovim) can call | Not started |
 
 ## How to search
 
