@@ -6,6 +6,7 @@ import { activeModal } from "../../shared/design-system/overlayLayer";
 import { createCorpus } from "./corpus.ts";
 import { noteInterest, topInterest } from "./interest";
 import { type FinderOpenOptions, provideFinder } from "./service";
+import { builtinSources } from "./sources";
 import type { FinderScope } from "./FinderDialog";
 import {
   type FinderSync,
@@ -97,6 +98,34 @@ export const apply: PluginModule["apply"] = (ctx) => {
       return show("buzz", options);
     show("buzz", { ...options, source });
   });
+  /** Opens a conversation in the connected community, optionally with a
+   * detail (such as a profile) beside it. */
+  const openConversation = (
+    channelId: string,
+    extra: { messageId?: string; threadRootId?: string; detail?: string } = {},
+  ) => {
+    const { viewer, scope } = relay.snapshot();
+    if (!viewer || !scope?.endsWith(`:${viewer}`)) return;
+    void ctx.navigation.open({
+      version: 1,
+      kind: "conversation",
+      scope: { viewer, communityOrigin: scope.slice(0, -(viewer.length + 1)) },
+      channelId,
+      ...(extra.messageId && { messageId: extra.messageId }),
+      ...(extra.threadRootId && { threadRootId: extra.threadRootId }),
+      ...(extra.detail && { detail: { target: extra.detail } }),
+    });
+  };
+  for (const source of builtinSources({
+    session: () => state.session,
+    current: () => {
+      const { target } = ctx.navigation.snapshot().entry;
+      return target.kind === "conversation" ? target.channelId : undefined;
+    },
+    open: (channelId, detail) =>
+      openConversation(channelId, detail ? { detail } : {}),
+  }))
+    sources.register(ctx, source);
   ctx.effect(() => {
     let visit: string | undefined;
     const visited = () => {
@@ -241,17 +270,10 @@ export const apply: PluginModule["apply"] = (ctx) => {
             }
             openMessage={(doc) => {
               const { viewer, scope } = relay.snapshot();
-              if (!viewer || !scope?.endsWith(`:${viewer}`)) return;
               // The visit adds 1; finding it here is worth more.
-              noteInterest(scope, doc.channelId, 2);
-              void ctx.navigation.open({
-                version: 1,
-                kind: "conversation",
-                scope: {
-                  viewer,
-                  communityOrigin: scope.slice(0, -(viewer.length + 1)),
-                },
-                channelId: doc.channelId,
+              if (viewer && scope?.endsWith(`:${viewer}`))
+                noteInterest(scope, doc.channelId, 2);
+              openConversation(doc.channelId, {
                 messageId: doc.id,
                 ...(doc.threadRootId && { threadRootId: doc.threadRootId }),
               });

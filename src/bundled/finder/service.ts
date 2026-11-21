@@ -20,7 +20,7 @@ export type FinderItem = Readonly<{
   keywords?: string;
   icon?: typeof ChatCircleIcon;
   avatar?: Readonly<{
-    src?: string;
+    src?: string | undefined;
     name?: string;
     shape?: "circle" | "squircle";
   }>;

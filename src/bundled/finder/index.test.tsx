@@ -7,6 +7,15 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Shortcut } from "../../features/shortcuts/service";
 import type { PluginModule } from "../../plugins/api";
 import { PluginRuntime } from "../../plugins/runtime";
+import { queryEvents } from "../../../tests/fixtures/finder-data";
+import { profileTarget } from "../../features/profiles/target";
+import { createRelaySession } from "../../features/relay/session";
+import {
+  keypair,
+  metadata,
+  profile,
+  roster,
+} from "../../features/relay/testing";
 import * as finderPlugin from "./index";
 import { topInterest } from "./interest";
 import type { Finder, FinderItem, FinderSource } from "./service";
@@ -56,7 +65,10 @@ const consumer = (register?: () => FinderSource) => {
   return { module, used };
 };
 
-async function mount(plugins: Record<string, PluginModule> = {}) {
+async function mount(
+  plugins: Record<string, PluginModule> = {},
+  connected?: ReturnType<typeof createRelaySession>,
+) {
   const ctx = new Context();
   contexts.push(ctx);
   const modules: Record<string, PluginModule> = {
@@ -78,11 +90,23 @@ async function mount(plugins: Record<string, PluginModule> = {}) {
   let snapshot = { entry };
   const shortcuts = new Map<string, Shortcut>();
   let Overlay: ComponentType = () => null;
+  const relaySnapshot = connected
+    ? {
+        status: "ready",
+        cached: false,
+        generation: 1,
+        scope,
+        viewer,
+        session: connected.session,
+      }
+    : { status: "connecting" };
   ctx.provide("relay", {
-    snapshot: () => ({ status: "connecting" }),
+    snapshot: () => relaySnapshot,
     subscribe: () => () => {},
   } as never);
+  const open = vi.fn(async () => ({ status: "opened" }));
   ctx.provide("navigation", {
+    open,
     snapshot: () => snapshot,
     subscribe(listener: () => void) {
       listeners.add(listener);
@@ -126,6 +150,7 @@ async function mount(plugins: Record<string, PluginModule> = {}) {
   return {
     shortcuts,
     enable,
+    open,
     visit: (id: string, channelId: string) =>
       navigate({
         id,
@@ -277,4 +302,55 @@ test("a failing list shows an error row, and a late answer for older text is ign
   expect(
     within(screen.getByRole("listbox")).getByRole("option"),
   ).toHaveTextContent("Fresh");
+});
+
+test("built-in conversations and people rank by name and open on Enter", async () => {
+  const relayKey = keypair();
+  const maya = keypair();
+  const events = [
+    metadata(relayKey, "crew", "crew", 1_700_000_000, [["t", "stream"]]),
+    roster(relayKey, "crew", [viewer, maya.pubkey]),
+    metadata(relayKey, "lab", "lab"),
+    roster(relayKey, "lab", [viewer]),
+    profile(maya, { name: "Maya Chen", nip05: "maya@example.org" }),
+  ];
+  const owner = createRelaySession({
+    viewer,
+    relayAuthor: relayKey.pubkey,
+    media: () => undefined,
+    query: async (filters) => queryEvents(events, filters),
+  });
+  await owner.session.channels.ensureList();
+  await owner.session.profiles.ensure([maya.pubkey]);
+  const opener = consumer();
+  const { show, open } = await mount({ "example.keys": opener.module }, owner);
+  show();
+  await act(async () =>
+    opener.used.finder?.open({
+      source: "buzz.finder/conversations",
+      query: "cre",
+    }),
+  );
+  expect(rows()).toEqual([expect.stringContaining("#crew")]);
+  await act(async () => screen.getByRole("option").click());
+  expect(open).toHaveBeenLastCalledWith(
+    expect.objectContaining({ kind: "conversation", channelId: "crew" }),
+  );
+  await act(async () =>
+    opener.used.finder?.open({
+      source: "buzz.finder/people",
+      query: "example",
+    }),
+  );
+  // Matched by NIP-05 address as well as name.
+  expect(rows()).toEqual([expect.stringContaining("Maya Chen")]);
+  await act(async () => screen.getByRole("option").click());
+  // No DM yet: the profile opens beside a conversation you share.
+  expect(open).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      channelId: "crew",
+      detail: { target: profileTarget(maya.pubkey) },
+    }),
+  );
+  owner.dispose();
 });
