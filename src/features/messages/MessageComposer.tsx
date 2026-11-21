@@ -82,7 +82,7 @@ import { matches } from "../shortcuts/bindings";
 import { isApplePlatform } from "../shortcuts/format";
 import { useChosenAgent } from "../solo/default-agent";
 import { agentUnavailable } from "../agents/choices";
-import { ownAgentDm } from "../solo/labels";
+import { ownAgentDm } from "../agents/own-agent-dm";
 import { useAgentChoices } from "../agents/use-choices";
 import {
   soloAgentsOnly,

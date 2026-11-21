@@ -1,7 +1,8 @@
 import { resolveForward, type ResolvedForward } from "./resolve-forward";
 import type { RelaySession } from "../relay/session";
 import type { OutboxRecovery } from "../relay/outbox";
-import { ownAgentDm, ownSolo } from "../solo/labels";
+import { ownAgentDm } from "../agents/own-agent-dm";
+import { ownSolo } from "../solo/labels";
 import { archivedMention } from "./mention-admission";
 import { followUpTargets, type FollowUpMessage } from "./follow-up-storage";
 import { signMessageTokens } from "./message-tokens";
