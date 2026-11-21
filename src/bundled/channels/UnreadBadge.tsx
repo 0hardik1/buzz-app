@@ -100,6 +100,14 @@ export function UnreadBadge({
   const unreadLabel = manual
     ? `Marked unread${snapshot.manual === "local-only" ? " on this device only" : ""}`
     : `${count} observed unread messages${snapshot.freshness === "stale" ? "; may be out of date" : ""}. Not an exact total.`;
+  // One spoken status per row. Needing you already says the row is unread, so
+  // it replaces the observed count; a manual mark still adds its note.
+  const status = needs.waiting
+    ? manual
+      ? `${needsYouLabel(needs.count)}. ${unreadLabel}`
+      : needsYouLabel(needs.count)
+    : unreadLabel;
+  const dot = labelUnread === "ordinary" && !preserveUnread;
   return (
     <>
       {label !== undefined && (
@@ -111,28 +119,22 @@ export function UnreadBadge({
           {label}
         </span>
       )}
-      {unread && (
+      {(unread || needs.waiting) && (
         <span
           className={styles.unreadState}
-          data-channel-unread=""
+          data-channel-unread={unread || undefined}
           data-channel-muted={muted || undefined}
           role="img"
-          aria-label={unreadLabel}
+          aria-label={status}
         />
       )}
-      {needs.waiting &&
-        (labelUnread === "ordinary" && !preserveUnread ? (
-          <span
-            className={styles.needsYouDot}
-            data-channel-needs-you=""
-            role="img"
-            aria-label={needsYouLabel(needs.count)}
-          />
-        ) : (
-          <span className="sr-only" data-channel-needs-you="">
-            {needsYouLabel(needs.count)}
-          </span>
-        ))}
+      {needs.waiting && (
+        <span
+          className={dot ? styles.needsYouDot : undefined}
+          data-channel-needs-you=""
+          aria-hidden="true"
+        />
+      )}
     </>
   );
 }
