@@ -52,6 +52,7 @@ import {
   MAX_BYTES as MIRROR_BYTES,
   type HeadPersistence,
   type SavedHead,
+  StartupRosterSuperseded,
 } from "./persistence";
 import { createMediaPreparation, saveData } from "./media";
 import { relayDebug } from "./debug";
@@ -432,6 +433,7 @@ export function createChannelStore(
     | undefined;
   let lastDiscoveryWrite: number | undefined;
   let discoveryDirty = false;
+  let discoverySuperseded = false;
   let discoveryRevocationPending = false;
   // The roster last written and when; undefined when the disk copy is unknown.
   let savedDiscovery: { key: string; at: number } | undefined;
@@ -1585,6 +1587,7 @@ export function createChannelStore(
     )
       return;
     const saving = { key, at: now() };
+    discoverySuperseded = false;
     savedDiscovery = saving;
     lastDiscoveryWrite = saving.at;
     void persistence
@@ -1602,10 +1605,19 @@ export function createChannelStore(
       .then(() => {
         if (savedDiscovery === saving) discoveryRevocationPending = false;
       })
-      .catch(() => {
+      .catch((error) => {
         if (savedDiscovery !== saving) return;
         savedDiscovery = undefined;
-        discoveryDirty = true;
+        if (!(error instanceof StartupRosterSuperseded)) {
+          discoveryDirty = true;
+          return;
+        }
+        discoveryRevocationPending = false;
+        discoverySuperseded = true;
+        if (discoverySave?.ifUnchanged) {
+          clearTimeout(discoverySave.timer);
+          discoverySave = undefined;
+        }
       });
   }
   /** Mirror the most recently used profiles so the next session starts with
@@ -1728,7 +1740,8 @@ export function createChannelStore(
     // Names do not depend on the saved roster: restore them alongside it.
     const profiles = restoreProfiles();
     try {
-      const saved = (await persistence.readStartup())?.discovery;
+      const saved = (await persistence.readStartup({ observeDiscovery: true }))
+        ?.discovery;
       if (
         !saved ||
         saved.relayAuthor !== transport.relayAuthor ||
@@ -2074,15 +2087,16 @@ export function createChannelStore(
             age < 0 ||
             (age >= DISCOVERY_SAVE_INTERVAL_MS &&
               (discoveryDirty || age >= DISCOVERY_RESAVE_MS));
-          // A repeat can flush a pending update, but has no new authority to
-          // replace a peer tab's stored roster.
+          const ifUnchanged = !first && !cacheChanged && !freshChange;
+          // A repeat can flush a pending update only until another tab has
+          // replaced the stored roster.
           if (
-            first ||
-            discoveryRevocationPending ||
-            freshChange ||
-            (cacheEvidence && due)
+            (!ifUnchanged || !discoverySuperseded) &&
+            (first ||
+              discoveryRevocationPending ||
+              freshChange ||
+              (cacheEvidence && due))
           ) {
-            const ifUnchanged = !first && !cacheChanged && !freshChange;
             if (discoverySave) discoverySave.ifUnchanged &&= ifUnchanged;
             else
               discoverySave = {
@@ -2497,6 +2511,7 @@ export function createChannelStore(
           savedDiscovery = undefined;
           lastDiscoveryWrite = undefined;
           discoveryDirty = false;
+          discoverySuperseded = false;
           discoveryRevocationPending = false;
           profileSave ??= setTimeout(saveProfiles, 1000);
           void persistence?.clear().catch(() => {});
@@ -3603,6 +3618,7 @@ export function createChannelStore(
     savedDiscovery = undefined;
     lastDiscoveryWrite = undefined;
     discoveryDirty = false;
+    discoverySuperseded = false;
     discoveryRevocationPending = false;
     await persistence?.clear();
   }

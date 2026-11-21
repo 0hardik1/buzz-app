@@ -381,6 +381,7 @@ test("startup retries honor the roster read before an abort and preserve peer wr
     const active = roster(relay, "active", [viewer]);
     const first = roster(relay, "first", [viewer]);
     const second = roster(relay, "second", [viewer]);
+    const retried = roster(relay, "retried", [viewer]);
     const replacement = roster(relay, "peer-only", [viewer]);
     const startup = (events) => ({
       discovery: { savedAt: Date.now(), relayAuthor: relay.pubkey, events },
@@ -390,17 +391,20 @@ test("startup retries honor the roster read before an abort and preserve peer wr
     const original = IDBObjectStore.prototype.get;
     let abortNext = false;
     let aborts = 0;
+    let writeReads = 0;
     IDBObjectStore.prototype.get = function (key) {
       const request = original.call(this, key);
       if (
-        abortNext &&
         this.name === "startup" &&
         this.transaction.mode === "readwrite" &&
         key === `${viewer}:${origin}`
       ) {
-        abortNext = false;
-        aborts++;
-        this.transaction.abort();
+        writeReads++;
+        if (abortNext) {
+          abortNext = false;
+          aborts++;
+          this.transaction.abort();
+        }
       }
       return request;
     };
@@ -415,9 +419,9 @@ test("startup retries honor the roster read before an abort and preserve peer wr
         visible: (value) => value,
       },
       directory,
-      { persistence: cache },
+      { persistence: cache, prepared: true },
     );
-    const events = [active, first, second];
+    const events = [active, first, second, retried];
     window.startupRetry = {
       revoke: async (id) => {
         abortNext = true;
@@ -428,6 +432,7 @@ test("startup retries honor the roster read before an abort and preserve peer wr
       clear: () => peer.clear(),
       repeat: () => channels.acceptDiscovery([active]),
       cachedIds,
+      writeReads: () => writeReads,
       cleanup() {
         IDBObjectStore.prototype.get = original;
         channels.dispose();
@@ -437,24 +442,33 @@ test("startup retries honor the roster read before an abort and preserve peer wr
       },
     };
 
-    await peer.writeStartup(startup([active]));
-    const initiallyRead = (await cache.readStartup()).discovery.events[0].id;
+    // The sidebar reads before the channel store restores the saved roster.
+    const sidebarEmpty = (await cache.readStartup()) === undefined;
+    const baseline = startup([active]);
+    await peer.writeStartup(baseline);
+    await channels.restore();
+    const restored = channels.queries.get("active")?.cached;
+    await peer.readStartup();
     abortNext = true;
     const patch = startup(events);
     const failed = await cache.writeStartup(patch).then(
       () => false,
       () => true,
     );
-    const savedAfterAbort = await cache.writeStartup(patch, false, true).then(
-      () => true,
-      () => false,
-    );
+    const guardedRetry = () =>
+      cache.writeStartup(patch, false, true).catch(() => {});
+    await peer.clear();
+    await guardedRetry();
+    const clearSurvived = (await cachedIds()) === undefined;
+    await peer.writeStartup(baseline);
+    await guardedRetry();
     const afterRetry = await cachedIds();
     channels.acceptDiscovery(events);
     return {
-      initiallyRead,
+      sidebarEmpty,
+      restored,
       failed,
-      savedAfterAbort,
+      clearSurvived,
       afterRetry,
       originalIds: events.map((event) => event.id),
       replacementId: replacement.id,
@@ -463,12 +477,23 @@ test("startup retries honor the roster read before an abort and preserve peer wr
 
   let afterReplacement;
   let afterClear;
+  let afterRevocationRetry;
+  let repeatReads;
   let aborts;
   try {
     await page.clock.runFor(500);
     expect(await page.evaluate(() => window.startupRetry.cachedIds())).toEqual(
       firstRetry.originalIds,
     );
+    expect(
+      await page.evaluate(() => window.startupRetry.revoke("retried")),
+    ).toEqual(firstRetry.originalIds);
+    await page.evaluate(() => window.startupRetry.repeat());
+    await page.clock.runFor(500);
+    afterRevocationRetry = await page.evaluate(() =>
+      window.startupRetry.cachedIds(),
+    );
+
     await page.evaluate(() => window.startupRetry.revoke("first"));
     await page.evaluate(() => window.startupRetry.replace());
     await page.evaluate(() => window.startupRetry.repeat());
@@ -476,6 +501,18 @@ test("startup retries honor the roster read before an abort and preserve peer wr
     afterReplacement = await page.evaluate(() =>
       window.startupRetry.cachedIds(),
     );
+    const readsAtConflict = await page.evaluate(() =>
+      window.startupRetry.writeReads(),
+    );
+    for (const delay of [500, 500, 600_500]) {
+      await page.clock.runFor(delay);
+      await page.evaluate(() => window.startupRetry.repeat());
+      await page.clock.runFor(500);
+      await page.evaluate(() => window.startupRetry.cachedIds());
+    }
+    repeatReads =
+      (await page.evaluate(() => window.startupRetry.writeReads())) -
+      readsAtConflict;
 
     await page.evaluate(() => window.startupRetry.revoke("second"));
     await page.evaluate(() => window.startupRetry.clear());
@@ -485,11 +522,14 @@ test("startup retries honor the roster read before an abort and preserve peer wr
   } finally {
     aborts = await page.evaluate(() => window.startupRetry.cleanup());
   }
-  expect(aborts).toBe(3);
-  expect(firstRetry.initiallyRead).toBe(firstRetry.originalIds[0]);
+  expect(aborts).toBe(4);
+  expect(firstRetry.sidebarEmpty).toBe(true);
+  expect(firstRetry.restored).toBe(true);
   expect(firstRetry.failed).toBe(true);
+  expect.soft(firstRetry.clearSurvived).toBe(true);
+  expect.soft(firstRetry.afterRetry).toEqual(firstRetry.originalIds);
+  expect(afterRevocationRetry).toEqual(firstRetry.originalIds.slice(0, -1));
   expect.soft(afterReplacement).toEqual([firstRetry.replacementId]);
+  expect.soft(repeatReads).toBe(0);
   expect.soft(afterClear).toBeUndefined();
-  expect.soft(firstRetry.savedAfterAbort).toBe(true);
-  expect(firstRetry.afterRetry).toEqual(firstRetry.originalIds);
 });

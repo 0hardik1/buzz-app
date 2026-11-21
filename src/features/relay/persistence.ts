@@ -22,9 +22,13 @@ export type SavedHead = {
   notices?: unknown[];
   profiles: unknown[];
 };
+export class StartupRosterSuperseded extends Error {}
+
 export interface HeadPersistence {
   read(): Promise<SavedHead[]>;
-  readStartup?(): Promise<SavedStartup | undefined>;
+  readStartup?(options?: {
+    observeDiscovery?: boolean;
+  }): Promise<SavedStartup | undefined>;
   writeStartup?(
     patch: SavedStartup,
     revoked?: boolean,
@@ -265,13 +269,13 @@ export function createHeadPersistence(
     });
   }
   return {
-    readStartup: () =>
+    readStartup: ({ observeDiscovery } = {}) =>
       transact(
         "readonly",
         (store, done, then) =>
           then(store.get(scope), (row) => {
             const data = row?.data as SavedStartup | undefined;
-            if (observedDiscovery === undefined)
+            if (observeDiscovery)
               observedDiscovery = discoveryVersion(data?.discovery);
             done(data);
           }),
@@ -309,7 +313,8 @@ export function createHeadPersistence(
           }),
         STARTUP,
       );
-      if (saved === undefined) throw new Error("Startup roster changed");
+      if (saved === undefined)
+        throw new StartupRosterSuperseded("Startup roster changed");
       if (!saved) throw new Error("Startup cache is over its byte budget");
       if (version !== undefined) observedDiscovery = version;
     },
