@@ -654,7 +654,7 @@ export function createSidebarPreferencesStore({
   }
   const restoreGeneration = generation;
   const ready = persistence
-    ?.readStartup?.("header")
+    ?.readStartup?.()
     .then((saved) => {
       if (
         closed ||

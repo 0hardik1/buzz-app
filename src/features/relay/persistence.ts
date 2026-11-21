@@ -1,6 +1,4 @@
-import { sha256 } from "@noble/hashes/sha2.js";
-import { bytesToHex } from "nostr-tools/utils";
-import { byteSize, listByteSize } from "./budget";
+import { byteSize } from "./budget";
 import type { SidebarPreferences } from "./sidebar-preferences";
 /** Device-local resume data, never proof of current access or permission to write. */
 export type SavedStartup = {
@@ -14,7 +12,6 @@ export type SavedStartup = {
   verifiedProfiles?: unknown;
   preferences?: { savedAt: number; data: SidebarPreferences };
 };
-type SavedDiscovery = NonNullable<SavedStartup["discovery"]>;
 /** Signed wire records only. The owner re-verifies before displaying cached history.
  * A cache hit is never authority for current membership or freshness. No keys/tokens are persisted. */
 export type SavedHead = {
@@ -27,8 +24,7 @@ export type SavedHead = {
 };
 export interface HeadPersistence {
   read(): Promise<SavedHead[]>;
-  /** Header-only callers get the discovery identity and an empty event list. */
-  readStartup?(mode?: "header"): Promise<SavedStartup | undefined>;
+  readStartup?(): Promise<SavedStartup | undefined>;
   writeStartup?(patch: SavedStartup, revoked?: boolean): Promise<void>;
   /** Signed kind 0 and verified-profile (30382) events mirrored from the profile directory. */
   readProfiles?(): Promise<unknown[]>;
@@ -44,85 +40,13 @@ const STORE = "heads";
 const STARTUP = "startup";
 const MIRROR = ":profiles";
 const STARTUP_BUDGET = `!budget${MIRROR}`;
-const ROSTER_SHARD = "!roster:";
-const ROSTER_SHARDS = 64;
 /** The largest row saved; a larger one is not written at all. */
 export const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_HEADS = 64;
 const MAX_AGE = 24 * 60 * 60 * 1000;
-type RowBudget = {
-  key: string;
-  bytes: number;
-  savedAt: number;
-  roster?: boolean;
-};
+type RowBudget = { key: string; bytes: number; savedAt: number };
 type Record = SavedHead & RowBudget & { scope: string };
-type RosterShard = { hash: string; bytes: number };
-type RosterIndex = Omit<SavedDiscovery, "events"> & {
-  shards: (RosterShard | null)[];
-};
-type StartupData = Omit<SavedStartup, "discovery"> & {
-  discovery?: SavedDiscovery | RosterIndex;
-};
-type StartupRow = RowBudget & { data: StartupData };
 type ScopedRow = Pick<Record, "scope" | "channelId"> & { key: IDBValidKey };
-
-const rosterPrefix = (scope: string) =>
-  `${ROSTER_SHARD}${scope.length}:${scope}/`;
-const rosterKey = (scope: string, shard: number) =>
-  `${rosterPrefix(scope)}${shard}`;
-function rosterKeys(scope: string) {
-  const prefix = rosterPrefix(scope);
-  return IDBKeyRange.bound(prefix, `${prefix}\uffff`);
-}
-
-function shardDiscovery(events: unknown[]) {
-  const groups = Array.from({ length: ROSTER_SHARDS }, () => [] as unknown[]);
-  for (const value of events) {
-    const event = value as { kind?: unknown; tags?: unknown } | null;
-    const coordinate = event?.kind === 9007 ? "h" : "d";
-    const channel = Array.isArray(event?.tags)
-      ? event.tags.find(
-          (tag) => Array.isArray(tag) && tag[0] === coordinate,
-        )?.[1]
-      : undefined;
-    let hash = 0;
-    if (typeof channel === "string")
-      for (let i = 0; i < channel.length; i++)
-        hash = Math.imul(hash, 31) + channel.charCodeAt(i);
-    groups[hash & (ROSTER_SHARDS - 1)]?.push(value);
-  }
-  const encoder = new TextEncoder();
-  return groups.map((events) => {
-    if (!events.length) return null;
-    const ids = events.map((value) => {
-      const id = (value as { id?: unknown } | null)?.id;
-      return typeof id === "string" ? id : JSON.stringify(value);
-    });
-    return {
-      events,
-      meta: {
-        hash: bytesToHex(sha256(encoder.encode(ids.join(",")))),
-        bytes: events.every((event) => event && typeof event === "object")
-          ? listByteSize(events as object[])
-          : byteSize(events),
-      },
-    };
-  });
-}
-
-function rosterIndex(value?: StartupData["discovery"]) {
-  return value &&
-    typeof value === "object" &&
-    "shards" in value &&
-    Array.isArray(value.shards) &&
-    !("events" in value)
-    ? value
-    : undefined;
-}
-
-const rosterBytes = (index?: RosterIndex) =>
-  index?.shards.reduce((bytes, shard) => bytes + (shard?.bytes ?? 0), 0) ?? 0;
 
 // History keys are strings. Array keys let us load the metadata on its own
 // without changing the database version that older builds open.
@@ -214,67 +138,51 @@ export function createHeadPersistence(
   }
   /** Keep the startup store, across identities, within its byte budget.
    * Optional profile mirrors give way before any saved roster. */
-  function prune(store: IDBObjectStore, then: Then, updated: RowBudget) {
-    then(store.get(STARTUP_BUDGET), (budget) => {
-      const known = new Map<string, RowBudget>(
-        (budget?.rows as RowBudget[] | undefined)?.map((row) => [row.key, row]),
-      );
-      known.set(updated.key, updated);
-      then(store.getAllKeys(), (keys) => {
-        const rows: RowBudget[] = [];
-        const missing: string[] = [];
-        for (const key of keys) {
-          if (
-            typeof key !== "string" ||
-            key === STARTUP_BUDGET ||
-            key.startsWith(ROSTER_SHARD)
-          )
-            continue;
-          const row = known.get(key);
-          if (row) rows.push(row);
-          else missing.push(key);
-        }
-        const trim = () => {
-          const mirror = (row: RowBudget) => Number(row.key.endsWith(MIRROR));
-          let total = 0;
-          const kept: RowBudget[] = [];
-          for (const row of rows.sort(
-            (a, b) => mirror(a) - mirror(b) || b.savedAt - a.savedAt,
-          )) {
-            total += row.bytes;
-            if (total > MAX_BYTES) store.delete(row.key);
-            else kept.push(row);
+  function prune(
+    store: IDBObjectStore,
+    then: Then,
+    updated: RowBudget,
+    saved?: (kept: boolean) => void,
+  ) {
+    then(
+      store.get(STARTUP_BUDGET),
+      (budget: { rows: RowBudget[] } | undefined) => {
+        const known = new Map(budget?.rows.map((row) => [row.key, row]));
+        known.set(updated.key, updated);
+        then(store.getAllKeys(), (keys) => {
+          const rows: RowBudget[] = [];
+          const missing: string[] = [];
+          for (const key of keys) {
+            if (typeof key !== "string" || key === STARTUP_BUDGET) continue;
+            const row = known.get(key);
+            if (row) rows.push(row);
+            else missing.push(key);
           }
-          const prefixes = new Set(
-            kept
-              .filter(({ roster }) => roster)
-              .map(({ key }) => rosterPrefix(key)),
-          );
-          for (const key of keys)
-            if (
-              typeof key === "string" &&
-              key.startsWith(ROSTER_SHARD) &&
-              !prefixes.has(key.slice(0, key.lastIndexOf("/") + 1))
-            )
-              store.delete(key);
-          writeStartupBudget(store, kept);
-        };
-        // Import sizes once for rows written before the budget was present.
-        let pending = missing.length;
-        if (pending === 0) trim();
-        for (const key of missing)
-          then(store.get(key), ({ bytes, savedAt, data }: StartupRow) => {
-            const index = rosterIndex(data?.discovery);
-            rows.push({
-              key,
-              bytes: bytes + rosterBytes(index),
-              savedAt,
-              roster: !!index,
+          const trim = () => {
+            const mirror = (row: RowBudget) => Number(row.key.endsWith(MIRROR));
+            let total = 0;
+            const kept: RowBudget[] = [];
+            for (const row of rows.sort(
+              (a, b) => mirror(a) - mirror(b) || b.savedAt - a.savedAt,
+            )) {
+              total += row.bytes;
+              if (total > MAX_BYTES) store.delete(row.key);
+              else kept.push(row);
+            }
+            writeStartupBudget(store, kept);
+            saved?.(kept.includes(updated));
+          };
+          // Import sizes once for rows written before the budget was present.
+          let pending = missing.length;
+          if (pending === 0) trim();
+          for (const key of missing)
+            then(store.get(key), ({ bytes, savedAt }: RowBudget) => {
+              rows.push({ key, bytes, savedAt });
+              if (--pending === 0) trim();
             });
-            if (--pending === 0) trim();
-          });
-      });
-    });
+        });
+      },
+    );
   }
   async function transact<T>(
     mode: IDBTransactionMode,
@@ -339,117 +247,33 @@ export function createHeadPersistence(
     });
   }
   return {
-    readStartup: (mode) =>
-      transact<SavedStartup | undefined>(
+    readStartup: () =>
+      transact(
         "readonly",
-        (store, done, then) =>
-          then(store.get(scope), (row: StartupRow | undefined) => {
-            if (!row?.data) return done(undefined);
-            const { discovery, ...settings } = row.data;
-            if (!discovery) return done(settings);
-            const index = rosterIndex(discovery);
-            const { savedAt, relayAuthor } = discovery;
-            if (mode === "header")
-              return done({
-                ...settings,
-                discovery: { savedAt, relayAuthor, events: [] },
-              });
-            if (!index)
-              return done({
-                ...settings,
-                discovery: discovery as SavedDiscovery,
-              });
-            then(
-              store.getAll(rosterKeys(scope)),
-              (rows: { key: string; data: unknown[]; hash: string }[]) => {
-                const held = new Map(rows.map((row) => [row.key, row]));
-                const events: unknown[] = [];
-                for (const [number, expected] of index.shards.entries()) {
-                  if (!expected) continue;
-                  const shard = held.get(rosterKey(scope, number));
-                  // A legacy client can evict a single shard. Keep sidebar
-                  // settings, but wait for live discovery for this roster.
-                  if (
-                    shard?.hash !== expected.hash ||
-                    !Array.isArray(shard.data)
-                  )
-                    return done(settings);
-                  for (const event of shard.data) events.push(event);
-                }
-                done({
-                  ...settings,
-                  discovery: { savedAt, relayAuthor, events },
-                });
-              },
-            );
-          }),
+        (store, done, then) => then(store.get(scope), (row) => done(row?.data)),
         STARTUP,
       ),
-    writeStartup: (patch, revoked = false) =>
-      transact(
+    async writeStartup(patch, revoked = false) {
+      const saved = await transact<boolean>(
         "readwrite",
         (store, done, then) =>
-          then(store.get(scope), (row: StartupRow | undefined) => {
-            const data: StartupData = { ...row?.data, ...patch };
-            const shards = patch.discovery
-              ? shardDiscovery(patch.discovery.events)
-              : undefined;
-            if (patch.discovery && shards) {
-              const { savedAt, relayAuthor } = patch.discovery;
-              data.discovery = {
-                savedAt,
-                relayAuthor,
-                shards: shards.map((shard) => shard?.meta ?? null),
-              };
-            }
-            let index = rosterIndex(data.discovery);
+          then(store.get(scope), (row) => {
+            const data: SavedStartup = { ...row?.data, ...patch };
             let bytes = byteSize(data);
-            if (bytes + rosterBytes(index) > MAX_BYTES && revoked) {
-              // Keep preferences even when a revocation cannot save a new roster.
-              store.delete(rosterKeys(scope));
+            if (bytes > MAX_BYTES && revoked) {
+              // An oversized replacement must still remove the revoked roster.
               delete data.discovery;
-              index = undefined;
               bytes = byteSize(data);
             }
-            const total = bytes + rosterBytes(index);
-            if (total > MAX_BYTES) return;
+            if (bytes > MAX_BYTES) return done(false);
             const meta = { key: scope, bytes, savedAt: Date.now() };
-            const save = () => {
-              store.put({ ...meta, data });
-              prune(store, then, { ...meta, bytes: total, roster: !!index });
-              done(undefined);
-            };
-            if (!shards || !index) {
-              save();
-              return;
-            }
-            const previous = rosterIndex(row?.data.discovery);
-            // A legacy build can evict an individual shard. Check keys without
-            // transferring values so the next roster save repairs a partial copy.
-            then(store.getAllKeys(rosterKeys(scope)), (keys) => {
-              const held = new Set(keys);
-              for (const [number, shard] of shards.entries()) {
-                const key = rosterKey(scope, number);
-                if (!shard) {
-                  if (held.has(key)) store.delete(key);
-                } else if (
-                  !held.has(key) ||
-                  previous?.shards[number]?.hash !== shard.meta.hash
-                ) {
-                  store.put({
-                    key,
-                    bytes: shard.meta.bytes,
-                    hash: shard.meta.hash,
-                    savedAt: meta.savedAt,
-                    data: shard.events,
-                  });
-                }
-              }
-              save();
-            });
+            store.put({ ...meta, data });
+            prune(store, then, meta, done);
           }),
         STARTUP,
-      ),
+      );
+      if (!saved) throw new Error("Startup cache is over its byte budget");
+    },
     readProfiles: () =>
       transact(
         "readonly",
@@ -553,7 +377,6 @@ export function createHeadPersistence(
         (store, done, then) => {
           store.delete(scope);
           store.delete(profiles);
-          store.delete(rosterKeys(scope));
           then(store.get(STARTUP_BUDGET), (budget) => {
             if (!budget) return;
             writeStartupBudget(

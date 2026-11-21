@@ -179,6 +179,7 @@ const sameKeys = (a?: readonly string[], b?: readonly string[]) =>
     (a ?? []).every((key, index) => key === b?.[index]));
 /** Relay page size, separate from discovery's retained-entry budget. */
 const DISCOVERY_LIMIT = 500;
+const DISCOVERY_SAVE_INTERVAL_MS = 30_000;
 /** An unchanged saved roster is written again after this long, so a row
  * pruned or cleared on disk returns and restore's one-day limit still passes. */
 const DISCOVERY_RESAVE_MS = 600_000;
@@ -428,6 +429,8 @@ export function createChannelStore(
   let discoveryObserved = false;
   // Catch-up bursts rewrite the whole startup record; save at most once per 500ms.
   let discoverySave: ReturnType<typeof setTimeout> | undefined;
+  let lastDiscoveryWrite: number | undefined;
+  let discoveryRevocationPending = false;
   // The roster last written and when; undefined when the disk copy is unknown.
   let savedDiscovery: { key: string; at: number } | undefined;
   // Directory bursts rewrite the whole profile mirror; save at most once per second.
@@ -1564,12 +1567,14 @@ export function createChannelStore(
     discoverySave = undefined;
     if (!persistence?.writeStartup || !discovery || !transport || disposed)
       return;
+    const urgent = revoked || discoveryRevocationPending;
+    discoveryRevocationPending = urgent;
     const events = discovery.savedEvents();
     const key = [transport.relayAuthor, ...events.map(({ id }) => id)].join();
     const age = now() - (savedDiscovery?.at ?? 0);
     // Catch-up repeats lookups that change nothing: skip rewriting the same roster.
     if (
-      !revoked &&
+      !urgent &&
       savedDiscovery?.key === key &&
       age >= 0 &&
       age < DISCOVERY_RESAVE_MS
@@ -1577,6 +1582,7 @@ export function createChannelStore(
       return;
     const saving = { key, at: now() };
     savedDiscovery = saving;
+    lastDiscoveryWrite = saving.at;
     void persistence
       .writeStartup(
         {
@@ -1586,10 +1592,15 @@ export function createChannelStore(
             events,
           },
         },
-        revoked,
+        urgent,
       )
+      .then(() => {
+        if (savedDiscovery === saving) discoveryRevocationPending = false;
+      })
       .catch(() => {
-        if (savedDiscovery === saving) savedDiscovery = undefined;
+        if (savedDiscovery !== saving) return;
+        savedDiscovery = undefined;
+        if (urgent) lastDiscoveryWrite = undefined;
       });
   }
   /** Mirror the most recently used profiles so the next session starts with
@@ -1922,10 +1933,22 @@ export function createChannelStore(
       discovery.isPending(id),
     );
     let discoveryChanged = false;
+    let cacheChanged = false;
+    let newCacheEvidence = false;
     for (const event of events) {
-      discoveryChanged = discovery.accept(event, cached) || discoveryChanged;
+      const id = tag(event, event.kind === 9007 ? "h" : "d");
+      const firstEvidence =
+        id &&
+        ((event.kind === 39000 && !discovery.metadataVersion(id)) ||
+          (event.kind === 39002 && !discovery.authorized(id)) ||
+          event.kind === 9007);
+      const changed = discovery.accept(event, cached);
+      discoveryChanged ||= changed;
+      if (changed && id && discovery.authorized(id)) {
+        cacheChanged = true;
+        newCacheEvidence ||= !!firstEvidence;
+      }
       if (event.kind === 39000) {
-        const id = tag(event, "d");
         if (id && discovery.metadataVersion(id)?.id === event.id) {
           if (cached) pendingMetadata.add(id);
           else pendingMetadata.delete(id);
@@ -1952,6 +1975,10 @@ export function createChannelStore(
     // A system channel never lists but stays readable: its saved history is
     // kept and restored like any other channel's.
     const nextAllowed = new Set(readable.map((channel) => channel.id));
+    const joined = readable.some(
+      (channel) =>
+        !allowed?.has(channel.id) && discovery.authorized(channel.id),
+    );
     const known = new Set([
       ...(allowed ?? []),
       ...windows.keys(),
@@ -2015,10 +2042,22 @@ export function createChannelStore(
       if (current === id) queries.ensure(id);
     }
     if (!cached) {
-      // Catch-up delivers many batches: coalesce them into one snapshot write,
-      // except revocation, which must not leave denied content on disk.
       if (revoked) saveDiscovery(true);
-      else discoverySave ??= setTimeout(saveDiscovery, 500);
+      else if (!disposed && appliedEpoch === epoch) {
+        const age = now() - (lastDiscoveryWrite ?? 0);
+        // Let fresh traffic trigger the next save. A queued trailing snapshot
+        // could overwrite an access change or cache clear from another tab.
+        if (
+          lastDiscoveryWrite === undefined ||
+          joined ||
+          confirmed.length ||
+          newCacheEvidence ||
+          age < 0 ||
+          (age >= DISCOVERY_SAVE_INTERVAL_MS &&
+            (cacheChanged || age >= DISCOVERY_RESAVE_MS))
+        )
+          discoverySave ??= setTimeout(saveDiscovery, 500);
+      }
       for (const channel of confirmed) {
         // Disk rows were display-only during hydration. Fresh membership now
         // makes that verified evidence usable for explicit read intent too.
@@ -2422,6 +2461,8 @@ export function createChannelStore(
           mirrored = undefined;
           savedAuthority = undefined;
           savedDiscovery = undefined;
+          lastDiscoveryWrite = undefined;
+          discoveryRevocationPending = false;
           profileSave ??= setTimeout(saveProfiles, 1000);
           void persistence?.clear().catch(() => {});
           void options.channelMedia?.retain([]).catch(() => {});
@@ -3525,6 +3566,8 @@ export function createChannelStore(
     savedVerified = [];
     savedAuthority = undefined;
     savedDiscovery = undefined;
+    lastDiscoveryWrite = undefined;
+    discoveryRevocationPending = false;
     await persistence?.clear();
   }
   /** One background head read at a time; warm never competes with demand reads

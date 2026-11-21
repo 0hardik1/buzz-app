@@ -192,7 +192,7 @@ export function provideRelay(
     let cached: ReturnType<typeof createRelaySession> | undefined;
     let handedOff = false;
     try {
-      const startup = await persistence.readStartup?.("header");
+      const startup = await persistence.readStartup?.();
       const saved = startup?.discovery;
       if (
         !saved ||

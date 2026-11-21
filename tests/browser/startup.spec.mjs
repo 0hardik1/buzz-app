@@ -221,11 +221,20 @@ test("fresh roster omission removes cached conversation and its next-launch reco
   page,
   app,
 }) => {
+  const savedAlpha = (startup) =>
+    startup.some((row) =>
+      row.data.discovery?.events?.some((event) =>
+        event.tags.some(([key, id]) => key === "d" && id === "alpha"),
+      ),
+    );
   await open(page, app);
   await expect
-    .poll(async () =>
-      (await cached(page)).heads.some((h) => h.channelId === "alpha"),
-    )
+    .poll(async () => {
+      const { heads, startup } = await cached(page);
+      return (
+        heads.some((head) => head.channelId === "alpha") && savedAlpha(startup)
+      );
+    })
     .toBe(true);
   const gate = held();
   let requested = false;
@@ -251,12 +260,7 @@ test("fresh roster omission removes cached conversation and its next-launch reco
         const { heads, startup } = await cached(page);
         return (
           heads.every((head) => head.channelId !== "alpha") &&
-          startup.every(
-            (row) =>
-              !(row.data.discovery?.events ?? []).some((event) =>
-                event.tags.some(([key, id]) => key === "d" && id === "alpha"),
-              ),
-          )
+          !savedAlpha(startup)
         );
       })
       .toBe(true);
@@ -708,16 +712,7 @@ test.describe("pending startup navigation", () => {
               for (const row of rows.result) {
                 // The profile mirror row holds no roster.
                 if (!row.data.discovery) continue;
-                const events =
-                  row.data.discovery.events ??
-                  rows.result
-                    .filter((candidate) =>
-                      candidate.key.startsWith(
-                        `!roster:${row.key.length}:${row.key}/`,
-                      ),
-                    )
-                    .flatMap((candidate) => candidate.data);
-                row.data.discovery.events = events.filter(
+                row.data.discovery.events = row.data.discovery.events.filter(
                   (event) =>
                     !event.tags.some(
                       ([key, value]) => key === "d" && value === "beta",

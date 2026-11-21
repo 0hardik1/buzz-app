@@ -70,9 +70,14 @@ it("writes sidebar preferences only when the confirmed value changes", async () 
     expect(writeStartup).toHaveBeenCalledOnce();
 
     const changed = { ...data, starred: [] };
-    read.mockResolvedValueOnce(changed);
+    read.mockResolvedValue(changed);
+    writeStartup.mockRejectedValueOnce(
+      new Error("Startup cache is over its byte budget"),
+    );
     await store.queries.refresh();
     expect(writeStartup).toHaveBeenCalledTimes(2);
+    await store.queries.refresh();
+    expect(writeStartup).toHaveBeenCalledTimes(3);
     expect(writeStartup).toHaveBeenLastCalledWith({
       preferences: { data: changed, savedAt: expect.any(Number) },
     });

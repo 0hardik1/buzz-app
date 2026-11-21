@@ -28,9 +28,12 @@ test("startup storage batches roster updates and prunes without transferring the
     const { pubkey: viewer } = keypair();
     const agents = [keypair().pubkey, keypair().pubkey];
     const origin = "https://example.org";
+    const otherOrigin = "https://other.example.org";
+    const scope = `${viewer}:${origin}`;
+    const otherScope = `${viewer}:${otherOrigin}`;
     const cache = createHeadPersistence(viewer, origin);
     const peer = createHeadPersistence(viewer, origin);
-    const other = createHeadPersistence(viewer, "https://other.example.org");
+    const other = createHeadPersistence(viewer, otherOrigin);
     const channelId = (index) => `example-channel-${index}`;
     const channelRoster = (index, time, members = [viewer, ...agents]) =>
       roster(relay, channelId(index), members, time);
@@ -69,11 +72,27 @@ test("startup storage batches roster updates and prunes without transferring the
         tx.oncomplete = resolve;
         tx.onabort = () => reject(tx.error);
       });
-    await writeLegacy(`${viewer}:${origin}`, saved);
+    await writeLegacy(scope, saved);
     const legacy = await cache.readStartup();
     await cache.writeStartup({ discovery: saved.discovery });
     await cache.writeProfiles([{ content: "m".repeat(2_000_000) }]);
-    await other.writeStartup({ verifiedProfiles: null });
+    const otherEvent = channelRoster(3000);
+    await other.writeStartup({
+      discovery: { ...saved.discovery, events: [otherEvent] },
+    });
+    await other.writeProfiles([{ content: "Other scope" }]);
+    await cache.write({
+      channelId: channelId(1),
+      events: [],
+      profiles: [],
+      savedAt: Date.now(),
+    });
+    await other.write({
+      channelId: channelId(3000),
+      events: [],
+      profiles: [],
+      savedAt: Date.now(),
+    });
     await peer.readStartup();
     const directory = createProfileDirectory(null);
     const channels = createChannelStore(
@@ -91,7 +110,6 @@ test("startup storage batches roster updates and prunes without transferring the
 
     const counts = () => ({
       rosterWrites: 0,
-      shardWrites: 0,
       rosterReads: 0,
       bulkValueReads: 0,
       readBytes: 0,
@@ -101,7 +119,14 @@ test("startup storage batches roster updates and prunes without transferring the
     const methods = ["put", "get", "getAll", "getAllKeys", "openCursor"];
     const prototype = IDBObjectStore.prototype;
     const originals = methods.map((method) => prototype[method]);
-    const hasRoster = (value) => Array.isArray(value?.data?.discovery?.events);
+    const inlineRoster = (value) =>
+      Array.isArray(value?.data?.discovery?.events);
+    const hasRoster = (value) =>
+      inlineRoster(value) ||
+      (Array.isArray(value?.data) &&
+        value.data.some(
+          (event) => event?.kind === 39002 || event?.kind === 39000,
+        ));
     for (const [index, method] of methods.entries()) {
       prototype[method] = function (...args) {
         const request = originals[index].apply(this, args);
@@ -109,8 +134,7 @@ test("startup storage batches roster updates and prunes without transferring the
         const sample = measured;
         if (method === "put") {
           sample.writtenBytes += bytes(args[0]);
-          if (hasRoster(args[0])) sample.rosterWrites++;
-          if (args[0].key.startsWith("!roster:")) sample.shardWrites++;
+          if (inlineRoster(args[0])) sample.rosterWrites++;
         } else {
           if (method === "getAll" || method === "openCursor")
             sample.bulkValueReads++;
@@ -133,18 +157,39 @@ test("startup storage batches roster updates and prunes without transferring the
         tx.oncomplete = resolve;
         tx.onabort = () => reject(tx.error);
       });
+    const rawStorage = () =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(["startup", "heads"]);
+        const startup = tx.objectStore("startup").getAll();
+        const heads = tx.objectStore("heads").getAll();
+        tx.oncomplete = () =>
+          resolve({
+            payloadKeys: startup.result
+              .filter((row) => hasRoster(row) || Array.isArray(row.data))
+              .map(({ key }) => key),
+            headScopes: [...new Set(heads.result.map((row) => row.scope))],
+          });
+        tx.onabort = () => reject(tx.error);
+      });
     channels.acceptDiscovery(events, undefined, undefined, false, false);
     window.rosterReplay = {
       update: (index) =>
         channels.acceptDiscovery([channelRoster(index, 1_700_000_001)]),
+      unrelated: () =>
+        channels.acceptDiscovery([
+          metadata(relay, "preview", "Unjoined preview"),
+        ]),
       settle,
-      async finish() {
+      async measure() {
         const replay = measured;
         measured = counts();
         await cache.writeProfiles([{ content: "m".repeat(5_000_000) }]);
         const prune = measured;
         measured = counts();
         const mirrorPruned = (await cache.readProfiles()).length === 0;
+        return { replay, prune, mirrorPruned };
+      },
+      async finish() {
         const current = await cache.readStartup();
         const removed = channelId(0);
         const changedPreferences = { ...preferences, savedAt: Date.now() + 1 };
@@ -152,29 +197,49 @@ test("startup storage batches roster updates and prunes without transferring the
         channels.acceptDiscovery([channelRoster(0, 1_700_000_002, agents)]);
         await saving;
         const afterRevocation = await cache.readStartup();
-        // Older clients can evict individual shards as independent rows.
-        await new Promise((resolve, reject) => {
-          const tx = db.transaction("startup", "readwrite");
-          const store = tx.objectStore("startup");
-          const keys = store.getAllKeys();
-          keys.onsuccess = () => {
-            const shard = keys.result.find((key) => key.startsWith("!roster:"));
-            if (shard) store.delete(shard);
-          };
-          tx.oncomplete = resolve;
-          tx.onabort = () => reject(tx.error);
-        });
-        const incomplete = await cache.readStartup();
+        const oversized = await cache
+          .writeStartup({
+            preferences: {
+              ...changedPreferences,
+              data: {
+                sections: [
+                  { id: "oversized", name: "p".repeat(4_600_000), order: 0 },
+                ],
+              },
+            },
+          })
+          .then(
+            () => false,
+            () => true,
+          );
+        await cache.writeProfiles([{ content: "Selected scope" }]);
         channels.acceptDiscovery([channelRoster(1, 1_700_000_002)]);
-        await channels.clearCache();
+        const clear = (name, work) =>
+          new Promise((resolve, reject) => {
+            const tx = db.transaction(name, "readwrite");
+            work(tx.objectStore(name));
+            tx.oncomplete = resolve;
+            tx.onabort = () => reject(tx.error);
+          });
+        // The v2 client clears these stores in two transactions.
+        await clear("startup", (startup) => {
+          startup.delete(scope);
+          startup.delete(`${scope}:profiles`);
+        });
+        await clear("heads", (heads) => {
+          const rows = heads.getAll();
+          rows.onsuccess = () => {
+            for (const row of rows.result)
+              if (row.scope === scope) heads.delete(row.key);
+          };
+        });
         return {
+          afterClear: await rawStorage(),
           legacyRestored:
             legacy.discovery.events.length === events.length &&
             legacy.preferences.savedAt === preferences.savedAt,
           initialBytes: bytes(saved),
-          replay,
-          prune,
-          mirrorPruned,
+          oversized,
           latestSaved: current.discovery.events.some(
             (event) =>
               event.kind === 39002 &&
@@ -186,16 +251,17 @@ test("startup storage batches roster updates and prunes without transferring the
           ),
           preferencesSaved:
             afterRevocation.preferences.savedAt === changedPreferences.savedAt,
-          incompleteRejected:
-            incomplete.discovery === undefined &&
-            incomplete.preferences.savedAt === changedPreferences.savedAt,
         };
       },
       async cleanup() {
         try {
           return {
+            ...(await rawStorage()),
             cleared: (await cache.readStartup()) === undefined,
-            otherScope: await other.readStartup(),
+            otherScope,
+            otherEvent:
+              (await other.readStartup())?.discovery?.events[0]?.id ===
+              otherEvent.id,
           };
         } finally {
           channels.dispose();
@@ -218,7 +284,16 @@ test("startup storage batches roster updates and prunes without transferring the
       await page.clock.runFor(500);
       await page.evaluate(() => window.rosterReplay.settle());
     }
-    result = await page.evaluate(() => window.rosterReplay.finish());
+    const replay = await page.evaluate(() => window.rosterReplay.measure());
+    await page.clock.runFor(30_000);
+    await page.evaluate(() => window.rosterReplay.update(20));
+    await page.clock.runFor(500);
+    result = {
+      ...replay,
+      ...(await page.evaluate(() => window.rosterReplay.finish())),
+    };
+    await page.clock.runFor(30_500);
+    await page.evaluate(() => window.rosterReplay.unrelated());
     await page.clock.runFor(500);
   } finally {
     remaining = await page.evaluate(() => window.rosterReplay.cleanup());
@@ -227,12 +302,21 @@ test("startup storage batches roster updates and prunes without transferring the
     body: JSON.stringify(result, null, 2),
     contentType: "application/json",
   });
+  const otherPayloads = {
+    payloadKeys: [remaining.otherScope, `${remaining.otherScope}:profiles`],
+    headScopes: [remaining.otherScope],
+  };
+  expect(result.afterClear).toEqual(otherPayloads);
+  expect(remaining).toMatchObject({
+    ...otherPayloads,
+    cleared: true,
+    otherEvent: true,
+  });
   expect(result).toMatchObject({
     legacyRestored: true,
     replay: {
-      rosterWrites: 0,
-      shardWrites: 20,
-      rosterReads: 0,
+      rosterWrites: 1,
+      rosterReads: 1,
       bulkValueReads: 0,
     },
     prune: { rosterReads: 0, rosterWrites: 0, bulkValueReads: 0 },
@@ -240,14 +324,10 @@ test("startup storage batches roster updates and prunes without transferring the
     latestSaved: true,
     immediatelyRevoked: true,
     preferencesSaved: true,
-    incompleteRejected: true,
+    oversized: true,
   });
   expect(result.initialBytes).toBeGreaterThan(3_500_000);
   expect(result.replay.readBytes + result.replay.writtenBytes).toBeLessThan(
     2.05 * result.initialBytes,
   );
-  expect(remaining).toEqual({
-    cleared: true,
-    otherScope: { verifiedProfiles: null },
-  });
 });
