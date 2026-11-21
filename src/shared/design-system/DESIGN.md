@@ -960,9 +960,7 @@ features keep the row's treatment with its existing surface owner. A shared
 Menu also marks the element that had focus when it opened with
 `data-menu-origin` while it is mounted (a submenu's parent menu is not
 marked), so a row that opened a list-level menu, such as a keyboard-selected
-message, can keep its selected treatment. A keyboard-selected message uses
-`affordance-panel-hover` with a 2px `border-focus` bar at its start, kept
-while focus is within it or it is a menu origin.
+message, can keep its selected treatment.
 
 Button and IconButton share prominent, subtle, ghost, inverted, destructive,
 outline and link emphasis. Inverted is for an inverse surface; link keeps its

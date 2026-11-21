@@ -527,12 +527,13 @@ test("highlight radio choices keep single-selection semantics without a check ic
 
 test("an open menu marks what had focus when it opened, not a submenu's parent", async () => {
   const user = userEvent.setup();
-  render(
+  // An inline ref is a new one each render, which reattaches the popup.
+  const ui = () => (
     <>
       <button type="button">Row</button>
       <MenuRoot>
         <MenuTrigger>Actions</MenuTrigger>
-        <MenuPopup>
+        <MenuPopup ref={() => {}}>
           <MenuSubmenu>
             <MenuSubmenuTrigger>More</MenuSubmenuTrigger>
             <MenuSubmenuPopup>
@@ -541,14 +542,19 @@ test("an open menu marks what had focus when it opened, not a submenu's parent",
           </MenuSubmenu>
         </MenuPopup>
       </MenuRoot>
-    </>,
+    </>
   );
+  const view = render(ui());
   const trigger = screen.getByRole("button", { name: "Actions" });
   trigger.focus();
   await user.keyboard("{Enter}");
   const more = await screen.findByRole("menuitem", { name: "More" });
   expect(trigger).toHaveAttribute("data-menu-origin");
   await waitFor(() => expect(more).toHaveFocus());
+  // Reattached while focus is in the menu, it keeps its origin.
+  view.rerender(ui());
+  await act(async () => {});
+  expect(trigger).toHaveAttribute("data-menu-origin");
   await user.keyboard("{ArrowRight}");
   await screen.findByRole("menuitem", { name: "Deep" });
   expect(more).not.toHaveAttribute("data-menu-origin");

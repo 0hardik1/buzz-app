@@ -38,7 +38,7 @@ export function registerMessageList(element: HTMLElement, list: MessageList) {
 }
 
 /** The row's message box, not its day divider, takes focus. */
-function focusTarget(row: HTMLElement) {
+export function focusTarget(row: HTMLElement) {
   return row.querySelector<HTMLElement>(":scope > [data-layout]") ?? row;
 }
 

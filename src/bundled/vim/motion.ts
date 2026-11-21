@@ -6,6 +6,7 @@
 import { WHICH_KEY } from "./pending";
 import {
   activeMessageList,
+  focusTarget,
   selectedMessage,
   selectMessage,
 } from "../../features/messages/message-selection";
@@ -175,9 +176,6 @@ export const halfPage = (down: boolean) =>
     (rows) => rows[Math.floor(rows.length / 2)],
   );
 
-/** A message's own box, which takes focus when the message is selected. */
-const messageBox = (row: HTMLElement) =>
-  row.querySelector<HTMLElement>(":scope > [data-layout]") ?? row;
 /** Parts of a message that take focus: its author, links, files, reactions. */
 const PART =
   'a[href], button:not(:disabled), summary, [tabindex]:not([tabindex="-1"])';
@@ -197,7 +195,9 @@ export function messageStops() {
       part.getClientRects().length > 0 &&
       !part.closest(UNAVAILABLE),
   );
-  return parts.length ? { row, stops: [messageBox(row), ...parts] } : undefined;
+  return parts.length
+    ? { row, stops: [focusTarget(row), ...parts] }
+    : undefined;
 }
 
 /** Tab / Shift-Tab: the message's next or previous part, wrapping to itself. */
@@ -216,7 +216,7 @@ export function stepPart(forward: boolean) {
 export function leave() {
   const origin = focused();
   const row = origin?.closest<HTMLElement>(ROW);
-  if (origin && row && !origin.matches(TYPING) && origin !== messageBox(row))
+  if (origin && row && !origin.matches(TYPING) && origin !== focusTarget(row))
     return selectMessage(row);
   origin?.blur();
 }

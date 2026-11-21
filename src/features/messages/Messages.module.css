@@ -3746,12 +3746,13 @@ html[data-keyboard-navigation] .message:has([data-menu-origin])::after {
   background:
     linear-gradient(var(--border-focus), var(--border-focus)) var(--space-1)
     center / 2px calc(100% - var(--space-3)) no-repeat
-    var(--affordance-panel-hover);
+    var(--affordance-selected);
   pointer-events: none;
 }
 @media (forced-colors: active) {
-  html[data-keyboard-navigation] .message:focus-visible,
-  html[data-keyboard-navigation] .message[data-menu-origin] {
+  html[data-keyboard-navigation] .message:focus-within,
+  html[data-keyboard-navigation] .message[data-menu-origin],
+  html[data-keyboard-navigation] .message:has([data-menu-origin]) {
     outline: 2px solid Highlight;
   }
 }

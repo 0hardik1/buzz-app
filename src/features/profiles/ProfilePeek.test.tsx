@@ -318,6 +318,15 @@ it("the avatar's Menu key opens the person's own menu, which messages them and c
     await user.click(screen.getByRole("menuitem", { name: "Copy public key" }));
     expect(await navigator.clipboard.readText()).toBe(npubEncode(person));
     await waitFor(() => expect(menu).not.toBeInTheDocument());
+    // A keyboard open returns focus to the avatar; a pointer open leaves it.
+    const avatar = screen.getByRole("button", { name: "Avatar" });
+    await waitFor(() => expect(avatar).toHaveFocus());
+    avatar.blur();
+    fireEvent.contextMenu(avatar);
+    await screen.findByRole("menu", { name: "Morgan actions" });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(avatar).not.toHaveFocus();
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Avatar" }));
     // Closing the menu first must not abandon the conversation it opens.

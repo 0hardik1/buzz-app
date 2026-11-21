@@ -177,21 +177,20 @@ export function ProfilePeek({
     // Kept through a menu's Send message, which closes the menu first.
     enabled: open || menuOpen || messaging,
     onOpened(link) {
-      setMessaging(false);
       if (!onOpen(link))
         throw new Error("Could not open the conversation. Try again.");
       setOpen(false);
     },
   });
-  useEffect(() => {
-    if (!messaging || !message.error) return;
-    setMessaging(false);
-    notify(message.error, "error");
-  }, [messaging, message.error, notify]);
+  // A pointer open leaves focus where it was on close, as message menus do.
+  const menuByPointer = useRef(false);
   const openMenu = (event: KeyboardEvent | MouseEvent) => {
+    // A touch long-press stays the browser's, as on the message itself.
+    if ((event.nativeEvent as PointerEvent).pointerType === "touch") return;
     // The avatar's menu, not its message's.
     event.preventDefault();
     event.stopPropagation();
+    menuByPointer.current = event.type === "contextmenu";
     setOpen(false);
     setMenuOpen(true);
   };
@@ -393,7 +392,9 @@ export function ProfilePeek({
           aria-label={`${name} actions`}
           anchor={() => document.getElementById(triggerId)}
           align="start"
-          finalFocus={() => document.getElementById(triggerId) ?? true}
+          finalFocus={() =>
+            !menuByPointer.current && document.getElementById(triggerId)
+          }
         >
           <MenuItem onClick={openProfile}>View profile</MenuItem>
           {message.available && (
@@ -401,7 +402,10 @@ export function ProfilePeek({
               disabled={message.opening}
               onClick={() => {
                 setMessaging(true);
-                void message.open();
+                void message.open().then((error) => {
+                  setMessaging(false);
+                  if (error) notify(error, "error");
+                });
               }}
             >
               Send message

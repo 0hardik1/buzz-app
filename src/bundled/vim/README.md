@@ -57,6 +57,10 @@ Enter to press the button. Checkboxes, switches and options keep Space. When
 another shortcut uses the same key, such as Escape for marking a conversation
 read, Settings → Shortcuts marks it "Also used by"; change one to choose.
 
+In a message with parts, Tab and Shift-Tab stay within it, wrapping back to
+the message; press Escape, `j` or `k` to move on. In a message without parts,
+Tab moves as usual.
+
 Buzz's own message keys still act on the selected message: `e` edits, `r`
 reacts, `t` replies in thread, `u` marks unread and Delete deletes your own
 message.
