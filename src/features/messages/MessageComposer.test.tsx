@@ -107,6 +107,7 @@ import type { EmojiSnapshot } from "../relay/emoji-directory";
 import { emojiQuery } from "../../bundled/emoji/emoji-query";
 import type { ComposerInputElement } from "./composer-dom";
 import { profileTarget } from "../profiles/target";
+import { profileMentionParts } from "./profile-mentions";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { setRememberAgentsPreference } from "./mention-preferences";
 import * as modelStorage from "./solo-model-picks-storage";
@@ -18699,6 +18700,79 @@ it.each([
       groups,
       content: "@Mary Jane @Wes hi",
       tags: [],
+    });
+  },
+);
+it.each([
+  ["verified", "picked", 0, "Mary Jane Jones crew", ""],
+  ["verified", "saved in a draft", 1, "Mary Jane Jones crew", ""],
+  ["self-set", "picked", 0, "Mo crew", "Mo Jones"],
+])(
+  "a group whose label starts with a member's %s name is %s and sent as its members",
+  async (_name, _how, groups, label, own) => {
+    const mj = { ...first, name: "MJ" };
+    const verified = {
+      displayName: "MJ",
+      username: "mj",
+      fullName: "Mary Jane Jones",
+      issuerLabel: "Example",
+      verifiedAt: 1,
+      status: "checked" as const,
+      multipleIssuers: false,
+    };
+    if (groups)
+      writeView(
+        "scope",
+        "draft:channel",
+        typedDraft(savedCrew(`@${label} hi`, label, [mj, wes])),
+      );
+    const h = mount();
+    h.setProfiles(
+      new Map([
+        [mj.pubkey, { name: "MJ", verified }],
+        [wes.pubkey, { name: "Wes" }],
+      ]),
+    );
+    if (own)
+      Object.assign(h.session.profiles, {
+        event: (pubkey: string) =>
+          pubkey === mj.pubkey
+            ? {
+                id: "e".repeat(64),
+                pubkey,
+                created_at: 1,
+                kind: 0,
+                content: JSON.stringify({ name: own }),
+                tags: [],
+              }
+            : undefined,
+      });
+    if (!groups) {
+      h.fill("!Crew");
+      offerCrew(h, [mj, wes], label);
+      await h.user.keyboard("{Enter}hi");
+    }
+    const sent = await sentGroups(h);
+    const reader = new Map([
+      [mj.pubkey, { name: "Mary Jane Jones", verified }],
+      [wes.pubkey, { name: "Wes" }],
+    ]);
+    expect({
+      ...sent,
+      parts: profileMentionParts(
+        { content: sent.content ?? "", mentions: sent.tags ?? [] },
+        reader,
+      ),
+    }).toEqual({
+      groups,
+      content: "@MJ @Wes hi",
+      tags: [mj.pubkey, wes.pubkey],
+      parts: [
+        { text: "@MJ", target: profileTarget(mj.pubkey) },
+        { text: " " },
+        { text: "@Wes", target: profileTarget(wes.pubkey) },
+        { text: " hi" },
+      ],
     });
   },
 );

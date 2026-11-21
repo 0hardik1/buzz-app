@@ -58,6 +58,8 @@ import { useMessageEdit, lastEditableMessage } from "./useMessageEdit";
 import { editMentionText } from "./message-edit";
 import type { ChannelMessage } from "../relay/contracts";
 import { useListedChannel } from "../relay/listed-channel";
+import { foldProfiles } from "../relay/profiles";
+import { profileMentionNames } from "./profile-mentions";
 import { FileDropOverlay } from "./FileDropOverlay";
 import { useFileDrop } from "./use-file-drop";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -1161,6 +1163,20 @@ function Composer({
             : [];
         })
       : [];
+  };
+  const boundNames = (people: readonly MentionRecipient[]) => {
+    const profiles = session.profiles.snapshot();
+    return [...people, ...dmAgents()].flatMap(({ pubkey, name }) => {
+      const event = session.profiles.event?.(pubkey);
+      const own = event && foldProfiles([event]).get(pubkey);
+      return [
+        ...new Set([
+          name,
+          ...profileMentionNames(profiles.get(pubkey)),
+          own && !own.nameIsFallback ? own.name : undefined,
+        ]),
+      ].flatMap((each) => (each ? [{ pubkey, name: each }] : []));
+    });
   };
   // Read at send time: inline mentions win, else the toolbar's agents. A
   // reference addresses nobody, so it goes along with the toolbar's agents.
@@ -2476,11 +2492,10 @@ function Composer({
       return false;
     const label =
       requested !== undefined &&
-      groupLabelHolds(requested, [
-        ...recipients,
-        ...valueRef.current.recipients,
-        ...dmAgents(),
-      ])
+      groupLabelHolds(
+        requested,
+        boundNames([...recipients, ...valueRef.current.recipients]),
+      )
         ? requested
         : undefined;
     const unique = [
@@ -3193,10 +3208,10 @@ function Composer({
     const attempt = new AbortController();
     sendAttempt.current = attempt;
     const typed = valueRef.current;
-    const captured = sentDraft(typed, [
-      ...(routing ? recipientsNow : typed.recipients),
-      ...dmAgents(),
-    ]);
+    const captured = sentDraft(
+      typed,
+      boundNames(routing ? recipientsNow : typed.recipients),
+    );
     const explicit =
       human && ownerProvenance
         ? captured.recipients
