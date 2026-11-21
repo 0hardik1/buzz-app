@@ -183,18 +183,19 @@ export function mentionDraft(value: unknown): MentionDraft {
     ),
   };
 }
-/** A saved draft as a pick would make it now: a group chip whose label no
- * longer holds against the draft's recipients is one chip per member. The
- * normalize pass reads every change through `mentionDraft`, so only loading
- * a draft calls this. */
-export function restoredDraft(value: unknown) {
-  const draft = mentionDraft(value);
+/** `draft` as a send gives it: a group chip whose label no longer holds
+ * against the `people` the send tags is one chip per member, each keeping its
+ * explicit pick. With nothing to split it returns `draft` itself; the draft
+ * in the box is left as typed. */
+export function sentDraft(
+  draft: MentionDraft,
+  people: readonly MentionRecipient[],
+) {
   if (!draft.recipients.some((item) => item.label !== undefined)) return draft;
   const doc = readComposerDocument(draft, draft.recipients);
   const stale = projectComposerDocument(doc).tokens.filter(
     ({ node }) =>
-      node.attrs.group &&
-      !groupLabelHolds(node.attrs.group.label, draft.recipients),
+      node.attrs.group && !groupLabelHolds(node.attrs.group.label, people),
   );
   if (!stale.length) return draft;
   const split = stale.reduceRight((next, { from, to, node }) => {

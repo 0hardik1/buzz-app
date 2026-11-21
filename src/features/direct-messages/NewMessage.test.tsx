@@ -2,7 +2,7 @@ import { SEARCH_DEBOUNCE_MS } from "../../shared/search-debounce";
 import type { ConversationHostServices } from "../conversation/ConversationHost";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { composerDOMFixture } from "../messages/composer-testing";
+import { composerDOMFixture, typedDraft } from "../messages/composer-testing";
 
 import {
   afterEach,
@@ -39,6 +39,7 @@ import {
   publicKeyLabels,
 } from "../../shared/identity/public-key";
 import type { RelaySession } from "../relay/session";
+import { writeView } from "../../shared/view-state";
 import { NewMessage } from "./NewMessage";
 import { createAgentChoices } from "../agents/choices";
 import type { LocalAgentsSnapshot } from "../agents/local";
@@ -1487,6 +1488,42 @@ it("locks during opening and delivery, waits for confirmation, and retries the s
   await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
   expect(t.messages.send).toHaveBeenCalledOnce();
   expect(t.directMessages.open).toHaveBeenCalledOnce();
+  expect(t.directMessages.delivered).toHaveBeenCalledTimes(2);
+});
+
+it("sends a saved group whose label no longer holds as its members, and Retry sends the same text", async () => {
+  const crew = [
+    { pubkey: people[2]?.pubkey ?? "", name: "Mary Jane" },
+    { pubkey: people[3]?.pubkey ?? "", name: "Wes" },
+  ];
+  writeView(
+    scope,
+    "direct-message:new-draft",
+    typedDraft({
+      text: "@*ops* hi",
+      recipients: crew.map((person) => ({
+        ...person,
+        start: 0,
+        end: 6,
+        label: "*ops*",
+      })),
+    }),
+  );
+  const t = setup();
+  t.directMessages.delivery.mockReturnValue("unknown");
+  t.directMessages.delivered.mockRejectedValueOnce(
+    new Error("Delivery uncertain"),
+  );
+  t.mount();
+  await t.user.click(await screen.findByRole("option", { name: "Person 1" }));
+  await t.user.click(send());
+  await t.user.click(await screen.findByRole("button", { name: "Retry send" }));
+  await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
+  expect(t.messages.send).toHaveBeenCalledOnce();
+  expect(t.messages.send.mock.calls[0]?.slice(1, 3)).toEqual([
+    "@Mary Jane @Wes hi",
+    crew.map((person) => person.pubkey),
+  ]);
   expect(t.directMessages.delivered).toHaveBeenCalledTimes(2);
 });
 

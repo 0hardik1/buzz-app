@@ -160,7 +160,7 @@ import {
   editorMention,
   hasHumanMentionSelection,
   hostComposerProvenance,
-  restoredDraft,
+  sentDraft,
   stageableGif,
   withoutSpans,
   type MentionDraft,
@@ -733,7 +733,7 @@ function Composer({
       const saved = parseDraftView(savedRevision);
       if (saved && saved !== "oversized")
         return {
-          draft: restoredDraft(saved.value),
+          draft: mentionDraft(saved.value),
           revision: savedRevision,
           cursor,
         };
@@ -862,7 +862,7 @@ function Composer({
   const [initial] = useState(() => {
     if (reopenedConflict)
       return { value: reopenedConflict, applied: undefined, automatic: false };
-    const stored = restoredDraft(
+    const stored = mentionDraft(
       accepted?.next ??
         submission?.recoveredDraft ??
         readView<unknown>(scope, draftKey, submission?.initialDraft ?? ""),
@@ -1787,7 +1787,7 @@ function Composer({
     diagnose("load", revision.current, raw);
     let next: MentionDraft;
     try {
-      next = restoreChatLinks(restoredDraft(JSON.parse(raw ?? "null")));
+      next = restoreChatLinks(mentionDraft(JSON.parse(raw ?? "null")));
     } catch {
       next = mentionDraft("");
     }
@@ -3179,7 +3179,11 @@ function Composer({
     let retiredByOwner = false;
     const attempt = new AbortController();
     sendAttempt.current = attempt;
-    const captured = valueRef.current;
+    const typed = valueRef.current;
+    const captured = sentDraft(
+      typed,
+      routing ? recipientsNow : typed.recipients,
+    );
     const explicit =
       human && ownerProvenance
         ? captured.recipients
@@ -3216,6 +3220,14 @@ function Composer({
       !threadRootId &&
       followUpBehaviorPreference() === "queue";
     try {
+      if (captured !== typed && composerMarkdown(captured).length > 16000) {
+        const groups = new Set(typed.recipients.map((item) => item.label));
+        for (const item of captured.recipients) groups.delete(item.label);
+        groups.delete(undefined);
+        throw new Error(
+          `${[...groups].map((label) => `@${label}`).join(", ")} ${pendingRefusals.length}.`,
+        );
+      }
       const tokens = draftTokens(captured);
       messageTokenTags(tokens);
       if (command && onCommand) {
@@ -3224,7 +3236,7 @@ function Composer({
           setSending(true);
           if (await handled) {
             attempt.signal.throwIfAborted();
-            if (valueRef.current !== captured) return;
+            if (valueRef.current !== typed) return;
             const current = viewRevision(scope, draftKey);
             if (current !== savedRevision) {
               diagnose("send-upload-conflict", savedRevision, current);
@@ -3310,7 +3322,7 @@ function Composer({
             old,
             attempt.signal,
             () =>
-              valueRef.current === captured &&
+              valueRef.current === typed &&
               sameAttachmentSelection(
                 attachments.store.snapshot(),
                 capturedAttachments,
@@ -3325,7 +3337,7 @@ function Composer({
           .channels.find((item) => item.id === channelId);
         if (channel?.members && allowsOutsideMentions(channel)) {
           const current = () =>
-            valueRef.current === captured &&
+            valueRef.current === typed &&
             sameAttachmentSelection(
               attachments.store.snapshot(),
               capturedAttachments,
@@ -3381,7 +3393,7 @@ function Composer({
       if (attachments.store.snapshot().some((item) => item.status === "error"))
         return;
       if (
-        valueRef.current !== captured ||
+        valueRef.current !== typed ||
         !sameAttachmentSelection(
           attachments.store.snapshot(),
           capturedAttachments,
@@ -3419,7 +3431,7 @@ function Composer({
         setError(undefined);
         const current = () =>
           permitted.current &&
-          valueRef.current === captured &&
+          valueRef.current === typed &&
           viewRevision(scope, draftKey) === savedRevision &&
           sameAttachmentSelection(
             attachments.store.snapshot(),
@@ -3653,7 +3665,7 @@ function Composer({
             // restored. A later edit belongs to its author, not this job.
             if (!flushPendingDraft(scope, draftKey)) return "conflict";
             const current = viewRevision(scope, draftKey);
-            const capturedRevision = JSON.stringify(captured);
+            const capturedRevision = JSON.stringify(typed);
             const cleared = (raw: string | null | undefined) => {
               if (!raw) return false;
               try {
@@ -3716,7 +3728,7 @@ function Composer({
             if (target.snapshot().length) return "conflict";
             if (
               current !== capturedRevision &&
-              replaceView(scope, draftKey, current, captured) !== "saved"
+              replaceView(scope, draftKey, current, typed) !== "saved"
             )
               return false;
             if (!target.adopt(files)) return false;
@@ -3724,7 +3736,7 @@ function Composer({
             // The whole captured pick set returns with the whole draft; the
             // recipient filter above applies again on the next send.
             notifyRecovered(session, recoveryKey, {
-              draft: captured,
+              draft: typed,
               picks: capturedPicks,
               preparationError,
             });

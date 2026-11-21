@@ -18468,8 +18468,6 @@ it.each([
   ["mary crew", [maryJane, wes], false],
   ["MARY CREW", [maryJane, wes], false],
   ["Mary-crew", [maryJane, wes], false],
-  ["Mary Jane crew", [maryJane, wes], false],
-  ["Wes", [maryJane, wes], false],
   ["Marys crew", [maryJane, wes], true],
   ["Crew Mary", [maryJane, wes], true],
   ["Wesley team", [maryJane, wes], true],
@@ -18580,34 +18578,34 @@ it.each([
     savedCrew("@Mary Jane @Mary crew hi", "Mary crew", [wes], [maryJane]),
   ],
 ])(
-  "a saved group labelled %s comes back as its members, as a pick would make it now",
+  "a saved group labelled %s comes back as typed and is sent as its members",
   async (_label, saved) => {
     writeView("scope", "draft:channel", typedDraft(saved));
     expect(await sentGroups(mount())).toEqual({
-      groups: 0,
+      groups: 1,
       content: "@Mary Jane @Wes hi",
       tags: [maryJane.pubkey, wes.pubkey],
     });
   },
 );
-it("a group whose label no longer holds is its members in a draft saved without a document", async () => {
+it("a group whose label no longer holds is sent as its members from a draft saved without a document", async () => {
   writeView("scope", "draft:channel", opsCrew);
   expect(await sentGroups(mount())).toEqual({
-    groups: 0,
+    groups: 1,
     content: "@Mary Jane @Wes hi",
     tags: [maryJane.pubkey, wes.pubkey],
   });
 });
-it("a group whose label no longer holds is its members in a draft another window saves", async () => {
+it("a group whose label no longer holds is sent as its members from a draft another window saves", async () => {
   const h = mount();
   act(() => writeView("scope", "draft:channel", typedDraft(opsCrew)));
   expect(await sentGroups(h)).toEqual({
-    groups: 0,
+    groups: 1,
     content: "@Mary Jane @Wes hi",
     tags: [maryJane.pubkey, wes.pubkey],
   });
 });
-it("a group whose label a person added after it binds is its members when the draft reopens over a conflict", async () => {
+it("a group whose label a person added after it binds is sent as its members when the draft reopens over a conflict", async () => {
   const h = mount({}, undefined, undefined, undefined, undefined, bangAnywhere);
   h.fill("!Crew");
   offerCrew(h, [wes], "Mary crew");
@@ -18619,17 +18617,81 @@ it("a group whose label a person added after it binds is its members when the dr
     });
   });
   await h.user.keyboard("{Enter}");
-  expect(screen.queryAllByRole("img", { name: /^Group / })).toHaveLength(1);
   act(() => writeView("scope", "draft:channel", "Saved elsewhere"));
   h.remount();
   expect(screen.getByRole("alert")).toHaveTextContent(/changed elsewhere/);
   fireEvent.click(screen.getByRole("button", { name: "Keep my draft" }));
   expect(await sentGroups(h)).toEqual({
-    groups: 0,
+    groups: 1,
     content: "@Wes @Mary Jane ",
     tags: [wes.pubkey, maryJane.pubkey],
   });
 });
+it("a group picked before a member whose name starts its label is sent as its members, with the text after it in place", async () => {
+  const h = mount({}, undefined, undefined, undefined, undefined, bangAnywhere);
+  h.fill("!Crew");
+  offerCrew(h, [wes], "Mary crew");
+  await h.user.keyboard("{Enter}");
+  await h.user.keyboard("!M");
+  act(() => {
+    h.completionRequests.at(-1)?.({
+      items: [{ id: "mary", label: "Mary Jane", edit: { mention: maryJane } }],
+    });
+  });
+  await h.user.keyboard("{Enter}");
+  await h.user.keyboard("see you");
+  expect(await sentGroups(h)).toEqual({
+    groups: 1,
+    content: "@Wes @Mary Jane see you",
+    tags: [wes.pubkey, maryJane.pubkey],
+  });
+});
+it("in a Solo chat with agents only, a group of people outside it whose label starts with the toolbar agent's name is sent as its members", async () => {
+  const { h } = mountSoloAgents({ main: first.pubkey });
+  const outside = [
+    { pubkey: "d".repeat(64), name: "Cy" },
+    { pubkey: "e".repeat(64), name: "Di" },
+  ];
+  await choicesLoaded();
+  h.fill("!Crew");
+  offerCrew(h, outside, "Ada crew");
+  await h.user.keyboard("{Enter}");
+  act(() => void h.commands().insertText("hi"));
+  expect(await sentGroups(h)).toEqual({
+    groups: 1,
+    content: "@Cy @Di hi",
+    tags: [first.pubkey],
+  });
+});
+it.each([
+  ["the composer's own send", false],
+  ["a submission", true],
+])(
+  "a group sent as its members past the length limit is refused through %s, and the draft stays",
+  async (_path, submitted) => {
+    const submit = vi.fn();
+    const draftKey = submitted ? "new-draft" : "draft:channel";
+    const text = `@*ops* ${"x".repeat(15990)}`;
+    writeView(
+      "scope",
+      draftKey,
+      typedDraft(savedCrew(text, "*ops*", [maryJane, wes])),
+    );
+    const h = mount(
+      submitted
+        ? { submission: { draftKey, locked: false, disabled: false, submit } }
+        : {},
+    );
+    h.submit();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "@*ops* could not be tagged: the message would be too long.",
+    );
+    expect(submit).not.toHaveBeenCalled();
+    expect(h.messages.send).not.toHaveBeenCalled();
+    expect(screen.queryAllByRole("img", { name: /^Group / })).toHaveLength(1);
+    expect(h.input()).toHaveValue(text);
+  },
+);
 it("undoing and redoing a group pick brings back one chip with the same members", async () => {
   const h = mount();
   h.fill("!Crew");
