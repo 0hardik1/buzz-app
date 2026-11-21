@@ -33,7 +33,7 @@ function harness() {
     },
   };
 }
-const intent = { group: "section:work", mode: "alpha", sectionIds: ["work"] };
+const intent = { group: "section:work", mode: "recent", sectionIds: ["work"] };
 it.each([undefined, "alpha", "recent"])(
   "encrypts plugin choices from legacy %s without putting them in legacy sort fields and confirms reloads",
   async (initialMode) => {
@@ -61,7 +61,7 @@ it.each([undefined, "alpha", "recent"])(
     expect(h.decode(head).meta.g.channels[2]).toBe("alpha");
     expect(await choose(mode)).toEqual({ channels: mode, dms: "recent" });
     expect(publish).toHaveBeenCalledOnce();
-    expect(await choose("recent")).toEqual({ dms: "recent" });
+    expect(await choose("alpha")).toEqual({ dms: "recent" });
     expect(publish).toHaveBeenCalledTimes(2);
   },
 );
@@ -118,29 +118,29 @@ it("preserves another device's plugin choice when the writer has a stale section
   const saved = h.decode(head).pluginSort;
   expect(
     await mutateSidebarSort(
-      { group: "channels", mode: "alpha", sectionIds: [] },
+      { group: "channels", mode: "recent", sectionIds: [] },
       h.secret,
       async () => [head],
       async (event) => {
         head = event;
       },
     ),
-  ).toEqual({ channels: "alpha" });
+  ).toEqual({ channels: "recent" });
   const current = h.decode(head);
   expect(current.pluginSort).toEqual(saved);
   expect(
     projectSidebarPreferences(undefined, undefined, undefined, current, ["new"])
       .sort,
-  ).toEqual({ channels: "alpha", "section:new": mode });
+  ).toEqual({ channels: "recent", "section:new": mode });
 });
-it("mutates only the selected register, imports recognized legacy modes, and encodes the default (recent) as a tombstone", () => {
+it("mutates only the selected register, imports recognized legacy modes, and encodes alpha as a tombstone", () => {
   const h = harness();
   const blob = {
     version: 1,
     future: { x: 1 },
     groups: {
-      channels: "alpha",
-      "section:elsewhere": "alpha",
+      channels: "recent",
+      "section:elsewhere": "recent",
       future: "next-mode",
     },
   };
@@ -149,31 +149,35 @@ it("mutates only the selected register, imports recognized legacy modes, and enc
   expect(draft.event.created_at).toBe(101);
   const saved = h.decode(draft.event);
   expect(saved.groups).toEqual({
-    channels: "alpha",
-    "section:elsewhere": "alpha",
-    "section:work": "alpha",
+    channels: "recent",
+    "section:elsewhere": "recent",
+    "section:work": "recent",
   });
   expect(saved.future).toEqual(blob.future);
-  expect(saved.meta.g.channels).toEqual([100_000, "0000000000000000", "alpha"]);
+  expect(saved.meta.g.channels).toEqual([
+    100_000,
+    "0000000000000000",
+    "recent",
+  ]);
   expect(saved.meta.g["section:work"]).toEqual([
     100_001,
     expect.stringMatching(/^[0-9a-f]{16}$/),
-    "alpha",
+    "recent",
   ]);
   expect(draft.groups).toEqual({
-    channels: "alpha",
-    "section:work": "alpha",
+    channels: "recent",
+    "section:work": "recent",
   });
-  const recent = prepareSidebarSort(
+  const alpha = prepareSidebarSort(
     [draft.event],
-    { ...intent, mode: "recent" },
+    { ...intent, mode: "alpha" },
     h.secret,
     50_000,
   );
-  const reset = h.decode(recent.event);
+  const reset = h.decode(alpha.event);
   expect(reset.groups).toEqual({
-    channels: "alpha",
-    "section:elsewhere": "alpha",
+    channels: "recent",
+    "section:elsewhere": "recent",
   });
   expect(reset.meta.g["section:work"]).toEqual([
     100_002,
@@ -181,9 +185,9 @@ it("mutates only the selected register, imports recognized legacy modes, and enc
     null,
   ]);
   expect(reset.meta.g.channels).toEqual(saved.meta.g.channels);
-  expect(recent.event.created_at).toBe(102);
+  expect(alpha.event.created_at).toBe(102);
   expect(
-    prepareSidebarSort([recent.event], { ...intent, mode: "recent" }, h.secret)
+    prepareSidebarSort([alpha.event], { ...intent, mode: "alpha" }, h.secret)
       .event,
   ).toBeUndefined();
 });
@@ -230,13 +234,13 @@ it("confirms newer unrelated choices, rejects a replaced intent, and never seeds
     heads = [
       h.encrypt({
         version: 1,
-        groups: { "section:work": "alpha", forums: "alpha" },
+        groups: { "section:work": "recent", forums: "recent" },
       }),
     ];
   });
   expect(await mutateSidebarSort(intent, h.secret, read, publish)).toEqual({
-    "section:work": "alpha",
-    forums: "alpha",
+    "section:work": "recent",
+    forums: "recent",
   });
   expect(read).toHaveBeenCalledTimes(2);
   await mutateSidebarSort(intent, h.secret, read, publish);
@@ -259,7 +263,7 @@ it("confirms newer unrelated choices, rejects a replaced intent, and never seeds
 });
 it("whole-blob LWW can lose an intervening other-section save while both mutations succeed", async () => {
   const h = harness();
-  let heads = [h.encrypt({ version: 1, groups: { starred: "alpha" } })];
+  let heads = [h.encrypt({ version: 1, groups: { starred: "recent" } })];
   const read = async () => heads;
   const publish = async (event) => {
     // Model replaceable-event ordering without a same-second ID tie.
@@ -283,18 +287,18 @@ it("whole-blob LWW can lose an intervening other-section save while both mutatio
             read,
             publish,
           ),
-        ).resolves.toEqual({ starred: "alpha", forums: "alpha" });
+        ).resolves.toEqual({ starred: "recent", forums: "recent" });
         expect(h.decode(heads[0]).groups).toEqual({
-          starred: "alpha",
-          forums: "alpha",
+          starred: "recent",
+          forums: "recent",
         });
         await publish(event);
       },
     );
-    expect(result).toEqual({ starred: "alpha", channels: "alpha" });
+    expect(result).toEqual({ starred: "recent", channels: "recent" });
     expect(h.decode(heads[0]).groups).toEqual({
-      starred: "alpha",
-      channels: "alpha",
+      starred: "recent",
+      channels: "recent",
     });
     expect(h.decode(heads[0]).meta.g.forums).toBeUndefined();
   } finally {
@@ -335,24 +339,24 @@ it("edits the authoritative metadata, preserves tombstones and confirms projecte
   const reg = (v) => [9_000_000_000_000, "1111111111111111", v];
   let head = h.encrypt({
     version: 1,
-    groups: { channels: "alpha" },
-    meta: { v: 1, g: { channels: reg(null), forums: reg("alpha") } },
+    groups: { channels: "recent" },
+    meta: { v: 1, g: { channels: reg(null), forums: reg("recent") } },
   });
   const result = await mutateSidebarSort(
-    { group: "channels", mode: "alpha", sectionIds: [] },
+    { group: "channels", mode: "recent", sectionIds: [] },
     h.secret,
     async () => [head],
     async (event) => {
       head = event;
     },
   );
-  expect(result).toEqual({ channels: "alpha", forums: "alpha" });
+  expect(result).toEqual({ channels: "recent", forums: "recent" });
   expect(h.decode(head).meta.g.channels).toEqual([
     9_000_000_000_001,
     expect.stringMatching(/^[0-9a-f]{16}$/),
-    "alpha",
+    "recent",
   ]);
-  expect(h.decode(head).meta.g.forums).toEqual(reg("alpha"));
+  expect(h.decode(head).meta.g.forums).toEqual(reg("recent"));
   const publish = vi.fn();
   await expect(
     mutateSidebarSort(
