@@ -79,7 +79,8 @@ export function UnreadBadge({
   label?: ReactNode;
   /** Solo labels emphasize every unread message, so needing you adds no dot. */
   labelUnread?: "ordinary" | "all";
-  /** Preserve observed evidence for Solo destinations with their own labels. */
+  /** Preserve observed evidence for Solo destinations with their own labels.
+   * Their bold says it all, so needing you adds no dot there either. */
   preserveUnread?: boolean;
 }) {
   const {
@@ -120,7 +121,7 @@ export function UnreadBadge({
         />
       )}
       {needs.waiting &&
-        (labelUnread === "ordinary" ? (
+        (labelUnread === "ordinary" && !preserveUnread ? (
           <span
             className={styles.needsYouDot}
             data-channel-needs-you=""
