@@ -1,5 +1,5 @@
 // Fuzzy matching and scoring ported from fzf's `FuzzyMatchV1` and
-// `calculateScore` (src/algo/algo.go, MIT, Copyright (c) 2013-2024 Junegunn
+// `calculateScore` (src/algo/algo.go, MIT, Copyright (c) 2013-2026 Junegunn
 // Choi). See NOTICE.md. The greedy v1 pass is linear in the text, which keeps
 // long messages cheap; fzf itself falls back to it for long input.
 
