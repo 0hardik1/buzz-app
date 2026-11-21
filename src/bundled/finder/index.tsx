@@ -5,7 +5,11 @@ import { relayPartition } from "../../features/relay/partition";
 import { activeModal } from "../../shared/design-system/overlayLayer";
 import { createCorpus } from "./corpus.ts";
 import { noteInterest, topInterest } from "./interest";
-import { type FinderOpenOptions, provideFinder } from "./service";
+import {
+  type FinderOpenOptions,
+  provideFinder,
+  type RegisteredSource,
+} from "./service";
 import { builtinSources } from "./sources";
 import type { FinderScope } from "./FinderDialog";
 import {
@@ -94,8 +98,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     if (!source) return show(here(), options);
     if (source === "buzz.finder/channel") return show(here(), options);
     if (source === "buzz.finder/all") return show("buzz", options);
-    if (!sources.snapshot().some((entry) => entry.key === source))
-      return show("buzz", options);
+    if (!known(source)) return show("buzz", options);
     show("buzz", { ...options, source });
   });
   /** Opens a conversation in the connected community, optionally with a
@@ -116,7 +119,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
       ...(extra.detail && { detail: { target: extra.detail } }),
     });
   };
-  for (const source of builtinSources({
+  // Finder's own lists sit beside the registry, under the same key form.
+  const builtins: readonly RegisteredSource[] = builtinSources({
     session: () => state.session,
     current: () => {
       const { target } = ctx.navigation.snapshot().entry;
@@ -124,8 +128,21 @@ export const apply: PluginModule["apply"] = (ctx) => {
     },
     open: (channelId, detail) =>
       openConversation(channelId, detail ? { detail } : {}),
-  }))
-    sources.register(ctx, source);
+  }).map((source) => ({
+    ...source,
+    key: `buzz.finder/${source.id}`,
+    pluginId: "buzz.finder",
+    revision: "bundled",
+  }));
+  const find = (
+    key: string | undefined,
+    registered: readonly RegisteredSource[],
+  ) =>
+    key
+      ? (builtins.find((entry) => entry.key === key) ??
+        registered.find((entry) => entry.key === key))
+      : undefined;
+  const known = (key: string) => !!find(key, sources.snapshot());
   ctx.effect(() => {
     let visit: string | undefined;
     const visited = () => {
@@ -247,7 +264,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
             onScopeChange={show}
             openCount={openCount}
             initialQuery={initialQuery}
-            source={registered.find((entry) => entry.key === source)}
+            source={find(source, registered)}
             onSourceClose={() => set({ source: undefined, scope: "buzz" })}
             status={
               !session ? (
