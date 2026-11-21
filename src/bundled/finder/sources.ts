@@ -1,6 +1,7 @@
 // Built-in lists other plugins can open: `buzz.finder/conversations` and
 // `buzz.finder/people`.
 import { directMessageWith } from "../../features/direct-messages/message-person";
+import { sortParticipantNames } from "../../features/identity-names/participant-order";
 import { profileTarget } from "../../features/profiles/target";
 import type { ChannelSummary } from "../../features/relay/contracts";
 import {
@@ -47,9 +48,9 @@ export function builtinSources({
             id: channel.id,
             label:
               channel.channelType === "dm"
-                ? (channel.participants ?? [])
-                    .map((id) => nameOf(live, id))
-                    .join(", ") || "Notes to self"
+                ? sortParticipantNames(
+                    (channel.participants ?? []).map((id) => nameOf(live, id)),
+                  ).join(", ") || "Notes to self"
                 : channel.channelType === "stream" ||
                     channel.channelType === "forum"
                   ? `#${channel.name}`

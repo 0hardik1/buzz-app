@@ -18,6 +18,7 @@ import { queryEvents } from "../../../tests/fixtures/finder-data";
 import { profileTarget } from "../../features/profiles/target";
 import { createRelaySession } from "../../features/relay/session";
 import {
+  type Key,
   keypair,
   metadata,
   profile,
@@ -395,6 +396,10 @@ test("built-in conversations and people rank by name and open on Enter", async (
   const relayKey = keypair();
   const maya = keypair();
   const sam = keypair();
+  // Zoe's key sorts first, so a DM label in key order would lead with her.
+  const [zoe, ada] = [keypair(), keypair()].sort((a, b) =>
+    a.pubkey.localeCompare(b.pubkey),
+  ) as [Key, Key];
   const dm = (id: string, members: string[], tags: string[][] = []) => [
     metadata(relayKey, id, id, 1_700_000_000, [["t", "dm"], ...tags]),
     roster(relayKey, id, [viewer, ...members]),
@@ -408,6 +413,9 @@ test("built-in conversations and people rank by name and open on Enter", async (
     roster(relayKey, "old", [viewer]),
     ...dm("with-maya", [maya.pubkey]),
     ...dm("solo", []),
+    ...dm("trio", [zoe.pubkey, ada.pubkey]),
+    profile(zoe, { name: "Zoe Park" }),
+    profile(ada, { name: "Ada Park" }),
     profile(maya, { name: "Maya Chen", nip05: "maya@example.org" }),
     profile(sam, { name: "Sam Lee" }),
   ];
@@ -418,7 +426,7 @@ test("built-in conversations and people rank by name and open on Enter", async (
     query: async (filters) => queryEvents(events, filters),
   });
   await owner.session.channels.ensureList();
-  await owner.session.profiles.ensure([maya.pubkey]);
+  await owner.session.profiles.ensure([maya.pubkey, zoe.pubkey, ada.pubkey]);
   const opener = consumer();
   const { show, open } = await mount({ "example.keys": opener.module }, owner);
   show();
@@ -427,9 +435,11 @@ test("built-in conversations and people rank by name and open on Enter", async (
   await act(async () =>
     opener.used.finder?.open({ source: "buzz.finder/conversations" }),
   );
-  // Archived channels stay out; a DM is named for who's in it.
+  // Archived channels stay out; a DM is named for who's in it, by name
+  // order as everywhere else.
   expect(rows().sort()).toEqual([
     "#crew",
+    "Ada Park, Zoe ParkDirect message",
     "Maya ChenDirect message",
     "Notes to selfDirect message",
     "lab",
@@ -453,7 +463,12 @@ test("built-in conversations and people rank by name and open on Enter", async (
       opener.used.finder?.open({ source: "buzz.finder/people", query: "" }),
     );
     expect(named().sort()).toEqual(
-      ["Maya Chenmaya@example.org", sam.pubkey.slice(0, 10)].sort(),
+      [
+        "Ada Park",
+        "Maya Chenmaya@example.org",
+        "Zoe Park",
+        sam.pubkey.slice(0, 10),
+      ].sort(),
     );
     await act(() => vi.advanceTimersByTimeAsync(1000));
     expect(named()).toContain("Sam Lee");
