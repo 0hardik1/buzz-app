@@ -1,6 +1,8 @@
 //! Observed loopback TLS only. No OS credential store, provider or trust bypass.
 use super::*;
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 fn clients() -> &'static Mutex<BTreeMap<String, reqwest::Client>> {
@@ -12,8 +14,10 @@ pub(super) fn client(url: &str) -> Option<reqwest::Client> {
 }
 
 /// A public-looking name tests resolve to a peer through `public_https`.
+#[cfg(target_os = "macos")]
 pub(crate) const RESULT_HOST: &str = "result.example.test";
 
+#[cfg(target_os = "macos")]
 pub(crate) struct Peer {
     pub(crate) url: reqwest::Url,
     /// Trusts the peer as itself or as `RESULT_HOST`, for a pinned client.
@@ -23,6 +27,7 @@ pub(crate) struct Peer {
     task: tokio::task::JoinHandle<()>,
     watch: Arc<super::secret_tests::Watch>,
 }
+#[cfg(target_os = "macos")]
 impl Peer {
     pub(crate) async fn new() -> Self {
         Self::serving(1).await
@@ -132,6 +137,7 @@ impl Peer {
             .unwrap();
     }
 }
+#[cfg(target_os = "macos")]
 impl Drop for Peer {
     fn drop(&mut self) {
         self.task.abort();
