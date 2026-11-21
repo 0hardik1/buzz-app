@@ -142,6 +142,11 @@ it("ignores a key that reached the list from elsewhere after focus returned", ()
   list.append(menu);
   expect(key(list, "Escape", {}, menu)).toBe(false);
   expect(document.activeElement).toBe(box("three"));
+  // Opening, a menu owns the keys before focus moves into it.
+  box("three")?.setAttribute("data-menu-origin", "");
+  expect(key(list, "Escape")).toBe(false);
+  expect(key(list, "ArrowUp")).toBe(false);
+  expect(document.activeElement).toBe(box("three"));
 });
 
 it("finds the selected message's reaction trigger, preferring its action bar", () => {

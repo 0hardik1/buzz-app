@@ -258,6 +258,15 @@ test("a selection stays visible through its menus, and Tab and j reach people an
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(message).toBeFocused();
+  // Focus can reach a just-opened menu late; until then the menu still owns
+  // Escape, and the conversation does not take it as a move to the composer.
+  await page.keyboard.press("g");
+  await page.keyboard.press("o");
+  await expect(page.getByRole("menu")).toBeVisible();
+  await message.focus();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(message).toBeFocused();
 
   // j and k step between sidebar rows, which have no arrow keys of their own.
   await page.keyboard.press("\\");
