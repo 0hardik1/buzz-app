@@ -129,7 +129,7 @@ export function DiffMessage({
       );
     if (opening)
       reading.openPanel(
-        panelContent(opening, title),
+        panelContent(opening, { title, closeLabel: "Close diff" }),
         readingOrigin(composer),
         expand.current,
       );

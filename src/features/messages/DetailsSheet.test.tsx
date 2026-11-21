@@ -10,7 +10,6 @@ import {
 } from "@testing-library/react";
 import { StrictMode, useEffect, useRef, useState } from "react";
 import { afterEach, expect, it } from "vitest";
-import type { DetailTab } from "./DetailTabContext";
 import { DetailsSheet } from "./DetailsSheet";
 
 afterEach(() => {
@@ -37,14 +36,14 @@ it("opens what it reads as a tab and closes, leaving the composer's text", async
   }
   function Workspace() {
     const [open, setOpen] = useState(true);
-    const [tab, setTab] = useState<DetailTab>();
+    const [tab, setTab] = useState(false);
     return (
       <>
         <DetailsSheet
           open={open}
           onOpenChange={setOpen}
           onOpenAsTab={() => {
-            setTab({ id: "diff:1", title: "Diff", content: <Reader /> });
+            setTab(true);
             setOpen(false);
           }}
           title="Diff"
@@ -53,7 +52,11 @@ it("opens what it reads as a tab and closes, leaving the composer's text", async
         >
           <Reader />
         </DetailsSheet>
-        {tab && <section aria-label="Reader tab">{tab.content}</section>}
+        {tab && (
+          <section aria-label="Reader tab">
+            <Reader />
+          </section>
+        )}
       </>
     );
   }

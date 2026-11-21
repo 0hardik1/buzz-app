@@ -415,8 +415,13 @@ function ChannelWorkspace({
       ? pageNavigation
       : { ...pageNavigation, target };
   }, [pageNavigation, reading, readingState]);
-  // The sheets already show the rest of this visit, so it is complete.
-  const presentedVisit = navigation !== pageNavigation;
+  // The sheets already show the rest of this visit, so it is complete. A
+  // message the page still reveals completes as the page finds it.
+  const presentedVisit =
+    navigation !== pageNavigation &&
+    !(
+      navigation?.target.kind === "conversation" && navigation.target.messageId
+    );
   const messageDraft =
     navigation?.target.kind === "page"
       ? newMessage(navigation.target.route?.params)

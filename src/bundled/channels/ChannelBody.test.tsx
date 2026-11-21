@@ -16,10 +16,10 @@ import {
 } from "../../features/messages/composer-overlay";
 import {
   ComposerScopeProvider,
-  InlineContainers,
   useComposerHandle,
-  useInlineContainerList,
 } from "../../features/messages/inline-containers";
+import type { ReadingHost } from "../../features/messages/reading";
+import { TestWorkspace } from "../../features/messages/reading-testing";
 import {
   setThreadPlacementPreference,
   threadPlacementPreference,
@@ -63,7 +63,10 @@ vi.mock("../../features/conversation/Conversation", () => ({
   }: {
     onOpenThread(messageId: string, rootId: string): void;
   }) => (
-    <button type="button" onClick={() => onOpenThread("root", "root")}>
+    <button
+      type="button"
+      onClick={() => onOpenThread("1".repeat(64), "1".repeat(64))}
+    >
       Open reply
     </button>
   ),
@@ -82,24 +85,33 @@ function Composer() {
     />
   );
 }
-// The workspace's opener, over the channel's composer, which draws its
+// The workspace's reading, over the channel's composer, which draws its
 // threads as the conversation does.
-function Workspace({ children }: { children: ReactNode }) {
-  const containers = useInlineContainerList("alpha");
-  const handle = useComposerHandle(channelComposer("alpha"));
+function Workspace({
+  children,
+  host,
+}: {
+  children: ReactNode;
+  host?: Partial<ReadingHost>;
+}) {
   return (
-    <InlineContainers value={containers.opener}>
-      <ComposerScopeProvider
-        handle={handle}
-        renderThread={() => <textarea aria-label="Thread draft" />}
-      >
-        <div data-composer-host="">
-          {children}
-          <Composer />
-        </div>
-      </ComposerScopeProvider>
-      {containers.dialogs}
-    </InlineContainers>
+    <TestWorkspace channelId="alpha" host={host}>
+      <Scope>{children}</Scope>
+    </TestWorkspace>
+  );
+}
+function Scope({ children }: { children: ReactNode }) {
+  const handle = useComposerHandle(channelComposer("alpha"), true);
+  return (
+    <ComposerScopeProvider
+      handle={handle}
+      renderThread={() => <textarea aria-label="Thread draft" />}
+    >
+      <div data-composer-host="">
+        {children}
+        <Composer />
+      </div>
+    </ComposerScopeProvider>
   );
 }
 
@@ -138,43 +150,52 @@ it("keeps the focused thread and draft mounted through channel loading and recov
   view.unmount();
 });
 
+const ROOT = "1".repeat(64);
+const rootThread = {
+  kind: "thread",
+  channelId: "alpha",
+  rootId: ROOT,
+  messageId: ROOT,
+  reply: false,
+};
+
 it.each(["side", "main"] as const)(
   "opens threads in a tab instead of inline when they open in the %s pane",
   (pane) => {
     setThreadPlacementPreference(pane);
     fixture.update("ready", [{ id: "root" }]);
-    const openThread = vi.fn();
+    const openThreadTab = vi.fn();
     render(
-      <Workspace>
-        <ChannelBody cached={false} onOpenThread={openThread} />
+      <Workspace host={{ openThreadTab }}>
+        <ChannelBody cached={false} onOpenThread={() => {}} />
       </Workspace>,
     );
     const trigger = screen.getByRole("button", { name: "Open reply" });
     trigger.focus();
     fireEvent.click(trigger);
-    expect(openThread).toHaveBeenCalledWith("root", "root", undefined);
+    expect(openThreadTab).toHaveBeenCalledWith(rootThread);
     expect(screen.queryByRole("dialog", { name: "Thread" })).toBeNull();
   },
 );
 
 it("selects a thread's existing tab instead of reading it inline", () => {
   fixture.update("ready", [{ id: "root" }]);
-  const openThread = vi.fn();
+  const openThreadTab = vi.fn();
   render(
-    <Workspace>
-      <ChannelBody
-        cached={false}
-        onOpenThread={openThread}
-        hasThreadTab={(channelId, rootId) =>
-          channelId === "alpha" && rootId === "root"
-        }
-      />
+    <Workspace
+      host={{
+        openThreadTab,
+        hasThreadTab: (channelId, rootId) =>
+          channelId === "alpha" && rootId === ROOT,
+      }}
+    >
+      <ChannelBody cached={false} onOpenThread={() => {}} />
     </Workspace>,
   );
   const trigger = screen.getByRole("button", { name: "Open reply" });
   trigger.focus();
   fireEvent.click(trigger);
-  expect(openThread).toHaveBeenCalledWith("root", "root", undefined);
+  expect(openThreadTab).toHaveBeenCalledWith(rootThread);
   expect(screen.queryByRole("dialog", { name: "Thread" })).toBeNull();
 });
 

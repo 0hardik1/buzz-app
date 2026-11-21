@@ -125,7 +125,7 @@ test("Open as tab hands the reply target, draft and focus to the thread tab", as
   await expect(editor).toHaveText("Nested draft continues");
 });
 
-// Only the app's tab host shows a reader tab outliving a collapsed row.
+// Only the app's tab host shows a diff tab outliving a collapsed row.
 test("a diff tab keeps its layout on Expand and outlives its branch", async ({
   page,
   app,
@@ -165,12 +165,9 @@ test("a diff tab keeps its layout on Expand and outlives its branch", async ({
   const expand = card.getByRole("button", { name: "Expand diff" });
   // Expand moves when the highlighted diff replaces the raw patch.
   await expect(card.locator("diffs-container pre").first()).toBeVisible();
+  // A side tab reads no sheets: its diff opens a tab of its own.
   await expand.click();
-  const reader = page.getByRole("dialog");
-  await reader
-    .getByRole("button", { name: "Open as tab", exact: true })
-    .click();
-  await expect(reader).toBeHidden();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   const diffTab = tabs.getByRole("tab", { name: "a.ts" });
   await expect(diffTab).toHaveAttribute("aria-selected", "true");
   const split = page.getByRole("button", { name: "Split", exact: true });

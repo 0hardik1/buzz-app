@@ -1,16 +1,9 @@
-import { channelComposer, useOverlayComposerRef } from "./composer-overlay";
-import {
-  ComposerScopeProvider,
-  InlineContainers,
-  useComposerHandle,
-  useInlineContainerList,
-} from "./inline-containers";
 // @vitest-environment jsdom
 import {
   createLocalAgentActivity,
   REPLY_CORRELATION_MS,
 } from "../agents/local-activity";
-import { StrictMode, useRef } from "react";
+import { StrictMode } from "react";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import { bytesToHex } from "nostr-tools/utils";
 import "@testing-library/jest-dom/vitest";
@@ -3880,59 +3873,23 @@ it("offers Show more for a single brief only when it runs past its lines", () =>
   }
 });
 
-it("opens details out of the conversation's composer, which stays usable", async () => {
+it("without a workspace, details read in a dialog of their own", async () => {
   try {
-    // The conversation's composer, mounted in its scope.
-    function Composer() {
-      const form = useRef<HTMLFormElement>(null);
-      return (
-        <form
-          data-message-composer=""
-          aria-label="Composer"
-          ref={useOverlayComposerRef(form)}
-        >
-          <textarea aria-label="Reply" />
-        </form>
-      );
-    }
-    // The workspace's opener, with the conversation's composer scope.
-    function Workspace() {
-      const containers = useInlineContainerList("C");
-      const handle = useComposerHandle(channelComposer("C"));
-      return (
-        <InlineContainers value={containers.opener}>
-          <ComposerScopeProvider handle={handle}>
-            <div data-composer-host="">
-              <MessageRow
-                row={detailsRow()}
-                profile={{ name: "Morgarita" }}
-                media={() => undefined}
-                onOpenLink={() => false}
-                day={false}
-                retry={undefined}
-              />
-              <Composer />
-            </div>
-          </ComposerScopeProvider>
-          {containers.dialogs}
-        </InlineContainers>
-      );
-    }
-    renderDom(<Workspace />);
+    renderDom(
+      <MessageRow
+        row={detailsRow()}
+        profile={{ name: "Morgarita" }}
+        media={() => undefined}
+        onOpenLink={() => false}
+        day={false}
+        retry={undefined}
+      />,
+    );
     const more = screen.getByRole("button", { name: "Show more" });
     fireEvent.click(more);
-    const sheet = await screen.findByRole("dialog", { name: "Morgarita" });
-    const composer = screen.getByRole("form", { name: "Composer" });
-    // The sheet lives in the composer's pane, so the composer can rise above it.
-    expect(composer.parentElement?.contains(sheet)).toBe(true);
-    const reply = within(composer).getByRole("textbox", { name: "Reply" });
-    fireEvent.pointerDown(reply);
-    fireEvent.mouseDown(reply);
-    reply.focus();
-    fireEvent.click(reply);
-    expect(screen.getByRole("dialog", { name: "Morgarita" })).toBe(sheet);
+    const dialog = await screen.findByRole("dialog", { name: "Morgarita" });
     // A real press focuses Close before it activates.
-    const close = within(sheet).getByRole("button", { name: "Close details" });
+    const close = within(dialog).getByRole("button", { name: "Close details" });
     close.focus();
     fireEvent.click(close);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

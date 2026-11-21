@@ -20,6 +20,8 @@ export function apply(ctx: Context) {
     matches: (target) => !!diffTargetMessage(target),
     addressable: true,
     keepOpen: true,
+    // Its layout choice stays while another tab is selected.
+    deferUntilShown: true,
     component: (props) => <DiffPanel {...props} relay={relay} />,
   });
 }

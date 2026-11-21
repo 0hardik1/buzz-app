@@ -73,13 +73,14 @@ type ThreadRenderer = (
 /** A panel as the reading holds it, titled as its sheet is. */
 export function panelContent(
   entry: PanelOpening,
-  title: string = entry.panel.title,
+  sheet: Readonly<{ title?: string; closeLabel?: string }> = {},
 ): PanelContent {
   return {
     kind: "panel",
     channelId: entry.channelId,
     rootId: entry.rootId,
-    title,
+    title: sheet.title ?? entry.panel.title,
+    ...(sheet.closeLabel && { closeLabel: sheet.closeLabel }),
     target: entry.target,
     opening: entry,
   };
@@ -398,7 +399,9 @@ function SheetEntry({
       host={host}
       title={title}
       {...extra}
-      closeLabel={rules.closeLabel}
+      closeLabel={
+        (content.kind === "panel" && content.closeLabel) || rules.closeLabel
+      }
       containsComposer={!!rules.containsComposer}
       readerOnly={!!rules.readerOnly}
       tall={tall}

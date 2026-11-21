@@ -49,47 +49,46 @@ Closing an inactive tab must not change the selected content.
 
 ### Inline sheets
 
-With the Inline setting, threads, details, diffs and link panels open on a
-sheet over the composer of their conversation, as a dialog where no composer
-is on screen. Opening one is a visit to its address: a thread by its root, a
-panel by its target, a details or diff message as a `reader` over its own
-conversation. Moving to another page inside a panel is a visit too. Back
-closes the newest sheet; Forward reopens it where it was, or in its tab, or a
-dialog, when that composer is gone. Close, Escape and a press on the scrim
-retire the sheet's visits, and those of the sheets open on it, so neither Back
-nor Forward shows it again; so does a send that closes the details over its
-composer. Open as tab keeps the address, adding no visit. Arriving at a visit
-the sheets have not seen, as from a link or another address in the same
-channel, keeps only the sheets that address names and what they are open on;
-a reader it names that is already open stays as it is.
+Everything you read is a tab: a thread, a link panel or a diff (a diff is an
+ordinary panel, `buzz-diff:<message id>`). A tab shows in the side panel or
+inline, on a sheet over the main conversation. "Open threads in" picks where
+new ones go. Details messages are not tabs: they read on a sheet over the reply
+box they are answered from.
+
+Inline sheets stack. Each sits over the layer it was opened from: the
+conversation, an inline thread, or a panel's page. Opening from a layer
+replaces whatever was above it. In practice the stack is at most conversation,
+then thread, then a panel, diff or details. A link inside a panel moves that
+panel to another page. Side tabs work as before: they append, a link inside one
+opens another side tab, and only details read on a sheet there. Nothing reads
+on a sheet over another channel's tab. Details from one read in a dialog, as
+they do wherever no reply box is on screen. Each reply box holds at most one
+details sheet, and a send from that box closes it.
+
+Opening something inline is a visit to its address: a thread by its root, a
+panel by `detail.target`, and details as a `reader` (the message id, plus the
+root of the thread whose reply box it reads over). A page move inside a panel
+is a visit too. Back closes the newest sheet, and Forward reopens it where it
+was. Close, Escape and a press on the scrim close it and everything above it,
+retiring their visits, so neither Back nor Forward shows them again. Forward
+never lands on an empty step.
+
+Open as tab moves an inline thread or panel to a side tab. It carries the
+thread's draft, reply target and scroll, or the panel's current page. Anything
+stacked above it closes. Its address stays, so it adds no visit. The tab takes
+over its visits, and closing the tab retires them with the tab's own. Back and
+Forward never open a tab.
+
+One record per workspace holds what is open in each place and which visit
+opened it. What shows at a visit is worked out from the visits up to it, so
+nothing waits for a reply box to mount. The page sees each visit's address
+with the parts the sheets show removed. A visit it did not make, as after a
+reload or from a link, shows what its address names. A whole-thread address
+with Inline on and no tab for that thread opens the thread inline. A `reader`
+address opens its details, and the page also reveals the message beneath, so
+a deleted or missing message fails as a missing message link does. Readers are
+drawn from the message id, not from its row, so they outlive the row.
 Media viewers are not addresses: they dismiss only themselves.
-
-A sheet never selects another channel. Over another channel's thread tab, its
-address stays this conversation's: a reader names its message's channel as
-`reader.channelId`, a link panel drops that channel's thread root, and a
-thread of that channel adds no visit. Such a sheet belongs to that tab, not to
-the selected channel: selecting another channel leaves it open while the tab
-is, Back to details there waits for the tab's composer, and closing the tab
-retires their visits with the tab's own, wherever they are in history. A diff
-keeps its visits: it can still open in its own tab. Every saved details sheet
-over a thread tab waits for its own tab, so Back brings back each of them, not
-only the one the address names. The wait ends when no thread tab holds that
-composer, as after the tab closes some other way or its channel leaves, or
-when its reply box does not come back within five seconds, as over an archived
-channel; the details then open as they would without a composer: a dialog in
-their own channel, and closed in another.
-
-A `reader` address holds the message's kind (`details` or `diff`), its id,
-and the root of its thread when it is a reply, which names the composer it
-reads over. Arriving at one without its sheet, as after a reload or from a
-link, resolves the message first, the way a message link does: revealed in the
-timeline, or in its thread. Once the message's row is on screen, the row opens
-the reader over that conversation's composer, or in a dialog when no composer
-is on screen. A diff falls back to its tab instead; details never get a tab.
-A deleted or missing message fails as a missing message link does, and no
-sheet opens: a reader is drawn from its row, so it shows only while the row is
-there. A reader of another channel opens only from that channel's row, as in
-its thread tab; without one the address shows this conversation.
 
 ## Keep lifecycle and access guards
 

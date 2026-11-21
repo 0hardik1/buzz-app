@@ -142,14 +142,12 @@ describe("open target boundary", () => {
   });
   it("copies, bounds and round-trips a read-only reader address", () => {
     const reader = {
-      kind: "details" as const,
       messageId: "A".repeat(64),
       rootId: "B".repeat(64),
     };
     const target = parseOpenTarget({ ...conversation, reader });
     reader.messageId = "changed";
     expect(target.kind === "conversation" && target.reader).toEqual({
-      kind: "details",
       messageId: "a".repeat(64),
       rootId: "b".repeat(64),
     });
@@ -158,33 +156,20 @@ describe("open target boundary", () => {
     ).toBe(true);
     // A saved address parses back to the same visit.
     expect(parseOpenTarget(JSON.parse(JSON.stringify(target)))).toEqual(target);
-    const diff = parseOpenTarget({
+    const other = parseOpenTarget({
       ...conversation,
-      reader: { kind: "diff", messageId: "c".repeat(64) },
+      reader: { messageId: "c".repeat(64) },
     });
-    expect(targetKey(diff)).not.toBe(targetKey(target));
-    expect(targetKey(diff)).not.toBe(targetKey(conversation));
-    // A reader in another channel's thread tab names that channel.
-    const beside = parseOpenTarget({
-      ...conversation,
-      reader: { kind: "details", messageId: "c".repeat(64), channelId: "b" },
-    });
-    expect(beside.kind === "conversation" && beside.reader).toEqual({
-      kind: "details",
-      messageId: "c".repeat(64),
-      channelId: "b",
-    });
-    expect(parseOpenTarget(JSON.parse(JSON.stringify(beside)))).toEqual(beside);
+    expect(targetKey(other)).not.toBe(targetKey(target));
+    expect(targetKey(other)).not.toBe(targetKey(conversation));
     for (const reader of [
       null,
       {},
-      { kind: "details" },
-      { kind: "panel", messageId: "a".repeat(64) },
-      { kind: "diff", messageId: "invalid" },
-      { kind: "diff", messageId: "a".repeat(64), rootId: "invalid" },
-      { kind: "diff", messageId: "a".repeat(64), action: "delete" },
-
-      { kind: "diff", messageId: "a".repeat(64), channelId: "-bad" },
+      { messageId: "invalid" },
+      { messageId: "a".repeat(64), rootId: "invalid" },
+      { messageId: "a".repeat(64), action: "delete" },
+      { kind: "details", messageId: "a".repeat(64) },
+      { messageId: "a".repeat(64), channelId: "b" },
     ])
       expect(() => parseOpenTarget({ ...conversation, reader })).toThrow();
   });

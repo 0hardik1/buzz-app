@@ -43,6 +43,8 @@ export type PanelContent = Readonly<{
   /** The thread the link was in. */
   rootId?: string | undefined;
   title: string;
+  /** Its sheet's close button, when not plain "Close". */
+  closeLabel?: string | undefined;
   /** The page's address: opening it again in a slot replaces it. */
   target: string;
   /** The workspace's own description of the panel, which it draws. */
@@ -443,7 +445,11 @@ export function createReading(host: () => ReadingHost): Reading {
     if (changed) shown = folded;
     for (const listener of listeners) listener();
   };
-  const current = () => navigator?.snapshot().entry;
+  // A navigator stub may name visits without addresses.
+  const current = () => {
+    const entry = navigator?.snapshot().entry;
+    return entry?.target ? entry : undefined;
+  };
   /** An item for `content` in `slot`: the one already reading it there, so
    * its earlier visits stay its own, or a new one. */
   const itemFor = (
@@ -497,8 +503,8 @@ export function createReading(host: () => ReadingHost): Reading {
     publish(pruned({ items, events }, navigator.snapshot().retainedVisits));
   };
   /** The current visit's address names these, which it shows. */
-  const named = (target: OpenTarget): Shown[] => {
-    if (target.kind !== "conversation") return [];
+  const named = (target: OpenTarget | undefined): Shown[] => {
+    if (target?.kind !== "conversation") return [];
     const { inline, hasThreadTab } = host();
     const result: Shown[] = [];
     const channel = channelComposer(target.channelId);
@@ -716,7 +722,29 @@ export function createReading(host: () => ReadingHost): Reading {
       items.delete(item.id);
       publish({ items, events: state.events });
     },
-    page: (target) => pageTarget(target, shown),
+    page: (target) => {
+      const masked = pageTarget(target, shown);
+      const entry = current();
+      // A reader's address it did not open, as after a reload, reads as its
+      // message's too: the page reveals it beneath, or in its thread's tab,
+      // and fails as a missing message does. An inline thread shows it.
+      if (
+        target.kind !== "conversation" ||
+        masked.kind !== "conversation" ||
+        !target.reader ||
+        state.events.get(entry?.id ?? "")?.kind !== "arrive" ||
+        (target.reader.rootId &&
+          masked.threadRootId === undefined &&
+          target.threadRootId === target.reader.rootId)
+      )
+        return masked;
+      const { reader } = target;
+      return {
+        ...omit(masked, "messageId", "threadRootId"),
+        messageId: reader.messageId,
+        ...(reader.rootId ? { threadRootId: reader.rootId } : {}),
+      };
+    },
     presents: () => {
       const entry = current();
       return (

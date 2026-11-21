@@ -39,12 +39,12 @@ function mount(
   repo = "https://example.com/repo",
 ) {
   const ctx = new Context();
-  new PanelsService(ctx);
   ctx.provide("relay", { snapshot: () => ({ status: "idle" }) });
   const plugins = createPluginManager(ctx, {
     bundled: [{ manifest: { ...manifest, apiVersion: 1 }, module }],
   });
   const service = new ConversationService(ctx);
+  new PanelsService(ctx);
   cleanups.push(async () => {
     await plugins.dispose();
     await ctx.fiber.dispose();
