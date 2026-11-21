@@ -79,6 +79,10 @@ test("Vim keys select messages, act on them with go, and leave the composer", as
   await expect(
     page.getByRole("region", { name: "Thread messages", exact: true }),
   ).toBeVisible();
+  // Reply hands focus to the thread's composer; let that finish first.
+  await expect(
+    page.getByRole("textbox", { name: "Reply to thread", exact: true }),
+  ).toBeFocused();
 
   // i types; Escape stops typing so j moves again.
   await nothingFocused(page);
