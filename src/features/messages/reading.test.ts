@@ -250,6 +250,21 @@ describe("reading", () => {
     expect(shown()).toEqual(["thread 1", "details 4"]);
   });
 
+  it("a link to a thread reads it inline, revealing its root beneath", () => {
+    const { navigation, reading, shown } = setup();
+    void navigation.open({ ...conversation, messageId: T, threadRootId: T });
+    expect(shown()).toEqual(["thread 1"]);
+    expect(reading.page(navigation.snapshot().entry.target)).toEqual({
+      ...conversation,
+      messageId: T,
+    });
+    // A thread it opened reveals nothing.
+    reading.openThread(thread(T2), conversationOrigin);
+    expect(reading.page(navigation.snapshot().entry.target)).toEqual(
+      conversation,
+    );
+  });
+
   it("a thread with a tab shows there, and does not open inline", () => {
     const { host, reading, shown } = setup({ hasThreadTab: () => true });
     reading.openThread(thread(), conversationOrigin);

@@ -750,25 +750,29 @@ export function createReading(host: () => ReadingHost): Reading {
       if (gone && entry && targetKey(entry.target) === targetKey(target))
         return pageTarget(gone.fallback, shown);
       const masked = pageTarget(target, shown);
-      // A reader's address it did not open, as after a reload, reads as its
-      // message's too: the page reveals it beneath, or in its thread's tab,
-      // and fails as a missing message does. An inline thread shows it.
+      // An address it did not open, as after a reload or from a link, reads
+      // as its message's too: the page reveals that beneath, so focus returns
+      // to it and a missing message fails as a missing message link does. A
+      // reader's message shows in its thread's tab unless an inline thread
+      // shows it; an inline thread reveals its root.
       if (
         target.kind !== "conversation" ||
         masked.kind !== "conversation" ||
-        !target.reader ||
-        state.events.get(entry?.id ?? "")?.kind !== "arrive" ||
-        (target.reader.rootId &&
-          masked.threadRootId === undefined &&
-          target.threadRootId === target.reader.rootId)
+        state.events.get(entry?.id ?? "")?.kind !== "arrive"
       )
         return masked;
+      const inlineThread =
+        target.threadRootId !== undefined && masked.threadRootId === undefined;
       const { reader } = target;
-      return {
-        ...omit(masked, "messageId", "threadRootId"),
-        messageId: reader.messageId,
-        ...(reader.rootId ? { threadRootId: reader.rootId } : {}),
-      };
+      if (reader && !(inlineThread && target.threadRootId === reader.rootId))
+        return {
+          ...omit(masked, "messageId", "threadRootId"),
+          messageId: reader.messageId,
+          ...(reader.rootId ? { threadRootId: reader.rootId } : {}),
+        };
+      return inlineThread && target.threadRootId
+        ? { ...masked, messageId: target.threadRootId }
+        : masked;
     },
     presents: () => {
       const entry = current();
