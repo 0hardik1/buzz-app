@@ -40,13 +40,14 @@ export const apply: PluginModule["apply"] = (ctx) => {
   const navigation = ctx.navigation;
   const apple = isApplePlatform(globalThis.navigator?.platform ?? "");
 
-  const status = document.createElement("p");
-  status.setAttribute("role", "status");
-  status.className = "sr-only";
+  /** A polite live region, one per activation so a quick re-enable keeps it. */
+  let status: HTMLElement | undefined;
   const announce = (text: string) => {
-    status.textContent = "";
+    const live = status;
+    if (!live) return;
+    live.textContent = "";
     requestAnimationFrame(() => {
-      status.textContent = text;
+      live.textContent = text;
     });
   };
 
@@ -150,7 +151,11 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ctx.effect(() => {
     const release = enableMenuLetters("hjkl");
     const host = document.createElement("div");
-    document.body.append(host, status);
+    const live = document.createElement("p");
+    live.setAttribute("role", "status");
+    live.className = "sr-only";
+    status = live;
+    document.body.append(host, live);
     const root = createRoot(host);
     root.render(
       <WhichKey
@@ -168,7 +173,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
         release();
         root.unmount();
         host.remove();
-        status.remove();
+        live.remove();
+        if (status === live) status = undefined;
       });
     };
   });

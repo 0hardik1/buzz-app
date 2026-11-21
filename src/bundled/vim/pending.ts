@@ -34,8 +34,9 @@ export function createPending(
 
   const onKey = (event: KeyboardEvent) => {
     if (MODIFIER.test(event.key) || event.isComposing) return;
-    // Holding the first key must not complete a sequence such as gg.
-    if (event.repeat) {
+    // Holding the first key must not complete a sequence such as gg; held
+    // arrows still move through the menu.
+    if (event.repeat && event.key.length === 1) {
       event.preventDefault();
       event.stopImmediatePropagation();
       return;

@@ -99,6 +99,7 @@ test("arrows drive a shown menu, and the action runs where the sequence began", 
   pending.start("g");
   menu.focus();
   expect(keydown("ArrowDown").defaultPrevented).toBe(false);
+  expect(keydown("ArrowDown", { repeat: true }).defaultPrevented).toBe(false);
   expect(pending.snapshot()?.shown).toBe(true);
   let focusedWhenRun: Element | null = null;
   actions.mockImplementation(() => {
