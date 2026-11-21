@@ -801,9 +801,7 @@ fn reviewed_credential_admission_refuses_without_calling_the_effect() {
             result_url: None,
         }),
     };
-    let witness = crate::ReviewedInvocationWitness(
-        File::open(env.manager.root.join("registry.json")).unwrap(),
-    );
+    let witness = crate::ReviewedInvocationWitness();
     let before = snapshot(env.temp.path());
     let reads = env.store.reads.load(Ordering::SeqCst);
     let mut dispatched = false;

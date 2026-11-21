@@ -24,7 +24,8 @@ pub use secrets::{CleanupStatus, SecretStatus, SecretStore};
 
 /// Operation-local revocation witness. The open file prevents inode reuse while
 /// a macOS native review is pending; it is never serialized or caller-supplied.
-pub struct ReviewedInvocationWitness(File);
+/// Other platforms refuse admission, so their witness retains no file.
+pub struct ReviewedInvocationWitness(#[cfg(target_os = "macos")] File);
 
 pub type Result<T> = std::result::Result<T, String>;
 pub const LIMIT: u64 = 8 * 1024 * 1024;
