@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { createPluginManager } from "../../src/plugins/manager";
 import { bundledPlugins } from "../../src/bundled";
 import { ConversationService } from "../../src/features/conversation/service";
+import { PanelsService } from "../../src/features/panels/service";
 import { createRelaySession } from "../../src/features/relay/session";
 import { MessageRow } from "../../src/features/messages/MessageRow";
 import { ThreadPanel } from "../../src/features/messages/ThreadPanel";
@@ -23,12 +24,15 @@ import { Button } from "../../src/shared/design-system/ui/Button";
 import "../../src/shared/styles/globals.css";
 
 const ctx = new Context();
+// The diff panel reads through the relay; rows here read without a workspace.
+ctx.provide("relay", { snapshot: () => ({ status: "idle" }) });
 const plugins = createPluginManager(ctx, {
   bundled: bundledPlugins.filter(
     ({ manifest }) => manifest.id === "buzz.diffs",
   ),
 });
 const extensions = new ConversationService(ctx);
+new PanelsService(ctx);
 const viewer = keypair(),
   relay = keypair();
 const root = message(viewer, "diffs", "Please review this diff", 1);

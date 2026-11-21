@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { createNavigationController } from "../navigation/controller";
-import { createMemoryHistory } from "../navigation/history";
+import {
+  type NavigationHistory,
+  createMemoryHistory,
+} from "../navigation/history";
 import type { OpenTarget } from "../navigation/targets";
 import { channelComposer, threadComposer } from "./composer-overlay";
 import {
@@ -61,8 +64,10 @@ const sideThread = (rootId = T2): ReadingOrigin => ({
   onScreen: true,
 });
 
-function setup(overrides: Partial<ReadingHost> = {}) {
-  const history = createMemoryHistory(conversation);
+function setup(
+  overrides: Partial<ReadingHost> = {},
+  history: NavigationHistory = createMemoryHistory(conversation),
+) {
   const { navigation } = createNavigationController(history);
   const host: ReadingHost = {
     inline: () => true,
@@ -275,6 +280,31 @@ describe("reading", () => {
       conversation,
     );
     expect(reading.presents()).toBe(true);
+  });
+
+  it("until a close's return arrives, its visit reads as where it returns", () => {
+    // A browser returns by traversal, which arrives after the close.
+    const memory = createMemoryHistory(conversation);
+    const returns: (() => void)[] = [];
+    const { navigation, reading, shown, itemOf } = setup(
+      {},
+      {
+        ...memory,
+        dismiss: (visits, fallback) =>
+          returns.push(() => memory.dismiss(visits, fallback)),
+      },
+    );
+    reading.openThread(thread(), conversationOrigin);
+    const closed = navigation.snapshot().entry;
+    reading.close(itemOf("thread"));
+    expect(navigation.snapshot().entry.id).toBe(closed.id);
+    // Nothing shows, and the page is not sent to the closed thread.
+    expect(shown()).toEqual([]);
+    expect(reading.page(closed.target)).toEqual(conversation);
+    for (const done of returns) done();
+    expect(navigation.snapshot().entry.target).toEqual(conversation);
+    expect(shown()).toEqual([]);
+    expect(navigation.snapshot().canGoForward).toBe(false);
   });
 
   it("folds nothing for visits it never saw", () => {

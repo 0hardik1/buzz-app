@@ -424,8 +424,20 @@ export function createReading(host: () => ReadingHost): Reading {
   let navigator: Navigation | undefined;
   let shown: ReadonlyMap<Slot, Shown> = new Map();
   let pushing = false;
-  /** While a close returns to what remains: its arrival keeps that. */
-  let keeping: ReadonlyMap<Slot, Shown> | undefined;
+  /**
+   * A close returning from the visit it retired. The return can arrive after
+   * the close (a browser traversal), so until then that visit reads as its
+   * fallback, showing what remains, and its arrival keeps that.
+   */
+  let leaving:
+    | Readonly<{
+        visit: string;
+        fallback: OpenTarget;
+        remaining: ReadonlyMap<Slot, Shown>;
+      }>
+    | undefined;
+  const departing = () =>
+    leaving && leaving.visit === current()?.id ? leaving : undefined;
   const listeners = new Set<() => void>();
   const visitsUpTo = () => {
     if (!navigator) return [];
@@ -437,7 +449,14 @@ export function createReading(host: () => ReadingHost): Reading {
   };
   const publish = (next: ReadingState) => {
     state = next;
-    const folded = fold(state, visitsUpTo());
+    const gone = departing();
+    const folded = gone
+      ? new Map(
+          [...gone.remaining].filter(([, item]) =>
+            state.items.has(item.item.id),
+          ),
+        )
+      : fold(state, visitsUpTo());
     const changed =
       folded.size !== shown.size ||
       [...folded].some(([slot, item]) => {
@@ -557,21 +576,23 @@ export function createReading(host: () => ReadingHost): Reading {
     return result;
   };
   const arrive = () => {
-    if (!navigator || pushing) return;
+    if (!navigator || pushing || departing()) return;
+    const kept = leaving?.remaining;
+    leaving = undefined;
     const snapshot = navigator.snapshot();
     const visit = snapshot.entry.id;
     if (state.events.has(visit)) {
       publish(pruned(state, snapshot.retainedVisits));
       return;
     }
-    const kept = keeping
-      ? [...keeping.values()].filter((item) => state.items.has(item.item.id))
+    const arrived = kept
+      ? [...kept.values()].filter((item) => state.items.has(item.item.id))
       : named(snapshot.entry.target);
     const items = new Map(state.items);
-    for (const { item } of kept) items.set(item.id, item);
+    for (const { item } of arrived) items.set(item.id, item);
     const events = new Map(state.events).set(visit, {
       kind: "arrive",
-      shown: kept.map(({ item, content }) => ({ item: item.id, content })),
+      shown: arrived.map(({ item, content }) => ({ item: item.id, content })),
     });
     publish(pruned({ items, events }, snapshot.retainedVisits));
   };
@@ -587,19 +608,18 @@ export function createReading(host: () => ReadingHost): Reading {
     const closing = [...shown.values()]
       .filter((item) => ids.has(item.item.id))
       .map((item) => item.content);
-    publish(next);
-    if (!navigator || !entry || !visits.length) return;
     const top = below && remaining.get(below.slot);
     const fallback =
-      (top && addressOf(top.content, top.item.slot, entry.target)) ??
-      withoutNamed(entry.target, closing);
-    if (!fallback) return;
-    keeping = remaining;
-    try {
-      navigator.dismiss(visits, fallback);
-    } finally {
-      keeping = undefined;
-    }
+      entry &&
+      ((top && addressOf(top.content, top.item.slot, entry.target)) ??
+        withoutNamed(entry.target, closing));
+    const nav = navigator;
+    const returning = !!nav && !!entry && !!fallback && visits.length > 0;
+    if (returning && visits.includes(entry.id))
+      leaving = { visit: entry.id, fallback, remaining };
+    publish(next);
+    if (!returning) return;
+    nav.dismiss(visits, fallback);
     publish(state);
   };
   const below = (item: Item) =>
@@ -725,8 +745,11 @@ export function createReading(host: () => ReadingHost): Reading {
       publish({ items, events: state.events });
     },
     page: (target) => {
-      const masked = pageTarget(target, shown);
       const entry = current();
+      const gone = departing();
+      if (gone && entry && targetKey(entry.target) === targetKey(target))
+        return pageTarget(gone.fallback, shown);
+      const masked = pageTarget(target, shown);
       // A reader's address it did not open, as after a reload, reads as its
       // message's too: the page reveals it beneath, or in its thread's tab,
       // and fails as a missing message does. An inline thread shows it.
@@ -751,7 +774,7 @@ export function createReading(host: () => ReadingHost): Reading {
       const entry = current();
       return (
         !!entry &&
-        targetKey(pageTarget(entry.target, shown)) !== targetKey(entry.target)
+        targetKey(reading.page(entry.target)) !== targetKey(entry.target)
       );
     },
     attach: (next) => {

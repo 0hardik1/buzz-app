@@ -200,7 +200,7 @@ test("details over an inline thread step back one at a time, and close with it",
   await expect(forward(page)).toBeDisabled();
 });
 
-test("Back, ✕ the thread, then Forward to the later details visit brings back nothing", async ({
+test("Back from details, then ✕ the thread, leaves no Forward to the details", async ({
   page,
   app,
 }) => {
@@ -226,9 +226,9 @@ test("Back, ✕ the thread, then Forward to the later details visit brings back 
   await expect(sheet.locator("[data-details-sheet-surface]")).toHaveCount(0);
   await sheet.getByRole("button", { name: "Close thread" }).click();
   await expect(sheet).toHaveCount(0);
-  // The details visit remains, as the conversation it was over.
-  await forward(page).click();
-  await expect(page.getByRole("button", { name: "Go back" })).toBeEnabled();
+  // The details stacked on the thread closed with it, so their visit is
+  // retired: Forward has no empty step to land on.
+  await expect(forward(page)).toBeDisabled();
   await expect(sheets(page)).toHaveCount(0);
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
@@ -393,6 +393,8 @@ test.describe("an archive meanwhile", () => {
       .getByRole("button", { name: "Open as tab", exact: true })
       .click();
     await expect(page.getByRole("tab", { name: /Thread root/ })).toBeVisible();
+    // The sheet leaves as its tab opens a thread of its own.
+    await expect(sheets(page)).toHaveCount(0);
     const thread = page.getByRole("complementary", {
       name: "Thread",
       exact: true,
@@ -407,10 +409,19 @@ test.describe("an archive meanwhile", () => {
     ).toBeVisible();
     app.archiveChannel("alpha");
     await back(page);
-    await expect(page.getByRole("tab", { name: /Thread root/ })).toBeVisible();
-    // Its tab has no reply box now, so the details read in a dialog.
+    // Its tab has no reply box now, so the details read in a dialog, which
+    // is modal and hides the tab from the accessibility tree.
     await expect(
-      thread.getByText("This channel is archived", { exact: true }),
+      page.getByRole("tab", { name: /Thread root/, includeHidden: true }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("complementary", {
+          name: "Thread",
+          exact: true,
+          includeHidden: true,
+        })
+        .getByText("This channel is archived", { exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole("dialog").filter({ hasText: "The end." }),
@@ -545,11 +556,14 @@ async function openOtherChannelTab(page, app, reply) {
   await threadIdle(page, thread);
   return { thread, inner, link };
 }
+// A modal dialog hides what is beneath it from the accessibility tree.
 async function staysOnAlpha(page) {
   await expect(
-    page.getByRole("textbox", { name: "Message #Alpha" }),
+    page.getByRole("textbox", { name: "Message #Alpha", includeHidden: true }),
   ).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Thread · Beta" })).toBeVisible();
+  await expect(
+    page.getByRole("tab", { name: "Beta root", includeHidden: true }),
+  ).toBeVisible();
   expect((await hashTarget(page)).channelId).toBe("alpha");
 }
 
@@ -576,10 +590,11 @@ test("details over another channel's thread tab read in a dialog and keep the se
   await expect(reader()).toBeVisible();
   await expect(sheets(page)).toHaveCount(0);
   await staysOnAlpha(page);
-  await back(page);
+  // The dialog is modal, so Back and Forward come from the browser.
+  await page.goBack();
   await expect(reader()).toHaveCount(0);
   await staysOnAlpha(page);
-  await forward(page).click();
+  await page.goForward();
   await expect(reader()).toBeVisible();
   await staysOnAlpha(page);
   await reader().getByRole("button", { name: "Close details" }).click();
