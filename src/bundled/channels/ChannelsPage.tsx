@@ -1154,17 +1154,48 @@ function ChannelWorkspace({
     currentId,
     queries,
   ]);
+  // A thread reading inline over the conversation reveals its root beneath,
+  // reading older pages to find it. The root is in the timeline even with
+  // replies: the sheet shows those. Each visit seeks again.
+  const sheetRoot =
+    !!requestedMessage &&
+    requestedThread === undefined &&
+    [...readingState.values()].some(
+      ({ item, content }) =>
+        item.sheets &&
+        content.kind === "thread" &&
+        content.channelId === currentId &&
+        content.rootId === requestedMessage,
+    );
+  const sheetVisit = useRef({ navigation, request: 0 });
+  if (sheetVisit.current.navigation !== navigation)
+    sheetVisit.current = {
+      navigation,
+      request: sheetVisit.current.request + 1,
+    };
+  const sheetRootSought = useMessageOpening(
+    queries.channels,
+    currentId ?? "",
+    sheetRoot && !cached && !current?.cached ? requestedMessage : undefined,
+    sheetVisit.current.request,
+  );
   // A live connection can still be confirming its restored membership. Keep
   // the pending intent; an exact reader cannot use display-only authority.
   const exact = useMemo(
     () =>
       cached || current?.cached
         ? undefined
-        : navigation && requestedMessage && requestedThread === requestedMessage
-          ? { request: navigation, inTimeline: false }
-          : exactOpening?.request === navigation
-            ? exactOpening
-            : undefined,
+        : navigation && sheetRoot
+          ? sheetRootSought === undefined
+            ? undefined
+            : { request: navigation, inTimeline: true }
+          : navigation &&
+              requestedMessage &&
+              requestedThread === requestedMessage
+            ? { request: navigation, inTimeline: false }
+            : exactOpening?.request === navigation
+              ? exactOpening
+              : undefined,
     [
       cached,
       current?.cached,
@@ -1172,6 +1203,8 @@ function ChannelWorkspace({
       requestedMessage,
       requestedThread,
       exactOpening,
+      sheetRoot,
+      sheetRootSought,
     ],
   );
   // The route addresses a thread; its tab owns presentation, the route only

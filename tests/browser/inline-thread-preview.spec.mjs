@@ -183,8 +183,9 @@ for (const dismiss of ["Escape", "Close"])
     await expect(threadTab(page)).toHaveCount(0);
   });
 
-// An older thread's root sits above the loaded history: the visit reads older
-// pages until it finds the root, then reads the thread there, not in a tab.
+// An older thread's root sits above the loaded history: the thread reads
+// inline at once, not in a tab, and the page reads older pages beneath it
+// until it reveals the root.
 test.describe("with a root above the loaded history", () => {
   test.use({ historyCounts: { alpha: 103, beta: 1 } });
 
@@ -208,20 +209,25 @@ test.describe("with a root above the loaded history", () => {
     const copyRow = timeline(page).locator(`[data-message-id="${copy.id}"]`);
     await expect(copyRow).toBeInViewport();
     await expect(rootRow).toHaveCount(0);
-    await copyRow.getByRole("link", { name: "Thread — Old root" }).click();
     // The fixture holds older pages until released.
-    await expect.poll(() => app.pending.length).toBeGreaterThan(0);
+    let released = 0;
     const release = setInterval(() => {
-      while (app.pending.length) app.pending.shift().release();
+      while (app.pending.length) {
+        app.pending.shift().release();
+        released++;
+      }
     }, 20);
     try {
+      await copyRow.getByRole("link", { name: "Thread — Old root" }).click();
       await expect(
         sheet(page).locator(`[data-message-id="${root.id}"]`),
       ).toBeVisible();
+      await expect(threadTab(page)).toHaveCount(0);
+      await expect.poll(() => released).toBeGreaterThan(0);
+      await expect(rootRow).toHaveCount(1);
     } finally {
       clearInterval(release);
     }
-    await expect(threadTab(page)).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(sheet(page)).toBeHidden();
     await expect(rootRow).toBeInViewport();
