@@ -145,6 +145,7 @@ export function FinderDialog(props: Props) {
             key={props.source.key}
             source={props.source}
             query={query}
+            revision={props.revision}
             setQuery={setQuery}
             input={input}
             open={props.open}

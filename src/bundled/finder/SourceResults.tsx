@@ -33,8 +33,12 @@ type Listed =
 
 /** Every row, ranked by Finder's matcher over label and keywords. Ties keep
  * the source's order. */
-function useRanked(source: RegisteredSource, query: string): Listed {
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new query reads the list again, so it stays current while typing.
+function useRanked(
+  source: RegisteredSource,
+  query: string,
+  revision: number,
+): Listed {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: new text, names or messages read the list again, so it stays current.
   const items = useMemo(() => {
     if (!("items" in source)) return undefined;
     try {
@@ -43,7 +47,7 @@ function useRanked(source: RegisteredSource, query: string): Listed {
       console.error(`Finder source ${source.key} failed`, error);
       return null;
     }
-  }, [source, query]);
+  }, [source, query, revision]);
   const corpus = useMemo(() => {
     if (!items) return undefined;
     const ranked = createCorpus();
@@ -113,6 +117,7 @@ function useSearched(
 export function SourceResults({
   source,
   query,
+  revision,
   setQuery,
   input,
   open,
@@ -123,6 +128,8 @@ export function SourceResults({
 }: {
   source: RegisteredSource;
   query: string;
+  /** Moves as names, channels and messages arrive. */
+  revision: number;
   setQuery: (query: string) => void;
   input: RefObject<HTMLElement | null>;
   open: boolean;
@@ -132,7 +139,7 @@ export function SourceResults({
   onClose: () => void;
   footer?: ReactNode;
 }) {
-  const ranked = useRanked(source, query);
+  const ranked = useRanked(source, query, revision);
   const searched = useSearched(source, query);
   const listed = "items" in source ? ranked : searched;
   // biome-ignore lint/correctness/useExhaustiveDependencies: previews must not cross sessions.

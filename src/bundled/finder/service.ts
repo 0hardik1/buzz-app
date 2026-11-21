@@ -41,7 +41,8 @@ export type FinderSource = Readonly<
     title: string;
   } & (
     | {
-        /** Every row; Finder ranks them as you type. */
+        /** Every row; Finder ranks them as you type. It reads them again
+         * for each text and as messages and names arrive. */
         items(): readonly FinderItem[];
       }
     | {

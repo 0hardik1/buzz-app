@@ -366,12 +366,14 @@ test("a failing or empty list says so, and a late answer for older text is ignor
 test("built-in conversations and people rank by name and open on Enter", async () => {
   const relayKey = keypair();
   const maya = keypair();
+  const sam = keypair();
   const events = [
     metadata(relayKey, "crew", "crew", 1_700_000_000, [["t", "stream"]]),
-    roster(relayKey, "crew", [viewer, maya.pubkey]),
+    roster(relayKey, "crew", [viewer, maya.pubkey, sam.pubkey]),
     metadata(relayKey, "lab", "lab"),
     roster(relayKey, "lab", [viewer]),
     profile(maya, { name: "Maya Chen", nip05: "maya@example.org" }),
+    profile(sam, { name: "Sam Lee" }),
   ];
   const owner = createRelaySession({
     viewer,
@@ -411,6 +413,22 @@ test("built-in conversations and people rank by name and open on Enter", async (
       detail: { target: profileTarget(maya.pubkey) },
     }),
   );
+  // A name that loads while the list is open replaces the key there.
+  await act(async () =>
+    opener.used.finder?.open({ source: "buzz.finder/people", query: "" }),
+  );
+  const named = () => rows().map((row) => row.replace(/^./, ""));
+  expect(named()).toContain(sam.pubkey.slice(0, 10));
+  vi.useFakeTimers();
+  try {
+    await act(async () => {
+      await owner.session.profiles.ensure([sam.pubkey]);
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(named()).toContain("Sam Lee");
+  } finally {
+    vi.useRealTimers();
+  }
   owner.dispose();
 });
 

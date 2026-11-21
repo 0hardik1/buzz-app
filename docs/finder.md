@@ -99,7 +99,8 @@ export function apply(ctx) {
 - `registerSource(source)` returns a function that removes the list. It also
   goes when your plugin stops; if it was open, Finder shows All of Buzz.
 - A list either gives every row with `items()`, which Finder ranks with its
-  fuzzy matcher over `label` and `keywords`, or runs its own search with
+  fuzzy matcher over `label` and `keywords` and reads again for each text and
+  as messages and names arrive, or runs its own search with
   `search(query, publish, signal)`. A search can publish several times, such
   as local rows first and remote ones later. Publishing for older text does
   nothing.
