@@ -85,10 +85,11 @@ One record per workspace holds what is open in each place and which visit
 opened it. What shows at a visit is worked out from the visits up to it, so
 nothing waits for a reply box to mount. The page sees each visit's address
 with the parts the sheets show removed. A visit it did not make, as after a
-reload or from a link, shows what its address names. A whole-thread address
-with Inline on and no tab for that thread opens the thread inline. A `reader`
-address opens its details, and the page also reveals the message beneath, so
-a deleted or missing message fails as a missing message link does. Readers are
+reload or from a link, shows what its address names, and the page also
+reveals the message beneath, so focus returns to it and a deleted or missing
+message fails as a missing message link does. A whole-thread address with
+Inline on and no tab for that thread opens the thread inline over its root. A
+`reader` address opens its details over that message. Readers are
 drawn from the message id, not from its row, so they outlive the row.
 Media viewers are not addresses: they dismiss only themselves.
 
