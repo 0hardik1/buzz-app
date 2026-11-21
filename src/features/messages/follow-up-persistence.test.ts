@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup as cleanupUI,
   fireEvent,
   render,
@@ -26,6 +27,58 @@ import {
   type FollowUpMessage,
 } from "./follow-up-storage";
 import { messageTokenTags } from "./message-tokens";
+
+// Pause storage helpers that read either saved pause shape, so the same
+// test runs against the commit before a pause storage change.
+type PauseStorage = {
+  pauseState?(channelId: string): { paused: boolean };
+  savePauseState?(
+    channelId: string,
+    state: {
+      seq: number;
+      paused: boolean;
+      lastStopSeq: number;
+      generation: number;
+    },
+  ): void;
+  paused?(channelId: string): boolean;
+  pause?(channelId: string, paused: boolean): void;
+};
+function savedPause(scope: string, channelId: string) {
+  const storage = followUpStorage(scope) as unknown as PauseStorage;
+  return storage.pauseState
+    ? storage.pauseState(channelId).paused
+    : !!storage.paused?.(channelId);
+}
+/** The storage event another window's latest pause write sends. */
+function pauseStorageEvent(scope: string) {
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.includes(scope) && key.includes("follow-up-pause"))
+      return new StorageEvent("storage", {
+        key,
+        newValue: localStorage.getItem(key),
+      });
+  }
+  return new StorageEvent("storage");
+}
+/** Releases check recipients before they take the chat lock; let those
+ * checks finish, then wait for every release holding or queued on it. */
+async function releasesSettled(scope: string, channelId = "chat") {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await followUpStorage(scope).lockChat(channelId, async () => {});
+}
+function writeSavedPause(scope: string, channelId: string) {
+  const storage = followUpStorage(scope) as unknown as PauseStorage;
+  if (storage.savePauseState)
+    storage.savePauseState(channelId, {
+      seq: 1,
+      paused: true,
+      lastStopSeq: 1,
+      generation: 0,
+    });
+  else storage.pause?.(channelId, true);
+}
 
 const secret = new Uint8Array(32).fill(7);
 const viewer = getPublicKey(secret);
@@ -1007,7 +1060,7 @@ it("cancels a deferred manual Send when its row is removed", async () => {
   const restarted = fixture();
   restarted.choices(false, []);
   restarted.queue.sendNow(id);
-  await followUpStorage(scope).lockChat("chat", async () => {});
+  await releasesSettled(scope);
   restarted.queue.remove(id);
   restarted.choices(true, [agent]);
   await followUpStorage(scope).lockChat("chat", async () => {});
@@ -1134,6 +1187,7 @@ it.each([false, true])(
     } finally {
       finish();
     }
+    await releasesSettled(scope);
     await followUpStorage(scope).lock(id, async () => {});
     if (manual) {
       expect(restarted.send).toHaveBeenCalledOnce();
@@ -1400,6 +1454,7 @@ it.each(["together", "after handoff", "later row first"])(
       await vi.waitFor(() => expect(first.queue.snapshot()).toEqual([]));
     if (order !== "later row first") second.finish();
     await vi.waitFor(() => expect(first.queue.snapshot()).toEqual([]));
+    await releasesSettled(scope);
     await followUpStorage(scope).lock(secondId, async () => {});
     expect(first.send).toHaveBeenCalledOnce();
     expect(second.send).not.toHaveBeenCalled();
@@ -1590,6 +1645,10 @@ it("removes a manual send while another row holds the chat lock", async () => {
   });
   h.refresh.mockClear();
   const locks = vi.spyOn(navigator.locks, "request");
+  // Recipient checks run before the chat lock, so model another row holding
+  // it directly. The first row is still checking its recipients; the second
+  // waits on the held lock.
+  const held = followUpStorage(scope).lockChat("chat", () => gate);
   try {
     h.queue.sendNow(first);
     await vi.waitFor(() => expect(h.refresh).toHaveBeenCalledOnce());
@@ -1607,7 +1666,8 @@ it("removes a manual send while another row holds the chat lock", async () => {
     );
   } finally {
     release();
-    await followUpStorage(scope).lockChat("chat", async () => {});
+    await held;
+    await releasesSettled(scope);
     await followUpStorage(scope).lock(second, async () => {});
   }
   await vi.waitFor(() => expect(h.queue.snapshot()).toEqual([]));
@@ -1969,7 +2029,7 @@ it.each([false, true])(
     const next = fixture();
     next.enqueue();
     next.finish();
-    await followUpStorage(scope).lockChat("chat", async () => {});
+    await releasesSettled(scope);
     expect(next.send).not.toHaveBeenCalled();
     expect(next.queue.snapshot()[0]?.restored).toBe(true);
     expect(followUpStorage(scope).handoff("chat")?.recipients).toContain(agent);
@@ -2440,7 +2500,7 @@ describe("Stop pauses the queue", () => {
     h.enqueue({ ...dmMessage, text: "Second" });
     await h.queue.pause("chat");
     expect(h.queue.pauses().get("chat")).toEqual({});
-    expect(followUpStorage(scope).paused("chat")).toBe(true);
+    expect(savedPause(scope, "chat")).toBe(true);
     h.finish();
     await Promise.resolve();
     expect(h.send).not.toHaveBeenCalled();
@@ -2452,7 +2512,7 @@ describe("Stop pauses the queue", () => {
     h.work(firstId, "done");
     await vi.waitFor(() => expect(h.send).toHaveBeenCalledTimes(2));
     expect(h.send.mock.calls[1]?.[1]).toBe("Second");
-    expect(followUpStorage(scope).paused("chat")).toBe(false);
+    expect(savedPause(scope, "chat")).toBe(false);
   });
 
   it("sends only the chosen row on Send now and keeps the chat paused", async () => {
@@ -2576,9 +2636,7 @@ describe("Stop pauses the queue", () => {
     h.queue.sendNow(only);
     await vi.waitFor(() => expect(h.queue.snapshot()).toEqual([]));
     await vi.waitFor(() => expect(h.queue.pauses().size).toBe(0));
-    await vi.waitFor(() =>
-      expect(followUpStorage(scope).paused("chat")).toBe(false),
-    );
+    await vi.waitFor(() => expect(savedPause(scope, "chat")).toBe(false));
   });
 });
 
@@ -2601,7 +2659,7 @@ describe("Stop pause across windows and restarts", () => {
       recipients: [agent],
       owner: "buzz-follow-up-window:closed",
     });
-    storage.pause("chat", true);
+    writeSavedPause(scope, "chat");
     const restarted = fixture(scope, [], true, true);
     await restarted.owner.ready;
     restarted.finish();
@@ -2677,7 +2735,7 @@ describe("Stop pause across windows and restarts", () => {
     producing.finish();
     await followUpStorage(scope).lockChat("chat", async () => {});
     expect(producing.send).not.toHaveBeenCalled();
-    expect(followUpStorage(scope).paused("chat")).toBe(true);
+    expect(savedPause(scope, "chat")).toBe(true);
   });
 
   it("keeps the saved pause if another window still has a waiting row", async () => {
@@ -2693,7 +2751,7 @@ describe("Stop pause across windows and restarts", () => {
     await vi.waitFor(() => expect(followUpStorage(scope).has(id)).toBe(false));
     await followUpStorage(scope).lockChat("chat", async () => {});
     expect(followUpStorage(scope).has(remaining)).toBe(true);
-    expect(followUpStorage(scope).paused("chat")).toBe(true);
+    expect(savedPause(scope, "chat")).toBe(true);
   });
 
   it("keeps a restored successor held when the former owner's handoff is unresolved", async () => {
@@ -2705,7 +2763,7 @@ describe("Stop pause across windows and restarts", () => {
       recipients: [agent],
       owner: "buzz-follow-up-window:closed",
     });
-    storage.pause("chat", true);
+    writeSavedPause(scope, "chat");
     const restarted = fixture(scope, [], true, true);
     await restarted.owner.ready;
     restarted.finish();
@@ -2717,8 +2775,6 @@ describe("Stop pause across windows and restarts", () => {
 });
 
 describe("Stop pause review round", () => {
-  const pausedKey = `buzz-view.v1:${JSON.stringify([scope, "follow-up-paused:chat"])}`;
-
   it("keeps another window's next row paused after a row it was already sending at Stop", async () => {
     const sending = fixture(scope, [], true, true);
     await sending.owner.ready;
@@ -2741,7 +2797,7 @@ describe("Stop pause review round", () => {
     const stopped = stopping.queue.pause("chat");
     gate.resolve();
     await stopped;
-    expect(followUpStorage(scope).paused("chat")).toBe(true);
+    expect(savedPause(scope, "chat")).toBe(true);
     const id = sending.send.mock.results[0]?.value as string;
     sending.work(id, "working");
     sending.work(id, "done");
@@ -2783,7 +2839,7 @@ describe("Stop pause review round", () => {
     });
   });
 
-  it("says a row went out when another window passed its checks after Stop was pressed", async () => {
+  it("holds another window's row still checking its recipients when Stop is pressed", async () => {
     const sending = fixture(scope, [], true, true);
     await sending.owner.ready;
     sending.enqueue({ ...dmMessage, text: "First" });
@@ -2797,16 +2853,18 @@ describe("Stop pause review round", () => {
       return refresh?.() as ReturnType<NonNullable<typeof refresh>>;
     });
     sending.finish();
-    // The other window holds the chat lock, still validating its first row.
+    // The other window is still checking its first row's recipients.
     await vi.waitFor(() => expect(sending.refresh).toHaveBeenCalled());
     const stopped = stopping.queue.pause("chat");
     expect(stopping.queue.pauses().get("chat")).toEqual({});
     gate.resolve();
     await stopped;
-    expect(sending.send).toHaveBeenCalledOnce();
-    expect(stopping.queue.pauses().get("chat")).toEqual({
-      sentBeforeStop: true,
-    });
+    await releasesSettled(scope);
+    // Design §6 accepts only a row already past those checks.
+    expect(sending.send).not.toHaveBeenCalled();
+    expect(sending.queue.pauses().has("chat")).toBe(true);
+    expect(stopping.queue.pauses().get("chat")).toEqual({});
+    expect(followUpStorage(scope).load()).toHaveLength(2);
   });
 
   it("puts a Send now still short of its handoff back in the paused queue at Stop", async () => {
@@ -2869,10 +2927,8 @@ describe("Stop pause review round", () => {
     // Every composer unmounts.
     unsubscribe();
     await other.queue.resume("chat");
-    expect(followUpStorage(scope).paused("chat")).toBe(false);
-    window.dispatchEvent(
-      new StorageEvent("storage", { key: pausedKey, newValue: null }),
-    );
+    expect(savedPause(scope, "chat")).toBe(false);
+    window.dispatchEvent(new StorageEvent("storage"));
     expect(kept.queue.pauses().has("chat")).toBe(false);
     kept.finish();
     await vi.waitFor(() => expect(kept.send).toHaveBeenCalledOnce());
@@ -2917,7 +2973,7 @@ describe("Stop pause review round", () => {
         ),
       ).toBeTruthy(),
     );
-    expect(followUpStorage(scope).paused("chat")).toBe(true);
+    expect(savedPause(scope, "chat")).toBe(true);
     failing.mockRestore();
     h.finish();
     await vi.waitFor(() => expect(h.send).toHaveBeenCalledOnce());
@@ -2943,18 +2999,308 @@ describe("Stop pause review round", () => {
     await expect(h.queue.resume("chat")).rejects.toThrow("Locks unavailable");
     failing.mockRestore();
     expect(h.queue.pauses().has("chat")).toBe(false);
-    // Another window presses Stop: it saves a new pause value, and its
-    // storage event reaches this window.
-    localStorage.setItem(pausedKey, JSON.stringify(crypto.randomUUID()));
-    window.dispatchEvent(
-      new StorageEvent("storage", {
-        key: pausedKey,
-        newValue: JSON.stringify(crypto.randomUUID()),
-      }),
-    );
+    // Another window presses Stop, and its storage event reaches this window.
+    const other = fixture(scope, [], false, true);
+    await other.owner.ready;
+    await other.queue.pause("chat");
+    window.dispatchEvent(pauseStorageEvent(scope));
     expect(h.queue.pauses().has("chat")).toBe(true);
     h.finish();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.send).not.toHaveBeenCalled();
+  });
+  const failChatLocks = () => {
+    const request = navigator.locks.request.bind(navigator.locks);
+    return vi
+      .spyOn(navigator.locks, "request")
+      .mockImplementation(((name: string, ...rest: unknown[]) =>
+        name.startsWith("buzz-follow-up-chat:")
+          ? Promise.reject(new Error("Locks unavailable"))
+          : (request as (...args: unknown[]) => Promise<unknown>)(
+              name,
+              ...rest,
+            )) as typeof navigator.locks.request);
+  };
+
+  it("holds automatic release after a failed Resume when another window's later Stop has no storage event yet", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    h.enqueue(dmMessage);
+    await h.queue.pause("chat");
+    const failing = failChatLocks();
+    await expect(h.queue.resume("chat")).rejects.toThrow("Locks unavailable");
+    failing.mockRestore();
+    expect(h.queue.pauses().has("chat")).toBe(false);
+    // Another window stops; its storage event never reaches this window.
+    const other = fixture(scope, [], false, true);
+    await other.owner.ready;
+    await other.queue.pause("chat");
+    h.finish();
+    await releasesSettled(scope);
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.queue.pauses().has("chat")).toBe(true);
+    expect(h.queue.notices().get("chat")).toBeUndefined();
+  });
+
+  it("keeps a failed Resume through another window's ordinary enqueue", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    h.enqueue({ ...dmMessage, text: "First" });
+    await h.queue.pause("chat");
+    const failing = failChatLocks();
+    await expect(h.queue.resume("chat")).rejects.toThrow("Locks unavailable");
+    failing.mockRestore();
+    const other = fixture(scope, [], false, true);
+    await other.owner.ready;
+    other.enqueue({ ...dmMessage, text: "Other" });
+    await releasesSettled(scope);
+    window.dispatchEvent(new StorageEvent("storage"));
+    h.finish();
+    await vi.waitFor(() => expect(h.send).toHaveBeenCalledOnce());
+    expect(h.send.mock.calls[0]?.[1]).toBe("First");
+  });
+
+  it("drops an earlier Send now after another window's Stop and Resume, and keeps queue order", async () => {
+    const a = fixture(scope, [], false, true);
+    await a.owner.ready;
+    a.enqueue({ ...dmMessage, text: "First" });
+    const correction = a.enqueue({ ...dmMessage, text: "Correction" });
+    const b = fixture(scope, [], false, true);
+    await b.owner.ready;
+    const gate = deferredVoid();
+    const refresh = a.refresh.getMockImplementation();
+    a.refresh.mockImplementationOnce(async () => {
+      await gate.promise;
+      return refresh?.() as ReturnType<NonNullable<typeof refresh>>;
+    });
+    a.queue.sendNow(correction);
+    await vi.waitFor(() => expect(a.refresh).toHaveBeenCalled());
+    // Both save before A's handoff takes the chat lock.
+    const stopped = b.queue.pause("chat");
+    const resumed = b.queue.resume("chat");
+    gate.resolve();
+    await Promise.all([stopped, resumed]);
+    await releasesSettled(scope);
+    // The agent is still busy: nothing jumps the queue.
+    expect(a.send).not.toHaveBeenCalled();
+    expect(
+      followUpStorage(scope)
+        .load()
+        .map((row) => row.text),
+    ).toEqual(["First", "Correction"]);
+    window.dispatchEvent(new StorageEvent("storage"));
+    a.finish();
+    await vi.waitFor(() => expect(a.send).toHaveBeenCalledOnce());
+    expect(a.send.mock.calls[0]?.[1]).toBe("First");
+  });
+
+  it("sends a Send now clicked after another window's saved Stop and keeps the rest paused", async () => {
+    const a = fixture(scope, [], false, true);
+    await a.owner.ready;
+    a.enqueue({ ...dmMessage, text: "First" });
+    const correction = a.enqueue({ ...dmMessage, text: "Correction" });
+    const b = fixture(scope, [], false, true);
+    await b.owner.ready;
+    await b.queue.pause("chat");
+    a.queue.sendNow(correction);
+    await vi.waitFor(() => expect(a.send).toHaveBeenCalledOnce());
+    expect(a.send.mock.calls[0]?.[1]).toBe("Correction");
+    expect(savedPause(scope, "chat")).toBe(true);
+    expect(
+      followUpStorage(scope)
+        .load()
+        .map((row) => row.text),
+    ).toEqual(["First"]);
+  });
+
+  it("re-reads a row's saved text under the lock after its recipient checks", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    const id = h.enqueue({ ...dmMessage, text: "Draft" });
+    const gate = deferredVoid();
+    const refresh = h.refresh.getMockImplementation();
+    h.refresh.mockImplementationOnce(async () => {
+      await gate.promise;
+      return refresh?.() as ReturnType<NonNullable<typeof refresh>>;
+    });
+    h.queue.sendNow(id);
+    await vi.waitFor(() => expect(h.refresh).toHaveBeenCalled());
+    // Another window saves an edit while this one checks recipients.
+    const storage = followUpStorage(scope);
+    const saved = storage.load()[0];
+    if (!saved) throw new Error("Missing row");
+    storage.save({ ...saved, text: "Edited" });
+    gate.resolve();
+    await vi.waitFor(() => expect(h.send).toHaveBeenCalledOnce());
+    expect(h.send.mock.calls[0]?.[1]).toBe("Edited");
+  });
+
+  it.each(["enqueue", "enqueue and Stop"])(
+    "keeps a row queued into the pause while the queue empties in another window paused (%s)",
+    async (race) => {
+      const a = fixture(scope, [], false, true);
+      await a.owner.ready;
+      const only = a.enqueue({ ...dmMessage, text: "Only" });
+      await releasesSettled(scope);
+      await a.queue.pause("chat");
+      const b = fixture(scope, [], false, true);
+      await b.owner.ready;
+      // Window B queues just after window A found the queue empty, before A
+      // saves the cleared pause.
+      let armed = true;
+      const raced = () => {
+        if (!armed) return;
+        armed = false;
+        b.enqueue({ ...dmMessage, text: "New" });
+        if (race === "enqueue and Stop") void b.queue.pause("chat");
+      };
+      const setItem = Storage.prototype.setItem;
+      const removeItem = Storage.prototype.removeItem;
+      const sets = vi
+        .spyOn(Storage.prototype, "setItem")
+        .mockImplementation(function (this: Storage, key, value) {
+          if (
+            key.includes("follow-up-pause") &&
+            value.includes('"paused":false')
+          )
+            raced();
+          return setItem.call(this, key, value);
+        });
+      const removes = vi
+        .spyOn(Storage.prototype, "removeItem")
+        .mockImplementation(function (this: Storage, key) {
+          if (key.includes("follow-up-pause")) raced();
+          return removeItem.call(this, key);
+        });
+      try {
+        a.queue.remove(only);
+        await vi.waitFor(() => expect(armed).toBe(false));
+      } finally {
+        sets.mockRestore();
+        removes.mockRestore();
+      }
+      await releasesSettled(scope);
+      window.dispatchEvent(new StorageEvent("storage"));
+      b.finish();
+      await releasesSettled(scope);
+      expect(b.send).not.toHaveBeenCalled();
+      expect(b.queue.pauses().has("chat")).toBe(true);
+      expect(savedPause(scope, "chat")).toBe(true);
+    },
+  );
+
+  it("warns about a message sent past Stop only when its handoff recorded one", async () => {
+    const stopping = fixture(scope, [], true, true);
+    await stopping.owner.ready;
+    stopping.enqueue(dmMessage);
+    const storage = followUpStorage(scope);
+    for (const message of [undefined, "f".repeat(64)]) {
+      const held = deferredVoid();
+      const busy = storage.lockChat("chat", () => held.promise);
+      const stopped = stopping.queue.pause("chat");
+      // Another window claims a row under the lock; its publish either threw
+      // before recording a message, or recorded one.
+      storage.claim("chat", {
+        id: `other-${message ? "sent" : "claim"}`,
+        recipients: [agent],
+        owner: "buzz-follow-up-window:other",
+        ...(message ? { message } : {}),
+      });
+      held.resolve();
+      await busy;
+      await stopped;
+      expect(stopping.queue.pauses().get("chat")).toEqual(
+        message ? { sentBeforeStop: true } : {},
+      );
+      await stopping.queue.resume("chat");
+    }
+  });
+
+  it("keeps the went-out note visible after the chat's only row hands off", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    const stopping = fixture(scope, [], true, true);
+    await stopping.owner.ready;
+    const only = stopping.enqueue(dmMessage);
+    render(
+      createElement(QueuedFollowUps, {
+        session: stopping.session,
+        channelId: "chat",
+        disabled: false,
+        focusComposer() {},
+      }),
+    );
+    const storage = followUpStorage(scope);
+    await releasesSettled(scope);
+    const held = deferredVoid();
+    const busy = storage.lockChat("chat", () => held.promise);
+    const stopped = stopping.queue.pause("chat");
+    // Another window, already past its checks, hands off the only row.
+    storage.claim("chat", {
+      id: only,
+      message: "f".repeat(64),
+      recipients: [agent],
+      owner: "buzz-follow-up-window:other",
+    });
+    storage.remove(only);
+    held.resolve();
+    await busy;
+    await stopped;
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage"));
+    });
+    await vi.waitFor(() => expect(stopping.queue.snapshot()).toEqual([]));
+    await vi.waitFor(() =>
+      expect(
+        screen.getByText(
+          "One queued message was already being sent when you pressed Stop and may still go out.",
+        ),
+      ).toBeTruthy(),
+    );
+  });
+
+  it("retires the failed-Resume alert at a later Stop, and keeps it gone after another window's Resume", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    h.enqueue(dmMessage);
+    await h.queue.pause("chat");
+    render(
+      createElement(QueuedFollowUps, {
+        session: h.session,
+        channelId: "chat",
+        disabled: false,
+        focusComposer() {},
+      }),
+    );
+    const alert =
+      "Queue resumed in this window only. Couldn’t save that, so other windows or a restart may keep it paused.";
+    const failing = failChatLocks();
+    fireEvent.click(screen.getByRole("button", { name: "Resume queue" }));
+    await vi.waitFor(() => expect(screen.getByText(alert)).toBeTruthy());
+    failing.mockRestore();
+    await act(() => h.queue.pause("chat"));
+    expect(screen.queryByText(alert)).toBeNull();
+    const other = fixture(scope, [], false, true);
+    await other.owner.ready;
+    await other.queue.resume("chat");
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage"));
+    });
+    await releasesSettled(scope);
+    expect(screen.queryByText(alert)).toBeNull();
   });
 });

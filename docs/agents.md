@@ -1123,19 +1123,29 @@ rows for explicit Send rather than starting overlapping work. The paused rows ex
 handled in another window.
 **Don’t resume** leaves the saved follow-ups paused. Other chats remain paused.
 **Stop** on top-level work pauses that chat's queue. The pause is set in memory before
-the interrupt is sent, so Stop never waits for it; saving the pause runs in parallel
-under the chat lock, and a failed save is reported separately from the Stop. Stop
+the interrupt is sent, so Stop never waits for it; saving the pause runs in parallel,
+and a failed save is reported separately from the Stop. Each chat has one saved pause
+record, `{ seq, paused, lastStopSeq, generation }`. Every change to it (Stop, Resume,
+enqueue, and the queue emptying) is saved under the chat lock and takes the record's
+next `seq`, so the chat lock orders intents from all windows: two clicks in different
+windows are ordered by which save gets the lock first, not by click time. Stop
 checks the saved rows too, so a row another window queued is paused even before this
-window hears of it. Release checks the in-memory and saved pause in the same
-synchronous step as its final publication guards, so a row already past that step may
-still publish; the paused header says one message was already being sent and may still
-go out, and later rows stay paused. That includes a row another window was handing off,
-seen from its saved sending mark at Stop or from a new hand-off found when the pause
-save gets the chat lock. A **Send now** that hasn't reached its Outbox hand-off when
-Stop lands goes back to a paused row: Stop is the later intent. **Send now** on a
-paused row sends only that row; the chat stays paused until **Resume queue**. A Resume
-whose save fails holds in that window, which says so, until its own Stop or another
-window's new pause. Each window hears other windows' pause changes while it has queued
+window hears of it. A release checks recipients before it takes the chat lock; the
+lock covers its final checks and Outbox hand-off. Under the lock it reads the saved
+row, its predecessor and the pause record again, so a Stop saved while it was checking
+holds the row. A row already past those checks when Stop is pressed may still publish;
+the chat's queue then says one message was already being sent and may still go out,
+also when that was its last row, and later rows stay paused. That includes a row
+another window was handing off with a recorded message, seen from its saved sending
+mark at Stop or from a new hand-off found when the pause save gets the chat lock.
+**Send now** on a paused row sends only that row; the chat stays paused until **Resume
+queue**. A Send now records the saved `seq` and `generation` at the click. A Stop saved
+after that, in any window, cancels it, even when a Resume followed: the row goes back
+to its place in the queue. A Stop in the same window that is still saving doesn't
+cancel a Send now clicked after it. A Resume whose save fails holds in that window,
+which says so, but overrides only the saved Stop it saw: a newer saved Stop, the queue
+emptying, or a Stop in that window ends it, even before a storage event arrives. An
+ordinary enqueue does not. Each window hears other windows' pause changes while it has queued
 rows or work to watch, with or without a mounted composer. Resume of interrupted turns
 does not clear a Stop pause. A Stop inside a thread leaves the chat's queue alone; each
 Stop takes its scope from the stopped request's own work, never from where its
@@ -1143,7 +1153,9 @@ activity update was posted. A hosted turn is top-level only when its own request
 the thread root. The owner is never a completion target, even when they mention
 themselves. A chat drops its pause only
 when no saved rows are left in any window, checked again under the chat lock, so the
-next message sends as usual. An earlier hand-off that this window doesn't own and that
+next message sends as usual. That starts a new `generation`; a row that another window
+queued into the pause just before, unseen by that check, pauses the chat again when it
+takes its `seq`. An earlier hand-off that this window doesn't own and that
 has no completion evidence holds every row behind it, each until its own **Send now**.
 **Resume queue** and a **Send now** that goes past that hand-off both save the hold
 first, under a separate per-row key, so it survives another restart and an

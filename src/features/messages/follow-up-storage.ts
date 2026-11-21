@@ -41,6 +41,23 @@ export type FollowUpHandoff = {
   complete?: true;
   owner?: string;
 };
+/**
+ * A chat's saved pause. `seq` counts every intent saved under the chat lock;
+ * `lastStopSeq` is the latest Stop's; `generation` moves on each time the
+ * chat's queue empties.
+ */
+export type FollowUpPauseState = Readonly<{
+  seq: number;
+  paused: boolean;
+  lastStopSeq: number;
+  generation: number;
+}>;
+const NO_PAUSE: FollowUpPauseState = {
+  seq: 0,
+  paused: false,
+  lastStopSeq: 0,
+  generation: 0,
+};
 const prefix = "follow-up:";
 /** The agents a queued row waits on: its mentions, plus a DM's agent. The
  * viewer never answers a turn, so a self-mention is never a target. */
@@ -180,46 +197,22 @@ export function followUpStorage(scope: string) {
         throw new Error("Queued message ordering is unavailable. Try again.");
       return value as FollowUpHandoff;
     },
-    /** The owner stopped this chat's work; its queue releases nothing on its own. */
-    paused(channelId: string) {
-      const value = readView<unknown>(
-        scope,
-        `follow-up-paused:${channelId}`,
-        null,
-      );
-      return value === true || typeof value === "string";
+    /**
+     * The chat's pause record. Every change is written under the chat lock
+     * and takes the next `seq`, so the lock orders all pause intents.
+     */
+    pauseState(channelId: string): FollowUpPauseState {
+      const name = `follow-up-pause:${channelId}`;
+      const revision = viewRevision(scope, name);
+      if (revision === null) return NO_PAUSE;
+      const value = readView<unknown>(scope, name, null);
+      if (revision === undefined || !pauseState(value))
+        throw new Error("The queue pause is unavailable. Try again.");
+      return value;
     },
-    /** The chat another window just paused, read from its storage event. */
-    pausedIn(event: StorageEvent): string | undefined {
-      const prefix = "buzz-view.v1:";
-      if (!event.key?.startsWith(prefix) || event.newValue === null) return;
-      let pair: unknown;
-      try {
-        pair = JSON.parse(event.key.slice(prefix.length));
-      } catch {
-        return;
-      }
-      if (
-        Array.isArray(pair) &&
-        pair[0] === scope &&
-        typeof pair[1] === "string" &&
-        pair[1].startsWith("follow-up-paused:")
-      )
-        return pair[1].slice("follow-up-paused:".length);
-      return;
-    },
-    pause(channelId: string, paused: boolean) {
-      const name = `follow-up-paused:${channelId}`;
-      if (!paused) {
-        try {
-          clearView(scope, name);
-        } catch {
-          throw new Error("Could not save the queue pause.");
-        }
-        return;
-      }
-      // Each Stop writes a new value, so other windows always hear of it.
-      if (!writeView(scope, name, crypto.randomUUID()))
+    /** Call only under the chat lock. */
+    savePauseState(channelId: string, state: FollowUpPauseState) {
+      if (!writeView(scope, `follow-up-pause:${channelId}`, state))
         throw new Error("Could not save the queue pause.");
     },
     claim(channelId: string, handoff: FollowUpHandoff) {
@@ -256,6 +249,17 @@ export function followUpStorage(scope: string) {
   };
 }
 
+function pauseState(value: unknown): value is FollowUpPauseState {
+  if (!value || typeof value !== "object") return false;
+  const v = value as FollowUpPauseState;
+  return (
+    Number.isSafeInteger(v.seq) &&
+    typeof v.paused === "boolean" &&
+    Number.isSafeInteger(v.lastStopSeq) &&
+    Number.isSafeInteger(v.generation) &&
+    v.lastStopSeq <= v.seq
+  );
+}
 function strings(value: unknown): value is string[] {
   return (
     Array.isArray(value) && value.every((item) => typeof item === "string")

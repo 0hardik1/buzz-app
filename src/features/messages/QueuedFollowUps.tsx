@@ -47,7 +47,9 @@ export function QueuedFollowUps({
   const pause = useSyncExternalStore(queue.subscribe, queue.pauses).get(
     channelId,
   );
-  const [resumeError, setResumeError] = useState<string>();
+  const notice = useSyncExternalStore(queue.subscribe, queue.notices).get(
+    channelId,
+  );
   const section = useRef<HTMLElement>(null);
   const focused = useRef<
     { id: string; action: "send" | "remove" | "preview" | "edit" } | undefined
@@ -69,7 +71,10 @@ export function QueuedFollowUps({
     if (next) next.focus();
     else focusComposer();
   }, [entries, focusComposer]);
-  if (!entries.length && !storageError) return null;
+  // A message that went out after Stop is reported even when it was the
+  // last queued row.
+  const sentAfterStop = !pause && notice?.sentBeforeStop;
+  if (!entries.length && !storageError && !sentAfterStop) return null;
   return (
     <section
       ref={section}
@@ -94,16 +99,10 @@ export function QueuedFollowUps({
             variant="subtle"
             disabled={disabled}
             onClick={() => {
-              setResumeError(undefined);
               // Resume removes this button; keep keyboard focus in the chat.
               focusComposer();
-              queue
-                .resume(channelId)
-                .catch(() =>
-                  setResumeError(
-                    "Queue resumed in this window only. Couldn’t save that, so other windows or a restart may keep it paused.",
-                  ),
-                );
+              // A failed save is the queue's notice while that Resume holds.
+              queue.resume(channelId).catch(() => {});
             }}
           >
             Resume queue
@@ -115,9 +114,16 @@ export function QueuedFollowUps({
           {pause.saveError}
         </p>
       )}
-      {resumeError && !pause && (
+      {notice?.resumeUnsaved && !pause && (
         <p role="alert" className="text-body-sm text-danger">
-          {resumeError}
+          Queue resumed in this window only. Couldn’t save that, so other
+          windows or a restart may keep it paused.
+        </p>
+      )}
+      {sentAfterStop && (
+        <p className="text-caption" role="status">
+          One queued message was already being sent when you pressed Stop and
+          may still go out.
         </p>
       )}
       <ol className={styles.list}>
