@@ -121,6 +121,10 @@
      frame between them. */
   grid-template-rows: max-content var(--timeline-aside-extra, 0px);
   align-items: start;
+  /* As with trailing content: past the pinned transcript's end the inset
+     would only start the aside's range early, moving it at the latest
+     message. */
+  --history-bottom-inset: 0px;
 }
 .feed[data-aside] > .transcript {
   display: block;
