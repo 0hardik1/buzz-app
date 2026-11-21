@@ -5,6 +5,7 @@ import { relayPartition } from "../../features/relay/partition";
 import { activeModal } from "../../shared/design-system/overlayLayer";
 import { createCorpus } from "./corpus.ts";
 import { noteInterest, topInterest } from "./interest";
+import { type FinderOpenOptions, provideFinder } from "./service";
 import type { FinderScope } from "./FinderDialog";
 import {
   type FinderSync,
@@ -28,6 +29,9 @@ type State = Readonly<{
   sync?: FinderSync | undefined;
   scope: FinderScope;
   openCount: number;
+  /** The key of an open source other than the two scopes. */
+  source?: string | undefined;
+  initialQuery?: string | undefined;
 }>;
 
 export const apply: PluginModule["apply"] = (ctx) => {
@@ -67,14 +71,32 @@ export const apply: PluginModule["apply"] = (ctx) => {
   const inConversation = () =>
     ctx.navigation.snapshot().entry.target.kind === "conversation";
   /** Opens Finder, or switches scope while it's open, keeping the text. */
-  const show = (scope: FinderScope) => {
-    if (scope === "channel") interested(2);
+  const show = (
+    scope: FinderScope,
+    { source, query }: { source?: string; query?: string } = {},
+  ) => {
+    if (scope === "channel" && !source) interested(2);
     set({
       open: true,
       scope,
-      ...(!state.open && { openCount: state.openCount + 1 }),
+      source,
+      // Text from the caller starts a fresh opening even while open.
+      ...((!state.open || query !== undefined) && {
+        openCount: state.openCount + 1,
+        initialQuery: query,
+      }),
     });
   };
+  const here = (): FinderScope => (inConversation() ? "channel" : "buzz");
+  const sources = provideFinder(ctx, ({ source, query }: FinderOpenOptions) => {
+    const options = query === undefined ? {} : { query };
+    if (!source) return show(here(), options);
+    if (source === "buzz.finder/channel") return show(here(), options);
+    if (source === "buzz.finder/all") return show("buzz", options);
+    if (!sources.snapshot().some((entry) => entry.key === source))
+      return show("buzz", options);
+    show("buzz", { ...options, source });
+  });
   ctx.effect(() => {
     let visit: string | undefined;
     const visited = () => {
@@ -140,7 +162,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     allowInEditable: true,
     allowInModal: true,
     when: available,
-    run: () => show(inConversation() ? "channel" : "buzz"),
+    run: () => show(here()),
   });
 
   // Not while typing: the composer keeps ⌘⇧P for Spoiler.
@@ -157,8 +179,21 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ctx.pages.registerOverlay({
     id: "finder",
     component: function Finder() {
-      const { open, revision, session, status, sync, scope, openCount } =
-        useSyncExternalStore(store.subscribe, store.snapshot);
+      const {
+        open,
+        revision,
+        session,
+        status,
+        sync,
+        scope,
+        openCount,
+        source,
+        initialQuery,
+      } = useSyncExternalStore(store.subscribe, store.snapshot);
+      const registered = useSyncExternalStore(
+        sources.subscribe,
+        sources.snapshot,
+      );
       const target = useSyncExternalStore(
         ctx.navigation.subscribe,
         ctx.navigation.snapshot,
@@ -182,6 +217,9 @@ export const apply: PluginModule["apply"] = (ctx) => {
             scope={scope === "channel" && !currentChannelId ? "buzz" : scope}
             onScopeChange={show}
             openCount={openCount}
+            initialQuery={initialQuery}
+            source={registered.find((entry) => entry.key === source)}
+            onSourceClose={() => set({ source: undefined, scope: "buzz" })}
             status={
               !session ? (
                 <p className="px-3 text-body-sm text-subtle">

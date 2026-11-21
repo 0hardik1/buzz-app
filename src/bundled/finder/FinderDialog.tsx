@@ -31,6 +31,8 @@ import {
   type FinderDoc,
   type FinderResults,
 } from "./corpus.ts";
+import type { RegisteredSource } from "./service";
+import { SourceResults } from "./SourceResults";
 import type { ChannelSearchStatus, FinderSync } from "./sync";
 
 export type FinderScope = "channel" | "buzz";
@@ -79,6 +81,9 @@ type Props = {
   /** Counts openings: each new one starts from `initialQuery`, or empty. */
   openCount: number;
   initialQuery?: string | undefined;
+  /** Another plugin's list, or a built-in one, in place of the two scopes. */
+  source?: RegisteredSource | undefined;
+  onSourceClose?: () => void;
   status?: ReactNode;
   openMessage: (doc: FinderDoc) => void;
 };
@@ -125,7 +130,22 @@ export function FinderDialog(props: Props) {
       initialFocus={input}
     >
       {props.open &&
-        (props.scope === "buzz" && props.session ? (
+        (props.source ? (
+          <SourceResults
+            source={props.source}
+            query={query}
+            setQuery={setQuery}
+            input={input}
+            open={props.open}
+            session={props.session}
+            onOpenChange={props.onOpenChange}
+            onClose={() => {
+              props.onSourceClose?.();
+              input.current?.focus();
+            }}
+            footer={props.status}
+          />
+        ) : props.scope === "buzz" && props.session ? (
           <AllResults {...contents} session={props.session} />
         ) : (
           <LocalResults {...contents} />
