@@ -326,7 +326,7 @@ test("a source leaves when its plugin stops, and All of Buzz shows instead", asy
   ).not.toBeInTheDocument();
 });
 
-test("a failing or empty list says so, and a late answer for older text is ignored", async () => {
+test("a failing or empty list says so, a late answer for older text is ignored, and a repeated row shows once", async () => {
   const answers = new Map<string, (items: readonly FinderItem[]) => void>();
   const broken = consumer(() => ({
     id: "broken",
@@ -386,7 +386,8 @@ test("a failing or empty list says so, and a late answer for older text is ignor
   );
   await act(async () => answers.get("a")?.([item("Stale")]));
   expect(rows()).toEqual([]);
-  await act(async () => answers.get("ab")?.([item("Fresh")]));
+  // A row published twice shows once.
+  await act(async () => answers.get("ab")?.([item("Fresh"), item("Fresh")]));
   expect(
     within(screen.getByRole("listbox")).getByRole("option"),
   ).toHaveTextContent("Fresh");

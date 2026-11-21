@@ -105,6 +105,7 @@ export function apply(ctx) {
   as local rows first and remote ones later. Publishing for older text does
   nothing.
 - Each row has an `id`, a `label`, and `run()`, which runs after Finder closes.
+  IDs are unique within a list; a repeated ID shows one row, the last given.
   It can add a `detail` line, `keywords`, an `icon` or `avatar`, and a
   `preview`: `{ kind: "channel", channelId }`, `{ kind: "person", pubkey }`,
   or a component.

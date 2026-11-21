@@ -100,8 +100,14 @@ function useSearched(
         source.search(
           query,
           (items) => {
+            // One row per ID, as a list from `items()` gets.
             if (!controller.signal.aborted)
-              setListed({ query, items: [...items] });
+              setListed({
+                query,
+                items: [
+                  ...new Map(items.map((item) => [item.id, item])).values(),
+                ],
+              });
           },
           controller.signal,
         ),

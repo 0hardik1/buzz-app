@@ -11,6 +11,7 @@ import {
 
 /** One row in a source's list. */
 export type FinderItem = Readonly<{
+  /** Unique within the list; a repeat replaces the earlier row. */
   id: string;
   /** What's shown and matched. */
   label: string;
