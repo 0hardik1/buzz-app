@@ -3,6 +3,7 @@
  * their own arrow-key behavior: a move is that arrow, pressed on the focus.
  * Only what nothing handles falls back to scrolling.
  */
+import { WHICH_KEY } from "./pending";
 import {
   activeMessageList,
   selectedMessage,
@@ -248,13 +249,13 @@ export function openActions() {
   // WebKit can leave focus on the item; the menu's keys need it inside.
   let frames = 10;
   const settle = () => {
-    const menu = document.querySelector<HTMLElement>(
-      '[role="menu"][data-open]',
-    );
+    const menu = [
+      ...document.querySelectorAll<HTMLElement>('[role="menu"][data-open]'),
+    ].find((popup) => !popup.closest(`[${WHICH_KEY}]`));
     if (menu?.contains(document.activeElement)) return;
     if (menu) menu.focus();
     else if (--frames > 0) requestAnimationFrame(settle);
   };
-  requestAnimationFrame(settle);
+  settle();
   return true;
 }

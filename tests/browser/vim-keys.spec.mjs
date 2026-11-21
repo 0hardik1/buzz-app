@@ -64,6 +64,12 @@ test("Vim keys select messages, act on them with go, and leave the composer", as
   await expect(
     menu.getByRole("menuitem", { name: "Copy message", exact: true }),
   ).toHaveAttribute("aria-keyshortcuts", /^[a-z0-9]$/);
+  // go moves focus into the menu, so its keys reach it.
+  await expect
+    .poll(() =>
+      page.evaluate(() => !!document.activeElement?.closest('[role="menu"]')),
+    )
+    .toBe(true);
   // An open menu keeps its keys: Space starts no leader sequence, so the
   // next key still reaches the menu.
   await page.keyboard.press(" ");
