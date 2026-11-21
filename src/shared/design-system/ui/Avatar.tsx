@@ -69,10 +69,12 @@ export function Avatar({
   alt: string;
   fallback: string;
   fallbackContent?: ReactNode;
-  /** Neutral monograms, or a stable categorical fill for a channel's identity. */
+  /** Neutral monograms, a stable categorical fill for a channel's identity,
+   * or a quiet accent fill for an identity drawn as an icon. */
   fallbackSurface?:
     | "subtle"
     | "panel"
+    | "accent"
     | "categorical-purple"
     | "categorical-blue"
     | "categorical-green"

@@ -916,6 +916,13 @@
     color: var(--text-standard);
   }
 
+  /* A quiet accent fill for an identity drawn as an icon, such as a Solo chat.
+     It shares the sidebar's pale accent hover, so it never reads gray on gray. */
+  .buzz-avatar[data-fallback-surface="accent"]:has([data-avatar-fallback]) {
+    background: var(--affordance-sidebar-hover);
+    color: var(--text-standard);
+  }
+
   /* Each fill carries its own ink, so a selected row's ink never reaches it. */
   .buzz-avatar[data-fallback-surface="categorical-purple"] {
     background: var(--surface-categorical-purple);

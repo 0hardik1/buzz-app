@@ -132,7 +132,11 @@ export function UnreadBadge({
         />
       )}
       {unreadDot && unread && (
-        <span className={styles.needsYouDot} aria-hidden="true" />
+        <span
+          className={styles.needsYouDot}
+          data-tile-unread-dot=""
+          aria-hidden="true"
+        />
       )}
       {needs.waiting && (
         <span

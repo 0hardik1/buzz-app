@@ -217,3 +217,20 @@
   display: flex;
   pointer-events: none;
 }
+/* A Solo tile's dot overlaps the circle's top-right edge, as presence does the
+   bottom-right: its centre sits on the rim at 45deg, 14.6% of the circle in
+   from its box, and the circle is inset by the tile's padding. The ring parts
+   it from the artwork, like the corner count's. */
+.tileBadge:has([data-tile-unread-dot]) {
+  --tile-dot-offset: calc(
+    var(--space-1) +
+    (100% - 2 * var(--space-1)) *
+    0.146 -
+    0.1875rem
+  );
+  inset-block-start: var(--tile-dot-offset);
+  inset-inline-end: var(--tile-dot-offset);
+}
+.tileBadge [data-tile-unread-dot] {
+  box-shadow: 0 0 0 1px var(--surface-panel);
+}

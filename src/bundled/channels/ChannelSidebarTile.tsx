@@ -47,6 +47,7 @@ export function ChannelSidebarTile({
         alt=""
         fallback={channel.name}
         fallbackContent={<Icon size={20} />}
+        fallbackSurface="accent"
         size="fill"
       />
     );
