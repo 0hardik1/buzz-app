@@ -108,6 +108,44 @@
   width: min(100%, var(--timeline-measure));
   margin-inline: auto;
 }
+/* PROTOTYPE: the transcript and a page's aside share the feed's scroller.
+   Without an aside the transcript box adds nothing to the layout. */
+.transcript {
+  display: contents;
+}
+.feed[data-aside] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+.feed[data-aside] > .transcript {
+  display: block;
+  grid-area: 1 / 1;
+  min-width: 0;
+  /* ChannelTimeline pins the transcript's end to the scrollport's bottom while
+     the aside's range past it scrolls. */
+  position: sticky;
+  top: var(--timeline-transcript-pin, auto);
+  /* The aside's docked width, which ChannelTimeline measures. */
+  padding-inline-end: var(--timeline-aside-width, 0px);
+}
+/* The aside overlays the transcript's grid cell, so the plugin's frame spans the
+   reader's width; only the plugin's own content takes pointer input. */
+.asideColumn {
+  grid-area: 1 / 1;
+  align-self: stretch;
+  z-index: 3;
+  pointer-events: none;
+}
+.asideFrame {
+  position: sticky;
+  top: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+.asideFrame > * {
+  pointer-events: auto;
+}
 .feed ol {
   list-style: none;
   margin: 0;
