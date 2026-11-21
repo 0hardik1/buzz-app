@@ -46,21 +46,6 @@ const strike: Handle & { peek?: Handle } = (node, parent, state, info) => {
 strike.peek = () => "~";
 
 export type ComposerMarkdownMode = "chat" | "document";
-/** A group chip's `@label` as Markdown prose: the characters that can open
- * inline Markdown are escaped, so it renders as the label. */
-export const groupLabelMarkdown = (label: string) =>
-  `@${label.replace(/[\\`*_[\]<~]/g, "\\$&")}`;
-
-const groupChip = (node: EditorNode) =>
-  node.attrs.group &&
-  !composerSchema.marks.code.isInSet(node.marks) &&
-  !composerSchema.marks.link.isInSet(node.marks)
-    ? node.type.create(
-        { ...node.attrs, source: groupLabelMarkdown(node.attrs.group.label) },
-        null,
-        node.marks,
-      )
-    : node;
 
 /** Plain portions are authored Markdown, not rich-editor literal text. Keeping
  * their source verbatim avoids normalizing formats this slice does not edit.
@@ -78,7 +63,7 @@ export function composerMarkdown(
     node.type.name === "token" && node.attrs.semantic
       ? node.mark(composerSchema.marks.literal.create().addToSet(node.marks))
       : node.isLeaf
-        ? groupChip(node)
+        ? node
         : node.copy(Fragment.fromArray(node.content.content.map(project)));
   const doc = project(readComposerDocument(draft, [], mode));
   const wire = (body: EditorNode) =>

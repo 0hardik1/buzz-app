@@ -736,72 +736,6 @@ describe("inline formatting batch", () => {
       ),
     ).toBe("_@Honey_");
   });
-  it("escapes a group chip's label like prose, so it never changes the Markdown", () => {
-    const members = [
-      { pubkey: "a".repeat(64), name: "Honey" },
-      { pubkey: "b".repeat(64), name: "Pollen" },
-    ];
-    const chip = (label: string, ...marks: InlineFormat[]) =>
-      schema.nodes.token.create(
-        { source: `@${label}`, group: { label, members } },
-        null,
-        marks.map((name) => schema.marks[name].create()),
-      );
-    const rendered = (markdown: string) => {
-      const kinds = new Set<string>();
-      let text = "";
-      const visit = (node: Nodes) => {
-        kinds.add(node.type);
-        if (node.type === "text") text += node.value;
-        if ("children" in node) node.children.forEach(visit);
-      };
-      visit(fromMarkdown(markdown));
-      return { kinds: [...kinds], text };
-    };
-    expect(serialize(chip("Design Team"), schema.text(" hi"))).toBe(
-      "@Design Team hi",
-    );
-    for (const label of [
-      "eng_ios",
-      "eng*ops",
-      "*ops*",
-      "a`b",
-      "x](https://evil.example)[y",
-      "[x](https://evil.example)",
-    ])
-      expect(rendered(serialize(chip(label), schema.text(" hi")))).toEqual({
-        kinds: ["root", "paragraph", "text"],
-        text: `@${label} hi`,
-      });
-    expect(
-      rendered(serialize(chip("eng_ios", "italic"), schema.text(" hi"))),
-    ).toEqual({
-      kinds: ["root", "paragraph", "emphasis", "text"],
-      text: "@eng_ios hi",
-    });
-    expect(
-      rendered(
-        serialize(
-          chip("eng*"),
-          schema.text("b", [schema.marks.italic.create()]),
-          schema.text("*"),
-        ),
-      ),
-    ).toEqual({
-      kinds: ["root", "paragraph", "text", "emphasis"],
-      text: "@eng*b*",
-    });
-    const linked = schema.nodes.token.create(
-      { source: "@eng_ios", group: { label: "eng_ios", members } },
-      null,
-      [schema.marks.link.create({ href: "https://example.com" })],
-    );
-    expect(rendered(serialize(linked))).toEqual({
-      kinds: ["root", "paragraph", "link", "text"],
-      text: "@eng_ios",
-    });
-    expect(serialize(chip("eng_ios", "code"))).toBe("`@eng_ios`");
-  });
   it("trusts a group chip only with a one-line label", () => {
     const members = [{ pubkey: "a".repeat(64), name: "Honey" }];
     const group = (label: string) =>
@@ -885,4 +819,17 @@ it("a group chip's members keep `explicit` through a saved draft, as a person ch
     [bo.pubkey, "Crew", true],
     [ann.pubkey, undefined, true],
   ]);
+});
+
+it("a person chip keeps `explicit` when it is rebuilt from the draft text", () => {
+  const ann = { pubkey: "a".repeat(64), name: "Ann", explicit: true as const };
+  const draft = mentionDraft({
+    text: "@Ann ",
+    recipients: [{ ...ann, start: 0, end: 4 }],
+  });
+  expect(
+    projectComposerDocument(
+      readComposerDocument(draft, [{ start: 0, end: 4 }]),
+    ).draft.recipients.map(({ pubkey, explicit }) => [pubkey, explicit]),
+  ).toEqual([[ann.pubkey, true]]);
 });

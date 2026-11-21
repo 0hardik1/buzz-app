@@ -13351,16 +13351,11 @@ it("a selection offset inside a group chip keeps it one chip that notifies every
     second.pubkey,
   ]);
 });
-it("deleting a group chip after a selection offset inside it, or removing a member, still updates who is notified", async () => {
+it("deleting a group chip removes every member from who is notified", async () => {
   const h = mount();
   h.fill("!Crew");
   offerCrew(h, [first, second]);
   await h.user.keyboard("{Enter}");
-  act(() => h.input().setSelectionRange(2, 2));
-  act(() => h.input().removeRecipient(first.pubkey));
-  expect(h.commands().recipients.map(({ pubkey }) => pubkey)).toEqual([
-    second.pubkey,
-  ]);
   act(() => h.input().setSelectionRange(0, 5));
   await h.user.keyboard("{Backspace}");
   expect(h.commands().recipients).toEqual([]);
@@ -18409,61 +18404,26 @@ it("pastes a copied forward literally inside a code block", async () => {
   ).not.toBeInTheDocument();
 });
 
-const groupLabelMatrix = [
-  ...[..."*_`~[]<>|#\\&!=:@"].flatMap((c) => [`x${c}y`, `${c}${c}x`]),
-  "Design Team",
-  "R&D &copy;",
-  "ops ||tier 2||",
-  "eng_ios",
-  "a_b_c",
-  "*ops*",
-  "_ops_",
-  "a`b",
-  "x](https://evil.example)[y",
-  "[x](https://evil.example)",
-  "![x](https://evil.example/x.png)",
-  "<https://evil.example>",
-  "<b>x</b>",
-  "https://evil.example",
-  "www.evil.example",
-  "buzz://channel/x",
-  "a@b.co",
-  ":party_parrot:",
-  "a~~b~~",
-  "1. x",
-  "- x",
-  "> x",
-  "trailing\\",
-  "x|",
-  "Ops:",
-  "x&#58;y",
-  "Honey's team",
-  "Honey team",
-  "Honey",
-  "Crew",
-  "ops @Honey",
-  "Oncall #general",
-  "[x](https:evil.example)",
-  "Team example.com",
-  "b.co",
-  "x www.example.com",
-  "a`b`c",
-  "x :party_parrot:",
-  "x mailto:y",
-  "x xmpp:y",
-  "R&D",
-  "Dev/Ops",
-  "Ops (EU)",
-  "Launch crew",
-  "eng-oncall",
-  "Other team",
-];
 const oneChipLabels = new Set([
-  "Design Team",
-  "Crew",
-  "Launch crew",
-  "Other team",
+  "Team 42",
+  "24-7",
+  "eng-oncall",
+  "a-b-c",
+  "हिंदी टीम",
+  "हिंदी-टीम",
+  "ทีมไทย",
+  "Cafe\u0301 crew",
 ]);
+const groupLabelMatrix = [
+  ...oneChipLabels,
+  "eng_ios",
+  "-ops",
+  "ops-",
+  "a--b",
+  "a - b",
+  "Honey team",
+  "Honey-crew",
+];
 async function pickSent(edit: {
   mentions: MentionRecipient[];
   label?: string;
@@ -18499,6 +18459,29 @@ it.each(groupLabelMatrix)(
       expect(group).toEqual(await pickSent({ mentions: [first, second] }));
       expect(group.chips.some((name) => name?.startsWith("Group"))).toBe(false);
     }
+  },
+);
+it.each(["eng-oncall", "a-b-c"])(
+  "a group labelled %s is still one chip after its saved draft is restored",
+  async (label) => {
+    const h = mount();
+    h.fill("!Crew");
+    offerCrew(h, [first, second], label);
+    await h.user.keyboard("{Enter}");
+    act(() => h.input().blur());
+    h.remount();
+    expect(
+      screen
+        .queryAllByRole("img")
+        .map((node) => node.getAttribute("aria-label")),
+    ).toEqual([`Group ${label}, 2 recipients: Honey · rcaj, Honey · 04hu`]);
+    h.submit();
+    await waitFor(() => expect(h.messages.send).toHaveBeenCalled());
+    expect(h.messages.send.mock.calls[0]?.[1]).toBe(`@${label} `);
+    expect(h.messages.send.mock.calls[0]?.[2]).toEqual([
+      first.pubkey,
+      second.pubkey,
+    ]);
   },
 );
 

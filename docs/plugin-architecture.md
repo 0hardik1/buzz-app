@@ -3487,9 +3487,15 @@ detail/decorative previews, an optional `agent` flag (marked and announced only
 for the bundled mention and channel providers) and either text, an exact `{ pubkey, name }` mention,
 or a `mentions` array of up to 32 such recipients. A `mentions` edit may add a
 `label`: one `@label` chip that notifies each mention and is sent as the plain
-text `@label`, with one `p` tag per mention. In code, and in a message edit, it
-inserts only the text `@label`, since edits add no recipients. Removing every
-recipient leaves the text. Batch edit primitives are
+text `@label`, with one `p` tag per mention. The host keeps a label only when
+readers will see it as that text. It must be letters, digits and spaces, with a
+hyphen allowed between two letters or digits. And no name of its mentions, or of
+a recipient already in the draft, may read as a mention inside `@label`:
+`Honey team` with a member Honey would show as `@Honey`. Otherwise the label is
+dropped and each mention goes in as its own chip. In code, a labelled edit
+inserts only the text `@label`. A message edit adds no recipients: it inserts
+the text `@label`, or each mention's reference when the label is dropped.
+Removing every recipient leaves the text. Batch edit primitives are
 copied and frozen before display, and accepted as a single editor transaction.
 The host copies edit/query primitives and caps publications at 50 choices. A
 publication returns its own withdrawal disposer (or `false` after revocation).

@@ -199,7 +199,7 @@ import type { AnnotationMenuRequest } from "./composer-dom";
 import { formatMediaTime, mediaTimeReply } from "./media-timecode";
 import { RichComposerInput } from "./RichComposerInput";
 import type { MessageLinkOrigin } from "./MessageRow";
-import { composerMarkdown, groupLabelMarkdown } from "./composer-markdown";
+import { composerMarkdown } from "./composer-markdown";
 import type {
   ComposerInputElement,
   ComposerLinkEdit,
@@ -2494,7 +2494,7 @@ function Composer({
       return insert(
         label === undefined
           ? unique.map((person) => editMentionText(person)).join("")
-          : `${groupLabelMarkdown(label)} `,
+          : `@${label} `,
         undefined,
         range,
       );

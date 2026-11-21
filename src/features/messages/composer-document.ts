@@ -298,14 +298,17 @@ export function composerGroup(value: unknown, source: unknown) {
     return null;
   return value as ComposerGroup;
 }
-/** Whether `@label` reads as one group to whoever gets it: plain text in
- * which the reader binds none of `people`'s names, each taken alone. */
+/** Whether `@label` reads as one group to whoever gets it: letters, digits
+ * and spaces, a hyphen only between two of them, in which the reader binds
+ * none of `people`'s names, each taken alone. */
 export function groupLabelHolds(
   label: string,
   people: readonly MentionRecipient[],
 ) {
   return (
-    /^[\p{L}\p{N} ]+$/u.test(label) &&
+    /^(?:[\p{L}\p{M}\p{N} ]|(?<=[\p{L}\p{M}\p{N}])-(?=[\p{L}\p{N}]))+$/u.test(
+      label,
+    ) &&
     !people.some((person) =>
       profileMentionParts(
         {
@@ -329,12 +332,7 @@ export function tokenRecipients(
     (item) => item.start === range.start && item.end === range.end,
   );
   const label = on.find((item) => item.label !== undefined)?.label;
-  const one = on[0];
-  if (label === undefined)
-    return {
-      recipient: one ? { pubkey: one.pubkey, name: one.name } : null,
-      group: null,
-    };
+  if (label === undefined) return { recipient: on[0] ?? null, group: null };
   const members = new Map(
     on
       .filter((item) => item.label === label)
