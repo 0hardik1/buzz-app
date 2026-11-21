@@ -64,6 +64,10 @@ test("Vim keys select messages, act on them with go, and leave the composer", as
   await expect(
     menu.getByRole("menuitem", { name: "Copy message", exact: true }),
   ).toHaveAttribute("aria-keyshortcuts", /^[a-z0-9]$/);
+  // An open menu keeps its keys: Space starts no leader sequence, so the
+  // next key still reaches the menu.
+  await page.keyboard.press(" ");
+  await expect(page.locator("[data-vim-which-key]")).toHaveCount(0);
   await page.keyboard.press("r");
   await expect(menu).toHaveCount(0);
   await expect(
@@ -142,6 +146,7 @@ test("the leader shows what can follow and runs Buzz's own actions by id", async
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
   await expect(row).toBeFocused();
+  await expect(composer(page, "Beta")).toBeVisible();
 });
 
 test("leader keys follow Buzz's shortcut when it is rebound", async ({
@@ -166,4 +171,25 @@ test("leader keys follow Buzz's shortcut when it is rebound", async ({
   await page.keyboard.press(" ");
   await page.keyboard.press(" ");
   await expect(search).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(search).toHaveCount(0);
+
+  // Turning the plugin off takes the keys out of every menu.
+  const profile = page.getByRole("button", {
+    name: "Your profile",
+    exact: true,
+  });
+  await profile.click();
+  await expect(
+    page.getByRole("menuitem", { name: "Settings", exact: true }),
+  ).toHaveAttribute("aria-keyshortcuts", /./);
+  await page.keyboard.press("Escape");
+  await openSettings(page);
+  await selectSettingsSection(page, "Manage plugins");
+  await setPluginEnabled(page, "Vim keys", false);
+  await closeSettings(page);
+  await profile.click();
+  await expect(
+    page.getByRole("menuitem", { name: "Settings", exact: true }),
+  ).not.toHaveAttribute("aria-keyshortcuts");
 });

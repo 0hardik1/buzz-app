@@ -34,6 +34,12 @@ export function createPending(
 
   const onKey = (event: KeyboardEvent) => {
     if (MODIFIER.test(event.key) || event.isComposing) return;
+    // Holding the first key must not complete a sequence such as gg.
+    if (event.repeat) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     if (event.metaKey || event.ctrlKey || event.altKey) return cancel();
     if (event.key === "Escape") {
       event.preventDefault();

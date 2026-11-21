@@ -3,7 +3,15 @@ import "@testing-library/jest-dom/vitest";
 import { afterEach, expect, test, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MenuItem, MenuPopup, MenuRoot, MenuTrigger } from "./Menu";
+import {
+  MenuItem,
+  MenuPopup,
+  MenuRoot,
+  MenuSubmenu,
+  MenuSubmenuPopup,
+  MenuSubmenuTrigger,
+  MenuTrigger,
+} from "./Menu";
 import { assignMenuLetters, enableMenuLetters } from "./menu-letters";
 
 afterEach(cleanup);
@@ -65,8 +73,12 @@ test("while letters are on, items show and run their key; off, nothing changes",
     "data-menu-letter",
     "e",
   );
-  // A disabled item keeps its key but does not run.
+  // A disabled item keeps its key; pressing it neither runs it nor falls through.
+  const outside = vi.fn();
+  document.addEventListener("keydown", outside);
   await user.keyboard("e");
+  document.removeEventListener("keydown", outside);
+  expect(outside).not.toHaveBeenCalled();
   expect(onEdit).not.toHaveBeenCalled();
   await user.keyboard("r");
   expect(onReply).toHaveBeenCalledTimes(1);
@@ -76,4 +88,39 @@ test("while letters are on, items show and run their key; off, nothing changes",
   expect(
     await screen.findByRole("menuitem", { name: "Reply" }),
   ).not.toHaveAttribute("aria-keyshortcuts");
+});
+
+test("a key in a submenu runs the submenu's item, not the parent's", async () => {
+  const user = userEvent.setup();
+  const status = vi.fn();
+  const system = vi.fn();
+  const release = enableMenuLetters();
+  try {
+    render(
+      <MenuRoot>
+        <MenuTrigger>Profile</MenuTrigger>
+        <MenuPopup>
+          <MenuItem onClick={status}>Set a status</MenuItem>
+          <MenuSubmenu>
+            <MenuSubmenuTrigger>Appearance</MenuSubmenuTrigger>
+            <MenuSubmenuPopup>
+              <MenuItem onClick={system}>System</MenuItem>
+            </MenuSubmenuPopup>
+          </MenuSubmenu>
+        </MenuPopup>
+      </MenuRoot>,
+    );
+    await user.click(screen.getByRole("button", { name: "Profile" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Appearance" }),
+    );
+    const item = await screen.findByRole("menuitem", { name: "System" });
+    expect(item).toHaveAttribute("aria-keyshortcuts", "s");
+    item.focus();
+    await user.keyboard("s");
+    expect(system).toHaveBeenCalledTimes(1);
+    expect(status).not.toHaveBeenCalled();
+  } finally {
+    act(release);
+  }
 });

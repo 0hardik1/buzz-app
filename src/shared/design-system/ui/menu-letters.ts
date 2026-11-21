@@ -78,11 +78,21 @@ function itemsOf(popup: HTMLElement) {
   );
 }
 
+/** The item's own words, not trailing counts or hints that change. */
+function labelOf(item: HTMLElement) {
+  const copy = item.cloneNode(true) as HTMLElement;
+  for (const extra of copy.querySelectorAll(
+    ".buzz-menu-trailing, .buzz-menu-item-indicator",
+  ))
+    extra.remove();
+  return copy.textContent ?? "";
+}
+
 function label(popup: HTMLElement) {
   const items = itemsOf(popup);
   const letters = assignMenuLetters(
     items.map((item) => ({
-      label: item.textContent ?? "",
+      label: labelOf(item),
       fixed: item.dataset.menuLetterFixed,
     })),
     reservedKeys(),
@@ -134,6 +144,9 @@ export function useMenuLetters() {
   const onKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>) => {
     if (
       !on ||
+      // A submenu's popup sits in this one's React tree; it handles its keys.
+      (event.target as Element).closest?.(".buzz-menu-popup") !==
+        event.currentTarget ||
       event.defaultPrevented ||
       event.metaKey ||
       event.ctrlKey ||

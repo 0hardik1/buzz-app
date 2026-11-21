@@ -159,25 +159,30 @@ export const apply: PluginModule["apply"] = (ctx) => {
         groups={groups}
       />,
     );
+    // Its own root: no host surface hosts a plugin's global menu. It renders
+    // only the shared Menu, which needs no host provider.
     return () => {
-      pending.cancel();
-      // Disabling can happen during a render; unmount once it finishes.
+      // Disabling can happen during a render; finish once it is done.
       queueMicrotask(() => {
+        pending.cancel();
+        release();
         root.unmount();
         host.remove();
+        status.remove();
       });
-      status.remove();
-      release();
     };
   });
 
+  /** In an open menu, its own keys win; only j/k/h/l move there. */
+  const inMenu = () => !!document.activeElement?.closest('[role="menu"]');
   let order = 0;
   const key = (
     id: string,
     title: string,
     binding: KeyBinding | readonly KeyBinding[],
     run: Shortcut["run"],
-    options: Partial<Shortcut> = {},
+    { when, ...options }: Partial<Shortcut> = {},
+    menus = false,
   ) =>
     ctx.shortcuts.register({
       id,
@@ -186,6 +191,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
       run,
       order: order++,
       ...options,
+      when: () => (menus || !inMenu()) && (!when || when()),
     });
   // Movement also works in dialogs such as Settings; it never fires in a field.
   const moving = { allowInModal: true, repeat: true };
@@ -193,10 +199,10 @@ export const apply: PluginModule["apply"] = (ctx) => {
   const control = (letter: string): KeyBinding =>
     apple ? { key: letter, ctrl: true } : { key: letter, alt: true };
 
-  key("down", "Move down", { key: "j" }, () => step(true), moving);
-  key("up", "Move up", { key: "k" }, () => step(false), moving);
-  key("left", "Move left", { key: "h" }, () => sideways(false), moving);
-  key("right", "Move right", { key: "l" }, () => sideways(true), moving);
+  key("down", "Move down", { key: "j" }, () => step(true), moving, true);
+  key("up", "Move up", { key: "k" }, () => step(false), moving, true);
+  key("left", "Move left", { key: "h" }, () => sideways(false), moving, true);
+  key("right", "Move right", { key: "l" }, () => sideways(true), moving, true);
   key("bottom", "Go to bottom", { key: "g", shift: true }, bottom, {
     allowInModal: true,
   });
@@ -252,8 +258,12 @@ export const apply: PluginModule["apply"] = (ctx) => {
   key("reveal", "Show this conversation in the sidebar", { key: "\\" }, () => {
     if (!revealConversation()) announce("The sidebar is hidden.");
   });
-  key("go", "Go: top (gg) or actions (go)", { key: "g" }, () =>
-    pending.start("g"),
+  key(
+    "go",
+    "Go: top (gg) or actions (go)",
+    { key: "g" },
+    () => pending.start("g"),
+    { allowInModal: true },
   );
   key("next", "Next: conversation (]b) or unread (]u)", { key: "]" }, () =>
     pending.start("]"),

@@ -1048,8 +1048,9 @@ Quitting Buzz also turns it off.
   `Space /` searches where you are, `Space Space` switches conversation and
   `Space s k` opens Settings → Shortcuts. `]b`/`[b` step through
   conversations, `H`/`L` go back and forward, `i` starts typing and Escape
-  stops. Keys never fire while you type in a field or terminal. The plugin's
-  README in Settings → Plugins lists every key.
+  stops. Apart from that Escape, its keys never fire while you type in a field
+  or terminal. `Ctrl-h`/`Ctrl-l` move between panes (`Alt` on Windows and
+  Linux). The plugin's README in Settings → Plugins lists every key.
 - **Message width**: choose **Narrow** or **Wide** in **Settings → Appearance →
   Interface**. Narrow is the default; Wide gives messages and the composer
   50% more room when the pane is wide enough. The choice is saved on this device.

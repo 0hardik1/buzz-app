@@ -51,6 +51,11 @@ pause in a sequence, a menu shows the keys that can follow; Escape cancels.
 While Vim keys is on, every menu shows a key beside each item. `j`, `k`, `h`
 and `l` keep moving in menus.
 
+Space on a focused button starts the leader instead of pressing it; press
+Enter to press the button. Checkboxes, switches and options keep Space. When
+another shortcut uses the same key, such as Escape for marking a conversation
+read, Settings → Shortcuts marks it "Also used by"; change one to choose.
+
 Buzz's own message keys still act on the selected message: `e` edits, `r`
 reacts, `t` replies in thread, `u` marks unread and Delete deletes your own
 message.
