@@ -1,3 +1,4 @@
+import { withHumanMentionSelection } from "../messages/mention-draft";
 import {
   readComposerSnapshot,
   composerMarkdownContext,
@@ -19,8 +20,10 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type Dispatch,
   type ReactNode,
   type RefObject,
+  type SetStateAction,
 } from "react";
 import type { Contribution } from "../../plugins/contributions";
 import type {
@@ -199,6 +202,8 @@ export function ComposerCompletions({
     registry.snapshot,
   );
   const [display] = useState(createDisplay);
+  // Only user navigation pins an ID; automatic selection follows the first result.
+  const [pin, setPin] = useState<{ scope: string; row?: string | undefined }>();
   // Query owners remount on typing. Keep the last physical position with the
   // host, recording after row handlers have compared the previous position.
   const pointerPosition =
@@ -225,6 +230,26 @@ export function ComposerCompletions({
       ...(resolved.pending ?? []),
       ...(resolved.tokens ?? []),
     ]);
+  const scope = JSON.stringify(
+    match && observation
+      ? [
+          contributionKey(match.provider),
+          observation.revision,
+          match.query.start,
+          match.query.end,
+          match.query.query,
+        ]
+      : null,
+  );
+  const select = useCallback(
+    (row: SetStateAction<string | undefined>) =>
+      setPin((previous) => {
+        const held = previous?.scope === scope ? previous.row : undefined;
+        const next = typeof row === "function" ? row(held) : row;
+        return next === held ? previous : { scope, row: next };
+      }),
+    [scope],
+  );
   const open =
     !!match &&
     !!observation &&
@@ -245,11 +270,7 @@ export function ComposerCompletions({
   return (
     <ContributionBoundary
       key={JSON.stringify([
-        contributionKey(match.provider),
-        observation.revision,
-        match.query.start,
-        match.query.end,
-        match.query.query,
+        scope,
         match.supplements.map(({ provider, query }) => [
           contributionKey(provider),
           query.end,
@@ -275,6 +296,8 @@ export function ComposerCompletions({
         input={input}
         replace={replace}
         pointerPosition={pointerPosition}
+        selected={pin?.scope === scope ? pin.row : undefined}
+        setSelected={select}
       />
     </ContributionBoundary>
   );
@@ -301,8 +324,12 @@ function OwnedCompletion({
   input,
   replace,
   pointerPosition,
+  selected,
+  setSelected,
   ...context
 }: CompletionContext & {
+  selected: string | undefined;
+  setSelected: Dispatch<SetStateAction<string | undefined>>;
   provider: Contribution<ComposerCompletion>;
   sources: readonly CompletionMatch[];
   registry: ContributionReader<ComposerCompletion>;
@@ -351,8 +378,6 @@ function OwnedCompletion({
   // This lifetime's own publication; a carried display is never acted on.
   const latest = useRef(new Map<number, HostCompletionResult>());
   const failed = useRef(new Set<number>());
-  // Only user navigation pins an ID; automatic selection follows the first result.
-  const [selected, setSelected] = useState<string>();
   const [keyboardSelection, setKeyboardSelection] = useState<string>();
   const pointerMoved = useCallback(
     (event: Pick<PointerEvent, "clientX" | "clientY">) => {
@@ -423,7 +448,7 @@ function OwnedCompletion({
       live.current = false;
       published.clear();
     };
-  }, [active, display, sources, trigger]);
+  }, [active, display, sources, trigger, setSelected]);
   // A carried result stands only until this query's provider has run its
   // mount effects, which precede this one; a provider that has not published
   // by then leaves the popup closed, as for a first query, so a stale display
@@ -439,7 +464,7 @@ function OwnedCompletion({
       return (
         source.provider !== provider &&
         !failed.current.has(slot(source)) &&
-        (!published || published.holdAutoSelect)
+        published?.holdAutoSelect === true
       );
     });
   const isolate = (source: CompletionMatch, node: ReactNode) =>
@@ -502,7 +527,7 @@ function OwnedCompletion({
   const count = rows.length;
   const index = rows.findIndex((row) => row.key === selected);
   const selectedIndex = index < 0 ? 0 : index;
-  function accept(index: number, key = "click") {
+  function accept(index: number, event: Event, key = "click") {
     const terminator = terminates(key);
     const row = terminator ? undefined : rows[index];
     const source = row?.source ?? { provider, query };
@@ -519,11 +544,8 @@ function OwnedCompletion({
     const id = terminator ? published.spaceId : row?.item?.id;
     const item = published.items.find((item) => item.id === id);
     if (!item || item.disabled || item.canSelect?.(key) === false) return false;
-    const accepted = current.current.replace(
-      item.edit,
-      source.query,
-      observation,
-      key,
+    const accepted = withHumanMentionSelection(event, () =>
+      current.current.replace(item.edit, source.query, observation, key),
     );
     if (accepted) current.current.editor.invalidate();
     return accepted;
@@ -590,7 +612,7 @@ function OwnedCompletion({
         (!result?.spaceId || result.spaceId === published.spaceId)
       ) {
         // Selected by ID, so no displayed row is needed.
-        if (accept(-1, event.key)) {
+        if (accept(-1, event.nativeEvent, event.key)) {
           event.preventDefault();
           event.stopPropagation();
           return true;
@@ -602,15 +624,18 @@ function OwnedCompletion({
       // This includes a display whose exact match the publication withdrew
       // as undecided: no other recipient overrules what the user saw, the
       // decision is deferred to the resolver under the full rule.
+      const spacePending = published?.spacePending;
       if (
         terminates(event.key) &&
-        published?.spacePending &&
-        !published.spaceId &&
-        current.current.replace(
-          { pending: published.spacePending },
-          query,
-          observation,
-          event.key,
+        spacePending &&
+        !published?.spaceId &&
+        withHumanMentionSelection(event.nativeEvent, () =>
+          current.current.replace(
+            { pending: spacePending },
+            query,
+            observation,
+            event.key,
+          ),
         )
       ) {
         event.preventDefault();
@@ -631,7 +656,7 @@ function OwnedCompletion({
       if ((event.key === "Enter" || event.key === "Tab") && count) {
         event.preventDefault();
         event.stopPropagation();
-        accept(selectedIndex, event.key);
+        accept(selectedIndex, event.nativeEvent, event.key);
         return true;
       }
       return false;
@@ -732,7 +757,7 @@ function OwnedCompletion({
                         }
                       : undefined
                   }
-                  onClick={() => accept(i)}
+                  onClick={(event) => accept(i, event.nativeEvent)}
                   className={styles.option}
                 >
                   {item?.preview && (

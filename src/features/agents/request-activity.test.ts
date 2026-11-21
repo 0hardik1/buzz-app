@@ -1,4 +1,6 @@
 import { expect, it, vi } from "vitest";
+import { activityTranscript } from "./activity-transcript";
+import type { ActivityTurn } from "./activity";
 import { requestActivity } from "./request-activity";
 
 const agent = "a".repeat(64);
@@ -47,6 +49,34 @@ it("parses only newly appended records when the records array changes", () => {
       `${added.id}:0`,
     ]);
     expect(result.terminal.get("t")).toBe("ended");
+  } finally {
+    parse.mockRestore();
+  }
+});
+
+it("lets transcripts of later selections reuse earlier record parses", () => {
+  const first = [
+    record(1, [
+      event("turn_started", "t", 1, { triggeringEventIds: [trigger] }),
+      event("step", "t", 2),
+    ]),
+  ];
+  const scope = { agent, channelId: "c" };
+  activityTranscript(
+    requestActivity(first, agent, "c", trigger).records,
+    scope,
+  );
+  const next = [...first, record(2, [event("step", "t", 3)])];
+  const parse = vi.spyOn(JSON, "parse");
+  try {
+    const { records } = requestActivity(next, agent, "c", trigger);
+    parse.mockClear();
+    const transcript = activityTranscript(records, scope);
+    // Only the newly selected projection is parsed.
+    expect(parse).toHaveBeenCalledTimes(1);
+    expect(transcript).toEqual(
+      activityTranscript(structuredClone(records), scope),
+    );
   } finally {
     parse.mockRestore();
   }
@@ -119,4 +149,32 @@ it("selects no turn for a message in a start or steer list the lifecycle rejects
   expect([...requestActivity(records, agent, "c", trigger).turnIds]).toEqual([
     "t",
   ]);
+});
+
+it("indexes triggers so unrelated messages skip replay and trimmed starts still match", () => {
+  const records = Object.freeze([record(1, [event("step", "t", 2)])]);
+  const turns: readonly ActivityTurn[] = Object.freeze([
+    Object.freeze({
+      agent,
+      turnId: "t",
+      channelId: "c",
+      timestamp: 1800000000000,
+      state: "ended",
+      outcome: "ended",
+      triggeringEventIds: [trigger],
+      requests: [],
+    } satisfies ActivityTurn),
+  ]);
+  expect(
+    requestActivity(records, agent, "c", "d".repeat(64), turns).turnIds.size,
+  ).toBe(0);
+  const linked = requestActivity(records, agent, "c", trigger, turns);
+  expect([...linked.turnIds]).toEqual(["t"]);
+  expect(linked.terminal.get("t")).toBe("ended");
+  expect(
+    requestActivity(records, agent, "other", trigger, turns).turnIds.size,
+  ).toBe(0);
+  expect(
+    requestActivity(records, "e".repeat(64), "c", trigger, turns).turnIds.size,
+  ).toBe(0);
 });

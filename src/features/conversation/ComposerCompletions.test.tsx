@@ -325,6 +325,7 @@ it("opens no query at a trigger inside a resolved chip", () => {
 
 const ENG_BOT = { pubkey: "e".repeat(64), name: "Eng Bot" };
 const BOB = { pubkey: "b".repeat(64), name: "Bob" };
+const ENG_LEAD = { pubkey: "f".repeat(64), name: "Eng Lead" };
 type Source = Readonly<{
   id: string;
   order?: number;
@@ -493,10 +494,6 @@ it("opens with a supplement's rows when the winner has none", async () => {
     "Enter",
   );
 });
-it("never opens for a supplement alone", () => {
-  mountSources([groups({ items: [groupRow] })]);
-  expect(screen.queryByRole("listbox")).toBeNull();
-});
 it("accepts each row through its own provider when their ids collide", async () => {
   const { replace, press } = mountSources([
     people(),
@@ -523,6 +520,16 @@ it("accepts each row through its own provider when their ids collide", async () 
     expect.anything(),
     "Enter",
   );
+  cleanup();
+  const fresh = mountSources([people(), groups({ items: [groupRow] }, 10)]);
+  await screen.findByRole("option", { name: /^eng$/ });
+  fresh.press("Enter");
+  expect(fresh.replace).toHaveBeenLastCalledWith(
+    { mention: ENG_BOT },
+    expect.anything(),
+    expect.anything(),
+    "Enter",
+  );
 });
 it("keeps Space from picking the winner's exact match while a supplement holds it", async () => {
   const { replace, press } = mountSources([
@@ -534,6 +541,7 @@ it("keeps Space from picking the winner's exact match while a supplement holds i
   expect(replace).not.toHaveBeenCalled();
 });
 it.each([
+  ["has not answered", undefined],
   ["publishes no rows", { items: [] }],
   [
     "fails",
@@ -585,19 +593,33 @@ it("drops a failed supplement's rows and refuses its later publications", async 
 });
 it("drops a supplement removed while the menu is open, with its hold", async () => {
   const { replace, press, publishes, unregister } = mountSources([
-    people(),
-    groups({ items: [groupRow], holdAutoSelect: true }),
+    people({
+      items: [
+        { id: "x", label: "Eng Bot", edit: { mention: ENG_BOT } },
+        { id: "y", label: "Eng Lead", edit: { mention: ENG_LEAD } },
+      ],
+    }),
+    groups({ items: [groupRow], holdAutoSelect: true }, 10),
   ]);
   await screen.findByRole("option", { name: /^eng$/ });
+  press("ArrowDown");
+  await screen.findByRole("option", { name: /^Eng Lead$/, selected: true });
   const stale = publishes.get("groups");
   unregister("groups");
-  expect(listed()).toEqual(["Eng Bot"]);
+  expect(listed()).toEqual(["Eng Bot", "Eng Lead"]);
+  press("Enter");
+  expect(replace).toHaveBeenLastCalledWith(
+    { mention: ENG_LEAD },
+    expect.anything(),
+    expect.anything(),
+    "Enter",
+  );
   let late: ReturnType<ComposerCompletionProps["publish"]> | undefined;
   act(() => {
     late = stale?.({ items: [groupRow] });
   });
   expect(late).toBe(false);
-  expect(listed()).toEqual(["Eng Bot"]);
+  expect(listed()).toEqual(["Eng Bot", "Eng Lead"]);
   expect(press(" ")).toBe(true);
   expect(replace).toHaveBeenCalledWith(
     { mention: ENG_BOT },
@@ -644,13 +666,15 @@ it("keeps the winner's rows when a supplement's preview throws", async () => {
   expect(listed()).toEqual(["Eng Bot"]);
   error.mockRestore();
 });
-it("lets Escape dismiss a supplement that has not answered beside an empty winner", () => {
+it("keeps Escape for a supplement that publishes a hold beside an empty winner, and not for a silent one", () => {
   const empty = people({ items: [], spaceId: undefined });
-  expect(mountSources([empty, groups(undefined)]).press("Escape")).toBe(true);
+  expect(
+    mountSources([empty, groups({ items: [], holdAutoSelect: true })]).press(
+      "Escape",
+    ),
+  ).toBe(true);
   cleanup();
-  expect(mountSources([empty, groups({ items: [] })]).press("Escape")).toBe(
-    false,
-  );
+  expect(mountSources([empty, groups(undefined)]).press("Escape")).toBe(false);
 });
 it("holds a pending exact match too while a supplement holds it", async () => {
   const resolve = vi.fn();
@@ -676,12 +700,6 @@ it("holds a pending exact match too while a supplement holds it", async () => {
     expect.anything(),
     " ",
   );
-});
-it("holds Space until a supplement has answered", async () => {
-  const { replace, press } = mountSources([people(), groups(undefined)]);
-  await screen.findByRole("option", { name: /^Eng Bot$/ });
-  expect(press(" ")).toBe(false);
-  expect(replace).not.toHaveBeenCalled();
 });
 it("ignores a supplement's own exact match and agent mark, and retries it alone", async () => {
   const retry = vi.fn();

@@ -5,11 +5,40 @@ import {
   readComposerSnapshot,
 } from "./composer-document";
 
-export type MentionRecipient = Readonly<{ pubkey: string; name: string }>;
+export type MentionRecipient = Readonly<{
+  pubkey: string;
+  name: string;
+  /** A recipient selected in the editor. Automatic and legacy spans omit it. */
+  explicit?: true;
+}>;
 /** One recipient on a span. A group chip projects one per member, each with
  * the group's `label`: then the span is `@label`, not `@name`. */
 export type DraftRecipient = MentionRecipient &
   Readonly<{ start: number; end: number; label?: string }>;
+
+let humanMentionSelection = false;
+/** The host's own composer entry points can collect local send evidence. */
+export const hostComposerProvenance = Symbol("host composer provenance");
+/** The bundled picker and completion UI own the browser event. Plugin commands
+ * can insert recipients, but only this synchronous selection carries proof. */
+export function withHumanMentionSelection<T>(event: Event, select: () => T): T {
+  const previous = humanMentionSelection;
+  humanMentionSelection = event.isTrusted;
+  try {
+    return select();
+  } finally {
+    humanMentionSelection = previous;
+  }
+}
+
+export function editorMention({
+  pubkey,
+  name,
+}: MentionRecipient): MentionRecipient {
+  return { pubkey, name, ...(humanMentionSelection ? { explicit: true } : {}) };
+}
+
+export const hasHumanMentionSelection = () => humanMentionSelection;
 /** One entry per person: a group shares a span with its members, and two
  * chips can name the same person. */
 export const distinctRecipients = <T extends MentionRecipient>(
@@ -139,10 +168,14 @@ export function mentionDraft(value: unknown): MentionDraft {
       : {}),
     ...(doc ? { document: document as ComposerSnapshot } : {}),
     recipients: capRecipients(safe).map(
-      ({ pubkey, name, label, start, end }) =>
-        label === undefined
-          ? { pubkey, name, start, end }
-          : { pubkey, name, label, start, end },
+      ({ pubkey, name, label, start, end, explicit }) => ({
+        pubkey,
+        name,
+        ...(label === undefined ? {} : { label }),
+        start,
+        end,
+        ...(explicit === true ? { explicit } : {}),
+      }),
     ),
   };
 }
