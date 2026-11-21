@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { tag, type RelayEvent } from "./events";
-import type { HeadPersistence } from "./persistence";
+import type { HeadPersistence, SavedStartup } from "./persistence";
 import { createRelaySession } from "./session";
 import {
   keypair,
@@ -185,7 +185,9 @@ it("confirms a scan-start system membership that moved ahead of a paged system c
     const id = tag(event, "d");
     if (id) names.set(id, metadata(relay, id, "System", undefined, systemTags));
   }
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
+  let saved: SavedStartup["discovery"];
   const persistence: HeadPersistence = {
     read: async () => [],
     readStartup: async () => ({
@@ -195,7 +197,9 @@ it("confirms a scan-start system membership that moved ahead of a paged system c
         events: [systemRoster(), systemMetadata],
       },
     }),
-    writeStartup: async () => {},
+    writeStartup: async ({ discovery }) => {
+      if (discovery) saved = discovery;
+    },
     write: async () => {},
     remove: async () => {},
     retain: async () => {},
@@ -241,7 +245,16 @@ it("confirms a scan-start system membership that moved ahead of a paged system c
         limit: 2,
       },
     ]);
-    confirm.respond([systemRoster(1_700_001_000)]);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(saved?.events).toContainEqual(page[0]);
+    expect(saved?.events).not.toContainEqual(systemMetadata);
+    const confirmed = systemRoster(1_700_001_000);
+    confirm.respond([confirmed]);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(
+      saved?.events.some((event) => (event as RelayEvent).id === confirmed.id),
+    ).toBe(true);
     await vi.waitFor(() => {
       for (const request of wire.pending.splice(0))
         request.respond(
@@ -256,6 +269,7 @@ it("confirms a scan-start system membership that moved ahead of a paged system c
     expect(channels.get?.(system)?.cached).toBeUndefined();
   } finally {
     owner.dispose();
+    vi.useRealTimers();
   }
 });
 

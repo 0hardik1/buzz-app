@@ -25,7 +25,11 @@ export type SavedHead = {
 export interface HeadPersistence {
   read(): Promise<SavedHead[]>;
   readStartup?(): Promise<SavedStartup | undefined>;
-  writeStartup?(patch: SavedStartup, revoked?: boolean): Promise<void>;
+  writeStartup?(
+    patch: SavedStartup,
+    revoked?: boolean,
+    ifUnchanged?: boolean,
+  ): Promise<void>;
   /** Signed kind 0 and verified-profile (30382) events mirrored from the profile directory. */
   readProfiles?(): Promise<unknown[]>;
   writeProfiles?(events: readonly unknown[]): Promise<void>;
@@ -74,6 +78,19 @@ function deleteHead(store: IDBObjectStore, key: string) {
   store.delete([key]);
 }
 
+function discoveryVersion(discovery: SavedStartup["discovery"]): string | null {
+  if (!discovery) return null;
+  return JSON.stringify([
+    discovery.savedAt,
+    discovery.relayAuthor,
+    Array.isArray(discovery.events)
+      ? (discovery.events as ({ id?: unknown } | null)[]).map((event) =>
+          typeof event?.id === "string" ? event.id : null,
+        )
+      : null,
+  ]);
+}
+
 export function createHeadPersistence(
   viewer: string,
   relay: string,
@@ -82,6 +99,7 @@ export function createHeadPersistence(
   const profiles = `${scope}${MIRROR}`;
   let closed = false;
   let opening: Promise<IDBDatabase> | undefined;
+  let observedDiscovery: string | null | undefined;
   function database() {
     if (closed || typeof indexedDB === "undefined")
       return Promise.reject(new Error("Cache unavailable"));
@@ -253,11 +271,23 @@ export function createHeadPersistence(
         (store, done, then) => then(store.get(scope), (row) => done(row?.data)),
         STARTUP,
       ),
-    async writeStartup(patch, revoked = false) {
-      const saved = await transact<boolean>(
+    async writeStartup(patch, revoked = false, ifUnchanged = false) {
+      let version: string | null | undefined;
+      const saved = await transact<boolean | undefined>(
         "readwrite",
         (store, done, then) =>
           then(store.get(scope), (row) => {
+            if (
+              patch.discovery &&
+              (ifUnchanged || observedDiscovery === undefined)
+            ) {
+              const current = discoveryVersion(row?.data?.discovery);
+              // Compare inside the write transaction. Settings-only changes
+              // preserve the signed snapshot, but a peer can replace or clear it.
+              if (ifUnchanged && current !== (observedDiscovery ?? null))
+                return done(undefined);
+              if (observedDiscovery === undefined) observedDiscovery = current;
+            }
             const data: SavedStartup = { ...row?.data, ...patch };
             let bytes = byteSize(data);
             if (bytes > MAX_BYTES && revoked) {
@@ -266,13 +296,16 @@ export function createHeadPersistence(
               bytes = byteSize(data);
             }
             if (bytes > MAX_BYTES) return done(false);
+            if (patch.discovery) version = discoveryVersion(data.discovery);
             const meta = { key: scope, bytes, savedAt: Date.now() };
             store.put({ ...meta, data });
             prune(store, then, meta, done);
           }),
         STARTUP,
       );
+      if (saved === undefined) throw new Error("Startup roster changed");
       if (!saved) throw new Error("Startup cache is over its byte budget");
+      if (version !== undefined) observedDiscovery = version;
     },
     readProfiles: () =>
       transact(
@@ -390,6 +423,7 @@ export function createHeadPersistence(
         },
         STARTUP,
       );
+      observedDiscovery = null;
       await transact("readwrite", (store, done, then) =>
         // Include metadata left by a point delete on an older build.
         then(store.getAll(), (rows: ScopedRow[]) => {

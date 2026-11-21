@@ -171,13 +171,18 @@ test("startup storage batches roster updates and prunes without transferring the
         tx.onabort = () => reject(tx.error);
       });
     channels.acceptDiscovery(events, undefined, undefined, false, false);
+    let lastUpdate;
     window.rosterReplay = {
-      update: (index) =>
-        channels.acceptDiscovery([channelRoster(index, 1_700_000_001)]),
-      unrelated: () =>
+      update(index) {
+        lastUpdate = channelRoster(index, 1_700_000_001);
+        channels.acceptDiscovery([lastUpdate]);
+      },
+      repeat: () => channels.acceptDiscovery([lastUpdate]),
+      unrelated: () => {
         channels.acceptDiscovery([
           metadata(relay, "preview", "Unjoined preview"),
-        ]),
+        ]);
+      },
       settle,
       async measure() {
         const replay = measured;
@@ -213,7 +218,8 @@ test("startup storage batches roster updates and prunes without transferring the
           );
         await cache.writeProfiles([{ content: "Selected scope" }]);
         await other.writeProfiles([{ content: "Other scope" }]);
-        channels.acceptDiscovery([channelRoster(1, 1_700_000_002)]);
+        lastUpdate = channelRoster(1, 1_700_000_002);
+        channels.acceptDiscovery([lastUpdate]);
         const clear = (name, work) =>
           new Promise((resolve, reject) => {
             const tx = db.transaction(name, "readwrite");
@@ -286,7 +292,7 @@ test("startup storage batches roster updates and prunes without transferring the
     }
     const replay = await page.evaluate(() => window.rosterReplay.measure());
     await page.clock.runFor(30_000);
-    await page.evaluate(() => window.rosterReplay.update(20));
+    await page.evaluate(() => window.rosterReplay.repeat());
     await page.clock.runFor(500);
     result = {
       ...replay,
@@ -294,6 +300,8 @@ test("startup storage batches roster updates and prunes without transferring the
     };
     await page.clock.runFor(30_500);
     await page.evaluate(() => window.rosterReplay.unrelated());
+    await page.clock.runFor(500);
+    await page.evaluate(() => window.rosterReplay.repeat());
     await page.clock.runFor(500);
   } finally {
     remaining = await page.evaluate(() => window.rosterReplay.cleanup());
