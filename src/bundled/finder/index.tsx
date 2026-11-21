@@ -26,14 +26,20 @@ type State = Readonly<{
   session?: RelaySession | undefined;
   status?: FinderSyncStatus | undefined;
   sync?: FinderSync | undefined;
-  scope?: FinderScope;
+  scope: FinderScope;
+  openCount: number;
 }>;
 
 export const apply: PluginModule["apply"] = (ctx) => {
   const relay = ctx.relay;
   const corpus = createCorpus();
   const listeners = new Set<() => void>();
-  let state: State = { open: false, revision: 0 };
+  let state: State = {
+    open: false,
+    revision: 0,
+    scope: "buzz",
+    openCount: 0,
+  };
   const set = (patch: Partial<State>) => {
     state = { ...state, ...patch };
     for (const listener of listeners) listener();
@@ -58,9 +64,16 @@ export const apply: PluginModule["apply"] = (ctx) => {
       weight,
     );
   };
-  const chooseScope = (scope: FinderScope | undefined) => {
+  const inConversation = () =>
+    ctx.navigation.snapshot().entry.target.kind === "conversation";
+  /** Opens Finder, or switches scope while it's open, keeping the text. */
+  const show = (scope: FinderScope) => {
     if (scope === "channel") interested(2);
-    set({ open: true, scope });
+    set({
+      open: true,
+      scope,
+      ...(!state.open && { openCount: state.openCount + 1 }),
+    });
   };
   ctx.effect(() => {
     let visit: string | undefined;
@@ -92,7 +105,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
           session: undefined,
           status: undefined,
           sync: undefined,
-          scope: undefined,
           revision: state.revision + 1,
         });
       const running = startFinderSync({
@@ -107,7 +119,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
         session: snapshot.session,
         status: running.status(),
         sync: running,
-        scope: undefined,
         revision: state.revision + 1,
       });
     };
@@ -119,36 +130,34 @@ export const apply: PluginModule["apply"] = (ctx) => {
     };
   });
 
+  // Both work while Finder is open, so either key switches scope there.
+  const available = () => state.open || !activeModal(document);
   ctx.shortcuts.register({
     id: "open",
-    title: "Find in your conversations",
+    title: "Find in this channel",
     binding: { key: "p", mod: true },
     order: 10,
     allowInEditable: true,
-    run: () => set({ open: true, scope: undefined }),
+    allowInModal: true,
+    when: available,
+    run: () => show(inConversation() ? "channel" : "buzz"),
   });
 
+  // Not while typing: the composer keeps ⌘⇧P for Spoiler.
   ctx.shortcuts.register({
-    id: "channel",
-    title: "Find in this channel",
-    binding: [
-      { key: "p", mod: true, alt: true },
-      // Option+P can report π on an Apple keyboard.
-      { key: "π", mod: true, alt: true },
-    ],
+    id: "all",
+    title: "Find in all of Buzz",
+    binding: { key: "p", mod: true, shift: true },
     order: 11,
-    allowInEditable: true,
     allowInModal: true,
-    when: () =>
-      (state.open || !activeModal(document)) &&
-      ctx.navigation.snapshot().entry.target.kind === "conversation",
-    run: () => chooseScope("channel"),
+    when: available,
+    run: () => show("buzz"),
   });
 
   ctx.pages.registerOverlay({
     id: "finder",
     component: function Finder() {
-      const { open, revision, session, status, sync, scope } =
+      const { open, revision, session, status, sync, scope, openCount } =
         useSyncExternalStore(store.subscribe, store.snapshot);
       const target = useSyncExternalStore(
         ctx.navigation.subscribe,
@@ -170,8 +179,9 @@ export const apply: PluginModule["apply"] = (ctx) => {
             session={session}
             sync={sync}
             currentChannelId={currentChannelId}
-            scope={scope === "channel" && !currentChannelId ? undefined : scope}
-            onScopeChange={chooseScope}
+            scope={scope === "channel" && !currentChannelId ? "buzz" : scope}
+            onScopeChange={show}
+            openCount={openCount}
             status={
               !session ? (
                 <p className="px-3 text-body-sm text-subtle">

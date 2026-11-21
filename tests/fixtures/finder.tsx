@@ -144,10 +144,13 @@ function App() {
   useKeyboardFocusVisibility();
   const [open, setOpen] = useState(true);
   const [opened, setOpened] = useState<FinderDoc>();
-  const [scope, setScope] = useState<FinderScope>();
+  const currentChannelId = params.get("channel") ?? undefined;
+  const [scope, setScope] = useState<FinderScope>(
+    currentChannelId ? "channel" : "buzz",
+  );
+  const [openCount, setOpenCount] = useState(1);
   const [revision, setRevision] = useState(0);
   const [sync, setSync] = useState<ReturnType<typeof startFinderSync>>();
-  const currentChannelId = params.get("channel") ?? undefined;
   useEffect(() => {
     const running = startFinderSync({
       session,
@@ -160,20 +163,22 @@ function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === "p" && (event.metaKey || event.ctrlKey)) {
+        // As in the app: ⌘P this channel, ⌘⇧P all of Buzz.
         event.preventDefault();
-        setScope(event.altKey && currentChannelId ? "channel" : undefined);
+        setScope(event.shiftKey || !currentChannelId ? "buzz" : "channel");
+        if (!open) setOpenCount((n) => n + 1);
         setOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [currentChannelId]);
+  }, [currentChannelId, open]);
   return (
     <main style={{ padding: "var(--space-panel-inset)", minHeight: "100vh" }}>
       <h1>Finder fixture</h1>
       <p>
-        {corpus.size.toLocaleString()} messages indexed. Press ⌘P (Ctrl+P) to
-        open the finder.
+        {corpus.size.toLocaleString()} messages indexed. Press ⌘P (Ctrl+P) for
+        this channel, ⌘⇧P (Ctrl+Shift+P) for all of Buzz.
       </p>
       {opened && (
         <p>
@@ -191,6 +196,7 @@ function App() {
         currentChannelId={currentChannelId}
         scope={scope}
         onScopeChange={setScope}
+        openCount={openCount}
         openMessage={setOpened}
       />
     </main>
