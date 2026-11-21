@@ -13,6 +13,7 @@ import {
   type RefObject,
 } from "react";
 import { CONVERSATION_LIST_LABEL, NEEDS_YOU } from "./conversation-rows";
+import { sidebarScrollAnchor } from "./sidebar-scroll-anchor";
 import styles from "./Channels.module.css";
 import { avatarMedia } from "../../shared/avatar-source";
 import type { ChannelSummary, Profile } from "../../features/relay/contracts";
@@ -108,11 +109,15 @@ function unreadEdges(list: HTMLElement): Edges {
 export function SidebarUnread({
   children,
   listRef,
+  adjustScrollAnchor,
+  captureScrollAnchor,
   dmPreviews,
   floatingAction,
 }: {
   children: ReactNode;
   listRef?: RefObject<HTMLElement | null>;
+  adjustScrollAnchor?: (top: number) => void;
+  captureScrollAnchor?: RefObject<(() => void) | undefined>;
   dmPreviews?: ReadonlyMap<string, UnreadDmPreview>;
   floatingAction?: RefObject<HTMLDivElement | null> | undefined;
 }) {
@@ -126,6 +131,14 @@ export function SidebarUnread({
     const viewport = list.current;
     const rows = content.current;
     if (!viewport || !rows) return;
+    const anchor = adjustScrollAnchor
+      ? sidebarScrollAnchor(viewport, adjustScrollAnchor)
+      : undefined;
+    if (anchor) {
+      viewport.style.overflowAnchor = "none";
+      anchor.capture();
+      if (captureScrollAnchor) captureScrollAnchor.current = anchor.capture;
+    }
     let frame = 0;
     const measure = () => {
       frame = 0;
@@ -234,6 +247,7 @@ export function SidebarUnread({
       });
     };
     const resize = new ResizeObserver(() => {
+      anchor?.refresh();
       schedulePosition();
       schedule();
     });
@@ -252,14 +266,29 @@ export function SidebarUnread({
         )
       )
         schedulePosition();
-      if (records.some(({ target }) => rows.contains(target))) schedule();
+      if (records.some(({ target }) => rows.contains(target))) {
+        anchor?.refresh(
+          records.some(
+            ({ attributeName, target }) =>
+              attributeName === "data-moving" &&
+              target instanceof Element &&
+              !target.hasAttribute("data-moving"),
+          ),
+        );
+        schedule();
+      }
     });
     mutations.observe(rows, {
       subtree: true,
       childList: true,
+      characterData: true,
       attributes: true,
       attributeFilter: [
         "open",
+        "hidden",
+        "inert",
+        "style",
+        "class",
         "data-channel-needs-you",
         "data-channel-type",
         "data-channel-id",
@@ -277,14 +306,23 @@ export function SidebarUnread({
         });
       }
     }
-    viewport.addEventListener("scroll", schedule, { passive: true });
+    const scrolled = () => {
+      anchor?.scrolled();
+      schedule();
+    };
+    viewport.addEventListener("scroll", scrolled, { passive: true });
     schedule();
     return () => {
       cancelAnimationFrame(frame);
       cancelAnimationFrame(positionFrame);
       resize.disconnect();
       mutations.disconnect();
-      viewport.removeEventListener("scroll", schedule);
+      viewport.removeEventListener("scroll", scrolled);
+      if (anchor) {
+        anchor.dispose();
+        if (captureScrollAnchor) captureScrollAnchor.current = undefined;
+        viewport.style.removeProperty("overflow-anchor");
+      }
       for (const edge of [cue, upper]) {
         edge?.removeAttribute("data-beside-action");
         edge?.removeAttribute("data-share-action-row");
@@ -293,7 +331,7 @@ export function SidebarUnread({
       cue?.removeAttribute("data-preview-limit");
       upper?.removeAttribute("data-preview-limit");
     };
-  }, [list, floatingAction]);
+  }, [list, floatingAction, adjustScrollAnchor, captureScrollAnchor]);
   const reveal = (edge: keyof Edges) => {
     const viewport = list.current;
     if (!viewport) return;
@@ -316,6 +354,7 @@ export function SidebarUnread({
         rect.top -
         viewport.getBoundingClientRect().top -
         (viewport.clientHeight - rect.height) / 2;
+      captureScrollAnchor?.current?.();
       // Continue keyboard navigation at the revealed row, not the start of the
       // roster. Its existing focus preparation still applies; focus is not selection.
       row.focus({ preventScroll: true });

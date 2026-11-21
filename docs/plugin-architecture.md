@@ -1053,6 +1053,12 @@ it goes. `systemPrompt` and `turnPrompt` give Buzz's prompts, `turnPrompt`
 showing what the session has not seen and taking plugins' notes. Its
 `cursor` is opaque: save it with the session and give it to the next
 `turnPrompt`, which keeps a mark for each thread of a channel conversation.
+Give `systemPrompt` the `conversation` so that a type with
+`conversationSections` gets the base prompt sections a plugin replaced there,
+and so that the prompt says whether the session is one thread or a whole
+conversation.
+A type whose turns take those notes declares `notes: true`, so that a plugin
+can tell before it leaves one.
 `reply` posts as the agent there. `tools(agent, conversation, { read })`
 answers the Buzz tools over MCP for `ctx.host.serveMcp`, so the manifest
 declares `host.mcp`; `read` is the plugin's own file access (`host.files`),
@@ -1150,8 +1156,8 @@ gives one of the owner's local agents standing instructions in one
 conversation, at most 8192 UTF-8 bytes after trimming; empty text clears them.
 Each of that agent's turns there shows them in an `<owner-instructions
 source="…">` section after the plugin instructions, escaped the same way, and
-the base prompt ranks them below the owner's messages and above a Solo chat's
-Canvas. They are kept on this device for now. `conversationInstructions(agent,
+the base prompt ranks them below its own sections and above a Solo chat's
+Canvas that an agent wrote. They are kept on this device for now. `conversationInstructions(agent,
 place)` resolves with the text. See [Agents](agents.md).
 
 A bundled plugin can give this launch's recommended agent setup in place of
@@ -2117,6 +2123,16 @@ may offer settings recovery. Before you open the profile in an older build,
 remove the declaring plugin, or roll it back to a version without the field,
 in the newer build.
 
+`ctx.agents.setConversationSections(agent, { channelId, root? }, sections)`
+gives one of the owner's local agents the plugin's text for declared sections
+in one conversation, which the plugin then manages; an empty set clears them.
+Each turn's base instructions there show the text in a `<plugin-section
+id="…" plugin="…">` wrapper in place of the section's default text. One plugin
+manages a conversation at a time, the owner's own choice for a section wins
+over the plugin's text, and a protected agent uses none.
+`conversationSections(agent, place)` resolves with the plugin's set and
+whether a prompt uses each text. See [Agents](agents.md).
+
 A plugin that needs a long-lived program, such as an agent CLI that speaks a
 JSON protocol on stdin and stdout, declares it under `host.processes`:
 
@@ -2908,6 +2924,38 @@ not generation. Reactive filtered reads use `session.observe`;
 writes use `session.outbox` or the `session.messages` convenience methods. Reads,
 live traffic and local events share reconciliation, with no separately injected
 write service. Dispose owned views when their plugin or session scope ends.
+
+`session.ownerMentions` is an optional, read-only capability. On a host with
+`version === 1`, call `latest({ channelId, rootId })` to read the latest confirmed
+explicit mention in that source. Use `null` for the channel level, a message ID
+for the thread it starts, or the reply target ID for an ordinary nested branch.
+For sends from an invocation composer, use the invocation anchor ID, including
+when the composer replies to a message inside it. Those sends update only that
+invocation. A top-level message also starts its own thread.
+The result has `eventId`, `createdAtMs`, and `recipientIds` in editor order.
+Pass up to 128 eligible recipient IDs as the second argument to find the
+latest retained mention of any of them. This also limits the returned
+`recipientIds` to that set.
+Subscribe once with `subscribe(listener)` and reread `latest` before using a
+result from asynchronous work. Bind to the current session on reconnect.
+
+Call `confirmedOwnerSends({ channelId, rootId }, eventIds)` with up to 128
+candidate message IDs from the same conversation. It returns confirmed human
+owner IDs in input order, including messages without explicit mentions. The
+host retains up to 4,096 confirmed IDs per viewer and community. An empty result
+means there is no positive proof for the candidates.
+
+The host records evidence from a human Send through its built-in channel and
+thread composers, media review replies, new direct messages and Solo chats,
+and main-window Huddle composer. It exposes the evidence after relay
+acknowledgement or verified history readback. The detached Huddle composer
+uses a send proxy, so its sends have unknown provenance, as do older messages
+and raw writes. Automatic recipients leave the last explicit mention in place.
+The bounded index is local to the running app and its viewer and community.
+It survives a transient reconnect and session replacement. A community access
+refusal clears the retained evidence. `null` means evidence or access is
+unavailable. This reader performs no relay queries and returns no message text.
+
 For kind 30177 publication, follow the
 [managed-agent registration guidance](relay-queries.md#managed-agent-registration-kind-30177).
 

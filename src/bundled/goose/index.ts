@@ -1,4 +1,5 @@
 import { repositoriesContext } from "../../features/communities/repositories";
+import { usageOn } from "../../features/agents/standalone-sessions";
 // goose agents: an agent type whose agents are goose on this computer, all in
 // one `goose-acp` process. Each conversation an agent is in is one ACP session
 // in it; goose answers with the in-process Buzz tools, served to it over
@@ -20,6 +21,7 @@ import {
   onRecommended,
   recommendedRun,
 } from "../../features/agents/recommended";
+import { REQUEST_TIMEOUT_MS } from "./goose";
 import { gooseRun } from "./run";
 import { readModelSettings } from "../../features/agents/model-settings";
 import { explainTurn, GooseSetup, readNoProxy, REVIEW_REFUSED } from "./setup";
@@ -30,7 +32,7 @@ import { readUsage } from "./usage";
 export const TYPE_ID = "goose";
 /** The harness goose declares to the gateway, its descriptor upstream key. */
 export const HARNESS = "goose";
-export const inject = ["agents", "host", "agentProtection"];
+export const inject = ["agents", "host", "agentProtection", "settingsCards"];
 export const apply: PluginModule["apply"] = (ctx) => {
   // Only the desktop app can start `goose-acp`; no unusable type elsewhere.
   if (!isTauri()) return;
@@ -66,6 +68,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     // Read at a forwarded turn, after `setup` exists.
     async () => (await setup.providers()).defaults.provider,
   );
+  runtime.usageOn = usageOn(ctx.settingsCards);
   const desktop =
     host.spawn && host.resolveDirectory
       ? {
@@ -141,6 +144,9 @@ export const apply: PluginModule["apply"] = (ctx) => {
     gateway: { harness: HARNESS },
     retire: (pubkey) => runtime.retire(pubkey),
     protection: true,
+    conversationFolders: true,
+    conversationSections: true,
+    notes: true,
     title: "Goose",
     icon: GooseLogoIcon,
     description:
@@ -194,6 +200,16 @@ export const apply: PluginModule["apply"] = (ctx) => {
       return [provider, model].filter(Boolean).join(" · ") || "Goose";
     },
     sessions: {
+      ready: (agentKey) => runtime.listed(agentKey),
+      // The sessions `list` remembers are the latest 200 conversations; goose
+      // keeps the rest, and finds them by tag.
+      history: (agent, conversation) =>
+        history.started(
+          config(agent.config).workspace,
+          agent.key,
+          conversation,
+          AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        ),
       list: (agentKey) => {
         const live = runtime.sessions(agentKey);
         const busy = new Map(live.map((view) => [view.key, view.busy]));
@@ -225,13 +241,17 @@ export const apply: PluginModule["apply"] = (ctx) => {
       subscribe: (listener) => runtime.subscribe(listener),
     },
     ...(desktop && {
-      usage: (agent, { since, signal }) =>
-        readUsage(
-          history,
+      usage: async (agent, { since, signal }) =>
+        runtime.withWakes(
           agent.key,
-          config(agent.config).workspace,
-          since,
-          signal,
+          await readUsage(
+            history,
+            agent.key,
+            config(agent.config).workspace,
+            since,
+            signal,
+            [...new Set(runtime.folders(agent.key).values())],
+          ),
         ),
     }),
     tabs: [

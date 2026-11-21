@@ -91,6 +91,14 @@ export function apply(ctx: Context) {
       unread.markCapturedMessagesRead(["example-message-id"]);
     void capturedRead.then(({ undo }) => undo?.());
   }
+  if (typeof unread.messages === "function") {
+    const listed = unread.messages("example-channel", 50);
+    const more: true | undefined = listed.truncated ?? listed.incomplete;
+    for (const item of listed.items ?? []) {
+      const rootId: string | undefined = item.rootId;
+      void [item.id, item.createdAt, item.authorId, rootId, more];
+    }
+  }
   for (const item of conversations.items) {
     for (const message of item.messages) {
       const id: string = message.id;
@@ -289,10 +297,40 @@ import type { createServices } from "@buzz/author";
     await writeFile(
       join(dir, "document-consumer.ts"),
       `
-import type { Context, MarkdownProps, PanelWorkspaceItem, PanelWorkspaceProps, PanelSplit } from "@buzz/author";
-export const inject = ["react", "conversation", "panels"];
+import type { ComponentProps } from "react";
+import type { Agents, Context, MarkdownProps, PanelWorkspaceItem, PanelWorkspaceProps, PanelSplit } from "@buzz/author";
+export const inject = ["react", "agents", "conversation", "panels"];
 export function apply(ctx: Context) {
   const React = ctx.react;
+  type TranscriptProps = ComponentProps<NonNullable<Agents["ui"]>["Transcript"]>;
+  type Agent = TranscriptProps["agent"];
+  function Activity(agent: Agent) {
+    const Transcript = ctx.agents.ui?.Transcript;
+    if (!Transcript) return null;
+    const props: TranscriptProps = {
+      agent,
+      read: async () => ({
+        turns: [{
+          turnId: "turn-1", channelId: "chan-1", threadRootId: null,
+          triggeringEventIds: ["a".repeat(64)], newSession: true, config: [],
+          startedAt: 1_700_000_000_000, endedAt: 1_700_000_001_000,
+          outcome: "ended", partial: false,
+          items: [
+            { id: "m-1", at: 1_700_000_000_500, type: "message", text: "Done", posted: true, messageId: "b".repeat(64) },
+          ],
+        }],
+      }),
+      readKey: "chan-1",
+      working: false,
+      reading: "Reading…",
+      missing: null,
+      failed: "Could not read transcript",
+    };
+    return React.createElement(Transcript, props);
+  }
+  void Activity;
+  // @ts-expect-error Agents.ui is optional on older hosts and must be checked.
+  void ctx.agents.ui.Transcript;
   const document: MarkdownProps = { content: "**Hello**", scale: "document", openLink: () => false };
   function Reader() {
     ctx.panels.useTabTitle?.("A page", React.createElement("span", null, "A"));
