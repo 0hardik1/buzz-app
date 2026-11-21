@@ -80,7 +80,6 @@ test("startup storage batches roster updates and prunes without transferring the
     await other.writeStartup({
       discovery: { ...saved.discovery, events: [otherEvent] },
     });
-    await other.writeProfiles([{ content: "Other scope" }]);
     await cache.write({
       channelId: channelId(1),
       events: [],
@@ -213,6 +212,7 @@ test("startup storage batches roster updates and prunes without transferring the
             () => true,
           );
         await cache.writeProfiles([{ content: "Selected scope" }]);
+        await other.writeProfiles([{ content: "Other scope" }]);
         channels.acceptDiscovery([channelRoster(1, 1_700_000_002)]);
         const clear = (name, work) =>
           new Promise((resolve, reject) => {
