@@ -33,9 +33,12 @@ export const focused = () => {
     : undefined;
 };
 export const typing = () => !!focused()?.matches(TYPING);
+/** The open modal on top; one that is closing no longer holds the keys. */
 const topModal = () =>
   [...document.querySelectorAll<HTMLElement>(MODAL)]
-    .filter((modal) => !modal.closest(UNAVAILABLE))
+    .filter(
+      (modal) => !modal.closest(UNAVAILABLE) && !modal.matches("[data-closed]"),
+    )
     .at(-1);
 
 /** Press a key on the focus as if typed; true when something handled it. */
