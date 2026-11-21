@@ -224,7 +224,9 @@ conversation content and unmount when leaving Messages.
 
 ## Sidebar sort persistence
 
-Each sidebar section can independently select **Recent** (the default) or **A–Z**.
+Each sidebar section can independently select **Recent** or **A–Z**. An unsaved section reads as A–Z, so older
+A–Z choices keep working; Solo reads as Recent and always saves its choice.
+Nothing switches a section to Recent on its own.
 The development broker and packaged native host save these choices in the desktop-compatible encrypted
 kind-30078 `channel-workspace-sort` record: `{ version: 1, groups: { ... }, meta: { v: 1, g: { ... } } }`.
 A–Z writes a null register and removes that group's legacy override.

@@ -515,7 +515,7 @@ it.each(["mute-first", "sort-first"] as const)(
   "%s shares the session queue and preserves confirmed mutes through sort rollback/retry",
   async (order) => {
     const muteGate = deferred<readonly string[]>();
-    const sortGate = deferred<Readonly<Record<string, "alpha">>>();
+    const sortGate = deferred<Readonly<Record<string, "recent">>>();
     const muteStarted = deferred<void>();
     const sortStarted = deferred<void>();
     const mute = vi.fn<SidebarMuteMutator>(async () => {
@@ -540,7 +540,7 @@ it.each(["mute-first", "sort-first"] as const)(
       await initial;
       const startMute = () => preferences.setMute("alpha", true);
       const startSort = () =>
-        preferences.setSort("channels", "alpha", ["work"]);
+        preferences.setSort("channels", "recent", ["work"]);
       const first = order === "mute-first" ? startMute() : startSort();
       const firstResult = Promise.allSettled([first]);
       await (order === "mute-first" ? muteStarted : sortStarted).promise;
@@ -549,13 +549,13 @@ it.each(["mute-first", "sort-first"] as const)(
       expect(order === "mute-first" ? sort : mute).not.toHaveBeenCalled();
       expect(preferences.snapshot().data).toEqual({
         ...data,
-        sort: { channels: "alpha" },
+        sort: { channels: "recent" },
       }); // Sort is optimistic; mute truth is still confirmed-only.
       if (order === "mute-first") {
         muteGate.resolve(["alpha"]);
         await first;
         expect(preferences.snapshot().data?.sort).toEqual({
-          channels: "alpha",
+          channels: "recent",
         });
         await sortStarted.promise;
         sortGate.reject(new Error("sort failed"));
@@ -575,14 +575,14 @@ it.each(["mute-first", "sort-first"] as const)(
         status: "ready",
         data: { ...data, muted: ["alpha"], sort: {} },
         sortErrors: [
-          { group: "channels", mode: "alpha", error: "sort failed" },
+          { group: "channels", mode: "recent", error: "sort failed" },
         ],
       });
-      sort.mockResolvedValueOnce({ channels: "alpha" });
-      await preferences.setSort("channels", "alpha", ["work"]);
+      sort.mockResolvedValueOnce({ channels: "recent" });
+      await preferences.setSort("channels", "recent", ["work"]);
       expect(preferences.snapshot()).toEqual({
         status: "ready",
-        data: { ...data, muted: ["alpha"], sort: { channels: "alpha" } },
+        data: { ...data, muted: ["alpha"], sort: { channels: "recent" } },
       });
     } finally {
       muteGate.resolve([]);
@@ -602,7 +602,7 @@ it.each(["clearCache", "dispose"] as const)(
       return gate.promise;
     });
     const sort = vi.fn<SidebarSortMutator>(async () => ({
-      channels: "alpha",
+      channels: "recent",
     }));
     const { wire, owner, preferences } = setup(
       undefined,
@@ -618,7 +618,7 @@ it.each(["clearCache", "dispose"] as const)(
       await initial;
       const muting = preferences.setMute("alpha", true);
       const signal = await started.promise;
-      const sorting = preferences.setSort("channels", "alpha", ["work"]);
+      const sorting = preferences.setSort("channels", "recent", ["work"]);
       const settled = Promise.allSettled([muting, sorting]);
       await owner[action]();
       expect(signal.aborted).toBe(true);
@@ -871,7 +871,7 @@ it("waits for local moves and reconciles hints without losing other preference f
     ...data,
     assignments: { alpha: "work", gamma: "work" },
     muted: ["muted"],
-    sort: { channels: "alpha" as const },
+    sort: { channels: "recent" as const },
   };
   const strong = vi.fn(async () => {
     started.resolve();

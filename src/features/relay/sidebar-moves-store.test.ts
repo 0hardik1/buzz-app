@@ -6,7 +6,6 @@ import type {
   SidebarPreferences,
   SidebarSortMutator,
 } from "./sidebar-preferences";
-import { defaultSidebarSort } from "./sidebar-sort";
 import { flush } from "./testing";
 
 function deferred<T>() {
@@ -75,7 +74,7 @@ async function setup() {
   });
   const sort = vi.fn<SidebarSortMutator>(async (group, mode) => {
     const next = { ...data.sort };
-    if (mode === defaultSidebarSort(group)) delete next[group];
+    if (mode === "alpha") delete next[group];
     else next[group] = mode;
     data = { ...data, sort: next };
     return next;
@@ -487,7 +486,7 @@ it.each([
     try {
       const move = () => h.prefs.assign("alpha", "later");
       const sort = () =>
-        h.prefs.setSort("channels", "alpha", ["work", "later"]);
+        h.prefs.setSort("channels", "recent", ["work", "later"]);
       const first = order === "move-first" ? move() : sort();
       const firstResult = Promise.allSettled([first]);
       await (order === "move-first" ? moveStarted : sortStarted).promise;
@@ -499,7 +498,7 @@ it.each([
       expect(h.prefs.snapshot().data).toMatchObject({
         assignments: { alpha: "later" },
         starred: [],
-        sort: { channels: "alpha" },
+        sort: { channels: "recent" },
         muted: [],
       });
       const finishMove = () =>
@@ -509,12 +508,12 @@ it.each([
       const finishSort = () =>
         outcome === "sort-fails"
           ? sortGate.reject(new Error("sort failed"))
-          : sortGate.resolve({ channels: "alpha" });
+          : sortGate.resolve({ channels: "recent" });
       if (order === "move-first") {
         finishMove();
         await firstResult;
         await sortStarted.promise;
-        expect(h.prefs.snapshot().data?.sort).toEqual({ channels: "alpha" });
+        expect(h.prefs.snapshot().data?.sort).toEqual({ channels: "recent" });
         finishSort();
       } else {
         finishSort();
@@ -532,7 +531,7 @@ it.each([
       expect(h.prefs.snapshot().data).toMatchObject({
         assignments: { alpha: outcome === "move-fails" ? "work" : "later" },
         starred: outcome === "move-fails" ? ["alpha"] : [],
-        sort: outcome === "sort-fails" ? {} : { channels: "alpha" },
+        sort: outcome === "sort-fails" ? {} : { channels: "recent" },
         muted: ["beta"],
       });
       expect(h.prefs.snapshot().moves?.[0]?.error).toBe(
@@ -562,7 +561,7 @@ it.each(["clear", "dispose", "cancel"] as const)(
     });
     const before = h.prefs.snapshot().data;
     try {
-      const sorting = h.prefs.setSort("channels", "alpha", [], caller.signal);
+      const sorting = h.prefs.setSort("channels", "recent", [], caller.signal);
       const signal = await started.promise;
       const moving = h.prefs.assign("alpha", "later", caller.signal);
       const results = Promise.allSettled([sorting, moving]);
@@ -570,7 +569,7 @@ it.each(["clear", "dispose", "cancel"] as const)(
       if (action === "cancel") caller.abort();
       else h.owner[action]();
       expect(signal.aborted).toBe(true);
-      gate.resolve({ channels: "alpha" });
+      gate.resolve({ channels: "recent" });
       expect((await results).map(({ status }) => status)).toEqual([
         "rejected",
         "rejected",
@@ -611,13 +610,13 @@ it.each([false, true])(
         retry = h.prefs.refresh();
         await started.promise;
       }
-      await h.prefs.setSort("channels", "alpha", []);
+      await h.prefs.setSort("channels", "recent", []);
       gate.resolve(before);
       await retry;
       expect(h.prefs.snapshot()).toMatchObject({
         status: "error",
         error: "preferences unavailable",
-        data: { sort: { channels: "alpha" } },
+        data: { sort: { channels: "recent" } },
       });
       expect(h.prefs.writable).toBe(false);
       await expect(h.prefs.assign("alpha", "later")).rejects.toThrow(
@@ -626,7 +625,7 @@ it.each([false, true])(
       await h.prefs.refresh();
       expect(h.prefs.snapshot().status).toBe("ready");
       expect(h.prefs.writable).toBe(true);
-      expect(h.prefs.snapshot().data?.sort).toEqual({ channels: "alpha" });
+      expect(h.prefs.snapshot().data?.sort).toEqual({ channels: "recent" });
     } finally {
       gate.resolve(before);
       h.owner.dispose();
@@ -914,7 +913,7 @@ it.each(["mute", "sort", "writer-failure"] as const)(
     try {
       await entered.promise;
       if (kind === "sort")
-        await h.prefs.setSort("channels", "alpha", ["work", "later"]);
+        await h.prefs.setSort("channels", "recent", ["work", "later"]);
       else await h.prefs.setMute("alpha", true);
       read.resolve(first);
       await creating;
@@ -930,7 +929,7 @@ it.each(["mute", "sort", "writer-failure"] as const)(
       expect(h.prefs.snapshot().data?.sections.at(-1)).toMatchObject(section);
       expect(h.prefs.snapshot().data).toMatchObject(
         kind === "sort"
-          ? { sort: { channels: "alpha" } }
+          ? { sort: { channels: "recent" } }
           : { muted: ["alpha"] },
       );
       expect(h.prefs.sectionCreationWritable).toBe(true);

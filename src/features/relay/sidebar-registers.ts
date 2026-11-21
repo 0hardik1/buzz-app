@@ -578,7 +578,8 @@ export function editSidebarSortRecord(
       : current;
   // Older A–Z writers tombstone with null and skip equal values. A distinct
   // alpha anchor lets their explicit choice supersede the plugin binding.
-  // The group's default is stored as absence; Solo always keeps its choice.
+  // Recent is always written explicitly; A–Z keeps the null tombstone, and
+  // Solo always keeps its choice.
   const anchor = plugin
     ? "alpha"
     : group === "solo" || mode !== defaultSidebarSort(group)
