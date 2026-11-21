@@ -108,7 +108,7 @@ impl AppAgentHost {
     }
     /// `agent` saved under `dir` with its key already read, for tests outside
     /// Agents.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn fixture(dir: &Path, agent: &AppAgent, key: Secret, tokens: AgentTokens) -> Self {
         let path = dir.join("identities.json");
         std::fs::write(&path, serde_json::to_vec(&[agent]).unwrap()).unwrap();

@@ -123,6 +123,7 @@ pub(crate) mod read_gates {
     }
     impl Enqueue {
         /// Waits for a read to reach the gate, returning its end.
+        #[cfg(target_os = "macos")]
         pub(crate) fn entered(&self, within: Duration) -> Option<tokio::time::Instant> {
             let state = self.state.lock().unwrap();
             let (state, _) = self
@@ -131,6 +132,7 @@ pub(crate) mod read_gates {
                 .unwrap();
             state.0
         }
+        #[cfg(target_os = "macos")]
         pub(crate) fn release(&self) {
             self.state.lock().unwrap().1 = true;
             self.changed.notify_all();
@@ -994,7 +996,6 @@ impl Invocations {
             }
         }
     }
-    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn retirement_signal(&self, call: &str) -> Result<Arc<tokio::sync::Notify>, String> {
         self.0
             .lock()
@@ -1096,7 +1097,7 @@ impl Invocations {
             }
         }
     }
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn spend(&self, call: &str, reads: u32, deadline: tokio::time::Instant) {
         let mut state = self.0.lock().unwrap();
         let parent = state.get_mut(call).unwrap().parent.as_mut().unwrap();
@@ -1104,7 +1105,7 @@ impl Invocations {
     }
     /// Test inspection of the parent's read accounting: (reads, reading,
     /// selected sequence).
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn reads(&self, call: &str) -> (u32, bool, Option<u32>) {
         let state = self.0.lock().unwrap();
         let parent = state.get(call).unwrap().parent.as_ref().unwrap();
@@ -1114,7 +1115,7 @@ impl Invocations {
             parent.selected.as_ref().map(|(sequence, _)| *sequence),
         )
     }
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn source(&self, call: &str) -> Option<(Vec<u8>, String)> {
         let state = self.0.lock().unwrap();
         match &state.get(call)?.parent.as_ref()?.stage {
@@ -1124,7 +1125,7 @@ impl Invocations {
     }
     /// Test inspection of the retained prepared state: (directory, source
     /// hash, prepared hash, prepared size).
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn prepared(
         &self,
         call: &str,

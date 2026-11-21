@@ -36,7 +36,7 @@ pub(crate) use media_cache::MediaCache;
 pub(crate) use media_cache::DIR as MEDIA_CACHE_DIR;
 mod media_preparation;
 pub(crate) use media_preparation::{strict_video, Prepared, StrictVideo};
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 pub(crate) use media_preparation::{Programs, WriteGate, CONVERSIONS};
 mod media_spool;
 mod reminders;

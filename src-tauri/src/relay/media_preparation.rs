@@ -46,9 +46,9 @@ impl Drop for Programs {
         *STRICT_PROGRAMS.lock().unwrap() = None;
     }
 }
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 static WRITE_GATE: std::sync::Mutex<Option<HeldWrite>> = std::sync::Mutex::new(None);
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 struct HeldWrite {
     entered: oneshot::Sender<PathBuf>,
     release: std::sync::mpsc::Receiver<()>,
@@ -56,7 +56,7 @@ struct HeldWrite {
 }
 /// Test-only hold of the strict branch's next blocking source write, armed
 /// until dropped. Hold `CONVERSIONS` while it lives.
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 pub(crate) struct WriteGate {
     /// The held source path, sent from the blocking thread before it writes.
     pub(crate) entered: oneshot::Receiver<PathBuf>,
@@ -65,7 +65,7 @@ pub(crate) struct WriteGate {
     pub(crate) joined: oneshot::Receiver<()>,
     release: std::sync::mpsc::Sender<()>,
 }
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 impl WriteGate {
     pub(crate) fn arm() -> Self {
         let (entered, entered_rx) = oneshot::channel();
@@ -118,7 +118,7 @@ impl WriteGate {
         }))
     }
 }
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 impl Drop for WriteGate {
     fn drop(&mut self) {
         *WRITE_GATE.lock().unwrap() = None;
@@ -747,9 +747,9 @@ pub(super) async fn prepare_strict(
     let source = directory.path().join("source.mp4");
     let (path, hash) = (source.clone(), source_sha256.clone());
     let write = move || write_source(&path, bytes, &hash);
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     let write = WriteGate::held(&source, write);
-    #[cfg(not(test))]
+    #[cfg(not(all(test, target_os = "macos")))]
     let write = blocking(write);
     write.await?;
     let facts = probe(&ffprobe, &source, left(), &mut cancelled).await?;

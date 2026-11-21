@@ -72,6 +72,7 @@ struct Fixture {
     app: tauri::App<MockRuntime>,
     view: tauri::WebviewWindow<MockRuntime>,
     revision: String,
+    #[cfg(target_os = "macos")]
     events: tokio::sync::mpsc::UnboundedReceiver<(u32, Value)>,
 }
 impl Fixture {
@@ -128,6 +129,9 @@ impl Fixture {
             .revision;
         manager.change("enable", ID).unwrap();
         let (events_tx, events) = tokio::sync::mpsc::unbounded_channel();
+        // Only the macOS reviewed HTTP tests read callback events.
+        #[cfg(not(target_os = "macos"))]
+        drop(events);
         let builder = mock_builder()
             .channel_interceptor(move |_, callback, _, body| {
                 let tauri::ipc::InvokeResponseBody::Json(body) = body else {
@@ -158,6 +162,7 @@ impl Fixture {
             app,
             view,
             revision,
+            #[cfg(target_os = "macos")]
             events,
         }
     }
