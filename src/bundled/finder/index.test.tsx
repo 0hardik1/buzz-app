@@ -230,13 +230,26 @@ test("⌘P searches the open conversation, else all of Buzz; ⌘⇧P switches in
   expect(press(composer, true)).toBe(true);
   expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   leave();
+  composer.blur();
   press(document.body);
   expect(await selectedTab()).toBe("All of Buzz");
+  fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
+  // The dialog is gone once its focus return has run.
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  // Opened with nothing focused, it doesn't focus the first control.
+  expect(document.body).toHaveFocus();
   composer.remove();
 });
 
 test("another plugin opens its own list with a query; Finder ranks it and Enter runs the item", async () => {
-  const banana = vi.fn();
+  // Like a pane jump: the item moves focus, and closing leaves it there.
+  const here = document.createElement("button");
+  const there = document.createElement("button");
+  document.body.append(here, there);
+  here.focus();
+  const banana = vi.fn(() => there.focus());
   const fruit = consumer(() => ({
     id: "list",
     title: "Fruit",
@@ -263,6 +276,12 @@ test("another plugin opens its own list with a query; Finder ranks it and Enter 
   expect(rows()).toEqual([expect.stringContaining("Banana")]);
   await act(async () => screen.getByRole("option").click());
   expect(banana).toHaveBeenCalledTimes(1);
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  expect(there).toHaveFocus();
+  here.remove();
+  there.remove();
   await act(async () => veg.used.finder?.open({ source: "example.veg/list" }));
   expect(await screen.findByRole("combobox")).toHaveValue("");
   expect(rows()).toEqual([expect.stringContaining("Bean")]);

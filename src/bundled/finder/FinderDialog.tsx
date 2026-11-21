@@ -102,8 +102,11 @@ export function FinderDialog(props: Props) {
   // keep that here, for closing to return to.
   const returnTo = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
-    if (props.open && document.activeElement instanceof HTMLElement)
-      returnTo.current = document.activeElement;
+    if (!props.open) return;
+    const active = document.activeElement;
+    // Nothing focused returns nowhere, not to the page's first control.
+    returnTo.current =
+      active instanceof HTMLElement && active !== document.body ? active : null;
   }, [props.open]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: one budget per dialog opening and session, even when switching scopes.
   const opening = useMemo(() => ({}), [props.open, props.session]);
