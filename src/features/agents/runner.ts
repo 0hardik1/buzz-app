@@ -122,6 +122,7 @@ import {
   fallbackNotice,
   gatewayRoutes,
   TURN_READINESS_WAIT_MS,
+  SELECTION_PENDING_NOTICE,
   unattributedNotice,
 } from "./gateway/route";
 import { turnContextFor } from "./gateway/turn";
@@ -3132,7 +3133,13 @@ export class AgentRunners {
    * replayed. A turn whose access is revoked after dispatch is the harness's
    * to fail visibly. An `attribution` type's turn never waits or fails here:
    * it takes the route as it stands, and any blocked route, `auth` and
-   * `readiness_pending` included, runs it unattributed with a notice. */
+   * `readiness_pending` included, runs it unattributed with a notice. A
+   * harness a plugin's list leaves out (`GatewayRoutes.excludes`) runs with
+   * its own configuration, without a notice, whatever the route: a turn
+   * waits for the list first, within the same cap, and then neither waits
+   * for nor rechecks an access check. An `attribution` turn doesn't wait for
+   * the list either: while it is unknown, the turn runs unattributed with
+   * `SELECTION_PENDING_NOTICE`, unless its route is already external. */
   private async gatewayRouting(
     agent: Agent,
     type: RegisteredAgentType,
@@ -3144,17 +3151,46 @@ export class AgentRunners {
     const upstream = harness && gatewayRoutes.upstream(harness);
     if (!upstream) return {};
     const attribution = type.gateway?.mode === "attribution";
-    // Attribution never holds a turn for an access check: it takes the
-    // route as it stands, while any check carries on for later turns.
-    const route = await gatewayRoutes.routeForTurn(
-      agent.key,
-      attribution
-        ? undefined
-        : AbortSignal.any([
-            signal,
-            AbortSignal.timeout(TURN_READINESS_WAIT_MS),
-          ]),
-    );
+    // Attribution never holds a turn, for the plugin's list or an access
+    // check. A list that leaves this harness out, or a route already
+    // external, runs it on its own configuration without a notice. While the
+    // list is unknown, it runs unattributed with a notice that says only
+    // that, since no access check has gone out yet.
+    if (attribution) {
+      if (gatewayRoutes.excludes(harness)) return {};
+      if (gatewayRoutes.selecting) {
+        if (gatewayRoutes.routeFor(agent.key).kind === "external") return {};
+        const notice = SELECTION_PENDING_NOTICE;
+        job.work?.notice(notice);
+        return {
+          gatewayFallback: Object.freeze({
+            reason: "readiness_pending" as const,
+            notice,
+          }),
+        };
+      }
+    }
+    // One cap for the list and the access check together.
+    const wait = attribution
+      ? undefined
+      : AbortSignal.any([signal, AbortSignal.timeout(TURN_READINESS_WAIT_MS)]);
+    // The list first, so a harness it leaves out never waits for, or
+    // rechecks, an access check. A route already external, such as an
+    // unlisted community's, doesn't wait for the list.
+    if (
+      wait &&
+      gatewayRoutes.selecting &&
+      gatewayRoutes.routeFor(agent.key).kind !== "external"
+    ) {
+      await gatewayRoutes.selectionForTurn(wait);
+      signal.throwIfAborted();
+    }
+    // A harness the plugin's list leaves out keeps its own configuration
+    // whatever the route, so a partial list never fails its turns.
+    if (gatewayRoutes.excludes(harness)) return {};
+    // Attribution takes the route as it stands, while any check carries on
+    // for later turns.
+    const route = await gatewayRoutes.routeForTurn(agent.key, wait);
     signal.throwIfAborted();
     if (route.kind === "external") return {};
     if (route.kind === "blocked") {

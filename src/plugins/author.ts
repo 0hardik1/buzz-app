@@ -198,6 +198,7 @@ export type {
   AgentSession,
   AgentSessions,
   Delivery,
+  GatewayHarnessSource,
   ModelSettings,
   NoteChange,
   PluginNote,
