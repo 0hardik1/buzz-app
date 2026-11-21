@@ -244,5 +244,17 @@ export const inSidebar = () => {
  */
 export function openActions() {
   const origin = focused();
-  return !!origin && press(origin, "ContextMenu");
+  if (!origin || !press(origin, "ContextMenu")) return false;
+  // WebKit can leave focus on the item; the menu's keys need it inside.
+  let frames = 10;
+  const settle = () => {
+    const menu = document.querySelector<HTMLElement>(
+      '[role="menu"][data-open]',
+    );
+    if (menu?.contains(document.activeElement)) return;
+    if (menu) menu.focus();
+    else if (--frames > 0) requestAnimationFrame(settle);
+  };
+  requestAnimationFrame(settle);
+  return true;
 }
