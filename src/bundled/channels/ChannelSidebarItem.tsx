@@ -218,10 +218,8 @@ function ChannelSidebarItemCore({
     if (menuContent !== undefined) lastMenuContent.current = menuContent;
   }, [menuContent]);
   const Icon = channelIcon(channel);
-  // Solo chats are told apart by their titles, so they stay a list.
-  const tiled =
-    useContext(SidebarCardDisplayContext) === "icons" &&
-    channel.channelType !== "solo";
+  const tiled = useContext(SidebarCardDisplayContext) === "icons";
+  const solo = channel.channelType === "solo";
   const plainRow = (
     <ChannelSidebarRow
       channel={channel}
@@ -361,7 +359,14 @@ function ChannelSidebarItemCore({
         <>
           <span className={styles.indicatorStack} data-channel-indicators="">
             <span className={styles.indicatorLayer}>
-              {tiled ? (
+              {solo ? (
+                // Solo stays bold only: no dot in a list, no count on a tile.
+                <UnreadBadge
+                  session={session}
+                  channelId={channel.id}
+                  labelUnread="all"
+                />
+              ) : tiled ? (
                 <UnreadCount
                   session={session}
                   channelId={channel.id}

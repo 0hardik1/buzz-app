@@ -3,13 +3,15 @@ import type { ChannelSummary, Profile } from "../../features/relay/contracts";
 import type { RelaySession } from "../../features/relay/session";
 import { selectProfiles } from "../../features/relay/profile-selection";
 import { ChannelAvatar } from "../../features/channels/ChannelAvatar";
+import { channelIcon } from "../../features/channels/channel-icon";
 import { avatarMedia } from "../../shared/avatar-source";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { AvatarStack } from "../../shared/design-system/ui/AvatarStack";
 
 /**
  * A conversation drawn as its identity, for a card shown as icons: a DM as its
- * person, a group DM as up to three of its people, a channel as its monogram.
+ * person, a group DM as up to three of its people, a channel as its monogram,
+ * a Solo chat as the chat bubble its row shows.
  */
 export function ChannelSidebarTile({
   channel,
@@ -38,6 +40,17 @@ export function ChannelSidebarTile({
         statusBadgeSize="small"
       />
     );
+  if (channel.channelType === "solo") {
+    const Icon = channelIcon(channel);
+    return (
+      <Avatar
+        alt=""
+        fallback={channel.name}
+        fallbackContent={<Icon size={20} />}
+        size="fill"
+      />
+    );
+  }
   return <ChannelAvatar name={channel.name} size="fill" />;
 }
 
