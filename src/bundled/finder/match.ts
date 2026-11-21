@@ -1,7 +1,7 @@
-// Fuzzy matching and scoring ported from fzf's `FuzzyMatchV1` and
-// `calculateScore` (src/algo/algo.go, MIT, Copyright (c) 2013-2026 Junegunn
-// Choi). See NOTICE.md. The greedy v1 pass is linear in the text, which keeps
-// long messages cheap; fzf itself falls back to it for long input.
+// Scoring ported from fzf's `calculateScore`, and matching adapted from its
+// `FuzzyMatchV1` (src/algo/algo.go, MIT, Copyright (c) 2013-2026 Junegunn
+// Choi). See NOTICE.md. Chat messages are long prose, unlike file paths, so a
+// term's letters must stay close together and typed words are tried first.
 
 const scoreMatch = 16;
 const scoreGapStart = -3;
@@ -107,31 +107,62 @@ function scoreSpan(
   return score;
 }
 
-/** A fuzzy match of `pattern` in `text`: forward to the first complete
- * occurrence, then backward to its shortest end-anchored span. Both strings
- * are already in the case being compared. */
+/** How far one term's letters may spread: chat messages are long, and
+ * letters picked from different words ("a" in "and", "y" in "you") are noise.
+ * `dplyrlbk` still finds "deploy rollback". */
+const spread = (length: number) => Math.max(length * 3, length + 6);
+/** Start points tried per message. ponytail: fixed cap, an fzf v2-style
+ * alignment if it misses real matches. */
+const STARTS = 64;
+
+/** A fuzzy match of `pattern` in `text`: the letters typed together if they
+ * appear so, else the best-scoring compact run of them, trying each place the
+ * first letter appears (fzf's v1 takes only the first). Both strings are
+ * already in the case being compared. With `score` false, only whether it
+ * matches (0) or not. */
 export function fuzzyMatch(
   text: string,
   pattern: string,
   positions?: number[],
+  score = true,
 ): number | undefined {
   if (!pattern) return 0;
-  let at = -1;
-  let start = -1;
-  for (let p = 0; p < pattern.length; p++) {
-    at = text.indexOf(pattern[p] as string, at + 1);
-    if (at < 0) return undefined;
-    if (p === 0) start = at;
+  if (!score) {
+    if (text.includes(pattern)) return 0;
+  } else {
+    const together = exactMatch(text, pattern, positions);
+    if (together !== undefined) return together;
   }
-  const end = at + 1;
-  // Walk back from the last match to the latest start that still fits.
-  let p = pattern.length - 1;
-  for (let i = end - 1; i >= start; i--)
-    if (text.charCodeAt(i) === pattern.charCodeAt(p) && --p < 0) {
-      start = i;
-      break;
+  const limit = spread(pattern.length);
+  const head = pattern[0] as string;
+  let best: number | undefined;
+  let bestStart = -1;
+  let bestEnd = -1;
+  for (
+    let first = text.indexOf(head), tries = 0;
+    first >= 0 && tries < STARTS;
+    first = text.indexOf(head, first + 1), tries++
+  ) {
+    let at = first;
+    for (let p = 1; p < pattern.length && at >= 0; p++) {
+      at = text.indexOf(pattern[p] as string, at + 1);
+      if (at - first >= limit) break;
     }
-  return scoreSpan(text, pattern, start, end, positions);
+    // No later start can finish if this one ran out of text.
+    if (at < 0) break;
+    const end = at + 1;
+    if (end - first > limit) continue;
+    if (!score) return 0;
+    const found = scoreSpan(text, pattern, first, end);
+    if (best === undefined || found > best) {
+      best = found;
+      bestStart = first;
+      bestEnd = end;
+    }
+  }
+  if (best !== undefined && positions)
+    scoreSpan(text, pattern, bestStart, bestEnd, positions);
+  return best;
 }
 
 /** An exact substring match, scored like fzf's exact match: the occurrence
@@ -206,8 +237,8 @@ export function charMask(text: string) {
   return mask;
 }
 
-/** Whether every term matches, without scoring: a forward `indexOf` chain,
- * far cheaper than `matchTerms`. */
+/** Whether every term matches, by the same rule as `matchTerms` but
+ * without scoring. */
 export function termsMatch(
   terms: readonly Term[],
   text: string,
@@ -215,16 +246,9 @@ export function termsMatch(
 ) {
   for (const term of terms) {
     const haystack = term.caseSensitive ? text : lower;
-    let found: boolean;
-    if (term.exact) found = haystack.includes(term.text);
-    else {
-      let at = -1;
-      for (let p = 0; p < term.text.length; p++) {
-        at = haystack.indexOf(term.text[p] as string, at + 1);
-        if (at < 0) break;
-      }
-      found = at >= 0;
-    }
+    const found = term.exact
+      ? haystack.includes(term.text)
+      : fuzzyMatch(haystack, term.text, undefined, false) !== undefined;
     if (found === term.negate) return false;
   }
   return true;

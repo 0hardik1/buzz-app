@@ -28,9 +28,30 @@ test("ranks word starts and runs above letters inside words", () => {
     "the plan is pending",
     "an explanation is pending",
   ]);
-  // Initials of words beat letters strung through one.
-  expect(texts(corpus, "dpl")[0]).toBe("draft a plan, look good");
+  // Letters close together beat initials spread over a sentence.
+  expect(texts(corpus, "dpl")[0]).toBe("deploy looks good");
   expect(texts(corpus, "zzz")).toEqual([]);
+});
+
+test("finds the words typed, not letters picked across a long message", () => {
+  const corpus = createCorpus();
+  corpus.add([
+    doc("Yes, I'm here and responding. What do you need?"),
+    doc(
+      "Example TODOs [ ] Pick a small task to try with Pony. [ ] Share the doc",
+    ),
+    doc("\u201cI don't hold any shares myself, so back to work.\u201d", {
+      author: "Peter",
+    }),
+    doc("we should deploy the rollback today"),
+  ]);
+  expect(texts(corpus, "any shares")).toEqual([
+    "\u201cI don't hold any shares myself, so back to work.\u201d",
+  ]);
+  // Letters can still skip within a compact stretch.
+  expect(texts(corpus, "dplyrlbk")).toEqual([
+    "we should deploy the rollback today",
+  ]);
 });
 
 test("every term must match, in the text or who and where it was said", () => {

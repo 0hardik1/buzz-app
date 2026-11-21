@@ -18,7 +18,8 @@ where it was said.
 - The finder searches your own conversations from the last 90 days: messages
   you wrote, threads you replied in, direct messages, and messages that mention
   you. The first time, it reads them from the community, which can take a
-  minute. It keeps up with new messages after that.
+  minute. It also adds every message Buzz shows or receives from channels
+  you're in while it's open, such as a channel you scroll through.
 - `'word` matches those exact letters together, `!word` leaves out messages
   with that word, and a capital letter makes a word match case.
 - The index is kept in memory on this device and never sent anywhere. It is

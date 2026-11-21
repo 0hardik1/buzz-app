@@ -88,17 +88,12 @@ export function startFinderSync({
     text: searchText(event).replace(/\s+/g, " ").trim(),
   });
 
-  /** Yours, addressed to you, in a DM, or in a thread you joined. */
-  const relevant = (event: RelayEvent, rootId: string | undefined) => {
-    const channelId = event.tags.find(([name]) => name === "h")?.[1];
-    if (!channelId || !channel(channelId)) return false;
-    return (
-      event.pubkey === viewer ||
-      event.tags.some(([name, value]) => name === "p" && value === viewer) ||
-      channel(channelId)?.channelType === "dm" ||
-      roots.has(event.id) ||
-      (!!rootId && roots.has(rootId))
-    );
+  /** Anything the app receives from a conversation you belong to: live
+   * traffic and what you scroll past, at no extra relay cost. Previews of
+   * channels you haven't joined and huddle rooms stay out. */
+  const relevant = (event: RelayEvent) => {
+    const found = channel(event.tags.find(([name]) => name === "h")?.[1] ?? "");
+    return !!found && !found.readOnly && !found.huddle;
   };
   const take = (events: readonly RelayEvent[], force = false) => {
     const added: FinderDoc[] = [];
@@ -107,7 +102,7 @@ export function startFinderSync({
       if (raw.has(event.id)) continue;
       const rootId = threadReference(event)?.rootId;
       if (event.pubkey === viewer && rootId) roots.add(rootId);
-      if (!force && !relevant(event, rootId)) continue;
+      if (!force && !relevant(event)) continue;
       const entry = { event, rootId };
       raw.set(event.id, entry);
       added.push(docOf(entry));
@@ -153,6 +148,8 @@ export function startFinderSync({
     // Start at a random moment, so a fleet reconnecting at once spreads out.
     await sleep(Math.random() * 3000, signal);
     await session.channels.ensureList?.();
+    // What the app already loaded before the finder started.
+    take(live.snapshot().events as readonly RelayEvent[]);
     publish({ phase: "filling" });
     await readAll({ kinds: KINDS, authors: [viewer] });
     await readAll({ kinds: KINDS, "#p": [viewer] });

@@ -35,15 +35,32 @@ This is a work in progress on the `noah/finder` branch.
 - A capital letter makes that word match case: `API` won't match "api".
 - With nothing typed, the finder lists your newest messages.
 
-Results are ranked the way fzf ranks them. Letters at the start of a word, and
-letters next to each other, score higher. Ties go to the newer message.
+Results are scored the way fzf scores them: letters at the start of a word,
+and letters next to each other, score higher. Ties go to the newer message.
+
+Matching differs from fzf in two ways, because chat messages are long
+sentences, not file names:
+
+- **Words you type whole are found whole.** If a word appears exactly as
+  typed, that occurrence is scored, choosing the best one (a word start beats
+  the middle of a word).
+- **Letters must stay close together.** Otherwise one word's letters have to
+  fit within about three times its length. `dplyrlbk` still finds "deploy
+  rollback", but `any` can't be stitched together from "**a**nd", a later
+  "**n**", and "**y**ou".
 
 ## What it searches
 
-Only your own conversations: messages you wrote, threads you replied in, direct
-messages, and messages that mention you, from the last 90 days. That keeps the
-index small enough to search on every keystroke, and keeps it to things you were
-part of.
+Two sources, both limited to the last 90 days:
+
+- **Your own conversations**, read from the relay when the finder starts:
+  messages you wrote, threads you replied in, direct messages, and messages
+  that mention you.
+- **Everything else Buzz receives from channels you're in** while it's open:
+  new messages as they arrive, and older ones as you scroll past them. These
+  cost no extra relay reads; the app already fetched them.
+
+Channels you haven't joined, which you can preview, stay out.
 
 The index lives in memory and, once that part is built, in a database on this
 device. It is never sent anywhere. Signing out or using **Clear cache** deletes
@@ -81,9 +98,9 @@ conversations. Treat these as worst cases.
 
 | Messages | Memory | Typical key | Slowest query, cold |
 | --- | --- | --- | --- |
-| 25,000 | 10 MB | 1–5 ms | 14 ms |
-| 50,000 | 20 MB | 2–10 ms | 30 ms |
-| 200,000 | 81 MB | 14–50 ms | 85–100 ms |
+| 25,000 | 10 MB | 1–3 ms | 9 ms |
+| 50,000 | 20 MB | 1–7 ms | 16 ms |
+| 200,000 | 81 MB | 4–55 ms | 81 ms |
 
 Measured on an Apple laptop and a Blox Linux workstation, with similar results.
 A screen frame is 16 ms, so up to about 50,000 messages it keeps up with typing.
