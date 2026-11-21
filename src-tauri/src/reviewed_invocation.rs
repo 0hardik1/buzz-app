@@ -70,6 +70,7 @@ impl Invocations {
             }
         }
     }
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn retirement_signal(&self, call: &str) -> Result<Arc<tokio::sync::Notify>, String> {
         self.0
             .lock()
