@@ -1150,6 +1150,18 @@ function Composer({
           ]),
         ]
       : pubkeys;
+  const dmAgents = () => {
+    const viewer = session.viewer;
+    const profiles = session.profiles.snapshot();
+    return viewer && dmMembers?.length === 2 && dmMembers.includes(viewer)
+      ? dmMembers.flatMap((pubkey) => {
+          const profile = profiles.get(pubkey);
+          return pubkey !== viewer && profile?.isAgent
+            ? [{ pubkey, name: profile.name }]
+            : [];
+        })
+      : [];
+  };
   // Read at send time: inline mentions win, else the toolbar's agents. A
   // reference addresses nobody, so it goes along with the toolbar's agents.
   const sendRecipients = () => {
@@ -2467,6 +2479,7 @@ function Composer({
       groupLabelHolds(requested, [
         ...recipients,
         ...valueRef.current.recipients,
+        ...dmAgents(),
       ])
         ? requested
         : undefined;
@@ -3180,10 +3193,10 @@ function Composer({
     const attempt = new AbortController();
     sendAttempt.current = attempt;
     const typed = valueRef.current;
-    const captured = sentDraft(
-      typed,
-      routing ? recipientsNow : typed.recipients,
-    );
+    const captured = sentDraft(typed, [
+      ...(routing ? recipientsNow : typed.recipients),
+      ...dmAgents(),
+    ]);
     const explicit =
       human && ownerProvenance
         ? captured.recipients

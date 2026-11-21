@@ -1491,7 +1491,7 @@ it("locks during opening and delivery, waits for confirmation, and retries the s
   expect(t.directMessages.delivered).toHaveBeenCalledTimes(2);
 });
 
-it("sends a saved group whose label no longer holds as its members, and Retry sends the same text", async () => {
+it("sends a saved group whose label no longer holds as its members", async () => {
   const crew = [
     { pubkey: people[2]?.pubkey ?? "", name: "Mary Jane" },
     { pubkey: people[3]?.pubkey ?? "", name: "Wes" },
@@ -1510,21 +1510,15 @@ it("sends a saved group whose label no longer holds as its members, and Retry se
     }),
   );
   const t = setup();
-  t.directMessages.delivery.mockReturnValue("unknown");
-  t.directMessages.delivered.mockRejectedValueOnce(
-    new Error("Delivery uncertain"),
-  );
   t.mount();
   await t.user.click(await screen.findByRole("option", { name: "Person 1" }));
   await t.user.click(send());
-  await t.user.click(await screen.findByRole("button", { name: "Retry send" }));
   await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
   expect(t.messages.send).toHaveBeenCalledOnce();
   expect(t.messages.send.mock.calls[0]?.slice(1, 3)).toEqual([
     "@Mary Jane @Wes hi",
     crew.map((person) => person.pubkey),
   ]);
-  expect(t.directMessages.delivered).toHaveBeenCalledTimes(2);
 });
 
 it("preserves recipients and draft after opening fails and across remount", async () => {

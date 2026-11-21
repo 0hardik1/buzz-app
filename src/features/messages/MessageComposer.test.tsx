@@ -18664,6 +18664,45 @@ it("in a Solo chat with agents only, a group of people outside it whose label st
   });
 });
 it.each([
+  ["picked", 0],
+  ["saved in a draft", 1],
+])(
+  "in a one-to-one DM with an agent, a group whose label starts with the agent's name is %s and sent as its members",
+  async (_how, groups) => {
+    const viewer = "d".repeat(64);
+    const ops = "c".repeat(64);
+    if (groups)
+      writeView(
+        "scope",
+        "draft:channel",
+        typedDraft(savedCrew("@Ops crew hi", "Ops crew", [maryJane, wes])),
+      );
+    const h = mount({}, undefined, viewer);
+    h.setProfiles(new Map([[ops, { name: "Ops", isAgent: true }]]));
+    const dm = {
+      status: "ready" as const,
+      channels: [
+        { id: "channel", channelType: "dm" as const, members: [viewer, ops] },
+      ],
+    };
+    Object.assign(h.session.channels, {
+      list: () => dm,
+      get: () => dm.channels[0],
+    });
+    h.remount();
+    if (!groups) {
+      h.fill("!Crew");
+      offerCrew(h, [maryJane, wes], "Ops crew");
+      await h.user.keyboard("{Enter}hi");
+    }
+    expect(await sentGroups(h)).toEqual({
+      groups,
+      content: "@Mary Jane @Wes hi",
+      tags: [],
+    });
+  },
+);
+it.each([
   ["the composer's own send", false],
   ["a submission", true],
 ])(
