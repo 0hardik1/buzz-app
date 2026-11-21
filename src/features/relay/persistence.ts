@@ -23,7 +23,7 @@ export type SavedHead = {
   profiles: unknown[];
 };
 export class StartupRosterSuperseded extends Error {
-  constructor(readonly observePeer: () => void) {
+  constructor(readonly observePeer?: () => void) {
     super("Startup roster changed");
   }
 }
@@ -319,10 +319,16 @@ export function createHeadPersistence(
           }),
         STARTUP,
       );
-      if (saved === undefined)
-        throw new StartupRosterSuperseded(() => {
-          observedDiscovery = version;
-        });
+      if (saved === undefined) {
+        const peerVersion = version;
+        throw new StartupRosterSuperseded(
+          peerVersion
+            ? () => {
+                observedDiscovery = peerVersion;
+              }
+            : undefined,
+        );
+      }
       if (!saved) throw new Error("Startup cache is over its byte budget");
       if (version !== undefined) observedDiscovery = version;
     },

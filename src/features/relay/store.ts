@@ -433,7 +433,7 @@ export function createChannelStore(
     | undefined;
   let lastDiscoveryWrite: number | undefined;
   let discoveryDirty = false;
-  let discoverySuperseded = false;
+  let discoverySuperseded: "cleared" | "replaced" | undefined;
   let discoveryRevocationPending = false;
   // The roster last written and when; undefined when the disk copy is unknown.
   let savedDiscovery: { key: string; at: number } | undefined;
@@ -1587,7 +1587,7 @@ export function createChannelStore(
     )
       return;
     const saving = { key, at: now() };
-    discoverySuperseded = false;
+    discoverySuperseded = undefined;
     savedDiscovery = saving;
     lastDiscoveryWrite = saving.at;
     void persistence
@@ -1613,10 +1613,9 @@ export function createChannelStore(
           return;
         }
         // Only the current attempt can establish the next peer baseline.
-        error.observePeer();
-        discoveryDirty = false;
+        error.observePeer?.();
         discoveryRevocationPending = false;
-        discoverySuperseded = true;
+        discoverySuperseded = error.observePeer ? "replaced" : "cleared";
         if (discoverySave?.ifUnchanged) {
           clearTimeout(discoverySave.timer);
           discoverySave = undefined;
@@ -2092,10 +2091,13 @@ export function createChannelStore(
             (age >= DISCOVERY_SAVE_INTERVAL_MS &&
               (discoveryDirty || age >= DISCOVERY_RESAVE_MS));
           const ifUnchanged = !first && !cacheChanged && !freshChange;
-          // After a peer change, only a later signed update makes a repeat
-          // eligible to save. The writer compares with the observed peer row.
+          // A replacement lets newer pending changes retry against that row.
+          // An absent row cannot identify which peer clear a repeat observed.
+          const canRetry =
+            !discoverySuperseded ||
+            (discoverySuperseded === "replaced" && discoveryDirty);
           if (
-            (!ifUnchanged || !discoverySuperseded || discoveryDirty) &&
+            (!ifUnchanged || canRetry) &&
             (first ||
               discoveryRevocationPending ||
               freshChange ||
@@ -2515,7 +2517,7 @@ export function createChannelStore(
           savedDiscovery = undefined;
           lastDiscoveryWrite = undefined;
           discoveryDirty = false;
-          discoverySuperseded = false;
+          discoverySuperseded = undefined;
           discoveryRevocationPending = false;
           profileSave ??= setTimeout(saveProfiles, 1000);
           void persistence?.clear().catch(() => {});
@@ -3622,7 +3624,7 @@ export function createChannelStore(
     savedDiscovery = undefined;
     lastDiscoveryWrite = undefined;
     discoveryDirty = false;
-    discoverySuperseded = false;
+    discoverySuperseded = undefined;
     discoveryRevocationPending = false;
     await persistence?.clear();
   }
