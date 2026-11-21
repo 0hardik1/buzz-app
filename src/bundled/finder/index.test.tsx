@@ -297,7 +297,7 @@ test("a source leaves when its plugin stops, and All of Buzz shows instead", asy
   ).not.toBeInTheDocument();
 });
 
-test("a failing list shows an error row, and a late answer for older text is ignored", async () => {
+test("a failing or empty list says so, and a late answer for older text is ignored", async () => {
   const answers = new Map<string, (items: readonly FinderItem[]) => void>();
   const broken = consumer(() => ({
     id: "broken",
@@ -305,6 +305,18 @@ test("a failing list shows an error row, and a late answer for older text is ign
     items: () => {
       throw new Error("no list");
     },
+  }));
+  const rejects = consumer(() => ({
+    id: "rejects",
+    title: "Rejects",
+    search: async () => {
+      throw new Error("no answer");
+    },
+  }));
+  const empty = consumer(() => ({
+    id: "empty",
+    title: "Empty",
+    items: () => [],
   }));
   const slow = consumer(() => ({
     id: "slow",
@@ -314,6 +326,8 @@ test("a failing list shows an error row, and a late answer for older text is ign
   vi.spyOn(console, "error").mockImplementation(() => {});
   const { show } = await mount({
     "example.broken": broken.module,
+    "example.rejects": rejects.module,
+    "example.empty": empty.module,
     "example.slow": slow.module,
   });
   show();
@@ -321,6 +335,20 @@ test("a failing list shows an error row, and a late answer for older text is ign
     broken.used.finder?.open({ source: "example.broken/broken" }),
   );
   expect(await screen.findByText("This list couldn't load.")).toBeVisible();
+  await act(async () =>
+    rejects.used.finder?.open({ source: "example.rejects/rejects" }),
+  );
+  expect(await screen.findByText("This list couldn't load.")).toBeVisible();
+  await act(async () =>
+    empty.used.finder?.open({ source: "example.empty/empty" }),
+  );
+  expect(await screen.findByText("This list is empty.")).toBeVisible();
+  await act(async () =>
+    empty.used.finder?.open({ source: "example.empty/empty", query: "x" }),
+  );
+  expect(
+    await screen.findByText("Nothing matches. Try fewer letters."),
+  ).toBeVisible();
   await act(async () =>
     slow.used.finder?.open({ source: "example.slow/slow", query: "a" }),
   );

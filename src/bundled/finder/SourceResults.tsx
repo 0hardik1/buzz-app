@@ -84,18 +84,26 @@ function useSearched(
   useEffect(() => {
     if (!("search" in source)) return;
     const controller = new AbortController();
-    try {
-      source.search(
-        query,
-        (items) => {
-          if (!controller.signal.aborted)
-            setListed({ query, items: [...items] });
-        },
-        controller.signal,
-      );
-    } catch (error) {
+    const fail = (error: unknown) => {
+      // Stopping for newer text isn't a failure.
+      if (controller.signal.aborted) return;
       console.error(`Finder source ${source.key} failed`, error);
       setListed({ query, error: true });
+    };
+    try {
+      // An async search can reject later instead of throwing.
+      Promise.resolve(
+        source.search(
+          query,
+          (items) => {
+            if (!controller.signal.aborted)
+              setListed({ query, items: [...items] });
+          },
+          controller.signal,
+        ),
+      ).catch(fail);
+    } catch (error) {
+      fail(error);
     }
     return () => controller.abort();
   }, [source, query]);
@@ -187,9 +195,11 @@ export function SourceResults({
           empty:
             listed && "error" in listed
               ? "This list couldn't load."
-              : listed
-                ? "Nothing matches. Try fewer letters."
-                : "",
+              : !listed
+                ? ""
+                : query.trim()
+                  ? "Nothing matches. Try fewer letters."
+                  : "This list is empty.",
         },
       ]}
       footer={footer}
