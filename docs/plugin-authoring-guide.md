@@ -5,7 +5,7 @@ A plugin is a folder with `manifest.json` and one self-contained ES module `plug
 ## Workflow
 
 1. Write a small first version as plain JS in a folder in your workspace: `React.createElement` via `ctx.react`, no build step. TypeScript/JSX is optional and only worth it if you set up your own bundler that emits a single `plugin.js` with classic JSX and no runtime imports. `buzzodz plugin init` exists only with a buzz-app checkout.
-2. First install needs the owner. Ask them to open **Settings → Plugins → Manage plugins**, choose **Add**, then **Browse** under Add from folder, pick your folder, review the host access shown and select **Install plugin**. It must be **Browse**: a dragged-in folder is copied, so it has no folder to reload. New plugins are enabled by default (the review has an opt-out).
+2. First install needs the owner. Ask them to open **Settings → Plugins → Manage plugins**, choose **Add**, then **Browse** under Add from folder, pick your folder, review the host access shown and select **Install plugin**. It must be **Browse**: a dragged-in folder is copied, so it has no folder to reload. Or call `plugin_request` with `action` `install` and your folder's absolute path as `repository`: the owner reviews and installs it from the card, linked the same way. New plugins are enabled by default (the review has an opt-out).
 3. After that, edit the files in the same folder and call the `plugin_reload` tool with the manifest id. It briefly stops the plugin, loads the new files, waits for activation and, if the new code fails to start, restores the revision that was running. Read its `application` result (`applied` | `saved` | `failed`, with `nextStep`) instead of guessing. Call `plugin_status` (optionally with `id`) to see state, errors and the pages, panels, sidebar sections and agent tools it registered. Reload also applies `name`, `description` and `discovery` changes; a changed `id` is refused (install it as a new plugin).
 4. If you change `manifest.host` (host access), reload refuses. The owner must review the change via the plugin's **Update** in Settings → Plugins.
 5. Verify what the user will see. Keep the first version small, then refine.
@@ -318,8 +318,10 @@ Add `"host"` to `inject`, then:
   `registerWorkspace`, with the same provider lifetime as `ui.Tabs`.
   Set the page's `layout` to `"workspace"`. Pass
   `{ id, session, scope, target, label, intro?, actions?, detail?, latestRequest? }`.
-  `target` is `{ channelId, threadId?, messageId? }`: omit `threadId` for the
-  channel timeline, or supply it for a thread. `messageId` selects a message.
+  Set `target` to `{ channelId, threadId?, subthreadId?, messageId? }`. Omit
+  `threadId` for the channel timeline. Supply a thread ID to show the thread.
+  Add `subthreadId` to show and compose within a branch of that thread.
+  `messageId` selects a message in the chosen view.
   Pass a fresh `AbortSignal` as `latestRequest` to open the transcript at the
   latest message, including when selecting the same conversation again. Scope
   the signal to that opening. Omit it on Back or Forward. An aborted signal is
@@ -379,6 +381,16 @@ Inject `panels` to use these host members:
   plugin-ID prefixes keep different plugins from sharing a name. Width is saved per scope/name and follows saves
   from other windows; undefined scope keeps it in memory. Double-click resets
   the preferred width. `primary`, when supplied, is `{ defaultWidth, maxRatio }`.
+
+Inject `agents` to render `ctx.agents.ui?.Transcript` inside an agent type's
+Activity tab. Feature-detect `ctx.agents.ui?.Transcript` and keep a fallback on
+older hosts where `ui` is absent. It renders the same transcript view bundled
+harnesses use: the Refresh header, live refreshes while `working` is true
+(including on `Delivery.step` calls), **View activity** turn focus, Markdown,
+file diffs, prompt sections and context use. The plugin still owns its
+conversation list and marks its own sent-message items with `posted: true` and
+`messageId`. Derive its props from `@buzz/author` with
+`ComponentProps<NonNullable<Agents["ui"]>["Transcript"]>`.
 
 ```js
 export const inject = ["react", "conversation", "panels", "pages"];

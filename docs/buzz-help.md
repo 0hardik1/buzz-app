@@ -279,6 +279,9 @@ In a Codex agent’s settings, open **Huddle voice** in the **Settings** tab to 
   **Copy link**, and shared expiry and use limits. On macOS, hover over the QR
   or focus its action with the keyboard to reveal **Share**, which opens the
   system share menu with a QR image and the invite link.
+  **Links** lists the community's invite links with their status, uses and
+  expiry; **Revoke** on a row, or paste a link into **Revoke a link**, stops
+  anyone new from joining with it. People who already joined stay in.
 - To use Buzz on your phone, open Settings → **Mobile app** (**Pair mobile**
   in builds without Builderlab). When you're signed in with Builderlab and your
   account holds this identity's backup, it says to install the app (with store
@@ -644,6 +647,12 @@ Quitting Buzz also turns it off.
   does not choose where the agent works. A chip someone else
   sends, or a folder no longer in your repositories folder, grants nothing.
   A bare **!**, or **!** before a space, stays text.
+- **Skill chips.** In the desktop app, when a message addresses one of your own
+  local agents whose harness declares skill folders, type **/** and part of a
+  skill name in the composer to list matching skills from those folders on this
+  device. Choosing one adds a skill chip targeted at that agent; if a message
+  addresses more than one agent, the picker asks you to mention one agent first.
+  A query that matches no skill stays plain text.
 - **Activity** (the bell at the top of the Messages sidebar) collects DMs, ordinary responses in Solo chats, mentions of you, and
   replies in threads you started, replied in, or follow. Solo chats appear under All, not DMs; their nested
   threads stay separate. Agent-only coordination stays out. The tabs (All, Threads, Mentions, DMs, Reactions) narrow it by
@@ -893,9 +902,13 @@ Quitting Buzz also turns it off.
   you typed. The keyword order shows first; the reordered list replaces it a
   moment later, and a small sparkle appears at the end of the Messages heading
   (hover it to see **Reranked**). If you've already moved the
-  highlight or chosen a result, the order stays as it is. The provider sees the query and those
-  messages' text, conversation names and authors. Newest-first and filter-only
-  searches aren't reranked.
+  highlight or chosen a result, the order stays as it is. Other things equal,
+  it favors messages people wrote over agent or workflow output, then ones
+  that mention you, then ones in conversations you're in. The provider sees
+  the query and those messages' text, dates, conversation names and authors,
+  and whether each is a direct message, yours, from an agent or workflow,
+  mentions you, or is in a conversation you're in. Newest-first and filter-only searches aren't
+  reranked.
 - **Ask an agent**: start with `ask:` to write a question for your default
   agent, or choose **Ask** under a long query. Enter opens New chat with the
   question addressed to that agent; press Enter again to send it. If New chat
@@ -1673,11 +1686,11 @@ If an agent reports incompatible synced settings, choose the **Previous Versions
   from this device only; it may stay in that community's channels.
 - **Settings → Agent setup → Base instructions** shows what Buzz tells every
   agent on this device before the agent's own instructions, one section per
-  topic. For Publishing, Progress, Etiquette, Agent Memory, Engineering
-  Discipline, Commit identity and Autonomy, choose **Default**, **Off**, or
-  **Custom** with your own text of up to 4 KiB, then **Save**. Default shows
-  the section's text to read and copy; choose Custom to edit it. The other
-  sections are always on, or Buzz sets them for the conversation; **All
+  topic. For Publishing, Progress, Etiquette, Agent Memory, Commit identity
+  and Autonomy, choose **Default**, **Off**, or **Custom** with your own text
+  of up to 4 KiB, then **Save**. Default shows the section's text to read and
+  copy; choose Custom to edit it. The other sections are always on, or Buzz
+  sets them for the conversation; **All
   sections** shows the default text of each. A plugin that is on can declare
   sections that it replaces in the chats it manages: its install review lists
   them. For example, such a plugin can set where an agent's work happens in a
@@ -2075,7 +2088,7 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   development** plugin is on (it is by default). It gives them
   `plugin_authoring_guide`, `plugin_status` and `plugin_reload`. The person
   installs a new plugin first: **Manage plugins → Add → Browse** under Add from
-  folder. After that the agent can reload it from that folder. A reload that
+  folder, or by approving the agent's install request for the folder. After that the agent can reload it from that folder. A reload that
   fails to start restores the previous version. Changed host access still needs
   the person's review through the plugin's **Update**.
 - **Performance diagnostics** starts off and is unlisted in the Plugins catalog.
@@ -2092,7 +2105,10 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   message in the conversation shows a card with **Review** and **Decline**, and the
   change waits until the person reviews and confirms it there (or under **Requested
   by agents** in **Settings → Plugins → Manage plugins**). A restart discards it. An agent cannot
-  install plugin code by itself.
+  install plugin code by itself. An install request can name a Git repository or
+  a local folder; a folder installs linked, as **Browse** does, so anything that
+  can write to the folder can change the plugin's code and reload it without
+  another review while its access stays the same.
 - A `buzz://plugin-install` link, or a plugin's request to install another
   plugin from a URL, can update a plugin with that ID installed from Git in
   place: review the source change and choose **Update**, with no removal. It is

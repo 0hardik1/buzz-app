@@ -23,6 +23,7 @@ import { useChannelWindow } from "../../features/relay/react";
 import { useRecoveryOwns } from "../../features/relay/RecoveryNotice";
 import { headRecovering } from "../../features/relay/live-recovery";
 import { clientMetrics } from "../../features/developer/client-metrics";
+import { MessageLoading } from "../../features/messages/MessageLoading";
 import { Button } from "../../shared/design-system/ui/Button";
 import styles from "./Channels.module.css";
 
@@ -181,7 +182,7 @@ export const ChannelBody = memo(function ChannelBody({
       </div>
     ) : holding || (window.status !== "ready" && !window.rows.length) ? (
       <div
-        className={`${styles.empty} ${styles.timelinePlaceholder}`}
+        className={`${styles.empty} ${styles.timelinePlaceholder} ${styles.timelineLoading}`}
         data-buzz-launch-pending={!cached ? "required" : undefined}
       >
         <MessageLoading />

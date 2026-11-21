@@ -1,3 +1,4 @@
+import { hostComposerProvenance } from "./mention-draft";
 import { TypingIndicator } from "./TypingIndicator";
 import { MessageLoading } from "./MessageLoading";
 import { useMessageArrival } from "./use-message-arrival";
@@ -587,6 +588,7 @@ function ReviewShell({
                   }}
                 >
                   <MediaCommentComposer
+                    evidenceOwner={hostComposerProvenance}
                     shown={commentsOpen}
                     extensions={extensions}
                     session={session}

@@ -16,7 +16,10 @@ import {
   useComposerScope,
 } from "./composer-overlay";
 import { Collapsible } from "@base-ui/react/collapsible";
-import { formatItemTimestamp } from "../../shared/datetime";
+import {
+  formatFullTimestamp,
+  formatItemTimestamp,
+} from "../../shared/datetime";
 import { ProfilePeek } from "../profiles/ProfilePeek";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import {
@@ -56,6 +59,7 @@ import { ReplySummary } from "./ReplySummary";
 import { usePresenceStatus } from "../presence/react";
 import { UserStatusDisplay } from "../user-status/StatusDisplay";
 import { useMessageDensity } from "../../shared/theme/message-density";
+import { useLocalDay } from "../../shared/use-local-day";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
   memo,
@@ -2206,6 +2210,8 @@ function RelayedMessageRow(props: MessageRowProps) {
   const resolveName = useChannelIdentityNames(references, row.channelId);
   const directory = useReferenceDirectory(references, participantProfiles);
   const showTime = useMessageTimeVisible(references?.channels, row.channelId);
+  // The button's name carries the full date, so it follows time zone changes.
+  useLocalDay();
   const shown = useMemo(() => {
     const content = withoutRelayNotice(row.content, row.relayedFrom?.notice);
     const removed = row.content.length - content.length;
@@ -2277,7 +2283,7 @@ function RelayedMessageRow(props: MessageRowProps) {
                 ref={trigger}
                 data-buzz-ui=""
                 className={styles.relayedTrigger}
-                aria-label={`${agent.name}${chatLabel ? ` from ${chatLabel}` : ""}: ${preview}${row.edited ? " (edited)" : ""}${row.replyCount > 0 ? `, ${row.replyCount === 1 ? "1 reply" : `${row.replyCount} replies`}` : ""}`}
+                aria-label={`${agent.name}${chatLabel ? ` from ${chatLabel}` : ""}: ${preview}${row.edited ? " (edited)" : ""}${row.replyCount > 0 ? `, ${row.replyCount === 1 ? "1 reply" : `${row.replyCount} replies`}` : ""}, ${formatFullTimestamp(row.createdAt)}`}
               />
               <span className={styles.relayedAvatar} aria-hidden="true">
                 <AgentAvatar
@@ -2303,7 +2309,7 @@ function RelayedMessageRow(props: MessageRowProps) {
                   <span
                     className={styles.relayedSubtle}
                     data-relayed-source=""
-                    data-relayed-from=""
+                    data-relayed-from={chat.channelType === "dm" ? "dm" : ""}
                     aria-hidden="true"
                   >
                     from
