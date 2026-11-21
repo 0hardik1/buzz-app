@@ -256,6 +256,10 @@
   flex-shrink: 0;
   --sidebar-section-gap: var(--space-2);
 }
+/* A card after the sections, like New workspace, keeps their gap. */
+:where([data-sidebar-slot]:has(> .channelSection)) ~ .channelSection {
+  margin-top: var(--sidebar-section-gap);
+}
 .channelSection[data-sidebar-section="starred"] {
   --sidebar-section-gap: var(--space-4);
 }
