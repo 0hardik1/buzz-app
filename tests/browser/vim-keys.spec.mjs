@@ -3,6 +3,7 @@ import {
   openSettings,
   selectSettingsSection,
 } from "./navigation.mjs";
+import { animationsSettled } from "./animations.mjs";
 import { setPluginEnabled } from "./plugin-settings.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
@@ -79,10 +80,12 @@ test("Vim keys select messages, act on them with go, and leave the composer", as
   await expect(
     page.getByRole("region", { name: "Thread messages", exact: true }),
   ).toBeVisible();
-  // Reply hands focus to the thread's composer; let that finish first.
+  // Reply hands focus to the thread's composer; let that and the panel's
+  // entrance finish first, since i skips a composer the panel still covers.
   await expect(
     page.getByRole("textbox", { name: "Reply to thread", exact: true }),
   ).toBeFocused();
+  await animationsSettled(page.locator("[data-panel-dock]"));
 
   // i types; Escape stops typing so j moves again.
   await nothingFocused(page);
