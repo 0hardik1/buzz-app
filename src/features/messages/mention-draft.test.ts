@@ -5,6 +5,7 @@ import {
   legacyFollowupDraft,
   mentionDraft,
   followupDraft,
+  restoredDraft,
 } from "./mention-draft";
 import { typedDraft } from "./composer-testing";
 import { composerMarkdown } from "./composer-markdown";
@@ -291,4 +292,25 @@ it("the recipient cap counts distinct people, keeping each one's spans", () => {
   expect(
     restored.filter((item) => item.pubkey === people[0]?.pubkey),
   ).toHaveLength(2);
+});
+it("a restored group whose label no longer holds is one chip per member, each keeping its explicit pick", () => {
+  const mary = {
+    pubkey: "5".repeat(64),
+    name: "Mary",
+    explicit: true as const,
+  };
+  const wes = { pubkey: "6".repeat(64), name: "Wes" };
+  const saved = typedDraft({
+    text: "@*ops* hi",
+    recipients: [mary, wes].map((person) => ({
+      ...person,
+      label: "*ops*",
+      start: 0,
+      end: 6,
+    })),
+  });
+  expect(restoredDraft(saved).recipients).toEqual([
+    { ...mary, start: 0, end: 5 },
+    { ...wes, start: 6, end: 10 },
+  ]);
 });

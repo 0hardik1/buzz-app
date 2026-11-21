@@ -299,8 +299,9 @@ export function composerGroup(value: unknown, source: unknown) {
   return value as ComposerGroup;
 }
 /** Whether `@label` reads as one group to whoever gets it: letters, digits
- * and spaces, a hyphen only between two of them, in which the reader binds
- * none of `people`'s names, each taken alone. */
+ * and spaces, a hyphen only between two of them, in which no reader binds
+ * any of `people`. This app's reader matches a whole name; mobile's matches
+ * a name or its first word at the start, in any case, where a word ends. */
 export function groupLabelHolds(
   label: string,
   people: readonly MentionRecipient[],
@@ -318,6 +319,16 @@ export function groupLabelHolds(
         },
         undefined,
       ).some((part) => part.target),
+    ) &&
+    !people.some((person) =>
+      [person.name, person.name.split(/\s+/)[0]].some(
+        (name) =>
+          !!name &&
+          new RegExp(
+            `^${name.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&")}(?![\\p{L}\\p{M}\\p{N}])`,
+            "iu",
+          ).test(label),
+      ),
     )
   );
 }

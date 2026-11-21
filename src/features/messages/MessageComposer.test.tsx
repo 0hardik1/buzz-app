@@ -18461,6 +18461,29 @@ it.each(groupLabelMatrix)(
     }
   },
 );
+const maryJane = { ...first, name: "Mary Jane" };
+const wes = { ...second, name: "Wes" };
+it.each([
+  ["Mary crew", [maryJane, wes], false],
+  ["mary crew", [maryJane, wes], false],
+  ["MARY CREW", [maryJane, wes], false],
+  ["Mary-crew", [maryJane, wes], false],
+  ["Mary Jane crew", [maryJane, wes], false],
+  ["Wes", [maryJane, wes], false],
+  ["Marys crew", [maryJane, wes], true],
+  ["Crew Mary", [maryJane, wes], true],
+  ["Wesley team", [maryJane, wes], true],
+  ["ÉMILE crew", [{ ...first, name: "Émile Durand" }], false],
+  ["ſam crew", [{ ...first, name: "Sam Lee" }], false],
+])(
+  "a group picked with the label %s is one chip only when mobile's reader binds no member's name or first word at its start",
+  async (label, members, holds) => {
+    const group = await pickSent({ mentions: members, label });
+    expect(group.tags).toEqual(members.map((person) => person.pubkey));
+    if (holds) expect(group.content).toBe(`@${label} `);
+    else expect(group).toEqual(await pickSent({ mentions: members }));
+  },
+);
 it.each(["eng-oncall", "a-b-c"])(
   "a group labelled %s is still one chip after its saved draft is restored",
   async (label) => {
@@ -18521,3 +18544,108 @@ it.each([true, false])(
     );
   },
 );
+
+const savedCrew = (
+  text: string,
+  label: string,
+  crew: readonly MentionRecipient[],
+  before: readonly MentionRecipient[] = [],
+) => {
+  const start = text.indexOf(`@${label}`);
+  return {
+    text,
+    recipients: [
+      ...before.map((person) => ({ ...person, start: 0, end: start - 1 })),
+      ...crew.map((person) => ({
+        ...person,
+        start,
+        end: start + label.length + 1,
+        label,
+      })),
+    ],
+  };
+};
+const opsCrew = savedCrew("@*ops* hi", "*ops*", [maryJane, wes]);
+async function sentGroups(h: ReturnType<typeof mount>) {
+  const groups = screen.queryAllByRole("img", { name: /^Group / }).length;
+  h.submit();
+  await waitFor(() => expect(h.messages.send).toHaveBeenCalled());
+  const [, content, tags] = h.messages.send.mock.calls[0] ?? [];
+  return { groups, content, tags };
+}
+it.each([
+  ["*ops*", opsCrew],
+  [
+    "Mary crew",
+    savedCrew("@Mary Jane @Mary crew hi", "Mary crew", [wes], [maryJane]),
+  ],
+])(
+  "a saved group labelled %s comes back as its members, as a pick would make it now",
+  async (_label, saved) => {
+    writeView("scope", "draft:channel", typedDraft(saved));
+    expect(await sentGroups(mount())).toEqual({
+      groups: 0,
+      content: "@Mary Jane @Wes hi",
+      tags: [maryJane.pubkey, wes.pubkey],
+    });
+  },
+);
+it("a group whose label no longer holds is its members in a draft saved without a document", async () => {
+  writeView("scope", "draft:channel", opsCrew);
+  expect(await sentGroups(mount())).toEqual({
+    groups: 0,
+    content: "@Mary Jane @Wes hi",
+    tags: [maryJane.pubkey, wes.pubkey],
+  });
+});
+it("a group whose label no longer holds is its members in a draft another window saves", async () => {
+  const h = mount();
+  act(() => writeView("scope", "draft:channel", typedDraft(opsCrew)));
+  expect(await sentGroups(h)).toEqual({
+    groups: 0,
+    content: "@Mary Jane @Wes hi",
+    tags: [maryJane.pubkey, wes.pubkey],
+  });
+});
+it("a group whose label a person added after it binds is its members when the draft reopens over a conflict", async () => {
+  const h = mount({}, undefined, undefined, undefined, undefined, bangAnywhere);
+  h.fill("!Crew");
+  offerCrew(h, [wes], "Mary crew");
+  await h.user.keyboard("{Enter}");
+  await h.user.keyboard("!M");
+  act(() => {
+    h.completionRequests.at(-1)?.({
+      items: [{ id: "mary", label: "Mary Jane", edit: { mention: maryJane } }],
+    });
+  });
+  await h.user.keyboard("{Enter}");
+  expect(screen.queryAllByRole("img", { name: /^Group / })).toHaveLength(1);
+  act(() => writeView("scope", "draft:channel", "Saved elsewhere"));
+  h.remount();
+  expect(screen.getByRole("alert")).toHaveTextContent(/changed elsewhere/);
+  fireEvent.click(screen.getByRole("button", { name: "Keep my draft" }));
+  expect(await sentGroups(h)).toEqual({
+    groups: 0,
+    content: "@Wes @Mary Jane ",
+    tags: [wes.pubkey, maryJane.pubkey],
+  });
+});
+it("undoing and redoing a group pick brings back one chip with the same members", async () => {
+  const h = mount();
+  h.fill("!Crew");
+  offerCrew(h, [maryJane, wes]);
+  await h.user.keyboard("{Enter}");
+  const chips = () =>
+    screen.queryAllByRole("img").map((node) => node.getAttribute("aria-label"));
+  const picked = chips();
+  expect(picked).toEqual(["Group Crew, 2 recipients: Mary Jane, Wes"]);
+  act(() => h.input().undo(false));
+  expect(chips()).toEqual([]);
+  act(() => h.input().undo(true));
+  expect(chips()).toEqual(picked);
+  expect(await sentGroups(h)).toEqual({
+    groups: 1,
+    content: "@Crew ",
+    tags: [maryJane.pubkey, wes.pubkey],
+  });
+});

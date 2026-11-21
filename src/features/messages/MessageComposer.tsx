@@ -160,6 +160,7 @@ import {
   editorMention,
   hasHumanMentionSelection,
   hostComposerProvenance,
+  restoredDraft,
   stageableGif,
   withoutSpans,
   type MentionDraft,
@@ -732,7 +733,7 @@ function Composer({
       const saved = parseDraftView(savedRevision);
       if (saved && saved !== "oversized")
         return {
-          draft: mentionDraft(saved.value),
+          draft: restoredDraft(saved.value),
           revision: savedRevision,
           cursor,
         };
@@ -861,7 +862,7 @@ function Composer({
   const [initial] = useState(() => {
     if (reopenedConflict)
       return { value: reopenedConflict, applied: undefined, automatic: false };
-    const stored = mentionDraft(
+    const stored = restoredDraft(
       accepted?.next ??
         submission?.recoveredDraft ??
         readView<unknown>(scope, draftKey, submission?.initialDraft ?? ""),
@@ -1786,7 +1787,7 @@ function Composer({
     diagnose("load", revision.current, raw);
     let next: MentionDraft;
     try {
-      next = restoreChatLinks(mentionDraft(JSON.parse(raw ?? "null")));
+      next = restoreChatLinks(restoredDraft(JSON.parse(raw ?? "null")));
     } catch {
       next = mentionDraft("");
     }

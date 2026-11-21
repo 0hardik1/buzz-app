@@ -1,7 +1,11 @@
+import { Fragment, Slice } from "prosemirror-model";
 import { forwardReference, type ForwardReference } from "./forward-clipboard";
 import { canonicalChatCard } from "./chat-cards";
 import {
+  composerSchema,
+  groupLabelHolds,
   projectComposerDocument,
+  readComposerDocument,
   readComposerSnapshot,
 } from "./composer-document";
 
@@ -178,6 +182,39 @@ export function mentionDraft(value: unknown): MentionDraft {
       }),
     ),
   };
+}
+/** A saved draft as a pick would make it now: a group chip whose label no
+ * longer holds against the draft's recipients is one chip per member. The
+ * normalize pass reads every change through `mentionDraft`, so only loading
+ * a draft calls this. */
+export function restoredDraft(value: unknown) {
+  const draft = mentionDraft(value);
+  const doc = readComposerDocument(draft, draft.recipients);
+  const stale = projectComposerDocument(doc).tokens.filter(
+    ({ node }) =>
+      node.attrs.group &&
+      !groupLabelHolds(node.attrs.group.label, draft.recipients),
+  );
+  if (!stale.length) return draft;
+  const split = stale.reduceRight((next, { from, to, node }) => {
+    const members: readonly MentionRecipient[] = node.attrs.group.members;
+    const chips = members.flatMap((person, index) => [
+      ...(index ? [composerSchema.text(" ", node.marks)] : []),
+      composerSchema.nodes.token.create(
+        { source: `@${person.name}`, recipient: person, editAsText: false },
+        null,
+        node.marks,
+      ),
+    ]);
+    return next.replace(from, to, new Slice(Fragment.from(chips), 0, 0));
+  }, doc);
+  const { text, recipients, document } = projectComposerDocument(split).draft;
+  return mentionDraft({
+    ...draft,
+    text,
+    recipients,
+    ...(draft.document ? { document } : {}),
+  });
 }
 /** What counts as a draft everywhere: text, an attached chat or GIF, or `files`.
  * A typed tag is text the person put there; the composer no longer saves
