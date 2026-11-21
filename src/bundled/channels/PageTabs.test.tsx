@@ -33,8 +33,10 @@ vi.mock("./ConversationTab", () => ({
     parent,
     intro,
     trailing,
+    aside,
   }: {
     intro?: import("react").ReactNode;
+    aside?: import("react").ReactNode;
     trailing?: { content(state: object): import("react").ReactNode };
     tab: Tab;
     channel: { name: string };
@@ -53,6 +55,7 @@ vi.mock("./ConversationTab", () => ({
       {intro}
       {tab.kind} in {channel.name}
       {trailing?.content({ expanded: false, toggle() {} })}
+      {aside}
       {!visit && " unvisited"}
       {onResolvedRoot && (
         <button type="button" onClick={() => onResolvedRoot("older")}>
@@ -472,7 +475,8 @@ it("a workspace gives its trailing content to its main reader", () => {
   expect(screen.getByText("Decision card")).toBeVisible();
 });
 
-it("a workspace places its aside after the main reader, in the reader's row", () => {
+// PROTOTYPE: a channel reader scrolls the aside with its transcript.
+it("a workspace gives a channel reader its aside", () => {
   const f = fixture();
   cleanup();
   render(
@@ -488,8 +492,7 @@ it("a workspace places its aside after the main reader, in the reader's row", ()
   );
   const reader = screen.getByText("conversation in alpha", { exact: false });
   const aside = screen.getByRole("complementary", { name: "Task dashboard" });
-  expect(reader.parentElement?.nextElementSibling).toBe(aside);
-  expect(screen.getByRole("tabpanel")).toContainElement(aside);
+  expect(reader).toContainElement(aside);
 });
 
 it.each([false, true])(

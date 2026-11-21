@@ -1756,15 +1756,13 @@ function Timeline({
     reading.every(
       (id, index) => rows[rows.length - reading.length + index]?.id === id,
     );
-  useLayoutEffect(() => {
-    if (prepend) olderLanded.current = performance.now();
-  });
   // Without shift, rows landing above the reader push them down. Scroll by
   // that height before paint, so input that follows starts from the reader's
   // row. Rows that moved keep another row's size until they measure; hold the
   // reader's latest row through those measurements, until reader input that
   // follows them ends.
   useLayoutEffect(() => {
+    if (prepend) olderLanded.current = performance.now();
     const boundaryChanged = previousBoundaryId.current !== newMessageBoundaryId;
     previousBoundaryId.current = newMessageBoundaryId;
     const element = scroller.current;
