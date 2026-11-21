@@ -3,8 +3,10 @@ import { Menu as BaseMenu } from "@base-ui/react/menu";
 import { CheckIcon, CaretRightIcon } from "../icons/index";
 import { useFinalFocusUnlessMoved } from "./finalFocus";
 import { hoverOpenTiming, type HoverOpen } from "./hoverIntent";
+import { useMenuLetters } from "./menu-letters";
 import {
   createContext,
+  useCallback,
   useContext,
   useState,
   type ComponentProps,
@@ -128,6 +130,16 @@ function PositionedPopup({
   ...props
 }: PopupProps) {
   const focus = useFinalFocusUnlessMoved(finalFocus, ref);
+  const letters = useMenuLetters();
+  const { ref: focusRef } = focus;
+  const { ref: lettersRef } = letters;
+  const popupRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      focusRef(element);
+      lettersRef(element);
+    },
+    [focusRef, lettersRef],
+  );
   const contextMenu = useContext(ContextMenuPresence) !== null;
   return (
     <BaseMenu.Portal>
@@ -144,7 +156,8 @@ function PositionedPopup({
       >
         <BaseMenu.Popup
           {...props}
-          ref={focus.ref}
+          ref={popupRef}
+          onKeyDownCapture={letters.onKeyDownCapture}
           finalFocus={focus.finalFocus}
           data-buzz-ui=""
           data-size={size}
@@ -179,11 +192,18 @@ export function MenuSubmenuPopup(props: PopupProps) {
 
 type ItemProps = Omit<ComponentProps<typeof BaseMenu.Item>, "className"> & {
   tone?: "default" | "danger";
+  /** Its key while menu letters are on, instead of one taken from its label. */
+  letter?: string;
 };
 
-export function MenuItem({ tone = "default", ...props }: ItemProps) {
+export function MenuItem({ tone = "default", letter, ...props }: ItemProps) {
   return (
-    <BaseMenu.Item {...props} data-tone={tone} className="buzz-menu-item" />
+    <BaseMenu.Item
+      {...props}
+      data-tone={tone}
+      data-menu-letter-fixed={letter}
+      className="buzz-menu-item"
+    />
   );
 }
 
