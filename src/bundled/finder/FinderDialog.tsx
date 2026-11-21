@@ -43,7 +43,9 @@ export function excerpt(
   };
 }
 
-const noProfiles = () => new Map();
+const emptyProfiles: ReturnType<RelaySession["profiles"]["snapshot"]> =
+  new Map();
+const noProfiles = () => emptyProfiles;
 const noSubscribe = () => () => {};
 
 /** Search your own conversations, Telescope-style: the field, the best
