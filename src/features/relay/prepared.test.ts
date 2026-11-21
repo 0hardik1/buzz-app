@@ -155,6 +155,37 @@ describe("prepared channel working sets", () => {
     }
   });
 
+  it("promotes a queued hover when selecting it evicts an active head", async () => {
+    const { queries, store, next, pending } = setup();
+    const reads: Promise<unknown>[] = [];
+    try {
+      queries.ensureList();
+      next().respond(discovery(["a", "b"]));
+      await flush();
+      queries.ensure("a", new AbortController().signal);
+      const previous = next();
+      for (let limit = 1; limit <= 3; limit++) {
+        const read = store.session.read([{ kinds: [9], "#h": ["b"], limit }]);
+        void read.catch(() => {});
+        reads.push(read);
+      }
+      expect(pending).toHaveLength(2);
+      next();
+      next();
+      queries.prepare?.("b");
+      expect(pending).toHaveLength(0);
+
+      queries.ensure("b", new AbortController().signal);
+
+      expect(previous.signal?.aborted).toBe(true);
+      expect(pending).toHaveLength(1);
+      expect(next().filters[0]).toMatchObject({ "#h": ["b"], top_level: true });
+    } finally {
+      store.dispose();
+      await Promise.allSettled(reads);
+    }
+  });
+
   it.each(["leave", "evict"] as const)(
     "releases navigation priority for a shared hover head when the reader can %s",
     async (end) => {

@@ -713,14 +713,9 @@ export function createChannelStore(
       evict(oldest);
     }
   }
-  function touch(channelId: string): WindowState {
-    let state = windows.get(channelId);
-    if (state) {
-      windows.delete(channelId);
-      windows.set(channelId, state);
-      return state;
-    }
-    state = {
+  function touch(channelId: string, navigation?: AbortSignal): WindowState {
+    const existing = windows.get(channelId);
+    const state: WindowState = existing ?? {
       traffic: new Map(
         (tails.peek(channelId)?.events ?? []).map((event) => [event.id, event]),
       ),
@@ -741,8 +736,12 @@ export function createChannelStore(
       sent: new Set(),
       generation: 0,
     };
+    if (existing) windows.delete(channelId);
     windows.set(channelId, state);
-    trim();
+    // Eviction can cancel a read and admit the queued head synchronously.
+    if (navigation && !navigation.aborted)
+      navigationHead = { state, signal: navigation };
+    if (!existing) trim();
     return state;
   }
   const authorized = (id: string) => discovery?.canAccess(id) ?? false;
@@ -3969,9 +3968,7 @@ export function createChannelStore(
       if (disposed || !transport || !authorized(channelId)) return;
       intent = channelId;
       current = channelId;
-      const state = touch(channelId);
-      if (navigation && !navigation.aborted)
-        navigationHead = { state, signal: navigation };
+      const state = touch(channelId, navigation);
       const retained = prepared ? heads.peek(channelId) : undefined;
       if (retained && ["idle", "error"].includes(state.snapshot.status))
         adoptHead(state, retained);
