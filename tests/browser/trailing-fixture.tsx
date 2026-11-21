@@ -33,6 +33,8 @@ export function trailingCard(
           // A ring, not a border: a sticky footer sits inside its box's border,
           // so a bottom border would show below it only at the end of the range.
           borderRadius: 12,
+          // A plugin's own spacing above the card counts toward its height.
+          marginTop: 12,
           background: "var(--surface-panel, Canvas)",
           boxShadow:
             "0 0 0 1px var(--border-standard, #8884), 0 -4px 16px #0002",

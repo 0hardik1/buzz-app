@@ -199,11 +199,13 @@ test.describe("thread workspace", () => {
 });
 
 test.describe("trailing content", () => {
-  // Rows above the card, the card and its controls, in viewport pixels.
+  // Rows above the card, the card and its controls, in viewport pixels. The
+  // trailing content's top includes the card's own margin.
   const place = (region) =>
     region.evaluate((element) => {
       const card = element.querySelector('[aria-label="Fixture card"]');
-      const extra = -Number.parseFloat(card.parentElement.style.bottom || "0");
+      const content = card.parentElement;
+      const extra = -Number.parseFloat(content.style.bottom || "0");
       const maxTop = element.scrollHeight - element.clientHeight;
       const bounds = element.getBoundingClientRect();
       const rows = element.querySelectorAll("[data-message-id]");
@@ -212,10 +214,10 @@ test.describe("trailing content", () => {
         maxTop,
         scrollTop: element.scrollTop,
         past: element.scrollTop - Math.max(0, maxTop - extra),
-        cardTop: card.getBoundingClientRect().top - bounds.top,
-        // From the latest mounted row's bottom down to the card's top.
+        cardTop: content.getBoundingClientRect().top - bounds.top,
+        // From the latest mounted row's bottom down to the content's top.
         latestGap:
-          card.getBoundingClientRect().top -
+          content.getBoundingClientRect().top -
           (rows[rows.length - 1]?.getBoundingClientRect().bottom ?? 0),
         footerBottom: card.querySelector("footer").getBoundingClientRect()
           .bottom,
@@ -389,9 +391,12 @@ test.describe("trailing content", () => {
       element
         .querySelector('[aria-label="Fixture card"] button[aria-expanded]')
         .click();
-      const card = element.querySelector('[aria-label="Fixture card"]');
+      const content = element.querySelector(
+        '[aria-label="Fixture card"]',
+      ).parentElement;
       return (
-        card.getBoundingClientRect().top - element.getBoundingClientRect().top
+        content.getBoundingClientRect().top -
+        element.getBoundingClientRect().top
       );
     });
     expect(Math.abs(landed - 100)).toBeLessThanOrEqual(1);
