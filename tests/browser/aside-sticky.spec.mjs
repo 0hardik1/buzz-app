@@ -101,3 +101,45 @@ test("a fast reversal while an older page lands moves the widget with the scroll
       `widget at ${Math.round(sample.top)}, ${sample.past}px past latest`,
     ).toBeLessThanOrEqual(2);
 });
+
+test("layout keeps a reader's small scroll above the latest message", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  await openAside(page);
+  const region = history(page);
+  await settle(page, region);
+  const rest = await place(region);
+  expect(Math.abs(rest.past)).toBeLessThanOrEqual(1);
+
+  // Within the follow threshold the reader still follows the latest message.
+  await region.hover();
+  await page.mouse.wheel(0, -40);
+  await expect
+    .poll(async () => (await place(region)).past)
+    .toBeLessThanOrEqual(-39);
+  const height = await region.evaluate((element) => element.scrollHeight);
+  // The widget grows, which lengthens its range past the latest message and
+  // realigns a follower. Wait for that range, then for the realignment.
+  await region
+    .getByRole("region", { name: "Fixture dashboard" })
+    .evaluate((widget) => {
+      widget.style.paddingBottom = "36px";
+    });
+  await expect
+    .poll(() => region.evaluate((element) => element.scrollHeight))
+    .toBeGreaterThan(height);
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      ),
+  );
+  const after = await place(region);
+  expect(after.past, "the reader's scroll is kept").toBeLessThanOrEqual(-39);
+  expect(
+    Math.abs(after.top - rest.top),
+    "the widget stays put",
+  ).toBeLessThanOrEqual(1);
+});
