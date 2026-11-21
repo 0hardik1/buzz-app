@@ -5,7 +5,6 @@ import { useRelayConnection } from "../../features/relay/react";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
 import { DiffReader, diffTargetMessage, useDiff } from "./DiffMessage";
-import styles from "./Diffs.module.css";
 
 /** A diff message read whole, in a sheet or a tab: drawn from its id, so it
  * outlives the row that opened it and a channel switch. */
@@ -40,9 +39,5 @@ function DiffPanelBody({
   const diff = useDiff(message);
   usePanelTabTitle(diff?.title ?? "Code diff");
   if (!diff) return null;
-  return (
-    <div className={styles.panel}>
-      <DiffReader viewer={diff.viewer} warning={diff.warning} />
-    </div>
-  );
+  return <DiffReader viewer={diff.viewer} warning={diff.warning} />;
 }

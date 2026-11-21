@@ -45,6 +45,8 @@ export type PanelContent = Readonly<{
   title: string;
   /** Its sheet's close button, when not plain "Close". */
   closeLabel?: string | undefined;
+  /** As a tab, it joins the open ones rather than replacing a passing one. */
+  append?: boolean | undefined;
   /** The page's address: opening it again in a slot replaces it. */
   target: string;
   /** The workspace's own description of the panel, which it draws. */
@@ -73,14 +75,14 @@ export type Item = Readonly<{
 }>;
 export type Shown = Readonly<{ item: Item; content: ReadingContent }>;
 
-export type ReadingEvent =
+type ReadingEvent =
   | Readonly<{ kind: "open"; item: string; content: ReadingContent }>
   | Readonly<{
       kind: "arrive";
       shown: readonly Readonly<{ item: string; content: ReadingContent }>[];
     }>;
 
-export type ReadingState = Readonly<{
+type ReadingState = Readonly<{
   items: ReadonlyMap<string, Item>;
   /** By visit id. */
   events: ReadonlyMap<string, ReadingEvent>;
@@ -93,7 +95,7 @@ export const provides = (item: Pick<Item, "content" | "slot">) =>
     : undefined;
 
 /** Two contents read the same thing, so one replaces the other in place. */
-export function sameContent(a: ReadingContent, b: ReadingContent) {
+function sameContent(a: ReadingContent, b: ReadingContent) {
   if (a.kind !== b.kind || a.channelId !== b.channelId) return false;
   switch (a.kind) {
     case "thread":
@@ -176,7 +178,7 @@ export function stacked(state: ReadingState, ids: Iterable<string>) {
 
 /** The visits that showed only what `ids` closes: their opens, and the
  * arrivals that showed nothing else. Close retires these. */
-export function visitsOf(state: ReadingState, ids: ReadonlySet<string>) {
+function visitsOf(state: ReadingState, ids: ReadonlySet<string>) {
   const visits: string[] = [];
   for (const [visit, event] of state.events) {
     if (
@@ -248,7 +250,7 @@ const threadAt = (
  * a `reader` over the address of the conversation or thread it reads over.
  * Undefined where it has none, as outside a conversation.
  */
-export function addressOf(
+function addressOf(
   content: ReadingContent,
   slot: Slot,
   current: OpenTarget,

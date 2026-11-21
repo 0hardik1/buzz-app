@@ -360,7 +360,7 @@ export function useConversationTabs({
       if (!reading) open(entry, append);
       else
         reading.openPanel(
-          panelContent(entry),
+          panelContent(entry, { append }),
           readingOrigin(composer),
           trigger,
         );
@@ -1074,7 +1074,8 @@ export function useConversationTabs({
             entry.panel === (content.opening as Opening).panel &&
             entry.target === content.target,
         ),
-      open: (content: PanelContent) => open(content.opening as Opening, true),
+      open: (content: PanelContent) =>
+        open(content.opening as Opening, content.append ?? true),
     },
     renderInlinePanel,
     opened,
