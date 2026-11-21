@@ -889,6 +889,7 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         agent_state::app_agent_state_set,
         decisions::decide,
         voice_search::voice_search_backend,
+        voice_search::voice_search_select,
         voice_search::voice_search_prepare,
         voice_search::voice_search_connect,
         voice_search::voice_search_start,

@@ -2,6 +2,11 @@
 //! when the distributor configured a key endpoint. Debug builds can opt in
 //! to on-device Apple speech, which keeps audio on the Mac.
 //!
+//! Hosted speech has two paths: the key path fetches a key and answers the
+//! offer with OpenAI directly, and the offer path sends the offer to a kgoose
+//! route that answers it. Debug builds can switch paths at runtime from
+//! Developer settings (`voice_search_select`) to compare them.
+//!
 //! Apple speech (linked in by build.rs) runs one listen at a time and
 //! sends its events to the webview on the channel it passed.
 use serde::Serialize;
@@ -183,42 +188,139 @@ pub(crate) enum VoiceBackend {
     Apple,
 }
 
+/// Which recognizer voice jump uses.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum VoicePath {
+    /// Fetch a Realtime key ahead of time and answer the offer with OpenAI.
+    Key,
+    /// Send the offer to the kgoose route, which answers it.
+    Offer,
+    /// On-device Apple speech (debug builds only).
+    Apple,
+}
+
+struct Selection {
+    path: VoicePath,
+    /// The model the offer path asks for; `None` uses the route's default.
+    model: Option<String>,
+}
+
+static SELECTED: Mutex<Option<Selection>> = Mutex::new(None);
+
+fn default_path() -> VoicePath {
+    if cfg!(debug_assertions) && std::env::var("BUZZ_VOICE_BACKEND").as_deref() == Ok("apple") {
+        VoicePath::Apple
+    } else if realtime::endpoint().is_none() && realtime::calls_endpoint().is_some() {
+        VoicePath::Offer
+    } else {
+        VoicePath::Key
+    }
+}
+
+fn selected() -> (VoicePath, Option<String>) {
+    let selected = SELECTED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match selected.as_ref() {
+        Some(selection) => (selection.path, selection.model.clone()),
+        None => (default_path(), None),
+    }
+}
+
 fn apple_selected() -> bool {
-    cfg!(debug_assertions) && std::env::var("BUZZ_VOICE_BACKEND").as_deref() == Ok("apple")
+    selected().0 == VoicePath::Apple
+}
+
+fn path_available(path: VoicePath) -> bool {
+    match path {
+        VoicePath::Key => realtime::endpoint().is_some(),
+        VoicePath::Offer => realtime::calls_endpoint().is_some(),
+        VoicePath::Apple => cfg!(debug_assertions) && native::available(),
+    }
 }
 
 /// The configured recognizer, if it can be used on this device.
 #[tauri::command]
 pub(crate) fn voice_search_backend() -> Option<VoiceBackend> {
-    if apple_selected() {
-        native::available().then_some(VoiceBackend::Apple)
-    } else {
-        realtime::endpoint().map(|_| VoiceBackend::Realtime)
+    let path = selected().0;
+    if !path_available(path) {
+        return None;
     }
+    Some(match path {
+        VoicePath::Apple => VoiceBackend::Apple,
+        VoicePath::Key | VoicePath::Offer => VoiceBackend::Realtime,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct VoicePaths {
+    selected: VoicePath,
+    model: Option<String>,
+    available: Vec<VoicePath>,
+}
+
+fn paths() -> VoicePaths {
+    let (selected, model) = selected();
+    VoicePaths {
+        selected,
+        model,
+        available: [VoicePath::Key, VoicePath::Offer, VoicePath::Apple]
+            .into_iter()
+            .filter(|path| path_available(*path))
+            .collect(),
+    }
+}
+
+/// Selects the recognizer for later listens (debug builds only), and returns
+/// the paths this build can use. Without `path`, it only reports them.
+#[tauri::command]
+pub(crate) fn voice_search_select(
+    path: Option<VoicePath>,
+    model: Option<String>,
+) -> Result<VoicePaths, String> {
+    if let Some(path) = path {
+        if !cfg!(debug_assertions) {
+            return Err("Voice paths can only be switched in development builds".into());
+        }
+        if !path_available(path) {
+            return Err("That voice path isn't configured".into());
+        }
+        *SELECTED
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Selection {
+            path,
+            model: model.filter(|model| !model.trim().is_empty()),
+        });
+    }
+    Ok(paths())
 }
 
 /// Warms the selected recognizer: an Apple speech model or a Realtime key.
+/// The offer path has nothing to fetch ahead of time.
 #[tauri::command]
 pub(crate) async fn voice_search_prepare() -> Result<(), String> {
-    if apple_selected() {
-        native::prepare();
-        Ok(())
-    } else {
-        realtime::prepare().await
+    match selected().0 {
+        VoicePath::Apple => {
+            native::prepare();
+            Ok(())
+        }
+        VoicePath::Key => realtime::prepare().await,
+        VoicePath::Offer => Ok(()),
     }
 }
 
-/// Answers the webview's WebRTC offer without exposing the transcription key.
+/// Answers the webview's WebRTC offer on the selected hosted path.
 #[tauri::command]
 pub(crate) async fn voice_search_connect(offer: String) -> Result<String, String> {
-    if apple_selected() {
-        return Err("Hosted voice search is not selected".into());
+    match selected() {
+        (VoicePath::Apple, _) => Err("Hosted voice search is not selected".into()),
+        (VoicePath::Key, _) => realtime::connect(offer).await,
+        (VoicePath::Offer, model) => realtime::connect_offer(offer, model).await,
     }
-    realtime::connect(offer).await
 }
 
-/// Starts listening, biased toward `hints`; returns the listen's number for
-/// finishing or cancelling it.
 #[tauri::command]
 pub(crate) fn voice_search_start(
     hints: Vec<String>,

@@ -15,6 +15,7 @@ import {
 import type { RelayData } from "../features/relay/service";
 import { clientMetrics } from "../features/developer/client-metrics";
 import { ClientMetricsPanel } from "./ClientMetricsPanel";
+import { VoiceDeveloperSettings } from "./VoiceDeveloperSettings";
 import { SwitchPreferenceRow } from "../shared/design-system/ui/SwitchPreferenceRow";
 import {
   importScenario,
@@ -202,6 +203,7 @@ export function DeveloperSettings({ relay }: { relay: RelayData }) {
             )}
           </SettingsGroup>
         </div>
+        <VoiceDeveloperSettings />
         <div className="space-y-2">
           <InlineHeader
             title="Agent import"

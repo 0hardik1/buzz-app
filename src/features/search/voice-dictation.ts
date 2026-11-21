@@ -4,6 +4,12 @@
 // second press ends the utterance.
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  loadVoicePaths,
+  recordVoiceTiming,
+  subscribeVoicePaths,
+  timedPath,
+} from "./voice-paths";
 
 /** Speech that stops producing text this long has paused: reported, but
  * listening goes on. On-device recognition revises its words about every
@@ -30,20 +36,31 @@ export function prepareVoice() {
 export type VoiceBackend = "realtime" | "apple";
 
 let backend: Promise<VoiceBackend | null> | undefined;
-/** The selected recognizer, asked of native code once. */
+/** The selected recognizer, asked of native code once and again whenever a
+ * development build switches paths. */
 export function useVoiceSearchBackend(enabled: boolean) {
   const [value, setValue] = useState<VoiceBackend | null>(null);
   useEffect(() => {
     if (!enabled) return;
     let current = true;
-    backend ??= invoke<VoiceBackend | null>("voice_search_backend").catch(
-      () => null,
-    );
-    void backend.then((next) => {
-      if (current) setValue(next);
+    const read = () => {
+      backend ??= invoke<VoiceBackend | null>("voice_search_backend").catch(
+        () => null,
+      );
+      void backend.then((next) => {
+        if (current) setValue(next);
+      });
+    };
+    read();
+    void loadVoicePaths();
+    const unsubscribe = subscribeVoicePaths(() => {
+      backend = undefined;
+      read();
+      prepareVoice();
     });
     return () => {
       current = false;
+      unsubscribe();
     };
   }, [enabled]);
   return enabled ? value : null;
@@ -129,9 +146,26 @@ export function useVoiceDictation({
       let pause: ReturnType<typeof setTimeout> | undefined;
       let ending = false;
       let ended = false;
+      // Timings for comparing recognizers: see voice-paths.
+      const timed = timedPath();
+      const pressedAt = performance.now();
+      let listeningAt: number | undefined;
+      let firstTextAt: number | undefined;
+      let finalTextAt: number | undefined;
+      const since = (at: number | undefined) =>
+        at === undefined || listeningAt === undefined ? null : at - listeningAt;
       const close = (report: boolean, heard = text) => {
         if (ended) return;
         ended = true;
+        if (listeningAt !== undefined)
+          recordVoiceTiming({
+            ...timed,
+            connectMs: listeningAt - pressedAt,
+            firstTextMs: since(firstTextAt),
+            finalTextMs: since(finalTextAt),
+            endMs: report ? since(performance.now()) : null,
+            at: Date.now(),
+          });
         clearTimeout(timer);
         clearTimeout(pause);
         peer?.close();
@@ -162,12 +196,15 @@ export function useVoiceDictation({
         timer = setTimeout(finish, ms);
       };
       const listening = () => {
+        listeningAt ??= performance.now();
         setState("listening");
         if (!ending && !text) wait(SILENCE_MS);
       };
       const heard = (next: string) => {
         if (next === text) return;
         text = next;
+        finalTextAt = performance.now();
+        firstTextAt ??= finalTextAt;
         callbacks.current.onText(text.trim());
         if (ending || ended) return;
         clearTimeout(pause);

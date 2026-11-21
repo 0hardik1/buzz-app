@@ -240,6 +240,7 @@ fn main() {
             "app_agent_state_set",
             "decide",
             "voice_search_backend",
+            "voice_search_select",
             "voice_search_prepare",
             "voice_search_connect",
             "voice_search_start",

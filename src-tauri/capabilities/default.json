@@ -183,6 +183,7 @@
     "allow-app-agent-state-set",
     "allow-decide",
     "allow-voice-search-backend",
+    "allow-voice-search-select",
     "allow-voice-search-prepare",
     "allow-voice-search-connect",
     "allow-voice-search-start",
