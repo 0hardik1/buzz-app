@@ -561,8 +561,12 @@ async function staysOnAlpha(page) {
   await expect(
     page.getByRole("textbox", { name: "Message #Alpha", includeHidden: true }),
   ).toBeVisible();
+  // Named for its root once Beta's messages have loaded.
   await expect(
-    page.getByRole("tab", { name: "Beta root", includeHidden: true }),
+    page.getByRole("tab", {
+      name: /^(Thread · Beta|Beta root)$/,
+      includeHidden: true,
+    }),
   ).toBeVisible();
   expect((await hashTarget(page)).channelId).toBe("alpha");
 }
