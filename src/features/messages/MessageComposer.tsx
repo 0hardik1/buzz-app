@@ -52,6 +52,7 @@ import {
   readComposerSnapshot,
   composerMarkdownContext,
   markdownRanges,
+  groupLabelHolds,
 } from "./composer-document";
 import { useMessageEdit, lastEditableMessage } from "./useMessageEdit";
 import { editMentionText } from "./message-edit";
@@ -2445,7 +2446,7 @@ function Composer({
   function insertMentions(
     recipients: readonly MentionRecipient[],
     range?: CompletionQuery,
-    label?: string,
+    requested?: string,
   ) {
     if (
       !Array.isArray(recipients) ||
@@ -2460,6 +2461,14 @@ function Composer({
       )
     )
       return false;
+    const label =
+      requested !== undefined &&
+      groupLabelHolds(requested, [
+        ...recipients,
+        ...valueRef.current.recipients,
+      ])
+        ? requested
+        : undefined;
     const unique = [
       ...new Map(
         recipients.map((person) => [person.pubkey, editorMention(person)]),
@@ -2478,8 +2487,8 @@ function Composer({
       input.current.readOnly
     )
       return false;
-    if (label !== undefined && range && inMarkdownCode(range))
-      return insert(`@${label} `, undefined, range);
+    if (requested !== undefined && range && inMarkdownCode(range, false))
+      return insert(`@${requested} `, undefined, range);
     // Message edits only add references, never new notification intent.
     if (editing.target)
       return insert(
@@ -2526,10 +2535,13 @@ function Composer({
     setError(undefined);
     return true;
   }
-  function inMarkdownCode(range: Readonly<{ start: number; end: number }>) {
+  function inMarkdownCode(
+    range: Readonly<{ start: number; end: number }>,
+    links = true,
+  ) {
     const doc = readComposerSnapshot(valueRef.current.document);
     const context = doc
-      ? composerMarkdownContext(doc)
+      ? composerMarkdownContext(doc, undefined, links)
       : { text: valueRef.current.text, protected: [] };
     return [...context.protected, ...markdownRanges(context.text).literal].some(
       (r) => range.start < r.end && range.end > r.start,

@@ -1087,8 +1087,9 @@ export function EditableInput({
       const source = projection();
       const inside = source.tokens.filter(
         (token) =>
-          (start > token.start && start < token.end) ||
-          (end > token.start && end < token.end),
+          !token.node.attrs.group &&
+          ((start > token.start && start < token.end) ||
+            (end > token.start && end < token.end)),
       );
       if (!inside.length) return;
       const tr = editor.state.tr;

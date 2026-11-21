@@ -30,7 +30,8 @@ import { LinkLabel } from "../../bundled/links/InlineLink";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { serializeSelection } from "./selection-copy";
 import { buzzCopyDocument } from "./composer-clipboard";
-import { projectComposerDocument } from "./composer-document";
+import { composerSchema, projectComposerDocument } from "./composer-document";
+import { composerMarkdown } from "./composer-markdown";
 import { createRelaySession } from "../relay/session";
 import { createAgentDirectory } from "../identity-names/testing";
 import { bindNames } from "../identity-names/service";
@@ -1698,3 +1699,54 @@ it("renders frozen forwarded mention labels without source profiles or notificat
   expect(html).not.toContain(`(${other})`);
   expect(html).toContain("data-mention-kind");
 });
+
+const markdownSyntax = [..."*_`~[]<>|#\\&!=:@"];
+it.each([
+  ...markdownSyntax.map((character) => `x${character}y`),
+  "R&D &copy;",
+  "ops ||tier 2||",
+  "x](https://evil.example)[y",
+  "[x](https://evil.example)",
+  "![x](https://evil.example/x.png)",
+  "<https://evil.example>",
+  "<b>x</b>",
+  "https://evil.example",
+  "www.evil.example",
+  "a@b.co",
+  ":party_parrot:",
+  "trailing\\",
+])(
+  "a group chip labelled %s inside link text renders its label verbatim, with no nested link, code, image or spoiler from the label",
+  (label) => {
+    const href = "https://example.test/notes";
+    const members = [smith, other].map((pubkey) => ({
+      pubkey,
+      name: profiles.get(pubkey)?.name ?? "",
+    }));
+    const { draft } = projectComposerDocument(
+      composerSchema.nodes.doc.create(null, [
+        composerSchema.nodes.paragraph.create(null, [
+          composerSchema.nodes.token.create(
+            { source: `@${label}`, group: { label, members } },
+            null,
+            [composerSchema.marks.link.create({ href })],
+          ),
+          composerSchema.text(" hi"),
+        ]),
+      ]),
+    );
+    const { container } = renderDom(
+      <MessageMarkdown
+        {...props(composerMarkdown(draft), { emoji: [party], extensions })}
+      />,
+    );
+    expect(container.textContent).toBe(`@${label} hi`);
+    const links = container.querySelectorAll("a");
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", href);
+    expect(links[0]).toHaveTextContent(`@${label}`);
+    expect(
+      container.querySelector("a a, code, img, [data-spoiler]"),
+    ).toBeNull();
+  },
+);

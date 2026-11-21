@@ -14,6 +14,7 @@ import type {
   PendingMention,
 } from "./mention-draft";
 import type { ComposerResource } from "../conversation/contracts";
+import { profileMentionParts } from "./profile-mentions";
 import {
   chipLabel,
   composerToken,
@@ -297,6 +298,26 @@ export function composerGroup(value: unknown, source: unknown) {
     return null;
   return value as ComposerGroup;
 }
+/** Whether `@label` reads as one group to whoever gets it: plain text in
+ * which the reader binds none of `people`'s names, each taken alone. */
+export function groupLabelHolds(
+  label: string,
+  people: readonly MentionRecipient[],
+) {
+  return (
+    /^[\p{L}\p{N} ]+$/u.test(label) &&
+    !people.some((person) =>
+      profileMentionParts(
+        {
+          content: `@${label}`,
+          mentions: [person.pubkey],
+          mentionLabels: [{ id: person.pubkey, names: [person.name] }],
+        },
+        undefined,
+      ).some((part) => part.target),
+    )
+  );
+}
 /** A source token's recipient attributes from the draft's recipients on its
  * range: every labelled one as a group, else the one recipient. */
 export function tokenRecipients(
@@ -317,7 +338,10 @@ export function tokenRecipients(
   const members = new Map(
     on
       .filter((item) => item.label === label)
-      .map(({ pubkey, name }) => [pubkey, { pubkey, name }]),
+      .map(({ pubkey, name, explicit }) => [
+        pubkey,
+        { pubkey, name, ...(explicit ? { explicit } : {}) },
+      ]),
   );
   return {
     recipient: null,
@@ -625,11 +649,12 @@ function project(doc: EditorNode) {
       });
       const group = composerGroup(node.attrs.group, node.attrs.source);
       if (group)
-        for (const { pubkey, name } of group.members)
+        for (const { pubkey, name, explicit } of group.members)
           recipients.push({
             pubkey,
             name,
             label: group.label,
+            ...(explicit ? { explicit } : {}),
             start,
             end: text.length,
           });
@@ -686,6 +711,7 @@ function project(doc: EditorNode) {
 export function composerMarkdownContext(
   doc: EditorNode,
   source = projectComposerDocument(doc),
+  links = true,
 ) {
   let text = source.draft.text;
   const protectedRanges: SourceRange[] = [];
@@ -698,6 +724,7 @@ export function composerMarkdownContext(
       text.slice(start, end).replace(/[^\r\n]/g, "x") +
       text.slice(end);
   };
+  const { code, link, literal } = composerSchema.marks;
   doc.descendants((node, position) => {
     if (node.type.name === "markdown_table") {
       mask(position, position + node.nodeSize);
@@ -709,9 +736,8 @@ export function composerMarkdownContext(
     }
     if (
       node.isInline &&
-      (["code", "link", "literal"] as const).some((name) =>
-        composerSchema.marks[name].isInSet(node.marks),
-      )
+      (code.isInSet(node.marks) ||
+        (link.isInSet(node.marks) ? links : literal.isInSet(node.marks)))
     )
       mask(position, position + node.nodeSize);
   });

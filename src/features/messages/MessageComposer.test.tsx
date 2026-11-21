@@ -225,6 +225,10 @@ function mount(
   viewer?: string,
   agents?: Agents,
   task?: ChannelMessage,
+  match: ComposerCompletion["match"] = ({ text, start }) =>
+    text.startsWith("!") && start > 0
+      ? { start: 0, end: start, query: text.slice(1, start) }
+      : null,
 ) {
   let commands: ComposerToolProps;
   const completionRequests: ComposerCompletionProps["publish"][] = [];
@@ -241,10 +245,7 @@ function mount(
     pluginId: "test",
     revision,
     title: "Delayed",
-    match: ({ text, start }) =>
-      text.startsWith("!") && start > 0
-        ? { start: 0, end: start, query: text.slice(1, start) }
-        : null,
+    match,
     component: Completion,
   });
   let completions: readonly Contribution<ComposerCompletion>[] = [
@@ -13291,6 +13292,12 @@ it("batch insertion rejects an unavailable member atomically and does not send o
   expect(h.messages.send).not.toHaveBeenCalled();
   expect(screen.getByRole("alert")).toHaveTextContent("no longer available");
 });
+const bangAnywhere: ComposerCompletion["match"] = ({ text, start }) => {
+  const at = text.lastIndexOf("!", start - 1);
+  return at >= 0 && /^$|[\s`]$/.test(text.slice(0, at).slice(-1))
+    ? { start: at, end: start, query: text.slice(at + 1, start) }
+    : null;
+};
 function offerCrew(
   h: ReturnType<typeof mount>,
   mentions: readonly MentionRecipient[],
@@ -13324,19 +13331,120 @@ it("a labelled mentions edit is one chip, sent as `@label` with each member once
     second.pubkey,
   ]);
 });
-it("a labelled mentions edit inside Markdown code is only its name", async () => {
+it("a selection offset inside a group chip keeps it one chip that notifies every member", async () => {
   const h = mount();
-  h.fill("!`Crew`");
+  h.fill("!Crew");
   offerCrew(h, [first, second]);
   await h.user.keyboard("{Enter}");
-  expect(h.input()).toHaveValue("@Crew ");
+  act(() => h.input().setSelectionRange(2, 2));
+  fireEvent(document, new Event("selectionchange"));
+  expect(
+    screen.getByRole("img", {
+      name: "Group Crew, 2 recipients: Honey · rcaj, Honey · 04hu",
+    }),
+  ).toBeVisible();
+  h.submit();
+  await waitFor(() => expect(h.messages.send).toHaveBeenCalled());
+  expect(h.messages.send.mock.calls[0]?.[1]).toBe("@Crew ");
+  expect(h.messages.send.mock.calls[0]?.[2]).toEqual([
+    first.pubkey,
+    second.pubkey,
+  ]);
+});
+it("deleting a group chip after a selection offset inside it, or removing a member, still updates who is notified", async () => {
+  const h = mount();
+  h.fill("!Crew");
+  offerCrew(h, [first, second]);
+  await h.user.keyboard("{Enter}");
+  act(() => h.input().setSelectionRange(2, 2));
+  act(() => h.input().removeRecipient(first.pubkey));
+  expect(h.commands().recipients.map(({ pubkey }) => pubkey)).toEqual([
+    second.pubkey,
+  ]);
+  act(() => h.input().setSelectionRange(0, 5));
+  await h.user.keyboard("{Backspace}");
   expect(h.commands().recipients).toEqual([]);
+  expect(screen.queryByRole("img", { name: /^Group Crew/ })).toBeNull();
 });
 it.each([
-  ["Crew", "@Crew "],
-  ["*ops*", "@\\*ops\\* "],
+  [
+    "a group",
+    { mentions: [first, second], label: "Crew" },
+    [first.pubkey, second.pubkey],
+  ],
+  ["a person", { mention: first }, [first.pubkey]],
 ])(
-  "a labelled mentions edit while editing a sent message adds only its text (%s)",
+  "picking %s inside link text keeps its recipients",
+  async (_, edit, notified) => {
+    const h = mount(
+      {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      bangAnywhere,
+    );
+    const label = "go !Crew now";
+    await h.user.type(h.input(), label);
+    act(() => h.input().setSelectionRange(0, label.length));
+    act(() => void h.input().editLink()?.save(label, "https://example.test/"));
+    act(() => h.input().setSelectionRange(8, 8));
+    fireEvent(document, new Event("selectionchange"));
+    expect(h.input().querySelector("a")).not.toBeNull();
+    act(() => {
+      h.completionRequests.at(-1)?.({
+        items: [{ id: "pick", label: "Pick", edit }],
+      });
+    });
+    await h.user.keyboard("{Enter}");
+    expect(h.input().querySelector("a [data-source]")).not.toBeNull();
+    h.submit();
+    await waitFor(() => expect(h.messages.send).toHaveBeenCalled());
+    expect(h.messages.send.mock.calls[0]?.[2]).toEqual(notified);
+  },
+);
+it.each([
+  ["a code span", "Crew", "see `run !Crew` now", "see `run @Crew ` now"],
+  ["a fenced block", "Crew", "```\nrun !Crew\n```", "```\nrun @Crew \n```"],
+  [
+    "a code span",
+    "Honey team",
+    "see `run !Crew` now",
+    "see `run @Honey team ` now",
+  ],
+])(
+  "a labelled mentions edit inside %s is only its name (%s)",
+  async (_, label, text, sent) => {
+    const h = mount(
+      {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      bangAnywhere,
+    );
+    h.fill(text);
+    const caret = text.indexOf("!Crew") + "!Crew".length;
+    act(() => h.input().setSelectionRange(caret, caret));
+    fireEvent(document, new Event("selectionchange"));
+    offerCrew(h, [first, second], label);
+    await h.user.keyboard("{Enter}");
+    expect(h.input()).toHaveValue(sent);
+    expect(h.commands().recipients).toEqual([]);
+    h.submit();
+    await waitFor(() => expect(h.messages.send).toHaveBeenCalled());
+    expect(h.messages.send.mock.calls[0]?.[1]).toBe(sent);
+    expect(h.messages.send.mock.calls[0]?.[2]).toEqual([]);
+  },
+);
+it.each([
+  ["Crew", "@Crew "],
+  [
+    "*ops*",
+    "[@Honey](nostr:npub1424242424242424242424242424242424242424242424242424qamrcaj) [@Honey](nostr:npub1hwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwasxw04hu) ",
+  ],
+])(
+  "a labelled mentions edit while editing a sent message adds text and no recipients (%s)",
   async (label, text) => {
     const h = mount({}, undefined, first.pubkey);
     h.setRows([editableMessage()]);
@@ -18300,3 +18408,133 @@ it("pastes a copied forward literally inside a code block", async () => {
     screen.queryByRole("button", { name: "Remove forwarded message" }),
   ).not.toBeInTheDocument();
 });
+
+const groupLabelMatrix = [
+  ...[..."*_`~[]<>|#\\&!=:@"].flatMap((c) => [`x${c}y`, `${c}${c}x`]),
+  "Design Team",
+  "R&D &copy;",
+  "ops ||tier 2||",
+  "eng_ios",
+  "a_b_c",
+  "*ops*",
+  "_ops_",
+  "a`b",
+  "x](https://evil.example)[y",
+  "[x](https://evil.example)",
+  "![x](https://evil.example/x.png)",
+  "<https://evil.example>",
+  "<b>x</b>",
+  "https://evil.example",
+  "www.evil.example",
+  "buzz://channel/x",
+  "a@b.co",
+  ":party_parrot:",
+  "a~~b~~",
+  "1. x",
+  "- x",
+  "> x",
+  "trailing\\",
+  "x|",
+  "Ops:",
+  "x&#58;y",
+  "Honey's team",
+  "Honey team",
+  "Honey",
+  "Crew",
+  "ops @Honey",
+  "Oncall #general",
+  "[x](https:evil.example)",
+  "Team example.com",
+  "b.co",
+  "x www.example.com",
+  "a`b`c",
+  "x :party_parrot:",
+  "x mailto:y",
+  "x xmpp:y",
+  "R&D",
+  "Dev/Ops",
+  "Ops (EU)",
+  "Launch crew",
+  "eng-oncall",
+  "Other team",
+];
+const oneChipLabels = new Set([
+  "Design Team",
+  "Crew",
+  "Launch crew",
+  "Other team",
+]);
+async function pickSent(edit: {
+  mentions: MentionRecipient[];
+  label?: string;
+}) {
+  const h = mount();
+  h.fill("!Crew");
+  act(() => {
+    h.completionRequests.at(-1)?.({
+      items: [{ id: "crew", label: "Crew", edit }],
+    });
+  });
+  await h.user.keyboard("{Enter}");
+  const chips = screen
+    .queryAllByRole("img")
+    .map((node) => node.getAttribute("aria-label"));
+  h.submit();
+  await waitFor(() => expect(h.messages.send).toHaveBeenCalled());
+  const [, content, tags] = h.messages.send.mock.calls[0] ?? [];
+  cleanup();
+  return { chips, content, tags };
+}
+it.each(groupLabelMatrix)(
+  "a group picked with the label %s is one chip only when the label is plain text and starts with no member's name",
+  async (label) => {
+    const group = await pickSent({ mentions: [first, second], label });
+    expect(group.tags).toEqual([first.pubkey, second.pubkey]);
+    if (oneChipLabels.has(label)) {
+      expect(group.content).toBe(`@${label} `);
+      expect(group.chips).toEqual([
+        `Group ${label}, 2 recipients: Honey · rcaj, Honey · 04hu`,
+      ]);
+    } else {
+      expect(group).toEqual(await pickSent({ mentions: [first, second] }));
+      expect(group.chips.some((name) => name?.startsWith("Group"))).toBe(false);
+    }
+  },
+);
+
+it.each([true, false])(
+  "a group label that starts with the name of a person already in the draft is its members (person in the draft: %s)",
+  async (withPerson) => {
+    const h = mount(
+      {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      bangAnywhere,
+    );
+    if (withPerson) {
+      h.fill("!H");
+      act(() => {
+        h.completionRequests.at(-1)?.({
+          items: [{ id: "honey", label: "Honey", edit: { mention: first } }],
+        });
+      });
+      await h.user.keyboard("{Enter}");
+      await h.user.keyboard("!Crew");
+    } else h.fill("!Crew");
+    offerCrew(h, [{ ...second, name: "Wes" }], "Honey crew");
+    await h.user.keyboard("{Enter}");
+    expect(
+      screen.queryAllByRole("img", { name: /^Group Honey crew/ }),
+    ).toHaveLength(withPerson ? 0 : 1);
+    h.submit();
+    await waitFor(() => expect(h.messages.send).toHaveBeenCalled());
+    expect(h.messages.send.mock.calls[0]?.[1]).toBe(
+      withPerson ? "@Honey @Wes " : "@Honey crew ",
+    );
+    expect(h.messages.send.mock.calls[0]?.[2]).toEqual(
+      withPerson ? [first.pubkey, second.pubkey] : [second.pubkey],
+    );
+  },
+);

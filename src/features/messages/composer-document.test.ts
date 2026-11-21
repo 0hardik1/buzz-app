@@ -854,3 +854,35 @@ it.each(["chat", "document"] as const)(
     expect(readComposerDocument(draft, []).eq(original)).toBe(true);
   },
 );
+
+it("a group chip's members keep `explicit` through a saved draft, as a person chip does", () => {
+  const ann = { pubkey: "a".repeat(64), name: "Ann", explicit: true as const };
+  const bo = { pubkey: "b".repeat(64), name: "Bo", explicit: true as const };
+  const saved = mentionDraft(
+    projectComposerDocument(
+      doc(
+        paragraph(
+          schema.nodes.token.create({
+            source: "@Crew",
+            group: { label: "Crew", members: [ann, bo] },
+          }),
+          schema.text(" "),
+          schema.nodes.token.create({ source: "@Ann", recipient: ann }),
+        ),
+      ),
+    ).draft,
+  );
+  expect(
+    projectComposerDocument(
+      readComposerDocument(saved, []),
+    ).draft.recipients.map(({ pubkey, label, explicit }) => [
+      pubkey,
+      label,
+      explicit,
+    ]),
+  ).toEqual([
+    [ann.pubkey, "Crew", true],
+    [bo.pubkey, "Crew", true],
+    [ann.pubkey, undefined, true],
+  ]);
+});
