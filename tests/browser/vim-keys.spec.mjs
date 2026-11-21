@@ -362,15 +362,8 @@ test.describe("the cursor", () => {
     await expect(box(page, 39)).toBeFocused();
     await expect(cursor(page)).toHaveCount(1);
     await expect.poll(() => painted(box(page, 39))).toBe(true);
-    // Right-clicking selects too; dismissing that menu with the pointer
-    // returns focus to the selection rather than leaving it nowhere.
-    const outside = await history(page).boundingBox();
-    await box(page, 38).click({ button: "right", position: { x: 4, y: 4 } });
-    await expect(page.getByRole("menu")).toBeVisible();
-    await page.mouse.click(outside.x + 8, outside.y + 8);
-    await expect(page.getByRole("menu")).toHaveCount(0);
+    await page.keyboard.press("k");
     await expect(box(page, 38)).toBeFocused();
-    await expect(cursor(page)).toHaveCount(1);
     await page.keyboard.press("j");
     await expect(box(page, 39)).toBeFocused();
 

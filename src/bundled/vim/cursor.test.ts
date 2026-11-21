@@ -135,6 +135,18 @@ test("focus that falls to nothing, or a click in the timeline, returns to it", a
   expect(document.activeElement).toBe(part);
 });
 
+test("a new message leaves the selection where it is", async () => {
+  const { box, view, render, marked } = conversation();
+  cleanups.push(trackCursor());
+  await frame();
+  box("two").focus();
+  await frame();
+  view.ids.push("four");
+  render();
+  await frame();
+  expect(marked()).toEqual(["two"]);
+});
+
 test("a deleted message passes the cursor to its neighbor", async () => {
   const { box, view, render, marked, pins } = conversation("alpha", [
     "one",
