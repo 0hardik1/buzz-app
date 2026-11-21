@@ -1237,6 +1237,10 @@ export type AgentType<Config = unknown> = {
    * left for it. Without it, support is unadvertised: a harness that builds
    * its turns with `turnPrompt` still shows them, and another one never does. */
   notes?: true;
+  /** Up to 8 folders, each absolute, `~/…` or starting with `$CODEX_HOME`,
+   * whose `<name>/SKILL.md` skills the composer's `/` offers for its local
+   * agents. */
+  skillFolders?: readonly string[];
   /** Why protected runs must stop when this runtime cannot enforce the contract. */
   protectionUnavailable?: string;
   /** Fully retires native sessions for this membership key before policy changes. */
@@ -3525,6 +3529,19 @@ export class AgentsService extends Service implements Agents {
       throw new Error(
         `Agent type timeoutMs must be a whole number from 1 to ${TIMEOUT_LIMIT_MS}`,
       );
+    const folders = type.skillFolders;
+    if (
+      folders !== undefined &&
+      !(
+        Array.isArray(folders) &&
+        folders.length <= 8 &&
+        Array.from(folders).every((folder) => typeof folder === "string")
+      )
+    )
+      throw new Error("Agent type skillFolders must be up to 8 folders");
+    const skillFolders = folders
+      ? Object.freeze(folders.map((folder) => folder.trim()).filter(Boolean))
+      : undefined;
     const { remote } = type;
     if (
       remote &&
@@ -3543,6 +3560,7 @@ export class AgentsService extends Service implements Agents {
     const pluginId = this.ctx.pluginOwner?.id;
     this.contributions.register(this.ctx, {
       ...type,
+      ...(skillFolders && { skillFolders }),
       ...(models && {
         models: async (agent: Agent<Config>) => {
           await this.checkExecution(agent.key, agent.type);
