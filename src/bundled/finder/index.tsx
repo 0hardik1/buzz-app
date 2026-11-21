@@ -5,11 +5,7 @@ import { relayPartition } from "../../features/relay/partition";
 import { activeModal } from "../../shared/design-system/overlayLayer";
 import { createCorpus } from "./corpus.ts";
 import { noteInterest, topInterest } from "./interest";
-import {
-  type FinderOpenOptions,
-  provideFinder,
-  type RegisteredSource,
-} from "./service";
+import { provideFinder, type RegisteredSource } from "./service";
 import { builtinSources } from "./sources";
 import type { FinderScope } from "./FinderDialog";
 import {
@@ -33,10 +29,8 @@ type State = Readonly<{
   status?: FinderSyncStatus | undefined;
   sync?: FinderSync | undefined;
   scope: FinderScope;
-  openCount: number;
   /** The key of an open source other than the two scopes. */
   source?: string | undefined;
-  initialQuery?: string | undefined;
 }>;
 
 export const apply: PluginModule["apply"] = (ctx) => {
@@ -47,7 +41,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
     open: false,
     revision: 0,
     scope: "buzz",
-    openCount: 0,
   };
   const set = (patch: Partial<State>) => {
     state = { ...state, ...patch };
@@ -76,10 +69,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   const inConversation = () =>
     ctx.navigation.snapshot().entry.target.kind === "conversation";
   /** Opens Finder, or switches scope while it's open, keeping the text. */
-  const show = (
-    scope: FinderScope,
-    { source, query }: { source?: string; query?: string } = {},
-  ) => {
+  const show = (scope: FinderScope, source?: string) => {
     // Searching a channel counts once per switch, not per key press.
     if (
       scope === "channel" &&
@@ -87,26 +77,17 @@ export const apply: PluginModule["apply"] = (ctx) => {
       (!state.open || state.scope !== "channel" || state.source)
     )
       interested(2);
-    set({
-      open: true,
-      scope,
-      source,
-      // Text from the caller starts a fresh opening even while open.
-      ...((!state.open || query !== undefined) && {
-        openCount: state.openCount + 1,
-        initialQuery: query,
-      }),
-    });
+    set({ open: true, scope, source });
   };
   const here = (): FinderScope => (inConversation() ? "channel" : "buzz");
-  const sources = provideFinder(ctx, ({ source, query }: FinderOpenOptions) => {
-    const options = query === undefined ? {} : { query };
-    if (!source) return show(here(), options);
-    if (source === "buzz.finder/channel") return show(here(), options);
-    if (source === "buzz.finder/all") return show("buzz", options);
-    if (!known(source)) return show("buzz", options);
-    show("buzz", { ...options, source });
-  });
+  // `buzz.finder/channel` and unknown keys open as ⌘P does.
+  const sources = provideFinder(ctx, (source) =>
+    source === "buzz.finder/all"
+      ? show("buzz")
+      : source && known(source)
+        ? show("buzz", source)
+        : show(here()),
+  );
   /** Opens a conversation in the connected community, optionally with a
    * detail (such as a profile) beside it. */
   const openConversation = (
@@ -254,17 +235,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ctx.pages.registerOverlay({
     id: "finder",
     component: function Finder() {
-      const {
-        open,
-        revision,
-        session,
-        status,
-        sync,
-        scope,
-        openCount,
-        source,
-        initialQuery,
-      } = useSyncExternalStore(store.subscribe, store.snapshot);
+      const { open, revision, session, status, sync, scope, source } =
+        useSyncExternalStore(store.subscribe, store.snapshot);
       const registered = useSyncExternalStore(
         sources.subscribe,
         sources.snapshot,
@@ -291,8 +263,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
             currentChannelId={currentChannelId}
             scope={scope === "channel" && !currentChannelId ? "buzz" : scope}
             onScopeChange={show}
-            openCount={openCount}
-            initialQuery={initialQuery}
             source={find(source, registered)}
             onSourceClose={() => set({ source: undefined, scope: "buzz" })}
             status={

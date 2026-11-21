@@ -7,7 +7,6 @@ import {
   fireEvent,
   render,
   screen,
-  within,
 } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -179,6 +178,8 @@ const selectedTab = async () =>
   (await screen.findByRole("tab", { selected: true })).textContent;
 const rows = () =>
   screen.queryAllByRole("option").map((row) => row.textContent ?? "");
+const type = (value: string) =>
+  fireEvent.change(screen.getByRole("combobox"), { target: { value } });
 const item = (label: string, run = vi.fn()): FinderItem => ({
   id: label.toLowerCase(),
   label,
@@ -253,7 +254,7 @@ test("⌘P searches the open conversation, else all of Buzz; ⌘⇧P switches in
   composer.remove();
 });
 
-test("another plugin opens its own list with a query; Finder ranks it and Enter runs the item", async () => {
+test("another plugin opens its own list; Finder ranks it and Enter runs the item", async () => {
   // Like a pane jump: the item moves focus, and closing leaves it there.
   const here = document.createElement("button");
   const there = document.createElement("button");
@@ -271,14 +272,13 @@ test("another plugin opens its own list with a query; Finder ranks it and Enter 
     title: "Vegetables",
     items: () => [item("Bean")],
   }));
-  const { show } = await mount({
+  const { show, visit } = await mount({
     "example.fruit": fruit.module,
     "example.veg": veg.module,
   });
   show();
-  await act(async () =>
-    fruit.used.finder?.open({ source: "example.fruit/list", query: "ban" }),
-  );
+  await act(async () => fruit.used.finder?.open("example.fruit/list"));
+  type("ban");
   expect(await screen.findByRole("combobox")).toHaveValue("ban");
   expect(
     screen.getByRole("button", { name: "Remove Fruit search scope" }),
@@ -292,12 +292,19 @@ test("another plugin opens its own list with a query; Finder ranks it and Enter 
   expect(there).toHaveFocus();
   here.remove();
   there.remove();
-  await act(async () => veg.used.finder?.open({ source: "example.veg/list" }));
+  await act(async () => veg.used.finder?.open("example.veg/list"));
   expect(await screen.findByRole("combobox")).toHaveValue("");
   expect(rows()).toEqual([expect.stringContaining("Bean")]);
-  // A bare local ID names no source: Finder opens as ⌘P does.
-  await act(async () => veg.used.finder?.open({ source: "list" }));
+  // The two scopes by key; a bare local ID names no list, so Finder opens
+  // as ⌘P does.
+  act(() => visit("v1", "crew"));
+  await act(async () => veg.used.finder?.open("buzz.finder/all"));
   expect(await selectedTab()).toBe("All of Buzz");
+  await act(async () => veg.used.finder?.open("list"));
+  expect(await selectedTab()).toBe("This channel");
+  await act(async () => veg.used.finder?.open("buzz.finder/all"));
+  await act(async () => veg.used.finder?.open("buzz.finder/channel"));
+  expect(await selectedTab()).toBe("This channel");
 });
 
 test("a source leaves when its plugin stops, and All of Buzz shows instead", async () => {
@@ -308,9 +315,7 @@ test("a source leaves when its plugin stops, and All of Buzz shows instead", asy
   }));
   const { show, enable } = await mount({ "example.fruit": fruit.module });
   show();
-  await act(async () =>
-    fruit.used.finder?.open({ source: "example.fruit/list" }),
-  );
+  await act(async () => fruit.used.finder?.open("example.fruit/list"));
   expect(rows()).toEqual([expect.stringContaining("Apple")]);
   await enable("buzz.finder");
   expect(await selectedTab()).toBe("All of Buzz");
@@ -326,8 +331,7 @@ test("a source leaves when its plugin stops, and All of Buzz shows instead", asy
   ).not.toBeInTheDocument();
 });
 
-test("a failing or empty list says so, a late answer for older text is ignored, and a repeated row shows once", async () => {
-  const answers = new Map<string, (items: readonly FinderItem[]) => void>();
+test("a failing or empty list says so", async () => {
   const broken = consumer(() => ({
     id: "broken",
     title: "Broken",
@@ -335,62 +339,25 @@ test("a failing or empty list says so, a late answer for older text is ignored, 
       throw new Error("no list");
     },
   }));
-  const rejects = consumer(() => ({
-    id: "rejects",
-    title: "Rejects",
-    search: async () => {
-      throw new Error("no answer");
-    },
-  }));
   const empty = consumer(() => ({
     id: "empty",
     title: "Empty",
     items: () => [],
   }));
-  const slow = consumer(() => ({
-    id: "slow",
-    title: "Slow",
-    search: (query, publish) => void answers.set(query, publish),
-  }));
   vi.spyOn(console, "error").mockImplementation(() => {});
   const { show } = await mount({
     "example.broken": broken.module,
-    "example.rejects": rejects.module,
     "example.empty": empty.module,
-    "example.slow": slow.module,
   });
   show();
-  await act(async () =>
-    broken.used.finder?.open({ source: "example.broken/broken" }),
-  );
+  await act(async () => broken.used.finder?.open("example.broken/broken"));
   expect(await screen.findByText("This list couldn't load.")).toBeVisible();
-  await act(async () =>
-    rejects.used.finder?.open({ source: "example.rejects/rejects" }),
-  );
-  expect(await screen.findByText("This list couldn't load.")).toBeVisible();
-  await act(async () =>
-    empty.used.finder?.open({ source: "example.empty/empty" }),
-  );
+  await act(async () => empty.used.finder?.open("example.empty/empty"));
   expect(await screen.findByText("This list is empty.")).toBeVisible();
-  await act(async () =>
-    empty.used.finder?.open({ source: "example.empty/empty", query: "x" }),
-  );
+  type("x");
   expect(
     await screen.findByText("Nothing matches. Try fewer letters."),
   ).toBeVisible();
-  await act(async () =>
-    slow.used.finder?.open({ source: "example.slow/slow", query: "a" }),
-  );
-  await act(async () =>
-    slow.used.finder?.open({ source: "example.slow/slow", query: "ab" }),
-  );
-  await act(async () => answers.get("a")?.([item("Stale")]));
-  expect(rows()).toEqual([]);
-  // A row published twice shows once.
-  await act(async () => answers.get("ab")?.([item("Fresh"), item("Fresh")]));
-  expect(
-    within(screen.getByRole("listbox")).getByRole("option"),
-  ).toHaveTextContent("Fresh");
 });
 
 test("built-in conversations and people rank by name and open on Enter", async () => {
@@ -433,9 +400,7 @@ test("built-in conversations and people rank by name and open on Enter", async (
   show();
   // People rows lead with an avatar's initial.
   const named = () => rows().map((row) => row.replace(/^./, ""));
-  await act(async () =>
-    opener.used.finder?.open({ source: "buzz.finder/conversations" }),
-  );
+  await act(async () => opener.used.finder?.open("buzz.finder/conversations"));
   // Archived channels stay out; a DM is named for who's in it, by name
   // order as everywhere else.
   expect(rows().sort()).toEqual([
@@ -445,12 +410,8 @@ test("built-in conversations and people rank by name and open on Enter", async (
     "Notes to selfDirect message",
     "lab",
   ]);
-  await act(async () =>
-    opener.used.finder?.open({
-      source: "buzz.finder/conversations",
-      query: "cre",
-    }),
-  );
+  await act(async () => opener.used.finder?.open("buzz.finder/conversations"));
+  type("cre");
   expect(rows()).toEqual([expect.stringContaining("#crew")]);
   await act(async () => screen.getByRole("option").click());
   expect(open).toHaveBeenLastCalledWith(
@@ -460,9 +421,7 @@ test("built-in conversations and people rank by name and open on Enter", async (
   // them as they arrive.
   vi.useFakeTimers();
   try {
-    await act(async () =>
-      opener.used.finder?.open({ source: "buzz.finder/people", query: "" }),
-    );
+    await act(async () => opener.used.finder?.open("buzz.finder/people"));
     expect(named().sort()).toEqual(
       [
         "Ada Park",
@@ -476,12 +435,8 @@ test("built-in conversations and people rank by name and open on Enter", async (
   } finally {
     vi.useRealTimers();
   }
-  await act(async () =>
-    opener.used.finder?.open({
-      source: "buzz.finder/people",
-      query: "example",
-    }),
-  );
+  await act(async () => opener.used.finder?.open("buzz.finder/people"));
+  type("example");
   // Matched by NIP-05 address as well as name.
   expect(rows()).toEqual([expect.stringContaining("Maya Chen")]);
   await act(async () => screen.getByRole("option").click());
@@ -490,9 +445,8 @@ test("built-in conversations and people rank by name and open on Enter", async (
     expect.objectContaining({ channelId: "with-maya" }),
   );
   expect(open.mock.lastCall).not.toHaveProperty([0, "detail"]);
-  await act(async () =>
-    opener.used.finder?.open({ source: "buzz.finder/people", query: "sam" }),
-  );
+  await act(async () => opener.used.finder?.open("buzz.finder/people"));
+  type("sam");
   expect(rows()).toEqual([expect.stringContaining("Sam Lee")]);
   await act(async () => screen.getByRole("option").click());
   // No DM: the profile opens beside a conversation you share.
@@ -505,34 +459,29 @@ test("built-in conversations and people rank by name and open on Enter", async (
   owner.dispose();
 });
 
-test("switching to another list never shows or runs the last list's rows", async () => {
+test("switching to another list keeps the text and shows only its rows", async () => {
   const ran = vi.fn();
   const first = consumer(() => ({
     id: "first",
     title: "First",
-    search: (_, publish) => publish([item("From first", ran)]),
+    items: () => [item("From first", ran)],
   }));
   const second = consumer(() => ({
     id: "second",
     title: "Second",
-    // Answers later, so a stale row would show meanwhile.
-    search: () => {},
+    items: () => [item("From second")],
   }));
   const { show } = await mount({
     "example.first": first.module,
     "example.second": second.module,
   });
   show();
-  await act(async () =>
-    first.used.finder?.open({ source: "example.first/first", query: "x" }),
-  );
+  await act(async () => first.used.finder?.open("example.first/first"));
+  type("from");
   expect(rows()).toEqual([expect.stringContaining("From first")]);
-  // The text stays "x": only the list changes.
-  await act(async () =>
-    second.used.finder?.open({ source: "example.second/second" }),
-  );
-  expect(screen.getByRole("combobox")).toHaveValue("x");
-  expect(rows()).toEqual([]);
+  await act(async () => second.used.finder?.open("example.second/second"));
+  expect(screen.getByRole("combobox")).toHaveValue("from");
+  expect(rows()).toEqual([expect.stringContaining("From second")]);
   expect(ran).not.toHaveBeenCalled();
 });
 
@@ -547,9 +496,8 @@ test("⌘P leaves a list for the two scopes with the text kept, and This channel
   });
   show();
   visit("v1", "crew");
-  await act(async () =>
-    fruit.used.finder?.open({ source: "example.fruit/list", query: "ap" }),
-  );
+  await act(async () => fruit.used.finder?.open("example.fruit/list"));
+  type("ap");
   fireEvent.keyDown(screen.getByRole("combobox"), {
     key: "p",
     code: "KeyP",

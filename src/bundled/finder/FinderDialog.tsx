@@ -79,9 +79,6 @@ type Props = {
   currentChannelId?: string | undefined;
   scope: FinderScope;
   onScopeChange: (scope: FinderScope) => void;
-  /** Counts openings: each new one starts from `initialQuery`, or empty. */
-  openCount: number;
-  initialQuery?: string | undefined;
   /** Another plugin's list, or a built-in one, in place of the two scopes. */
   source?: RegisteredSource | undefined;
   onSourceClose?: () => void;
@@ -90,13 +87,9 @@ type Props = {
 };
 
 export function FinderDialog(props: Props) {
-  const [query, setQuery] = useState(props.initialQuery ?? "");
-  // A new opening starts fresh; switching scope keeps the text.
-  const [counted, setCounted] = useState(props.openCount);
-  if (counted !== props.openCount) {
-    setCounted(props.openCount);
-    setQuery(props.initialQuery ?? "");
-  }
+  const [query, setQuery] = useState("");
+  // Closing clears the text; switching scope or list keeps it.
+  if (!props.open && query) setQuery("");
   const input = useRef<HTMLElement>(null);
   // The search field takes focus before the dialog notes what had it, so
   // keep that here, for closing to return to.

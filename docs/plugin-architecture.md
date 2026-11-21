@@ -3619,13 +3619,11 @@ While the bundled Finder plugin is on, it provides `ctx.finder`, a picker
 other plugins can open or add lists to, as Telescope is for Neovim plugins.
 Finder draws the window, ranks rows, shows previews and handles the keys.
 `registerSource({ id, title, items() })` adds a list Finder ranks with its
-fuzzy matcher, or `{ id, title, search(query, publish, signal) }` one that
-searches for itself and may publish more than once. IDs are prefixed with the
-registering plugin's ID, and a list goes when its plugin stops.
-`open({ source, query })` opens Finder on any list, including the built-in
-`buzz.finder/channel`, `buzz.finder/all`, `buzz.finder/conversations` and
-`buzz.finder/people`. Take it with `ctx.inject(["finder"], (child) => …)`, as
-Finder can be off. The full contract is in [Finder](finder.md#plugin-sources).
+fuzzy matcher. IDs are prefixed with the registering plugin's ID, and a list
+goes when its plugin stops. `open(source)` opens Finder on any list,
+including the built-in `buzz.finder/channel`, `buzz.finder/all`,
+`buzz.finder/conversations` and `buzz.finder/people`. Take it with
+`ctx.inject(["finder"], (child) => …)`, as Finder can be off. The full contract is in [Finder](finder.md#plugin-sources).
 
 ## GitHub pull request states
 

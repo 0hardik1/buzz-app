@@ -136,16 +136,13 @@ async function fixture() {
     session: owner.session,
     sync,
     openMessage: vi.fn(),
-    openCount: 1,
   };
   function Finder({
     initial = "buzz",
     open = true,
-    openCount = 1,
   }: {
     initial?: FinderScope;
     open?: boolean;
-    openCount?: number;
   }) {
     const [scope, setScope] = useState<FinderScope>(initial);
     const revision = useRevision();
@@ -153,7 +150,6 @@ async function fixture() {
       <FinderDialog
         {...props}
         open={open}
-        openCount={openCount}
         revision={revision}
         currentChannelId="crew"
         scope={scope}
@@ -294,7 +290,7 @@ test("adds relay hits to the index on close, keeps public previews out, and reta
   ]);
 });
 
-test("each opening starts with an empty query, and switching scope keeps it", async () => {
+test("closing clears the query, and switching scope keeps it", async () => {
   const { Finder, click } = await fixture();
   const view = render(<Finder />);
   type("release");
@@ -305,7 +301,7 @@ test("each opening starts with an empty query, and switching scope keeps it", as
   );
   expect(screen.getByRole("combobox")).toHaveValue("release");
   view.rerender(<Finder open={false} />);
-  view.rerender(<Finder openCount={2} />);
+  view.rerender(<Finder />);
   expect(screen.getByRole("combobox")).toHaveValue("");
 });
 

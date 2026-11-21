@@ -84,31 +84,27 @@ export function apply(ctx) {
         { id: "thread", label: "Thread", keywords: "replies", run: () => focusThread() },
       ],
     });
-    // Open Finder on a list, with or without starting text.
-    child.finder.open({ source: "buzz.finder/people", query: "maya" });
+    // Open Finder on a list.
+    child.finder.open("buzz.finder/people");
   });
 }
 ```
 
-- `open({ source, query })`: without `source`, Finder opens as ⌘P does.
-  Without `query`, the field starts empty. An unknown source opens All of Buzz.
+- `open(source)` opens Finder with an empty field. Without a source, or with
+  one it doesn't know, Finder opens as ⌘P does.
 - Built-in lists: `buzz.finder/channel` (This channel), `buzz.finder/all` (All
   of Buzz), `buzz.finder/conversations` (channels and DMs you've joined; Enter
   opens one) and `buzz.finder/people` (everyone in them, by name, handle or
   NIP-05; Enter opens your DM with them, or their profile).
 - `registerSource(source)` returns a function that removes the list. It also
   goes when your plugin stops; if it was open, Finder shows All of Buzz.
-- A list either gives every row with `items()`, which Finder ranks with its
-  fuzzy matcher over `label` and `keywords` and reads again for each text and
-  as messages and names arrive, or runs its own search with
-  `search(query, publish, signal)`. A search can publish several times, such
-  as local rows first and remote ones later. Publishing for older text does
-  nothing.
-- Each row has an `id`, a `label`, and `run()`, which runs after Finder closes.
-  IDs are unique within a list; a repeated ID shows one row, the last given.
-  It can add a `detail` line, `keywords`, an `icon` or `avatar`, and a
-  `preview`: `{ kind: "channel", channelId }`, `{ kind: "person", pubkey }`,
-  or a component.
+- A list gives every row with `items()`. Finder ranks them with its fuzzy
+  matcher over `label` and `keywords`, and reads them again for each text and
+  as messages and names arrive.
+- Each row has an `id`, unique within the list, a `label`, and `run()`, which
+  runs after Finder closes. It can add a `detail` line, `keywords`, an `icon`,
+  an `avatar` (`{ src }`; without `src`, the label's initials), and a
+  `preview`: `{ kind: "channel", channelId }` or `{ kind: "person", pubkey }`.
 - A list that throws shows "This list couldn't load." instead of breaking
   Finder.
 
@@ -278,5 +274,5 @@ start in the index. Try a word with no matches to reach the end. Use
 `?channel=c0&history=6000` with a word that has no matches to reach the
 5,000-message cap and try **Keep going**. Choose **All of Buzz** in the switch,
 or press ⌘⇧P, to see device matches with relay hits below them. Add
-`?source=fruit` to open a sample plugin list, with a custom preview, or
+`?source=fruit` to open a sample plugin list, or
 `?source=conversations` or `?source=people` for the built-in lists.

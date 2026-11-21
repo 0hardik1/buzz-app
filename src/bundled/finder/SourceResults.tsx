@@ -1,10 +1,4 @@
-import {
-  type ReactNode,
-  type RefObject,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { type ReactNode, type RefObject, useMemo } from "react";
 import {
   SearchChoices,
   type SearchDestination,
@@ -16,48 +10,32 @@ import {
 import type { RelaySession } from "../../features/relay/session";
 import { ChatCircleIcon } from "../../shared/design-system/icons/index";
 import { createCorpus } from "./corpus.ts";
-import type { FinderItem, RegisteredSource } from "./service";
+import type { RegisteredSource } from "./service";
 
 const LIMIT = 50;
 
-type Listed =
-  | Readonly<{
-      query: string;
-      items: readonly FinderItem[];
-      /** Matched code points of each label, by item ID. */
-      matches?: ReadonlyMap<string, readonly number[]>;
-      /** How many matched, of which `items` are the best. */
-      total?: number;
-    }>
-  | Readonly<{ query: string; error: true }>;
-
-/** Every row, ranked by Finder's matcher over label and keywords. Ties keep
- * the source's order. */
-function useRanked(
-  source: RegisteredSource,
-  query: string,
-  revision: number,
-): Listed {
+/** The best rows for the text, ranked by Finder's matcher over label and
+ * keywords, with their matched code points; ties keep the source's order.
+ * `undefined` when the list fails. */
+function useRanked(source: RegisteredSource, query: string, revision: number) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: new text, names or messages read the list again, so it stays current.
   const items = useMemo(() => {
-    if (!("items" in source)) return undefined;
     try {
       return source.items();
     } catch (error) {
       console.error(`Finder source ${source.key} failed`, error);
-      return null;
+      return undefined;
     }
   }, [source, query, revision]);
   const corpus = useMemo(() => {
-    if (!items) return undefined;
     const ranked = createCorpus();
     ranked.add(
-      items.map((item, n) => ({
+      (items ?? []).map((item, n, all) => ({
         id: item.id,
         channelId: "",
         authorId: "",
         // Newer wins a tie; the first row is "newest".
-        createdAt: items.length - n,
+        createdAt: all.length - n,
         author: item.keywords ?? "",
         place: "",
         text: item.label,
@@ -65,59 +43,16 @@ function useRanked(
     );
     return ranked;
   }, [items]);
-  if (items === null) return { query, error: true };
-  if (!items || !corpus) return { query, items: [] };
+  if (!items) return undefined;
   const byId = new Map(items.map((item) => [item.id, item]));
   const results = corpus.search(query, LIMIT);
   return {
-    query,
-    items: results.hits.flatMap(({ doc }) => byId.get(doc.id) ?? []),
     total: results.total,
-    matches: new Map(
-      results.hits.map(({ doc, positions }) => [doc.id, positions]),
-    ),
+    hits: results.hits.flatMap(({ doc, positions }) => {
+      const item = byId.get(doc.id);
+      return item ? [{ item, positions }] : [];
+    }),
   };
-}
-
-/** What the source published for the current text, as it arrives. */
-function useSearched(
-  source: RegisteredSource,
-  query: string,
-): Listed | undefined {
-  const [listed, setListed] = useState<Listed>();
-  useEffect(() => {
-    if (!("search" in source)) return;
-    const controller = new AbortController();
-    const fail = (error: unknown) => {
-      // Stopping for newer text isn't a failure.
-      if (controller.signal.aborted) return;
-      console.error(`Finder source ${source.key} failed`, error);
-      setListed({ query, error: true });
-    };
-    try {
-      // An async search can reject later instead of throwing.
-      Promise.resolve(
-        source.search(
-          query,
-          (items) => {
-            // One row per ID, as a list from `items()` gets.
-            if (!controller.signal.aborted)
-              setListed({
-                query,
-                items: [
-                  ...new Map(items.map((item) => [item.id, item])).values(),
-                ],
-              });
-          },
-          controller.signal,
-        ),
-      ).catch(fail);
-    } catch (error) {
-      fail(error);
-    }
-    return () => controller.abort();
-  }, [source, query]);
-  return listed?.query === query ? listed : undefined;
 }
 
 export function SourceResults({
@@ -146,36 +81,22 @@ export function SourceResults({
   footer?: ReactNode;
 }) {
   const ranked = useRanked(source, query, revision);
-  const searched = useSearched(source, query);
-  const listed = "items" in source ? ranked : searched;
   // biome-ignore lint/correctness/useExhaustiveDependencies: previews must not cross sessions.
   const previews = useMemo<PreviewCache>(() => new Map(), [session]);
-  const items = listed && "items" in listed ? listed.items : [];
-  const byKey = new Map(items.map((item) => [`item:${item.id}`, item]));
-  const rows = items.map((item): SearchDestination => {
-    const matches =
-      "items" in ranked ? ranked.matches?.get(item.id) : undefined;
-    const preview = item.preview;
-    return {
+  const rows = (ranked?.hits ?? []).map(
+    ({ item, positions }): SearchDestination => ({
       key: `item:${item.id}`,
       label: item.label,
-      ...(matches?.length ? { matches } : {}),
+      ...(positions.length ? { matches: positions } : {}),
       ...(item.detail ? { detail: item.detail } : {}),
       icon: item.icon ?? ChatCircleIcon,
       ...(item.avatar && {
         avatar: {
-          shape: item.avatar.shape ?? "circle",
+          shape: "circle",
           ...(item.avatar.src && { src: item.avatar.src }),
-          name: item.avatar.name ?? item.label,
         },
       }),
-      ...(preview &&
-        typeof preview === "object" && {
-          peek:
-            preview.kind === "channel"
-              ? { kind: "channel" as const, channelId: preview.channelId }
-              : { kind: "person" as const, pubkey: preview.pubkey },
-        }),
+      ...(item.preview && { peek: item.preview }),
       run: () => {
         onOpenChange(false);
         try {
@@ -184,9 +105,8 @@ export function SourceResults({
           console.error(`Finder source ${source.key} failed`, error);
         }
       },
-    };
-  });
-  const custom = items.some((item) => typeof item.preview === "function");
+    }),
+  );
   return (
     <SearchChoices
       label={source.title}
@@ -202,52 +122,40 @@ export function SourceResults({
           destinations: rows,
           total: rows.length,
           count:
-            listed && "items" in listed && (listed.total ?? 0) > rows.length
-              ? `${rows.length} of ${listed.total?.toLocaleString()}`
+            ranked && ranked.total > rows.length
+              ? `${rows.length} of ${ranked.total.toLocaleString()}`
               : undefined,
-          empty:
-            listed && "error" in listed
-              ? "This list couldn't load."
-              : !listed
-                ? ""
-                : query.trim()
-                  ? "Nothing matches. Try fewer letters."
-                  : "This list is empty.",
+          empty: !ranked
+            ? "This list couldn't load."
+            : query.trim()
+              ? "Nothing matches. Try fewer letters."
+              : "This list is empty.",
         },
       ]}
       footer={footer}
       scope={{ id: source.key, label: source.title, onRemove: onClose }}
       peek={{
         ranked: false,
-        busy: !listed,
-        preview:
-          session || custom
-            ? (row, tone, follow) => {
-                const item = row ? byKey.get(row.key) : undefined;
-                const Preview =
-                  typeof item?.preview === "function"
-                    ? item.preview
-                    : undefined;
-                if (Preview) return <Preview />;
-                return session ? (
-                  <SearchPreview
-                    session={session}
-                    cache={previews}
-                    row={row?.peek ? row : undefined}
-                    tone={tone}
-                    follow={follow}
-                    terms={[]}
-                    nameOf={(pubkey) =>
-                      session.profiles.snapshot().get(pubkey)?.name ??
-                      pubkey.slice(0, 10)
-                    }
-                    whereOf={(channelId) =>
-                      session.channels.get?.(channelId)?.name ?? "Conversation"
-                    }
-                  />
-                ) : null;
-              }
-            : undefined,
+        busy: false,
+        preview: session
+          ? (row, tone, follow) => (
+              <SearchPreview
+                session={session}
+                cache={previews}
+                row={row?.peek ? row : undefined}
+                tone={tone}
+                follow={follow}
+                terms={[]}
+                nameOf={(pubkey) =>
+                  session.profiles.snapshot().get(pubkey)?.name ??
+                  pubkey.slice(0, 10)
+                }
+                whereOf={(channelId) =>
+                  session.channels.get?.(channelId)?.name ?? "Conversation"
+                }
+              />
+            )
+          : undefined,
       }}
     />
   );

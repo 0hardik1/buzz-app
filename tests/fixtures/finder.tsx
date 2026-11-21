@@ -157,7 +157,6 @@ const fruit: RegisteredSource = {
         label,
         detail: "Sample plugin row",
         keywords: label === "Mango" ? "tropical" : "",
-        preview: () => <p>A preview the plugin draws for {label}.</p>,
         run: () => console.log(`chose ${label}`),
       }),
     ),
@@ -187,7 +186,6 @@ function App() {
   const [scope, setScope] = useState<FinderScope>(
     currentChannelId ? "channel" : "buzz",
   );
-  const [openCount, setOpenCount] = useState(1);
   const [source, setSource] = useState(
     sources.find((source) => source.id === params.get("source")),
   );
@@ -209,13 +207,12 @@ function App() {
         event.preventDefault();
         setScope(event.shiftKey || !currentChannelId ? "buzz" : "channel");
         setSource(undefined);
-        if (!open) setOpenCount((n) => n + 1);
         setOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [currentChannelId, open]);
+  }, [currentChannelId]);
   return (
     <main style={{ padding: "var(--space-panel-inset)", minHeight: "100vh" }}>
       <h1>Finder fixture</h1>
@@ -239,7 +236,6 @@ function App() {
         currentChannelId={currentChannelId}
         scope={scope}
         onScopeChange={setScope}
-        openCount={openCount}
         source={source}
         onSourceClose={() => {
           setSource(undefined);

@@ -104,13 +104,7 @@ export function builtinSources({
             ...(profile?.nip05 && { detail: profile.nip05 }),
             ...(keywords && { keywords }),
             icon: UserIcon,
-            avatar: {
-              shape: "circle",
-              name: nameOf(live, pubkey),
-              ...(profile?.picture && {
-                src: avatarMedia(profile.picture, live.media),
-              }),
-            },
+            avatar: { src: avatarMedia(profile?.picture, live.media) },
             preview: { kind: "person", pubkey },
             run: () => {
               // Your DM with them, as ⌘K opens; else their profile beside

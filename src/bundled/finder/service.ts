@@ -2,16 +2,15 @@
 // own. Finder provides it while it's on; take it with
 // `ctx.inject(["finder"], (child) => …)` so a plugin still starts without it.
 import { type Context, Service } from "@deepseek-ai/cordis";
-import type { ComponentType } from "react";
 import type { ChatCircleIcon } from "../../shared/design-system/icons/index";
 import {
   type Contribution,
   createContributions,
 } from "../../plugins/contributions";
 
-/** One row in a source's list. */
+/** One row in a list. */
 export type FinderItem = Readonly<{
-  /** Unique within the list; a repeat replaces the earlier row. */
+  /** Unique within the list. */
   id: string;
   /** What's shown and matched. */
   label: string;
@@ -20,57 +19,35 @@ export type FinderItem = Readonly<{
   /** Matched too, but not shown, such as a handle. */
   keywords?: string;
   icon?: typeof ChatCircleIcon;
-  avatar?: Readonly<{
-    src?: string | undefined;
-    name?: string;
-    shape?: "circle" | "squircle";
-  }>;
+  /** A round avatar in place of the icon: the image, else the label's
+   * initials. */
+  avatar?: Readonly<{ src?: string | undefined }>;
   /** Shown beside the list while the row is highlighted. */
   preview?:
     | Readonly<{ kind: "channel"; channelId: string }>
-    | Readonly<{ kind: "person"; pubkey: string }>
-    | ComponentType;
+    | Readonly<{ kind: "person"; pubkey: string }>;
   /** Runs on Enter or click, after Finder closes. */
   run(): void;
 }>;
 
-export type FinderSource = Readonly<
-  {
-    /** Unique within your plugin; Finder prefixes your plugin's ID. */
-    id: string;
-    /** Names the list, in the scope chip. */
-    title: string;
-  } & (
-    | {
-        /** Every row; Finder ranks them as you type. It reads them again
-         * for each text and as messages and names arrive. */
-        items(): readonly FinderItem[];
-      }
-    | {
-        /** Your own search, for each text typed. Publish as often as rows
-         * change; publishing after `signal` aborts does nothing. */
-        search(
-          query: string,
-          publish: (items: readonly FinderItem[]) => void,
-          signal: AbortSignal,
-        ): void;
-      }
-  )
->;
-
-export type FinderOpenOptions = Readonly<{
-  /** A source key, such as "buzz.finder/people" or "your.plugin/id".
-   * Without it, Finder opens as ⌘P does. */
-  source?: string;
-  /** The text to start with. Without it, the field starts empty. */
-  query?: string;
+export type FinderSource = Readonly<{
+  /** Unique within your plugin; Finder prefixes your plugin's ID. */
+  id: string;
+  /** Names the list, in the scope chip. */
+  title: string;
+  /** Every row; Finder ranks them as you type. It reads them again for each
+   * text and as messages and names arrive. */
+  items(): readonly FinderItem[];
 }>;
 
 export type Finder = {
-  /** Adds a source; returns a function that removes it. It also goes when
+  /** Adds a list; returns a function that removes it. It also goes when
    * your plugin stops. */
   registerSource(source: FinderSource): () => void;
-  open(options?: FinderOpenOptions): void;
+  /** Opens Finder with an empty field on a list key, such as
+   * "buzz.finder/people" or "your.plugin/id"; without one, or with an
+   * unknown one, as ⌘P does. */
+  open(source?: string): void;
 };
 
 export type RegisteredSource = Contribution<FinderSource>;
@@ -85,7 +62,7 @@ declare module "@deepseek-ai/cordis" {
 /** Provides `ctx.finder` for as long as `ctx` (Finder's own scope) lives. */
 export function provideFinder(
   ctx: Context,
-  open: (options: FinderOpenOptions) => void,
+  open: (source: string | undefined) => void,
 ) {
   const sources = createContributions<FinderSource>(ctx);
   class FinderService extends Service implements Finder {
@@ -97,8 +74,8 @@ export function provideFinder(
     registerSource(source: FinderSource) {
       return sources.register(this.ctx, source);
     }
-    open(options: FinderOpenOptions = {}) {
-      open(options);
+    open(source?: string) {
+      open(source);
     }
   }
   new FinderService();
