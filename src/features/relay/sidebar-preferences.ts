@@ -18,13 +18,11 @@ export {
   MAX_WORKSPACES,
   MAX_WORKSPACE_ASSIGNMENTS,
 } from "./sidebar-registers.ts";
-import type { ReadFilter } from "./events.ts";
 import type { RelayEvent } from "./events.ts";
 import type { RelayReader } from "./reader.ts";
 
 export const WORKSPACE_COORDINATE = "channel-workspaces";
 export const WORKSPACE_SORT_COORDINATE = "channel-workspace-sort";
-export const WORKSPACE_FILTER_COORDINATE = "channel-workspace-filter";
 export const HOME_SIDEBAR_SECTIONS = [
   "starred",
   "solo",
@@ -32,62 +30,21 @@ export const HOME_SIDEBAR_SECTIONS = [
   "forums",
   "dms",
 ] as const;
+/** Account preference records this app reads. Older apps also saved card
+ * filters (`channel-filter`, `channel-workspace-filter`); filtering is gone, so
+ * those records are never read, written or replaced, and stay intact. */
 export const SIDEBAR_COORDINATES = [
   "channel-sections",
   "channel-stars",
   "channel-mutes",
   "channel-sort",
-  "channel-filter",
 ] as const;
-/** Only the complete bounded account-preference batch may exceed the ordinary four-filter limit. */
-export function isSidebarPreferencesBatch(
-  filters: readonly ReadFilter[],
-): boolean {
-  const viewer = filters[0]?.authors?.[0];
-  return (
-    typeof viewer === "string" &&
-    !!viewer &&
-    filters.length === SIDEBAR_COORDINATES.length &&
-    new Set(filters.map((filter) => sidebarBatchCoordinate(filter))).size ===
-      SIDEBAR_COORDINATES.length &&
-    filters.every(
-      (filter) =>
-        Array.isArray(filter?.kinds) &&
-        filter.kinds.length === 1 &&
-        filter.kinds[0] === 30078 &&
-        Array.isArray(filter.authors) &&
-        filter.authors.length === 1 &&
-        filter.authors[0] === viewer &&
-        Array.isArray(filter["#d"]) &&
-        filter["#d"].length === 1 &&
-        SIDEBAR_COORDINATES.includes(
-          sidebarBatchCoordinate(
-            filter,
-          ) as (typeof SIDEBAR_COORDINATES)[number],
-        ) &&
-        filter.limit === 1 &&
-        (filter.consistency === undefined || filter.consistency === "strong") &&
-        Object.keys(filter).every((key) =>
-          ["kinds", "authors", "#d", "limit", "consistency"].includes(key),
-        ),
-    )
-  );
-}
 export const WORKSPACE_PREFERENCE_COORDINATES = [
   WORKSPACE_COORDINATE,
   "channel-stars",
   "channel-mutes",
   WORKSPACE_SORT_COORDINATE,
-  WORKSPACE_FILTER_COORDINATE,
 ] as const;
-
-function sidebarBatchCoordinate(filter: ReadFilter) {
-  const coordinate = filter?.["#d"]?.[0];
-  if (coordinate === WORKSPACE_COORDINATE) return "channel-sections";
-  if (coordinate === WORKSPACE_SORT_COORDINATE) return "channel-sort";
-  if (coordinate === WORKSPACE_FILTER_COORDINATE) return "channel-filter";
-  return coordinate;
-}
 
 export type SidebarGroups = Readonly<{
   sections: readonly Readonly<{
@@ -365,7 +322,6 @@ export function projectWorkspacePreferences(
   stars?: unknown,
   mutes?: unknown,
   sort?: unknown,
-  filters?: unknown,
 ) {
   return projectSidebarPreferences(
     workspaces,
@@ -373,7 +329,6 @@ export function projectWorkspacePreferences(
     mutes,
     sort,
     undefined,
-    filters,
     true,
   );
 }
@@ -527,9 +482,6 @@ export function projectSidebarPreferences(
   mutes?: unknown,
   sort?: unknown,
   sortSectionIds?: readonly string[],
-  /** Older apps' card filters. Filtering is gone, so a saved record of any
-   * shape is accepted and ignored: every card shows all of its rows. */
-  _filters?: unknown,
   workspaceRecord = false,
 ): SidebarPreferences {
   const result: {
@@ -726,13 +678,8 @@ export async function readSidebarPreferences(
           ),
         ),
       );
-      const legacy = [
-        ...(!present.has(WORKSPACE_SORT_COORDINATE) ? ["channel-sort"] : []),
-        ...(!present.has(WORKSPACE_FILTER_COORDINATE)
-          ? ["channel-filter"]
-          : []),
-      ];
-      if (legacy.length) events = [...events, ...(await read(legacy))];
+      if (!present.has(WORKSPACE_SORT_COORDINATE))
+        events = [...events, ...(await read(["channel-sort"]))];
     }
     signal.throwIfAborted();
   } catch (error) {

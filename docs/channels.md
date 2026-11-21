@@ -183,8 +183,8 @@ Its ellipsis menu offers **Sort** (**Recent** or **A–Z**, plus **Unreads
 first**) and **Layout**. The card's height decides how many rows show; drag its
 bottom edge, or double-click it to show every row. Rows past the edge that
 need you are counted in the card's "N unread" badge. Account preferences saved
-by older apps may still hold card filters (`channel-workspace-filter`); they are
-accepted and ignored, so such a card shows everything, sorted. The saved-groups
+by older apps may still hold card filters; they are never read, so such a card
+shows everything, sorted. The saved-groups
 browser regression records every visible return frame and holds the redundant
 decode path, so eventual restoration cannot conceal a fallback-group/scroll jump.
 
@@ -230,12 +230,11 @@ Nothing switches a section to Recent on its own.
 The development broker and packaged native host save these choices in the desktop-compatible encrypted
 kind-30078 `channel-workspace-sort` record: `{ version: 1, groups: { ... }, meta: { v: 1, g: { ... } } }`.
 A–Z writes a null register and removes that group's legacy override.
-Sorting is the only saved view choice. Older apps also saved card filters in a
-separate `channel-workspace-filter` coordinate (`groups`, `activeWindowSeconds`
-and `unreadsWindowSeconds`). This app neither reads nor writes them: the
-preference parser accepts any such record and ignores it, and the native signer
-still accepts the fields, so older saved preferences load and nothing is
-rejected. Sort writes go through the existing preference queue, and a confirmed
+Sorting is the only saved view choice. Older apps also saved card filters in
+separate `channel-filter` and `channel-workspace-filter` records. This app never
+queries, replays, decodes or writes them, and their arrival never triggers a
+reread, so an unreadable one cannot break loading and an older app's record
+stays intact. Sort writes go through the existing preference queue, and a confirmed
 full read is required before writes. A saved startup copy is display-only until
 relay reads recover. Like sorting, this is whole-record last-write-wins; another client sees changes
 when it loads or refreshes preferences, without a new automatic reconciliation loop.
@@ -264,8 +263,8 @@ The relay selects one whole record when same-account writers race, so
 confirmation can precede a later replacement of the same edit.
 
 A cold load or uncached reconnect gap starts three preference reads in parallel,
-with seven filters total. If the unified sort or filter is absent, a fourth
-read requests the missing legacy coordinates with one or two more filters.
+with six filters total. If the unified sort is absent, a fourth read requests
+the legacy `channel-sort` with one more filter.
 These counts are before scheduler caching and coalescing. A continuous
 reconnect does not force a preference reread.
 

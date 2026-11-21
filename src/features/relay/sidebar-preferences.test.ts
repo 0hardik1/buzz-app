@@ -19,6 +19,7 @@ import {
 import { keypair, signed, scriptedTransport, flush, roster } from "./testing";
 import type { LiveCallbacks } from "./live";
 import { ReadError } from "./errors";
+import type { ReadFilter } from "./events";
 
 const groups = {
   version: 1,
@@ -219,9 +220,10 @@ it("reads legacy preferences through the production session, transport, and boun
         "channel-stars",
         "channel-mutes",
         "channel-sort",
-        "channel-filter",
       ]),
     );
+    expect(reads).not.toContain("channel-filter");
+    expect(reads).not.toContain("channel-workspace-filter");
     result = [
       ...records,
       encrypted("channel-mutes", {
@@ -723,85 +725,23 @@ it("writer reconciliation cannot join an older in-flight preference read", async
   );
 });
 
-it("admits only the complete bounded sidebar batch beyond the normal reader limit", async () => {
-  const { SIDEBAR_COORDINATES, isSidebarPreferencesBatch } = await import(
-    "./sidebar-preferences"
+it("never reads an older app's card filter records", async () => {
+  const read = vi.fn(async () => []);
+  const decode = vi.fn(async () => expected);
+  const signal = new AbortController().signal;
+  await readSidebarPreferences({ read }, "viewer", decode, signal);
+  await readSidebarPreferences(
+    { read },
+    "viewer",
+    decode,
+    signal,
+    undefined,
+    true,
   );
-  const filters = SIDEBAR_COORDINATES.map((coordinate) => ({
-    kinds: [30078],
-    authors: ["viewer"],
-    "#d": [coordinate],
-    limit: 1,
-  }));
-  expect(isSidebarPreferencesBatch(filters)).toBe(true);
-  expect(
-    isSidebarPreferencesBatch(
-      filters.map((filter) => ({ ...filter, consistency: "strong" })),
-    ),
-  ).toBe(true);
-  expect(
-    isSidebarPreferencesBatch(
-      filters.map((filter) => ({
-        ...filter,
-        consistency: "weak",
-      })) as unknown as typeof filters,
-    ),
-  ).toBe(false);
-  expect(
-    isSidebarPreferencesBatch(
-      filters.map((filter) => ({
-        ...filter,
-        consistency: true,
-      })) as unknown as typeof filters,
-    ),
-  ).toBe(false);
-  expect(isSidebarPreferencesBatch(filters.slice(1))).toBe(false);
-  expect(
-    isSidebarPreferencesBatch([
-      ...filters.slice(0, 4),
-      filters[0] as (typeof filters)[number],
-    ]),
-  ).toBe(false);
-  for (const changed of [
-    { limit: 2 },
-    { kinds: [9] },
-    { authors: ["other"] },
-    { "#d": ["unknown"] },
-    { since: 1 },
-  ])
-    expect(
-      isSidebarPreferencesBatch([
-        { ...(filters[0] as (typeof filters)[number]), ...changed },
-        ...filters.slice(1),
-      ]),
-    ).toBe(false);
-});
-
-it("accepts and ignores an older app's channel-filter record", () => {
-  const records: unknown[] = [
-    {
-      version: 1,
-      groups: { channels: "unreads", "section:x": "active" },
-      activeWindowSeconds: { channels: 7 * 86400 },
-      unreadsWindowSeconds: { channels: 86400 },
-    },
-    { version: 2, groups: "nope" },
-  ];
-  for (const record of records) {
-    let result: ReturnType<typeof projectSidebarPreferences> | undefined;
-    expect(() => {
-      result = projectSidebarPreferences(
-        groups,
-        stars,
-        undefined,
-        { version: 1, groups: { channels: "recent" } },
-        ["work"],
-        record,
-      );
-    }).not.toThrow();
-    expect(result).not.toHaveProperty("filters");
-    expect(result).not.toHaveProperty("activeWindowSeconds");
-    expect(result?.sections).toEqual(expected.sections);
-    expect(result?.sort).toEqual({ channels: "recent" });
-  }
+  const coordinates = (read.mock.calls as unknown as [ReadFilter[]][]).flatMap(
+    ([filters]) => filters.flatMap((filter) => filter["#d"] ?? []),
+  );
+  expect(coordinates).toContain("channel-sort");
+  expect(coordinates).not.toContain("channel-filter");
+  expect(coordinates).not.toContain("channel-workspace-filter");
 });

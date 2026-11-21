@@ -41,7 +41,6 @@ function sectionChoice(
       undefined,
       blob,
       sectionIds,
-      undefined,
       wire !== coordinate,
     );
 

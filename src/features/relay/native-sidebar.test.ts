@@ -2,7 +2,10 @@ import { assert, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { finalizeEvent, nip44 } from "nostr-tools";
 import { connectNativeTransport as connectNative } from "./native";
+import type { ReadFilter } from "./events";
+import type { RelayReader } from "./reader";
 import { createSidebarPreferencesStore } from "./sidebar-preferences-store";
+import { readSidebarPreferences } from "./sidebar-preferences";
 import { keypair, nativeSignatureChecks } from "./testing";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -519,6 +522,72 @@ it("reads the authoritative legacy projection and writes only the unified coordi
       },
     },
   });
+});
+
+it("reads around an older app's unreadable card filter records and never touches them", async () => {
+  records.set(
+    "channel-workspaces",
+    signedRecord("channel-workspaces", {
+      version: 1,
+      sections: [{ id: "work", name: "Work", order: 0 }],
+      assignments: { c1: "work" },
+    }),
+  );
+  records.set(
+    "channel-workspace-sort",
+    signedRecord("channel-workspace-sort", {
+      version: 1,
+      groups: { channels: "recent" },
+    }),
+  );
+  const retired = ["channel-filter", "channel-workspace-filter"].map((d) =>
+    finalizeEvent(
+      {
+        kind: 30078,
+        created_at: 1_700_000_000,
+        tags: [
+          ["d", d],
+          ["t", d],
+        ],
+        content: "not encrypted",
+      },
+      viewer.secret,
+    ),
+  );
+  for (const event of retired) records.set(event.tags[0]?.[1] ?? "", event);
+  const transport = await connectNativeTransport(community);
+  const reader = {
+    read: (filters: ReadFilter[], { signal }: { signal: AbortSignal }) =>
+      transport.query(filters, signal),
+  } as unknown as RelayReader;
+  await expect(
+    readSidebarPreferences(
+      reader,
+      viewer.pubkey,
+      transport.decodeSidebarPreferences,
+      signal,
+      "strong",
+      true,
+    ),
+  ).resolves.toMatchObject({
+    sections: [{ id: "work", name: "Work", order: 0 }],
+    assignments: { c1: "work" },
+    sort: { channels: "recent" },
+  });
+  await transport.writeSidebarSort?.("channels", "alpha", [], signal);
+  const queried = vi
+    .mocked(invoke)
+    .mock.calls.filter(
+      ([command, args]) =>
+        command === "relay_http" &&
+        (args as { path: string }).path === "/query",
+    )
+    .flatMap(([, args]) => JSON.parse((args as { body: string }).body))
+    .flatMap((filter: { "#d": string[] }) => filter["#d"]);
+  expect(queried).not.toContain("channel-filter");
+  expect(queried).not.toContain("channel-workspace-filter");
+  expect(records.get("channel-filter")).toBe(retired[0]);
+  expect(records.get("channel-workspace-filter")).toBe(retired[1]);
 });
 
 it("reads legacy records with oversized deleted-section text and preserves them", async () => {

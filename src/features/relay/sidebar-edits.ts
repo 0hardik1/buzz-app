@@ -97,7 +97,6 @@ export function editSidebarSectionOrder(
       undefined,
       undefined,
       undefined,
-      undefined,
       true,
     );
     const live = workspaceSectionOrder(groups);
@@ -280,7 +279,6 @@ export function editSidebarAssignment(
   const previous = workspaceSectionOrder(
     projectSidebarPreferences(
       current,
-      undefined,
       undefined,
       undefined,
       undefined,

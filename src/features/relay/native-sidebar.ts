@@ -25,7 +25,6 @@ import {
   projectWorkspaceGroups,
   WORKSPACE_COORDINATE,
   WORKSPACE_SORT_COORDINATE,
-  WORKSPACE_FILTER_COORDINATE,
   workspaceBaseRecord,
   expandWorkspaceRecord,
   workspacePayloadForSigning,
@@ -42,9 +41,7 @@ const coordinates = [
   "channel-stars",
   "channel-mutes",
   "channel-sort",
-  "channel-filter",
   WORKSPACE_SORT_COORDINATE,
-  WORKSPACE_FILTER_COORDINATE,
   "main-agent",
 ] as const;
 type Coordinate = (typeof coordinates)[number];
@@ -54,7 +51,7 @@ const empty = (coordinate: Coordinate): Record<string, unknown> =>
     ? { version: 1, agent: null }
     : coordinate === "channel-sections"
       ? { version: 1, sections: [], assignments: {} }
-      : coordinate.endsWith("-sort") || coordinate.endsWith("-filter")
+      : coordinate.endsWith("-sort")
         ? { version: 1, groups: {} }
         : { version: 1, channels: {} };
 const agentKey = /^[0-9a-f]{64}$/;
@@ -99,24 +96,20 @@ export function nativeSidebar(transport: ReadTransport) {
         raw["channel-stars"],
         raw["channel-mutes"],
         raw[WORKSPACE_SORT_COORDINATE] ?? raw["channel-sort"],
-        raw[WORKSPACE_FILTER_COORDINATE] ?? raw["channel-filter"],
       );
     }
-    if (raw[WORKSPACE_SORT_COORDINATE] || raw[WORKSPACE_FILTER_COORDINATE])
+    if (raw[WORKSPACE_SORT_COORDINATE])
       return projectWorkspacePreferences(
         undefined,
         raw["channel-stars"],
         raw["channel-mutes"],
-        raw[WORKSPACE_SORT_COORDINATE] ?? raw["channel-sort"],
-        raw[WORKSPACE_FILTER_COORDINATE] ?? raw["channel-filter"],
+        raw[WORKSPACE_SORT_COORDINATE],
       );
     return projectSidebarPreferences(
       raw["channel-sections"],
       raw["channel-stars"],
       raw["channel-mutes"],
       raw["channel-sort"],
-      undefined,
-      raw["channel-filter"],
     );
   }
   async function head(
@@ -158,10 +151,7 @@ export function nativeSidebar(transport: ReadTransport) {
             : coordinate === WORKSPACE_SORT_COORDINATE ||
                 coordinate === "channel-sort"
               ? projectSidebarRecord("channel-sort", value)
-              : coordinate === WORKSPACE_FILTER_COORDINATE ||
-                  coordinate === "channel-filter"
-                ? projectSidebarRecord("channel-filter", value)
-                : value,
+              : value,
       createdAt: events[0]?.created_at ?? 0,
     };
   }
@@ -180,12 +170,7 @@ export function nativeSidebar(transport: ReadTransport) {
         ? value
         : undefined,
       sectionIds,
-      coordinate === "channel-filter" ||
-        coordinate === WORKSPACE_FILTER_COORDINATE
-        ? value
-        : undefined,
-      coordinate === WORKSPACE_SORT_COORDINATE ||
-        coordinate === WORKSPACE_FILTER_COORDINATE,
+      coordinate === WORKSPACE_SORT_COORDINATE,
     );
   }
   async function mutate<T>(
@@ -207,11 +192,7 @@ export function nativeSidebar(transport: ReadTransport) {
   ): Promise<T> {
     const current = await head(coordinate, signal);
     const fallback =
-      coordinate === WORKSPACE_SORT_COORDINATE
-        ? "channel-sort"
-        : coordinate === WORKSPACE_FILTER_COORDINATE
-          ? "channel-filter"
-          : undefined;
+      coordinate === WORKSPACE_SORT_COORDINATE ? "channel-sort" : undefined;
     const base =
       fallback && !current.createdAt ? await head(fallback, signal) : current;
     const withLegacy = (head: Head) => {

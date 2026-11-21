@@ -599,7 +599,6 @@ export function createSidebarPreferencesStore({
         rows(data.muted, "muted"),
         { version: 1, groups: data.sort ?? {} },
         undefined,
-        undefined,
         data.sectionOrder !== undefined,
       );
       // Display-only: do not initialize the confirmed mutation base from disk.

@@ -1,5 +1,4 @@
 import {
-  isSidebarPreferencesBatch,
   decodeLegacyWorkspaceEnvelope,
   WORKSPACE_COORDINATE,
   WORKSPACE_SORT_COORDINATE,
@@ -769,9 +768,7 @@ export function validFilters(filters) {
   return (
     Array.isArray(filters) &&
     filters.length >= 1 &&
-    (filters.length <= MAX_FILTERS ||
-      isWorkflowDefinitionBatch(filters) ||
-      isSidebarPreferencesBatch(filters)) &&
+    (filters.length <= MAX_FILTERS || isWorkflowDefinitionBatch(filters)) &&
     filters.every(
       (filter) =>
         filter &&
