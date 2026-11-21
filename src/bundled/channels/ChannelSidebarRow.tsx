@@ -179,12 +179,16 @@ export function ChannelSidebarRow({
         )
       }
       trailing={
-        !tile &&
-        badge && (
+        badge &&
+        (tile ? (
+          // Inside the button, like a row's badges, so unread scans that
+          // resolve a marker to its row find it in either display.
+          <span className={styles.tileBadge}>{badge}</span>
+        ) : (
           <span className={styles.badges} data-working={working || undefined}>
             {badge}
           </span>
-        )
+        ))
       }
     />
   );
@@ -203,7 +207,6 @@ export function ChannelSidebarRow({
             {wrapSelect ? wrapSelect(selectButton) : selectButton}
           </span>
         </Tooltip>
-        {badge && <span className={styles.tileBadge}>{badge}</span>}
         {presenceDescription && (
           <span className="sr-only" id={presenceId}>
             {presenceDescription}
