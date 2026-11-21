@@ -275,8 +275,10 @@ test("channel sidebar resizes from the full gutter and persists", async ({
       panelGap: Number.parseFloat(
         getComputedStyle(panel.closest(".shell-sidebar")).marginInlineEnd,
       ),
-      panelGapToken:
-        Number.parseFloat(contentStyle.getPropertyValue("--space-panel-gap")) *
+      // The sidebar sits a small gap (4px) from the page, tighter than the
+      // panel gap at the app's edge.
+      sidebarGapToken:
+        Number.parseFloat(contentStyle.getPropertyValue("--space-1")) *
         rootSize,
       // The redesigned sidebar keeps a symmetric inline gutter inside each
       // card; rows use the sidebar's fixed row radius rather than a
@@ -297,8 +299,8 @@ test("channel sidebar resizes from the full gutter and persists", async ({
   const conversation = await page
     .locator("#main-content > .panel")
     .boundingBox();
-  // The floating sidebar and conversation card sit a panel gap apart.
-  expect(geometry.panelGap).toBe(geometry.panelGapToken);
+  // The floating sidebar and conversation card sit 4px apart.
+  expect(geometry.panelGap).toBe(geometry.sidebarGapToken);
   expect(geometry.panelGap).toBeGreaterThan(0);
   expect(conversation).not.toBeNull();
   expect(conversation.x - (before.x + before.width)).toBeCloseTo(
