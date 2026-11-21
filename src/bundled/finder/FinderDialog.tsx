@@ -293,9 +293,10 @@ const wordsOf = (query: string) =>
  * existing message search owns debounce, cancellation and channel access. */
 function AllResults(props: Contents & { session: RelaySession }) {
   const { session, query, corpus, revision, hold } = props;
-  // Once relay rows show, the device rows above them hold still until the
-  // text changes: the relay's own hits also reach the index as they arrive.
-  const relayShown = useRef(false);
+  // While the relay is asked, and once its rows show, the device rows above
+  // hold still until the text changes: the relay's own hits also reach the
+  // index as they arrive, and would otherwise move in above.
+  const holding = useRef(false);
   const kept = useRef<{
     query: string;
     session: RelaySession;
@@ -307,7 +308,7 @@ function AllResults(props: Contents & { session: RelaySession }) {
     [corpus, query, revision],
   );
   const local =
-    relayShown.current &&
+    holding.current &&
     kept.current?.query === query &&
     kept.current.session === session
       ? kept.current.results
@@ -392,7 +393,7 @@ function AllResults(props: Contents & { session: RelaySession }) {
     ],
   };
   const asked = !covered && !search.tooShort && !!query.trim();
-  relayShown.current = asked && relay.hits.length > 0;
+  holding.current = asked && (search.loading || relay.hits.length > 0);
   const retry = search.error ? search.retry : search.loadMore;
   const error = search.error || search.moreError;
   return (

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { StrictMode, useState } from "react";
+import { StrictMode, useState, useSyncExternalStore } from "react";
 import {
   act,
   cleanup,
@@ -105,11 +105,25 @@ async function fixture() {
   vi.useFakeTimers();
   vi.spyOn(Math, "random").mockReturnValue(0);
   const corpus = createCorpus();
+  // Revisions as the plugin counts them: one per index change.
+  let revisions = 0;
+  const watchers = new Set<() => void>();
   const sync = startFinderSync({
     session: owner.session,
     corpus,
-    changed() {},
+    changed() {
+      revisions++;
+      for (const watcher of watchers) watcher();
+    },
   });
+  const useRevision = () =>
+    useSyncExternalStore(
+      (watcher) => {
+        watchers.add(watcher);
+        return () => watchers.delete(watcher);
+      },
+      () => revisions,
+    );
   stops.push(sync.dispose);
   await vi.advanceTimersByTimeAsync(1000);
   expect(sync.status().phase).toBe("ready");
@@ -128,14 +142,13 @@ async function fixture() {
     initial = "buzz",
     open = true,
     openCount = 1,
-    revision = 0,
   }: {
     initial?: FinderScope;
     open?: boolean;
     openCount?: number;
-    revision?: number;
   }) {
     const [scope, setScope] = useState<FinderScope>(initial);
+    const revision = useRevision();
     return (
       <FinderDialog
         {...props}
@@ -182,7 +195,7 @@ const local = (id: string, text: string) => ({
 test("All of Buzz shows device matches at once, then relay hits below them, asking once per pause", async () => {
   const { Finder, reads, corpus } = await fixture();
   corpus.add([local("here", "api notes from this device")]);
-  const view = render(
+  render(
     <StrictMode>
       <Finder />
     </StrictMode>,
@@ -207,11 +220,6 @@ test("All of Buzz shows device matches at once, then relay hits below them, aski
   expect(reads).toHaveLength(1);
   // The recent hit also reached the index, as relay events do in the app.
   expect(corpus.search("release").total).toBe(1);
-  view.rerender(
-    <StrictMode>
-      <Finder revision={1} />
-    </StrictMode>,
-  );
   // Relay hits arrive below; the device row and the highlight stay put.
   expect(options("Matches")).toEqual([
     expect.stringContaining("api notes from this device"),
