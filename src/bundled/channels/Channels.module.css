@@ -396,11 +396,11 @@
   overflow: hidden;
   white-space: nowrap;
 }
-/* Collapsed headings stand in for their hidden rows, using the same unread
-   evidence as the sidebar edge cues. Muted destinations stay quiet. */
+/* Collapsed headings stand in for their hidden rows: bold for backlog or for
+   anything that needs you. Muted destinations stay quiet. */
 .channelSection:has(
     > .sectionContent
-      :is([data-channel-unread], [data-channel-activity]):not(
+      :is([data-channel-unread], [data-channel-needs-you]):not(
         [data-channel-muted]
       )
   )
@@ -823,8 +823,8 @@ html[data-keyboard-navigation]
   align-items: center;
   gap: var(--space-2);
 }
-.priorityDot,
-.threadActivityDot {
+/* A conversation that needs you: a DM, a mention or a followed reply. */
+.needsYouDot {
   display: block;
   margin-inline-start: auto;
   flex-shrink: 0;
@@ -832,9 +832,6 @@ html[data-keyboard-navigation]
   height: 0.375rem;
   border-radius: 50%;
   background: var(--affordance-prominent-mark);
-}
-.threadActivityDot {
-  cursor: help;
 }
 .activityStale {
   margin: 0;
@@ -1046,9 +1043,7 @@ html[data-keyboard-navigation]
 [class~="buzz-sidebar-navigation"] [data-selected] .typing > span {
   background: currentColor;
 }
-[class~="buzz-sidebar-navigation"]
-  [data-selected]
-  :is(.priorityDot, .threadActivityDot) {
+[class~="buzz-sidebar-navigation"] [data-selected] .needsYouDot {
   background: var(--text-row-selected);
 }
 

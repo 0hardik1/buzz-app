@@ -10,7 +10,7 @@ import {
 import { readView, subscribeView, writeView } from "../../shared/view-state";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import { Button } from "../../shared/design-system/ui/Button";
-import { hasUnmutedUnread, waitsOnYou } from "./conversation-rows";
+import { needsYou } from "./conversation-rows";
 import styles from "./Channels.module.css";
 
 const heightsKey = "sidebar:card-heights";
@@ -134,11 +134,7 @@ export function SidebarCardResize({
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: [
-        "data-channel-unread",
-        "data-channel-muted",
-        "data-channel-waiting",
-      ],
+      attributeFilter: ["data-channel-needs-you"],
     });
     const sized =
       typeof ResizeObserver === "undefined"
@@ -354,8 +350,8 @@ type Waiting = { count: number; lowest: number };
 const none: Waiting = { count: 0, lowest: -1 };
 
 /**
- * Conversations past the card's edge whose unread waits on you, counted once
- * each, and the index of the lowest one's row.
+ * Conversations past the card's edge that need you, counted once each, and
+ * the index of the lowest one's row.
  */
 function waitingPastEdge(list: HTMLElement): Waiting {
   const seen = new Set<string>();
@@ -367,7 +363,7 @@ function waitingPastEdge(list: HTMLElement): Waiting {
       const button = row.querySelector<HTMLElement>(
         "button[data-channel-id], button[data-solo-channel-id]",
       );
-      if (!button || !hasUnmutedUnread(button) || !waitsOnYou(button)) return;
+      if (!button || !needsYou(button)) return;
       seen.add(button.dataset.channelId ?? button.dataset.soloChannelId ?? "");
       lowest = index;
     });

@@ -12,11 +12,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import {
-  CONVERSATION_LIST_LABEL,
-  UNREAD_MARKERS,
-  waitsOnYou,
-} from "./conversation-rows";
+import { CONVERSATION_LIST_LABEL, NEEDS_YOU } from "./conversation-rows";
 import styles from "./Channels.module.css";
 import { avatarMedia } from "../../shared/avatar-source";
 import type { ChannelSummary, Profile } from "../../features/relay/contracts";
@@ -64,9 +60,8 @@ function unreadEdges(list: HTMLElement): Edges {
   const viewport = list.getBoundingClientRect();
   if (!list.clientHeight || !viewport.width) return edges;
   const rows = new Set<HTMLButtonElement>();
-  for (const marker of list.querySelectorAll(UNREAD_MARKERS)) {
-    // Muting keeps unread evidence but excludes it from scroll notifications.
-    if (marker.hasAttribute("data-channel-muted")) continue;
+  // Only conversations that need you earn a cue; ordinary backlog stays bold.
+  for (const marker of list.querySelectorAll(NEEDS_YOU)) {
     const row = marker.closest("button");
     if (row) rows.add(row);
   }
@@ -77,8 +72,6 @@ function unreadEdges(list: HTMLElement): Edges {
     const closed = row
       .closest("[data-sidebar-section]")
       ?.querySelector("details:not([open])");
-    // Only unread that waits on you earns a cue; ordinary backlog stays bold.
-    if (!waitsOnYou(row)) continue;
     // A row past a resized card's edge can't be scrolled to; the card's badge
     // stands in for it, so the cue leads there.
     const clipped = !closed && row.closest("[data-card-clipped]") !== null;
@@ -267,12 +260,9 @@ export function SidebarUnread({
       attributes: true,
       attributeFilter: [
         "open",
-        "data-channel-unread",
-        "data-channel-muted",
-        "data-channel-activity",
+        "data-channel-needs-you",
         "data-channel-type",
         "data-channel-id",
-        "data-priority",
         "data-moving",
         "data-card-clipped",
       ],

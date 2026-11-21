@@ -40,12 +40,8 @@ import { ChannelSidebarTile } from "./ChannelSidebarTile";
 import { SidebarCardDisplayContext } from "./SidebarCardDisplay";
 import { DmTypingBadge } from "./DmTypingBadge";
 import { usePresenceStatus } from "../../features/presence/react";
-import {
-  UnreadBadge,
-  UnreadCount,
-  ordinaryUnread,
-  useConfirmedMute,
-} from "./UnreadBadge";
+import { UnreadBadge, UnreadCount, ordinaryUnread } from "./UnreadBadge";
+import { useConfirmedMute } from "../../features/relay/useNeedsYou";
 import { SoloChatTitle } from "../../features/solo/SoloChatTitle";
 import { useWorkingAgents } from "./useWorkingAgents";
 import { WorkingAgentsBadge } from "./WorkingAgentsBadge";

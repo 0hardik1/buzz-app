@@ -1,5 +1,5 @@
 import { useMemo, useRef, useSyncExternalStore } from "react";
-import { inboxUnreadChannels } from "../../features/relay/inbox";
+import { needsYouChannels } from "../../features/relay/inbox";
 import type { RelaySession } from "../../features/relay/session";
 import {
   readView,
@@ -66,8 +66,9 @@ export function unreadsFirst<T>(
 }
 
 /**
- * Unmuted conversations unread in Activity. The one you open stays in the set
- * until you leave it, so reading it doesn't pull it out from under you.
+ * Unmuted conversations that need you (see `needsYou`). The one you open stays
+ * in the set until you leave it, so reading it doesn't pull it out from under
+ * you.
  */
 export function useWaitingChannels(
   unread: RelaySession["unread"],
@@ -86,7 +87,7 @@ export function useWaitingChannels(
   return useMemo(() => {
     const quiet = new Set(muted ?? []);
     const waiting = new Set(
-      [...inboxUnreadChannels(inbox)].filter((id) => !quiet.has(id)),
+      [...needsYouChannels(inbox)].filter((id) => !quiet.has(id)),
     );
     if (held.current.open !== open)
       held.current = { open, held: !!open && waiting.has(open) };
