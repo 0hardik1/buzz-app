@@ -203,6 +203,7 @@ export function SoloDraft({
   session,
   scope,
   onStarted,
+  onConfirmed,
   onFailed,
   projectId,
   extensions,
@@ -235,6 +236,10 @@ export function SoloDraft({
   session: RelaySession;
   scope: string;
   onStarted: (id: string) => void;
+  /** The relay confirmed that a chat reported through `onStarted` exists.
+   * Confirmation still arrives after an optimistic channel row replaces the
+   * draft. */
+  onConfirmed?: ((id: string) => void) | undefined;
   /** The started chat `id` was never made; `message` says why, and whether
    * what was sent in it went back to New chat. It does unless a draft was
    * begun there since (an earlier refused prompt included) or it can't be
@@ -709,7 +714,13 @@ export function SoloDraft({
         // Delivery retains its frozen choices; neither shared map is changed unlocked.
       }
       draftEdited(undefined);
-      if (mounted.current) onStarted(channelId);
+      if (mounted.current) {
+        onStarted(channelId);
+        void ready.then(
+          () => onConfirmed?.(channelId),
+          () => {},
+        );
+      }
       if (clearedPicks === "failed")
         notify(
           "Could not clear model and effort from New chat. Reset them before starting another chat.",

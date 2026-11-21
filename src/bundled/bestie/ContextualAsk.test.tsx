@@ -119,6 +119,7 @@ const message = {
   replyCount: 0,
 };
 const startChat = vi.fn();
+const noOperations: readonly never[] = [];
 const session = {
   ...owner.session,
   viewer,
@@ -131,6 +132,11 @@ const session = {
   outbox: {
     ...owner.session.outbox,
     supports: () => true,
+    snapshot: () => noOperations,
+    subscribe: () => () => {},
+    ready: async () => {},
+    recovery: async () => undefined,
+    observeDismiss: () => () => {},
   },
 } as RelaySession;
 
@@ -1037,6 +1043,118 @@ it.each([
     }
   },
 );
+
+it("keeps one pending catch-up through a complete roster until its channel arrives", async () => {
+  const channelId = crypto.randomUUID();
+  const sourceId = message.id;
+  const key = contextualDraftKey(sourceId, "b".repeat(64));
+  const startedKey = `${key}:started-chat`;
+  writeView(scope, startedKey, channelId);
+  let operations = [
+    {
+      event: { kind: 9007, tags: [["h", channelId]] },
+      delivery: "unknown",
+    },
+  ];
+  const outboxListeners = new Set<() => void>();
+  let channelSnapshot = {
+    status: "ready" as const,
+    rosterAsOf: 1,
+    channels: [] as {
+      id: string;
+      name: string;
+      channelType: "solo";
+      members: string[];
+    }[],
+  };
+  const channelListeners = new Set<() => void>();
+  const catchUpSession = {
+    ...session,
+    outbox: {
+      ...session.outbox,
+      snapshot: () => operations,
+      subscribe: (listener: () => void) => {
+        outboxListeners.add(listener);
+        return () => outboxListeners.delete(listener);
+      },
+    },
+    channels: {
+      ...session.channels,
+      list: () => channelSnapshot,
+      subscribeList: (listener: () => void) => {
+        channelListeners.add(listener);
+        return () => channelListeners.delete(listener);
+      },
+    },
+  } as unknown as RelaySession;
+  const relaySnapshot = {
+    status: "ready" as const,
+    generation: 1,
+    scope,
+    origin: "https://relay.test",
+    viewer,
+    session: catchUpSession,
+  };
+  const relay = {
+    snapshot: () => relaySnapshot,
+    subscribe: () => () => {},
+    retry() {},
+    tryAgain() {},
+    disconnect() {},
+    clearCache: async () => {},
+  } satisfies RelayData;
+  const noPanels: readonly never[] = [];
+  const host = {
+    panels: {
+      snapshot: () => noPanels,
+      subscribe: () => () => {},
+      resolve: () => undefined,
+    },
+    relay,
+    navigation: { open: vi.fn() },
+  };
+  const none: readonly never[] = [];
+  const contributions = { snapshot: () => none, subscribe: () => () => {} };
+  render(
+    <ToastProvider>
+      <ContextualAskPanel
+        target={contextualCatchUpTarget({
+          thread: sourceId,
+          agent: "b".repeat(64),
+        })}
+        close={() => {}}
+        relay={relay}
+        host={host as never}
+        extensions={{ tools: contributions, inline: contributions }}
+      />
+    </ToastProvider>,
+  );
+
+  expect(await screen.findByText("Opening your chat…")).toBeInTheDocument();
+  expect(readView(scope, startedKey, null)).toBe(channelId);
+  expect(startChat).not.toHaveBeenCalled();
+
+  act(() => {
+    operations = [];
+    channelSnapshot = {
+      ...channelSnapshot,
+      channels: [
+        {
+          id: channelId,
+          name: "Saved catch-up",
+          channelType: "solo",
+          members: [viewer, "b".repeat(64)],
+        },
+      ],
+    };
+    for (const listener of channelListeners) listener();
+    for (const listener of outboxListeners) listener();
+  });
+
+  expect(await screen.findByText(/With Pollen/)).toBeInTheDocument();
+  expect(readView(scope, startedKey, null)).toBe(channelId);
+  expect(startChat).not.toHaveBeenCalled();
+});
 
 it("does not resume a former Bestie's chat for the same source", async () => {
   const source = {

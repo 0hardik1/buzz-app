@@ -23,6 +23,7 @@ import { useAgentChoices } from "../../features/agents/use-choices";
 import { useChannelList, useRelayConnection } from "../../features/relay/react";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
+import type { OutgoingEvent } from "../../features/relay/outbox";
 import type {
   ChannelList,
   ChannelMessage,
@@ -454,12 +455,26 @@ const contextualDraftKey = (source: string, agent: string) =>
   linkedDraftKey(contextualDraftId(source, agent));
 const startedChatKey = (source: string, agent: string) =>
   `${contextualDraftKey(source, agent)}:started-chat`;
+const noOutgoingEvents: readonly OutgoingEvent[] = [];
+
+function hasPendingCreate(
+  channelId: string,
+  operations: readonly OutgoingEvent[],
+) {
+  return operations.some(
+    ({ event, refused }) =>
+      !refused &&
+      event.kind === 9007 &&
+      event.tags.some(([name, value]) => name === "h" && value === channelId),
+  );
+}
 
 function hasResumableStartedChat(
   scope: string,
   sourceId: string,
   bestie: Bestie,
   channels: ChannelList,
+  operations: readonly OutgoingEvent[],
 ) {
   const started = readView<unknown>(
     scope,
@@ -470,6 +485,7 @@ function hasResumableStartedChat(
   const channel = channels.channels.find((item) => item.id === started);
   return !(
     channels.status === "ready" &&
+    !hasPendingCreate(started, operations) &&
     (channel?.archived ||
       (!channel &&
         channels.coverage !== "partial" &&
@@ -667,6 +683,7 @@ export function AskBestieAction({
         sourceId,
         activeBestie,
         channels,
+        session.outbox?.snapshot() ?? noOutgoingEvents,
       );
       if (
         !resuming &&
@@ -804,6 +821,7 @@ export function CatchUpBestieAction({
           sourceId,
           activeBestie,
           session.channels.list(),
+          session.outbox?.snapshot() ?? noOutgoingEvents,
         ) &&
         !seedContextualRequest(
           session.scope,
@@ -880,6 +898,16 @@ export function ContextualAskPanel({
   const choices = useAgentChoices(session, true, true);
   const bestie = selectedBestie(saved, choices);
   const channels = useChannelList(session.channels);
+  const operations = useSyncExternalStore(
+    useCallback(
+      (listener) => session.outbox?.subscribe(listener) ?? (() => {}),
+      [session],
+    ),
+    useCallback(
+      () => session.outbox?.snapshot() ?? noOutgoingEvents,
+      [session],
+    ),
+  );
   const notify = useToastNotification();
   const draftKey =
     sourceId && agent && scope
@@ -914,6 +942,7 @@ export function ContextualAskPanel({
   const staleStartedChat = !!(
     channelId &&
     channels.status === "ready" &&
+    !hasPendingCreate(channelId, operations) &&
     (channel?.archived ||
       (!channel &&
         channels.coverage !== "partial" &&
@@ -1189,6 +1218,8 @@ export function ContextualAskPanel({
             "error",
           );
         setStartedState({ key: startedKey, value: id });
+      }}
+      onConfirmed={(id) => {
         if (catchUp)
           void fileCatchUpChat(session, id).catch((error: unknown) => {
             notify(
