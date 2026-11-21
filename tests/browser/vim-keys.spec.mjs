@@ -244,13 +244,8 @@ test("a selection stays visible through its menus, and Tab and j reach people an
   await page.keyboard.press("Escape");
   await expect(actions).toHaveCount(0);
   await expect(avatar).toBeFocused();
-  // Escape closes the person's card first, then returns to the message.
-  const card = page.getByRole("dialog", {
-    name: "Fixture Reader profile preview",
-  });
-  await expect(card).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(card).toBeHidden();
+  // The menu's return focus does not reopen the person's card, so one Escape
+  // goes back to the message.
   await page.keyboard.press("Escape");
   await expect.poll(() => selectedId(page)).toBe(newest);
   await expect(avatar).not.toBeFocused();

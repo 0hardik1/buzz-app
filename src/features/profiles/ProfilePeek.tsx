@@ -148,6 +148,7 @@ export function ProfilePeek({
   const focusRegion = {
     onFocus: () => onFocusChange?.(true),
     onBlur: (event: FocusEvent<HTMLElement>) => {
+      returningFromMenu.current = false;
       const next = event.relatedTarget;
       // Window blur retains the browser's return-focus target.
       if (!next && document.activeElement === event.target) return;
@@ -184,6 +185,8 @@ export function ProfilePeek({
   });
   // A pointer open leaves focus where it was on close, as message menus do.
   const menuByPointer = useRef(false);
+  // The menu's return focus is not a fresh request to preview the person.
+  const returningFromMenu = useRef(false);
   const openMenu = (event: KeyboardEvent | MouseEvent) => {
     // A touch long-press stays the browser's, as on the message itself.
     if ((event.nativeEvent as PointerEvent).pointerType === "touch") return;
@@ -246,6 +249,12 @@ export function ProfilePeek({
         id={previewId}
         open={open}
         onOpenChange={(next, details) => {
+          const fromMenu = returningFromMenu.current;
+          returningFromMenu.current = false;
+          if (next && fromMenu && details.reason === "trigger-focus") {
+            details.cancel();
+            return;
+          }
           // Crossing an avatar on the active toolbar's safe pointer route must
           // not put a new preview between the message and its actions. A compact
           // row reveals its actions anywhere in the row, avatar included, so
@@ -392,9 +401,13 @@ export function ProfilePeek({
           aria-label={`${name} actions`}
           anchor={() => document.getElementById(triggerId)}
           align="start"
-          finalFocus={() =>
-            !menuByPointer.current && document.getElementById(triggerId)
-          }
+          finalFocus={() => {
+            if (menuByPointer.current) return false;
+            // ponytail: a close that moves focus elsewhere leaves this set until
+            // the card's next open or the avatar's blur; one focus open is skipped.
+            returningFromMenu.current = true;
+            return document.getElementById(triggerId);
+          }}
         >
           <MenuItem onClick={openProfile}>View profile</MenuItem>
           {message.available && (
