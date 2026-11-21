@@ -51,7 +51,7 @@ export function builtinSources({
                   ? `#${channel.name}`
                   : channel.name || "Conversation",
             ...(channel.channelType === "dm" && { detail: "Direct message" }),
-            icon: HashIcon,
+            icon: channel.channelType === "dm" ? UserIcon : HashIcon,
             preview: { kind: "channel", channelId: channel.id },
             run: () => open(channel.id),
           }),

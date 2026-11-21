@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { Context } from "@deepseek-ai/cordis";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import type { ComponentType } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Shortcut } from "../../features/shortcuts/service";
+import { ShortcutsService } from "../../features/shortcuts/service";
 import type { PluginModule } from "../../plugins/api";
 import { PluginRuntime } from "../../plugins/runtime";
 import { queryEvents } from "../../../tests/fixtures/finder-data";
@@ -88,7 +95,8 @@ async function mount(
   };
   // Stable between changes, as the real navigation snapshot is.
   let snapshot = { entry };
-  const shortcuts = new Map<string, Shortcut>();
+  // The real dispatcher, so typing guards apply as in the app.
+  const shortcuts = new ShortcutsService(ctx, window);
   let Overlay: ComponentType = () => null;
   const relaySnapshot = connected
     ? {
@@ -118,11 +126,6 @@ async function mount(
       Overlay = overlay.component;
     },
   } as never);
-  ctx.provide("shortcuts", {
-    register(shortcut: Shortcut) {
-      shortcuts.set(shortcut.id, shortcut);
-    },
-  } as never);
   const navigate = (next: typeof entry) => {
     entry = next;
     snapshot = { entry };
@@ -142,13 +145,16 @@ async function mount(
         })),
       ),
     );
-    await vi.waitFor(() => expect(shortcuts.has("open")).toBe(true));
+    await vi.waitFor(() =>
+      expect(
+        shortcuts.snapshot().some((entry) => entry.key === "buzz.finder/open"),
+      ).toBe(true),
+    );
   };
   await enable("buzz.finder", ...Object.keys(plugins));
   // Load the lazy dialog first, so its import time can't race the waits.
   await import("./FinderDialog");
   return {
-    shortcuts,
     enable,
     open,
     visit: (id: string, channelId: string) =>
@@ -189,26 +195,41 @@ test("counts each visit to a conversation once", async () => {
   expect(topInterest(scope, 5)).toEqual(["quiet", "busy"]);
 });
 
-test("⌘P searches the open conversation, else all of Buzz; ⌘⇧P stays out of text fields", async () => {
-  const { visit, leave, shortcuts, show } = await mount();
-  const find = shortcuts.get("open");
-  const all = shortcuts.get("all");
-  expect(find?.binding).toEqual({ key: "p", mod: true });
-  expect(find?.allowInEditable).toBe(true);
-  expect(all?.binding).toEqual({ key: "p", mod: true, shift: true });
-  // The composer's Spoiler keeps ⌘⇧P while typing.
-  expect(all?.allowInEditable).toBeFalsy();
+test("⌘P searches the open conversation, else all of Buzz; ⌘⇧P switches inside Finder but leaves other text fields alone", async () => {
+  const { visit, leave, show } = await mount();
+  // Off Apple platforms, ⌘ is Ctrl.
+  const press = (target: Element, shift = false) =>
+    fireEvent.keyDown(target, {
+      key: shift ? "P" : "p",
+      code: "KeyP",
+      ctrlKey: true,
+      shiftKey: shift,
+    });
+  const composer = document.createElement("textarea");
+  document.body.append(composer);
   visit("v1", "crew");
   show();
-  await act(async () => find?.run());
+  press(document.body);
   expect(await selectedTab()).toBe("This channel");
-  await act(async () => all?.run());
+  const field = screen.getByRole("combobox");
+  field.focus();
+  press(field, true);
   expect(await selectedTab()).toBe("All of Buzz");
-  await act(async () => find?.run());
+  press(field);
   expect(await selectedTab()).toBe("This channel");
+  fireEvent.keyDown(field, { key: "Escape" });
+  await vi.waitFor(() =>
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument(),
+  );
+  // Typing in the composer, ⌘⇧P is Spoiler's: Finder neither opens nor
+  // takes the key.
+  composer.focus();
+  expect(press(composer, true)).toBe(true);
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   leave();
-  await act(async () => find?.run());
+  press(document.body);
   expect(await selectedTab()).toBe("All of Buzz");
+  composer.remove();
 });
 
 test("another plugin opens its own list with a query; Finder ranks it and Enter runs the item", async () => {
@@ -260,6 +281,13 @@ test("a source leaves when its plugin stops, and All of Buzz shows instead", asy
   );
   expect(rows()).toEqual([expect.stringContaining("Apple")]);
   await enable("buzz.finder");
+  expect(await selectedTab()).toBe("All of Buzz");
+  expect(
+    screen.queryByRole("button", { name: "Remove Fruit search scope" }),
+  ).not.toBeInTheDocument();
+  // Coming back, it waits to be opened again.
+  await enable("buzz.finder", "example.fruit");
+  await vi.waitFor(() => expect(fruit.used.finder).toBeDefined());
   expect(await selectedTab()).toBe("All of Buzz");
   expect(
     screen.queryByRole("button", { name: "Remove Fruit search scope" }),
@@ -353,4 +381,35 @@ test("built-in conversations and people rank by name and open on Enter", async (
     }),
   );
   owner.dispose();
+});
+
+test("switching to another list never shows or runs the last list's rows", async () => {
+  const ran = vi.fn();
+  const first = consumer(() => ({
+    id: "first",
+    title: "First",
+    search: (_, publish) => publish([item("From first", ran)]),
+  }));
+  const second = consumer(() => ({
+    id: "second",
+    title: "Second",
+    // Answers later, so a stale row would show meanwhile.
+    search: () => {},
+  }));
+  const { show } = await mount({
+    "example.first": first.module,
+    "example.second": second.module,
+  });
+  show();
+  await act(async () =>
+    first.used.finder?.open({ source: "example.first/first", query: "x" }),
+  );
+  expect(rows()).toEqual([expect.stringContaining("From first")]);
+  // The text stays "x": only the list changes.
+  await act(async () =>
+    second.used.finder?.open({ source: "example.second/second" }),
+  );
+  expect(screen.getByRole("combobox")).toHaveValue("x");
+  expect(rows()).toEqual([]);
+  expect(ran).not.toHaveBeenCalled();
 });

@@ -132,6 +132,8 @@ export function FinderDialog(props: Props) {
       {props.open &&
         (props.source ? (
           <SourceResults
+            // A new list starts clean: no rows from the last one.
+            key={props.source.key}
             source={props.source}
             query={query}
             setQuery={setQuery}
@@ -281,17 +283,23 @@ function AllResults(props: Contents & { session: RelaySession }) {
   // Once relay rows show, the device rows above them hold still until the
   // text changes: the relay's own hits also reach the index as they arrive.
   const relayShown = useRef(false);
-  const kept = useRef<{ query: string; results: FinderResults }>(undefined);
+  const kept = useRef<{
+    query: string;
+    session: RelaySession;
+    results: FinderResults;
+  }>(undefined);
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision names the corpus contents.
   const fresh = useMemo(
     () => corpus.search(query, PAGE),
     [corpus, query, revision],
   );
   const local =
-    relayShown.current && kept.current?.query === query
+    relayShown.current &&
+    kept.current?.query === query &&
+    kept.current.session === session
       ? kept.current.results
       : fresh;
-  kept.current = { query, results: local };
+  kept.current = { query, session, results: local };
   const words = wordsOf(query);
   const covered =
     local.hits.length >= PAGE &&

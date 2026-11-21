@@ -80,7 +80,13 @@ export const apply: PluginModule["apply"] = (ctx) => {
     scope: FinderScope,
     { source, query }: { source?: string; query?: string } = {},
   ) => {
-    if (scope === "channel" && !source) interested(2);
+    // Searching a channel counts once per switch, not per key press.
+    if (
+      scope === "channel" &&
+      !source &&
+      (!state.open || state.scope !== "channel" || state.source)
+    )
+      interested(2);
     set({
       open: true,
       scope,
@@ -143,6 +149,13 @@ export const apply: PluginModule["apply"] = (ctx) => {
         registered.find((entry) => entry.key === key))
       : undefined;
   const known = (key: string) => !!find(key, sources.snapshot());
+  // A list that goes away leaves All of Buzz, and doesn't come back unasked.
+  ctx.effect(() =>
+    sources.subscribe(() => {
+      if (state.source && !known(state.source))
+        set({ source: undefined, scope: "buzz" });
+    }),
+  );
   ctx.effect(() => {
     let visit: string | undefined;
     const visited = () => {
@@ -200,6 +213,16 @@ export const apply: PluginModule["apply"] = (ctx) => {
 
   // Both work while Finder is open, so either key switches scope there.
   const available = () => state.open || !activeModal(document);
+  /** Focus is in a text field, by the shortcut dispatcher's own rule. */
+  const typing = () => {
+    const focused = document.activeElement as HTMLElement | null;
+    return (
+      !!focused &&
+      (focused.isContentEditable ||
+        /^(INPUT|TEXTAREA|SELECT)$/.test(focused.tagName) ||
+        focused.getAttribute("role") === "textbox")
+    );
+  };
   ctx.shortcuts.register({
     id: "open",
     title: "Find in this channel",
@@ -211,14 +234,16 @@ export const apply: PluginModule["apply"] = (ctx) => {
     run: () => show(here()),
   });
 
-  // Not while typing: the composer keeps ⌘⇧P for Spoiler.
+  // Finder's own field takes it; other text fields keep ⌘⇧P (the
+  // composer's Spoiler), so it's left to them.
   ctx.shortcuts.register({
     id: "all",
     title: "Find in all of Buzz",
     binding: { key: "p", mod: true, shift: true },
     order: 11,
+    allowInEditable: true,
     allowInModal: true,
-    when: available,
+    when: () => state.open || (available() && !typing()),
     run: () => show("buzz"),
   });
 

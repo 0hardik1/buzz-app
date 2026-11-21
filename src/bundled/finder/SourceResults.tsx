@@ -26,6 +26,8 @@ type Listed =
       items: readonly FinderItem[];
       /** Matched code points of each label, by item ID. */
       matches?: ReadonlyMap<string, readonly number[]>;
+      /** How many matched, of which `items` are the best. */
+      total?: number;
     }>
   | Readonly<{ query: string; error: true }>;
 
@@ -66,6 +68,7 @@ function useRanked(source: RegisteredSource, query: string): Listed {
   return {
     query,
     items: results.hits.flatMap(({ doc }) => byId.get(doc.id) ?? []),
+    total: results.total,
     matches: new Map(
       results.hits.map(({ doc, positions }) => [doc.id, positions]),
     ),
@@ -177,6 +180,10 @@ export function SourceResults({
           hideLabel: true,
           destinations: rows,
           total: rows.length,
+          count:
+            listed && "items" in listed && (listed.total ?? 0) > rows.length
+              ? `${rows.length} of ${listed.total?.toLocaleString()}`
+              : undefined,
           empty:
             listed && "error" in listed
               ? "This list couldn't load."
