@@ -183,7 +183,10 @@ export const apply: PluginModule["apply"] = (ctx) => {
   });
 
   /** In an open menu, its own keys win; only j/k/h/l move there. */
-  const inMenu = () => !!document.activeElement?.closest('[role="menu"]');
+  // Focus moves into a just-opened menu a frame later, so check the popup too.
+  const inMenu = () =>
+    !!document.activeElement?.closest('[role="menu"]') ||
+    !!document.querySelector('[role="menu"][data-open]');
   let order = 0;
   const key = (
     id: string,
