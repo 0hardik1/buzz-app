@@ -551,8 +551,11 @@ export class AcpRuntime {
         // The serving session's tools act here from now on; a replacement
         // session on the same key never moves them.
         entry.places.set(pinned, { context, handle: agent });
-        // Only a commit adds to `from`, so what it holds was delivered.
-        const unpaid = owed.get(key).filter((id) => !from.ids.includes(id));
+        // Only a commit adds to `from`, so what it holds was delivered; an
+        // owed message is paid once a prompt carried it as owed or its own.
+        const unpaid = owed
+          .get(key)
+          .filter((id) => !from.requests?.includes(id));
         owed.set(key, unpaid);
         // Only a request a prompt delivered as its own is answered; one shown
         // as another prompt's context still is.
@@ -589,7 +592,12 @@ export class AcpRuntime {
             resumed ? `${prompt}\n\n${RESUMED_PROMPT}` : prompt,
           ),
           // Only what the prompt shows counts as seen.
-          through: cover(from, turn.context.slice(-CONTEXT_LIMIT), event),
+          through: cover(
+            from,
+            turn.context.slice(-CONTEXT_LIMIT),
+            event,
+            unpaid,
+          ),
         };
       },
       signal,
@@ -863,7 +871,7 @@ export class AcpRuntime {
     const candidates = earlier.filter(
       (item) =>
         (resumed || item.created_at >= from.at || owed.includes(item.id)) &&
-        !from.ids.includes(item.id) &&
+        (!from.ids.includes(item.id) || owed.includes(item.id)) &&
         (fresh || resumed || item.pubkey !== pubkeyOf(self)),
     );
     // Owed messages come first; the newest others fill what is left.
@@ -1261,22 +1269,28 @@ const COVERED_IDS = 256;
 
 /** `from` plus the events a prompt carried as context and its `request`:
  * identities, not just seconds, so a distinct message in a covered second, or
- * a late older one, still goes. */
+ * a late older one, still goes. The request and any `owed` message it carried
+ * count as answered. */
 export function cover(
   from: Mark,
   context: readonly EventData[],
   request: EventData,
+  owed: readonly string[] = [],
 ): Mark {
   const carried = [...context, request];
   const added = new Set(carried.map((item) => item.id));
+  const answered = new Set([
+    ...context.filter((item) => owed.includes(item.id)).map((item) => item.id),
+    request.id,
+  ]);
   return {
     at: Math.max(from.at, ...carried.map((item) => item.created_at)),
     ids: [...from.ids.filter((id) => !added.has(id)), ...added].slice(
       -COVERED_IDS,
     ),
     requests: [
-      ...(from.requests ?? []).filter((id) => id !== request.id),
-      request.id,
+      ...(from.requests ?? []).filter((id) => !answered.has(id)),
+      ...answered,
     ].slice(-COVERED_IDS),
   };
 }

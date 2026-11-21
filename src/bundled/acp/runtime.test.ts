@@ -2069,6 +2069,43 @@ describe("AcpRuntime", () => {
       await vi.waitFor(() => expect(fake.harnesses[0]?.turns).toHaveLength(2));
     });
 
+    it("still owes a mention shown as context whose own prompt failed, across a restart", async () => {
+      const config = await confirmed({ scope: "channel" });
+      const capabilities = {
+        mcpCapabilities: { http: true },
+        loadSession: true,
+      };
+      const a = at(message("5", "@Opal a"), 105);
+      const b = at(message("6", "@Opal shown b"), 105);
+      const c = at(message("7", "@Opal c"), 110);
+      const one = setup(
+        { capabilities, hold: true },
+        { read: async () => [a, b] },
+      );
+      one.sync(config);
+      const turns = () => one.fake.harnesses[0]?.turns ?? [];
+      await one.deliver(a, config).run;
+      await vi.waitFor(() => expect(turns()).toHaveLength(1));
+      expect(turns()[0]?.text).toContain("@Opal shown b");
+      turns()[0]?.finish();
+      await flush(20);
+      await one.deliver(b, config).run;
+      await vi.waitFor(() => expect(turns()).toHaveLength(2));
+      turns()[1]?.fail(-32603, "refused");
+      await flush(20);
+      one.runtime.dispose();
+      const two = setup(
+        { capabilities },
+        { storage: one.storage, read: async () => [a, b, c] },
+      );
+      two.sync(config);
+      await two.deliver(c, config).run;
+      await vi.waitFor(() =>
+        expect(two.fake.harnesses[0]?.turns).toHaveLength(1),
+      );
+      expect(two.fake.harnesses[0]?.turns[0]?.text).toContain("@Opal shown b");
+    });
+
     it("answers a request a saved mark showed only as context once, across restarts", async () => {
       const config = await confirmed({ scope: "channel" });
       const capabilities = {
