@@ -116,6 +116,12 @@
 .feed[data-aside] {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  /* The transcript, at least a viewport tall, then the aside's range past its
+     end, which ChannelTimeline sets. The range follows the transcript's height
+     as rows land, with no frame between them. */
+  grid-template-rows:
+    minmax(var(--timeline-aside-view, 0px), auto)
+    var(--timeline-aside-extra, 0px);
   align-items: start;
 }
 .feed[data-aside] > .transcript {
@@ -132,7 +138,7 @@
 /* The aside overlays the transcript's grid cell, so the plugin's frame spans the
    reader's width; only the plugin's own content takes pointer input. */
 .asideColumn {
-  grid-area: 1 / 1;
+  grid-area: 1 / 1 / 3 / 2;
   align-self: stretch;
   z-index: 3;
   pointer-events: none;

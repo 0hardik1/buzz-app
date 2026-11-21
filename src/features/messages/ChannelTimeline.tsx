@@ -927,8 +927,12 @@ function Timeline({
   // Only read at mount and unmount, so build it on demand.
   const signature = () =>
     `${geometrySignature(visibleRows, profiles, resolveName)}:${JSON.stringify([...foldedActivity].sort())}`;
+  // PROTOTYPE: the rows in the transcript's last viewport, which stay in view while the
+  // scroll offset runs past the list: Virtua renders none there.
+  const [asideKeep, setAsideKeep] = useState(Number.POSITIVE_INFINITY);
   // Mount the saved boundary before restoration measures its divider inset.
   const keptIndices = rows.flatMap((row, index) =>
+    index >= asideKeep ||
     row.id === focusedMessageId ||
     row.id === focusedActivityId ||
     (disclosures.get(row.id)?.ids[0] === focusedActivityId &&
@@ -948,11 +952,18 @@ function Timeline({
   const activityTail = useRef<HTMLDivElement>(null);
   const trailingBox = useRef<HTMLDivElement>(null);
   const transcriptBox = useRef<HTMLDivElement>(null);
-  const asideColumn = useRef<HTMLDivElement>(null);
   const asideSpacer = useRef<HTMLDivElement>(null);
   const asideFrame = useRef<HTMLDivElement>(null);
-  // The trailing content's height past its rest height.
+  // The scroll range past the latest message: the trailing content's height
+  // past its rest height, and (PROTOTYPE) the aside's range past the
+  // transcript's end, where only the aside moves.
   const trailingExtra = useRef(0);
+  const cardExtra = useRef(0);
+  const asideExtra = useRef(0);
+  // PROTOTYPE: the aside's range past the transcript's end for a card extent.
+  const asideRange = useRef<(card: number) => number>(undefined);
+  // When an older page last landed; the aside holds still while it settles.
+  const olderLanded = useRef(Number.NEGATIVE_INFINITY);
   useLayoutEffect(() => {
     const tail = activityTail.current;
     const element = scroller.current;
@@ -1070,20 +1081,21 @@ function Timeline({
     setTrailingExpanded(!!trailingPlace.current);
   };
   const hasTrailing = !!trailing;
+  const hasAside = !!aside;
   const listMounted = width > 0;
   useLayoutEffect(() => {
     const element = scroller.current;
     const box = trailingBox.current;
     // The box mounts with `trailing`, the list once the scroller has a width.
-    if (!hasTrailing || !listMounted || !element || !box) return;
-    if (typeof ResizeObserver === "undefined") return;
+    if ((!hasTrailing && !hasAside) || !listMounted || !element) return;
+    if ((hasTrailing && !box) || typeof ResizeObserver === "undefined") return;
     const hold = () => {
-      const height = box.getBoundingClientRect().height;
+      const height = box?.getBoundingClientRect().height ?? 0;
       // End the scroll range on a whole pixel. Integer scroll extents would
       // otherwise stop short of a fractional end, lifting the content's
       // bottom-stuck controls by up to a pixel at the end of the range.
-      const above = box.previousElementSibling?.getBoundingClientRect().bottom;
-      if (above !== undefined) {
+      const above = box?.previousElementSibling?.getBoundingClientRect().bottom;
+      if (box && above !== undefined) {
         const end =
           above -
           element.getBoundingClientRect().top +
@@ -1095,15 +1107,16 @@ function Timeline({
         )
           box.style.marginTop = `${snap}px`;
       }
-      const extra = Math.max(0, height - latestRest.current);
-      if (extra !== trailingExtra.current) {
-        trailingExtra.current = extra;
-        box.style.bottom = `${-extra}px`;
-      }
-      element.style.setProperty(
-        "--timeline-trailing-rest",
-        `${height - extra}px`,
-      );
+      const card = box ? Math.max(0, height - latestRest.current) : 0;
+      if (box && card !== cardExtra.current) box.style.bottom = `${-card}px`;
+      cardExtra.current = card;
+      const extra = card + (asideRange.current?.(card) ?? 0);
+      trailingExtra.current = extra;
+      if (box)
+        element.style.setProperty(
+          "--timeline-trailing-rest",
+          `${height - card}px`,
+        );
       // A send or Jump to latest makes the reader follow again.
       const place = follow.current ? undefined : trailingPlace.current;
       const top = latestTop(element, extra);
@@ -1121,7 +1134,7 @@ function Timeline({
     hold();
     holdTrailing.current = hold;
     const resize = new ResizeObserver(hold);
-    resize.observe(box);
+    if (box) resize.observe(box);
     resize.observe(element);
     if (activityTail.current) resize.observe(activityTail.current);
     // Virtua commits the rows' height to the list's style.
@@ -1134,12 +1147,12 @@ function Timeline({
       rows.disconnect();
       holdTrailing.current = undefined;
       trailingExtra.current = 0;
+      cardExtra.current = 0;
       trailingPlace.current = undefined;
       setTrailingExpanded(false);
       element.style.removeProperty("--timeline-trailing-rest");
     };
-  }, [hasTrailing, listMounted]);
-  const hasAside = !!aside;
+  }, [hasTrailing, hasAside, listMounted]);
   // PROTOTYPE: the transcript leaves the aside's docked width beside it. A
   // plugin's overlay, positioned out of flow, takes none.
   useLayoutEffect(() => {
@@ -1177,6 +1190,9 @@ function Timeline({
   // bottom-visible. A spacer above it holds its place: after each scroll the
   // spacer moves it as far as the transcript's rows moved, within that band, so
   // it travels with the transcript until an edge shows and then stays put.
+  // Past the transcript's end the transcript stays pinned and a range as long
+  // as the aside still has below the fold lets only the aside move. That range
+  // joins the trailing content's range past the latest message.
   useLayoutEffect(() => {
     const element = scroller.current;
     const transcript = transcriptBox.current;
@@ -1186,7 +1202,25 @@ function Timeline({
     if (typeof ResizeObserver === "undefined") return;
     // The frame's top in the scrollport, and a row whose movement it follows.
     let top = 0;
-    let anchor: { row: Element; top: number } | undefined;
+    // How far the aside reaches below the fold at the transcript's end.
+    let reach = 0;
+    // Up to the latest message, the range past it is what the aside will
+    // still have below the fold once the trailing content has grown. Past
+    // it the range holds, so the reader's place in it does.
+    const range = (card: number) => {
+      const end = transcript.offsetHeight - element.clientHeight;
+      if (element.scrollTop <= Math.max(0, end - card) + 1)
+        asideExtra.current = Math.max(0, Math.ceil(reach - card));
+      element.style.setProperty(
+        "--timeline-aside-extra",
+        `${asideExtra.current}px`,
+      );
+      return asideExtra.current;
+    };
+    asideRange.current = range;
+    let anchor:
+      | { row: Element; top: number; pin: number; offset: number }
+      | undefined;
     const place = (scrolled: boolean) => {
       const view = element.clientHeight;
       frame.style.minHeight = `${view}px`;
@@ -1194,20 +1228,60 @@ function Timeline({
       const band = view - height;
       frame.style.top = `${band}px`;
       frame.style.bottom = `${band}px`;
-      if (scrolled && anchor?.row.isConnected)
-        top += anchor.row.getBoundingClientRect().top - anchor.top;
+      const length = transcript.offsetHeight;
+      const offset = element.scrollTop;
+      // The transcript's own end, and the latest message before its trailing
+      // content. Past its end the transcript is pinned this far.
+      const end = Math.max(0, length - view);
+      const latest = Math.max(0, end - cardExtra.current);
+      const pin = Math.max(0, offset - end);
+      // The aside moves as the transcript's rows move, counting the rows the
+      // pin holds still. A row that unmounted leaves the scroll distance, up
+      // to a viewport; a longer jump keeps the aside's place. An older page
+      // lands through unpainted states that move the rows and corrections
+      // that move them back, so the aside holds still while it settles.
+      if (anchor && performance.now() - olderLanded.current > 250) {
+        const scrolledBy = anchor.offset - offset;
+        top += anchor.row.isConnected
+          ? anchor.row.getBoundingClientRect().top -
+            anchor.top -
+            (pin - anchor.pin)
+          : scrolled && Math.abs(scrolledBy) < view
+            ? scrolledBy
+            : 0;
+      }
       top = Math.min(0, Math.max(band, top));
+      const shown = top;
       const bounds = element.getBoundingClientRect();
       anchor = undefined;
-      for (const row of transcript.querySelector(":scope > ol")?.children ??
-        []) {
+      // Past the rows, the trailing content is what moves.
+      const rows = [
+        ...(transcript.querySelector(":scope > ol")?.children ?? []),
+        ...(trailingBox.current ? [trailingBox.current] : []),
+      ];
+      for (const row of rows) {
         const box = row.getBoundingClientRect();
         if (box.bottom <= bounds.top) continue;
-        anchor = { row, top: box.top };
+        anchor = { row, top: box.top, pin, offset };
         break;
       }
-      const room = Math.max(0, transcript.offsetHeight - height);
-      spacer.style.height = `${Math.min(room, Math.max(0, element.scrollTop + top))}px`;
+      reach = shown + height - view;
+      const list = transcript.querySelector<HTMLElement>(":scope > ol");
+      if (list && handle.current)
+        setAsideKeep(
+          handle.current.findItemIndex(Math.max(0, list.offsetHeight - view)),
+        );
+      const before = asideExtra.current;
+      const extra = range(cardExtra.current);
+      const columnHeight = Math.max(length, view) + extra;
+      element.style.setProperty(
+        "--timeline-transcript-pin",
+        `${Math.min(0, view - length)}px`,
+      );
+      element.style.setProperty("--timeline-aside-view", `${view}px`);
+      spacer.style.height = `${Math.min(columnHeight - height, Math.max(0, offset + shown))}px`;
+      element.dataset.prototypePast = `${Math.round(offset - latest)}`;
+      if (extra !== before) holdTrailing.current?.();
     };
     place(false);
     const scrolled = () => place(true);
@@ -1219,6 +1293,12 @@ function Timeline({
     return () => {
       element.removeEventListener("scroll", scrolled);
       resize.disconnect();
+      asideExtra.current = 0;
+      asideRange.current = undefined;
+      setAsideKeep(Number.POSITIVE_INFINITY);
+      element.style.removeProperty("--timeline-transcript-pin");
+      element.style.removeProperty("--timeline-aside-view");
+      element.style.removeProperty("--timeline-aside-extra");
     };
   }, [hasAside]);
   const toggleTrailing = useCallback(() => {
@@ -1240,12 +1320,16 @@ function Timeline({
     const maxTop = element.scrollHeight - element.clientHeight;
     const height = trailingBox.current?.getBoundingClientRect().height ?? 0;
     const view = element.clientHeight;
+    // PROTOTYPE: an aside's range lies past the transcript's own end.
+    const length = asideExtra.current
+      ? (transcriptBox.current?.offsetHeight ?? element.scrollHeight)
+      : element.scrollHeight;
     const gap = Math.max(
       0,
       Math.min(TRAILING_TOP_GAP, view / 3, view - latestRest.current),
     );
     const top = expand
-      ? Math.min(maxTop, element.scrollHeight - height - gap)
+      ? Math.min(Math.max(0, length - view), length - height - gap)
       : latestTop(element, extra);
     trailingPlace.current = expand
       ? { full: top >= maxTop, offset: top - latestTop(element, extra) }
@@ -1618,9 +1702,11 @@ function Timeline({
       !boundaryCandidate.awaitingRepair &&
       !(awayPending && !boundaryPending),
     trailing: () =>
-      trailingBox.current
+      trailingBox.current || hasAside
         ? {
-            top: trailingBox.current.getBoundingClientRect().top,
+            top:
+              trailingBox.current?.getBoundingClientRect().top ??
+              Number.POSITIVE_INFINITY,
             extra: trailingExtra.current,
           }
         : undefined,
@@ -1664,6 +1750,9 @@ function Timeline({
     reading.every(
       (id, index) => rows[rows.length - reading.length + index]?.id === id,
     );
+  useLayoutEffect(() => {
+    if (prepend) olderLanded.current = performance.now();
+  });
   // Without shift, rows landing above the reader push them down. Scroll by
   // that height before paint, so input that follows starts from the reader's
   // row. Rows that moved keep another row's size until they measure; hold the
@@ -2457,7 +2546,7 @@ function Timeline({
           );
           updateJumpToLatest(element);
         }
-        if (trailing) trackTrailing(element);
+        if (trailing || aside) trackTrailing(element);
         loadNearTop(element);
       }}
     >
@@ -2765,7 +2854,7 @@ function Timeline({
         )}
       </div>
       {aside && (
-        <div ref={asideColumn} className={styles.asideColumn}>
+        <div className={styles.asideColumn}>
           <div ref={asideSpacer} />
           <div ref={asideFrame} className={styles.asideFrame}>
             {aside}
