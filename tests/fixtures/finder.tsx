@@ -146,8 +146,6 @@ if (extra) {
 // A plugin's list, as `ctx.finder.registerSource` would hold it.
 const fruit: RegisteredSource = {
   key: "example.fixture/fruit",
-  pluginId: "example.fixture",
-  revision: "fixture",
   id: "fruit",
   title: "Fruit",
   items: () =>
@@ -168,14 +166,7 @@ const builtins = builtinSources({
   current: () => params.get("channel") ?? undefined,
   open: (channelId, detail) =>
     console.log(`open ${channelId}${detail ? ` with ${detail}` : ""}`),
-}).map(
-  (source): RegisteredSource => ({
-    ...source,
-    key: `buzz.finder/${source.id}`,
-    pluginId: "buzz.finder",
-    revision: "fixture",
-  }),
-);
+});
 const sources = [fruit, ...builtins];
 
 function App() {

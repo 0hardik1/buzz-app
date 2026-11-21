@@ -3,10 +3,7 @@
 // `ctx.inject(["finder"], (child) => …)` so a plugin still starts without it.
 import { type Context, Service } from "@deepseek-ai/cordis";
 import type { ChatCircleIcon } from "../../shared/design-system/icons/index";
-import {
-  type Contribution,
-  createContributions,
-} from "../../plugins/contributions";
+import { createContributions } from "../../plugins/contributions";
 
 /** One row in a list. */
 export type FinderItem = Readonly<{
@@ -50,7 +47,8 @@ export type Finder = {
   open(source?: string): void;
 };
 
-export type RegisteredSource = Contribution<FinderSource>;
+/** A source under its full key, such as "your.plugin/id". */
+export type RegisteredSource = FinderSource & Readonly<{ key: string }>;
 
 declare module "@deepseek-ai/cordis" {
   interface Context {

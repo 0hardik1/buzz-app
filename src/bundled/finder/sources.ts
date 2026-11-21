@@ -11,7 +11,7 @@ import {
 import type { RelaySession } from "../../features/relay/session";
 import { avatarMedia } from "../../shared/avatar-source";
 import { HashIcon, UserIcon } from "../../shared/design-system/icons/index";
-import type { FinderItem, FinderSource } from "./service";
+import type { FinderItem, RegisteredSource } from "./service";
 
 /** As ⌘K counts it: a saved row or a guest's read-only one counts; a public
  * channel read after leaving does not. */
@@ -31,7 +31,7 @@ export function builtinSources({
   session,
   current,
   open,
-}: Opener): FinderSource[] {
+}: Opener): RegisteredSource[] {
   const nameOf = (live: RelaySession, pubkey: string) =>
     live.profiles.snapshot().get(pubkey)?.name ?? pubkey.slice(0, 10);
   const conversations = (live: RelaySession) =>
@@ -39,6 +39,7 @@ export function builtinSources({
   return [
     {
       id: "conversations",
+      key: "buzz.finder/conversations",
       title: "Conversations",
       items: () => {
         const live = session();
@@ -65,6 +66,7 @@ export function builtinSources({
     },
     {
       id: "people",
+      key: "buzz.finder/people",
       title: "People",
       items: () => {
         const live = session();

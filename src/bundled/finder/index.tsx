@@ -107,7 +107,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     });
   };
   // Finder's own lists sit beside the registry, under the same key form.
-  const builtins: readonly RegisteredSource[] = builtinSources({
+  const builtins = builtinSources({
     session: () => state.session,
     current: () => {
       const { target } = ctx.navigation.snapshot().entry;
@@ -115,12 +115,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     },
     open: (channelId, detail) =>
       openConversation(channelId, detail ? { detail } : {}),
-  }).map((source) => ({
-    ...source,
-    key: `buzz.finder/${source.id}`,
-    pluginId: "buzz.finder",
-    revision: "bundled",
-  }));
+  });
   const find = (
     key: string | undefined,
     registered: readonly RegisteredSource[],
