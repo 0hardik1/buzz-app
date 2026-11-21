@@ -844,6 +844,7 @@ function MediaCommentComposer({
 }: Omit<MessageComposerProps, "threadRootId"> & {
   threadRootId: string | undefined;
   verifiedRootId: string | undefined;
+  evidenceOwner?: typeof hostComposerProvenance;
 }) {
   const [draftRootId] = useState(props.threadRootId);
   const changed = !!verifiedRootId && verifiedRootId !== draftRootId;

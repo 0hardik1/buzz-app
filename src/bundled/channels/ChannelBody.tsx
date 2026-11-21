@@ -1,4 +1,3 @@
-import { MessageLoading } from "../../features/messages/MessageLoading";
 import { useComposerScope } from "../../features/messages/composer-overlay";
 import {
   readingOrigin,
