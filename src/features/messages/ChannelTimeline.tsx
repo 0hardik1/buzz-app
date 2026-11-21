@@ -1202,6 +1202,9 @@ function Timeline({
     if (typeof ResizeObserver === "undefined") return;
     // The frame's top in the scrollport, and a row whose movement it follows.
     let top = 0;
+    // Row movement while an older page settles, kept unclamped so an unpainted
+    // move and the correction that undoes it cancel.
+    let held = 0;
     // How far the aside reaches below the fold at the transcript's end.
     let reach = 0;
     // Up to the latest message, the range past it is what the aside will
@@ -1238,26 +1241,27 @@ function Timeline({
       // The aside moves as the reader scrolls the transcript's rows, counting
       // the rows the pin holds still. A row that unmounted leaves the scroll
       // distance, up to a viewport; a longer jump keeps the aside's place.
-      // Layout that moves the rows, the timeline's own positioning and an
-      // older page landing, through unpainted states that move the rows and
-      // corrections that move them back, leave the aside where it is.
-      if (
-        scrolled &&
-        anchor &&
-        settled.current &&
-        performance.now() - olderLanded.current > 250
-      ) {
+      // Layout that moves the rows and the timeline's own positioning leave
+      // the aside where it is. While an older page lands, its unpainted states
+      // and their corrections move the rows both ways, so that movement is
+      // summed before it is bounded: the reader's own scroll still moves the
+      // aside in the same frame.
+      if (scrolled && anchor && settled.current) {
         const scrolledBy = anchor.offset - offset;
-        top += anchor.row.isConnected
+        const moved = anchor.row.isConnected
           ? anchor.row.getBoundingClientRect().top -
             anchor.top -
             (pin - anchor.pin)
           : Math.abs(scrolledBy) < view
             ? scrolledBy
             : 0;
+        if (performance.now() - olderLanded.current > 250) {
+          top += held + moved;
+          held = 0;
+        } else held += moved;
       }
       top = Math.min(0, Math.max(band, top));
-      const shown = top;
+      const shown = Math.min(0, Math.max(band, top + held));
       const bounds = element.getBoundingClientRect();
       anchor = undefined;
       // Past the rows, the trailing content is what moves.
