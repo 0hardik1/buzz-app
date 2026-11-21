@@ -189,6 +189,7 @@ export function mentionDraft(value: unknown): MentionDraft {
  * a draft calls this. */
 export function restoredDraft(value: unknown) {
   const draft = mentionDraft(value);
+  if (!draft.recipients.some((item) => item.label !== undefined)) return draft;
   const doc = readComposerDocument(draft, draft.recipients);
   const stale = projectComposerDocument(doc).tokens.filter(
     ({ node }) =>
