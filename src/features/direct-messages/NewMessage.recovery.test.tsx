@@ -685,7 +685,11 @@ it.each(["picker", "completion"])(
     const owner = t.create();
     t.mount(owner, extensions);
     await t.user.click(await screen.findByRole("option", { name: "Avery" }));
-    await t.user.click(screen.getByRole("option", { name: "Zoe" }));
+    await t.user.type(
+      screen.getByRole("combobox", { name: "Message recipients" }),
+      "Zoe",
+    );
+    await t.user.click(await screen.findByRole("option", { name: "Zoe" }));
     const composer = () =>
       screen.getByRole<ComposerInputElement>("textbox", { name: /^Message / });
     const choices = async () => {
@@ -859,10 +863,7 @@ it("loads matching DM history inline and keeps the draft while recipients change
   expect(t.openDirectMessage).not.toHaveBeenCalled();
   expect(t.publish).not.toHaveBeenCalled();
   await t.user.type(screen.getByRole("textbox"), "Keep this draft");
-  await t.user.click(
-    screen.getByRole("combobox", { name: "Message recipients" }),
-  );
-  await t.user.click(await screen.findByRole("option", { name: "Zoe" }));
+  await addRecipient(t, "Zoe");
   expect(
     screen.queryByRole("region", { name: "Channel message history" }),
   ).not.toBeInTheDocument();
@@ -1026,9 +1027,10 @@ async function showsHistory(
   ).toContain(content);
 }
 async function addRecipient(t: ReturnType<typeof setup>, name: string) {
-  await t.user.click(
-    screen.getByRole("combobox", { name: "Message recipients" }),
-  );
+  const field = screen.getByRole("combobox", { name: "Message recipients" });
+  await t.user.click(field);
+  // With people already picked the list closes; typing brings it back.
+  await t.user.type(field, name.split(",")[0] ?? name);
   await t.user.click(await screen.findByRole("option", { name }));
 }
 

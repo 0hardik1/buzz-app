@@ -657,6 +657,9 @@ export function NewMessage({
         disabled={locked}
         onChange={change}
         initiallyOpen={!addressing}
+        // After a pick, the group's conversation shows; typing brings the
+        // people list back for the next name.
+        searchOnly={recipients.length > 0}
         onComplete={focusComposer}
         onTyped={setTyped}
       />
