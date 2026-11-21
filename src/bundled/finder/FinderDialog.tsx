@@ -123,7 +123,8 @@ export function FinderDialog(props: Props) {
     <Dialog
       open={props.open}
       onOpenChange={props.onOpenChange}
-      title="Find in your conversations"
+      // Screen readers name the window after the list it shows.
+      title={props.source?.title ?? "Find in your conversations"}
       footerGap="none"
       motion="default"
       dismissOnOutsideClick

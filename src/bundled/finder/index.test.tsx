@@ -280,6 +280,7 @@ test("another plugin opens its own list; Finder ranks it and Enter runs the item
   await act(async () => fruit.used.finder?.open("example.fruit/list"));
   type("ban");
   expect(await screen.findByRole("combobox")).toHaveValue("ban");
+  expect(screen.getByRole("dialog", { name: "Fruit" })).toBeVisible();
   expect(
     screen.getByRole("button", { name: "Remove Fruit search scope" }),
   ).toBeVisible();
