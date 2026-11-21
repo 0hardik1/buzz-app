@@ -708,7 +708,16 @@ test.describe("pending startup navigation", () => {
               for (const row of rows.result) {
                 // The profile mirror row holds no roster.
                 if (!row.data.discovery) continue;
-                row.data.discovery.events = row.data.discovery.events.filter(
+                const events =
+                  row.data.discovery.events ??
+                  rows.result
+                    .filter((candidate) =>
+                      candidate.key.startsWith(
+                        `!roster:${row.key.length}:${row.key}/`,
+                      ),
+                    )
+                    .flatMap((candidate) => candidate.data);
+                row.data.discovery.events = events.filter(
                   (event) =>
                     !event.tags.some(
                       ([key, value]) => key === "d" && value === "beta",

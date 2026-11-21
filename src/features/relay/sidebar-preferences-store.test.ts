@@ -46,6 +46,41 @@ const data: SidebarPreferences = {
   starred: ["beta"],
   muted: [],
 };
+
+it("writes sidebar preferences only when the confirmed value changes", async () => {
+  const writeStartup = vi.fn(async () => {});
+  const read = vi.fn(async () => structuredClone(data));
+  const store = createSidebarPreferencesStore({
+    available: true,
+    read,
+    persistence: {
+      read: async () => [],
+      writeStartup,
+      write: async () => {},
+      remove: async () => {},
+      retain: async () => {},
+      clear: async () => {},
+      close: () => {},
+    },
+  });
+  try {
+    await store.queries.ensure();
+    await store.queries.refresh();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(writeStartup).toHaveBeenCalledOnce();
+
+    const changed = { ...data, starred: [] };
+    read.mockResolvedValueOnce(changed);
+    await store.queries.refresh();
+    expect(writeStartup).toHaveBeenCalledTimes(2);
+    expect(writeStartup).toHaveBeenLastCalledWith({
+      preferences: { data: changed, savedAt: expect.any(Number) },
+    });
+  } finally {
+    store.dispose();
+  }
+});
+
 function setup(
   decode = vi.fn(async (): Promise<SidebarPreferences> => data),
   write?: SidebarAssignmentMutator,

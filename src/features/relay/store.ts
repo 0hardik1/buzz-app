@@ -1083,7 +1083,7 @@ export function createChannelStore(
       );
       void persistence?.remove(channelId).catch(() => {});
       void options.channelMedia?.forget([channelId]).catch(() => {});
-      saveDiscovery();
+      saveDiscovery(true);
     }, [channelId]);
   }
   async function readPage(
@@ -1559,7 +1559,7 @@ export function createChannelStore(
       await yieldToHost();
     }
   }
-  function saveDiscovery() {
+  function saveDiscovery(revoked = false) {
     clearTimeout(discoverySave);
     discoverySave = undefined;
     if (!persistence?.writeStartup || !discovery || !transport || disposed)
@@ -1568,19 +1568,28 @@ export function createChannelStore(
     const key = [transport.relayAuthor, ...events.map(({ id }) => id)].join();
     const age = now() - (savedDiscovery?.at ?? 0);
     // Catch-up repeats lookups that change nothing: skip rewriting the same roster.
-    if (savedDiscovery?.key === key && age >= 0 && age < DISCOVERY_RESAVE_MS)
+    if (
+      !revoked &&
+      savedDiscovery?.key === key &&
+      age >= 0 &&
+      age < DISCOVERY_RESAVE_MS
+    )
       return;
-    savedDiscovery = { key, at: now() };
+    const saving = { key, at: now() };
+    savedDiscovery = saving;
     void persistence
-      .writeStartup({
-        discovery: {
-          savedAt: savedDiscovery.at,
-          relayAuthor: transport.relayAuthor,
-          events,
+      .writeStartup(
+        {
+          discovery: {
+            savedAt: saving.at,
+            relayAuthor: transport.relayAuthor,
+            events,
+          },
         },
-      })
+        revoked,
+      )
       .catch(() => {
-        savedDiscovery = undefined;
+        if (savedDiscovery === saving) savedDiscovery = undefined;
       });
   }
   /** Mirror the most recently used profiles so the next session starts with
@@ -2008,7 +2017,7 @@ export function createChannelStore(
     if (!cached) {
       // Catch-up delivers many batches: coalesce them into one snapshot write,
       // except revocation, which must not leave denied content on disk.
-      if (revoked) saveDiscovery();
+      if (revoked) saveDiscovery(true);
       else discoverySave ??= setTimeout(saveDiscovery, 500);
       for (const channel of confirmed) {
         // Disk rows were display-only during hydration. Fresh membership now
