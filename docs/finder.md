@@ -23,7 +23,32 @@ This is a work in progress on the `noah/finder` branch.
 | Saving the index between launches | Not started: it is rebuilt each launch |
 | Clear cache empties the index at once | Not yet: it empties on the next reconnect or restart |
 | Edited messages | Not yet: the finder shows the original text |
+| Relay search when you pause typing | Not started; next |
 | A tool other programs (Neovim) can call | Not started |
+
+## Where this is going
+
+The finder will search in two waves:
+
+1. **On this device, as you type.** Fuzzy matching over the local index, in a
+   few milliseconds. This is what exists today.
+2. **On the relay, when you pause.** About 300 ms after you stop typing, it
+   also runs the relay's message search, the one ⌘K uses. That search covers
+   every channel you can read, all the way back, but it only matches whole
+   words by their start and needs three letters. Its results appear in a
+   second section below the local ones. They never move the local rows, and
+   each one is added to the local index, so the next search finds it
+   instantly.
+
+The two waves split the work: local search handles scattered letters and
+speed, and the relay reaches messages the device has never seen. Because the
+relay covers the rest on demand, the finder doesn't need to download every
+channel's history up front. That keeps the load on the relay low across the
+fleet: one relay search per pause, only while the finder is open, and none
+when the local results already contain every word typed.
+
+After that, the index will be saved on the device, so a restart doesn't
+start it over.
 
 ## How to search
 
@@ -103,7 +128,7 @@ conversations. Treat these as worst cases.
 | 50,000 | 20 MB | 1–7 ms | 16 ms |
 | 200,000 | 81 MB | 4–55 ms | 81 ms |
 
-Measured on an Apple laptop and a Blox Linux workstation, with similar results.
+Measured on an Apple laptop and a Linux workstation, with similar results.
 A screen frame is 16 ms, so up to about 50,000 messages it keeps up with typing.
 Next steps for larger histories are searching in a background worker (so typing
 never waits) and splitting the search across several workers.
