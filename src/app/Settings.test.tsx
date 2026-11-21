@@ -818,6 +818,7 @@ export function apply(ctx) {
       retryCredentialCleanup: vi.fn(async () => ({ pending: 0, running: 0 })),
       imports: {
         folder: vi.fn(),
+        checkPath: vi.fn(),
         files: vi.fn(),
         git: vi.fn(async () => preview),
         url: vi.fn(),
