@@ -48,6 +48,58 @@ const place = (region) =>
     };
   });
 
+// Installs `window.asideSample()`: the sticky frame's top and its lowest
+// place, the offset, the scroll height, the offset past the latest message and
+// the rows on screen.
+const installSampler = (region) =>
+  region.evaluate((element) => {
+    let frame = element.querySelector('[aria-label="Fixture dashboard"]');
+    while (getComputedStyle(frame).position !== "sticky")
+      frame = frame.parentElement;
+    window.asideSample = () => {
+      const bounds = element.getBoundingClientRect();
+      const rows = {};
+      for (const row of element.querySelectorAll("[data-message-id]")) {
+        const box = row.getBoundingClientRect();
+        if (box.bottom > bounds.top && box.top < bounds.bottom)
+          rows[row.dataset.messageId] = box.top;
+      }
+      return {
+        top: frame.getBoundingClientRect().top - bounds.top,
+        band: element.clientHeight - frame.offsetHeight,
+        offset: element.scrollTop,
+        height: element.scrollHeight,
+        past: Number(element.dataset.prototypePast),
+        rows,
+      };
+    };
+  });
+
+// Each frame the widget moves with the rows on screen, or past the latest
+// message with the offset, held between its stuck-at-bottom and stuck-at-top
+// places. Rows landing above may instead leave it where it was from the end.
+function expectFollows(samples) {
+  for (let i = 1; i < samples.length; i++) {
+    const [a, b] = [samples[i - 1], samples[i]];
+    const clamp = (top) => Math.min(0, Math.max(b.band, top));
+    const id = Object.keys(b.rows).find((row) => row in a.rows);
+    const rows = id ? b.rows[id] - a.rows[id] : a.offset - b.offset;
+    const withRows = clamp(
+      a.top + rows - (Math.max(0, b.past) - Math.max(0, a.past)),
+    );
+    const fromEnd = clamp(
+      a.top - (b.offset - a.offset - (b.height - a.height)),
+    );
+    expect(
+      Math.min(
+        Math.abs(b.top - withRows),
+        b.height === a.height ? Infinity : Math.abs(b.top - fromEnd),
+      ),
+      `frame ${i}: widget at ${Math.round(b.top)}, expected ${Math.round(withRows)}`,
+    ).toBeLessThanOrEqual(1.5);
+  }
+}
+
 test("a fast reversal while an older page lands moves the widget with the scroll", async ({
   page,
   app,
@@ -69,37 +121,79 @@ test("a fast reversal while an older page lands moves the widget with the scroll
   expect(Math.abs(past.top - (rest.top - past.past))).toBeLessThanOrEqual(2);
 
   // A fresh channel's first older page is already requested. Hold it, then
-  // scroll back quickly as it lands: one step per frame, sampled each frame.
+  // scroll back quickly as it lands: one step per frame, sampled each frame
+  // with the rows on screen.
   await expect.poll(() => app.pending.length).toBe(1);
+  await installSampler(region);
   await region.evaluate((element) => {
     const height = element.scrollHeight;
     const samples = [];
-    const widget = element.querySelector('[aria-label="Fixture dashboard"]');
     window.reversal = new Promise((resolve) => {
-      const frame = () => {
+      const step = () => {
         if (element.scrollHeight !== height) {
-          samples.push({
-            top:
-              widget.getBoundingClientRect().top -
-              element.getBoundingClientRect().top,
-            past: Number(element.dataset.prototypePast),
-          });
-          if (samples.length > 8) return resolve(samples);
+          samples.push(window.asideSample());
+          if (samples.length > 12) return resolve(samples);
           element.scrollTop -= 150;
         }
-        requestAnimationFrame(frame);
+        requestAnimationFrame(step);
       };
-      requestAnimationFrame(frame);
+      requestAnimationFrame(step);
     });
   });
   app.pending.shift().release();
-  // Past the latest message the widget moves 1:1; in history it sticks at
-  // its resting top.
-  for (const sample of await page.evaluate(() => window.reversal))
-    expect(
-      Math.abs(sample.top - (rest.top - Math.max(0, sample.past))),
-      `widget at ${Math.round(sample.top)}, ${sample.past}px past latest`,
-    ).toBeLessThanOrEqual(2);
+  const samples = await page.evaluate(() => window.reversal);
+  expect(Math.min(...samples.map((sample) => sample.past))).toBeLessThan(0);
+  expectFollows(samples);
+});
+
+test("fast reversals into unmeasured rows move the widget with the scroll", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  await openAside(page);
+  const region = history(page);
+  await settle(page, region);
+  await installSampler(region);
+  await region.evaluate(() => {
+    window.asideSamples = [];
+    const frame = () => {
+      window.asideSamples.push(window.asideSample());
+      window.asideSampling = requestAnimationFrame(frame);
+    };
+    frame();
+  });
+  // Past the latest message, then fast up through rows never measured, with a
+  // short fast reversal every few steps: the widget is mid-travel as older
+  // pages land and rows measure.
+  await region.hover();
+  const wheel = async (delta, steps) => {
+    for (let i = 0; i < steps; i++) {
+      await page.mouse.wheel(0, delta);
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(resolve)),
+      );
+      while (app.pending.length) app.pending.shift().release();
+    }
+  };
+  await wheel(400, 4);
+  for (let i = 0; i < 10; i++) {
+    await wheel(-400, 4);
+    await wheel(400, 2);
+  }
+  const samples = await page.evaluate(() => {
+    cancelAnimationFrame(window.asideSampling);
+    return window.asideSamples;
+  });
+  expect(Math.max(...samples.map((sample) => sample.past))).toBeGreaterThan(0);
+  expect(
+    samples.some(
+      (sample, i) =>
+        sample.height > (samples[i - 1]?.height ?? Infinity) + 1000,
+    ),
+    "an older page landed while sampling",
+  ).toBe(true);
+  expectFollows(samples);
 });
 
 test("layout keeps a reader's small scroll above the latest message", async ({

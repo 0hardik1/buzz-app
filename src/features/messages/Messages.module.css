@@ -147,10 +147,15 @@
   contain: size;
   z-index: 3;
   pointer-events: none;
+  /* The frame's place is measured from the end, above a spacer. */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 .asideFrame {
   /* ChannelTimeline sets both insets; see its two-way sticky. */
   position: sticky;
+  flex: none;
   top: 0;
   display: flex;
   justify-content: flex-end;

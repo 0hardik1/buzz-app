@@ -962,8 +962,6 @@ function Timeline({
   const asideExtra = useRef(0);
   // PROTOTYPE: the aside's range past the transcript's end for a card extent.
   const asideRange = useRef<(card: number) => number>(undefined);
-  // When an older page last landed; the aside holds still while it settles.
-  const olderLanded = useRef(Number.NEGATIVE_INFINITY);
   useLayoutEffect(() => {
     const tail = activityTail.current;
     const element = scroller.current;
@@ -1192,10 +1190,12 @@ function Timeline({
     };
   }, [hasAside]);
   // PROTOTYPE: two-way sticky. The frame is sticky with both insets at the
-  // viewport height less its own, so it stays between top-visible and
-  // bottom-visible. A spacer above it holds its place: after each scroll the
-  // spacer moves it as far as the transcript's rows moved, within that band, so
-  // it travels with the transcript until an edge shows and then stays put.
+  // viewport height less its own, so the browser keeps it between top-visible
+  // and bottom-visible. A spacer below it ends its place in the flow where it
+  // shows, measured from the end of the transcript, so rows landing or
+  // measuring above the reader leave it in place. The browser then moves it
+  // with the transcript and sticks it at either edge; after each scroll the
+  // spacer adopts where it shows, so a reversal moves it at once.
   // Past the transcript's end the transcript stays pinned and a range as long
   // as the aside still has below the fold lets only the aside move. That range
   // joins the trailing content's range past the latest message.
@@ -1206,11 +1206,11 @@ function Timeline({
     const frame = asideFrame.current;
     if (!hasAside || !element || !transcript || !spacer || !frame) return;
     if (typeof ResizeObserver === "undefined") return;
-    // The frame's top in the scrollport, and a row whose movement it follows.
-    let top = 0;
-    // Row movement while an older page settles, kept unclamped so an unpainted
-    // move and the correction that undoes it cancel.
-    let held = 0;
+    // The frame's top in the scrollport as last shown, with the scroll offset
+    // and transcript length it showed at.
+    let shown = 0;
+    let offset = element.scrollTop;
+    let length = transcript.offsetHeight;
     // How far the aside reaches below the fold at the transcript's end.
     let reach = 0;
     // Up to the latest message, the range past it is what the aside will
@@ -1227,60 +1227,30 @@ function Timeline({
       return asideExtra.current;
     };
     asideRange.current = range;
-    let anchor:
-      | { row: Element; top: number; pin: number; offset: number }
-      | undefined;
-    const place = (scrolled: boolean) => {
+    const place = () => {
       const view = element.clientHeight;
       frame.style.minHeight = `${view}px`;
       const height = frame.offsetHeight;
       const band = view - height;
       frame.style.top = `${band}px`;
       frame.style.bottom = `${band}px`;
-      const length = transcript.offsetHeight;
-      const offset = element.scrollTop;
-      // The transcript's own end, and the latest message before its trailing
-      // content. Past its end the transcript is pinned this far.
-      const end = Math.max(0, length - view);
-      const latest = Math.max(0, end - cardExtra.current);
-      const pin = Math.max(0, offset - end);
-      // The aside moves as the reader scrolls the transcript's rows, counting
-      // the rows the pin holds still. A row that unmounted leaves the scroll
-      // distance, up to a viewport; a longer jump keeps the aside's place.
-      // Layout that moves the rows and the timeline's own positioning leave
-      // the aside where it is. While an older page lands, its unpainted states
-      // and their corrections move the rows both ways, so that movement is
-      // summed before it is bounded: the reader's own scroll still moves the
-      // aside in the same frame.
-      if (scrolled && anchor && settled.current) {
-        const scrolledBy = anchor.offset - offset;
-        const moved = anchor.row.isConnected
-          ? anchor.row.getBoundingClientRect().top -
-            anchor.top -
-            (pin - anchor.pin)
-          : Math.abs(scrolledBy) < view
-            ? scrolledBy
-            : 0;
-        if (performance.now() - olderLanded.current > 250) {
-          top += held + moved;
-          held = 0;
-        } else held += moved;
-      }
-      top = Math.min(0, Math.max(band, top));
-      const shown = Math.min(0, Math.max(band, top + held));
       const bounds = element.getBoundingClientRect();
-      anchor = undefined;
-      // Past the rows, the trailing content is what moves.
-      const rows = [
-        ...(transcript.querySelector(":scope > ol")?.children ?? []),
-        ...(trailingBox.current ? [trailingBox.current] : []),
-      ];
-      for (const row of rows) {
-        const box = row.getBoundingClientRect();
-        if (box.bottom <= bounds.top) continue;
-        anchor = { row, top: box.top, pin, offset };
-        break;
-      }
+      const nextOffset = element.scrollTop;
+      const nextLength = transcript.offsetHeight;
+      // A scroll since the last placement, whichever callback sees it first,
+      // moved the frame as the reader sees it. The timeline's own jump of more
+      // than a viewport with no rows landing, and layout without a scroll,
+      // move the rows under a still frame: both keep its place.
+      if (
+        nextOffset !== offset &&
+        (userScrolled.current ||
+          nextLength !== length ||
+          Math.abs(nextOffset - offset) <= view)
+      )
+        shown = frame.getBoundingClientRect().top - bounds.top;
+      shown = Math.min(0, Math.max(band, shown));
+      offset = nextOffset;
+      length = nextLength;
       reach = shown + height - view;
       const list = transcript.querySelector<HTMLElement>(":scope > ol");
       if (list && handle.current)
@@ -1289,25 +1259,30 @@ function Timeline({
         );
       const before = asideExtra.current;
       const extra = range(cardExtra.current);
-      const columnHeight = Math.max(length, view) + extra;
       element.style.setProperty(
         "--timeline-transcript-pin",
-        `${Math.min(0, view - length)}px`,
+        `${Math.min(0, view - nextLength)}px`,
       );
       element.style.setProperty("--timeline-aside-view", `${view}px`);
-      spacer.style.height = `${Math.min(columnHeight - height, Math.max(0, offset + shown))}px`;
-      element.dataset.prototypePast = `${Math.round(offset - latest)}`;
+      // The spacer ends the frame's place at `shown`, from the column's end.
+      const column = frame.parentElement?.getBoundingClientRect();
+      if (column)
+        spacer.style.height = `${Math.min(
+          column.height - height,
+          Math.max(0, column.bottom - bounds.top - shown - height),
+        )}px`;
+      const latest = Math.max(0, nextLength - view - cardExtra.current);
+      element.dataset.prototypePast = `${Math.round(nextOffset - latest)}`;
       if (extra !== before) holdTrailing.current?.();
     };
-    place(false);
-    const scrolled = () => place(true);
-    element.addEventListener("scroll", scrolled, { passive: true });
-    const resize = new ResizeObserver(() => place(false));
+    place();
+    element.addEventListener("scroll", place, { passive: true });
+    const resize = new ResizeObserver(place);
     resize.observe(element);
     resize.observe(frame);
     resize.observe(transcript);
     return () => {
-      element.removeEventListener("scroll", scrolled);
+      element.removeEventListener("scroll", place);
       resize.disconnect();
       asideExtra.current = 0;
       asideRange.current = undefined;
@@ -1778,7 +1753,6 @@ function Timeline({
   // reader's latest row through those measurements, until reader input that
   // follows them ends.
   useLayoutEffect(() => {
-    if (prepend) olderLanded.current = performance.now();
     const boundaryChanged = previousBoundaryId.current !== newMessageBoundaryId;
     previousBoundaryId.current = newMessageBoundaryId;
     const element = scroller.current;
@@ -2875,10 +2849,10 @@ function Timeline({
       </div>
       {aside && (
         <div className={styles.asideColumn}>
-          <div ref={asideSpacer} />
           <div ref={asideFrame} className={styles.asideFrame}>
             {aside}
           </div>
+          <div ref={asideSpacer} />
         </div>
       )}
     </section>
