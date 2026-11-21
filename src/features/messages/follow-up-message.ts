@@ -79,6 +79,13 @@ export function followUpMessage(
         throw new Error(
           "This Solo chat or its recipients are no longer available.",
         );
+      // The transport recipient of a DM row is its validated agent, not the
+      // profile cache: a cold cache would leave the event without the `p` tag
+      // that wakes a hosted agent. Owner-mention evidence stays the typed one.
+      const mentions =
+        message.dmAgent && !message.recipients.includes(message.dmAgent)
+          ? [...message.recipients, message.dmAgent]
+          : message.recipients;
       return sendWithOwnerMentions(
         session,
         message.explicitRecipientIds,
@@ -97,7 +104,7 @@ export function followUpMessage(
                 message.text,
                 recovery,
                 {
-                  mentions: message.recipients,
+                  mentions,
                   attachments: message.attachments,
                   references: message.references,
                   picks: message.picks,
@@ -112,7 +119,7 @@ export function followUpMessage(
               session.messages.send(
                 message.channelId,
                 message.text,
-                message.recipients,
+                mentions,
                 message.attachments,
                 recovery,
                 message.references,
@@ -127,13 +134,13 @@ export function followUpMessage(
             return session.messages.send(
               message.channelId,
               message.text,
-              message.recipients,
+              mentions,
               message.attachments,
             );
           return session.messages.send(
             message.channelId,
             message.text,
-            message.recipients,
+            mentions,
             message.attachments,
             recovery,
             message.references,

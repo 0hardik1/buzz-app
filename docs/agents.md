@@ -1092,8 +1092,10 @@ agent runner's interrupted turns. With **Queue** follow-up behavior, the owner's
 one-to-one DM with their own agent queues the same way. That agent must be selectable
 (not archived or deleting) and the owner's to message (`canMessageAgent`). An untagged
 message there, including one whose mention was removed or which has only references,
-waits on the DM's agent (`dmAgent`); publication keeps the typed mentions, so the
-released event has the same tags as an immediate DM send. A typed person, another
+waits on the DM's agent (`dmAgent`). Publication keeps the typed mentions as the
+owner's mention evidence and tags the validated `dmAgent` as the event's recipient,
+as an immediate DM send tags its agent partner. The tag comes from the row, not the
+profile cache, so a queued DM wakes its agent even before the agent's profile loads. A typed person, another
 owner's agent or a thread reply sends now. Release refuses the row, keeping it with an
 error, if the DM gains a member or the agent stops being selectable or messageable. A DM
 holds at most 20 queued rows. They are saved on this device in view storage,
@@ -1133,7 +1135,10 @@ checks the saved rows too, so a row another window queued is paused even before 
 window hears of it. A release checks recipients before it takes the chat lock; the
 lock covers its final checks and Outbox hand-off. Under the lock it reads the saved
 row, its predecessor and the pause record again, so a Stop saved while it was checking
-holds the row. A row already past those checks when Stop is pressed may still publish;
+holds the row. A row whose earlier hand-off left no event in the Outbox clears that
+delivery, leaves both locks to check its recipients again, then takes them back and
+rechecks the `generation`, the pause and its `seq` against the last Stop, so a Stop
+saved in between keeps it queued. A row already past those checks when Stop is pressed may still publish;
 the chat's queue then says one message was already being sent and may still go out,
 also when that was its last row, and later rows stay paused. That includes a row
 another window was handing off with a recorded message, seen from its saved sending
@@ -1142,10 +1147,13 @@ mark at Stop or from a new hand-off found when the pause save gets the chat lock
 queue**. A Send now records the saved `seq` and `generation` at the click. A Stop saved
 after that, in any window, cancels it, even when a Resume followed: the row goes back
 to its place in the queue. A Stop in the same window that is still saving doesn't
-cancel a Send now clicked after it. A Resume whose save fails holds in that window,
+cancel a Send now clicked after it, unless another window's Stop saved after the
+click and ahead of it. A Resume whose save fails holds in that window,
 which says so, but overrides only the saved Stop it saw: a newer saved Stop, the queue
 emptying, or a Stop in that window ends it, even before a storage event arrives. An
-ordinary enqueue does not. Each window hears other windows' pause changes while it has queued
+ordinary enqueue does not. When the queue empties while such a Resume holds, the
+window still clears the saved pause. A Stop on a chat with no queued rows clears the
+last Stop's note. Each window hears other windows' pause changes while it has queued
 rows or work to watch, with or without a mounted composer. Resume of interrupted turns
 does not clear a Stop pause. A Stop inside a thread leaves the chat's queue alone; each
 Stop takes its scope from the stopped request's own work, never from where its
@@ -1153,9 +1161,13 @@ activity update was posted. A hosted turn is top-level only when its own request
 the thread root. The owner is never a completion target, even when they mention
 themselves. A chat drops its pause only
 when no saved rows are left in any window, checked again under the chat lock, so the
-next message sends as usual. That starts a new `generation`; a row that another window
-queued into the pause just before, unseen by that check, pauses the chat again when it
-takes its `seq`. An earlier hand-off that this window doesn't own and that
+next message sends as usual. That starts a new `generation`. A new row's save takes
+the chat lock too: it reads the pause record, saves the next `seq` first and then the
+row, and joins the pause that same read found. So the queue emptying in another window
+either sees the saved row and keeps the pause, or ends the pause before the row reads
+it, and the row then sends as usual. If either save fails, the row leaves and the
+composer restores the draft, attachments included. The row shows while its save waits
+for the lock, but it can't be sent or edited until the save lands. An earlier hand-off that this window doesn't own and that
 has no completion evidence holds every row behind it, each until its own **Send now**.
 **Resume queue** and a **Send now** that goes past that hand-off both save the hold
 first, under a separate per-row key, so it survives another restart and an

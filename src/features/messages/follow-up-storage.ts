@@ -20,8 +20,9 @@ export type FollowUpMessage = {
   recipients: readonly string[];
   explicitRecipientIds?: readonly string[];
   /** In the owner's DM with their agent: the agent this row waits on and
-   * revalidates. Publication still mentions only `recipients`, as an
-   * immediate DM send does; the relay layer adds the DM partner's tag. */
+   * revalidates. Publication tags it as the transport recipient, as the
+   * relay layer tags an immediate DM send's agent partner; the owner's
+   * mention evidence stays `explicitRecipientIds`. */
   dmAgent?: string;
   attachments: readonly UploadedAttachment[];
   references: readonly string[];

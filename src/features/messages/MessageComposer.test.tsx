@@ -15785,6 +15785,151 @@ it("recovers an uploaded follow-up instead of queuing it after its chat disappea
   );
 });
 
+it.each([
+  ["plain text", "its sequence"],
+  ["plain text", "the row"],
+  ["a background attachment", "its sequence"],
+  ["a background attachment", "the row"],
+] as const)(
+  "restores the draft of a follow-up with %s when the queue can't save %s",
+  async (kind, failing) => {
+    localStorage.setItem("buzz-follow-up-behavior.v1", "queue");
+    const h = mount();
+    h.setLibrary([{ pubkey: first.pubkey, name: "Honey" }]);
+    const gate = deferred<ReturnType<typeof uploadDescriptor>>();
+    const upload = vi.fn(() => gate.promise);
+    // The agent is still answering, so the follow-up queues.
+    const activity = {
+      status: "unavailable",
+      records: [],
+      turns: [],
+      typing: [],
+      local: [
+        {
+          agent: first.pubkey,
+          channelId: "channel",
+          messageId: "previous",
+          state: "working",
+          scope: "scope",
+          threadRootId: "",
+          startedAt: 1,
+        },
+      ],
+    };
+    const list = {
+      status: "ready",
+      channels: [{ id: "channel", channelType: "solo", creator: "viewer" }],
+    };
+    h.retarget({
+      ownSoloConversation: true,
+      requireMention: true,
+      session: {
+        ...h.session,
+        // A community scope gives the queue its saved storage.
+        scope: "wss://relay.example",
+        viewer: "viewer",
+        attachments: { upload },
+        channels: { ...h.session.channels, list: () => list },
+        channelWrites: {
+          refreshMembership: async () => ({
+            id: "channel",
+            members: [first.pubkey],
+          }),
+          addAgents: vi.fn(),
+        },
+        agentActivity: {
+          activate: () => () => {},
+          subscribe: () => () => {},
+          snapshot: () => activity,
+        },
+      } as unknown as RelaySession,
+    });
+    // Saved rows need Web Locks; jsdom has none, so a FIFO stand-in.
+    const held = new Map<string, Promise<unknown>>();
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: {
+        query: async () => ({
+          held: [...held.keys()].map((name) => ({ name })),
+          pending: [],
+        }),
+        request(
+          name: string,
+          options: unknown,
+          callback?: (lock: unknown) => unknown,
+        ) {
+          if (callback)
+            return Promise.resolve(callback(held.has(name) ? null : {}));
+          const next = (held.get(name) ?? Promise.resolve()).then(
+            options as () => unknown,
+          );
+          const tail = next.catch(() => {});
+          held.set(name, tail);
+          void tail.then(() => {
+            if (held.get(name) === tail) held.delete(name);
+          });
+          return next;
+        },
+      },
+    });
+    // The queue saves the chat's `seq` first, then the row.
+    const key =
+      failing === "its sequence" ? '"follow-up-pause:' : '"follow-up:';
+    const setItem = Storage.prototype.setItem;
+    const writes = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, name, value) {
+        if (name.includes(key)) throw new Error("Disk full");
+        return setItem.call(this, name, value);
+      });
+    try {
+      act(() => {
+        h.commands().insertMention(first);
+        h.commands().insertText("Follow up");
+      });
+      await choicesLoaded();
+      if (kind === "a background attachment") {
+        fireEvent.change(screen.getByLabelText("Choose attachments"), {
+          target: {
+            files: [
+              new NodeFile(["notes"], "notes.txt", { type: "text/plain" }),
+            ],
+          },
+        });
+        h.submit();
+        await waitFor(() => expect(upload).toHaveBeenCalledOnce());
+        await act(async () => gate.resolve(uploadDescriptor()));
+      } else h.submit();
+      // The queue tried to save it, and that save failed.
+      await waitFor(() =>
+        expect(writes.mock.calls.some(([name]) => name.includes(key))).toBe(
+          true,
+        ),
+      );
+      await waitFor(() => expect(h.input()).toHaveValue("@Honey Follow up"));
+      if (kind === "a background attachment")
+        await waitFor(() =>
+          expect(
+            screen.getByRole("button", { name: "Remove notes.txt" }),
+          ).toBeVisible(),
+        );
+      expect(h.messages.send).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole("region", { name: "Queued follow-ups" }),
+      ).toBeNull();
+      // Nothing was queued, so the restored draft is the only copy.
+      expect(
+        Object.keys(localStorage).filter((name) =>
+          name.includes('"follow-up:'),
+        ),
+      ).toEqual([]);
+    } finally {
+      writes.mockRestore();
+      Reflect.deleteProperty(navigator, "locks");
+    }
+  },
+);
+
 it("replaces recipients atomically while preserving prose, selection and undo", async () => {
   const h = mount();
   const replacement = { ...second, name: "Mary Jane" };
