@@ -132,7 +132,7 @@
   position: sticky;
   top: var(--timeline-transcript-pin, auto);
   /* The aside's docked width, which ChannelTimeline measures. */
-  padding-inline-end: var(--timeline-aside-width, 0px);
+  padding-inline-end: var(--timeline-aside-width);
 }
 /* The aside overlays the transcript's grid cell, so the plugin's frame spans the
    reader's width; only the plugin's own content takes pointer input. */
