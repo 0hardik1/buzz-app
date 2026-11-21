@@ -87,8 +87,7 @@ function row(id: string, top: number, onClick = vi.fn()) {
     >
       {id}
       <span data-channel-unread="" />
-      <span data-channel-activity="" />
-      <span data-channel-waiting="" hidden />
+      <span data-channel-needs-you="" aria-hidden="true" />
     </button>
   );
 }
@@ -135,7 +134,7 @@ it("reveals the heading for an unread chat in a closed Solo workspace", async ()
           >
             Solo chat
             <span data-channel-unread="" />
-            <span data-channel-waiting="" hidden />
+            <span data-channel-needs-you="" aria-hidden="true" />
           </button>
         </SidebarSection>
       </SidebarUnread>
@@ -456,6 +455,11 @@ it.each([
         </SidebarUnread>,
       );
       await measure();
+      const needs = () =>
+        document.querySelector(
+          '[data-channel-id="muted"] [data-channel-needs-you]',
+        );
+      expect(needs()).not.toBeNull();
       expect(
         screen.getByRole("button", { name: "2 unread conversations below" }),
       ).toBeInTheDocument();
@@ -467,6 +471,7 @@ it.each([
       expect(
         screen.getByRole("button", { name: "1 unread conversation below" }),
       ).toBeInTheDocument();
+      expect(needs()).toBeNull();
       expect(session.unread.snapshot(target)).toBe(snapshot);
       expect(session.unread.activity("muted")).toBe(activity);
       await act(async () => {
@@ -474,6 +479,7 @@ it.each([
         for (const listener of listeners) listener();
       });
       await measure();
+      expect(needs()).not.toBeNull();
       expect(
         screen.getByRole("button", { name: "2 unread conversations below" }),
       ).toBeInTheDocument();

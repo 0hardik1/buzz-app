@@ -59,10 +59,12 @@ function Card({
                     }
                   />
                 )}
-                {marks[Number(row.slice(4))] &&
-                  marks[Number(row.slice(4))] !== "channel" && (
-                    <span data-channel-waiting="" hidden />
-                  )}
+                {/* Only a DM or a mention of you needs you; backlog and a
+                    muted conversation never do. */}
+                {(marks[Number(row.slice(4))] === "dm" ||
+                  marks[Number(row.slice(4))] === "mention") && (
+                  <span data-channel-needs-you="" aria-hidden="true" />
+                )}
               </button>
             </div>
           ),
@@ -204,11 +206,15 @@ it("follows a marker that changes in place, and leaves muted ones out", async ()
       name: "Show 1 unread conversation below in Work",
     }),
   ).toBeInTheDocument();
-  // Then its channel is muted, without the row re-rendering.
+  // Then its channel is muted, without the row re-rendering: the row stops
+  // needing you, so its marker goes while the muted evidence stays.
   await act(async () => {
     document
       .querySelector('[data-channel-id="Row 4"] [data-channel-unread]')
       ?.setAttribute("data-channel-muted", "");
+    document
+      .querySelector('[data-channel-id="Row 4"] [data-channel-needs-you]')
+      ?.remove();
   });
   expect(screen.queryByRole("button", { name: /unread/ })).toBeNull();
 });
