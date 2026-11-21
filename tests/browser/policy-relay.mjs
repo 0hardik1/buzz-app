@@ -669,8 +669,6 @@ export function policyRelay({
           });
         return Response.json(result);
       } catch (error) {
-        // A held part of a combined query can reject when its caller cancels.
-        if (init?.signal?.aborted && error === init.signal.reason) throw error;
         return fault(error);
       }
     },
