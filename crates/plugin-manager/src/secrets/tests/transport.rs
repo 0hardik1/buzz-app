@@ -8,7 +8,7 @@ fn fixture() -> Env {
     env.set(ALICE, SENTINEL).unwrap();
     env
 }
-fn inspect(env: &Env) -> Result<usize> {
+fn inspect(env: &Env) -> Admission<usize> {
     read::with_structural(&env.manager, |evidence| {
         assert_eq!(evidence.registry.version, 3);
         assert_eq!(evidence.state.version, 1);
@@ -781,6 +781,45 @@ fn prepared_material_cannot_admit_after_exact_account_or_authority_loss() {
     }
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn reviewed_credential_admission_refuses_without_calling_the_effect() {
+    let env = fixture();
+    let prepared = prepare(
+        &env,
+        ALICE,
+        "https://api.example.test",
+        Instant::now() + Duration::from_secs(10),
+    )
+    .unwrap();
+    let grant = crate::ReviewedInvocation {
+        id: "create".into(),
+        artifact: None,
+        credential_http: Some(crate::ReviewedCredentialHttp {
+            version: 1,
+            slot: "api-key".into(),
+            result_url: None,
+        }),
+    };
+    let witness = crate::ReviewedInvocationWitness(
+        File::open(env.manager.root.join("registry.json")).unwrap(),
+    );
+    let before = snapshot(env.temp.path());
+    let reads = env.store.reads.load(Ordering::SeqCst);
+    let mut dispatched = false;
+    assert!(env
+        .manager
+        .with_reviewed_secret(&prepared, &grant, &witness, || {
+            dispatched = true;
+            Ok(())
+        })
+        .unwrap_err()
+        .contains("requires macOS"));
+    assert!(!dispatched);
+    assert_eq!(env.store.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(snapshot(env.temp.path()), before);
+}
+
 #[cfg(not(unix))]
 #[test]
 fn non_unix_refuses_secret_setup_and_preparation_without_store_work() {
@@ -795,8 +834,340 @@ fn non_unix_refuses_secret_setup_and_preparation_without_store_work() {
         Instant::now() + Duration::from_secs(10),
     )
     .is_err());
+    assert!(env
+        .manager
+        .admit_reviewed_invocation(PLUGIN, &env.current(), "create")
+        .err()
+        .unwrap()
+        .contains("requires macOS"));
     assert_eq!(env.store.adds.load(Ordering::SeqCst), 0);
     assert_eq!(env.store.reads.load(Ordering::SeqCst), 0);
     assert_eq!(env.store.deletes.load(Ordering::SeqCst), 0);
     assert_eq!(snapshot(env.temp.path()), before);
+}
+
+#[cfg(target_os = "macos")]
+fn reviewed_fixture() -> (
+    Env,
+    crate::ReviewedInvocation,
+    crate::ReviewedInvocationWitness,
+) {
+    let env = Env::new();
+    let mut declared: Value = serde_json::from_str(&manifest(SLOT)).unwrap();
+    declared["host"]["reviewedInvocations"] = json!([
+        {"id":"create", "credentialHttp":{"version":1,"slot":"api-key"}}
+    ]);
+    write(&env.temp.path().join("build/manifest.json"), &declared);
+    env.manager.install(&env.temp.path().join("build")).unwrap();
+    env.manager.change("enable", PLUGIN).unwrap();
+    env.set(ALICE, SENTINEL).unwrap();
+    // Capture only after establishment: that registry replacement revokes older reviews.
+    let (grant, witness) = env
+        .manager
+        .admit_reviewed_invocation(PLUGIN, &env.current(), "create")
+        .unwrap();
+    (env, grant, witness)
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn reviewed_credential_admission_composes_existing_locks_and_never_reads_os_storage() {
+    let (env, grant, witness) = reviewed_fixture();
+    let prepared = prepare(
+        &env,
+        ALICE,
+        "https://api.example.test",
+        Instant::now() + Duration::from_secs(30),
+    )
+    .unwrap();
+    let before = snapshot(env.temp.path());
+    let reads = env.store.reads.load(Ordering::SeqCst);
+    let admitted = env
+        .manager
+        .with_reviewed_secret(&prepared, &grant, &witness, || {
+            for path in [
+                env.manager.root.join("registry.lock"),
+                env.root().join("state.lock"),
+                env.ns_path().with_extension("lock"),
+            ] {
+                assert!(matches!(
+                    File::open(path).unwrap().try_lock(),
+                    Err(fs::TryLockError::WouldBlock)
+                ));
+            }
+            Ok("admitted")
+        })
+        .unwrap();
+    assert_eq!(admitted, "admitted");
+    assert_eq!(env.store.reads.load(Ordering::SeqCst), reads);
+    assert_eq!(snapshot(env.temp.path()), before);
+    assert!(
+        env.manager
+            .with_reviewed_invocation(PLUGIN, &env.current(), &grant, &witness, || Ok(()))
+            .is_err(),
+        "HTTP grants never enter the synthetic executor"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn reviewed_credential_admission_requires_both_retained_grant_and_exact_enrollment() {
+    for change in [
+        "replace",
+        "clear-delete-denied",
+        "identical-registry-save",
+        "wrong-grant",
+        "wrong-slot",
+        "added-result-url",
+        "expired",
+    ] {
+        let (env, mut grant, witness) = reviewed_fixture();
+        let mut prepared = prepare(
+            &env,
+            ALICE,
+            "https://api.example.test",
+            Instant::now() + Duration::from_secs(30),
+        )
+        .unwrap();
+        match change {
+            "replace" => {
+                let generation = prepared.binding.generation.clone();
+                env.set(ALICE, "replacement").unwrap();
+                let fresh = prepare(
+                    &env,
+                    ALICE,
+                    "https://api.example.test",
+                    Instant::now() + Duration::from_secs(30),
+                )
+                .unwrap();
+                assert_eq!(generation, fresh.binding.generation);
+                assert_ne!(prepared.binding.account, fresh.binding.account);
+                env.manager
+                    .with_reviewed_secret(&fresh, &grant, &witness, || Ok(()))
+                    .unwrap();
+            }
+            "clear-delete-denied" => {
+                env.store.deny_delete(Some(Error::Denied));
+                assert!(env
+                    .manager
+                    .secret_clear(PLUGIN, &env.current(), "api-key", ALICE)
+                    .is_err());
+                assert!(env
+                    .store
+                    .items
+                    .lock()
+                    .unwrap()
+                    .contains_key(&prepared.binding.account));
+            }
+            "identical-registry-save" => {
+                let _lock = env.manager.lock().unwrap();
+                env.manager.save(&env.manager.read().unwrap()).unwrap();
+            }
+            "wrong-grant" => grant.id = "other".into(),
+            "wrong-slot" => grant.credential_http.as_mut().unwrap().slot = "other".into(),
+            "added-result-url" => {
+                grant.credential_http.as_mut().unwrap().result_url =
+                    Some(crate::ReviewedResultUrl {
+                        version: 1,
+                        json_pointer: "/output/0".into(),
+                    })
+            }
+            "expired" => prepared.deadline = Instant::now(),
+            _ => unreachable!(),
+        }
+        let reads = env.store.reads.load(Ordering::SeqCst);
+        let entered = AtomicUsize::new(0);
+        assert!(
+            env.manager
+                .with_reviewed_secret(&prepared, &grant, &witness, || {
+                    entered.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                })
+                .is_err(),
+            "{change}"
+        );
+        assert_eq!(entered.load(Ordering::SeqCst), 0, "{change}");
+        assert_eq!(env.store.reads.load(Ordering::SeqCst), reads, "{change}");
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn reviewed_admission_is_busy_only_while_another_holder_has_a_metadata_lock() {
+    let (env, grant, witness) = reviewed_fixture();
+    let prepared = prepare(
+        &env,
+        ALICE,
+        "https://api.example.test",
+        Instant::now() + Duration::from_secs(30),
+    )
+    .unwrap();
+    let locks = [
+        env.manager.root.join("registry.lock"),
+        env.root().join("state.lock"),
+        env.ns_path().with_extension("lock"),
+    ];
+    let reads = env.store.reads.load(Ordering::SeqCst);
+    let entered = AtomicUsize::new(0);
+    let admit = || {
+        entered.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    };
+    for path in &locks {
+        let held = File::open(path).unwrap();
+        held.try_lock().unwrap();
+        assert_eq!(
+            env.manager
+                .try_reviewed_secret(&prepared, &grant, &witness, admit),
+            Err(Refusal::Busy(UNREADABLE.into())),
+            "{path:?}"
+        );
+        // String callers keep the same refusal.
+        assert_eq!(
+            env.manager
+                .with_reviewed_secret(&prepared, &grant, &witness, admit)
+                .unwrap_err(),
+            UNREADABLE,
+            "{path:?}"
+        );
+        assert_eq!(
+            env.manager
+                .with_prepared_secret(&prepared, admit)
+                .unwrap_err(),
+            UNREADABLE,
+            "{path:?}"
+        );
+        drop(held);
+        // Every earlier lock was released when the attempt refused.
+        for earlier in &locks {
+            let probe = File::open(earlier).unwrap();
+            probe.try_lock().unwrap();
+        }
+    }
+    assert_eq!(entered.load(Ordering::SeqCst), 0);
+    env.manager
+        .try_reviewed_secret(&prepared, &grant, &witness, admit)
+        .unwrap();
+    assert_eq!(entered.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        env.manager
+            .try_reviewed_secret(&prepared, &grant, &witness, || {
+                Err::<(), _>("operation retired".into())
+            }),
+        Err(Refusal::Terminal("operation retired".into())),
+        "the admitted work's own refusal is terminal"
+    );
+
+    // A lock that cannot be opened, or malformed records, are terminal.
+    let lock = env.ns_path().with_extension("lock");
+    fs::remove_file(&lock).unwrap();
+    fs::create_dir(&lock).unwrap();
+    assert_eq!(
+        env.manager
+            .try_reviewed_secret(&prepared, &grant, &witness, admit),
+        Err(Refusal::Terminal(UNREADABLE.into()))
+    );
+    fs::remove_dir(&lock).unwrap();
+    File::create(&lock).unwrap();
+    fs::write(env.root().join(STATE), b"{").unwrap();
+    assert_eq!(
+        env.manager
+            .try_reviewed_secret(&prepared, &grant, &witness, admit),
+        Err(Refusal::Terminal(UNREADABLE.into()))
+    );
+    assert_eq!(entered.load(Ordering::SeqCst), 1);
+    assert_eq!(env.store.reads.load(Ordering::SeqCst), reads);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn reviewed_admission_is_withdrawn_only_when_the_plugin_left_its_reviewed_revision() {
+    for change in ["disable", "update", "safe"] {
+        let (mut env, grant, witness) = reviewed_fixture();
+        let prepared = prepare(
+            &env,
+            ALICE,
+            "https://api.example.test",
+            Instant::now() + Duration::from_secs(30),
+        )
+        .unwrap();
+        match change {
+            "disable" => {
+                env.manager.change("disable", PLUGIN).unwrap();
+            }
+            "update" => {
+                let mut registry = env.registry();
+                registry["installed"][PLUGIN]["current"] = "a".repeat(64).into();
+                env.write_registry(&registry);
+            }
+            "safe" => env.manager.safe_mode = true,
+            _ => unreachable!(),
+        }
+        let reads = env.store.reads.load(Ordering::SeqCst);
+        let entered = AtomicUsize::new(0);
+        let admit = || {
+            entered.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        };
+        let refusal = env
+            .manager
+            .try_reviewed_secret(&prepared, &grant, &witness, admit)
+            .unwrap_err();
+        // Safe mode refuses every plugin, so it is not this plugin's withdrawal.
+        match change {
+            "safe" => assert!(matches!(refusal, Refusal::Terminal(_)), "{change}"),
+            _ => assert_eq!(refusal, Refusal::Withdrawn(WITHDRAWN.into()), "{change}"),
+        }
+        // String callers keep the same refusal.
+        assert_eq!(
+            env.manager
+                .with_reviewed_secret(&prepared, &grant, &witness, admit)
+                .unwrap_err(),
+            refusal.message(),
+            "{change}"
+        );
+        assert_eq!(entered.load(Ordering::SeqCst), 0, "{change}");
+        assert_eq!(env.store.reads.load(Ordering::SeqCst), reads, "{change}");
+    }
+}
+
+#[test]
+fn reviewed_http_grants_require_one_effect_version_and_declared_slot() {
+    let mut base: Value = serde_json::from_str(&manifest(SLOT)).unwrap();
+    base["host"]["reviewedInvocations"] = json!([
+        {"id":"create", "credentialHttp":{"version":1,"slot":"api-key"}}
+    ]);
+    serde_json::from_value::<Manifest>(base.clone())
+        .unwrap()
+        .validate()
+        .unwrap();
+    let mut selected = base.clone();
+    selected["host"]["reviewedInvocations"][0]["credentialHttp"]["resultUrl"] =
+        json!({"version":1,"jsonPointer":"/output/0/~0~1x"});
+    serde_json::from_value::<Manifest>(selected.clone())
+        .unwrap()
+        .validate()
+        .unwrap();
+    selected["host"]["reviewedInvocations"][0]["credentialHttp"]["resultUrl"]["any"] = json!(1);
+    assert!(serde_json::from_value::<Manifest>(selected).is_err());
+    for grant in [
+        json!({"id":"create"}),
+        json!({"id":"create", "credentialHttp":{"version":2,"slot":"api-key"}}),
+        json!({"id":"create", "credentialHttp":{"version":1,"slot":"other"}}),
+        json!({"id":"create", "artifact":{"path":"/fixture/recipient","sha256":"ab".repeat(32)}, "credentialHttp":{"version":1,"slot":"api-key"}}),
+        json!({"id":"create", "credentialHttp":{"version":1,"slot":"api-key","resultUrl":{"version":2,"jsonPointer":"/output/0"}}}),
+        json!({"id":"create", "credentialHttp":{"version":1,"slot":"api-key","resultUrl":{"version":1,"jsonPointer":""}}}),
+        json!({"id":"create", "credentialHttp":{"version":1,"slot":"api-key","resultUrl":{"version":1,"jsonPointer":"output/0"}}}),
+        json!({"id":"create", "credentialHttp":{"version":1,"slot":"api-key","resultUrl":{"version":1,"jsonPointer":"/a~2b"}}}),
+        json!({"id":"create", "credentialHttp":{"version":1,"slot":"api-key","resultUrl":{"version":1,"jsonPointer":"/a~"}}}),
+        json!({"id":"create", "credentialHttp":{"version":1,"slot":"api-key","resultUrl":{"version":1,"jsonPointer":"/a".repeat(17)}}}),
+        json!({"id":"create", "credentialHttp":{"version":1,"slot":"api-key","resultUrl":{"version":1,"jsonPointer":format!("/{}", "a".repeat(256))}}}),
+    ] {
+        let mut invalid = base.clone();
+        invalid["host"]["reviewedInvocations"][0] = grant;
+        assert!(serde_json::from_value::<Manifest>(invalid)
+            .unwrap()
+            .validate()
+            .is_err());
+    }
 }

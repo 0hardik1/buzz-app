@@ -77,6 +77,37 @@ pub const SIGN_OUT_INCOMPLETE: &str = "Buzz couldn't remove saved plugin credent
 /// Metadata, not secure storage, failed: relaunching cannot repair lost records.
 pub const SIGN_OUT_UNREADABLE: &str = "Buzz couldn't confirm saved plugin credentials were removed while signing out: their records are unreadable, incomplete or could not be updated. Sign-out stays incomplete.";
 
+const WITHDRAWN: &str = "Plugin was disabled or updated; refresh the catalog";
+
+/// A refused credential admission. Only another holder's momentary metadata
+/// lock (`WouldBlock`) is `Busy`. `Withdrawn` is the terminal refusal of a
+/// plugin no longer enabled at the reviewed revision; every other refusal is
+/// `Terminal`. All keep the message string callers have always received.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    Busy(String),
+    Withdrawn(String),
+    Terminal(String),
+}
+impl Refusal {
+    pub fn message(self) -> String {
+        match self {
+            Self::Busy(message) | Self::Withdrawn(message) | Self::Terminal(message) => message,
+        }
+    }
+}
+impl From<String> for Refusal {
+    fn from(message: String) -> Self {
+        Self::Terminal(message)
+    }
+}
+impl From<&str> for Refusal {
+    fn from(message: &str) -> Self {
+        Self::Terminal(message.into())
+    }
+}
+type Admission<T> = std::result::Result<T, Refusal>;
+
 // ---------------------------------------------------------------- manifest
 
 /// A declared slot. The value never appears in a manifest.
@@ -854,6 +885,13 @@ fn slots(manifest: &Manifest) -> BTreeMap<String, Policy> {
         .map(|slot| (slot.id.clone(), slot.policy()))
         .collect()
 }
+/// The installed plugin only while it is enabled at `revision`.
+fn current<'r>(registry: &'r Registry, id: &str, revision: &str) -> Option<&'r Installed> {
+    registry
+        .installed
+        .get(id)
+        .filter(|p| p.enabled && p.current == revision)
+}
 
 /// Native preparation input, not dispatch authority.
 pub struct SecretRequest<'a> {
@@ -903,15 +941,25 @@ impl Manager {
     fn with_qualified_secret<T>(
         &self,
         request: &SecretRequest<'_>,
-        qualified: impl FnOnce(SecretBinding, &Registry) -> Result<T>,
-    ) -> Result<T> {
+        qualified: impl FnOnce(SecretBinding, &Registry) -> Admission<T>,
+    ) -> Admission<T> {
         read::with_structural(self, |evidence| {
-            let authority = self.authority(
-                evidence.registry,
-                request.plugin,
-                request.revision,
-                request.slot,
-            )?;
+            let authority = self
+                .authority(
+                    evidence.registry,
+                    request.plugin,
+                    request.revision,
+                    request.slot,
+                )
+                .map_err(|message| {
+                    if !self.safe_mode
+                        && current(evidence.registry, request.plugin, request.revision).is_none()
+                    {
+                        Refusal::Withdrawn(message)
+                    } else {
+                        Refusal::Terminal(message)
+                    }
+                })?;
             // Verified Manifest::validate requires every slot origin in networkOrigins.
             if !authority.policy.origins.iter().any(|v| v == request.origin)
                 || evidence.state.journal.as_ref().is_some_and(|journal| {
@@ -957,6 +1005,7 @@ impl Manager {
     }
     fn qualify_secret(&self, request: &SecretRequest<'_>) -> Result<SecretBinding> {
         self.with_qualified_secret(request, |binding, _| Ok(binding))
+            .map_err(Refusal::message)
     }
     /// Requalify the exact prepared enrollment at synchronous effect admission.
     /// R→G→I remain held through `admit`: it must only admit/start bounded work,
@@ -968,13 +1017,71 @@ impl Manager {
         prepared: &PreparedSecret,
         admit: impl FnOnce() -> Result<T>,
     ) -> Result<T> {
-        self.with_current_prepared_secret(prepared, |_| admit())
+        self.with_current_prepared_secret(prepared, |_| Ok(admit()?))
+            .map_err(Refusal::message)
+    }
+    /// Compose review and exact enrollment qualification under the existing R→G→I.
+    /// The same callback restrictions as `with_prepared_secret` apply.
+    pub fn with_reviewed_secret<T>(
+        &self,
+        prepared: &PreparedSecret,
+        expected: &crate::ReviewedInvocation,
+        witness: &crate::ReviewedInvocationWitness,
+        admit: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        self.try_reviewed_secret(prepared, expected, witness, admit)
+            .map_err(Refusal::message)
+    }
+    /// `with_reviewed_secret` for a caller that may come back when the only
+    /// refusal was a momentarily held metadata lock.
+    #[cfg(target_os = "macos")]
+    pub fn try_reviewed_secret<T>(
+        &self,
+        prepared: &PreparedSecret,
+        expected: &crate::ReviewedInvocation,
+        witness: &crate::ReviewedInvocationWitness,
+        admit: impl FnOnce() -> Result<T>,
+    ) -> Admission<T> {
+        self.with_current_prepared_secret(prepared, |registry| {
+            let binding = &prepared.binding;
+            let http = expected.credential_http.as_ref().ok_or(UNAVAILABLE)?;
+            if expected.artifact.is_some() || http.version != 1 || http.slot != binding.slot {
+                return Err(UNAVAILABLE.into());
+            }
+            let plugin = registry.installed.get(&binding.plugin).ok_or(UNAVAILABLE)?;
+            let artifact = self.artifact(
+                &binding.plugin,
+                &binding.revision,
+                plugin.current_signature.as_ref(),
+            )?;
+            if !artifact
+                .manifest
+                .host
+                .unwrap_or_default()
+                .reviewed_invocations
+                .contains(expected)
+            {
+                return Err(UNAVAILABLE.into());
+            }
+            self.check_reviewed_witness(witness)?;
+            Ok(admit()?)
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    pub fn try_reviewed_secret<T>(
+        &self,
+        _: &PreparedSecret,
+        _: &crate::ReviewedInvocation,
+        _: &crate::ReviewedInvocationWitness,
+        _: impl FnOnce() -> Result<T>,
+    ) -> Admission<T> {
+        Err("Native private review requires macOS".into())
     }
     fn with_current_prepared_secret<T>(
         &self,
         prepared: &PreparedSecret,
-        admit: impl FnOnce(&Registry) -> Result<T>,
-    ) -> Result<T> {
+        admit: impl FnOnce(&Registry) -> Admission<T>,
+    ) -> Admission<T> {
         let binding = &prepared.binding;
         let request = SecretRequest {
             plugin: &binding.plugin,
@@ -1090,11 +1197,7 @@ impl Manager {
         if self.safe_mode {
             return Err("External plugins are disabled in safe mode".into());
         }
-        let plugin = registry
-            .installed
-            .get(id)
-            .filter(|p| p.enabled && p.current == revision)
-            .ok_or("Plugin was disabled or updated; refresh the catalog")?;
+        let plugin = current(registry, id, revision).ok_or(WITHDRAWN)?;
         let artifact = self.artifact(id, revision, plugin.current_signature.as_ref())?;
         let slot = slots(&artifact.manifest)
             .remove(slot)

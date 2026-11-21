@@ -67,10 +67,13 @@ fn checked(path: &Path, write: bool) -> Result<File> {
     }
     Ok(file)
 }
-fn existing_lock(path: &Path) -> Result<Held> {
+fn existing_lock(path: &Path) -> Admission<Held> {
     let file = checked(path, true)?;
-    file.try_lock().map_err(|_| UNREADABLE)?;
-    Ok(Held(file))
+    match file.try_lock() {
+        Ok(()) => Ok(Held(file)),
+        Err(fs::TryLockError::WouldBlock) => Err(Refusal::Busy(UNREADABLE.into())),
+        Err(fs::TryLockError::Error(_)) => Err(UNREADABLE.into()),
+    }
 }
 pub(super) fn bytes(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
@@ -219,7 +222,7 @@ pub(super) fn inspect_retired(namespace: &Namespace) -> Result<()> {
 pub(super) fn with_structural<T>(
     manager: &Manager,
     continuation: impl FnOnce(Structural<'_>) -> T,
-) -> Result<T> {
+) -> Admission<T> {
     if cfg!(not(unix)) {
         return Err(UNSUPPORTED.into());
     }
