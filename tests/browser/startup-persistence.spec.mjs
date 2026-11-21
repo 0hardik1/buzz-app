@@ -37,7 +37,8 @@ test("startup storage batches roster updates and prunes without transferring the
     const channelId = (index) => `example-channel-${index}`;
     const channelRoster = (index, time, members = [viewer, ...agents]) =>
       roster(relay, channelId(index), members, time);
-    const events = Array.from({ length: 1876 }, (_, index) => [
+    const rosterSize = 1876;
+    const events = Array.from({ length: rosterSize }, (_, index) => [
       channelRoster(index),
       metadata(relay, channelId(index), `Example task ${index}`, undefined, [
         ["about", "Synthetic task context. ".repeat(42)],
@@ -177,7 +178,17 @@ test("startup storage batches roster updates and prunes without transferring the
         lastUpdate = channelRoster(index, 1_700_000_001);
         channels.acceptDiscovery([lastUpdate]);
       },
-      repeat: () => channels.acceptDiscovery([lastUpdate]),
+      repeat: (complete = false) =>
+        channels.acceptDiscovery(
+          [lastUpdate],
+          complete
+            ? new Set(
+                Array.from({ length: rosterSize - 1 }, (_, index) =>
+                  channelId(index + 1),
+                ),
+              )
+            : undefined,
+        ),
       unrelated: () => {
         channels.acceptDiscovery([
           metadata(relay, "preview", "Unjoined preview"),
@@ -301,7 +312,7 @@ test("startup storage batches roster updates and prunes without transferring the
     await page.clock.runFor(30_500);
     await page.evaluate(() => window.rosterReplay.unrelated());
     await page.clock.runFor(500);
-    await page.evaluate(() => window.rosterReplay.repeat());
+    await page.evaluate(() => window.rosterReplay.repeat(true));
     await page.clock.runFor(500);
   } finally {
     remaining = await page.evaluate(() => window.rosterReplay.cleanup());

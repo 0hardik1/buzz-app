@@ -180,8 +180,7 @@ const sameKeys = (a?: readonly string[], b?: readonly string[]) =>
 /** Relay page size, separate from discovery's retained-entry budget. */
 const DISCOVERY_LIMIT = 500;
 const DISCOVERY_SAVE_INTERVAL_MS = 30_000;
-/** An unchanged saved roster is written again after this long, so a row
- * pruned or cleared on disk returns and restore's one-day limit still passes. */
+/** Refresh an unchanged saved roster before restore's one-day limit. */
 const DISCOVERY_RESAVE_MS = 600_000;
 /** Channels one creator-proof filter names. Each has one creation, so a limit
  * of twice this, the relay's maximum, leaves room for strays; a filter that
@@ -2081,7 +2080,7 @@ export function createChannelStore(
             freshChange ||
             (cacheEvidence && due)
           ) {
-            const ifUnchanged = !cacheChanged && !freshChange && !complete;
+            const ifUnchanged = !first && !cacheChanged && !freshChange;
             discoverySave ??= setTimeout(
               () => saveDiscovery(false, ifUnchanged),
               500,
