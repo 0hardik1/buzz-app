@@ -1043,7 +1043,12 @@ function Timeline({
   const [trailingExpanded, setTrailingExpanded] = useState(false);
   const restHeight = trailing?.restHeight ?? 0;
   const latestRest = useRef(restHeight);
-  latestRest.current = restHeight;
+  const holdTrailing = useRef<() => void>(undefined);
+  // A new rest height moves the latest message's place, as a resize does.
+  useLayoutEffect(() => {
+    latestRest.current = restHeight;
+    holdTrailing.current?.();
+  }, [restHeight]);
   const trackTrailing = (element: HTMLElement) => {
     const extra = trailingExtra.current;
     trailingPlace.current =
@@ -1072,7 +1077,11 @@ function Timeline({
       // bottom-stuck controls by up to a pixel at the end of the range.
       const above = box.previousElementSibling?.getBoundingClientRect().bottom;
       if (above !== undefined) {
-        const end = above - element.getBoundingClientRect().top + height;
+        const end =
+          above -
+          element.getBoundingClientRect().top +
+          element.scrollTop +
+          height;
         const snap = Math.ceil(end - 0.01) - end;
         if (
           Math.abs(snap - (Number.parseFloat(box.style.marginTop) || 0)) > 0.01
@@ -1103,6 +1112,7 @@ function Timeline({
       element.scrollTop = next;
     };
     hold();
+    holdTrailing.current = hold;
     const resize = new ResizeObserver(hold);
     resize.observe(box);
     resize.observe(element);
@@ -1115,8 +1125,10 @@ function Timeline({
     return () => {
       resize.disconnect();
       rows.disconnect();
+      holdTrailing.current = undefined;
       trailingExtra.current = 0;
       trailingPlace.current = undefined;
+      setTrailingExpanded(false);
       element.style.removeProperty("--timeline-trailing-rest");
     };
   }, [hasTrailing, listMounted]);
@@ -1312,6 +1324,9 @@ function Timeline({
     const list = handle.current;
     const element = scroller.current;
     if (!list || !element) return;
+    // A reveal stops at the latest message, short of trailing content.
+    if (pastLatest(element, trailingExtra.current))
+      element.scrollTop = latestTop(element, trailingExtra.current);
     // Replace the mounting request with the reveal's exact position. Retain
     // that same item-relative offset through Virtua's late measurements.
     list.scrollToIndex(targetIndex, {
@@ -1353,9 +1368,6 @@ function Timeline({
   }, []);
   const completeTarget = useCallback(() => {
     const element = scroller.current;
-    // A reveal stops at the latest message, short of trailing content.
-    if (element && pastLatest(element, trailingExtra.current))
-      element.scrollTop = latestTop(element, trailingExtra.current);
     // Only a reveal clamped at the scroll limit follows. A near-bottom reveal
     // keeps its row where it placed it instead of re-aligning to the end.
     if (
@@ -1367,7 +1379,7 @@ function Timeline({
     // and so no scroll event records it. Its visit keeps the follow state, so
     // Back doesn't re-align the row; the channel's place keeps the 80 px rule.
     if (element) {
-      const channel = positionAt(element);
+      const channel = positionAt(element, undefined, trailingExtra.current);
       savedPosition.current = { ...channel, bottom: follow.current };
       revealedPlace.current = { visit: savedPosition.current, channel };
     }

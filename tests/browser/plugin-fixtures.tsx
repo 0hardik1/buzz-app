@@ -484,9 +484,16 @@ export const fixturePlugins: readonly BundledPlugin[] = [
             const { trailing: _, ...target } = params;
             return target;
           }, [params]);
+          // Approving removes the card in place, as a plugin's decision does.
+          const [approved, setApproved] = useState<string>();
           const card = useMemo(
-            () => trailing && trailingCard(trailingBrief(trailing)),
-            [trailing],
+            () =>
+              trailing &&
+              trailing !== approved &&
+              trailingCard(trailingBrief(trailing), () =>
+                setApproved(trailing),
+              ),
+            [trailing, approved],
           );
           useEffect(() => {
             if (connection.status === "ready" && Workspace && params)

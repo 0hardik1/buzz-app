@@ -288,6 +288,60 @@ test.describe("trailing content", () => {
     await expect(toggle(region)).toHaveText("Full brief");
   });
 
+  test("removing a grown card leaves no expanded state behind", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    const region = history(page);
+    await select(page, { channelId: "alpha", trailing: "long" });
+    await expect(toggle(region)).toHaveText("Full brief");
+    await settle(page, region);
+    await region.hover();
+    await wheel(page, 300, region);
+    await expect(toggle(region)).toHaveText("Hide brief");
+
+    await region.getByRole("button", { name: "Approve" }).click();
+    await expect(
+      region.getByRole("article", { name: "Fixture card" }),
+    ).toHaveCount(0);
+    await settle(page, region);
+    await readEarlier(page, region);
+    await expect(
+      region.getByRole("button", { name: "Jump to latest", exact: true }),
+    ).toBeVisible();
+  });
+
+  test.describe(() => {
+    // Without thread fixtures, the latest row is a top-level message.
+    test.use({ threadUnread: false });
+
+    test("a reveal of the latest message stops above the card", async ({
+      page,
+      app,
+    }) => {
+      await open(page, app);
+      const region = history(page);
+      await select(page, { channelId: "alpha", trailing: "long" });
+      await expect(toggle(region)).toHaveText("Full brief");
+      await settle(page, region);
+      const messageId = await region.evaluate(
+        (element) =>
+          [...element.querySelectorAll("[data-message-id]")].at(-1).dataset
+            .messageId,
+      );
+      await readEarlier(page, region);
+
+      await select(page, { channelId: "alpha", trailing: "long", messageId });
+      await expect(
+        region.locator(`[data-message-id="${messageId}"]`),
+      ).toBeInViewport();
+      await settle(page, region);
+      expect(Math.abs((await place(region)).past)).toBeLessThanOrEqual(1);
+      await expect(toggle(region)).toHaveText("Full brief");
+    });
+  });
+
   for (const brief of ["long", "short"])
     test(`Full brief shows the ${brief} card's ${brief === "long" ? "top below 100px of history" : "end"}, and Hide brief returns`, async ({
       page,

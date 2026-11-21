@@ -22,6 +22,7 @@ export function trailingBrief(size: "none" | "short" | "long") {
 
 export function trailingCard(
   brief: string,
+  approve: () => void,
 ): NonNullable<ConversationWorkspaceProps["trailing"]> {
   return {
     restHeight: trailingRestHeight,
@@ -75,7 +76,9 @@ export function trailingCard(
           <button type="button" aria-expanded={expanded} onClick={toggle}>
             {expanded ? "Hide brief" : "Full brief"}
           </button>
-          <button type="button">Approve</button>
+          <button type="button" onClick={approve}>
+            Approve
+          </button>
         </footer>
       </article>
     ),
