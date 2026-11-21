@@ -195,7 +195,7 @@ test("counts each visit to a conversation once", async () => {
   expect(topInterest(scope, 5)).toEqual(["quiet", "busy"]);
 });
 
-test("⌘P searches the open conversation, else all of Buzz; ⌘⇧P switches inside Finder but leaves other text fields alone", async () => {
+test("⌘P searches the open conversation, else all of Buzz; ⌘⇧P switches inside Finder but leaves other text fields alone; closing returns focus there", async () => {
   const { visit, leave, show } = await mount();
   // Off Apple platforms, ⌘ is Ctrl.
   const press = (target: Element, shift = false) =>
@@ -209,7 +209,9 @@ test("⌘P searches the open conversation, else all of Buzz; ⌘⇧P switches in
   document.body.append(composer);
   visit("v1", "crew");
   show();
-  press(document.body);
+  // ⌘P works while typing.
+  composer.focus();
+  press(composer);
   expect(await selectedTab()).toBe("This channel");
   const field = screen.getByRole("combobox");
   field.focus();
@@ -221,9 +223,10 @@ test("⌘P searches the open conversation, else all of Buzz; ⌘⇧P switches in
   await vi.waitFor(() =>
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument(),
   );
+  // Back where you were typing.
+  await vi.waitFor(() => expect(composer).toHaveFocus());
   // Typing in the composer, ⌘⇧P is Spoiler's: Finder neither opens nor
   // takes the key.
-  composer.focus();
   expect(press(composer, true)).toBe(true);
   expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   leave();

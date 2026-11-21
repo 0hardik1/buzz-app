@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -97,6 +98,13 @@ export function FinderDialog(props: Props) {
     setQuery(props.initialQuery ?? "");
   }
   const input = useRef<HTMLElement>(null);
+  // The search field takes focus before the dialog notes what had it, so
+  // keep that here, for closing to return to.
+  const returnTo = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    if (props.open && document.activeElement instanceof HTMLElement)
+      returnTo.current = document.activeElement;
+  }, [props.open]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: one budget per dialog opening and session, even when switching scopes.
   const opening = useMemo(() => ({}), [props.open, props.session]);
   // Relay hits join the index when Finder closes, so the device rows above
@@ -128,6 +136,7 @@ export function FinderDialog(props: Props) {
       height="stable-tall"
       bodyLayout="flex"
       initialFocus={input}
+      finalFocus={returnTo}
     >
       {props.open &&
         (props.source ? (
