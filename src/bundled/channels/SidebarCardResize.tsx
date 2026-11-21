@@ -128,8 +128,34 @@ export function SidebarCardResize({
       if (!stop.current) apply(rows, saved.current);
     };
     update();
-    const added = new MutationObserver(update);
-    // Unread markers come and go as rows change, so the badge stays current.
+    // Observers settle at most once a frame: resizing the sidebar reports a
+    // size every frame, and re-wrapping icon tiles reports again.
+    let frame: number | undefined;
+    let pending = false;
+    const schedule = () => {
+      if (pending) return;
+      pending = true;
+      frame = requestAnimationFrame(() => {
+        pending = false;
+        update();
+      });
+    };
+    // A row, or a row's needs-you marker, arriving or leaving.
+    const matters = (node: Node) =>
+      node instanceof Element &&
+      (node.matches(watched) || !!node.querySelector(watched));
+    // Only rows coming or going, or a row starting or stopping needing you,
+    // change what the card shows; other badges don't.
+    const added = new MutationObserver((records) => {
+      if (
+        records.some(
+          (record) =>
+            record.type === "attributes" ||
+            [...record.addedNodes, ...record.removedNodes].some(matters),
+        )
+      )
+        schedule();
+    });
     added.observe(rows, {
       childList: true,
       subtree: true,
@@ -139,11 +165,10 @@ export function SidebarCardResize({
     const sized =
       typeof ResizeObserver === "undefined"
         ? undefined
-        : new ResizeObserver(() => {
-            if (!stop.current) apply(rows, saved.current);
-          });
+        : new ResizeObserver(schedule);
     sized?.observe(rows);
     return () => {
+      if (pending && frame !== undefined) cancelAnimationFrame(frame);
       added.disconnect();
       sized?.disconnect();
     };
@@ -320,8 +345,10 @@ function clip(list: HTMLElement, height: number | undefined): number {
   // A hidden card has no layout, so every stop is zero: keep the saved
   // height as it is until the card is shown and can be measured.
   if (!full) {
-    list.style.maxHeight =
-      height !== undefined && height !== ALL_ROWS ? `${height}px` : "";
+    setMaxHeight(
+      list,
+      height !== undefined && height !== ALL_ROWS ? `${height}px` : "",
+    );
     return ends.length;
   }
   const limit =
@@ -331,20 +358,28 @@ function clip(list: HTMLElement, height: number | undefined): number {
         ? ends[DEFAULT_ROWS - 1]
         : nearest(ends, height);
   const clipped = limit !== undefined && limit < full;
-  list.style.maxHeight = clipped ? `${limit}px` : "";
+  setMaxHeight(list, clipped ? `${limit}px` : "");
   let shown = 0;
   list
     .querySelectorAll<HTMLElement>("[data-card-row]")
     .forEach((row, index) => {
       const hidden = clipped && (ends[index - 1] ?? 0) >= limit;
       // Only undo inertness this clip gave: a row leaving the list keeps its own.
-      if (hidden) row.inert = true;
-      else if (row.hasAttribute("data-card-clipped")) row.inert = false;
-      row.toggleAttribute("data-card-clipped", hidden);
+      // Unchanged writes are skipped, so they don't wake the unread edge cue.
+      if (hidden !== row.hasAttribute("data-card-clipped")) {
+        if (hidden || row.inert) row.inert = hidden;
+        row.toggleAttribute("data-card-clipped", hidden);
+      } else if (hidden && !row.inert) row.inert = true;
       if (!hidden) shown++;
     });
   return shown;
 }
+
+function setMaxHeight(list: HTMLElement, value: string) {
+  if (list.style.maxHeight !== value) list.style.maxHeight = value;
+}
+
+const watched = "[data-card-row], [data-channel-needs-you]";
 
 type Waiting = { count: number; lowest: number };
 const none: Waiting = { count: 0, lowest: -1 };
