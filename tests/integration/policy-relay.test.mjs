@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
+import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools";
 import { policyRelay } from "../browser/policy-relay.mjs";
 
 test("outbound ephemeral fanout drops without subscribers while inbound injection stays strict", () => {
@@ -64,4 +66,49 @@ test("a publication accepted after its page closed skips only the delivery check
     () => relay.publish("primary", event),
     /explicit production channel REQ/,
   );
+});
+
+test("a cancelled channel head with notices does not record a relay fault", async () => {
+  const key = generateSecretKey();
+  const report = { queries: [], unexpected: [] };
+  const relay = policyRelay({
+    report,
+    viewer: getPublicKey(key),
+    answer: () => [],
+  });
+  const url = "https://primary.test/query";
+  const head = { kinds: [9], "#h": ["alpha"], top_level: true, limit: 80 };
+  const notices = { kinds: [40099], "#h": ["alpha"], limit: 80 };
+  const body = JSON.stringify([head, notices]);
+  const auth = finalizeEvent(
+    {
+      kind: 27235,
+      created_at: 1,
+      content: "",
+      tags: [
+        ["u", url],
+        ["method", "POST"],
+        ["payload", createHash("sha256").update(body).digest("hex")],
+      ],
+    },
+    key,
+  );
+  relay.holdContent();
+  const controller = new AbortController();
+  const cancelled = assert.rejects(
+    relay.fetch(url, {
+      body,
+      headers: {
+        Authorization: `Nostr ${Buffer.from(JSON.stringify(auth)).toString("base64")}`,
+      },
+      signal: controller.signal,
+    }),
+    (error) => error === controller.signal.reason,
+  );
+  const issued = report.queries.map(({ filter }) => filter);
+  controller.abort();
+  await cancelled;
+
+  assert.deepEqual(issued, [head, notices]);
+  assert.deepEqual(report.unexpected, []);
 });

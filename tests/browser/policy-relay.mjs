@@ -280,7 +280,9 @@ export function policyRelay({
           filters[1].kinds[0] === 40099
         ) {
           expect(filters[1]["#h"]).toEqual(filters[0]["#h"]);
-          const parts = await Promise.all(
+          // Each part reports its own assertion failures. Return the pending
+          // read so cancellation does not also enter this request's catch.
+          return Promise.all(
             filters.map((filter) =>
               api.fetch(url, {
                 ...init,
@@ -288,14 +290,14 @@ export function policyRelay({
                 [REQUEST_PART]: true,
               }),
             ),
-          );
-          const failed = parts.find((response) => !response.ok);
-          if (failed) return failed;
-          return Response.json(
-            (
-              await Promise.all(parts.map((response) => response.json()))
-            ).flat(),
-          );
+          ).then(async (parts) => {
+            const failed = parts.find((response) => !response.ok);
+            if (failed) return failed;
+            const events = await Promise.all(
+              parts.map((response) => response.json()),
+            );
+            return Response.json(events.flat());
+          });
         }
         if (filters.length === 2 && filters[1].depth_limit) {
           const [root, replies] = filters;
@@ -667,6 +669,8 @@ export function policyRelay({
           });
         return Response.json(result);
       } catch (error) {
+        // A held part of a combined query can reject when its caller cancels.
+        if (init?.signal?.aborted && error === init.signal.reason) throw error;
         return fault(error);
       }
     },
