@@ -277,4 +277,5 @@ start in the index. Try a word with no matches to reach the end. Use
 `?channel=c0&history=6000` with a word that has no matches to reach the
 5,000-message cap and try **Keep going**. Choose **All of Buzz** in the switch,
 or press ⌘⇧P, to see device matches with relay hits below them. Add
-`?source=fruit` to open a sample plugin list, with a custom preview.
+`?source=fruit` to open a sample plugin list, with a custom preview, or
+`?source=conversations` or `?source=people` for the built-in lists.

@@ -24,6 +24,7 @@ import {
   type FinderScope,
 } from "../../src/bundled/finder/FinderDialog";
 import type { RegisteredSource } from "../../src/bundled/finder/service";
+import { builtinSources } from "../../src/bundled/finder/sources";
 import { startFinderSync } from "../../src/bundled/finder/sync";
 import { syntheticDocs } from "../../src/bundled/finder/synthetic.ts";
 
@@ -162,6 +163,22 @@ const fruit: RegisteredSource = {
     ),
 };
 
+// Finder's built-in lists: ?source=conversations or ?source=people.
+const builtins = builtinSources({
+  session: () => session,
+  current: () => params.get("channel") ?? undefined,
+  open: (channelId, detail) =>
+    console.log(`open ${channelId}${detail ? ` with ${detail}` : ""}`),
+}).map(
+  (source): RegisteredSource => ({
+    ...source,
+    key: `buzz.finder/${source.id}`,
+    pluginId: "buzz.finder",
+    revision: "fixture",
+  }),
+);
+const sources = [fruit, ...builtins];
+
 function App() {
   useKeyboardFocusVisibility();
   const [open, setOpen] = useState(true);
@@ -172,7 +189,7 @@ function App() {
   );
   const [openCount, setOpenCount] = useState(1);
   const [source, setSource] = useState(
-    params.get("source") === "fruit" ? fruit : undefined,
+    sources.find((source) => source.id === params.get("source")),
   );
   const [revision, setRevision] = useState(0);
   const [sync, setSync] = useState<ReturnType<typeof startFinderSync>>();
