@@ -71,7 +71,9 @@ root of the thread whose reply box it reads over). A page move inside a panel
 is a visit too. Back closes the newest sheet, and Forward reopens it where it
 was. Close, Escape and a press on the scrim close it and everything above it,
 retiring their visits, so neither Back nor Forward shows them again. Forward
-never lands on an empty step.
+never lands on an empty step. A browser returns from a closed visit by
+traversal, which arrives after the close; until it does, the page reads that
+visit as the address it returns to.
 
 Open as tab moves an inline thread or panel to a side tab. It carries the
 thread's draft, reply target and scroll, or the panel's current page. Anything
