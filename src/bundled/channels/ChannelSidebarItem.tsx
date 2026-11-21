@@ -360,11 +360,14 @@ function ChannelSidebarItemCore({
           <span className={styles.indicatorStack} data-channel-indicators="">
             <span className={styles.indicatorLayer}>
               {solo ? (
-                // Solo stays bold only: no dot in a list, no count on a tile.
+                // Solo is bold in a list. A tile has no text to bold, so it
+                // shows a dot instead, never a count, and typing takes the
+                // corner while an agent works.
                 <UnreadBadge
                   session={session}
                   channelId={channel.id}
                   labelUnread="all"
+                  unreadDot={tiled && agents.length === 0}
                 />
               ) : tiled ? (
                 <UnreadCount

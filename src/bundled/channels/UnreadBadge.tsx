@@ -72,6 +72,7 @@ export function UnreadBadge({
   label,
   labelUnread = "ordinary",
   preserveUnread = false,
+  unreadDot = false,
 }: {
   session: RelaySession;
   channelId: string;
@@ -82,6 +83,8 @@ export function UnreadBadge({
   /** Preserve observed evidence for Solo destinations with their own labels.
    * Their bold says it all, so needing you adds no dot there either. */
   preserveUnread?: boolean;
+  /** Draw the dot for any unread: a Solo tile has no text to bold. */
+  unreadDot?: boolean;
 }) {
   const {
     snapshot,
@@ -127,6 +130,9 @@ export function UnreadBadge({
           role="img"
           aria-label={status}
         />
+      )}
+      {unreadDot && unread && (
+        <span className={styles.needsYouDot} aria-hidden="true" />
       )}
       {needs.waiting && (
         <span
