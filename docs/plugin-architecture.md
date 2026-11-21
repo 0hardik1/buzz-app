@@ -1064,6 +1064,23 @@ declares `host.mcp`; `read` is the plugin's own file access (`host.files`),
 which uploads of local files use. The kit grants nothing `ctx.agents` and
 `ctx.host` do not already give the plugin.
 
+An agent type can list `skillFolders`: up to eight folders, each absolute,
+`~/…`, or starting with `$CODEX_HOME`; `register()` refuses more than eight.
+When a message addresses one local agent of that type, the composer's `/` offers
+each folder's `<name>/SKILL.md` skills, reading `name` and an optional
+`description` from each file's front matter. A chosen skill travels as a token
+in the message's `buzz-tokens-v1` tag, whose value is a JSON array of 1 to 32
+unique tokens at most 16 KiB in size: a folder token is
+`{ kind: "folder", id, label }`, where `id` is the folder's absolute path, and a
+skill token is `{ kind: "skill", id, label, target }`, where `id` is the
+`SKILL.md` path and `target` is the hex pubkey of the agent the skill was chosen
+for. Tokens can carry other fields, such as `description` and `location`; ignore
+them. Because anyone in a chat can sign a `buzz-tokens-v1` tag, a harness reads
+chips only when the message's author is the agent's owner, takes a skill token
+only when its `target` is the agent's pubkey (telling the agent to read each
+`SKILL.md`), and takes a folder token only while `ctx.host.repositoryFolders`
+lists its `id`.
+
 A plugin, bundled or installed, can add a tab to the settings of agents
 running here or hosted, whatever their type, with
 `ctx.agents.registerTab({ id, title, component, when, subscribe })`. The component receives
@@ -3438,6 +3455,31 @@ result without status/retry hides the menu while keeping the provider subscribed
 Before the first publication the menu is also hidden: syntax matching is not evidence
 of loading. Providers must publish an explicit status for actual pending work. Escape
 still revokes unpublished work, without exposing ARIA controls for a missing listbox.
+
+A provider registered with `ctx.conversation.registerCompletionSupplement(provider)`
+never owns the caret. Hosts without supplements lack that method, so a plugin
+calls it with `?.` and adds nothing on them. `registerCompletion` refuses
+`supplement`, so that method is the only way to register one. It mounts
+beside the winner when its own match has the same start, with its own query, and
+it never opens a menu alone. Each provider's rows form a section, and sections
+follow `order`, then the contribution key, with the winner among them. A
+supplement's section sits under a host-drawn heading with its `title`, and so
+does the winner's when another section comes first and the winner draws no
+heading of its own. The first row is selected by default, so Enter and Tab take a
+supplement row ordered above the winner's; a terminator still accepts only the
+winner's exact match. A supplement that publishes later with a lower `order`
+moves the default row until the user moves the selection, which then stays on
+its row while that row exists. Each row keeps its provider: a row is identified by
+provider and ID, and acceptance, `canSelect`, `disabled`, retry and status go to
+the provider that published it. Each provider keeps its own 50-row cap. A
+supplement decides no exact match. The host ignores its `spaceId`, `spacePending`,
+`agent` and `group`. Its `holdAutoSelect: true` says that its whole source, not only its
+shown rows, has or extends the typed name, or is still loading. Then a typed
+terminator never accepts the winner's exact match and types as text. Only a
+published hold holds: a supplement that has published nothing for this query
+holds nothing, so one that is still loading publishes `holdAutoSelect: true`
+in its mount effect, for every query. One that fails drops only its own section
+and holds nothing. A hold has no time limit.
 
 Providers receive immutable observation/range evidence and `publish(result)`—not
 DOM, focus or replacement commands. Results contain stable IDs, labels, optional
