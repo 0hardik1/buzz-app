@@ -427,7 +427,9 @@ export function createChannelStore(
   let startup: Promise<void> | undefined;
   let discoveryObserved = false;
   // Coalesce discovery batches before writing the whole startup record.
-  let discoverySave: ReturnType<typeof setTimeout> | undefined;
+  let discoverySave:
+    | { timer: ReturnType<typeof setTimeout>; ifUnchanged: boolean }
+    | undefined;
   let lastDiscoveryWrite: number | undefined;
   let discoveryDirty = false;
   let discoveryRevocationPending = false;
@@ -1562,8 +1564,9 @@ export function createChannelStore(
       await yieldToHost();
     }
   }
-  function saveDiscovery(revoked = false, ifUnchanged = false) {
-    clearTimeout(discoverySave);
+  function saveDiscovery(revoked = false) {
+    const ifUnchanged = !revoked && (discoverySave?.ifUnchanged ?? false);
+    clearTimeout(discoverySave?.timer);
     discoverySave = undefined;
     if (!persistence?.writeStartup || !discovery || !transport || disposed)
       return;
@@ -1594,7 +1597,7 @@ export function createChannelStore(
           },
         },
         urgent,
-        ifUnchanged && !urgent,
+        ifUnchanged,
       )
       .then(() => {
         if (savedDiscovery === saving) discoveryRevocationPending = false;
@@ -1603,7 +1606,6 @@ export function createChannelStore(
         if (savedDiscovery !== saving) return;
         savedDiscovery = undefined;
         discoveryDirty = true;
-        if (urgent) lastDiscoveryWrite = undefined;
       });
   }
   /** Mirror the most recently used profiles so the next session starts with
@@ -2081,10 +2083,12 @@ export function createChannelStore(
             (cacheEvidence && due)
           ) {
             const ifUnchanged = !first && !cacheChanged && !freshChange;
-            discoverySave ??= setTimeout(
-              () => saveDiscovery(false, ifUnchanged),
-              500,
-            );
+            if (discoverySave) discoverySave.ifUnchanged &&= ifUnchanged;
+            else
+              discoverySave = {
+                timer: setTimeout(saveDiscovery, 500),
+                ifUnchanged,
+              };
           }
         }
       }
@@ -2485,7 +2489,7 @@ export function createChannelStore(
           for (const state of [...windows.values()]) evict(state);
           heads.clear();
           tails.clear();
-          clearTimeout(discoverySave);
+          clearTimeout(discoverySave?.timer);
           discoverySave = undefined;
           // The kept directory is saved again after the clear.
           mirrored = undefined;
@@ -3589,7 +3593,7 @@ export function createChannelStore(
     tails.clear();
     if (discovery) setList({ ...list, channels: discovery.channels() });
     resetReferences();
-    clearTimeout(discoverySave);
+    clearTimeout(discoverySave?.timer);
     discoverySave = undefined;
     clearTimeout(profileSave);
     profileSave = undefined;
@@ -4536,7 +4540,7 @@ export function createChannelStore(
   }
   function dispose() {
     disposed = true;
-    clearTimeout(discoverySave);
+    clearTimeout(discoverySave?.timer);
     clearTimeout(profileSave);
     if (referenceWake) clearTimeout(referenceWake.timer);
     referenceWake = undefined;

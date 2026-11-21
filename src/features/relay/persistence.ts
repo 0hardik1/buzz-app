@@ -268,7 +268,13 @@ export function createHeadPersistence(
     readStartup: () =>
       transact(
         "readonly",
-        (store, done, then) => then(store.get(scope), (row) => done(row?.data)),
+        (store, done, then) =>
+          then(store.get(scope), (row) => {
+            const data = row?.data as SavedStartup | undefined;
+            if (observedDiscovery === undefined)
+              observedDiscovery = discoveryVersion(data?.discovery);
+            done(data);
+          }),
         STARTUP,
       ),
     async writeStartup(patch, revoked = false, ifUnchanged = false) {
@@ -284,7 +290,7 @@ export function createHeadPersistence(
               const current = discoveryVersion(row?.data?.discovery);
               // Compare inside the write transaction. Settings-only changes
               // preserve the signed snapshot, but a peer can replace or clear it.
-              if (ifUnchanged && current !== (observedDiscovery ?? null))
+              if (ifUnchanged && current !== observedDiscovery)
                 return done(undefined);
               if (observedDiscovery === undefined) observedDiscovery = current;
             }

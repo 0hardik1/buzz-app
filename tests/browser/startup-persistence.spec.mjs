@@ -350,3 +350,146 @@ test("startup storage batches roster updates and prunes without transferring the
     2.05 * result.initialBytes,
   );
 });
+
+test("startup retries honor the roster read before an abort and preserve peer writes", async ({
+  page,
+  context,
+  sourceOrigin,
+}) => {
+  const url = `${sourceOrigin}/startup-persistence-test`;
+  await context.route(url, (route) =>
+    route.fulfill({ contentType: "text/html", body: "<!doctype html>" }),
+  );
+  await page.goto(url);
+  const start = Date.now();
+  await page.clock.install({ time: start });
+  await page.clock.pauseAt(start + 60_000);
+  const firstRetry = await page.evaluate(async () => {
+    const { createHeadPersistence } = await import(
+      "/src/features/relay/persistence.ts"
+    );
+    const { createProfileDirectory } = await import(
+      "/src/features/relay/profile-directory.ts"
+    );
+    const { createChannelStore } = await import("/src/features/relay/store.ts");
+    const { keypair, roster } = await import("/src/features/relay/testing.ts");
+    const relay = keypair();
+    const { pubkey: viewer } = keypair();
+    const origin = "https://example.org";
+    const cache = createHeadPersistence(viewer, origin);
+    const peer = createHeadPersistence(viewer, origin);
+    const active = roster(relay, "active", [viewer]);
+    const first = roster(relay, "first", [viewer]);
+    const second = roster(relay, "second", [viewer]);
+    const replacement = roster(relay, "peer-only", [viewer]);
+    const startup = (events) => ({
+      discovery: { savedAt: Date.now(), relayAuthor: relay.pubkey, events },
+    });
+    const cachedIds = async () =>
+      (await peer.readStartup())?.discovery?.events.map((event) => event.id);
+    const original = IDBObjectStore.prototype.get;
+    let abortNext = false;
+    let aborts = 0;
+    IDBObjectStore.prototype.get = function (key) {
+      const request = original.call(this, key);
+      if (
+        abortNext &&
+        this.name === "startup" &&
+        this.transaction.mode === "readwrite" &&
+        key === `${viewer}:${origin}`
+      ) {
+        abortNext = false;
+        aborts++;
+        this.transaction.abort();
+      }
+      return request;
+    };
+    const directory = createProfileDirectory(null);
+    const channels = createChannelStore(
+      {
+        viewer,
+        relayAuthor: relay.pubkey,
+        read: async () => [],
+        revokeAccess: (commit) => commit(),
+        media: () => undefined,
+        visible: (value) => value,
+      },
+      directory,
+      { persistence: cache },
+    );
+    const events = [active, first, second];
+    window.startupRetry = {
+      revoke: async (id) => {
+        abortNext = true;
+        channels.acceptDiscovery([roster(relay, id, [], 1_700_000_001)]);
+        return cachedIds();
+      },
+      replace: () => peer.writeStartup(startup([replacement])),
+      clear: () => peer.clear(),
+      repeat: () => channels.acceptDiscovery([active]),
+      cachedIds,
+      cleanup() {
+        IDBObjectStore.prototype.get = original;
+        channels.dispose();
+        directory.dispose();
+        peer.close();
+        return aborts;
+      },
+    };
+
+    await peer.writeStartup(startup([active]));
+    const initiallyRead = (await cache.readStartup()).discovery.events[0].id;
+    abortNext = true;
+    const patch = startup(events);
+    const failed = await cache.writeStartup(patch).then(
+      () => false,
+      () => true,
+    );
+    const savedAfterAbort = await cache.writeStartup(patch, false, true).then(
+      () => true,
+      () => false,
+    );
+    const afterRetry = await cachedIds();
+    channels.acceptDiscovery(events);
+    return {
+      initiallyRead,
+      failed,
+      savedAfterAbort,
+      afterRetry,
+      originalIds: events.map((event) => event.id),
+      replacementId: replacement.id,
+    };
+  });
+
+  let afterReplacement;
+  let afterClear;
+  let aborts;
+  try {
+    await page.clock.runFor(500);
+    expect(await page.evaluate(() => window.startupRetry.cachedIds())).toEqual(
+      firstRetry.originalIds,
+    );
+    await page.evaluate(() => window.startupRetry.revoke("first"));
+    await page.evaluate(() => window.startupRetry.replace());
+    await page.evaluate(() => window.startupRetry.repeat());
+    await page.clock.runFor(500);
+    afterReplacement = await page.evaluate(() =>
+      window.startupRetry.cachedIds(),
+    );
+
+    await page.evaluate(() => window.startupRetry.revoke("second"));
+    await page.evaluate(() => window.startupRetry.clear());
+    await page.evaluate(() => window.startupRetry.repeat());
+    await page.clock.runFor(500);
+    afterClear = await page.evaluate(() => window.startupRetry.cachedIds());
+  } finally {
+    aborts = await page.evaluate(() => window.startupRetry.cleanup());
+  }
+  expect(aborts).toBe(3);
+  expect(firstRetry.initiallyRead).toBe(firstRetry.originalIds[0]);
+  expect(firstRetry.failed).toBe(true);
+  expect.soft(afterReplacement).toEqual([firstRetry.replacementId]);
+  expect.soft(afterClear).toBeUndefined();
+  expect.soft(firstRetry.savedAfterAbort).toBe(true);
+  expect(firstRetry.afterRetry).toEqual(firstRetry.originalIds);
+});

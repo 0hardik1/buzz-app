@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { tag, type RelayEvent } from "./events";
+import type { LiveCallbacks } from "./live";
 import type { HeadPersistence, SavedStartup } from "./persistence";
 import { createRelaySession } from "./session";
 import {
@@ -185,9 +186,11 @@ it("confirms a scan-start system membership that moved ahead of a paged system c
     const id = tag(event, "d");
     if (id) names.set(id, metadata(relay, id, "System", undefined, systemTags));
   }
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
   let saved: SavedStartup["discovery"];
+  let live!: LiveCallbacks;
+  let replacedByPeer = false;
   const persistence: HeadPersistence = {
     read: async () => [],
     readStartup: async () => ({
@@ -197,7 +200,9 @@ it("confirms a scan-start system membership that moved ahead of a paged system c
         events: [systemRoster(), systemMetadata],
       },
     }),
-    writeStartup: async ({ discovery }) => {
+    writeStartup: async ({ discovery }, _, ifUnchanged) => {
+      if (ifUnchanged && replacedByPeer)
+        throw new Error("Startup roster changed");
       if (discovery) saved = discovery;
     },
     write: async () => {},
@@ -207,7 +212,14 @@ it("confirms a scan-start system membership that moved ahead of a paged system c
     close: () => {},
   };
   const owner = createRelaySession(
-    { ...wire.transport, channelIdentity: true },
+    {
+      ...wire.transport,
+      channelIdentity: true,
+      subscribe(callbacks) {
+        live = callbacks;
+        return { update() {}, retry() {}, dispose() {} };
+      },
+    },
     { persistence, prepared: true },
   );
   const channels = owner.session.channels;
@@ -232,7 +244,8 @@ it("confirms a scan-start system membership that moved ahead of a paged system c
     await vi.waitFor(() => expect(wire.pending).toHaveLength(1));
     const ordinary = wire.next();
     expect(ordinary.filters[0]).not.toHaveProperty("#t");
-    ordinary.respond([roster(relay, other, [viewer.pubkey])]);
+    const member = roster(relay, other, [viewer.pubkey]);
+    ordinary.respond([member]);
     // The omission check reads the missing membership fresh by `#d`.
     await vi.waitFor(() => expect(wire.pending).toHaveLength(1));
     const confirm = wire.next();
@@ -248,6 +261,10 @@ it("confirms a scan-start system membership that moved ahead of a paged system c
     await vi.advanceTimersByTimeAsync(500);
     expect(saved?.events).toContainEqual(page[0]);
     expect(saved?.events).not.toContainEqual(systemMetadata);
+    // Queue an age refresh, then change the stored roster while the timer waits.
+    vi.setSystemTime(Date.now() + 600_000);
+    live.receive([member]);
+    replacedByPeer = true;
     const confirmed = systemRoster(1_700_001_000);
     confirm.respond([confirmed]);
     await vi.advanceTimersByTimeAsync(0);
