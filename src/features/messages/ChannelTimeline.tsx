@@ -1465,7 +1465,7 @@ function Timeline({
     trailingPlace.current = undefined;
     const tailHeight =
       (activityTail.current?.getBoundingClientRect().height ?? 0) +
-      trailingRest(trailingBox.current, trailingExtra.current);
+      trailingRest(trailingBox.current, cardExtra.current);
     handle.current.scrollToIndex(rows.length - 1, {
       align: "end",
       ...(tailHeight ? { offset: tailHeight } : {}),
@@ -2195,7 +2195,7 @@ function Timeline({
         const tailHeight =
           endIndex === rows.length - 1
             ? (activityTail.current?.getBoundingClientRect().height ?? 0) +
-              trailingRest(trailingBox.current, trailingExtra.current)
+              trailingRest(trailingBox.current, cardExtra.current)
             : 0;
         handle.current.scrollToIndex(endIndex, {
           align: "end",
