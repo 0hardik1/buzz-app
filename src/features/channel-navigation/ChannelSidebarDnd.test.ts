@@ -12,10 +12,18 @@ const cards = [
   { id: "d", top: 704, height: 40 },
 ];
 
-function over(dragging: string, y: number) {
-  const droppableContainers = cards.map(({ id }, groupIndex) => ({
+function over(dragging: string, y: number, headerHeight?: number) {
+  const droppableContainers = cards.map(({ id, top }, groupIndex) => ({
     id,
-    data: { current: { group: true, groupIndex } },
+    data: {
+      current: {
+        group: true,
+        groupIndex,
+        ...(headerHeight
+          ? { header: () => ({ top, height: headerHeight }) }
+          : {}),
+      },
+    },
   }));
   const droppableRects = new Map(
     cards.map(({ id, top, height }) => [
@@ -55,4 +63,16 @@ it("drops on the side of a tall card nearest the pointer", () => {
 it("still targets the neighbour across the gap between cards", () => {
   expect(over("a", 652)).toBe("b");
   expect(over("d", 652)).toBe("c");
+});
+
+it("decides the side by the target's header, which a person drags by", () => {
+  // b's header is 48–148 at large text: its lower part means after b, even
+  // though that is above the middle of the tall card.
+  expect(over("a", 130, 100)).toBe("b");
+  expect(over("d", 130, 100)).toBe("c");
+  // Its upper part means before b.
+  expect(over("a", 60, 100)).toBe("a");
+  expect(over("d", 60, 100)).toBe("b");
+  // Anywhere in the card below its header lands after it.
+  expect(over("d", 400, 100)).toBe("c");
 });

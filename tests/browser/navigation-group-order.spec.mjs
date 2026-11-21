@@ -27,7 +27,10 @@ async function pull(page, from, to) {
   const end = await header(page, to).boundingBox();
   await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
   await page.mouse.down();
-  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, {
+  // The target header's middle is the tie between its two sides: aim at the
+  // half facing the way the card moves.
+  const toward = end.y < start.y ? 0.25 : 0.75;
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height * toward, {
     steps: 8,
   });
 }
@@ -81,8 +84,8 @@ test("dragging a group header moves the whole group, keeps its state, and persis
   const y = own.y + own.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
-  // The pointer's half of the neighbour decides the side, so aim at the upper
-  // half of the group above: its insertion edge is "before" that group.
+  // The pointer's half of the neighbour's header decides the side, so aim at
+  // the upper half of the header above: its insertion edge is "before" it.
   const above = await header(page, "missing").boundingBox();
   await page.mouse.move(x, above.y + above.height / 4, { steps: 4 });
   await expect(laptop).toHaveAttribute("data-section-dragging");

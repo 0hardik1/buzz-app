@@ -54,11 +54,14 @@ export const sidebarCollisions: CollisionDetection = (args) => {
   const pointer = args.pointerCoordinates;
   const hit = pointerWithin({ ...args, droppableContainers: groups })[0];
   if (hit) {
-    // The pointer's half of the card decides the side, so a tall card's
-    // insertion line is the edge nearest the pointer. A drop reports the
-    // neighbour whose index puts the moved card on that side.
+    // Cards move by their headers, so the target's header decides the side:
+    // above its middle lands before the card, anywhere below lands after it.
+    // A drop reports the neighbour whose index puts the moved card on that
+    // side. Without a measured header, the card's own middle stands in.
     const index = groups.findIndex(({ id }) => id === hit.id);
-    const rect = args.droppableRects.get(hit.id);
+    const header: { top: number; height: number } | undefined =
+      groups[index]?.data.current?.header?.();
+    const rect = header?.height ? header : args.droppableRects.get(hit.id);
     const from = args.active.data.current.groupIndex;
     const to = groups[index]?.data.current?.groupIndex;
     if (!pointer || !rect || from === undefined || to === undefined)
@@ -481,7 +484,13 @@ export function DroppableSidebarSection({
 }) {
   const { setNodeRef, isOver, active } = useDroppable({
     id: section.sectionKey,
-    data: { group: reorderable, groupIndex, groupDomain, accepts },
+    data: {
+      group: reorderable,
+      groupIndex,
+      groupDomain,
+      accepts,
+      header: () => headerOf(section.sectionKey)?.getBoundingClientRect(),
+    },
     disabled,
     // dnd-kit queues a re-measure of only the droppable that resized and clears
     // that queue after each render, losing ids queued in between: a section
