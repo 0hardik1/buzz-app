@@ -45,9 +45,10 @@ sentences, not file names:
   typed, that occurrence is scored, choosing the best one (a word start beats
   the middle of a word).
 - **Letters must stay close together.** Otherwise one word's letters have to
-  fit within about three times its length. `dplyrlbk` still finds "deploy
-  rollback", but `any` can't be stitched together from "**a**nd", a later
-  "**n**", and "**y**ou".
+  fit within about three times its length and cross at most one space.
+  `dplyrlbk` still finds "deploy rollback", but `any` can't be stitched
+  together from "**a**nd", a later "**n**", and "**y**ou". Type two words
+  (`dpl rlbk`) to match letters further apart.
 
 ## What it searches
 

@@ -12,8 +12,14 @@ const doc = (text: string, patch: Partial<FinderDoc> = {}): FinderDoc => ({
   text,
   ...patch,
 });
-const texts = (corpus: ReturnType<typeof createCorpus>, query: string) =>
-  corpus.search(query).hits.map((hit) => hit.doc.text);
+const texts = (
+  corpus: ReturnType<typeof createCorpus>,
+  query: string,
+  add?: string,
+) => {
+  if (add) corpus.add([doc(add)]);
+  return corpus.search(query).hits.map((hit) => hit.doc.text);
+};
 
 test("ranks word starts and runs above letters inside words", () => {
   const corpus = createCorpus();
@@ -44,13 +50,19 @@ test("finds the words typed, not letters picked across a long message", () => {
       author: "Peter",
     }),
     doc("we should deploy the rollback today"),
+    doc("such as 13 replies in 5 minutes"),
+    doc("so does Jerry share the solo chat"),
   ]);
   expect(texts(corpus, "any shares")).toEqual([
     "\u201cI don't hold any shares myself, so back to work.\u201d",
   ]);
-  // Letters can still skip within a compact stretch.
-  expect(texts(corpus, "dplyrlbk")).toEqual([
-    "we should deploy the rollback today",
+  // Letters can still skip within a word and its neighbor, not a sentence.
+  expect(texts(corpus, "shares")).toEqual([
+    "\u201cI don't hold any shares myself, so back to work.\u201d",
+  ]);
+  expect(texts(corpus, "dplyrlbk")).toEqual([]);
+  expect(texts(corpus, "dplyrlbk", "we should deploy rollback today")).toEqual([
+    "we should deploy rollback today",
   ]);
 });
 

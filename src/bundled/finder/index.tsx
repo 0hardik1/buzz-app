@@ -99,7 +99,12 @@ export const apply: PluginModule["apply"] = (ctx) => {
               <p className="px-3 text-body-sm text-subtle" aria-live="polite">
                 Indexing your last 90 days… {count} messages so far.
               </p>
-            ) : undefined
+            ) : (
+              <p className="px-3 text-body-sm text-subtle">
+                {count} messages from the last 90 days. Channels you open add
+                theirs.
+              </p>
+            )
           }
           openMessage={(doc) => {
             const { viewer, scope } = relay.snapshot();

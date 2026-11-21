@@ -111,6 +111,19 @@ function scoreSpan(
  * letters picked from different words ("a" in "and", "y" in "you") are noise.
  * `dplyrlbk` still finds "deploy rollback". */
 const spread = (length: number) => Math.max(length * 3, length + 6);
+/** Spaces in `text[start..end)`: a term's letters may run across two
+ * neighboring words ("dplyrlbk" in "deploy rollback"), not a sentence. */
+function spaces(text: string, start: number, end: number) {
+  let count = 0;
+  for (
+    let at = text.indexOf(" ", start);
+    at >= 0 && at < end;
+    at = text.indexOf(" ", at + 1)
+  )
+    count++;
+  return count;
+}
+
 /** Start points tried per message. ponytail: fixed cap, an fzf v2-style
  * alignment if it misses real matches. */
 const STARTS = 64;
@@ -151,7 +164,7 @@ export function fuzzyMatch(
     // No later start can finish if this one ran out of text.
     if (at < 0) break;
     const end = at + 1;
-    if (end - first > limit) continue;
+    if (end - first > limit || spaces(text, first, end) > 1) continue;
     if (!score) return 0;
     const found = scoreSpan(text, pattern, first, end);
     if (best === undefined || found > best) {
