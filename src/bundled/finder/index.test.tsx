@@ -535,3 +535,35 @@ test("switching to another list never shows or runs the last list's rows", async
   expect(rows()).toEqual([]);
   expect(ran).not.toHaveBeenCalled();
 });
+
+test("⌘P leaves a list for the two scopes with the text kept, and This channel follows the conversation on screen", async () => {
+  const fruit = consumer(() => ({
+    id: "list",
+    title: "Fruit",
+    items: () => [item("Apple")],
+  }));
+  const { show, visit, leave } = await mount({
+    "example.fruit": fruit.module,
+  });
+  show();
+  visit("v1", "crew");
+  await act(async () =>
+    fruit.used.finder?.open({ source: "example.fruit/list", query: "ap" }),
+  );
+  fireEvent.keyDown(screen.getByRole("combobox"), {
+    key: "p",
+    code: "KeyP",
+    ctrlKey: true,
+  });
+  expect(await selectedTab()).toBe("This channel");
+  expect(screen.getByRole("combobox")).toHaveValue("ap");
+  act(() => leave());
+  expect(await selectedTab()).toBe("All of Buzz");
+  expect(screen.getByRole("tab", { name: "This channel" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  act(() => visit("v2", "lab"));
+  expect(await selectedTab()).toBe("This channel");
+  expect(screen.getByRole("combobox")).toHaveValue("ap");
+});
