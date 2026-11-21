@@ -1235,18 +1235,24 @@ function Timeline({
       const end = Math.max(0, length - view);
       const latest = Math.max(0, end - cardExtra.current);
       const pin = Math.max(0, offset - end);
-      // The aside moves as the transcript's rows move, counting the rows the
-      // pin holds still. A row that unmounted leaves the scroll distance, up
-      // to a viewport; a longer jump keeps the aside's place. An older page
-      // lands through unpainted states that move the rows and corrections
-      // that move them back, so the aside holds still while it settles.
-      if (anchor && performance.now() - olderLanded.current > 250) {
+      // The aside moves as the reader scrolls the transcript's rows, counting
+      // the rows the pin holds still. A row that unmounted leaves the scroll
+      // distance, up to a viewport; a longer jump keeps the aside's place.
+      // Layout that moves the rows, the timeline's own positioning and an
+      // older page landing, through unpainted states that move the rows and
+      // corrections that move them back, leave the aside where it is.
+      if (
+        scrolled &&
+        anchor &&
+        settled.current &&
+        performance.now() - olderLanded.current > 250
+      ) {
         const scrolledBy = anchor.offset - offset;
         top += anchor.row.isConnected
           ? anchor.row.getBoundingClientRect().top -
             anchor.top -
             (pin - anchor.pin)
-          : scrolled && Math.abs(scrolledBy) < view
+          : Math.abs(scrolledBy) < view
             ? scrolledBy
             : 0;
       }

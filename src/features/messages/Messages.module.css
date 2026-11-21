@@ -116,18 +116,17 @@
 .feed[data-aside] {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  /* The transcript, at least a viewport tall, then the aside's range past its
-     end, which ChannelTimeline sets. The range follows the transcript's height
-     as rows land, with no frame between them. */
-  grid-template-rows:
-    minmax(var(--timeline-aside-view, 0px), auto)
-    var(--timeline-aside-extra, 0px);
+  /* The transcript, then the aside's range past its end, which ChannelTimeline
+     sets. The range follows the transcript's height as rows land, with no
+     frame between them. */
+  grid-template-rows: max-content var(--timeline-aside-extra, 0px);
   align-items: start;
 }
 .feed[data-aside] > .transcript {
   display: block;
   grid-area: 1 / 1;
   min-width: 0;
+  min-height: var(--timeline-aside-view, 0px);
   /* ChannelTimeline pins the transcript's end to the scrollport's bottom while
      the aside's range past it scrolls. */
   position: sticky;
@@ -140,6 +139,8 @@
 .asideColumn {
   grid-area: 1 / 1 / 3 / 2;
   align-self: stretch;
+  /* It spans the rows the transcript and the range size, without sizing them. */
+  contain: size;
   z-index: 3;
   pointer-events: none;
 }
