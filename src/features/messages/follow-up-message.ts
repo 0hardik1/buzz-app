@@ -13,7 +13,7 @@ export function followUpMessage(
   message: FollowUpMessage,
   source?: Pick<ResolvedForward, "row" | "name">,
 ) {
-  const targets = followUpTargets(message);
+  const targets = followUpTargets(message, session.viewer);
   return {
     ready() {
       const choices = session.agentChoices.snapshot();

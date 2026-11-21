@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import type { LocalWork } from "./local-activity";
-import { conversationWorkStops, workStop } from "./work-stop";
+import { conversationWorkStops, requestTopLevel, workStop } from "./work-stop";
 
 const activity = {
   interrupt: vi.fn(async () => {}),
@@ -117,4 +117,61 @@ it("leaves the queue alone when only a hosted thread reply is running", () => {
   );
   expect(stops).toHaveLength(1);
   expect(stops[0]?.control.pauseQueue).toBeUndefined();
+});
+
+it("reads a request's scope from its own work", () => {
+  const snapshot = (
+    local: Partial<LocalWork>[],
+    requests: { messageId: string; threadRootId: string }[] = [],
+  ) =>
+    ({
+      status: "listening",
+      records: [],
+      typing: [],
+      local: local.map((row) => ({
+        scope: "s",
+        agent: "agent",
+        channelId: "chat",
+        messageId: "request",
+        threadRootId: "request",
+        startedAt: 1,
+        state: "working",
+        ...row,
+      })),
+      turns: [
+        {
+          agent: "agent",
+          channelId: "chat",
+          turnId: "t",
+          timestamp: 1,
+          state: "working",
+          requests,
+        },
+      ],
+    }) as unknown as Parameters<typeof requestTopLevel>[0];
+  expect(requestTopLevel(snapshot([{}]), "agent", "chat", "request")).toBe(
+    true,
+  );
+  expect(
+    requestTopLevel(snapshot([{ thread: true }]), "agent", "chat", "request"),
+  ).toBe(false);
+  expect(
+    requestTopLevel(
+      snapshot([], [{ messageId: "request", threadRootId: "request" }]),
+      "agent",
+      "chat",
+      "request",
+    ),
+  ).toBe(true);
+  expect(
+    requestTopLevel(
+      snapshot([], [{ messageId: "reply", threadRootId: "root" }]),
+      "agent",
+      "chat",
+      "reply",
+    ),
+  ).toBe(false);
+  expect(
+    requestTopLevel(snapshot([]), "agent", "chat", "request"),
+  ).toBeUndefined();
 });

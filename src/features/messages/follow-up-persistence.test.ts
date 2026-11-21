@@ -1,5 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup as cleanupUI, render, screen } from "@testing-library/react";
+import {
+  cleanup as cleanupUI,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { QueuedFollowUps } from "./QueuedFollowUps";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -2708,5 +2713,248 @@ describe("Stop pause across windows and restarts", () => {
     await storage.lockChat("chat", async () => {});
     expect(restarted.send).not.toHaveBeenCalled();
     expect(storage.has("successor")).toBe(true);
+  });
+});
+
+describe("Stop pause review round", () => {
+  const pausedKey = `buzz-view.v1:${JSON.stringify([scope, "follow-up-paused:chat"])}`;
+
+  it("keeps another window's next row paused after a row it was already sending at Stop", async () => {
+    const sending = fixture(scope, [], true, true);
+    await sending.owner.ready;
+    sending.enqueue({ ...dmMessage, text: "First" });
+    sending.enqueue({ ...dmMessage, text: "Second" });
+    const stopping = fixture(scope, [], true, true);
+    await stopping.owner.ready;
+    const gate = deferredVoid();
+    const save = sending.save.getMockImplementation();
+    sending.save.mockImplementation(async (...args) => {
+      await gate.promise;
+      return save?.(...args);
+    });
+    sending.finish();
+    await vi.waitFor(() =>
+      expect(sending.queue.snapshot()[0]?.sending).toBe(true),
+    );
+    // Accepted race (design §6): that row may still go out. The rows after
+    // it must see the saved pause.
+    const stopped = stopping.queue.pause("chat");
+    gate.resolve();
+    await stopped;
+    expect(followUpStorage(scope).paused("chat")).toBe(true);
+    const id = sending.send.mock.results[0]?.value as string;
+    sending.work(id, "working");
+    sending.work(id, "done");
+    await followUpStorage(scope).lockChat("chat", async () => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sending.send).toHaveBeenCalledOnce();
+    expect(
+      followUpStorage(scope)
+        .load()
+        .map((row) => row.text),
+    ).toEqual(["Second"]);
+  });
+
+  it("sees another window's row mid-handoff at Stop", async () => {
+    const sending = fixture(scope, [], true, true);
+    await sending.owner.ready;
+    sending.enqueue({ ...dmMessage, text: "First" });
+    sending.enqueue({ ...dmMessage, text: "Second" });
+    const stopping = fixture(scope, [], true, true);
+    await stopping.owner.ready;
+    const gate = deferredVoid();
+    const save = sending.save.getMockImplementation();
+    sending.save.mockImplementation(async (...args) => {
+      await gate.promise;
+      return save?.(...args);
+    });
+    sending.finish();
+    await vi.waitFor(() =>
+      expect(sending.queue.snapshot()[0]?.sending).toBe(true),
+    );
+    const stopped = stopping.queue.pause("chat");
+    expect(stopping.queue.pauses().get("chat")).toEqual({
+      sentBeforeStop: true,
+    });
+    gate.resolve();
+    await stopped;
+    expect(stopping.queue.pauses().get("chat")).toEqual({
+      sentBeforeStop: true,
+    });
+  });
+
+  it("says a row went out when another window passed its checks after Stop was pressed", async () => {
+    const sending = fixture(scope, [], true, true);
+    await sending.owner.ready;
+    sending.enqueue({ ...dmMessage, text: "First" });
+    sending.enqueue({ ...dmMessage, text: "Second" });
+    const stopping = fixture(scope, [], true, true);
+    await stopping.owner.ready;
+    const gate = deferredVoid();
+    const refresh = sending.refresh.getMockImplementation();
+    sending.refresh.mockImplementationOnce(async () => {
+      await gate.promise;
+      return refresh?.() as ReturnType<NonNullable<typeof refresh>>;
+    });
+    sending.finish();
+    // The other window holds the chat lock, still validating its first row.
+    await vi.waitFor(() => expect(sending.refresh).toHaveBeenCalled());
+    const stopped = stopping.queue.pause("chat");
+    expect(stopping.queue.pauses().get("chat")).toEqual({});
+    gate.resolve();
+    await stopped;
+    expect(sending.send).toHaveBeenCalledOnce();
+    expect(stopping.queue.pauses().get("chat")).toEqual({
+      sentBeforeStop: true,
+    });
+  });
+
+  it("puts a Send now still short of its handoff back in the paused queue at Stop", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    h.enqueue({ ...dmMessage, text: "First" });
+    const second = h.enqueue({ ...dmMessage, text: "Correction" });
+    const gate = deferredVoid();
+    const refresh = h.refresh.getMockImplementation();
+    h.refresh.mockImplementationOnce(async () => {
+      await gate.promise;
+      return refresh?.() as ReturnType<NonNullable<typeof refresh>>;
+    });
+    h.queue.sendNow(second);
+    await vi.waitFor(() => expect(h.refresh).toHaveBeenCalled());
+    void h.queue.pause("chat");
+    expect(h.queue.pauses().get("chat")).toEqual({});
+    gate.resolve();
+    await followUpStorage(scope).lockChat("chat", async () => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.queue.snapshot().map((row) => row.text)).toEqual([
+      "First",
+      "Correction",
+    ]);
+    expect(h.queue.pauses().get("chat")).toEqual({});
+    // A Send now after Stop still sends that one row.
+    h.queue.sendNow(second);
+    await vi.waitFor(() => expect(h.send).toHaveBeenCalledOnce());
+    expect(h.send.mock.calls[0]?.[1]).toBe("Correction");
+    expect(h.queue.pauses().has("chat")).toBe(true);
+  });
+
+  it("waits on the DM's agent, never the owner, when the owner mentions themselves", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    h.enqueue({ ...dmMessage, recipients: [viewer], text: "Note to self" });
+    h.enqueue({ ...dmMessage, text: "Next" });
+    expect(h.queue.snapshot()[0]?.recipients).toEqual([agent]);
+    const restored = fixture(scope, [], false, true);
+    expect(restored.queue.snapshot()[0]?.recipients).toEqual([agent]);
+    h.finish();
+    await vi.waitFor(() => expect(h.send).toHaveBeenCalledOnce());
+    const id = h.send.mock.results[0]?.value as string;
+    h.work(id, "working");
+    h.work(id, "done");
+    await vi.waitFor(() => expect(h.send).toHaveBeenCalledTimes(2));
+    expect(h.send.mock.calls[1]?.[1]).toBe("Next");
+  });
+
+  it("resumes in a window with no composer mounted when another window resumes", async () => {
+    // The resuming window never heard of the row, so only this one can send it.
+    const other = fixture(scope, [], true, true);
+    await other.owner.ready;
+    const kept = fixture(scope, [], true, true);
+    await kept.owner.ready;
+    kept.enqueue(dmMessage);
+    const unsubscribe = kept.queue.subscribe(() => {});
+    await kept.queue.pause("chat");
+    // Every composer unmounts.
+    unsubscribe();
+    await other.queue.resume("chat");
+    expect(followUpStorage(scope).paused("chat")).toBe(false);
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: pausedKey, newValue: null }),
+    );
+    expect(kept.queue.pauses().has("chat")).toBe(false);
+    kept.finish();
+    await vi.waitFor(() => expect(kept.send).toHaveBeenCalledOnce());
+  });
+
+  it("keeps a Resume it couldn't save in this window and says so", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    h.enqueue(dmMessage);
+    await h.queue.pause("chat");
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    render(
+      createElement(QueuedFollowUps, {
+        session: h.session,
+        channelId: "chat",
+        disabled: false,
+        focusComposer() {},
+      }),
+    );
+    const request = navigator.locks.request.bind(navigator.locks);
+    const failing = vi
+      .spyOn(navigator.locks, "request")
+      .mockImplementation(((name: string, ...rest: unknown[]) =>
+        name.startsWith("buzz-follow-up-chat:")
+          ? Promise.reject(new Error("Locks unavailable"))
+          : (request as (...args: unknown[]) => Promise<unknown>)(
+              name,
+              ...rest,
+            )) as typeof navigator.locks.request);
+    fireEvent.click(screen.getByRole("button", { name: "Resume queue" }));
+    await vi.waitFor(() =>
+      expect(
+        screen.getByText(
+          "Queue resumed in this window only. Couldn’t save that, so other windows or a restart may keep it paused.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(followUpStorage(scope).paused("chat")).toBe(true);
+    failing.mockRestore();
+    h.finish();
+    await vi.waitFor(() => expect(h.send).toHaveBeenCalledOnce());
+    expect(h.queue.pauses().has("chat")).toBe(false);
+    expect(screen.queryByText(/paused after Stop/)).toBeNull();
+  });
+
+  it("honours another window's later Stop after a Resume this window couldn't save", async () => {
+    const h = fixture(scope, [], false, true);
+    await h.owner.ready;
+    h.enqueue(dmMessage);
+    await h.queue.pause("chat");
+    const request = navigator.locks.request.bind(navigator.locks);
+    const failing = vi
+      .spyOn(navigator.locks, "request")
+      .mockImplementation(((name: string, ...rest: unknown[]) =>
+        name.startsWith("buzz-follow-up-chat:")
+          ? Promise.reject(new Error("Locks unavailable"))
+          : (request as (...args: unknown[]) => Promise<unknown>)(
+              name,
+              ...rest,
+            )) as typeof navigator.locks.request);
+    await expect(h.queue.resume("chat")).rejects.toThrow("Locks unavailable");
+    failing.mockRestore();
+    expect(h.queue.pauses().has("chat")).toBe(false);
+    // Another window presses Stop: it saves a new pause value, and its
+    // storage event reaches this window.
+    localStorage.setItem(pausedKey, JSON.stringify(crypto.randomUUID()));
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: pausedKey,
+        newValue: JSON.stringify(crypto.randomUUID()),
+      }),
+    );
+    expect(h.queue.pauses().has("chat")).toBe(true);
+    h.finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.send).not.toHaveBeenCalled();
   });
 });

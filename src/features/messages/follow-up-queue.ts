@@ -78,6 +78,10 @@ function createQueue(session: RelaySession) {
   let pauseView: ReadonlyMap<string, FollowUpPause> = new Map();
   // Chats this window resumed whose cleared flag is still being saved.
   const unpausing = new Map<string, number>();
+  // Chats this window resumed whose cleared flag could not be saved. The
+  // stale saved flag doesn't re-pause them here; this window's Stop, another
+  // window's new pause, or the flag clearing ends this.
+  const resumedHere = new Set<string>();
   const clearing = new Set<string>();
   const pausesChanged = () => {
     pauseView = new Map(
@@ -93,7 +97,13 @@ function createQueue(session: RelaySession) {
     for (const channelId of new Set(entries.map((entry) => entry.channelId))) {
       const saved = storage.paused(channelId);
       const current = pauses.get(channelId);
-      if (saved && !current && !unpausing.has(channelId)) {
+      if (!saved) resumedHere.delete(channelId);
+      if (
+        saved &&
+        !current &&
+        !unpausing.has(channelId) &&
+        !resumedHere.has(channelId)
+      ) {
         pauses.set(channelId, { saved: true });
         changed = true;
       } else if (!saved && current?.saved) {
@@ -135,7 +145,7 @@ function createQueue(session: RelaySession) {
         }
         return {
           ...saved,
-          recipients: followUpTargets(saved),
+          recipients: followUpTargets(saved, session.viewer),
           message: saved,
           restored: true,
           recovered: true,
@@ -184,6 +194,16 @@ function createQueue(session: RelaySession) {
     );
   const listeners = new Set<() => void>();
   let stop: (() => void) | undefined;
+  // Other windows' writes reach this queue while it shows rows or still has
+  // work to watch, whether or not a composer is mounted.
+  let observingStorage = false;
+  function observeStorage() {
+    const wanted = !!storage && (listeners.size > 0 || !!stop);
+    if (wanted === observingStorage) return;
+    observingStorage = wanted;
+    if (wanted) window.addEventListener("storage", onStorage);
+    else window.removeEventListener("storage", onStorage);
+  }
   const publishing = new Set<string>();
   const validating = new Set<string>();
   const requested = new Map<string, (() => void) | undefined>();
@@ -404,6 +424,7 @@ function createQueue(session: RelaySession) {
       offRemoval?.();
       deactivate();
     };
+    observeStorage();
     activating = false;
   }
   function waitForMessage(
@@ -726,7 +747,7 @@ function createQueue(session: RelaySession) {
   function isPaused(channelId: string) {
     if (!entries.some((entry) => entry.channelId === channelId)) return false;
     if (pauses.has(channelId)) return true;
-    if (unpausing.has(channelId)) return false;
+    if (unpausing.has(channelId) || resumedHere.has(channelId)) return false;
     try {
       if (!storage?.paused(channelId)) return false;
     } catch {
@@ -737,8 +758,14 @@ function createQueue(session: RelaySession) {
     emit();
     return true;
   }
-  /** Save the chat's current pause intent; the latest intent always wins. */
-  function savePause(channelId: string) {
+  /**
+   * Save the chat's current pause intent; the latest intent always wins.
+   * `handoffBefore` is the chat's handoff marker when Stop was pressed. The
+   * save waits for the chat lock, so a release another window held it for
+   * has finished by then; a new marker it left means that row went out after
+   * Stop, and Stop says so.
+   */
+  function savePause(channelId: string, handoffBefore?: string | null) {
     if (!storage) return Promise.resolve();
     const resuming = !pauses.has(channelId);
     if (resuming) unpausing.set(channelId, (unpausing.get(channelId) ?? 0) + 1);
@@ -746,15 +773,29 @@ function createQueue(session: RelaySession) {
       .lockChat(channelId, async () => {
         const paused = pauses.has(channelId);
         storage.pause(channelId, paused);
+        if (!paused) resumedHere.delete(channelId);
+        const slipped =
+          paused &&
+          handoffBefore !== undefined &&
+          (await sentElsewhereSince(channelId, handoffBefore));
         const current = pauses.get(channelId);
-        if (current && !current.saved) {
+        if (
+          current &&
+          (!current.saved || (slipped && !current.sentBeforeStop))
+        ) {
           const { saveError: _, ...rest } = current;
-          pauses.set(channelId, { ...rest, saved: true });
+          pauses.set(channelId, {
+            ...rest,
+            ...(slipped ? { sentBeforeStop: true as const } : {}),
+            saved: true,
+          });
           pausesChanged();
           emit();
         }
       })
       .catch((error) => {
+        // A Resume this window couldn't save still holds here.
+        if (resuming && !pauses.has(channelId)) resumedHere.add(channelId);
         const current = pauses.get(channelId);
         if (current) {
           pauses.set(channelId, {
@@ -774,6 +815,42 @@ function createQueue(session: RelaySession) {
         if (count) unpausing.set(channelId, count);
         else unpausing.delete(channelId);
       });
+  }
+  /** The chat's handoff marker now; undefined when it can't be read. */
+  function handoffAt(channelId: string): string | null | undefined {
+    if (!storage) return undefined;
+    try {
+      return storage.handoff(channelId)?.id ?? null;
+    } catch {
+      return undefined;
+    }
+  }
+  /** Whether another window has a saved row of this chat mid-handoff. */
+  function sendingElsewhere(channelId: string) {
+    if (!storage) return false;
+    try {
+      return storage
+        .load()
+        .some(
+          (row) =>
+            row.channelId === channelId &&
+            row.sending === true &&
+            !publishing.has(row.id),
+        );
+    } catch {
+      return false;
+    }
+  }
+  /** Under the chat lock: another window handed off a new row since `before`. */
+  async function sentElsewhereSince(channelId: string, before: string | null) {
+    if (!storage) return false;
+    try {
+      const current = storage.handoff(channelId);
+      if (!current || current.id === before) return false;
+      return current.owner !== (await storage.owner());
+    } catch {
+      return false;
+    }
   }
   /** Saved rows include ones other windows queued before this one hears of them. */
   function savedRows(channelId: string) {
@@ -913,6 +990,7 @@ function createQueue(session: RelaySession) {
       const dispose = stop;
       stop = undefined;
       dispose?.();
+      observeStorage();
     }
   }
   async function remove(id: string, locked = false) {
@@ -1004,7 +1082,14 @@ function createQueue(session: RelaySession) {
         .finally(() => refreshingSending.delete(entry.id));
     }
   }
-  const onStorage = () => {
+  const onStorage = (event?: Event) => {
+    // Storage events come only from other windows: a pause one of them wrote
+    // is newer than a Resume this window couldn't save.
+    const paused =
+      storage && event instanceof StorageEvent
+        ? storage.pausedIn(event)
+        : undefined;
+    if (paused) resumedHere.delete(paused);
     restore();
     if (entries.length) watch();
     emit();
@@ -1033,22 +1118,22 @@ function createQueue(session: RelaySession) {
     snapshot: () => entries,
     storageError: () => storageError,
     subscribe(listener: () => void) {
-      if (storage && !listeners.size) {
-        onStorage();
-        window.addEventListener("storage", onStorage);
-      }
+      if (storage && !listeners.size) onStorage();
       listeners.add(listener);
+      observeStorage();
       return () => {
         listeners.delete(listener);
-        if (storage && !listeners.size)
-          window.removeEventListener("storage", onStorage);
+        observeStorage();
       };
     },
     /** `validated` means the caller checked recipients just now; only a later release revalidates. */
     submit(submitted: Omit<Entry, "id">, validated = false) {
       // A saved row waits on its mentions plus, in an agent DM, that agent.
       const entry = submitted.message
-        ? { ...submitted, recipients: followUpTargets(submitted.message) }
+        ? {
+            ...submitted,
+            recipients: followUpTargets(submitted.message, session.viewer),
+          }
         : submitted;
       // Upload completion can arrive after the removal notification, even before
       // this queue exists. Reject before allocating a slot so upload recovery runs.
@@ -1305,15 +1390,25 @@ function createQueue(session: RelaySession) {
           entry.sending &&
           publishing.has(entry.id),
       );
+      // Stop is the later intent: a Send now still short of its Outbox
+      // handoff goes back to being a paused row. A later Send now still works.
+      for (const entry of entries)
+        if (
+          entry.channelId === channelId &&
+          requested.has(entry.id) &&
+          !(entry.sending && publishing.has(entry.id))
+        )
+          requested.delete(entry.id);
+      resumedHere.delete(channelId);
       const current = pauses.get(channelId);
       pauses.set(channelId, {
-        ...(current?.sentBeforeStop || handedOff
+        ...(current?.sentBeforeStop || handedOff || sendingElsewhere(channelId)
           ? { sentBeforeStop: true as const }
           : {}),
       });
       pausesChanged();
       emit();
-      return savePause(channelId);
+      return savePause(channelId, handoffAt(channelId));
     },
     /** Resume queue: release this chat's held rows in order again. */
     resume(channelId: string): Promise<void> {

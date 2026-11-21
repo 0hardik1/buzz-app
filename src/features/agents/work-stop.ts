@@ -29,6 +29,32 @@ export const queuePause =
     session ? followUpQueue(session).pause(channelId) : Promise.resolve();
 type Activity = RelaySession["agentActivity"];
 
+/**
+ * Whether a request is in the conversation rather than a thread, from the
+ * request's own work: local work's thread flag, or the root a hosted turn
+ * recorded for it. Undefined when no work names the request.
+ */
+export function requestTopLevel(
+  snapshot: ReturnType<Activity["snapshot"]>,
+  agent: string,
+  channelId: string,
+  requestId: string,
+): boolean | undefined {
+  const local = (snapshot.local ?? []).find(
+    (work) =>
+      work.agent === agent &&
+      work.channelId === channelId &&
+      work.messageId === requestId,
+  );
+  if (local) return !local.thread;
+  for (const turn of snapshot.turns) {
+    if (turn.agent !== agent || turn.channelId !== channelId) continue;
+    const request = turn.requests?.find((row) => row.messageId === requestId);
+    if (request) return request.threadRootId === requestId;
+  }
+  return undefined;
+}
+
 /** Capability and exact scope are shared by request and conversation popovers. */
 export function workStop(
   work: Pick<

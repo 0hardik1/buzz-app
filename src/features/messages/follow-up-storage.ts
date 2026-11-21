@@ -42,13 +42,20 @@ export type FollowUpHandoff = {
   owner?: string;
 };
 const prefix = "follow-up:";
-/** The agents a queued row waits on: its mentions, plus a DM's agent. */
+/** The agents a queued row waits on: its mentions, plus a DM's agent. The
+ * viewer never answers a turn, so a self-mention is never a target. */
 export const followUpTargets = (
   message: Pick<FollowUpMessage, "recipients" | "dmAgent">,
-): readonly string[] =>
-  message.dmAgent && !message.recipients.includes(message.dmAgent)
-    ? [...message.recipients, message.dmAgent]
-    : message.recipients;
+  viewer?: string,
+): readonly string[] => {
+  const targets =
+    message.dmAgent && !message.recipients.includes(message.dmAgent)
+      ? [...message.recipients, message.dmAgent]
+      : message.recipients;
+  return viewer && targets.includes(viewer)
+    ? targets.filter((key) => key !== viewer)
+    : targets;
+};
 export const followUpRecovery = (id: string) => ({
   key: prefix + id,
   value: id,
@@ -175,9 +182,31 @@ export function followUpStorage(scope: string) {
     },
     /** The owner stopped this chat's work; its queue releases nothing on its own. */
     paused(channelId: string) {
-      return (
-        readView<unknown>(scope, `follow-up-paused:${channelId}`, null) === true
+      const value = readView<unknown>(
+        scope,
+        `follow-up-paused:${channelId}`,
+        null,
       );
+      return value === true || typeof value === "string";
+    },
+    /** The chat another window just paused, read from its storage event. */
+    pausedIn(event: StorageEvent): string | undefined {
+      const prefix = "buzz-view.v1:";
+      if (!event.key?.startsWith(prefix) || event.newValue === null) return;
+      let pair: unknown;
+      try {
+        pair = JSON.parse(event.key.slice(prefix.length));
+      } catch {
+        return;
+      }
+      if (
+        Array.isArray(pair) &&
+        pair[0] === scope &&
+        typeof pair[1] === "string" &&
+        pair[1].startsWith("follow-up-paused:")
+      )
+        return pair[1].slice("follow-up-paused:".length);
+      return;
     },
     pause(channelId: string, paused: boolean) {
       const name = `follow-up-paused:${channelId}`;
@@ -189,7 +218,8 @@ export function followUpStorage(scope: string) {
         }
         return;
       }
-      if (!writeView(scope, name, true))
+      // Each Stop writes a new value, so other windows always hear of it.
+      if (!writeView(scope, name, crypto.randomUUID()))
         throw new Error("Could not save the queue pause.");
     },
     claim(channelId: string, handoff: FollowUpHandoff) {

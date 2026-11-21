@@ -1129,10 +1129,19 @@ checks the saved rows too, so a row another window queued is paused even before 
 window hears of it. Release checks the in-memory and saved pause in the same
 synchronous step as its final publication guards, so a row already past that step may
 still publish; the paused header says one message was already being sent and may still
-go out, and later rows stay paused. **Send now** on a paused row sends only that row;
-the chat stays paused until **Resume queue**. Resume of interrupted turns does not clear
-a Stop pause. A Stop inside a thread leaves the chat's queue alone; a hosted turn is
-top-level only when its own request is the thread root. A chat drops its pause only
+go out, and later rows stay paused. That includes a row another window was handing off,
+seen from its saved sending mark at Stop or from a new hand-off found when the pause
+save gets the chat lock. A **Send now** that hasn't reached its Outbox hand-off when
+Stop lands goes back to a paused row: Stop is the later intent. **Send now** on a
+paused row sends only that row; the chat stays paused until **Resume queue**. A Resume
+whose save fails holds in that window, which says so, until its own Stop or another
+window's new pause. Each window hears other windows' pause changes while it has queued
+rows or work to watch, with or without a mounted composer. Resume of interrupted turns
+does not clear a Stop pause. A Stop inside a thread leaves the chat's queue alone; each
+Stop takes its scope from the stopped request's own work, never from where its
+activity update was posted. A hosted turn is top-level only when its own request is
+the thread root. The owner is never a completion target, even when they mention
+themselves. A chat drops its pause only
 when no saved rows are left in any window, checked again under the chat lock, so the
 next message sends as usual. An earlier hand-off that this window doesn't own and that
 has no completion evidence holds every row behind it, each until its own **Send now**.
