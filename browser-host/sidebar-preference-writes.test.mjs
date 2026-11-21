@@ -13,6 +13,7 @@ import { relayBrokerPlugin } from "./relay-broker.mjs";
 import { prepareSidebarStar } from "./sidebar-toggle.mjs";
 import { connectBrokerTransport } from "../src/features/relay/transport.ts";
 import { createRelaySession } from "../src/features/relay/session.ts";
+import { WORKSPACE_PREFERENCE_COORDINATES } from "../src/features/relay/sidebar-preferences.ts";
 import { fixtureRelayUrl, fixtureAliases } from "../tests/relay-config.ts";
 
 const emptyWorkspace = { sections: [], assignments: {}, sectionOrder: [] };
@@ -198,7 +199,14 @@ it.each([false, true])(
       ]);
       expect(preferences.sectionCreationWritable).toBe(true);
       const batches = h.calls.filter(
-        ({ body }) => Array.isArray(body) && body.length === 5,
+        // The account preference batch: one filter per saved coordinate.
+        ({ body }) =>
+          Array.isArray(body) &&
+          body.length === WORKSPACE_PREFERENCE_COORDINATES.length &&
+          body.every(
+            (filter, i) =>
+              filter["#d"]?.[0] === WORKSPACE_PREFERENCE_COORDINATES[i],
+          ),
       );
       expect(batches).toHaveLength(fails ? 3 : 2);
       expect(
@@ -549,12 +557,12 @@ it("accepts split UTF-8 sort intents above the other routes' 2 KiB budget", asyn
     (_, i) => `${i}-${"é".repeat(100)}`,
   );
   const group = `section:${sectionIds[0]}`;
-  const intent = { group, mode: "alpha", sectionIds };
+  const intent = { group, mode: "recent", sectionIds };
   expect(Buffer.byteLength(JSON.stringify(intent))).toBeGreaterThan(2048);
   expect(Buffer.byteLength(JSON.stringify(intent))).toBeLessThan(32 * 1024);
   const response = await h.post(intent, undefined, "sidebar-sort");
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ groups: { [group]: "alpha" } });
+  expect(await response.json()).toEqual({ groups: { [group]: "recent" } });
   expect(h.calls.map(({ url }) => new URL(url).pathname)).toEqual([
     "/query",
     "/query",
@@ -569,7 +577,7 @@ it("serializes different sidebar endpoints through one relay queue", async () =>
   const star = h.post({ channelId: "alpha", starred: true });
   await held.started.promise;
   const sort = h.post(
-    { group: "channels", mode: "alpha", sectionIds: [] },
+    { group: "channels", mode: "recent", sectionIds: [] },
     undefined,
     "sidebar-sort",
   );

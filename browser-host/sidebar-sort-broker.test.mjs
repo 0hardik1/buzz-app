@@ -107,25 +107,25 @@ async function harness() {
     },
   };
 }
-it("real broker sorting preserves saved-section keys in transport confirmation and removes overrides reset to the default", async () => {
+it("real broker sorting preserves saved-section keys in transport confirmation and removes A–Z overrides", async () => {
   const h = await harness();
   const signal = new AbortController().signal;
   h.heads.set(
     "channel-sort",
     prepareSidebarSort(
       [],
-      { group: "forums", mode: "alpha", sectionIds: [] },
+      { group: "forums", mode: "recent", sectionIds: [] },
       h.key,
     ).event,
   );
   expect(
     await h.transport.writeSidebarSort(
       "section:work",
-      "alpha",
+      "recent",
       ["work"],
       signal,
     ),
-  ).toEqual({ forums: "alpha", "section:work": "alpha" });
+  ).toEqual({ forums: "recent", "section:work": "recent" });
   expect(h.calls.map((call) => new URL(call.url).pathname)).toEqual([
     "/query",
     "/query",
@@ -144,11 +144,11 @@ it("real broker sorting preserves saved-section keys in transport confirmation a
   expect(
     await h.transport.writeSidebarSort(
       "section:work",
-      "recent",
+      "alpha",
       ["work"],
       signal,
     ),
-  ).toEqual({ forums: "alpha" });
+  ).toEqual({ forums: "recent" });
   const queries = h.calls.filter(({ url }) => url.endsWith("/query"));
   expect(queries).toHaveLength(5);
   expect(queries.map(({ body }) => body[0]["#d"][0])).toEqual([
@@ -176,7 +176,7 @@ it.each(["query", "oversized", "publication", "receipt", "conflict"])(
     await expect(
       h.transport.writeSidebarSort(
         "channels",
-        "alpha",
+        "recent",
         [],
         new AbortController().signal,
       ),
