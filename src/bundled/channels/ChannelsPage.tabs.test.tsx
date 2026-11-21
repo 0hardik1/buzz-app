@@ -30,6 +30,7 @@ import type { RelayData } from "../../features/relay/service";
 import { matchesEvent } from "../../features/relay/projection";
 import type { RelayEvent } from "../../features/relay/events";
 import {
+  bounds,
   keypair,
   metadata,
   roster,
@@ -129,10 +130,24 @@ async function page(
       viewer: viewer.pubkey,
       relayAuthor: authority.pubkey,
       media: () => undefined,
-      query: async (filters) =>
-        events.filter((event) =>
+      query: async (filters) => {
+        const found = events.filter((event) =>
           filters.some((filter) => matchesEvent(event, filter)),
-        ),
+        );
+        // A channel's head page holds its whole history.
+        const head = filters.find(
+          (filter) => filter.top_level && filter.until === undefined,
+        )?.["#h"]?.[0];
+        return head
+          ? [
+              ...found,
+              bounds(authority, head, "head", {
+                has_more: false,
+                next_cursor: null,
+              }),
+            ]
+          : found;
+      },
       writer: {
         sign: async (template) => signed(viewer, template),
         publish: async () => {},
