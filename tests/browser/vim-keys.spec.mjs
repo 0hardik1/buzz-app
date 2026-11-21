@@ -319,7 +319,7 @@ test.describe("the cursor", () => {
     await expect(box(page, 38)).toBeFocused();
     await page.keyboard.press("i");
     await expect(composer(page, "Alpha")).toBeFocused();
-    expect(await painted(box(page, 38))).toBe(true);
+    await expect.poll(() => painted(box(page, 38))).toBe(true);
     await page.keyboard.press("Escape");
     await expect(box(page, 38)).toBeFocused();
 
@@ -327,12 +327,12 @@ test.describe("the cursor", () => {
     await page.keyboard.press("\\");
     const nav = page.getByRole("navigation", { name: "Subscribed channels" });
     await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
-    expect(await painted(box(page, 38))).toBe(true);
+    await expect.poll(() => painted(box(page, 38))).toBe(true);
     await page.keyboard.press("Escape");
     await expect(box(page, 38)).toBeFocused();
     await page.keyboard.press(" ");
     await expect(page.locator("[data-vim-which-key]")).toBeVisible();
-    expect(await painted(box(page, 38))).toBe(true);
+    await expect.poll(() => painted(box(page, 38))).toBe(true);
     await page.keyboard.press("Escape");
     await expect(page.locator("[data-vim-which-key]")).toHaveCount(0);
     await expect(box(page, 38)).toBeFocused();
@@ -361,7 +361,7 @@ test.describe("the cursor", () => {
     await box(page, 39).click({ position: { x: 4, y: 4 } });
     await expect(box(page, 39)).toBeFocused();
     await expect(cursor(page)).toHaveCount(1);
-    expect(await painted(box(page, 39))).toBe(true);
+    await expect.poll(() => painted(box(page, 39))).toBe(true);
     // Right-clicking selects too; dismissing that menu with the pointer
     // returns focus to the selection rather than leaving it nowhere.
     const outside = await history(page).boundingBox();

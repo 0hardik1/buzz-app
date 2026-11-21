@@ -18,9 +18,9 @@ const ROW = "[data-message-id]";
 const WORKSPACE = "[data-channel-workspace]";
 const TYPING =
   'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
-/** Surfaces that own focus while open. */
+/** Surfaces that own focus while open or closing, until they return it. */
 const OVERLAY =
-  '[aria-modal="true"]:not([data-closed]), [role="dialog"]:not([aria-modal="false"]), dialog[open], [role="menu"][data-open], [data-vim-which-key]';
+  '[aria-modal="true"]:not([data-closed]), [role="dialog"]:not([aria-modal="false"]), dialog[open], [role="menu"], [data-vim-which-key]';
 /** Clicks in the sidebar's conversations leave focus on the cursor. */
 const SIDEBAR = `nav[aria-label="${CONVERSATION_LIST_LABEL}"]`;
 
@@ -83,6 +83,8 @@ export function currentCursor() {
 }
 
 const overlayOpen = () => !!document.querySelector(OVERLAY);
+const isNowhere = () =>
+  !document.activeElement || document.activeElement === document.body;
 
 /** Focus a message without scrolling: only a move scrolls. */
 export function focusMessage(row: HTMLElement) {
@@ -142,7 +144,7 @@ export function trackCursor() {
     if (open !== shown) claim = shown = open;
     if (overlayOpen()) return;
     const active = document.activeElement;
-    const nowhere = !active || active === document.body;
+    const nowhere = isNowhere();
     const typing = !!active?.matches(TYPING);
     const inMessage = !!active?.closest(ROW);
     if (claim && claim === open) {
@@ -156,10 +158,16 @@ export function trackCursor() {
     }
     const afterClick = clicked;
     clicked = false;
-    if (nowhere || (afterClick && !typing && !inMessage)) {
+    if (afterClick && !typing && !inMessage && !nowhere) {
       const row = currentCursor();
       if (row) focusMessage(row);
     }
+    // Focus can pass through nothing on its way back; restore only if it stays.
+    if (nowhere)
+      requestAnimationFrame(() => {
+        const row = currentCursor();
+        if (isNowhere() && !overlayOpen() && row) focusMessage(row);
+      });
   };
   const schedule = () => {
     frame ||= requestAnimationFrame(sync);

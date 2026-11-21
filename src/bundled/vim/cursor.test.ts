@@ -105,9 +105,14 @@ test("focus that falls to nothing, or a click in the timeline, returns to it", a
   const { list, box, marked } = conversation();
   cleanups.push(trackCursor());
   await frame();
+  // The reader's own key ends the opened conversation's claim on focus.
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k" }));
   box("two").focus();
   await frame();
   (document.activeElement as HTMLElement).blur();
+  // It must stay nowhere for a frame: focus can pass through on its way back.
+  await frame();
+  expect(document.activeElement).toBe(document.body);
   await frame();
   expect(document.activeElement).toBe(box("two"));
 
