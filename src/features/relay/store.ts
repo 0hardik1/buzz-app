@@ -563,18 +563,20 @@ export function createChannelStore(
       // viewer's own confirmed sends can carry rows from before the loaded
       // history. Showing one leaves a gap that a later page fills mid-list,
       // where the timeline can neither anchor the reader nor tell it from new
-      // arrivals. That page shows them instead.
+      // arrivals. That page shows them instead. Until a page sets the floor,
+      // history's extent is unknown, not unbounded: a live row from before
+      // the open waits for the head page, so the view loads in one piece.
       const more = patch.hasMore ?? state.snapshot.hasMore;
-      const shown =
-        (floor: number | undefined) => (event: import("./events").EventData) =>
-          !channelRowKind(event.kind) ||
-          ((floor === undefined || event.created_at >= floor) &&
-            (state.ceiling === undefined || event.created_at < state.ceiling));
+      const floor = more ? (state.floor ?? Infinity) : undefined;
+      const shown = (event: import("./events").EventData) =>
+        !channelRowKind(event.kind) ||
+        ((floor === undefined || event.created_at >= floor) &&
+          (state.ceiling === undefined || event.created_at < state.ceiling));
       // Notices read beside a head wait for a page to land (see `adoptHead`).
       const notices = state.floor === undefined ? [] : state.notices.values();
       const combined = new Map(
         [...state.events, ...notices, ...state.traffic.values()]
-          .filter(shown(more ? state.floor : undefined))
+          .filter(shown)
           .map((event) => [event.id, event as import("./events").EventData]),
       );
       const ids = new Set(combined.keys());
@@ -590,12 +592,9 @@ export function createChannelStore(
           )
           .map(({ event }) => event.id),
       );
-      // Until a page sets the floor, history's extent is unknown, not
-      // unbounded: a confirmed send waits for the page that holds it.
+      // Likewise a confirmed send waits for the page that holds it.
       const own = outbox.filter(
-        ({ event }) =>
-          state.sent.has(event.id) ||
-          shown(more ? (state.floor ?? Infinity) : undefined)(event),
+        ({ event }) => state.sent.has(event.id) || shown(event),
       );
       for (const item of own)
         if (
