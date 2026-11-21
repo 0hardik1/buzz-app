@@ -530,6 +530,10 @@ export const fixturePlugins: readonly BundledPlugin[] = [
                   label="Transcript fixture"
                   target={target as PageTabTarget}
                   {...(card ? { trailing: card } : {})}
+                  // Zero width, so only the aside test changes the layout.
+                  aside={
+                    <aside aria-label="Reader aside" style={{ width: 0 }} />
+                  }
                   latestRequest={
                     request && request.opening === opening
                       ? request.signal

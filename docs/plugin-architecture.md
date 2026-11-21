@@ -3360,6 +3360,10 @@ end when all of it fits, or back to the rest position, without animation under
 reduced motion. The feed drops its end inset while content is
 present, so a `position: sticky; bottom: 0` element inside it sits on the
 history's bottom edge.
+With `workspaceSlots.aside`, `aside` renders after the main tab's reader,
+between the transcript and the side pane. The host gives it no width, frame or
+scrolling. Its offset parent is the row of the reader and the aside, so a page
+can watch that row's size to choose its own layout.
 
 `open({ channelId, messageId })` opens the conversation at that message. The
 shared `useMessageOpening` reader waits for verified history (cached rows
