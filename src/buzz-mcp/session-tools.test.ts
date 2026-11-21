@@ -258,9 +258,10 @@ it("lends an added tool the sender it was called as, only while the call runs", 
     { ...agentHandle(), protection: { check } } as unknown as AgentHandle,
     { ...options, protectionContext: async () => [] },
   );
-  const context: { channel?: string; root?: string } = {
+  const context: { channel?: string; root?: string; sourceRoot?: string } = {
     channel: "a",
     root: "r",
+    sourceRoot: "s",
   };
   let lent: AppInvocation | undefined;
   let proof: unknown = "unset";
@@ -278,6 +279,7 @@ it("lends an added tool the sender it was called as, only while the call runs", 
   await entered.promise;
   context.channel = "b";
   delete context.root;
+  context.sourceRoot = "t";
   approval.resolve();
   expect(await reply).toBe("done");
   // The fourth argument stays an operation's proof; an ordinary call has none.
@@ -289,6 +291,7 @@ it("lends an added tool the sender it was called as, only while the call runs", 
     owner: "owner",
     channel: "a",
     root: "r",
+    sourceRoot: "s",
   });
   expect(() => lent?.initiating()).toThrow("The tool call has ended");
   expect(() => lent?.live()).not.toThrow();

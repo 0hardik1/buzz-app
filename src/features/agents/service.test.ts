@@ -73,6 +73,8 @@ import type { Mode } from "./agent-start";
 import { channelTemplates } from "../channel-templates/local";
 import { eventDto, type ReadFilter, type RelayEvent } from "../relay/events";
 import { keypair, message, signed } from "../relay/testing";
+import { readSubthread } from "../relay/subthread";
+import { threadReference } from "../relay/thread-reference";
 import { createRelayReader } from "../relay/reader";
 import type { LiveBatch } from "../relay/incoming";
 import type { RelaySession } from "../relay/session";
@@ -6469,21 +6471,36 @@ describe("an agent in several communities", () => {
       read: vi.fn(),
       memories: async () => ({ entries: [], partial: false }),
     };
-    /** One turn of `key`'s that proposes a review, then ends. */
-    const turn = async (key: string, callId: string, community: string) => {
+    /** One turn of `key`'s that proposes a review, then ends. A turn in
+     * `routed` calls the registered tool as an agent's session does. */
+    const turn = async (
+      key: string,
+      callId: string,
+      community: string,
+      routed?: { channel: string; root: string; sourceRoot: string },
+    ) => {
       open = community;
       const handle = f.plugin.agents.handle(key);
       if (!handle) throw new Error(`no handle for ${key}`);
       const client = appClient(handle, options);
       let live = true;
       const context = { channel: "a" };
-      await tool?.call(
-        client,
-        context,
-        { callId },
-        undefined,
-        appInvocation(client, context, () => live),
-      );
+      if (routed)
+        await callSessionTool(
+          client,
+          routed,
+          "video_review",
+          { callId },
+          f.service.tools(),
+        );
+      else
+        await tool?.call(
+          client,
+          context,
+          { callId },
+          undefined,
+          appInvocation(client, context, () => live),
+        );
       await vi.waitFor(() =>
         expect(native?.args.once).toMatchObject({ callId }),
       );
@@ -6604,7 +6621,58 @@ describe("an agent in several communities", () => {
           publish: message("https://other.example.test"),
         },
       ]);
-      for (const { receipt } of [home, sib, awayTurn])
+      // A task subthread's result lands in both its source thread and its task.
+      const author = keypair();
+      const source = signed(author, {
+        kind: 9,
+        content: "Source",
+        tags: [["h", "a"]],
+      });
+      const task = signed(author, {
+        kind: 9,
+        content: "Task",
+        tags: [
+          ["h", "a"],
+          ["e", source.id, "", "root"],
+          ["e", source.id, "", "reply"],
+        ],
+      });
+      const routed = await turn(
+        bot,
+        "66666666-6666-4666-8666-666666666666",
+        "https://relay.example.test",
+        { channel: "a", root: task.id, sourceRoot: source.id },
+      );
+      expect(routed.destination).toEqual({
+        community: "https://relay.example.test",
+        viewer: viewerKey,
+        channel: "a",
+        root: task.id,
+        sourceRoot: source.id,
+      });
+      const { event: published } = routed.publish as {
+        event: { kind: number; content: string; tags: string[][] };
+      };
+      expect(published.tags.slice(0, 3)).toEqual([
+        ["h", "a"],
+        ["e", source.id, "", "root"],
+        ["e", task.id, "", "reply"],
+      ]);
+      const posted = signed(author, published);
+      expect(threadReference(posted)).toEqual({
+        rootId: source.id,
+        parentId: task.id,
+      });
+      const read = vi.fn(async () => []);
+      const branch = await readSubthread(
+        [task, posted],
+        { channel: "a", root: source.id, anchor: task.id },
+        [9],
+        read,
+      );
+      expect(branch.events.map(({ id }) => id)).toEqual([task.id, posted.id]);
+      expect(read).not.toHaveBeenCalled();
+      for (const { receipt } of [home, sib, awayTurn, routed])
         expect(receipt).toMatchObject({
           outcome: "unknown",
           delivery: { upload: "uploaded", status: "posted" },

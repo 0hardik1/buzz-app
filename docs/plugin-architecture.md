@@ -1148,7 +1148,10 @@ also gets a fifth `host` argument: `{ destination, reviewAndInvokeOnce }`. The
 fourth argument stays the [operation proof](#agent-operation-proofs), so it is
 `undefined` here; an operation's checked call gets a proof and no `host`. The
 review sends as the calling agent, only to that call's community, owner,
-channel and root (absent root stays absent), and starts only until the call
+channel and root (absent root stays absent). When the call was addressed in an
+invocation subthread, `root` stays its task anchor and the destination also
+carries `sourceRoot`, the physical thread holding it; both are captured with
+the call and frozen into the review. The review starts only until the call
 settles or rejects; a review already started stays approvable afterwards until
 the agent's handle, plugin, page, session or membership ends. Native fences the
 membership's incarnation, so a deleted and re-imported agent cannot approve an
@@ -2161,8 +2164,10 @@ plugin/tool accept API, approval boolean or execution bearer is returned.
 against compromised same-process renderer code.
 
 The body is at most 32 KiB. Destination contains exact `community`, `viewer`,
-`channel` and optional `root` strings, each 1–256 ASCII routing bytes. Absent root
-is not an empty or present root. The native projection includes the exact body,
+`channel` and optional `root` and `sourceRoot` strings, each 1–256 ASCII routing
+bytes. Absent root is not an empty or present root. `sourceRoot` names the
+physical thread when `root` is a task anchor inside it; it requires `root`, and
+the card approves only on a message signed in that thread. The native projection includes the exact body,
 operation, destination, digest, call identity and fixed deadline. Native-created
 synthetic material is used only in the private fake-recipient envelope; there is
 no input field, getter or credential setup. Destination binds this dispatch and
@@ -2319,11 +2324,13 @@ call through two more private steps, while that tool call's handle is live.
 Native rehashes the retained file and streams it once to the agent's own
 community as the agent captured at review start. The message is one
 attachment-only kind 9, `video.mp4` with the prepared hash, size and measured
-dimensions, in the original chat and thread. HostService formats it with the
+dimensions, in the original chat and thread. A task's media goes in its
+source thread, replying to the task: `e(sourceRoot, root)` then `e(root, reply)`. HostService formats it with the
 ordinary attachment helpers; native refuses anything else. Before the upload,
 and again before signing, native rereads the channel as that agent. The
 community-signed roster must list it above guest, the channel must not be
-archived, and any root must belong to that channel. The receipt adds
+archived, and every named root, task and source thread alike, must be that
+channel's own signed message. The receipt adds
 `delivery`: `upload` (`uploaded`, `failed` or `unknown`), `status` (`posted`,
 `failed` or `unknown`) and the signed `eventId`. Posted means the community
 accepted that exact event, not that the media plays. Nothing is retried.

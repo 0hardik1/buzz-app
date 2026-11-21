@@ -10,6 +10,7 @@ import type { PluginInfo } from "../../plugins/types";
 import {
   HostService,
   type Host,
+  type ReviewedInvocationDestination,
   type ReviewedInvocationReceipt,
 } from "./service";
 import { runtimePerformance } from "../developer/runtime-performance";
@@ -2743,6 +2744,100 @@ it.each([
   }
 });
 
+const taskDestination = {
+  ...reviewedRequest.destination,
+  root: "task",
+  sourceRoot: "source",
+};
+it.each([
+  ["without its source thread", { sourceRoot: undefined }],
+  ["in another source thread", { sourceRoot: "other" }],
+  ["in its task as the source thread", { sourceRoot: "task" }],
+])("refuses to send a task review %s", async (_name, change) => {
+  const { host, fiber } = await oncePlugin();
+  const { origin } = agentOrigin(taskDestination);
+  const review = (host as HostService).reviewAndInvokeOnce.bind(host);
+  try {
+    const { sourceRoot: _, ...rest } = taskDestination;
+    const destination =
+      change.sourceRoot === undefined ? rest : { ...rest, ...change };
+    await expect(
+      review({ ...reviewedRequest, destination }, { callId }, origin),
+    ).rejects.toThrow("can only send where it was asked");
+    expect(invoke).not.toHaveBeenCalled();
+  } finally {
+    await fiber.dispose();
+  }
+});
+
+it("binds a task review only to a reader in its source thread", async () => {
+  const { root, host, fiber } = await oncePlugin();
+  const { origin } = agentOrigin(taskDestination);
+  const request = { ...reviewedRequest, destination: taskDestination };
+  const terminal = reviewGate<ReviewedInvocationReceipt>();
+  const started = reviewGate<Native>();
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "plugin_host_call_context") return onceContext;
+    if (command !== "plugin_host_reviewed_invoke") return undefined;
+    const ipc = args as Record<string, { onmessage(value: unknown): void }>;
+    started.resolve({
+      args: args as Record<string, unknown>,
+      review: (projection) => ipc.onReview?.onmessage(projection),
+      progress: () => {},
+    });
+    return terminal.promise;
+  });
+  const result = (host as HostService)
+    .reviewAndInvokeOnce(request, { callId }, origin)
+    .catch((error: unknown) => error);
+  try {
+    const native = await started.promise;
+    native.review({
+      callId,
+      pluginId: "example.plugin",
+      revision: "abc",
+      request,
+      author: { pubkey: "agent-pubkey", relay: "wss://relay.test" },
+      digest,
+      expiresAt: Date.now() + 60_000,
+    });
+    const reviewed = (root.host as HostService).reviewed;
+    const reader = (thread: string | undefined) => ({
+      session: reviewed.snapshot()?.session,
+      channel: "origin-a",
+      root: "task",
+      thread,
+    });
+    const mount = {};
+    for (const thread of ["other", "task", undefined])
+      expect(reviewed.bind(callId, mount, reader(thread))).toBe(false);
+    expect(reviewed.bind(callId, mount, reader("source"))).toBe(true);
+  } finally {
+    terminal.resolve({
+      ...reviewedReceipt,
+      destination: taskDestination,
+      outcome: "unknown",
+    });
+    await result;
+    await fiber.dispose();
+  }
+});
+
+it("refuses a source thread without the task it holds before IPC", async () => {
+  const { host, fiber } = await oncePlugin();
+  const destination = { ...reviewedRequest.destination, sourceRoot: "source" };
+  const { origin } = agentOrigin(destination);
+  const review = (host as HostService).reviewAndInvokeOnce.bind(host);
+  try {
+    await expect(
+      review({ ...reviewedRequest, destination }, { callId }, origin),
+    ).rejects.toThrow("Invalid reviewed invocation");
+    expect(invoke).not.toHaveBeenCalled();
+  } finally {
+    await fiber.dispose();
+  }
+});
+
 it.each(["at its start", "after the native context wait"])(
   "starts no agent review once its tool call has ended %s",
   async (when) => {
@@ -2811,6 +2906,7 @@ it("keeps a started agent review approvable after its call ends, until the agent
       session: operation?.session,
       channel: "origin-a",
       root: undefined,
+      thread: undefined,
     };
     const mount = {};
     expect(reviewed.bind(callId, mount, reader)).toBe(true);
@@ -3229,6 +3325,10 @@ it.each([
   [
     "destination",
     { destination: { ...reviewedRequest.destination, channel: "x" } },
+  ],
+  [
+    "source thread",
+    { destination: { ...reviewedRequest.destination, sourceRoot: "x" } },
   ],
   ["sequence", { sequence: 1 }],
   ["missing", undefined],
@@ -3661,7 +3761,6 @@ const delivered = {
   community: "https://fixture.test",
   root: "a".repeat(64),
 };
-const agentMedia = { ...mediaRequest, destination: delivered };
 const preparedSha = "d".repeat(64);
 const uploadReceipt = {
   url: `https://fixture.test/media/${preparedSha}.mp4`,
@@ -3670,26 +3769,30 @@ const uploadReceipt = {
   sha256: preparedSha,
   dim: "1280x720",
 };
-const steps = (upload: object = uploadReceipt) =>
+const steps = (upload: object = uploadReceipt, destination = delivered) =>
   ({
     prepare: {
       ...prepared,
-      destination: delivered,
+      destination,
       prepared: { sha256: preparedSha, size: 5 },
     },
-    upload: { ...prepared, destination: delivered, phase: "uploaded", upload },
-    publish: { ...prepared, destination: delivered, phase: "publishing" },
+    upload: { ...prepared, destination, phase: "uploaded", upload },
+    publish: { ...prepared, destination, phase: "publishing" },
   }) as Record<string, unknown>;
 /** An agent's media call through creation, under `ack`'s native steps. */
 async function agentMediaCall(
   ack: (step: { phase: string }) => unknown = (step) => steps()[step.phase],
+  destination: ReviewedInvocationDestination = delivered,
 ) {
-  const { state, origin } = agentOrigin(delivered);
-  const call = await mediaCall(readAndSelect, ack, agentMedia, origin);
-  call.approve(agentMedia);
-  call.native.progress({ ...createResponse, destination: delivered });
+  const { state, origin } = agentOrigin(destination);
+  const media = { ...mediaRequest, destination };
+  const call = await mediaCall(readAndSelect, ack, media, origin);
+  call.approve(media);
+  call.native.progress({ ...createResponse, destination });
   return { ...call, state };
 }
+/** A task subthread's media: task `root` under the physical `sourceRoot`. */
+const routed = { ...delivered, sourceRoot: "f".repeat(64) };
 const phases = () =>
   selections().map(([, args]) => (args as { step: { phase: string } }).step);
 
@@ -3740,6 +3843,63 @@ it("uploads an agent's prepared media once and admits one attachment-only messag
   const result = (await call.result) as ReviewedInvocationReceipt;
   expect(result.delivery).toEqual(receipt.delivery);
   expect(Object.isFrozen(result.delivery)).toBe(true);
+});
+
+it("publishes a task's media in its source thread, replying to the task", async () => {
+  const call = await agentMediaCall(
+    (step) => steps(uploadReceipt, routed)[step.phase],
+    routed,
+  );
+  try {
+    await vi.waitFor(() => expect(selections()).toHaveLength(3));
+    const [, , publish] = phases() as { event?: { tags: string[][] } }[];
+    expect(publish?.event?.tags.slice(0, 3)).toEqual([
+      ["h", "origin-a"],
+      ["e", routed.sourceRoot, "", "root"],
+      ["e", routed.root, "", "reply"],
+    ]);
+    expect(retires()).toHaveLength(0);
+  } finally {
+    await call.finish({
+      callId,
+      destination: routed,
+      digest,
+      outcome: "unknown",
+    });
+  }
+});
+
+it.each([
+  ["without its source thread", { ...routed, sourceRoot: undefined }],
+  ["in another source thread", { ...routed, sourceRoot: "c".repeat(64) }],
+])("refuses a task's terminal receipt %s", async (_name, destination) => {
+  const { sourceRoot, ...rest } = destination;
+  const call = await agentMediaCall(() => undefined, routed);
+  await call.finish({
+    callId,
+    destination: sourceRoot === undefined ? rest : destination,
+    digest,
+    outcome: "unknown",
+  });
+  expect(String(await call.result)).toContain(
+    "Invalid reviewed invocation receipt",
+  );
+});
+
+it("retires a task's media on an acknowledgement without its source thread", async () => {
+  const call = await agentMediaCall(
+    (step) =>
+      step.phase === "upload"
+        ? steps()[step.phase]
+        : steps(uploadReceipt, routed)[step.phase],
+    routed,
+  );
+  try {
+    await vi.waitFor(() => expect(retires()).toHaveLength(1));
+    expect(phases().map(({ phase }) => phase)).toEqual(["prepare", "upload"]);
+  } finally {
+    await call.finish();
+  }
 });
 
 it.each([

@@ -26,6 +26,7 @@ fn request() -> Request {
             viewer: "fixture-viewer".into(),
             channel: "fixture-channel-a".into(),
             root: None,
+            source_root: None,
         },
     }
 }
@@ -1158,6 +1159,24 @@ fn destination_root_absence_is_distinct_and_null_or_empty_is_invalid() {
     assert!(with_root.validate().is_err());
     let mut value = serde_json::to_value(original).unwrap();
     value["destination"]["root"] = serde_json::Value::Null;
+    assert!(serde_json::from_value::<Request>(value).is_err());
+}
+
+#[test]
+fn destination_source_root_needs_its_task_and_null_or_empty_is_invalid() {
+    let mut task = request();
+    task.destination.root = Some("task".into());
+    let mut routed = task.clone();
+    routed.destination.source_root = Some("source".into());
+    assert!(routed.validate().is_ok());
+    assert_ne!(task.digest(None), routed.digest(None));
+    let mut orphan = routed.clone();
+    orphan.destination.root = None;
+    assert!(orphan.validate().is_err());
+    routed.destination.source_root = Some(String::new());
+    assert!(routed.validate().is_err());
+    let mut value = serde_json::to_value(task).unwrap();
+    value["destination"]["sourceRoot"] = serde_json::Value::Null;
     assert!(serde_json::from_value::<Request>(value).is_err());
 }
 

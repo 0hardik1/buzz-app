@@ -55,11 +55,15 @@ export function ReviewedInvocationReview({
   const destination = projection?.request.destination;
   const effect = projection?.request.effect;
   const expected = projection?.request.expectedMedia;
+  // From the row's signed tags: a root row is its own thread.
+  const thread = message.threadRootId ?? message.id;
   const sameReader =
     !!reader &&
     operation?.session === reader.session &&
     destination?.channel === reader.channel &&
     destination?.root === reader.root &&
+    (destination?.sourceRoot === undefined ||
+      destination.sourceRoot === thread) &&
     message.channelId === reader.channel;
   const identity = useMemo(
     () => ({
@@ -68,8 +72,16 @@ export function ReviewedInvocationReview({
       session: reader?.session,
       channel: reader?.channel,
       root: reader?.root,
+      thread,
     }),
-    [callId, message.content, reader?.session, reader?.channel, reader?.root],
+    [
+      callId,
+      message.content,
+      reader?.session,
+      reader?.channel,
+      reader?.root,
+      thread,
+    ],
   );
   const binding = useRef<typeof identity | null>(null);
   const mount = useRef({});
@@ -173,7 +185,9 @@ export function ReviewedInvocationReview({
               {destination?.channel}
               {destination?.root === undefined
                 ? " · channel root"
-                : ` · thread ${destination.root}`}
+                : destination.sourceRoot === undefined
+                  ? ` · thread ${destination.root}`
+                  : ` · thread ${destination.sourceRoot} · task ${destination.root}`}
             </p>
             <details>
               <summary>Details</summary>

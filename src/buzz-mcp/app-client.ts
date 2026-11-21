@@ -37,6 +37,8 @@ export class AppInvocation {
   readonly owner: string;
   readonly channel: string | undefined;
   readonly root: string | undefined;
+  /** The physical thread when root is an invocation subthread. */
+  readonly sourceRoot: string | undefined;
   constructor(agent: AgentHandle, context: Context, initiating: () => void) {
     this.#agent = agent;
     this.#initiating = initiating;
@@ -45,6 +47,7 @@ export class AppInvocation {
     this.owner = agent.owner;
     this.channel = context.channel;
     this.root = context.root;
+    this.sourceRoot = context.sourceRoot;
     Object.freeze(this);
   }
   static is(value: unknown): value is AppInvocation {

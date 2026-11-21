@@ -432,6 +432,53 @@ it.each(["thread", "unresolved"])(
   },
 );
 
+const task = "task";
+const twoRoot = {
+  ...request,
+  destination: { ...request.destination, root: task, sourceRoot: "source" },
+};
+
+it.each([
+  ["its source thread", "source", 1],
+  ["another thread", "other", 0],
+  ["no thread", undefined, 0],
+] as const)(
+  "approves a task review only on a row signed in %s",
+  async (_, threadRootId, dispatched) => {
+    const h = await harness(true, {
+      request: twoRoot,
+      reviewRoot: task,
+      row: { ...message, id: "reply", threadRootId },
+    });
+    await h.offer();
+    fireEvent.click(screen.getByRole("button", { name: "Approve and run" }));
+    expect(commands("plugin_host_reviewed_dispatch")).toHaveLength(dispatched);
+    if (dispatched)
+      expect(commands("plugin_host_reviewed_dispatch")[0]?.[1]).toMatchObject({
+        destination: twoRoot.destination,
+      });
+    else
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "belongs to another conversation",
+      );
+  },
+);
+
+it("retires a bound task review when its row's signed thread changes", async () => {
+  const h = await harness(false, { request: twoRoot, mount: false });
+  const reader = { session: h.session, channel: message.channelId, root: task };
+  const row = (threadRootId: string) =>
+    ({ ...message, id: "reply", threadRootId }) as ChannelMessage;
+  const { rerender } = render(h.view(reader, row("source")));
+  await h.offer();
+  expect(screen.getByRole("button", { name: "Approve and run" })).toBeEnabled();
+  rerender(h.view(reader, row("other")));
+  await act(async () => {});
+  expect(commands("plugin_host_reviewed_retire")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Approve and run" }));
+  expect(commands("plugin_host_reviewed_dispatch")).toHaveLength(0);
+});
+
 it("refuses a fresh pending instance in the same task before queued retirement", async () => {
   const h = await harness();
   await h.offer();

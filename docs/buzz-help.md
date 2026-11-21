@@ -2108,7 +2108,8 @@ tab, asks **Discard changes?** first; **Keep editing** keeps them.
   that one public HTTPS address from the service's latest successful response,
   without the saved key, cookies, redirects or retries. A failed download is not
   retried. When an agent proposed a video review, the approved result is posted
-  once, as that agent, as a single attachment in the original chat or thread. It
+  once, as that agent, as a single attachment in the original chat or thread;
+  a result for a task stays in that task, inside its source thread. It
   is not retried, and "posted" does not mean the video plays.
 - Plugin sharing search groups people who have not been added under **Not yet
   added**, or a heading chosen by the plugin. Its **Copy link** action appears

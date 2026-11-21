@@ -1739,12 +1739,33 @@ enum Delivery {
     MismatchedAck,
     RetiredDuringUpload,
     RetiredDuringPublish,
+    /// A task subthread's delivery: task root under a physical source root.
+    Task,
+    TaskForeignSource,
+    TaskWithoutSource,
+    TaskReversed,
+    TaskMissingSource,
+    TaskForgedSource,
+}
+impl Delivery {
+    fn task(self) -> bool {
+        matches!(
+            self,
+            Self::Task
+                | Self::TaskForeignSource
+                | Self::TaskWithoutSource
+                | Self::TaskReversed
+                | Self::TaskMissingSource
+                | Self::TaskForgedSource
+        )
+    }
 }
 
 /// What one delivery left behind.
 struct Delivered {
     agent: String,
     root: String,
+    source: Option<String>,
     prepared: Value,
     event: Option<Value>,
     receipt: Value,
@@ -1779,13 +1800,38 @@ async fn deliver(case: Delivery, served: &[u8]) -> Delivered {
     };
     let relay_key = ::nostr::key::Keys::generate();
     let authority = relay_key.public_key().to_hex();
-    let rooted = if case == Delivery::ForeignRoot {
+    let rooted = if matches!(case, Delivery::ForeignRoot | Delivery::TaskForeignSource) {
         "other-channel"
     } else {
         "fixture-channel"
     };
     let root = community_event(&::nostr::key::Keys::generate(), 9, &[&["h", rooted]]);
-    let root_id = root["id"].as_str().unwrap().to_owned();
+    // A task's anchor is a reply in its source thread, which `root` stands for.
+    let (root, source_root) = if case.task() {
+        let source = root["id"].as_str().unwrap().to_owned();
+        let task = community_event(
+            &::nostr::key::Keys::generate(),
+            9,
+            &[
+                &["h", "fixture-channel"],
+                &["e", &source, "", "root"],
+                &["e", &source, "", "reply"],
+            ],
+        );
+        let mut source_event = root;
+        if case == Delivery::TaskForgedSource {
+            source_event["content"] = json!("forged");
+        }
+        let served = if case == Delivery::TaskMissingSource {
+            json!([task])
+        } else {
+            json!([task, source_event])
+        };
+        (served, Some(source))
+    } else {
+        (json!([root]), None)
+    };
+    let root_id = root[0]["id"].as_str().unwrap().to_owned();
     let member: &[&str] = if case == Delivery::Guest {
         &["p", &agent.pubkey, "", "guest"]
     } else {
@@ -1796,19 +1842,28 @@ async fn deliver(case: Delivery, served: &[u8]) -> Delivered {
     } else {
         &[&["d", "fixture-channel"]]
     };
-    let readable = json!([
+    let mut readable = vec![
         community_event(&relay_key, 39002, &[&["d", "fixture-channel"], member]),
         community_event(&relay_key, 39000, metadata),
-        root,
-    ])
-    .to_string();
+    ];
+    readable.extend(root.as_array().unwrap().iter().cloned());
+    let readable = json!(readable).to_string();
     // Identity and read precede each effect; refusals stop before it.
     let expected = match case {
-        Delivery::Accepted | Delivery::MismatchedAck => 6,
-        Delivery::Guest | Delivery::Archived | Delivery::ForeignRoot => 2,
+        Delivery::Accepted | Delivery::MismatchedAck | Delivery::Task => 6,
+        Delivery::Guest
+        | Delivery::Archived
+        | Delivery::ForeignRoot
+        | Delivery::TaskForeignSource
+        | Delivery::TaskMissingSource
+        | Delivery::TaskForgedSource => 2,
         Delivery::RetiredDuringUpload => 2,
         Delivery::Tampered => 0,
-        Delivery::UnusableReceipt | Delivery::RetiredBeforePublish | Delivery::ExtraTag => 3,
+        Delivery::UnusableReceipt
+        | Delivery::RetiredBeforePublish
+        | Delivery::ExtraTag
+        | Delivery::TaskWithoutSource
+        | Delivery::TaskReversed => 3,
         Delivery::RetiredDuringPublish => 5,
     };
     // The author's channel read before the upload or the signature, held
@@ -1858,6 +1913,9 @@ async fn deliver(case: Delivery, served: &[u8]) -> Delivered {
     let mut request = expecting(&f, &peer);
     request["author"] = json!({"pubkey":agent.pubkey, "relay":agent.relay});
     request["request"]["destination"]["root"] = json!(root_id);
+    if let Some(source) = &source_root {
+        request["request"]["destination"]["sourceRoot"] = json!(source);
+    }
     let (review, terminal, source) = retained_from(&mut f, &mut peer, request, served).await;
     let call = &review["callId"];
     let step = |step: Value| {
@@ -1917,11 +1975,30 @@ async fn deliver(case: Delivery, served: &[u8]) -> Delivered {
             );
             // What the JS host builds from this receipt.
             let url = media["url"].as_str().unwrap();
-            let mut event = json!({"kind":9, "content":format!("![video.mp4](<{url}>)"), "tags":[
-                ["h", "fixture-channel"], ["e", root_id, "", "reply"],
-                ["imeta", format!("url {url}"), "m video/mp4", format!("size {}", prepared["size"]),
-                    format!("x {}", prepared["sha256"].as_str().unwrap()), "filename video.mp4",
-                    format!("dim {}", media["dim"].as_str().unwrap())]]});
+            let thread = |id: &str, marker: &str| json!(["e", id, "", marker]);
+            let mut tags = vec![json!(["h", "fixture-channel"])];
+            match (&source_root, case) {
+                (Some(source), Delivery::TaskReversed) => {
+                    tags.extend([thread(&root_id, "root"), thread(source, "reply")]);
+                }
+                (Some(_), Delivery::TaskWithoutSource) | (None, _) => {
+                    tags.push(thread(&root_id, "reply"));
+                }
+                (Some(source), _) => {
+                    tags.extend([thread(source, "root"), thread(&root_id, "reply")]);
+                }
+            }
+            tags.push(json!([
+                "imeta",
+                format!("url {url}"),
+                "m video/mp4",
+                format!("size {}", prepared["size"]),
+                format!("x {}", prepared["sha256"].as_str().unwrap()),
+                "filename video.mp4",
+                format!("dim {}", media["dim"].as_str().unwrap())
+            ]));
+            let mut event =
+                json!({"kind":9, "content":format!("![video.mp4](<{url}>)"), "tags":tags});
             if case == Delivery::ExtraTag {
                 event["tags"]
                     .as_array_mut()
@@ -1953,6 +2030,7 @@ async fn deliver(case: Delivery, served: &[u8]) -> Delivered {
     Delivered {
         agent: agent.pubkey,
         root: root_id,
+        source: source_root,
         prepared,
         event,
         receipt,
@@ -2003,6 +2081,42 @@ fn an_agents_review_posts_its_prepared_media_once_as_that_agent() {
 }
 
 #[test]
+fn a_task_review_posts_in_its_source_thread_replying_to_the_task() {
+    let _serial = crate::host_files::managed_tests::commands();
+    let _conversions = crate::relay::CONVERSIONS.blocking_lock();
+    let Some(served) = served_media() else {
+        return;
+    };
+    tauri::async_runtime::block_on(async {
+        let d = deliver(Delivery::Task, &served).await;
+        let source = d.source.unwrap();
+        let posted: Value = serde_json::from_slice(&d.bodies[5]).unwrap();
+        assert_eq!(
+            d.receipt["delivery"],
+            json!({"upload":"uploaded", "status":"posted", "eventId":posted["id"]})
+        );
+        assert_eq!(posted["pubkey"], json!(d.agent));
+        assert_eq!(
+            posted["tags"].as_array().unwrap()[..3],
+            [
+                json!(["h", "fixture-channel"]),
+                json!(["e", source, "", "root"]),
+                json!(["e", d.root, "", "reply"]),
+            ]
+        );
+        // Both thread IDs are checked in the one bounded read before each effect.
+        let ids = format!(r#""ids":["{source}","{}"],"limit":2"#, d.root);
+        for read in [1, 4] {
+            assert!(String::from_utf8_lossy(&d.bodies[read]).contains(&ids));
+        }
+        eprintln!(
+            "DELIVERED_TASK event={} root={source} reply={}",
+            posted["id"], d.root
+        );
+    });
+}
+
+#[test]
 fn an_agents_delivery_stops_before_any_effect_it_cannot_stand_behind() {
     let _serial = crate::host_files::managed_tests::commands();
     let _conversions = crate::relay::CONVERSIONS.blocking_lock();
@@ -2015,6 +2129,9 @@ fn an_agents_delivery_stops_before_any_effect_it_cannot_stand_behind() {
             Delivery::Guest,
             Delivery::Archived,
             Delivery::ForeignRoot,
+            Delivery::TaskForeignSource,
+            Delivery::TaskMissingSource,
+            Delivery::TaskForgedSource,
             Delivery::Tampered,
             Delivery::RetiredDuringUpload,
         ] {
@@ -2032,6 +2149,8 @@ fn an_agents_delivery_stops_before_any_effect_it_cannot_stand_behind() {
             Delivery::UnusableReceipt,
             Delivery::RetiredBeforePublish,
             Delivery::ExtraTag,
+            Delivery::TaskWithoutSource,
+            Delivery::TaskReversed,
             Delivery::RetiredDuringPublish,
         ] {
             let d = deliver(case, &served).await;

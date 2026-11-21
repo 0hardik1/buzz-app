@@ -1126,7 +1126,7 @@ impl Custody {
     async fn admit(
         &self,
         channel: &str,
-        root: Option<&str>,
+        roots: &[&str],
         current: &(impl Fn() -> Result<(), String> + Sync),
     ) -> Result<(AppAgent, Arc<Secret>, Admission), String> {
         let (agent, key) = self.host.key(self.agent.clone()).await?;
@@ -1135,7 +1135,7 @@ impl Custody {
             .tokens
             .authorize_for(&agent, &key, self.member.incarnation(), Duration::ZERO)
             .await?;
-        writable(&agent, &key, &evidence, channel, root).await?;
+        writable(&agent, &key, &evidence, channel, roots).await?;
         current()?;
         Ok((agent, key, evidence))
     }
@@ -1144,12 +1144,12 @@ impl Custody {
     pub(crate) async fn upload(
         &self,
         channel: &str,
-        root: Option<&str>,
+        roots: &[&str],
         file: std::fs::File,
         (size, sha256): (usize, &str),
         current: &(impl Fn() -> Result<(), String> + Sync),
     ) -> Sent<String> {
-        let Ok((agent, key, evidence)) = self.admit(channel, root, current).await else {
+        let Ok((agent, key, evidence)) = self.admit(channel, roots, current).await else {
             return Sent::Failed;
         };
         let sent = AtomicBool::new(false);
@@ -1183,11 +1183,11 @@ impl Custody {
     pub(crate) async fn publish(
         &self,
         channel: &str,
-        root: Option<&str>,
+        roots: &[&str],
         event: AppAgentEvent,
         current: &(impl Fn() -> Result<(), String> + Sync),
     ) -> (Option<String>, Sent<()>) {
-        let Ok((agent, key, evidence)) = self.admit(channel, root, current).await else {
+        let Ok((agent, key, evidence)) = self.admit(channel, roots, current).await else {
             return (None, Sent::Failed);
         };
         let Ok(signed) = agent.sign(&key, event.kind, event.content, event.tags) else {
@@ -1222,13 +1222,13 @@ fn settled<T>(result: Result<T, String>, sent: &AtomicBool) -> Sent<T> {
 
 /// The author may still post there, read as the author rather than the viewer:
 /// the community's own current roster lists it above guest, its metadata is
-/// not archived, and any root is that channel's own signed message.
+/// not archived, and each thread root is that channel's own signed message.
 async fn writable(
     agent: &AppAgent,
     key: &Secret,
     evidence: &Admission,
     channel: &str,
-    root: Option<&str>,
+    roots: &[&str],
 ) -> Result<(), String> {
     let community = reqwest::Url::parse(&agent.upload_url())
         .and_then(|url| url.join("/"))
@@ -1242,7 +1242,9 @@ async fn writable(
         serde_json::json!({"kinds":[39002], "authors":[authority], "#d":[channel], "limit":1, "consistency":"strong"}),
         serde_json::json!({"kinds":[39000], "authors":[authority], "#d":[channel], "limit":1, "consistency":"strong"}),
     ];
-    filters.extend(root.map(|root| serde_json::json!({"ids":[root], "limit":1})));
+    if !roots.is_empty() {
+        filters.push(serde_json::json!({"ids":roots, "limit":roots.len()}));
+    }
     let events = evidence
         .run(false, read(agent, key, evidence.header(), &filters))
         .await?;
@@ -1285,9 +1287,9 @@ async fn writable(
     // The relay omits the archived tag on active channels.
     let open = of(39000)
         .is_some_and(|metadata| !metadata.contains(&vec!["archived".into(), "true".into()]));
-    let rooted = root.is_none_or(|root| {
+    let rooted = roots.iter().all(|root| {
         events.iter().any(|event| {
-            event.id.to_hex() == root
+            event.id.to_hex() == *root
                 && tags(event)
                     .iter()
                     .any(|tag| tag.len() > 1 && tag[0] == "h" && tag[1] == channel)

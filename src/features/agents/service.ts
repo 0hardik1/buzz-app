@@ -3886,6 +3886,9 @@ export class AgentsService extends Service implements Agents {
       viewer: invocation.owner,
       channel: invocation.channel,
       ...(invocation.root === undefined ? {} : { root: invocation.root }),
+      ...(invocation.sourceRoot === undefined
+        ? {}
+        : { sourceRoot: invocation.sourceRoot }),
     });
     const origin = Object.freeze({ invocation, relay, destination });
     return Object.freeze({

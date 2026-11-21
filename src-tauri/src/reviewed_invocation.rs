@@ -224,6 +224,26 @@ pub(crate) struct Destination {
         skip_serializing_if = "Option::is_none"
     )]
     root: Option<String>,
+    /// The physical thread when `root` is an invocation subthread.
+    #[serde(
+        default,
+        deserialize_with = "present_root",
+        skip_serializing_if = "Option::is_none"
+    )]
+    source_root: Option<String>,
+}
+impl Destination {
+    /// The distinct thread IDs the delivery names, each checked before an effect.
+    fn roots(&self) -> Vec<&str> {
+        let mut roots: Vec<&str> = self
+            .source_root
+            .iter()
+            .chain(self.root.iter())
+            .map(String::as_str)
+            .collect();
+        roots.dedup();
+        roots
+    }
 }
 fn present_root<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     String::deserialize(d).map(Some)
@@ -315,6 +335,7 @@ impl Request {
             _ => return Err(REFUSED.into()),
         }
         if self.body.is_empty()
+            || (self.destination.source_root.is_some() && self.destination.root.is_none())
             || self.body.len() > 32 * 1024
             || self.body.contains('\0')
             || [
@@ -324,6 +345,7 @@ impl Request {
             ]
             .into_iter()
             .chain(self.destination.root.iter())
+            .chain(self.destination.source_root.iter())
             .any(|part| {
                 part.is_empty()
                     || part.len() > 256
@@ -881,12 +903,15 @@ fn attachment_only(
     url: &str,
 ) -> bool {
     let mut tags = vec![vec!["h".to_owned(), destination.channel.clone()]];
+    let thread =
+        |id: &String, marker: &str| vec!["e".to_owned(), id.clone(), String::new(), marker.into()];
     tags.extend(
         destination
-            .root
+            .source_root
             .iter()
-            .map(|root| vec!["e".to_owned(), root.clone(), String::new(), "reply".into()]),
+            .map(|root| thread(root, "root")),
     );
+    tags.extend(destination.root.iter().map(|root| thread(root, "reply")));
     tags.push(vec![
         "imeta".to_owned(),
         format!("url {url}"),
@@ -1793,7 +1818,7 @@ pub(crate) async fn plugin_host_reviewed_invoke<R: tauri::Runtime>(
                                         let destination = &authority.destination;
                                         let sent = match file {
                                             Some(file) if current().is_ok() => custody.upload(
-                                                &destination.channel, destination.root.as_deref(), file,
+                                                &destination.channel, &destination.roots(), file,
                                                 (prepared.prepared_size, &prepared.prepared_sha256), &current,
                                             ).await,
                                             _ => Sent::Failed,
@@ -1821,7 +1846,7 @@ pub(crate) async fn plugin_host_reviewed_invoke<R: tauri::Runtime>(
                                         let destination = &authority.destination;
                                         let (event_id, sent) = match &authority.custody {
                                             Some(custody) if attachment_only(&event, destination, &prepared, &url) => {
-                                                custody.publish(&destination.channel, destination.root.as_deref(), event, &current).await
+                                                custody.publish(&destination.channel, &destination.roots(), event, &current).await
                                             }
                                             _ => (None, Sent::Failed),
                                         };

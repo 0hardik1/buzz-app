@@ -254,7 +254,10 @@ export type ReviewedInvocationDestination = Readonly<{
   community: string;
   viewer: string;
   channel: string;
+  /** The conversation the call was addressed in: its task anchor. */
   root?: string;
+  /** The physical thread when root is an invocation subthread. */
+  sourceRoot?: string;
 }>;
 /** Exact HTTP create. Authorization comes natively from `slot`, never headers. */
 export type ReviewedInvocationEffect = Readonly<{
@@ -636,6 +639,9 @@ function captureReviewed(
       ...(input.destination.root === undefined
         ? {}
         : { root: input.destination.root }),
+      ...(input.destination.sourceRoot === undefined
+        ? {}
+        : { sourceRoot: input.destination.sourceRoot }),
     }),
   };
   const media = input.expectedMedia;
@@ -751,7 +757,8 @@ export function sameDestination(
     a?.community === b?.community &&
     a.viewer === b.viewer &&
     a.channel === b.channel &&
-    a.root === b.root
+    a.root === b.root &&
+    a.sourceRoot === b.sourceRoot
   );
 }
 
@@ -781,6 +788,8 @@ export class HostService extends Service implements Host {
         session: ReviewedOperation["session"] | undefined;
         channel: string | undefined;
         root: string | undefined;
+        /** The physical thread of the signed row the review renders on. */
+        thread: string | undefined;
       }>,
     ): boolean => {
       const current = this.reviewedOperation;
@@ -791,6 +800,8 @@ export class HostService extends Service implements Host {
         current.session !== reader.session ||
         current.destination.channel !== reader.channel ||
         current.destination.root !== reader.root ||
+        (current.destination.sourceRoot !== undefined &&
+          current.destination.sourceRoot !== reader.thread) ||
         !agentRuns(current)
       )
         return false;
@@ -898,7 +909,9 @@ export class HostService extends Service implements Host {
       typeof request.body !== "string" ||
       Object.values(request.destination).some(
         (value) => typeof value !== "string",
-      )
+      ) ||
+      (request.destination.sourceRoot !== undefined &&
+        request.destination.root === undefined)
     )
       throw new Error("Invalid reviewed invocation");
     if (
@@ -1604,7 +1617,7 @@ export class HostService extends Service implements Host {
     owner: NonNullable<Context["pluginOwner"]>,
     continuation: Continuation,
     agent: AppInvocation,
-    { community, channel, root }: ReviewedInvocationDestination,
+    { community, channel, root, sourceRoot }: ReviewedInvocationDestination,
     prepared: HostByteSource,
   ) {
     agent.live();
@@ -1629,6 +1642,7 @@ export class HostService extends Service implements Host {
         content: message.content,
         tags: [
           ["h", channel],
+          ...(sourceRoot === undefined ? [] : [["e", sourceRoot, "", "root"]]),
           ...(root === undefined ? [] : [["e", root, "", "reply"]]),
           ...message.tags,
         ],
