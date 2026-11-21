@@ -3,6 +3,10 @@
 import { directMessageWith } from "../../features/direct-messages/message-person";
 import { profileTarget } from "../../features/profiles/target";
 import type { ChannelSummary } from "../../features/relay/contracts";
+import {
+  PROFILE_CACHE_BASE,
+  profileRosterRoom,
+} from "../../features/relay/budget";
 import type { RelaySession } from "../../features/relay/session";
 import { avatarMedia } from "../../shared/avatar-source";
 import { HashIcon, UserIcon } from "../../shared/design-system/icons/index";
@@ -72,6 +76,22 @@ export function builtinSources({
           for (const pubkey of channel.participants ?? channel.members ?? [])
             if (pubkey !== live.viewer && !shared.has(pubkey))
               shared.set(pubkey, channel.id);
+        // Ask for names not loaded yet, after this read; the list is read
+        // again as they arrive. Loaded, pending and known-unnamed people
+        // cost no read.
+        // ponytail: the first roster's worth of people only; reserve room
+        // as an open channel does if People needs more names than that.
+        const unnamed = [...shared.keys()]
+          .filter((pubkey) => !profiles.has(pubkey))
+          .slice(
+            0,
+            profileRosterRoom(live.profiles.limit?.() ?? PROFILE_CACHE_BASE),
+          );
+        if (unnamed.length)
+          queueMicrotask(
+            () =>
+              void live.profiles.ensure(unnamed, "background").catch(() => {}),
+          );
         return [...shared].map(([pubkey, channelId]): FinderItem => {
           const profile = profiles.get(pubkey);
           const keywords = [profile?.username, profile?.nip05]

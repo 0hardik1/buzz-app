@@ -417,6 +417,21 @@ test("built-in conversations and people rank by name and open on Enter", async (
   expect(open).toHaveBeenLastCalledWith(
     expect.objectContaining({ kind: "conversation", channelId: "crew" }),
   );
+  // Everyone but you. Finder asks for names it doesn't have, and shows
+  // them as they arrive.
+  vi.useFakeTimers();
+  try {
+    await act(async () =>
+      opener.used.finder?.open({ source: "buzz.finder/people", query: "" }),
+    );
+    expect(named().sort()).toEqual(
+      ["Maya Chenmaya@example.org", sam.pubkey.slice(0, 10)].sort(),
+    );
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(named()).toContain("Sam Lee");
+  } finally {
+    vi.useRealTimers();
+  }
   await act(async () =>
     opener.used.finder?.open({
       source: "buzz.finder/people",
@@ -431,27 +446,11 @@ test("built-in conversations and people rank by name and open on Enter", async (
     expect.objectContaining({ channelId: "with-maya" }),
   );
   expect(open.mock.lastCall).not.toHaveProperty([0, "detail"]);
-  // Everyone but you. A name that loads while the list is open replaces
-  // the key there.
   await act(async () =>
-    opener.used.finder?.open({ source: "buzz.finder/people", query: "" }),
+    opener.used.finder?.open({ source: "buzz.finder/people", query: "sam" }),
   );
-  expect(named().sort()).toEqual(
-    ["Maya Chenmaya@example.org", sam.pubkey.slice(0, 10)].sort(),
-  );
-  vi.useFakeTimers();
-  try {
-    await act(async () => {
-      await owner.session.profiles.ensure([sam.pubkey]);
-      await vi.advanceTimersByTimeAsync(1000);
-    });
-    expect(named()).toContain("Sam Lee");
-  } finally {
-    vi.useRealTimers();
-  }
-  await act(async () =>
-    screen.getByRole("option", { name: /Sam Lee/ }).click(),
-  );
+  expect(rows()).toEqual([expect.stringContaining("Sam Lee")]);
+  await act(async () => screen.getByRole("option").click());
   // No DM: the profile opens beside a conversation you share.
   expect(open).toHaveBeenLastCalledWith(
     expect.objectContaining({
