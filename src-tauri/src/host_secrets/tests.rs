@@ -128,7 +128,7 @@ impl Fixture {
             .unwrap()
             .revision;
         manager.change("enable", ID).unwrap();
-        let (events_tx, events) = tokio::sync::mpsc::unbounded_channel();
+        let (events_tx, events) = tokio::sync::mpsc::unbounded_channel::<(u32, Value)>();
         // Only the macOS reviewed HTTP tests read callback events.
         #[cfg(not(target_os = "macos"))]
         drop(events);
