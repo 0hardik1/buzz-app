@@ -6,10 +6,9 @@ fire while you type in a field or a terminal.
 ## Getting started
 
 1. Turn on **Vim keys** in **Settings → Plugins**.
-2. Press `j` and `k` to move between messages, list items and menu items.
-   Each conversation keeps a cursor on one message, which starts on the
-   newest one you can see. With nothing focused, `j`, `k`, `go` and Tab start
-   from it.
+2. Each conversation always has one selected message, starting with the
+   newest. Press `j` and `k` to move it, or click a message. The view follows
+   the selection.
 3. Press `go` to open the selected item's actions. Each action shows its key;
    press it to run the action.
 4. Press Space to see the leader keys, such as `Space /` to search where you
@@ -22,18 +21,18 @@ fire while you type in a field or a terminal.
 
 | Keys | Action |
 | --- | --- |
-| `j` / `k` | Next / previous message, sidebar conversation or item; scroll when nothing else moves |
+| `j` / `k` | Next / previous message, sidebar conversation or item |
 | `h` / `l` | Left / right in lists; `l` on a message opens its thread |
-| `gg` / `G` | Top / bottom |
-| `Ctrl-d` / `Ctrl-u` | Half a page down / up, keeping the selected message near the middle |
+| `gg` / `G` | Oldest loaded / newest message |
+| `Ctrl-d` / `Ctrl-u` | The message half a page down / up, centred |
 | `go` | Actions for the selected message, person or conversation |
-| `Tab` / `Shift-Tab` | Next / previous part of the selected message: its author, links, files and reactions |
+| `Tab` / `Shift-Tab` | Switch between the selected message and its parts: its author, links, files and reactions |
 | `]b` / `[b` | Next / previous conversation |
 | `]u` / `[u` | Next / previous unread conversation |
 | `H` / `L` | Back / forward |
 | `\` | Show the open conversation in the sidebar |
 | `i` | Type a message |
-| `Escape` (`Ctrl-[` on Mac) | Leave the field or control; from a part of a message, back to the message |
+| `Escape` (`Ctrl-[` on Mac) | Back to the selected message, from the message box, the sidebar or a part |
 | `Ctrl-h` / `Ctrl-l` | Pane to the left / right |
 | `Ctrl-j` / `Ctrl-k` | Message box / messages |
 | `Space /` | Search where you are: the sidebar's conversations, or this conversation |
@@ -41,7 +40,6 @@ fire while you type in a field or a terminal.
 | `Space s /` | Search Buzz |
 | `Space s c` | Search this conversation |
 | `Space s k` | Keyboard shortcuts |
-| `Space t z` | Start or end Focus (needs the Focus plugin) |
 | `Space ,` | Settings |
 | `Space h` | Home |
 
@@ -59,15 +57,19 @@ Enter to press the button. Checkboxes, switches and options keep Space. When
 another shortcut uses the same key, such as Escape for marking a conversation
 read, Settings → Shortcuts marks it "Also used by"; change one to choose.
 
-The cursor stays marked while focus is elsewhere, such as the message box,
-the sidebar or a menu. Clicking a message moves the cursor to it. Scrolling
-keeps the cursor on a message you can see; if the selected message scrolls
-away, the selection moves with it. The plugin marks the cursor's message box
-with `data-message-cursor`, which Buzz paints like a selected message.
+The selected message keeps focus except while you type after `i`, or while
+you use the sidebar, a menu or a dialog; it stays marked meanwhile.
+Opening a conversation focuses its selected message, not the message box,
+and each conversation remembers its selection. Scrolling with a mouse or
+trackpad moves the view but not the selection; the next move brings the view
+back. If the selected message is deleted, the next one is selected. The
+plugin marks the selected message with `data-message-cursor`, which Buzz
+paints like a selected message.
 
-In a message with parts, Tab and Shift-Tab stay within it, wrapping back to
-the message; press Escape, `j` or `k` to move on. In a message without parts,
-Tab moves as usual.
+Tab and Shift-Tab switch between the selected message and its parts,
+wrapping back to the message. They never move into a part's card or menu:
+use `go` for a part's actions and Escape to return to the message. Tab and
+Escape on a message are not listed in Settings → Shortcuts.
 
 Buzz's own message keys still act on the selected message: `e` edits, `r`
 reacts, `t` replies in thread, `u` marks unread and Delete deletes your own

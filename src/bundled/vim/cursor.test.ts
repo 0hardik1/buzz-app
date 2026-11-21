@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import {
   registerMessageList,
   type MessageList,
 } from "../../features/messages/message-selection";
 import type { ChannelMessage } from "../../features/relay/contracts";
-import { CURSOR, cursorRow, trackCursor } from "./cursor";
+import { CURSOR, trackCursor } from "./cursor";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -14,98 +14,183 @@ afterEach(() => {
 });
 
 const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
-const place = (element: Element, rect: () => Partial<DOMRect>) =>
-  Object.defineProperty(element, "getBoundingClientRect", {
-    value: () => ({ top: 0, bottom: 0, height: 0, ...rect() }),
-  });
 
-/** Four 100px messages in a 300px list, scrolled by `view.offset`. */
-function fixture() {
-  const ids = ["one", "two", "three", "four"];
-  const view = { offset: 0, ids };
-  const list = document.createElement("section");
-  list.style.overflowY = "auto";
-  list.innerHTML = ids
-    .map(
-      (id) =>
-        `<div data-message-id="${id}"><div data-layout="timeline" tabindex="-1">${id}</div></div>`,
-    )
-    .join("");
-  const composer = document.createElement("textarea");
-  document.body.append(list, composer);
-  Object.defineProperty(list, "getClientRects", { value: () => [{}] });
-  place(list, () => ({ top: 0, bottom: 300, height: 300 }));
+/** A conversation workspace with a composer and a list of messages. */
+function conversation(channel = "alpha", ids = ["one", "two", "three"]) {
+  const view = { ids: [...ids] };
+  const main = document.createElement("main");
+  main.id = "main-content";
+  main.innerHTML = `<div data-channel-workspace="${channel}"><section></section><div role="textbox" contenteditable="true"></div></div>`;
+  document.body.append(main);
+  const workspace = main.firstElementChild as HTMLElement;
+  const list = workspace.querySelector("section") as HTMLElement;
+  const composer = workspace.querySelector<HTMLElement>('[role="textbox"]');
+  const render = () => {
+    list.innerHTML = view.ids
+      .map(
+        (id) =>
+          `<div data-message-id="${id}"><div data-layout="timeline" tabindex="-1">${id}<button>part</button></div></div>`,
+      )
+      .join("");
+  };
+  render();
+  const pins: string[] = [];
+  const controller = {
+    row: (id: string) =>
+      view.ids.includes(id) ? ({ id } as ChannelMessage) : undefined,
+    newest: () => view.ids.at(-1),
+    keepMounted: vi.fn((id: string) => {
+      pins.push(id);
+      return () => pins.splice(pins.indexOf(id), 1);
+    }),
+  } as unknown as MessageList;
+  const unregister = registerMessageList(list, controller);
+  cleanups.push(() => unregister());
   const box = (id: string) =>
     list.querySelector(
       `[data-message-id="${id}"] > [data-layout]`,
     ) as HTMLElement;
-  for (const [index, id] of ids.entries())
-    place(box(id), () => {
-      const top = index * 100 - view.offset;
-      return { top, bottom: top + 100, height: 100 };
-    });
-  cleanups.push(
-    registerMessageList(list, {
-      row: (id) =>
-        view.ids.includes(id) ? ({ id } as ChannelMessage) : undefined,
-    } as MessageList),
-  );
   const marked = () =>
     [...list.querySelectorAll(`[${CURSOR}]`)].map(
       (element) =>
         element.closest<HTMLElement>("[data-message-id]")?.dataset.messageId,
     );
-  return { list, composer, box, view, marked };
+  return {
+    workspace,
+    list,
+    composer,
+    box,
+    view,
+    render,
+    pins,
+    marked,
+    unregister,
+  };
 }
 
-test("marks the newest message in view and follows focus and clicks", async () => {
-  const { list, composer, box, marked } = fixture();
+test("an opened conversation selects and focuses its newest message, kept mounted", async () => {
+  const { box, composer, marked, pins } = conversation();
+  // The host's initial focus goes to the composer; the cursor takes it back.
+  composer?.focus();
   cleanups.push(trackCursor());
   await frame();
   expect(marked()).toEqual(["three"]);
+  expect(document.activeElement).toBe(box("three"));
+  expect(pins).toEqual(["three"]);
+});
 
+test("focus and clicks move it; typing, scrolling and focus elsewhere keep it", async () => {
+  const { list, box, composer, marked, pins } = conversation();
+  cleanups.push(trackCursor());
+  await frame();
   box("one").focus();
   await frame();
   expect(marked()).toEqual(["one"]);
-  // Focus elsewhere keeps it.
-  composer.focus();
+  expect(pins).toEqual(["one"]);
+
+  // The reader's own key (i) ends the opened conversation's claim on focus.
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "i" }));
+  composer?.focus();
+  list.dispatchEvent(new Event("scroll"));
   await frame();
   expect(marked()).toEqual(["one"]);
-  expect(cursorRow(list)?.dataset.messageId).toBe("one");
+  expect(document.activeElement).toBe(composer);
 
   box("two").dispatchEvent(new Event("pointerdown", { bubbles: true }));
   await frame();
   expect(marked()).toEqual(["two"]);
 });
 
-test("scrolling keeps it, and its focus, on a message in view", async () => {
-  const { list, box, view, marked } = fixture();
+test("focus that falls to nothing, or a click in the timeline, returns to it", async () => {
+  const { list, box, marked } = conversation();
   cleanups.push(trackCursor());
-  box("one").focus();
   await frame();
-  view.offset = 150;
-  list.dispatchEvent(new Event("scroll"));
+  box("two").focus();
   await frame();
-  // Off the top: the first message in view takes it.
+  (document.activeElement as HTMLElement).blur();
+  await frame();
+  expect(document.activeElement).toBe(box("two"));
+
+  // A click on the timeline's empty space focuses the list itself.
+  list.tabIndex = 0;
+  list.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  list.focus();
+  list.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await frame();
   expect(marked()).toEqual(["two"]);
   expect(document.activeElement).toBe(box("two"));
 
-  view.offset = -250;
-  list.dispatchEvent(new Event("scroll"));
+  // A click on a message's part leaves focus on that part.
+  const part = box("one").querySelector("button") as HTMLElement;
+  part.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  part.focus();
+  part.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await frame();
-  // Off the bottom: the last one in view.
   expect(marked()).toEqual(["one"]);
+  expect(document.activeElement).toBe(part);
 });
 
-test("another conversation starts from its newest message; stopping clears", async () => {
-  const { list, box, view, marked } = fixture();
-  const stop = trackCursor();
-  box("one").focus();
+test("a deleted message passes the cursor to its neighbor", async () => {
+  const { box, view, render, marked, pins } = conversation("alpha", [
+    "one",
+    "two",
+    "three",
+    "four",
+  ]);
+  cleanups.push(trackCursor());
   await frame();
-  view.ids = ["two", "three", "four"];
-  list.dispatchEvent(new Event("scroll"));
+  box("two").focus();
+  await frame();
+  view.ids = ["one", "three", "four"];
+  render();
   await frame();
   expect(marked()).toEqual(["three"]);
+  expect(pins).toEqual(["three"]);
+  // The last one: the message before it.
+  box("four").focus();
+  await frame();
+  view.ids = ["one", "three"];
+  render();
+  await frame();
+  expect(marked()).toEqual(["three"]);
+});
+
+test("each conversation keeps its own cursor across a visit elsewhere", async () => {
+  const alpha = conversation("alpha");
+  cleanups.push(trackCursor());
+  await frame();
+  alpha.box("one").focus();
+  await frame();
+
+  // Beta replaces the conversation in the same workspace.
+  alpha.unregister();
+  document.body.replaceChildren();
+  const beta = conversation("beta", ["b1", "b2"]);
+  await frame();
+  expect(beta.marked()).toEqual(["b2"]);
+  expect(document.activeElement).toBe(beta.box("b2"));
+
+  beta.unregister();
+  document.body.replaceChildren();
+  const again = conversation("alpha");
+  await frame();
+  expect(again.marked()).toEqual(["one"]);
+  expect(document.activeElement).toBe(again.box("one"));
+});
+
+test("a dialog keeps focus, and stopping clears the marks and pins", async () => {
+  const { box, marked, pins } = conversation();
+  const dialog = document.createElement("div");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.innerHTML = "<button>OK</button>";
+  document.body.append(dialog);
+  const stop = trackCursor();
+  await frame();
+  expect(document.activeElement).not.toBe(box("three"));
+  dialog.remove();
+  await frame();
+  expect(document.activeElement).toBe(box("three"));
   stop();
   expect(marked()).toEqual([]);
+  expect(pins).toEqual([]);
 });

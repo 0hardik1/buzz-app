@@ -10,6 +10,7 @@ import type {
   Shortcut,
 } from "../../features/shortcuts/service";
 import type { PluginModule } from "../../plugins/api";
+import { messageListOf } from "../../features/messages/message-selection";
 import { enableMenuLetters } from "../../shared/design-system/ui/menu-letters";
 import { stepConversation } from "../channels/conversation-rows";
 import {
@@ -25,8 +26,8 @@ import {
   sideways,
   step,
   top,
+  focused,
   typing,
-  messageStops,
   stepPart,
 } from "./motion";
 import { trackCursor } from "./cursor";
@@ -57,16 +58,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
     });
   };
 
-  /** Focus is another bundled plugin's; run its shortcut if it is available. */
-  const toggleFocus = () => {
-    const toggle = shortcuts
-      .snapshot()
-      .find(
-        (entry) => entry.pluginId === "buzz.focus" && entry.id === "toggle",
-      );
-    if (toggle && (!toggle.when || toggle.when())) void toggle.run();
-    else announce("Turn on the Focus plugin to use this.");
-  };
   const searchHere = () => {
     if (inSidebar() || !shortcuts.runHost(CONVERSATION_SEARCH_ID))
       shortcuts.runHost(SEARCH_ID);
@@ -128,7 +119,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
           section: "shortcuts",
         }),
     },
-    { keys: `${LEADER}tz`, title: "Focus", run: toggleFocus },
     {
       keys: `${LEADER},`,
       title: "Settings",
@@ -143,7 +133,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
   const groups: readonly SequenceGroup[] = [
     { keys: LEADER, title: "Leader" },
     { keys: `${LEADER}s`, title: "Search" },
-    { keys: `${LEADER}t`, title: "Toggle" },
     { keys: "g", title: "Go" },
     { keys: "]", title: "Next" },
     { keys: "[", title: "Previous" },
@@ -157,6 +146,32 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ctx.effect(() => {
     const release = enableMenuLetters("hjkl");
     const stopCursor = trackCursor();
+    // Tab and Escape on a message beat its parts' own handlers, such as a
+    // preview card's Tab into the card and the list's Escape to the composer.
+    const messageKeys = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey
+      )
+        return;
+      const origin = focused();
+      const row = origin?.closest<HTMLElement>("[data-message-id]");
+      if (!origin || !row || typing() || !messageListOf(row)) return;
+      if (event.key === "Tab") stepPart(!event.shiftKey);
+      // A menu the message opened owns Escape, even before it takes focus.
+      else if (
+        event.key === "Escape" &&
+        !inMenu() &&
+        !origin.hasAttribute("data-menu-origin")
+      )
+        leave();
+      else return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    addEventListener("keydown", messageKeys, true);
     const host = document.createElement("div");
     const live = document.createElement("p");
     live.setAttribute("role", "status");
@@ -179,6 +194,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
         pending.cancel();
         release();
         stopCursor();
+        removeEventListener("keydown", messageKeys, true);
         root.unmount();
         host.remove();
         live.remove();
@@ -246,21 +262,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
   key("pane-composer", "Focus the message box", control("j"), focusComposer);
   key("pane-messages", "Focus the messages", control("k"), focusMessages);
   key("insert", "Type a message", { key: "i" }, focusComposer);
-  // Within a message: its author, links, files and reactions, then back.
-  key(
-    "next-part",
-    "Next part of the message",
-    { key: "Tab" },
-    () => stepPart(true),
-    { when: () => !!messageStops() },
-  );
-  key(
-    "previous-part",
-    "Previous part of the message",
-    { key: "Tab", shift: true },
-    () => stepPart(false),
-    { when: () => !!messageStops() },
-  );
   key(
     "leave",
     "Leave the field or control",

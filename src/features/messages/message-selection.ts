@@ -25,6 +25,8 @@ export type MessageList = Readonly<{
   /** Append copied message HTML and its source links to this list's own composer. */
   quote(html: string, sourceLinks?: readonly string[]): boolean;
   canQuote(): boolean;
+  /** Keeps a message rendered while it is scrolled away, until released. */
+  keepMounted?(id: string): () => void;
 }>;
 
 const ROW = "[data-message-id]";

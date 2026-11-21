@@ -1044,19 +1044,20 @@ Quitting Buzz also turns it off.
   by"; change one of them to choose which fires. In the Mac app, **Buzz →
   Settings…** in the menu bar also opens Settings.
 - **Vim keys** is an optional plugin, off by default; turn it on in
-  **Settings → Plugins**. Each conversation then keeps a cursor: one message
-  stays marked while you type, use the sidebar or a menu, or click. Clicking a
-  message moves it there, and scrolling keeps it on a message you can see.
-  `j`/`k` move between messages and list items (with nothing focused, they
-  start from the cursor, which begins on the newest message you can see),
-  `gg`/`G` go to the top or bottom, and `go` opens the selected message's,
-  person's or conversation's actions, each with a key that runs it; while it
-  is on, every menu shows those keys. In a selected message, `Tab` moves to
-  its author, links, files and reactions and Escape returns to the message. Space starts leader keys and shows what can follow:
+  **Settings → Plugins**. Each conversation then always has one selected
+  message, starting with the newest, which keeps focus unless you are typing
+  or using the sidebar, a menu or a dialog. `j`/`k` or a click move it, and
+  the view follows it; scrolling with a mouse or trackpad leaves it where it
+  is. `gg`/`G` go to the oldest loaded or newest message, and `go` opens the
+  selected message's, person's or conversation's actions, each with a key
+  that runs it; while it is on, every menu shows those keys. `Tab` switches
+  between the selected message and its author, links, files and reactions,
+  without entering their cards, and Escape returns to the message. Space
+  starts leader keys and shows what can follow:
   `Space /` searches where you are, `Space Space` switches conversation and
   `Space s k` opens Settings → Shortcuts. `]b`/`[b` step through
   conversations, `H`/`L` go back and forward, `i` starts typing and Escape
-  stops. Apart from that Escape, its keys never fire while you type in a field
+  returns to the selected message. Apart from that Escape, its keys never fire while you type in a field
   or terminal. `Ctrl-h`/`Ctrl-l` move between panes (`Alt` on Windows and
   Linux). The plugin's README in Settings → Plugins lists every key.
 - **Message width**: choose **Narrow** or **Wide** in **Settings → Appearance →

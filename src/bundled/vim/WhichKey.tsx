@@ -58,6 +58,9 @@ export function WhichKey({
         side="top"
         align="center"
         size="compact"
+        // Focus stays where the sequence left it, else the cursor takes it
+        // back; Base UI's return focus could land on another message's part.
+        finalFocus={() => false}
         {...{ [WHICH_KEY]: "" }}
       >
         <MenuGroup>

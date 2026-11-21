@@ -111,6 +111,10 @@ test("the leader shows what can follow and runs Buzz's own actions by id", async
   await expect(
     whichKey.getByRole("menuitem", { name: "Search…", exact: true }),
   ).toHaveAttribute("aria-keyshortcuts", "s");
+  // A message always has focus, so there is no focus toggle.
+  await expect(
+    whichKey.getByRole("menuitem", { name: "Toggle…", exact: true }),
+  ).toHaveCount(0);
   await page.keyboard.press("s");
   await expect(
     whichKey.getByRole("menuitem", { name: "Keyboard shortcuts", exact: true }),
@@ -278,67 +282,184 @@ test("a selection stays visible through its menus, and Tab and j reach people an
   await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
 });
 
-// Painting without keyboard navigation, real focus moves, a real click and
-// wheel scrolling need a browser; cursor bookkeeping is unit-tested.
-test.describe("with history to scroll", () => {
-  test.use({ historyCounts: { alpha: 40, beta: 1 } });
-  test("the cursor stays marked through focus elsewhere, clicks and scrolling", async ({
+// Real focus handoffs (the host's composer autofocus, Base UI's return
+// focus), painting, wheel scrolling over a virtualized list and preview cards
+// need a browser; cursor bookkeeping is unit-tested in cursor.test.ts.
+test.describe("the cursor", () => {
+  // Tall messages, so scrolling away unmounts rows.
+  test.use({ historyCounts: { alpha: 40, beta: 3 }, tallMessages: true });
+  const box = (page, n, channel = "alpha") =>
+    page.locator("[data-message-id] > [data-layout]").filter({
+      hasText: new RegExp(`primary ${channel} message ${n}(?!\\d)`),
+    });
+  const cursor = (page) => page.locator("[data-message-cursor]");
+  const painted = (locator) =>
+    locator.evaluate(
+      (element) => getComputedStyle(element, "::after").content !== "none",
+    );
+  const history = (page) =>
+    page.getByRole("region", { name: "Channel message history" });
+
+  test("a conversation always has one focused selection that only moves and clicks change", async ({
     page,
     app,
   }) => {
     await open(page, app);
     await enableVimKeys(page);
-    const cursor = () =>
-      page.evaluate(() =>
-        [...document.querySelectorAll("[data-message-cursor]")].map(
-          (box) => box.closest("[data-message-id]")?.dataset.messageId,
-        ),
-      );
-    const box = (id) =>
-      page.locator(`[data-message-id="${id}"] > [data-layout]`);
-    const painted = (id) =>
-      box(id).evaluate(
-        (element) => getComputedStyle(element, "::after").content !== "none",
-      );
-    await nothingFocused(page);
-    await page.keyboard.press("j");
-    await expect.poll(() => selectedId(page)).not.toBeNull();
-    const newest = await selectedId(page);
+    // Opening takes focus to the newest message, not the composer.
+    await expect(box(page, 39)).toBeFocused();
+    await expect(cursor(page)).toHaveCount(1);
+    await expect(box(page, 39)).toHaveAttribute("data-message-cursor", "");
     await page.keyboard.press("k");
-    await expect.poll(() => selectedId(page)).not.toBe(newest);
-    const older = await selectedId(page);
-    await expect.poll(cursor).toEqual([older]);
+    await expect(box(page, 38)).toBeFocused();
+    await expect(cursor(page)).toHaveCount(1);
 
-    // Focus in the sidebar, the which-key menu or the composer leaves it marked.
-    await page.keyboard.press("\\");
-    await expect(
-      page.locator('button[data-channel-id][aria-current="page"]'),
-    ).toBeFocused();
-    expect(await painted(older)).toBe(true);
-    await page.keyboard.press(" ");
-    await expect(page.locator("[data-vim-which-key]")).toBeVisible();
-    expect(await painted(older)).toBe(true);
+    // Escape on the message stays on it; i types and Escape comes back.
     await page.keyboard.press("Escape");
-    await expect(page.locator("[data-vim-which-key]")).toHaveCount(0);
-    await nothingFocused(page);
+    await expect(box(page, 38)).toBeFocused();
     await page.keyboard.press("i");
     await expect(composer(page, "Alpha")).toBeFocused();
-    expect(await painted(older)).toBe(true);
+    expect(await painted(box(page, 38))).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(box(page, 38)).toBeFocused();
 
-    // A click moves it, marked without keyboard navigation; k resumes from it.
-    await box(newest).click({ position: { x: 4, y: 4 } });
-    await expect.poll(cursor).toEqual([newest]);
-    expect(await painted(newest)).toBe(true);
-    expect(await painted(older)).toBe(false);
-    await nothingFocused(page);
+    // The sidebar and the which-key menu leave it marked; Escape comes back.
+    await page.keyboard.press("\\");
+    const nav = page.getByRole("navigation", { name: "Subscribed channels" });
+    await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
+    expect(await painted(box(page, 38))).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(box(page, 38)).toBeFocused();
+    await page.keyboard.press(" ");
+    await expect(page.locator("[data-vim-which-key]")).toBeVisible();
+    expect(await painted(box(page, 38))).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-vim-which-key]")).toHaveCount(0);
+    await expect(box(page, 38)).toBeFocused();
+
+    // Scrolling moves the view, not the selection; the next move brings the
+    // view back to the selection.
+    await history(page).hover();
+    await wheel(page, -6000);
+    await expect(box(page, 38)).not.toBeInViewport();
+    await expect(box(page, 38)).toBeFocused();
+    await expect(box(page, 38)).toHaveAttribute("data-message-cursor", "");
     await page.keyboard.press("k");
-    await expect.poll(() => selectedId(page)).toBe(older);
+    await expect(box(page, 37)).toBeFocused();
+    await expect(box(page, 37)).toBeInViewport();
+    // While typing too: the selection stays rendered, and Escape returns to it.
+    await page.keyboard.press("i");
+    await expect(composer(page, "Alpha")).toBeFocused();
+    await history(page).hover();
+    await wheel(page, -6000);
+    await expect(box(page, 37)).not.toBeInViewport();
+    await page.keyboard.press("Escape");
+    await expect(box(page, 37)).toBeFocused();
+    await expect(box(page, 37)).toBeInViewport();
 
-    // Scrolling it away moves it, with its focus, to a message in view.
-    await wheel(page, -4000);
-    await expect.poll(cursor).not.toEqual([older]);
-    const [moved] = await cursor();
-    await expect(box(moved)).toBeInViewport();
-    await expect(box(moved)).toBeFocused();
+    // A click selects, and painting does not need keyboard navigation.
+    await box(page, 39).click({ position: { x: 4, y: 4 } });
+    await expect(box(page, 39)).toBeFocused();
+    await expect(cursor(page)).toHaveCount(1);
+    expect(await painted(box(page, 39))).toBe(true);
+    // Right-clicking selects too; dismissing that menu with the pointer
+    // returns focus to the selection rather than leaving it nowhere.
+    const outside = await history(page).boundingBox();
+    await box(page, 38).click({ button: "right", position: { x: 4, y: 4 } });
+    await expect(page.getByRole("menu")).toBeVisible();
+    await page.mouse.click(outside.x + 8, outside.y + 8);
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(box(page, 38)).toBeFocused();
+    await expect(cursor(page)).toHaveCount(1);
+    await page.keyboard.press("j");
+    await expect(box(page, 39)).toBeFocused();
+
+    // Each conversation keeps its own selection, focused on arrival.
+    await page.keyboard.press("k");
+    await expect(box(page, 38)).toBeFocused();
+    await page.keyboard.press("]");
+    await page.keyboard.press("b");
+    await expect(box(page, 2, "beta")).toBeFocused();
+    await page.keyboard.press("[");
+    await page.keyboard.press("b");
+    await expect(box(page, 38)).toBeFocused();
+    // So does a click in the sidebar.
+    await nav.getByRole("button", { name: "Beta" }).click();
+    await expect(box(page, 2, "beta")).toBeFocused();
+    await expect(composer(page, "Beta")).not.toBeFocused();
+  });
+
+  test("gg, G, Ctrl-d and Ctrl-u move the selection, and the view follows", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await enableVimKeys(page);
+    await expect(box(page, 39)).toBeFocused();
+    const selected = () =>
+      page.evaluate(() =>
+        Number(
+          /message (\d+)/.exec(document.activeElement?.textContent ?? "")?.[1],
+        ),
+      );
+    await page.keyboard.press("Control+u");
+    await expect.poll(selected).toBeLessThan(39);
+    const up = await selected();
+    await expect(box(page, up)).toBeInViewport();
+    await expect(box(page, up)).toHaveAttribute("data-message-cursor", "");
+    await page.keyboard.press("Control+d");
+    await expect.poll(selected).toBeGreaterThan(up);
+    await expect(box(page, await selected())).toBeInViewport();
+
+    await page.keyboard.press("g");
+    await page.keyboard.press("g");
+    // The oldest loaded message; history pages in from the reader's own
+    // upward scrolling.
+    const oldest = page.locator("[data-message-id] > [data-layout]").first();
+    await expect(oldest).toBeFocused();
+    await expect(oldest).toBeInViewport();
+    await expect(oldest).toHaveAttribute("data-message-cursor", "");
+    await page.keyboard.press("Shift+G");
+    await expect(box(page, 39)).toBeFocused();
+    await expect(box(page, 39)).toBeInViewport();
+  });
+
+  test("Tab switches between a message's parts and never enters them", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await enableVimKeys(page);
+    const newest = box(page, 39);
+    await expect(newest).toBeFocused();
+    const avatar = page.getByRole("button", {
+      name: "View Fixture Reader profile",
+    });
+    const card = page.getByRole("dialog", {
+      name: "Fixture Reader profile preview",
+    });
+    await page.keyboard.press("Tab");
+    await expect(avatar).toBeFocused();
+    // The person's card shows, but Tab moves on rather than into it.
+    await expect(card).toBeVisible();
+    await page.keyboard.press("Tab");
+    await expect(newest).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(avatar).toBeFocused();
+    await expect(card).toBeVisible();
+    await page.keyboard.press("Shift+Tab");
+    await expect(newest).toBeFocused();
+    await expect(card).toHaveCount(0);
+    // Escape from a part goes back to its message.
+    await page.keyboard.press("Tab");
+    await expect(avatar).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(newest).toBeFocused();
+
+    // A message without parts keeps focus.
+    await page.keyboard.press("k");
+    await expect(box(page, 38)).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(box(page, 38)).toBeFocused();
   });
 });

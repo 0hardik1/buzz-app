@@ -3,13 +3,15 @@
  * their own arrow-key behavior: a move is that arrow, pressed on the focus.
  * Only what nothing handles falls back to scrolling.
  */
-import { cursorRow } from "./cursor";
+import { currentCursor, cursorRow, messageRows } from "./cursor";
 import { WHICH_KEY } from "./pending";
 import {
   activeMessageList,
   focusTarget,
+  messageListOf,
   selectedMessage,
   selectMessage,
+  selectNewestMessage,
 } from "../../features/messages/message-selection";
 import {
   composerFocusTarget,
@@ -100,46 +102,44 @@ function scroller() {
   );
 }
 
-/** Scroll, then keep a selected message selected among those in view. */
-function scrollThen(
-  move: (target: Element) => void,
-  pick: (rows: HTMLElement[]) => HTMLElement | undefined,
-) {
-  const target = scroller();
-  if (!target) return;
-  const hadSelection = !!selectedMessage();
-  move(target);
-  if (!hadSelection) return;
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => {
-      const row = pick(visibleMessages(target));
-      if (row) selectMessage(row);
-    }),
-  );
-}
-
-/** With nothing focused, the conversation's cursor message takes focus. */
-function resume() {
+/**
+ * The message a move starts from. A menu, dialog or the sidebar keeps its
+ * own focus; a part of a message starts from its message (or stays, for
+ * `go`); anywhere else starts from the conversation's cursor.
+ */
+function resume(parts = false) {
   const origin = focused();
-  if (origin) return origin;
-  const row = cursorRow(topModal() ?? activeMessageList());
-  if (!row) return;
-  selectMessage(row);
-  return focusTarget(row);
+  if (origin?.closest(`${MODAL}, [role="menu"]`) || (origin && inSidebar()))
+    return origin;
+  const row = origin?.closest<HTMLElement>(ROW) ?? currentCursor();
+  if (!row) return origin;
+  const box = focusTarget(row);
+  if (parts && origin && row.contains(origin)) return origin;
+  if (origin !== box) selectMessage(row);
+  return box;
 }
 
-/** `j` / `k`: the next or previous item, from the cursor when nothing is focused. */
-export function step(down: boolean) {
+/** `j` / `k`: the next or previous item, or message from the cursor. */
+export function step(down: boolean, settled = false) {
   const origin = resume();
   const selected = selectedMessage();
+  // A selection scrolled away is rendered alone; bring it back and let its
+  // neighbors render, so the move reaches the message beside it.
+  if (selected && !settled && !besideNeighbor(selected.element, down)) {
+    focusTarget(selected.element).scrollIntoView?.({ block: "nearest" });
+    let frames = 30;
+    const wait = () => {
+      if (besideNeighbor(selected.element, down) || --frames <= 0)
+        step(down, true);
+      else requestAnimationFrame(wait);
+    };
+    requestAnimationFrame(wait);
+    return;
+  }
   if (origin && press(origin, down ? "ArrowDown" : "ArrowUp")) {
     // Down past the newest message stays on it rather than typing.
     if (selected && typing()) selectMessage(selected.element);
     return;
-  }
-  if (!origin) {
-    const newest = visibleMessages(topModal() ?? activeMessageList()).at(-1);
-    if (newest) return selectMessage(newest);
   }
   // Sidebar rows are Tab stops without arrow keys; step between them.
   if (origin && sidebar()?.contains(origin)) {
@@ -169,23 +169,75 @@ export function sideways(right: boolean) {
   if (origin) press(origin, right ? "ArrowRight" : "ArrowLeft");
 }
 
-export const top = () =>
-  scrollThen(
-    (target) => target.scrollTo({ top: 0 }),
-    (rows) => rows[0],
-  );
-export const bottom = () =>
-  scrollThen(
-    (target) => target.scrollTo({ top: target.scrollHeight }),
-    (rows) => rows.at(-1),
-  );
-/** Half a page, keeping the selection near the middle (Neovim's `<C-d>zz`). */
-export const halfPage = (down: boolean) =>
-  scrollThen(
-    (target) =>
-      target.scrollBy({ top: ((down ? 1 : -1) * target.clientHeight) / 2 }),
-    (rows) => rows[Math.floor(rows.length / 2)],
-  );
+/** The list a message belongs to, with its rendered messages. */
+function listRows(row: HTMLElement) {
+  const list = messageListOf(row)?.element;
+  return list ? messageRows(list) : [];
+}
+
+/** Whether the message's rendered neighbor that way is the one beside it. */
+function besideNeighbor(row: HTMLElement, down: boolean) {
+  const rows = listRows(row);
+  const neighbor = rows[rows.indexOf(row) + (down ? 1 : -1)];
+  // Below the last rendered message, a newer one may still be rendering.
+  if (!neighbor)
+    return !down || row.dataset.messageId === messageListOf(row)?.list.newest();
+  const box = row.getBoundingClientRect();
+  const near = neighbor.getBoundingClientRect();
+  // ponytail: a fixed gap; rows sit flush or a margin apart.
+  return (down ? near.top - box.bottom : box.top - near.bottom) < LINE;
+}
+
+/**
+ * `gg` / `G`: the newest message, or the oldest loaded one, once scrolling
+ * there has rendered it. Without a message, just scroll.
+ */
+function edge(down: boolean) {
+  const row = resume()?.closest<HTMLElement>(ROW);
+  const target = scroller();
+  if (!target) return;
+  const list = row && messageListOf(row)?.element;
+  let frames = 60;
+  let last = Number.NaN;
+  const settle = () => {
+    if (down && list && selectNewestMessage(list)) return;
+    // The top can stop short of 0 at the history's edge; wait for rest.
+    const oldest =
+      !down && list && target.scrollTop === last && messageRows(list)[0];
+    if (oldest) return selectMessage(oldest);
+    last = target.scrollTop;
+    target.scrollTo({ top: down ? target.scrollHeight : 0 });
+    if (list && --frames > 0) requestAnimationFrame(settle);
+  };
+  target.scrollTo({ top: down ? target.scrollHeight : 0 });
+  if (list) requestAnimationFrame(settle);
+}
+export const top = () => edge(false);
+export const bottom = () => edge(true);
+
+/**
+ * `<C-d>` / `<C-u>`: the message half a page below or above, centred
+ * (Neovim's `<C-d>zz`). Without a message, half a page of scrolling.
+ */
+export function halfPage(down: boolean) {
+  const row = resume()?.closest<HTMLElement>(ROW);
+  const target = row ? scrollable(row) : scroller();
+  if (!target) return;
+  const distance = target.clientHeight / 2;
+  if (!row) return target.scrollBy({ top: down ? distance : -distance });
+  const goal =
+    focusTarget(row).getBoundingClientRect().top +
+    (down ? distance : -distance);
+  const rows = listRows(row);
+  const top = (candidate: HTMLElement) =>
+    focusTarget(candidate).getBoundingClientRect().top;
+  const next = down
+    ? (rows.find((candidate) => top(candidate) >= goal) ?? rows.at(-1))
+    : (rows.filter((candidate) => top(candidate) <= goal).at(-1) ?? rows[0]);
+  if (!next) return;
+  selectMessage(next);
+  focusTarget(next).scrollIntoView?.({ block: "center" });
+}
 
 /** Parts of a message that take focus: its author, links, files, reactions. */
 const PART =
@@ -196,8 +248,7 @@ const PART =
  * not in a message or it has no parts. Its hover toolbar is left to `go`.
  */
 export function messageStops() {
-  const cursor = cursorRow(topModal() ?? activeMessageList());
-  const origin = focused() ?? (cursor && focusTarget(cursor));
+  const origin = focused();
   const row = origin?.closest<HTMLElement>(ROW);
   if (!origin || !row || origin.matches(TYPING)) return;
   const parts = [...row.querySelectorAll<HTMLElement>(PART)].filter(
@@ -214,7 +265,6 @@ export function messageStops() {
 
 /** Tab / Shift-Tab: the message's next or previous part, wrapping to itself. */
 export function stepPart(forward: boolean) {
-  resume();
   const found = messageStops();
   if (!found) return;
   const { row, stops } = found;
@@ -225,12 +275,15 @@ export function stepPart(forward: boolean) {
   else focusKeyboardTarget(next);
 }
 
-/** Escape: from a message's part back to the message; else leave the field. */
+/** Escape: back to the cursor's message, from a field, its parts or the sidebar. */
 export function leave() {
   const origin = focused();
-  const row = origin?.closest<HTMLElement>(ROW);
-  if (origin && row && !origin.matches(TYPING) && origin !== focusTarget(row))
-    return selectMessage(row);
+  const pane = currentPane();
+  const row =
+    origin?.closest<HTMLElement>(ROW) ??
+    (pane && pane !== sidebar() ? cursorRow(pane) : undefined) ??
+    currentCursor();
+  if (row && !topModal()) return selectMessage(row);
   origin?.blur();
 }
 
@@ -318,7 +371,7 @@ export const inSidebar = () => {
  * Menu key and Shift+F10 open. False when the focus has none.
  */
 export function openActions() {
-  const origin = resume();
+  const origin = resume(true);
   if (!origin || !press(origin, "ContextMenu")) return false;
   // WebKit can leave focus on the item; the menu's keys need it inside.
   let frames = 10;
