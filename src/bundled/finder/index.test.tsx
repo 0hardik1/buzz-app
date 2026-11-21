@@ -209,10 +209,19 @@ test("⌘P searches the open conversation, else all of Buzz; ⌘⇧P switches in
   document.body.append(composer);
   visit("v1", "crew");
   show();
+  // Not over another modal, but over one on its way out, such as Finder
+  // itself just after Escape.
+  const modal = document.createElement("div");
+  modal.setAttribute("aria-modal", "true");
+  document.body.append(modal);
+  press(document.body);
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  modal.setAttribute("data-closed", "");
   // ⌘P works while typing.
   composer.focus();
   press(composer);
   expect(await selectedTab()).toBe("This channel");
+  modal.remove();
   const field = screen.getByRole("combobox");
   field.focus();
   press(field, true);

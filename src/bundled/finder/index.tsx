@@ -211,8 +211,12 @@ export const apply: PluginModule["apply"] = (ctx) => {
     };
   });
 
-  // Both work while Finder is open, so either key switches scope there.
-  const available = () => state.open || !activeModal(document);
+  // Both work while Finder is open, so either key switches scope there. A
+  // modal on its way out, such as Finder just after Escape, doesn't count.
+  const available = () => {
+    const modal = activeModal(document);
+    return state.open || !modal || modal.hasAttribute("data-closed");
+  };
   /** Focus is in a text field, by the shortcut dispatcher's own rule. */
   const typing = () => {
     const focused = document.activeElement as HTMLElement | null;
