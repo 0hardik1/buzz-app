@@ -344,16 +344,21 @@ export function createHeadPersistence(
         "readonly",
         (store, done, then) =>
           then(store.get(scope), (row: StartupRow | undefined) => {
-            const data = row?.data;
-            const index = rosterIndex(data?.discovery);
-            if (!data?.discovery) return done(data as SavedStartup | undefined);
-            const { savedAt, relayAuthor } = data.discovery;
+            if (!row?.data) return done(undefined);
+            const { discovery, ...settings } = row.data;
+            if (!discovery) return done(settings);
+            const index = rosterIndex(discovery);
+            const { savedAt, relayAuthor } = discovery;
             if (mode === "header")
               return done({
-                ...data,
+                ...settings,
                 discovery: { savedAt, relayAuthor, events: [] },
               });
-            if (!index) return done(data as SavedStartup);
+            if (!index)
+              return done({
+                ...settings,
+                discovery: discovery as SavedDiscovery,
+              });
             then(
               store.getAll(rosterKeys(scope)),
               (rows: { key: string; data: unknown[]; hash: string }[]) => {
@@ -368,11 +373,11 @@ export function createHeadPersistence(
                     shard?.hash !== expected.hash ||
                     !Array.isArray(shard.data)
                   )
-                    return done({ ...data, discovery: undefined });
+                    return done(settings);
                   for (const event of shard.data) events.push(event);
                 }
                 done({
-                  ...data,
+                  ...settings,
                   discovery: { savedAt, relayAuthor, events },
                 });
               },

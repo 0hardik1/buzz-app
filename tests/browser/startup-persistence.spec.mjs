@@ -152,6 +152,19 @@ test("startup storage batches roster updates and prunes without transferring the
         channels.acceptDiscovery([channelRoster(0, 1_700_000_002, agents)]);
         await saving;
         const afterRevocation = await cache.readStartup();
+        // Older clients can evict individual shards as independent rows.
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction("startup", "readwrite");
+          const store = tx.objectStore("startup");
+          const keys = store.getAllKeys();
+          keys.onsuccess = () => {
+            const shard = keys.result.find((key) => key.startsWith("!roster:"));
+            if (shard) store.delete(shard);
+          };
+          tx.oncomplete = resolve;
+          tx.onabort = () => reject(tx.error);
+        });
+        const incomplete = await cache.readStartup();
         channels.acceptDiscovery([channelRoster(1, 1_700_000_002)]);
         await channels.clearCache();
         return {
@@ -173,6 +186,9 @@ test("startup storage batches roster updates and prunes without transferring the
           ),
           preferencesSaved:
             afterRevocation.preferences.savedAt === changedPreferences.savedAt,
+          incompleteRejected:
+            incomplete.discovery === undefined &&
+            incomplete.preferences.savedAt === changedPreferences.savedAt,
         };
       },
       async cleanup() {
@@ -224,6 +240,7 @@ test("startup storage batches roster updates and prunes without transferring the
     latestSaved: true,
     immediatelyRevoked: true,
     preferencesSaved: true,
+    incompleteRejected: true,
   });
   expect(result.initialBytes).toBeGreaterThan(3_500_000);
   expect(result.replay.readBytes + result.replay.writtenBytes).toBeLessThan(
