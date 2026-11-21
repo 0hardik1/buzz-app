@@ -1384,9 +1384,11 @@ function ThreadMessages({
     request: number;
   }>();
   const rootId = snapshot.root?.id;
-  // What opens from this thread opens over its reply box.
+  // What opens from this thread opens over its reply box. Only an inline
+  // thread, the one a tab can take over, stacks sheets; a tab reads details.
   const composer = useComposerHandle(
     threadComposer(channelId, rootId ?? messageId),
+    !!handoff,
   );
   const rootPresentation = useMemo(
     () =>

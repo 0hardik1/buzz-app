@@ -1,21 +1,9 @@
-import {
-  type ReactNode,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
-import { createPortal } from "react-dom";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { formatItemTimestamp } from "../../shared/datetime";
 import { Button } from "../../shared/design-system/ui/Button";
+import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { useComposerScope } from "./composer-overlay";
-import {
-  RowKeepAlive,
-  useInlineContainers,
-  useReaderSlot,
-  useRequestedReader,
-} from "./inline-containers";
+import { readingOrigin, useReading } from "./inline-containers";
 import styles from "./Messages.module.css";
 
 const HEADING = /^H[1-6]$/;
@@ -41,34 +29,29 @@ function holdsBack(clip: HTMLElement) {
 }
 
 /** A details message reads in the chat as its opening brief, in full, and
- * opens whole in a reader over the composer it is answered from. The row
- * draws the reader's content, so it stays live and its links work. */
+ * opens whole in a reader over the composer it is answered from: its
+ * workspace draws that reader from the message's id. Without a workspace, as
+ * in search previews, it reads in a dialog of its own. */
 export function DetailsMessage({
   messageId,
+  channelId,
   author,
-  avatar,
   createdAt,
   preview,
   children,
 }: {
   messageId: string;
+  channelId: string;
   author: string;
-  /** The author's avatar, beside their name in the reader. */
-  avatar: ReactNode;
   createdAt: number;
   /** The whole message as the chat renders it; only its brief shows. */
   preview: ReactNode;
-  /** The reader's body. */
+  /** The reader's body, for its own dialog. */
   children: ReactNode;
 }) {
-  const { opener, dialogs } = useInlineContainers();
+  const reading = useReading();
   const composer = useComposerScope();
-  const target = { kind: "details", messageId } as const;
-  const slot = useReaderSlot(composer, target);
-  const keepMounted = useContext(RowKeepAlive);
-  const open = !!slot;
-  // Its reader is drawn from this row: it stays mounted while it reads.
-  useEffect(() => (open ? keepMounted?.() : undefined), [open, keepMounted]);
+  const [own, setOwn] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const clip = useRef<HTMLDivElement>(null);
   const [clipped, setClipped] = useState(false);
@@ -84,11 +67,16 @@ export function DetailsMessage({
     observer?.observe(element);
     return () => observer?.disconnect();
   }, []);
-  const time = formatItemTimestamp(createdAt, { withTime: true });
   // A send from its composer closes it.
-  const show = () =>
-    opener.open({ target, composer, trigger: trigger.current });
-  useRequestedReader(opener, target, show);
+  const show = () => {
+    if (!reading) setOwn(true);
+    else
+      reading.openDetails(
+        { kind: "details", channelId, messageId },
+        readingOrigin(composer),
+        trigger.current,
+      );
+  };
   return (
     <div className={styles.detailsPreview} data-clipped={clipped || undefined}>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: Show more is the keyboard path; this only widens the pointer target. */}
@@ -123,15 +111,18 @@ export function DetailsMessage({
           </Button>
         </span>
       )}
-      {slot?.title && createPortal(author, slot.title)}
-      {slot?.leading && createPortal(avatar, slot.leading)}
-      {slot?.description && createPortal(time, slot.description)}
-      {slot?.body &&
-        createPortal(
-          <div className={styles.detailsReader}>{children}</div>,
-          slot.body,
-        )}
-      {dialogs}
+      {!reading && (
+        <Dialog
+          open={own}
+          onOpenChange={setOwn}
+          title={author}
+          description={formatItemTimestamp(createdAt, { withTime: true })}
+          closeLabel="Close details"
+          finalFocus={trigger}
+        >
+          <div className={styles.detailsReader}>{children}</div>
+        </Dialog>
+      )}
     </div>
   );
 }

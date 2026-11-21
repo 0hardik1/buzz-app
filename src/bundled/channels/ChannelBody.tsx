@@ -1,13 +1,12 @@
 import { MessageLoading } from "../../features/messages/MessageLoading";
 import { useComposerScope } from "../../features/messages/composer-overlay";
 import {
-  InlineContainers,
-  type ThreadHandoff,
+  readingOrigin,
+  useReading,
 } from "../../features/messages/inline-containers";
 import {
   memo,
   type ReactNode,
-  useContext,
   useCallback,
   useEffect,
   useId,
@@ -38,8 +37,6 @@ export const ChannelBody = memo(function ChannelBody({
   marksRead,
   holding,
   onOpenThread,
-  hasThreadTab,
-  threadRequest,
   navigation,
   onContentReady,
 }: {
@@ -57,22 +54,10 @@ export const ChannelBody = memo(function ChannelBody({
   marksRead?: boolean | undefined;
   /** Show the loading notice instead of the list, as while a message is sought. */
   holding?: boolean | undefined;
-  /** Opens the thread's tab. A thread handed over from its sheet asks it to
-   * reveal the reply it was read at, or to reply to its reply target. */
+  /** Opens the thread's tab, where the workspace reads none inline. */
   onOpenThread?:
-    | ((
-        messageId: string,
-        threadRootId: string,
-        intent?: "reply" | "reveal",
-        replyParent?: string,
-      ) => void)
+    | ((messageId: string, threadRootId: string, intent?: "reply") => void)
     | undefined;
-  /** Whether a thread already has a tab, which it selects instead of reading
-   * inline. */
-  hasThreadTab?: ((channelId: string, rootId: string) => boolean) | undefined;
-  /** A visit to a thread read inline: once the timeline reveals its root, the
-   * thread opens over the conversation. */
-  threadRequest?: Readonly<{ rootId: string; signal: AbortSignal }> | undefined;
 }) {
   // The owner's Solo chat is a chat-style timeline that loads history on scroll.
   const conversation = useConversation();
@@ -81,14 +66,13 @@ export const ChannelBody = memo(function ChannelBody({
     channelId,
     ownSoloConversation: solo,
   } = conversation;
-  const opener = useContext(InlineContainers);
+  const reading = useReading();
   const composer = useComposerScope();
   // Stable, so memoized message rows keep their props across window updates.
   // The row it opens from is where focus returns: on macOS a click moves none.
-  // A thread with a tab, or with nothing to open over, opens its tab.
-  const live = useRef({ channelId, composer, onOpenThread, hasThreadTab });
+  const live = useRef({ channelId, composer, onOpenThread });
   useLayoutEffect(() => {
-    live.current = { channelId, composer, onOpenThread, hasThreadTab };
+    live.current = { channelId, composer, onOpenThread };
   });
   const read = useCallback(
     (
@@ -97,37 +81,24 @@ export const ChannelBody = memo(function ChannelBody({
       origin: Element | null,
       intent?: "reply",
     ) => {
-      const { channelId, composer, onOpenThread, hasThreadTab } = live.current;
-      // A thread handed over from its sheet opens its tab at its reply
-      // target's editor, else at the reply it was read at.
-      const openAsTab =
-        onOpenThread &&
-        ((handoff?: ThreadHandoff) => {
-          if (handoff?.replyParent)
-            onOpenThread(messageId, rootId, "reply", handoff.replyParent);
-          else if (handoff?.anchor)
-            onOpenThread(handoff.anchor, rootId, "reveal");
-          else onOpenThread(messageId, rootId, intent);
-        });
-      if (!opener) {
-        openAsTab?.();
+      const { channelId, composer, onOpenThread } = live.current;
+      if (!reading) {
+        onOpenThread?.(messageId, rootId, intent);
         return;
       }
-      opener.open({
-        target: {
+      reading.openThread(
+        {
           kind: "thread",
           channelId,
           rootId,
           messageId,
           reply: intent === "reply",
         },
-        composer,
-        trigger: origin instanceof HTMLElement ? origin : null,
-        hasTab: hasThreadTab?.(channelId, rootId),
-        openAsTab,
-      });
+        readingOrigin(composer),
+        origin instanceof HTMLElement ? origin : null,
+      );
     },
-    [opener],
+    [reading],
   );
   const openThread = useCallback(
     (
@@ -143,29 +114,6 @@ export const ChannelBody = memo(function ChannelBody({
         origin && !(focused && origin.contains(focused)) ? origin : focused,
         intent,
       );
-    },
-    [read],
-  );
-  const request = useRef(threadRequest);
-  useLayoutEffect(() => {
-    request.current = threadRequest;
-  });
-  const opened = useRef<AbortSignal | undefined>(undefined);
-  // The revealed root holds focus, so it takes focus back when the thread
-  // closes.
-  const revealed = useCallback(
-    (messageId: string, signal: AbortSignal) => {
-      const pending = request.current;
-      if (
-        !pending ||
-        pending.signal !== signal ||
-        pending.rootId !== messageId ||
-        signal.aborted ||
-        opened.current === signal
-      )
-        return;
-      opened.current = signal;
-      read(messageId, messageId, document.activeElement);
     },
     [read],
   );
@@ -253,7 +201,6 @@ export const ChannelBody = memo(function ChannelBody({
             (window.status === "ready" && window.freshness === "cached"))
         }
         {...(onOpenThread ? { onOpenThread: openThread } : {})}
-        onRevealed={revealed}
         revealMessageId={revealMessageId}
         openThreadRootId={openThreadRootId}
         inlineTarget={inlineTarget}

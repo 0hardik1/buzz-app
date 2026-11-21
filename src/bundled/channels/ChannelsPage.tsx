@@ -1,20 +1,15 @@
 import { useChannelHistoryFocus } from "./useChannelHistoryFocus";
 import type { Conversation } from "../../features/conversation/service";
 import { MediaReviewViewer } from "../../features/messages/MediaReviewViewer";
-import { DetailTabContext } from "../../features/messages/DetailTabContext";
 import {
   InlineContainers,
-  type InlineEntry,
-  type InlineOpener,
   type PanelRenderer,
-  useInlineContainerList,
+  useWorkspaceReading,
 } from "../../features/messages/inline-containers";
+import type { ReadingHost } from "../../features/messages/reading";
 import {
   type ComposerHandle,
-  type ComposerName,
   type MediaReviewOrigin,
-  composerChannel,
-  composerThread,
   threadComposer,
 } from "../../features/messages/composer-overlay";
 import { StartLinkedChat, canStartLinkedChat } from "./StartLinkedChat";
@@ -400,9 +395,28 @@ function ChannelWorkspace({
   archive?: ArchiveShortcut | undefined;
   read?: ReadShortcut | undefined;
 }) {
-  // What reads over the composers takes part in history; see useInlineVisit.
-  const inlineOpener = useRef<InlineOpener>(undefined);
-  const navigation = useInlineVisit(pageNavigation, inlineOpener.current);
+  // Threads, panels and details read over their composers, and take part in
+  // history. The page sees each visit without what they show.
+  const readingHost = useRef<ReadingHost>(undefined);
+  const panelRenderer = useRef<PanelRenderer>(undefined);
+  const { workspace: readingWorkspace, dialogs: readingDialogs } =
+    useWorkspaceReading(navigator, readingHost, panelRenderer);
+  const { reading } = readingWorkspace;
+  const readingState = useSyncExternalStore(
+    reading.subscribe,
+    reading.shown,
+    reading.shown,
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: what the reading shows decides the page's address.
+  const navigation = useMemo(() => {
+    if (!pageNavigation) return pageNavigation;
+    const target = reading.page(pageNavigation.target);
+    return target === pageNavigation.target
+      ? pageNavigation
+      : { ...pageNavigation, target };
+  }, [pageNavigation, reading, readingState]);
+  // The sheets already show the rest of this visit, so it is complete.
+  const presentedVisit = navigation !== pageNavigation;
   const messageDraft =
     navigation?.target.kind === "page"
       ? newMessage(navigation.target.route?.params)
@@ -1097,33 +1111,8 @@ function ChannelWorkspace({
     request: PageNavigation;
     inTimeline: boolean;
     rootId?: string;
-    /** Inline: the visit reveals its thread's root, which then opens over the
-     * conversation instead of in a tab. */
-    inlineThread?: boolean;
   }>();
   const { placement: threadPlacement } = useThreadPlacementPreference();
-  // A visit to a whole thread, such as a thread preview, reads it inline from
-  // its root. One with a tab still selects that tab.
-  const inlineThreadVisit =
-    threadPlacement === "inline" &&
-    !!currentId &&
-    !!requestedMessage &&
-    requestedThread === requestedMessage &&
-    !tabState.hasThreadTab(currentId, requestedMessage);
-  // The root can sit above the loaded history, as an older thread with new
-  // replies does: wait for verified rows and read older pages to find it.
-  // Each visit decides afresh: the window may have changed since the last.
-  const visits = useRef(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new navigation is a new visit.
-  const visitRequest = useMemo(() => ++visits.current, [navigation]);
-  const inlineRoot = useMessageOpening(
-    queries.channels,
-    currentId ?? "",
-    inlineThreadVisit && !cached && !current?.cached
-      ? requestedMessage
-      : undefined,
-    visitRequest,
-  );
   useEffect(() => {
     if (
       cached ||
@@ -1160,33 +1149,16 @@ function ChannelWorkspace({
     currentId,
     queries,
   ]);
-  // Likewise frozen once found or not: a root that never loads opens in a tab.
-  useEffect(() => {
-    if (!navigation || navigation.signal.aborted || inlineRoot === undefined)
-      return;
-    setExactOpening((opening) =>
-      opening?.request === navigation
-        ? opening
-        : {
-            request: navigation,
-            inTimeline: inlineRoot,
-            inlineThread: inlineRoot,
-          },
-    );
-  }, [navigation, inlineRoot]);
   // A live connection can still be confirming its restored membership. Keep
   // the pending intent; an exact reader cannot use display-only authority.
   const exact = useMemo(
     () =>
       cached || current?.cached
         ? undefined
-        : exactOpening?.request === navigation
-          ? exactOpening
-          : navigation &&
-              requestedMessage &&
-              requestedThread === requestedMessage &&
-              !inlineThreadVisit
-            ? { request: navigation, inTimeline: false }
+        : navigation && requestedMessage && requestedThread === requestedMessage
+          ? { request: navigation, inTimeline: false }
+          : exactOpening?.request === navigation
+            ? exactOpening
             : undefined,
     [
       cached,
@@ -1195,19 +1167,7 @@ function ChannelWorkspace({
       requestedMessage,
       requestedThread,
       exactOpening,
-      inlineThreadVisit,
     ],
-  );
-  const inlineThreadSignal = exact?.inlineThread
-    ? navigation?.signal
-    : undefined;
-  // Stable per visit, so the memoized body keeps its props.
-  const inlineThreadRequest = useMemo(
-    () =>
-      inlineThreadSignal && requestedMessage
-        ? { rootId: requestedMessage, signal: inlineThreadSignal }
-        : undefined,
-    [inlineThreadSignal, requestedMessage],
   );
   // The route addresses a thread; its tab owns presentation, the route only
   // selects it and supplies the reveal request.
@@ -1479,48 +1439,20 @@ function ChannelWorkspace({
     if (mediaReviews.length !== showingMediaReviews.length)
       setMediaReviews(showingMediaReviews);
   }, [mediaReviews.length, showingMediaReviews]);
-  // Threads, panels and details read over their composers.
-  const panelRenderer = useRef<PanelRenderer>(undefined);
-  const threadTabsHold = useRef<(name: ComposerName) => boolean>(undefined);
-  const containers = useInlineContainerList(
-    currentId,
-    (target, controls) => panelRenderer.current?.(target, controls),
-    useMemo(() => ({ navigator, address: inlineAddress }), [navigator]),
-    true,
-    threadTabsHold,
-  );
-  inlineOpener.current = containers.opener;
   // Closing a thread's tab retires the visits that selected it, and those of
-  // readers over its composer, wherever they are in history.
+  // what reads over its composer, wherever they are in history.
   const threadTabVisits = (
     tab: Extract<ConversationTab, { kind: "thread" }>,
   ) => [
     ...tabState.threadVisits(tab.channelId, rootOfTab(tab)),
-    ...containers.opener.retire(threadComposer(tab.channelId, rootOfTab(tab))),
+    ...reading.retire(threadComposer(tab.channelId, rootOfTab(tab))),
   ];
-  const presentedVisit =
-    !!pageNavigation && containers.opener.presents(pageNavigation.entryId);
-  // A visit to a reader's address (a reload, a link) reads as its message's;
-  // its row opens the reader once it is on screen.
-  const requestedReader =
-    pageNavigation?.target.kind === "conversation" &&
-    !containers.opener.presents(pageNavigation.entryId)
-      ? pageNavigation.target.reader
-      : undefined;
-  useLayoutEffect(() => {
-    containers.opener.requestReader(
-      requestedReader && {
-        kind: requestedReader.kind,
-        messageId: requestedReader.messageId,
-      },
-    );
-  }, [containers.opener, requestedReader]);
   // An inline opening's own visit completes at once: it is already shown.
   useLayoutEffect(() => {
     if (presentedVisit) pageNavigation?.complete({ status: "opened" });
   }, [pageNavigation, presentedVisit]);
   const secondary = useConversationTabs({
-    containers: containers.opener,
+    reading,
     state: tabState,
     relay,
     session: queries,
@@ -1650,7 +1582,6 @@ function ChannelWorkspace({
         entry.panel.channelMenu.eligible(current, queries)
       ),
   });
-  threadTabsHold.current = secondary.holdsComposer;
   panelRenderer.current = secondary.renderInlinePanel;
   const focusConversation = useRef(false);
   const closeAllTabs = () => {
@@ -1918,7 +1849,7 @@ function ChannelWorkspace({
       // Retire transient details first; selecting the thread is the last word.
       open(undefined);
       // A thread shows in one place: its tab, not also over the conversation.
-      containers.opener.close(threadComposer(channelId, threadRootId));
+      reading.handOver(channelId, threadRootId);
       // Every opening keeps existing work: a new thread adds a tab and an
       // open one is selected wherever it was placed.
       tabState.openThreadTab(
@@ -1962,9 +1893,51 @@ function ChannelWorkspace({
       threadPane,
       tabState.openThreadTab,
       tabState.leaveVisit,
-      containers.opener,
+      reading,
     ],
   );
+  // The reading's tabs. A thread handed over from its sheet opens its tab at
+  // its reply target's editor, else at the reply it was read at.
+  readingHost.current = {
+    inline: () => threadPlacement === "inline",
+    hasThreadTab: tabState.hasThreadTab,
+    openThreadTab: ({ channelId, messageId, rootId, reply }, handoff) => {
+      if (handoff?.replyParent)
+        openChannelThread(
+          channelId,
+          messageId,
+          rootId,
+          "reply",
+          handoff.replyParent,
+        );
+      else if (handoff?.anchor)
+        openChannelThread(channelId, handoff.anchor, rootId, "reveal");
+      else
+        openChannelThread(
+          channelId,
+          messageId,
+          rootId,
+          reply ? "reply" : undefined,
+        );
+    },
+    hasPanelTab: secondary.readingPanels.has,
+    openPanelTab: secondary.readingPanels.open,
+    adoptVisits: (content, visits) =>
+      tabState.adoptVisits(
+        visits,
+        content.kind === "thread"
+          ? {
+              thread: {
+                channelId: content.channelId,
+                messageId: content.rootId,
+                rootId: content.rootId,
+              },
+            }
+          : {
+              detail: { channelId: content.channelId, target: content.target },
+            },
+      ),
+  };
   const openThread = useCallback(
     (
       messageId: string,
@@ -2516,8 +2489,6 @@ function ChannelWorkspace({
               highlightedThread ? rootOfTab(highlightedThread) : undefined
             }
             onOpenThread={openThread}
-            hasThreadTab={tabState.hasThreadTab}
-            threadRequest={inlineThreadRequest}
             revealMessageId={
               sent?.channelId === current.id ? sent.id : undefined
             }
@@ -3020,7 +2991,7 @@ function ChannelWorkspace({
         )}
       {secondary.drag.feedback}
       {secondary.hosts}
-      {containers.dialogs}
+      {readingDialogs}
       <p role="status" className="sr-only">
         {secondary.announcement}
       </p>
@@ -3101,15 +3072,16 @@ function ChannelWorkspace({
       </PanelDock>
     </div>
   );
-  const page = (
+  return (
     // The review reads thread-tab links like the workspace.
-    <DetailTabContext value={secondary.detailTabs}>
+    <InlineContainers value={readingWorkspace}>
       <LinkThreadTabContext value={openLinkedThread}>
         <ConversationChannel
           session={queries}
           scope={scope}
           extensions={extensions}
           channel={current}
+          sheets
           interactions={{
             onOpenLink: openLink,
             canOpenLink,
@@ -3143,9 +3115,8 @@ function ChannelWorkspace({
         </ConversationChannel>
         {soloMoveNotices}
       </LinkThreadTabContext>
-    </DetailTabContext>
+    </InlineContainers>
   );
-  return <InlineContainers value={containers.opener}>{page}</InlineContainers>;
 }
 
 export function mediaReviewForDestination<
@@ -3186,113 +3157,4 @@ export function ConversationIcon({
   ) : (
     <Icon size="1rem" />
   );
-}
-
-/** The conversation an address is in, without what reads over it. */
-type ConversationTarget = Extract<OpenTarget, { kind: "conversation" }>;
-const conversationOf = (target: ConversationTarget): ConversationTarget => ({
-  version: 1,
-  kind: "conversation",
-  scope: target.scope,
-  channelId: target.channelId,
-});
-
-/**
- * The address of what reads over a composer, so opening it is a visit: a
- * thread reads from its root, a panel by its target, a details or diff
- * message as a reader over its own conversation. The current address stands
- * when it already names the entry, so opening it again adds no visit.
- */
-function inlineAddress(
-  entry: InlineEntry | undefined,
-  current: OpenTarget,
-): OpenTarget | undefined {
-  if (current.kind !== "conversation") return undefined;
-  const base = conversationOf(current);
-  if (!entry) return base;
-  const { target } = entry;
-  // Reading never selects another channel: what opens over another channel's
-  // thread tab keeps this conversation's address, naming only what it reads.
-  switch (target.kind) {
-    case "thread":
-      if (target.channelId !== current.channelId) return undefined;
-      return current.threadRootId === target.rootId &&
-        current.channelId === target.channelId &&
-        !current.detail &&
-        !current.reader
-        ? current
-        : {
-            ...base,
-            channelId: target.channelId,
-            messageId: target.rootId,
-            threadRootId: target.rootId,
-          };
-    case "panel": {
-      const opening = target.opening as PanelOpening;
-      // A root of another channel would name a thread this one lacks.
-      const rootId =
-        opening.channelId === current.channelId ? opening.rootId : undefined;
-      return current.detail?.target === opening.target &&
-        current.detail.rootId === rootId
-        ? current
-        : {
-            ...base,
-            detail: {
-              target: opening.target,
-              ...(rootId ? { rootId } : {}),
-            },
-          };
-    }
-    default: {
-      if (
-        current.reader?.kind === target.kind &&
-        current.reader.messageId === target.messageId
-      )
-        return current;
-      const name = entry.composer?.name ?? "";
-      const rootId = composerThread(name);
-      const channelId = composerChannel(name);
-      return {
-        ...base,
-        reader: {
-          kind: target.kind,
-          messageId: target.messageId,
-          ...(rootId ? { rootId } : {}),
-          ...(channelId && channelId !== current.channelId
-            ? { channelId }
-            : {}),
-        },
-      };
-    }
-  }
-}
-
-/**
- * The visit the page presents. A visit an inline opening made shows as its
- * plain conversation: what is open over its composers already shows the rest,
- * and the visit is complete. A reader's address otherwise reads as its
- * message's, revealed in the timeline or its thread, and fails as a missing
- * message does.
- */
-function useInlineVisit(
-  navigation: PageNavigation | undefined,
-  opener: InlineOpener | undefined,
-) {
-  const presented = !!navigation && !!opener?.presents(navigation.entryId);
-  return useMemo(() => {
-    const target = navigation?.target;
-    if (!navigation || target?.kind !== "conversation") return navigation;
-    if (presented) return { ...navigation, target: conversationOf(target) };
-    const reader = target.reader;
-    // Another channel's reader opens from its tab's row, if that is here.
-    if (!reader || target.messageId || reader.channelId) return navigation;
-    return {
-      ...navigation,
-      target: {
-        ...target,
-        messageId: reader.messageId,
-        ...(reader.rootId ? { threadRootId: reader.rootId } : {}),
-      },
-    };
-  }, [navigation, presented]);
 }

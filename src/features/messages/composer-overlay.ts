@@ -33,6 +33,9 @@ export type ComposerHandle = Readonly<{
   /** This scope alone: two scopes can share a name, as one channel in two
    * panes. */
   id: string;
+  /** What opens from this scope reads on sheets over it, as from the
+   * conversation or a thread read inline; elsewhere only details do. */
+  sheets: boolean;
   /** The mounted form, or null while none is shown. */
   form(): HTMLElement | null;
   /** Mounts `form` as this scope's composer; returns its release. */
@@ -40,7 +43,10 @@ export type ComposerHandle = Readonly<{
   subscribe(listener: () => void): () => void;
 }>;
 let handles = 0;
-export function createComposerHandle(name: ComposerName): ComposerHandle {
+export function createComposerHandle(
+  name: ComposerName,
+  sheets = false,
+): ComposerHandle {
   const id = `${name}#${++handles}`;
   let current: HTMLElement | null = null;
   const listeners = new Set<() => void>();
@@ -50,6 +56,7 @@ export function createComposerHandle(name: ComposerName): ComposerHandle {
   return {
     name,
     id,
+    sheets,
     form: () => current,
     attach: (form) => {
       current = form;

@@ -1,33 +1,35 @@
-import { DetailTabContext } from "../../features/messages/DetailTabContext";
 import { useComposerScope } from "../../features/messages/composer-overlay";
 import {
-  RowKeepAlive,
-  useInlineContainers,
-  useReaderSlot,
-  useRequestedReader,
+  panelContent,
+  readingOrigin,
+  useReading,
 } from "../../features/messages/inline-containers";
 import {
   type ComponentProps,
   type ReactNode,
-  useContext,
-  useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
+import { panelOpening, type Panels } from "../../features/panels/service";
 import type { ChannelMessage } from "../../features/relay/contracts";
 import { safeMessageUrl } from "../../features/relay/message-content";
 import { ArrowsOutIcon } from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
+import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { DiffViewer } from "./DiffViewer";
 import { parsePatch } from "./parse";
 import styles from "./Diffs.module.css";
 
+/** The panel target that reads a diff message whole. */
+export const diffTarget = (messageId: string) => `buzz-diff:${messageId}`;
+const TARGET = /^buzz-diff:([0-9a-f]{64})$/;
+export const diffTargetMessage = (target: string) => TARGET.exec(target)?.[1];
+
 /** The expanded diff, with its own layout choice: each sheet or tab that
  * shows it starts unified. */
-function DiffReader({
+export function DiffReader({
   viewer,
   warning,
 }: {
@@ -61,22 +63,12 @@ function DiffReader({
   );
 }
 
-export function DiffMessage({ message }: { message: ChannelMessage }) {
-  const tabs = useContext(DetailTabContext);
-  const { opener, dialogs } = useInlineContainers();
-  const composer = useComposerScope();
-  const target = { kind: "diff", messageId: message.id } as const;
-  const slot = useReaderSlot(composer, target);
-  const keepMounted = useContext(RowKeepAlive);
-  const open = !!slot;
-  // Its reader is drawn from this row: it stays mounted while it reads.
-  useEffect(() => (open ? keepMounted?.() : undefined), [open, keepMounted]);
-  const expand = useRef<HTMLButtonElement>(null);
-  const files = useMemo(() => parsePatch(message.content), [message.content]);
-  const show = useRef<() => void>(undefined);
-  useRequestedReader(opener, target, () => show.current?.());
-  const meta = message.diff;
-  if (!meta) return null;
+/** What a diff message shows: its title, source, viewer and warning. */
+export function useDiff(message: ChannelMessage | null | undefined) {
+  const content = message?.content ?? "";
+  const files = useMemo(() => parsePatch(content), [content]);
+  const meta = message?.diff;
+  if (!message || !meta) return undefined;
   const repoUrl = meta.repoUrl ? safeMessageUrl(meta.repoUrl) : undefined;
   const commit = meta.commitSha;
   const commitUrl =
@@ -84,8 +76,6 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
       ? `${repoUrl.replace(/\/$/, "")}/commit/${commit}`
       : undefined;
   const source = commitUrl || repoUrl;
-  const title = meta.filePath || "Diff";
-  const viewer = { content: message.content, files, filePath: meta.filePath };
   const warning = meta.truncated && (
     <p className={styles.notice}>
       Diff truncated.{" "}
@@ -98,23 +88,53 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
       )}
     </p>
   );
-  const reader = <DiffReader viewer={viewer} warning={warning} />;
-  show.current = () =>
-    opener.open({
-      target,
-      composer,
-      trigger: expand.current,
-      // A diff already in a tab shows there, as it was left.
-      hasTab: tabs?.has(`diff:${message.id}`),
-      openAsTab:
-        tabs &&
-        (() =>
-          tabs.open({
-            id: `diff:${message.id}`,
-            title,
-            content: reader,
-          })),
-    });
+  return {
+    meta,
+    commit,
+    source,
+    title: meta.filePath || "Diff",
+    viewer: { content: message.content, files, filePath: meta.filePath },
+    warning,
+  };
+}
+
+/**
+ * A diff message's card. Expand reads it whole in the diff panel, over the
+ * composer it is answered from or in a tab, as a link would open it. Without
+ * a workspace, as in search previews, it reads in a dialog of its own.
+ */
+export function DiffMessage({
+  message,
+  panels,
+}: {
+  message: ChannelMessage;
+  panels?: Pick<Panels, "resolve"> | undefined;
+}) {
+  const reading = useReading();
+  const composer = useComposerScope();
+  const [own, setOwn] = useState(false);
+  const expand = useRef<HTMLButtonElement>(null);
+  const diff = useDiff(message);
+  if (!diff) return null;
+  const { meta, commit, source, title, viewer, warning } = diff;
+  const show = () => {
+    const opening =
+      reading &&
+      panels &&
+      panelOpening(
+        panels,
+        message.channelId,
+        diffTarget(message.id),
+        message.threadRootId,
+      );
+    if (opening)
+      reading.openPanel(
+        panelContent(opening, title),
+        readingOrigin(composer),
+        expand.current,
+      );
+    else setOwn(true);
+  };
   return (
     <>
       <section className={styles.card} aria-label={`Diff: ${title}`}>
@@ -136,7 +156,7 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
             size="sm"
             aria-label="Expand diff"
             icon={<ArrowsOutIcon size={16} aria-hidden="true" />}
-            onClick={() => show.current?.()}
+            onClick={show}
           />
         </header>
         {meta.description && (
@@ -152,9 +172,18 @@ export function DiffMessage({ message }: { message: ChannelMessage }) {
         </section>
         {warning}
       </section>
-      {slot?.title && createPortal(title, slot.title)}
-      {slot?.body && createPortal(reader, slot.body)}
-      {dialogs}
+      {own && (
+        <Dialog
+          open
+          onOpenChange={setOwn}
+          title={title}
+          size="expanded"
+          closeLabel="Close diff"
+          finalFocus={expand}
+        >
+          <DiffReader viewer={viewer} warning={warning} />
+        </Dialog>
+      )}
     </>
   );
 }

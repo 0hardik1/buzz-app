@@ -15,7 +15,6 @@ import {
   overlayHost,
   useComposerScope,
 } from "./composer-overlay";
-import { RowKeepAlive } from "./inline-containers";
 import { Collapsible } from "@base-ui/react/collapsible";
 import { formatItemTimestamp } from "../../shared/datetime";
 import { ProfilePeek } from "../profiles/ProfilePeek";
@@ -1033,19 +1032,12 @@ function MessageRowContent({
   const relayedAgent = row.relayedFrom?.verified
     ? row.relayedFrom.agent
     : undefined;
-  const relayedProfile = relayedAgent
-    ? directory.profiles.get(relayedAgent)
-    : undefined;
-  const reader = relayedAgent
-    ? {
-        name: resolveName(
-          relayedAgent,
-          relayedProfile?.name ?? relayedAgent.slice(0, 10),
-        ),
-        picture: avatarMedia(relayedProfile?.picture, media),
-        agent: agentPubkeys?.has(relayedAgent) || relayedProfile?.isAgent,
-      }
-    : { name, picture, agent: avatarShape === "squircle" };
+  const readerName = relayedAgent
+    ? resolveName(
+        relayedAgent,
+        directory.profiles.get(relayedAgent)?.name ?? relayedAgent.slice(0, 10),
+      )
+    : name;
   const body =
     bodyContent ??
     (row.forward ? (
@@ -1119,16 +1111,8 @@ function MessageRowContent({
     ) : details ? (
       <DetailsMessage
         messageId={row.id}
-        author={reader.name}
-        avatar={
-          <Avatar
-            src={reader.picture}
-            alt=""
-            fallback={reader.name}
-            size="small"
-            shape={reader.agent ? "squircle" : "circle"}
-          />
-        }
+        channelId={row.channelId}
+        author={readerName}
         createdAt={row.createdAt}
         preview={
           <MessageMarkdown
@@ -1794,29 +1778,26 @@ function MessageRowContent({
                       )}
                     </div>
                   )}
-                  {/* Readers drawn from this row keep it mounted. */}
-                  <RowKeepAlive value={keepRowMounted}>
-                    {extensions?.messages ? (
-                      <MessageCard
-                        registry={extensions.messages}
-                        renderer={messageRenderer}
-                        message={row}
-                        onFailedChange={(renderer, failed) =>
-                          setFailedRenderer((current) =>
-                            failed
-                              ? renderer
-                              : current === renderer
-                                ? undefined
-                                : current,
-                          )
-                        }
-                      >
-                        {body}
-                      </MessageCard>
-                    ) : (
-                      body
-                    )}
-                  </RowKeepAlive>
+                  {extensions?.messages ? (
+                    <MessageCard
+                      registry={extensions.messages}
+                      renderer={messageRenderer}
+                      message={row}
+                      onFailedChange={(renderer, failed) =>
+                        setFailedRenderer((current) =>
+                          failed
+                            ? renderer
+                            : current === renderer
+                              ? undefined
+                              : current,
+                        )
+                      }
+                    >
+                      {body}
+                    </MessageCard>
+                  ) : (
+                    body
+                  )}
                   {editedInBubble && shown.edited && <EditedMarker />}
                   {reactionsInBubble && !withoutReactions && reactionContent}
                 </div>

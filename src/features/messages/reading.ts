@@ -256,7 +256,7 @@ export function addressOf(
   const thread = slot === "dialog" ? undefined : composerThread(slot);
   const beneath =
     slot === "dialog"
-      ? { ...current, reader: undefined }
+      ? omit(current, "reader")
       : thread && composerChannel(slot) === current.channelId
         ? threadAt(base, thread)
         : base;
@@ -276,7 +276,7 @@ export function addressOf(
     default: {
       const rootId = slot === "dialog" ? current.threadRootId : thread;
       return {
-        ...withoutUndefined(beneath),
+        ...beneath,
         reader: {
           messageId: content.messageId,
           ...(rootId ? { rootId } : {}),
@@ -285,10 +285,15 @@ export function addressOf(
     }
   }
 }
-const withoutUndefined = <T extends object>(value: T): T =>
-  Object.fromEntries(
-    Object.entries(value).filter(([, field]) => field !== undefined),
-  ) as T;
+/** `target` without the parts named by `keys`. */
+const omit = (
+  target: ConversationTarget,
+  ...keys: ("reader" | "detail" | "messageId" | "threadRootId")[]
+): ConversationTarget => {
+  const next: Record<string, unknown> = { ...target };
+  for (const key of keys) delete next[key];
+  return next as ConversationTarget;
+};
 
 /** What the workspace does that the sheets cannot: its tabs. */
 export type ReadingHost = Readonly<{
@@ -382,12 +387,12 @@ export function pageTarget(
       item.content.target === target.detail?.target,
   );
   if (!thread && !panel && !target.reader) return target;
-  const { reader: _reader, detail, messageId, threadRootId, ...rest } = target;
-  return withoutUndefined({
-    ...rest,
-    ...(panel ? {} : { detail }),
-    ...(thread ? {} : { messageId, threadRootId }),
-  }) as OpenTarget;
+  return omit(
+    target,
+    "reader",
+    ...(panel ? (["detail"] as const) : []),
+    ...(thread ? (["messageId", "threadRootId"] as const) : []),
+  );
 }
 
 /** `target` without the parts that name `closing`: what it returns to when
@@ -399,12 +404,12 @@ function withoutNamed(
   if (target.kind !== "conversation") return undefined;
   let next: ConversationTarget = target;
   for (const content of closing) {
-    if (content.kind === "details") next = { ...next, reader: undefined };
-    else if (content.kind === "panel") next = { ...next, detail: undefined };
+    if (content.kind === "details") next = omit(next, "reader");
+    else if (content.kind === "panel") next = omit(next, "detail");
     else if (next.threadRootId === content.rootId)
-      next = { ...next, messageId: undefined, threadRootId: undefined };
+      next = omit(next, "messageId", "threadRootId");
   }
-  return withoutUndefined(next);
+  return next;
 }
 
 let sequence = 0;

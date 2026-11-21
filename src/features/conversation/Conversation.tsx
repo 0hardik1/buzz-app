@@ -27,10 +27,10 @@ import { MediaReviewViewer } from "../messages/MediaReviewViewer";
 import { channelComposer } from "../messages/composer-overlay";
 import {
   ComposerScopeProvider,
-  type InlineTarget,
   type ThreadHandoff,
   useComposerHandle,
 } from "../messages/inline-containers";
+import type { ThreadContent } from "../messages/reading";
 import { ThreadPanel, type ThreadPanelProps } from "../messages/ThreadPanel";
 import { useListedChannel } from "../relay/listed-channel";
 import { ownSolo } from "../solo/labels";
@@ -130,6 +130,9 @@ type ChannelProps = Pick<Conversation, "session" | "scope" | "extensions"> & {
   channelName?: string | undefined;
   /** Whether the channel visit marks it read; see MessageManagement. */
   active?: boolean | undefined;
+  /** What opens from its conversation reads on sheets over its composer, as
+   * on the page's own channel. */
+  sheets?: boolean | undefined;
   children: ReactNode;
 } & (
     | {
@@ -180,6 +183,7 @@ export function ConversationChannel(props: ChannelProps) {
       extensions={extensions}
       channel={channel}
       channelName={channelName}
+      sheets={!!props.sheets}
       interactions={interactions}
     >
       {children}
@@ -225,9 +229,11 @@ function Provider({
   extensions,
   channel,
   channelName,
+  sheets,
   interactions: { onOpenLink, canOpenLink, onOpenMediaReview },
 }: Pick<ChannelProps, "session" | "scope" | "extensions" | "channel"> & {
   channelName: string;
+  sheets: boolean;
   interactions: ConversationInteractions;
   children: ReactNode;
 }) {
@@ -263,7 +269,10 @@ function Provider({
       onOpenMediaReview,
     ],
   );
-  const composer = useComposerHandle(id ? channelComposer(id) : undefined);
+  const composer = useComposerHandle(
+    id ? channelComposer(id) : undefined,
+    sheets,
+  );
   return (
     <Context.Provider value={value}>
       <ComposerScopeProvider handle={composer} renderThread={inlineThread}>
@@ -277,7 +286,7 @@ function Provider({
 
 /** A thread read over its channel's composer, inside its conversation. */
 const inlineThread = (
-  target: Extract<InlineTarget, { kind: "thread" }>,
+  target: ThreadContent,
   handoff: { current: (() => ThreadHandoff) | undefined },
 ) => (
   <ConversationThread

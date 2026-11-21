@@ -1,13 +1,10 @@
-import type { DetailTab } from "../../features/messages/DetailTabContext";
+import type { ComposerHandle } from "../../features/messages/composer-overlay";
 import {
-  type ComposerHandle,
-  type ComposerName,
-  threadComposer,
-} from "../../features/messages/composer-overlay";
-import type {
-  InlineOpener,
-  PanelRenderer,
+  type PanelRenderer,
+  panelContent,
+  readingOrigin,
 } from "../../features/messages/inline-containers";
+import type { PanelContent, Reading } from "../../features/messages/reading";
 import { PanelView } from "../../features/panels/PanelView";
 import { PanelSubviewHost } from "../../features/panels/PanelSubview";
 import panelStyles from "../../features/panels/Panels.module.css";
@@ -106,10 +103,10 @@ export function useConversationTabs({
   onVisitPanel,
   onClosePanel,
   onCloseTabs,
-  containers,
+  reading,
 }: {
   /** Where a panel opened from a message reads over its composer. */
-  containers?: InlineOpener | undefined;
+  reading?: Reading | undefined;
   state: ReturnType<typeof useChannelTabState>;
   relay: RelayData;
   session: RelaySession;
@@ -169,39 +166,6 @@ export function useConversationTabs({
   ): void;
 }) {
   const currentId = current?.id;
-  const [detailTabs, setDetailTabs] = useState<
-    (DetailTab & { channelId: string | undefined })[]
-  >([]);
-  // Reader tabs belong to this workspace, not to the rows that opened them.
-  // Opening one that is already a tab shows it.
-  const openDetailTab = useCallback(
-    (tab: DetailTab) => {
-      setDetailTabs((tabs) => [
-        ...tabs.filter((item) => item.id !== tab.id),
-        { ...tab, channelId: currentId },
-      ]);
-      tabState.select(tab.id);
-    },
-    [currentId, tabState.select],
-  );
-  const openDetailTabs = useRef(detailTabs);
-  openDetailTabs.current = detailTabs;
-  // Stable, so rows that open readers never re-render as tabs change.
-  const detailTabControls = useMemo(
-    () => ({
-      open: openDetailTab,
-      has: (id: string) => openDetailTabs.current.some((tab) => tab.id === id),
-    }),
-    [openDetailTab],
-  );
-  // A reader tab reads a message in its channel; another channel leaves it.
-  useEffect(() => {
-    setDetailTabs((tabs) =>
-      tabs.some((tab) => tab.channelId !== currentId)
-        ? tabs.filter((tab) => tab.channelId === currentId)
-        : tabs,
-    );
-  }, [currentId]);
   const viewer = queries.viewer;
   const { entries, setEntries } = tabState;
   const panelHistory = useRef({ onVisitPanel, onClosePanel });
@@ -349,8 +313,8 @@ export function useConversationTabs({
     [selectOpening, setEntries, tabState.moveEntry],
   );
   // A panel opened from a message reads over that message's composer.
-  const renderInlinePanel: PanelRenderer = (target, { close, navigate }) => {
-    const entry = target.opening as Opening;
+  const renderInlinePanel: PanelRenderer = (content, { close, navigate }) => {
+    const entry = content.opening as Opening;
     return (
       <PanelSubviewHost close={close}>
         {/* The card bounds the content so it scrolls, as in a panel tab. */}
@@ -368,7 +332,7 @@ export function useConversationTabs({
                     active() &&
                     panelOpening(panels, entry.channelId, next, entry.rootId);
                   if (!opening) return false;
-                  navigate(panelTarget(opening));
+                  navigate(panelContent(opening));
                   return true;
                 },
               }}
@@ -393,19 +357,15 @@ export function useConversationTabs({
         (document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null);
-      const openAsTab = () => open(entry, append);
-      if (!containers) {
-        openAsTab();
-        return;
-      }
-      containers.open({
-        target: panelTarget(entry),
-        composer,
-        trigger,
-        openAsTab,
-      });
+      if (!reading) open(entry, append);
+      else
+        reading.openPanel(
+          panelContent(entry),
+          readingOrigin(composer),
+          trigger,
+        );
     },
-    [open, containers],
+    [open, reading],
   );
   const panelTabs = entries.filter(
     (entry) =>
@@ -526,7 +486,6 @@ export function useConversationTabs({
     ...leadingIds,
     ...sideTabs.map((tab) => tab.id),
     ...sidePanelTabs.map(tabId),
-    ...detailTabs.map((tab) => tab.id),
   ];
   const mainTabIds = () => [
     ...mainTabs.map((tab) => tab.id),
@@ -648,10 +607,6 @@ export function useConversationTabs({
       else if (target) target.focus({ preventScroll: true });
       else focusSplit.current = true;
     }
-  };
-  const closeDetail = (id: string) => {
-    setDetailTabs((tabs) => tabs.filter((tab) => tab.id !== id));
-    afterClose(id);
   };
   const closeConversationTab = (id: string) => {
     const closing = tabState.tabs.find((tab) => tab.id === id);
@@ -1084,7 +1039,6 @@ export function useConversationTabs({
       navigationSignal?.aborted ||
       !(
         closing.length ||
-        detailTabs.some((tab) => tab.id !== keep) ||
         tabState.entries.some((entry) => panelTabId(entry) !== keep) ||
         (tabState.settings && keep !== "settings") ||
         tabState.thread ||
@@ -1102,7 +1056,6 @@ export function useConversationTabs({
       (entry) => panelTabId(entry) === keep,
     );
     opening.current = entryList.current[0];
-    setDetailTabs((tabs) => tabs.filter((tab) => tab.id === keep));
     tabState.closeTabs(keep);
     if (onCloseTabs) onCloseTabs(closing, closingEntries, keep);
     else if (addressed?.kind === "thread")
@@ -1113,7 +1066,16 @@ export function useConversationTabs({
   return {
     open,
     openDetail,
-    detailTabs: detailTabControls,
+    /** The reading's panel tabs: a panel with a tab shows there. */
+    readingPanels: {
+      has: (content: PanelContent) =>
+        entryList.current.some(
+          (entry) =>
+            entry.panel === (content.opening as Opening).panel &&
+            entry.target === content.target,
+        ),
+      open: (content: PanelContent) => open(content.opening as Opening, true),
+    },
     renderInlinePanel,
     opened,
     panel,
@@ -1136,15 +1098,6 @@ export function useConversationTabs({
     panelTrigger,
     openConversationLink,
     openConversationThread,
-    /** Whether a thread tab here holds `name`, a thread's composer: it shows
-     * the thread once selected. */
-    holdsComposer: (name: ComposerName) =>
-      tabState.tabs.some(
-        (tab) =>
-          tab.kind === "thread" &&
-          !!tabChannel(tab) &&
-          threadComposer(tab.channelId, rootOfTab(tab)) === name,
-      ),
     openLinkedThread,
     /** Whether a tab for this conversation could show it. */
     canOpenConversation: (channelId: string) =>
@@ -1233,27 +1186,6 @@ export function useConversationTabs({
         ),
       ];
     }),
-    items: [
-      ...sideTabs.map(tabItem),
-      ...sidePanelTabs.map(panelItem),
-      ...detailTabs.map((tab) => ({
-        id: tab.id,
-        label: tab.title,
-        move: undefined,
-        close: () => closeDetail(tab.id),
-        content: tab.content,
-      })),
-    ],
-  };
-}
-
-/** A panel as the inline opener describes it. */
-function panelTarget(entry: PanelOpening) {
-  return {
-    kind: "panel" as const,
-    channelId: entry.channelId,
-    rootId: entry.rootId,
-    title: entry.panel.title,
-    opening: entry,
+    items: [...sideTabs.map(tabItem), ...sidePanelTabs.map(panelItem)],
   };
 }

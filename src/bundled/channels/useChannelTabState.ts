@@ -1042,6 +1042,35 @@ export function useChannelTabState(
     },
     [key, snapshot],
   );
+  // A tab that takes over what read inline takes its visits, which its Close
+  // then retires as its own.
+  const adoptVisits = useCallback(
+    (
+      visits: readonly string[],
+      owner:
+        | { thread: { channelId: string; messageId: string; rootId: string } }
+        | { detail: { channelId: string; target: string } },
+    ) =>
+      update((state) => {
+        if (!visits.length) return state;
+        if ("thread" in owner)
+          return {
+            ...state,
+            routedVisits: {
+              ...state.routedVisits,
+              ...Object.fromEntries(visits.map((id) => [id, owner.thread])),
+            },
+          };
+        return {
+          ...state,
+          detailVisits: {
+            ...state.detailVisits,
+            ...Object.fromEntries(visits.map((id) => [id, owner.detail])),
+          },
+        };
+      }),
+    [update],
+  );
   const renameTab = useCallback(
     (id: string, name: string) =>
       update((s) => ({
@@ -1085,6 +1114,7 @@ export function useChannelTabState(
       getMainSelected,
       threadVisits,
       detailVisits,
+      adoptVisits,
       hasThreadTab,
       setEntries,
       setTabs,
@@ -1111,6 +1141,7 @@ export function useChannelTabState(
       getMainSelected,
       threadVisits,
       detailVisits,
+      adoptVisits,
       hasThreadTab,
       setEntries,
       setTabs,

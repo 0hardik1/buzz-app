@@ -15,6 +15,7 @@ beforeEach(() => {
 });
 import { createPluginManager } from "../../plugins/manager";
 import { ConversationService } from "../../features/conversation/service";
+import { PanelsService } from "../../features/panels/service";
 import { MessageRow } from "../../features/messages/MessageRow";
 import { foldMessages } from "../../features/relay/fold";
 import { keypair, signed } from "../../features/relay/testing";
@@ -38,6 +39,8 @@ function mount(
   repo = "https://example.com/repo",
 ) {
   const ctx = new Context();
+  new PanelsService(ctx);
+  ctx.provide("relay", { snapshot: () => ({ status: "idle" }) });
   const plugins = createPluginManager(ctx, {
     bundled: [{ manifest: { ...manifest, apiVersion: 1 }, module }],
   });
