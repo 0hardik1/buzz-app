@@ -127,6 +127,7 @@ function PositionedPopup({
   sticky,
   finalFocus,
   ref,
+  onKeyDownCapture,
   ...props
 }: PopupProps) {
   const focus = useFinalFocusUnlessMoved(finalFocus, ref);
@@ -157,7 +158,10 @@ function PositionedPopup({
         <BaseMenu.Popup
           {...props}
           ref={popupRef}
-          onKeyDownCapture={letters.onKeyDownCapture}
+          onKeyDownCapture={(event) => {
+            onKeyDownCapture?.(event);
+            letters.onKeyDownCapture(event);
+          }}
           finalFocus={focus.finalFocus}
           data-buzz-ui=""
           data-size={size}

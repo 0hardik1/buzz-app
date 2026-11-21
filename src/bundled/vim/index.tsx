@@ -1,5 +1,8 @@
 import { createRoot } from "react-dom/client";
-import { CONVERSATION_SEARCH_ID, SEARCH_ID } from "../../app/shell/PageSearch";
+import {
+  CONVERSATION_SEARCH_ID,
+  SEARCH_ID,
+} from "../../app/shell/search-shortcuts";
 import { isApplePlatform } from "../../features/shortcuts/format";
 import type {
   BundledShortcuts,

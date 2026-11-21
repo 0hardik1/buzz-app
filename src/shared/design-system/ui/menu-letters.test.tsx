@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { afterEach, expect, test, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   MenuItem,
@@ -15,6 +15,12 @@ import {
 import { assignMenuLetters, enableMenuLetters } from "./menu-letters";
 
 afterEach(cleanup);
+
+/** Base UI moves focus into an opened menu a frame later; keys go there. */
+const menuFocused = () =>
+  waitFor(() =>
+    expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull(),
+  );
 
 test("letters come from labels, keep fixed keys and never repeat", () => {
   expect(
@@ -57,6 +63,7 @@ test("while letters are on, items show and run their key; off, nothing changes",
   await user.click(screen.getByRole("button", { name: "Actions" }));
   const reply = await screen.findByRole("menuitem", { name: "Reply" });
   expect(reply).not.toHaveAttribute("aria-keyshortcuts");
+  await menuFocused();
   await user.keyboard("r");
   expect(onReply).not.toHaveBeenCalled();
   await user.keyboard("{Escape}");
@@ -73,6 +80,7 @@ test("while letters are on, items show and run their key; off, nothing changes",
     "data-menu-letter",
     "e",
   );
+  await menuFocused();
   // A disabled item keeps its key; pressing it neither runs it nor falls through.
   const outside = vi.fn();
   document.addEventListener("keydown", outside);
@@ -120,6 +128,31 @@ test("a key in a submenu runs the submenu's item, not the parent's", async () =>
     await user.keyboard("s");
     expect(system).toHaveBeenCalledTimes(1);
     expect(status).not.toHaveBeenCalled();
+  } finally {
+    act(release);
+  }
+});
+
+test("a caller's own capture handler still sees every key first", async () => {
+  const user = userEvent.setup();
+  const own = vi.fn();
+  const reply = vi.fn();
+  const release = enableMenuLetters();
+  try {
+    render(
+      <MenuRoot>
+        <MenuTrigger>Actions</MenuTrigger>
+        <MenuPopup onKeyDownCapture={(event) => own(event.key)}>
+          <MenuItem onClick={reply}>Reply</MenuItem>
+        </MenuPopup>
+      </MenuRoot>,
+    );
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await screen.findByRole("menuitem", { name: "Reply" });
+    await menuFocused();
+    await user.keyboard("r");
+    expect(own).toHaveBeenCalledWith("r");
+    expect(reply).toHaveBeenCalledTimes(1);
   } finally {
     act(release);
   }
