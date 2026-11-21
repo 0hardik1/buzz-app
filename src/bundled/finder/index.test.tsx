@@ -367,11 +367,19 @@ test("built-in conversations and people rank by name and open on Enter", async (
   const relayKey = keypair();
   const maya = keypair();
   const sam = keypair();
+  const dm = (id: string, members: string[], tags: string[][] = []) => [
+    metadata(relayKey, id, id, 1_700_000_000, [["t", "dm"], ...tags]),
+    roster(relayKey, id, [viewer, ...members]),
+  ];
   const events = [
     metadata(relayKey, "crew", "crew", 1_700_000_000, [["t", "stream"]]),
     roster(relayKey, "crew", [viewer, maya.pubkey, sam.pubkey]),
     metadata(relayKey, "lab", "lab"),
     roster(relayKey, "lab", [viewer]),
+    metadata(relayKey, "old", "old", 1_700_000_000, [["archived", "true"]]),
+    roster(relayKey, "old", [viewer]),
+    ...dm("with-maya", [maya.pubkey]),
+    ...dm("solo", []),
     profile(maya, { name: "Maya Chen", nip05: "maya@example.org" }),
     profile(sam, { name: "Sam Lee" }),
   ];
@@ -386,6 +394,18 @@ test("built-in conversations and people rank by name and open on Enter", async (
   const opener = consumer();
   const { show, open } = await mount({ "example.keys": opener.module }, owner);
   show();
+  // People rows lead with an avatar's initial.
+  const named = () => rows().map((row) => row.replace(/^./, ""));
+  await act(async () =>
+    opener.used.finder?.open({ source: "buzz.finder/conversations" }),
+  );
+  // Archived channels stay out; a DM is named for who's in it.
+  expect(rows().sort()).toEqual([
+    "#crew",
+    "Maya ChenDirect message",
+    "Notes to selfDirect message",
+    "lab",
+  ]);
   await act(async () =>
     opener.used.finder?.open({
       source: "buzz.finder/conversations",
@@ -406,19 +426,19 @@ test("built-in conversations and people rank by name and open on Enter", async (
   // Matched by NIP-05 address as well as name.
   expect(rows()).toEqual([expect.stringContaining("Maya Chen")]);
   await act(async () => screen.getByRole("option").click());
-  // No DM yet: the profile opens beside a conversation you share.
+  // Your DM with them, as ⌘K opens.
   expect(open).toHaveBeenLastCalledWith(
-    expect.objectContaining({
-      channelId: "crew",
-      detail: { target: profileTarget(maya.pubkey) },
-    }),
+    expect.objectContaining({ channelId: "with-maya" }),
   );
-  // A name that loads while the list is open replaces the key there.
+  expect(open.mock.lastCall).not.toHaveProperty([0, "detail"]);
+  // Everyone but you. A name that loads while the list is open replaces
+  // the key there.
   await act(async () =>
     opener.used.finder?.open({ source: "buzz.finder/people", query: "" }),
   );
-  const named = () => rows().map((row) => row.replace(/^./, ""));
-  expect(named()).toContain(sam.pubkey.slice(0, 10));
+  expect(named().sort()).toEqual(
+    ["Maya Chenmaya@example.org", sam.pubkey.slice(0, 10)].sort(),
+  );
   vi.useFakeTimers();
   try {
     await act(async () => {
@@ -429,6 +449,16 @@ test("built-in conversations and people rank by name and open on Enter", async (
   } finally {
     vi.useRealTimers();
   }
+  await act(async () =>
+    screen.getByRole("option", { name: /Sam Lee/ }).click(),
+  );
+  // No DM: the profile opens beside a conversation you share.
+  expect(open).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      channelId: "crew",
+      detail: { target: profileTarget(sam.pubkey) },
+    }),
+  );
   owner.dispose();
 });
 
