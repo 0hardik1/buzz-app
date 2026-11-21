@@ -1612,6 +1612,9 @@ export function createChannelStore(
           discoveryDirty = true;
           return;
         }
+        // Only the current attempt can establish the next peer baseline.
+        error.observePeer();
+        discoveryDirty = false;
         discoveryRevocationPending = false;
         discoverySuperseded = true;
         if (discoverySave?.ifUnchanged) {
@@ -1743,6 +1746,7 @@ export function createChannelStore(
       const saved = (await persistence.readStartup({ observeDiscovery: true }))
         ?.discovery;
       if (
+        options.revalidate ||
         !saved ||
         saved.relayAuthor !== transport.relayAuthor ||
         !Number.isFinite(saved.savedAt) ||
@@ -2088,10 +2092,10 @@ export function createChannelStore(
             (age >= DISCOVERY_SAVE_INTERVAL_MS &&
               (discoveryDirty || age >= DISCOVERY_RESAVE_MS));
           const ifUnchanged = !first && !cacheChanged && !freshChange;
-          // A repeat can flush a pending update only until another tab has
-          // replaced the stored roster.
+          // After a peer change, only a later signed update makes a repeat
+          // eligible to save. The writer compares with the observed peer row.
           if (
-            (!ifUnchanged || !discoverySuperseded) &&
+            (!ifUnchanged || !discoverySuperseded || discoveryDirty) &&
             (first ||
               discoveryRevocationPending ||
               freshChange ||
@@ -3865,9 +3869,9 @@ export function createChannelStore(
   }
   function restore() {
     if (!prepared || !persistence?.readStartup) return Promise.resolve();
-    // A reload skips the saved roster but keeps the profile mirror, which
-    // only a restore lets it write.
-    startup ??= options.revalidate ? restoreProfiles() : restoreStartup();
+    // Reload observes the roster version for storage retries. The UI still
+    // waits for live discovery, and the profile mirror can restore as usual.
+    startup ??= restoreStartup();
     return startup;
   }
   const queries: ChannelQueries = Object.freeze({

@@ -22,7 +22,11 @@ export type SavedHead = {
   notices?: unknown[];
   profiles: unknown[];
 };
-export class StartupRosterSuperseded extends Error {}
+export class StartupRosterSuperseded extends Error {
+  constructor(readonly observePeer: () => void) {
+    super("Startup roster changed");
+  }
+}
 
 export interface HeadPersistence {
   read(): Promise<SavedHead[]>;
@@ -294,8 +298,10 @@ export function createHeadPersistence(
               const current = discoveryVersion(row?.data?.discovery);
               // Compare inside the write transaction. Settings-only changes
               // preserve the signed snapshot, but a peer can replace or clear it.
-              if (ifUnchanged && current !== observedDiscovery)
+              if (ifUnchanged && current !== observedDiscovery) {
+                version = current;
                 return done(undefined);
+              }
               if (observedDiscovery === undefined) observedDiscovery = current;
             }
             const data: SavedStartup = { ...row?.data, ...patch };
@@ -314,7 +320,9 @@ export function createHeadPersistence(
         STARTUP,
       );
       if (saved === undefined)
-        throw new StartupRosterSuperseded("Startup roster changed");
+        throw new StartupRosterSuperseded(() => {
+          observedDiscovery = version;
+        });
       if (!saved) throw new Error("Startup cache is over its byte budget");
       if (version !== undefined) observedDiscovery = version;
     },
