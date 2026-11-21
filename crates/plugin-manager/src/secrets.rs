@@ -855,6 +855,191 @@ fn slots(manifest: &Manifest) -> BTreeMap<String, Policy> {
         .collect()
 }
 
+/// Native preparation input, not dispatch authority.
+pub struct SecretRequest<'a> {
+    pub plugin: &'a str,
+    pub revision: &'a str,
+    pub slot: &'a str,
+    pub identity: &'a str,
+    pub origin: &'a str,
+    pub deadline: Instant,
+}
+#[derive(PartialEq, Eq)]
+struct SecretBinding {
+    home: String,
+    profile: String,
+    namespace: String,
+    plugin: String,
+    revision: String,
+    identity: String,
+    slot: String,
+    origin: String,
+    lineage: String,
+    generation: String,
+    account: String,
+    policy: Policy,
+}
+/// Sensitive native material only; neither eligibility nor permission to send.
+pub struct PreparedSecret {
+    binding: SecretBinding,
+    value: Zeroizing<String>,
+    header: Zeroizing<String>,
+    deadline: Instant,
+}
+impl PreparedSecret {
+    /// Trusted native credential access: callers can copy; this is not an effect fence.
+    pub fn with_header<T>(&self, use_header: impl FnOnce(&str, &str) -> T) -> T {
+        use_header(&self.binding.policy.header, &self.header)
+    }
+    /// Exact native reflection check only. This does not detect encoded or
+    /// transformed disclosures by the reviewed recipient.
+    pub fn reflects_secret(&self, bytes: &[u8]) -> bool {
+        bytes
+            .windows(self.value.len())
+            .any(|part| part == self.value.as_bytes())
+    }
+}
+impl Manager {
+    fn with_qualified_secret<T>(
+        &self,
+        request: &SecretRequest<'_>,
+        qualified: impl FnOnce(SecretBinding, &Registry) -> Result<T>,
+    ) -> Result<T> {
+        read::with_structural(self, |evidence| {
+            let authority = self.authority(
+                evidence.registry,
+                request.plugin,
+                request.revision,
+                request.slot,
+            )?;
+            // Verified Manifest::validate requires every slot origin in networkOrigins.
+            if !authority.policy.origins.iter().any(|v| v == request.origin)
+                || evidence.state.journal.as_ref().is_some_and(|journal| {
+                    journal.covers(&evidence.namespace.home, request.identity)
+                })
+            {
+                return Err(UNAVAILABLE.into());
+            }
+            let entry = Self::live(
+                evidence.namespace,
+                &authority,
+                request.plugin,
+                request.identity,
+                request.slot,
+            )
+            .ok_or(UNAVAILABLE)?;
+            if evidence
+                .installed
+                .get(request.plugin)
+                .and_then(|v| v.generation.as_ref())
+                != Some(&entry.generation)
+            {
+                return Err(UNAVAILABLE.into());
+            }
+            qualified(
+                SecretBinding {
+                    home: evidence.namespace.home.clone(),
+                    profile: evidence.namespace.profile.clone(),
+                    namespace: self.namespace_id()?,
+                    plugin: entry.plugin.clone(),
+                    revision: request.revision.into(),
+                    identity: entry.identity.clone(),
+                    slot: entry.slot.clone(),
+                    origin: request.origin.into(),
+                    lineage: entry.lineage.clone(),
+                    generation: entry.generation.clone(),
+                    account: entry.account.clone(),
+                    policy: authority.policy,
+                },
+                evidence.registry,
+            )
+        })?
+    }
+    fn qualify_secret(&self, request: &SecretRequest<'_>) -> Result<SecretBinding> {
+        self.with_qualified_secret(request, |binding, _| Ok(binding))
+    }
+    /// Requalify the exact prepared enrollment at synchronous effect admission.
+    /// R→G→I remain held through `admit`: it must only admit/start bounded work,
+    /// never wait for OS/network completion or re-enter Manager metadata APIs.
+    /// Callers must also hold their page, identity and operation-lifetime fences;
+    /// this check grants no review authority and does not consume an operation.
+    pub fn with_prepared_secret<T>(
+        &self,
+        prepared: &PreparedSecret,
+        admit: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        self.with_current_prepared_secret(prepared, |_| admit())
+    }
+    fn with_current_prepared_secret<T>(
+        &self,
+        prepared: &PreparedSecret,
+        admit: impl FnOnce(&Registry) -> Result<T>,
+    ) -> Result<T> {
+        let binding = &prepared.binding;
+        let request = SecretRequest {
+            plugin: &binding.plugin,
+            revision: &binding.revision,
+            slot: &binding.slot,
+            identity: &binding.identity,
+            origin: &binding.origin,
+            deadline: prepared.deadline,
+        };
+        self.with_qualified_secret(&request, |current, registry| {
+            if current != *binding || Instant::now() >= prepared.deadline {
+                return Err(UNAVAILABLE.into());
+            }
+            admit(registry)
+        })
+    }
+    pub fn prepare_secret(&self, request: SecretRequest<'_>) -> Result<PreparedSecret> {
+        let prepare = || -> Result<PreparedSecret> {
+            valid_id(request.plugin)?;
+            valid_id(request.slot)?;
+            valid_identity(request.identity)?;
+            let origin = url::Url::parse(request.origin).map_err(err)?;
+            if origin.scheme() != "https"
+                || !origin.username().is_empty()
+                || origin.password().is_some()
+                || origin.origin().ascii_serialization() != request.origin
+                || Instant::now() >= request.deadline
+            {
+                return Err(UNAVAILABLE.into());
+            }
+            let binding = self.qualify_secret(&request)?;
+            let (_, store) = self.parts()?;
+            if Instant::now() >= request.deadline {
+                return Err(UNAVAILABLE.into());
+            }
+            let bytes = store.read(&binding.account).map_err(|_| UNAVAILABLE)?;
+            let text = std::str::from_utf8(&bytes).map_err(|_| UNAVAILABLE)?;
+            let value = valid_value(text)?;
+            if value.as_str() != text
+                || self.qualify_secret(&request)? != binding
+                || Instant::now() >= request.deadline
+            {
+                return Err(UNAVAILABLE.into());
+            }
+            let mut prepared = PreparedSecret {
+                binding,
+                value,
+                header: Zeroizing::new(String::new()),
+                deadline: request.deadline,
+            };
+            let scheme = &prepared.binding.policy.scheme;
+            if !scheme.is_empty() {
+                prepared.header.push_str(scheme);
+                prepared.header.push(' ');
+            }
+            prepared.header.push_str(&prepared.value);
+            if Instant::now() >= request.deadline {
+                return Err(UNAVAILABLE.into());
+            }
+            Ok(prepared)
+        };
+        prepare().map_err(|_| UNAVAILABLE.into())
+    }
+}
+
 // ---------------------------------------------------------------- manager
 
 /// What one plugin-facing call is entitled to, read under R.
