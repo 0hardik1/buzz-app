@@ -2096,12 +2096,9 @@ export function ChannelInventory({
                                 rowMenu.sectionKey === section.key;
                               return (
                                 <ChannelSidebarItem
-                                  profile={
-                                    channel.channelType === "dm" &&
-                                    channel.participants?.length === 1
-                                      ? dmProfiles.get(
-                                          channel.participants[0] ?? "",
-                                        )
+                                  profiles={
+                                    channel.channelType === "dm"
+                                      ? dmProfiles
                                       : undefined
                                   }
                                   key={channel.id}
