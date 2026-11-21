@@ -23,7 +23,7 @@ import { useAgentChoices } from "../../features/agents/use-choices";
 import { useChannelList, useRelayConnection } from "../../features/relay/react";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
-import type { OutgoingEvent } from "../../features/relay/outbox";
+import type { Outbox, OutgoingEvent } from "../../features/relay/outbox";
 import type {
   ChannelList,
   ChannelMessage,
@@ -43,6 +43,7 @@ import {
 } from "../../features/solo/SoloPresentation";
 import {
   readView,
+  replaceView,
   subscribeView,
   viewRevision,
   writeView,
@@ -455,18 +456,57 @@ const contextualDraftKey = (source: string, agent: string) =>
   linkedDraftKey(contextualDraftId(source, agent));
 const startedChatKey = (source: string, agent: string) =>
   `${contextualDraftKey(source, agent)}:started-chat`;
+const pendingFilingKey = (source: string, agent: string) =>
+  `${contextualDraftKey(source, agent)}:pending-filing`;
 const noOutgoingEvents: readonly OutgoingEvent[] = [];
 
-function hasPendingCreate(
+function pendingCreate(
   channelId: string,
   operations: readonly OutgoingEvent[],
 ) {
-  return operations.some(
+  return operations.find(
     ({ event, refused }) =>
       !refused &&
       event.kind === 9007 &&
       event.tags.some(([name, value]) => name === "h" && value === channelId),
   );
+}
+
+function useOutboxLoad(outbox: Outbox | undefined) {
+  const [loaded, setLoaded] = useState<{
+    outbox: Outbox | undefined;
+    status: "loading" | "ready" | "failed";
+    error?: string;
+  }>(() => ({ outbox, status: outbox ? "loading" : "ready" }));
+  const current =
+    loaded.outbox === outbox
+      ? loaded
+      : { outbox, status: outbox ? ("loading" as const) : ("ready" as const) };
+  useEffect(() => {
+    let active = true;
+    setLoaded({ outbox, status: outbox ? "loading" : "ready" });
+    if (outbox)
+      void outbox.ready().then(
+        () => {
+          if (active) setLoaded({ outbox, status: "ready" });
+        },
+        (reason: unknown) => {
+          if (active)
+            setLoaded({
+              outbox,
+              status: "failed",
+              error:
+                reason instanceof Error
+                  ? reason.message
+                  : "Could not load saved deliveries.",
+            });
+        },
+      );
+    return () => {
+      active = false;
+    };
+  }, [outbox]);
+  return current;
 }
 
 function hasResumableStartedChat(
@@ -485,7 +525,7 @@ function hasResumableStartedChat(
   const channel = channels.channels.find((item) => item.id === started);
   return !(
     channels.status === "ready" &&
-    !hasPendingCreate(started, operations) &&
+    !pendingCreate(started, operations) &&
     (channel?.archived ||
       (!channel &&
         channels.coverage !== "partial" &&
@@ -579,9 +619,9 @@ export async function fileCatchUpChat(
   const snapshot = session.sidebarPreferences.snapshot();
   if (snapshot.status !== "ready" || !snapshot.data)
     throw new Error(snapshot.error ?? "Solo workspaces are unavailable.");
+  // A later owner choice wins over this one-time automatic filing intent.
+  if (Object.hasOwn(snapshot.data.assignments, channelId)) return;
   const workspace = snapshot.data.sections.find(isCatchUpWorkspace);
-  if (workspace && snapshot.data.assignments[channelId] === workspace.id)
-    return;
   if (workspace) {
     await session.sidebarPreferences.assign(channelId, workspace.id);
     return;
@@ -590,6 +630,21 @@ export async function fileCatchUpChat(
     id: CATCH_UP_WORKSPACE_ID,
     name: CATCH_UP_WORKSPACE_NAME,
   });
+}
+
+async function reconcileCatchUpFiling(
+  session: RelaySession,
+  scope: string,
+  key: string,
+  channelId: string,
+) {
+  if (readView<unknown>(scope, key, null) !== channelId) return;
+  await fileCatchUpChat(session, channelId);
+  const cleared = replaceView(scope, key, JSON.stringify(channelId), null);
+  if (cleared === "failed")
+    throw new Error(
+      "The chat was filed, but its saved filing reminder could not be cleared on this device.",
+    );
 }
 
 function catchUpRange(
@@ -647,6 +702,7 @@ export function AskBestieAction({
   const saved = useSavedAgentState(session, session.scope);
   const choices = useAgentChoices(session, true, true);
   const bestie = selectedBestie(saved, choices);
+  const outboxLoad = useOutboxLoad(session.outbox);
   const notify = useToastNotification();
   const [busy, setBusy] = useState(false);
   const community = splitPartition(session.scope)?.communityOrigin;
@@ -654,9 +710,11 @@ export function AskBestieAction({
   const activeBestie = bestie;
 
   function start() {
-    if (busy) return;
+    if (busy || outboxLoad.status === "loading") return;
     setBusy(true);
     try {
+      if (outboxLoad.status === "failed")
+        throw new Error(outboxLoad.error ?? "Could not load saved deliveries.");
       const sourceId = message.threadRootId ?? message.id;
       const link = message.threadRootId
         ? messageLink(message.channelId, sourceId)
@@ -715,7 +773,10 @@ export function AskBestieAction({
   }
 
   return (
-    <MenuItem disabled={busy} onClick={start}>
+    <MenuItem
+      disabled={busy || outboxLoad.status === "loading"}
+      onClick={start}
+    >
       <MenuIcon>
         <AgentPortrait
           agent={{ name: activeBestie.name, picture: activeBestie.picture }}
@@ -754,6 +815,7 @@ export function CatchUpBestieAction({
   const saved = useSavedAgentState(session, session.scope);
   const choices = useAgentChoices(session, true, true);
   const bestie = selectedBestie(saved, choices);
+  const outboxLoad = useOutboxLoad(session.outbox);
   const notify = useToastNotification();
   const [busy, setBusy] = useState(false);
   const hostChannel =
@@ -778,9 +840,11 @@ export function CatchUpBestieAction({
   const activeHostChannel = hostChannel;
 
   function start() {
-    if (busy || !available()) return;
+    if (busy || outboxLoad.status === "loading" || !available()) return;
     setBusy(true);
     try {
+      if (outboxLoad.status === "failed")
+        throw new Error(outboxLoad.error ?? "Could not load saved deliveries.");
       const connection = relay.snapshot();
       if (
         connection.status !== "ready" ||
@@ -857,7 +921,10 @@ export function CatchUpBestieAction({
 
   const community = splitPartition(session.scope)?.communityOrigin;
   return (
-    <MenuItem disabled={busy} onClick={start}>
+    <MenuItem
+      disabled={busy || outboxLoad.status === "loading"}
+      onClick={start}
+    >
       <MenuIcon>
         <AgentPortrait
           agent={{ name: activeBestie.name, picture: activeBestie.picture }}
@@ -898,6 +965,7 @@ export function ContextualAskPanel({
   const choices = useAgentChoices(session, true, true);
   const bestie = selectedBestie(saved, choices);
   const channels = useChannelList(session.channels);
+  const outboxLoad = useOutboxLoad(session.outbox);
   const operations = useSyncExternalStore(
     useCallback(
       (listener) => session.outbox?.subscribe(listener) ?? (() => {}),
@@ -921,6 +989,10 @@ export function ContextualAskPanel({
     : null;
   const startedKey =
     sourceId && agent && scope ? startedChatKey(sourceId, agent) : undefined;
+  const filingKey =
+    catchUp && sourceId && agent && scope
+      ? pendingFilingKey(sourceId, agent)
+      : undefined;
   const [startedState, setStartedState] = useState(() => ({
     key: startedKey,
     value: startedKey ? readView<unknown>(scope, startedKey, null) : null,
@@ -939,10 +1011,14 @@ export function ContextualAskPanel({
   const channel = channelId
     ? channels.channels.find((item) => item.id === channelId)
     : undefined;
+  const createOperation = channelId
+    ? pendingCreate(channelId, operations)
+    : undefined;
   const staleStartedChat = !!(
     channelId &&
+    outboxLoad.status === "ready" &&
     channels.status === "ready" &&
-    !hasPendingCreate(channelId, operations) &&
+    !createOperation &&
     (channel?.archived ||
       (!channel &&
         channels.coverage !== "partial" &&
@@ -994,8 +1070,17 @@ export function ContextualAskPanel({
         "The old catch-up is unavailable, but its replacement could not be saved on this device.",
         "error",
       );
+    if (
+      filingKey &&
+      readView<unknown>(scope, filingKey, null) === channelId &&
+      !writeView(scope, filingKey, null)
+    )
+      notify(
+        "The old catch-up is unavailable, but its filing reminder could not be cleared on this device.",
+        "error",
+      );
     setStartedState({ key: startedKey, value: null });
-  }, [staleStartedChat, startedKey, channelId, scope, notify]);
+  }, [staleStartedChat, startedKey, filingKey, channelId, scope, notify]);
   // Starting a linked Solo consumes its saved source before its final local
   // cleanup calls onStarted. Keep this panel visit's source through that gap:
   // the optimistic channel-list update may otherwise rerender and unmount the
@@ -1008,21 +1093,62 @@ export function ContextualAskPanel({
               if (
                 changedKey === undefined ||
                 changedKey === draftKey ||
-                changedKey === `${draftKey}:source`
+                changedKey === `${draftKey}:source` ||
+                changedKey === filingKey
               )
                 listener();
             })
           : () => {},
-      [scope, draftKey],
+      [scope, draftKey, filingKey],
     ),
     () =>
       draftKey
         ? JSON.stringify([
             viewRevision(scope, draftKey),
             viewRevision(scope, `${draftKey}:source`),
+            filingKey ? viewRevision(scope, filingKey) : null,
           ])
         : undefined,
   );
+  const filingIntent = filingKey
+    ? readView<unknown>(scope, filingKey, null)
+    : null;
+  const filing = useRef<
+    { session: RelaySession; key: string; work: Promise<void> } | undefined
+  >(undefined);
+  const fileConfirmedCatchUp = useCallback(
+    (id: string) => {
+      if (!filingKey || readView<unknown>(scope, filingKey, null) !== id)
+        return;
+      const key = `${scope}\n${filingKey}\n${id}`;
+      if (filing.current?.session === session && filing.current.key === key)
+        return;
+      const work = reconcileCatchUpFiling(session, scope, filingKey, id)
+        .catch((error: unknown) => {
+          notify(
+            `The chat started, but it couldn’t be filed in Catch me up. ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+            "error",
+          );
+        })
+        .finally(() => {
+          if (filing.current?.work === work) filing.current = undefined;
+        });
+      filing.current = { session, key, work };
+    },
+    [filingKey, notify, scope, session],
+  );
+  useEffect(() => {
+    if (
+      channelId &&
+      channel &&
+      !channel.archived &&
+      !channel.pending &&
+      filingIntent === channelId
+    )
+      fileConfirmedCatchUp(channelId);
+  }, [channel, channelId, filingIntent, fileConfirmedCatchUp]);
   const savedSource = draftKey
     ? (readLinkedChat(scope, draftKey) ??
       readLinkedChat(scope, `${draftKey}:source`))
@@ -1069,6 +1195,34 @@ export function ContextualAskPanel({
   }
   if (bestie.pubkey !== agent) return null;
 
+  if ((!channel || channel.archived) && outboxLoad.status === "loading")
+    return (
+      <SoloConversationView
+        title={bestie.name}
+        ariaLabel={`Chat with ${bestie.name}`}
+        icon={icon}
+        embedded
+      >
+        <p role="status" className="m-0 p-4 text-body-sm text-subtle">
+          Checking saved deliveries…
+        </p>
+      </SoloConversationView>
+    );
+  if ((!channel || channel.archived) && outboxLoad.status === "failed")
+    return (
+      <SoloConversationView
+        title={bestie.name}
+        ariaLabel={`Chat with ${bestie.name}`}
+        icon={icon}
+        embedded
+      >
+        <p role="alert" className="m-0 p-4 text-body-sm text-danger">
+          {outboxLoad.error ?? "Saved deliveries could not be loaded."} Check
+          Outbox in Channels settings before trying again.
+        </p>
+      </SoloConversationView>
+    );
+
   // The same source/date identity names the retained panel tab and the
   // ordinary Solo chat; the Bestie portrait remains its conversation identity.
   if (staleStartedChat)
@@ -1092,9 +1246,33 @@ export function ContextualAskPanel({
         icon={icon}
         embedded
       >
-        <p role="status" className="m-0 p-4 text-body-sm text-subtle">
-          Opening your chat…
-        </p>
+        {createOperation?.delivery === "failed" ? (
+          <div className="flex flex-col items-start gap-3 p-4">
+            <p role="alert" className="m-0 text-body-sm text-danger">
+              This saved chat was not sent. Retry it here, or manage it in
+              Outbox from Channels settings.
+            </p>
+            <Button
+              size="sm"
+              onClick={() => {
+                try {
+                  session.outbox?.retry(createOperation.event.id);
+                } catch (error) {
+                  notify(
+                    error instanceof Error ? error.message : String(error),
+                    "error",
+                  );
+                }
+              }}
+            >
+              Retry opening chat
+            </Button>
+          </div>
+        ) : (
+          <p role="status" className="m-0 p-4 text-body-sm text-subtle">
+            Opening your chat…
+          </p>
+        )}
       </SoloConversationView>
     );
   if (channel)
@@ -1217,22 +1395,21 @@ export function ContextualAskPanel({
             "The chat started, but its source link couldn’t be saved on this device.",
             "error",
           );
+        if (filingKey && !writeView(scope, filingKey, id))
+          notify(
+            "The chat started, but its Catch me up filing could not be saved on this device.",
+            "error",
+          );
         setStartedState({ key: startedKey, value: id });
       }}
       onConfirmed={(id) => {
-        if (catchUp)
-          void fileCatchUpChat(session, id).catch((error: unknown) => {
-            notify(
-              `The chat started, but it couldn’t be filed in Catch me up. ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-              "error",
-            );
-          });
+        if (catchUp) fileConfirmedCatchUp(id);
       }}
       onFailed={(id, message, retry) => {
         if (startedKey && readView<unknown>(scope, startedKey, null) === id)
           writeView(scope, startedKey, null);
+        if (filingKey && readView<unknown>(scope, filingKey, null) === id)
+          writeView(scope, filingKey, null);
         setStartedState((current) =>
           current.key === startedKey
             ? { key: startedKey, value: null }

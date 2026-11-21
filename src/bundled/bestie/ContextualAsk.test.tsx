@@ -120,6 +120,15 @@ const message = {
 };
 const startChat = vi.fn();
 const noOperations: readonly never[] = [];
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
+    resolve = next;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
 const session = {
   ...owner.session,
   viewer,
@@ -139,6 +148,25 @@ const session = {
     observeDismiss: () => () => {},
   },
 } as RelaySession;
+
+function relayFor(relaySession: RelaySession): RelayData {
+  const snapshot = {
+    status: "ready" as const,
+    generation: 1,
+    scope,
+    origin: "https://relay.test",
+    viewer,
+    session: relaySession,
+  };
+  return {
+    snapshot: () => snapshot,
+    subscribe: () => () => {},
+    retry() {},
+    tryAgain() {},
+    disconnect() {},
+    clearCache: async () => {},
+  };
+}
 
 const personalCatchUp =
   "Lead with the few things most relevant to me based on what you know about my priorities, work, and people, and briefly say why. If you lack that context, prioritize decisions, direct asks, risks, blockers, and meaningful changes. Summarize everything else at a very high level. Link the important sources, and skip the play-by-play unless I ask.";
@@ -678,6 +706,83 @@ it("offers the exact saved Bestie and seeds an automatic whole-thread catch-up",
   expect(readView(scope, `${key}:submit-request`, null)).toBeNull();
 });
 
+it("waits for saved creates to hydrate before a menu action resumes one", async () => {
+  const channelId = crypto.randomUUID();
+  const key = contextualDraftKey(message.id, "b".repeat(64));
+  writeView(scope, `${key}:started-chat`, channelId);
+  const hydration = deferred();
+  let operations: {
+    event: { id: string; kind: number; tags: string[][] };
+    delivery: "unknown";
+  }[] = [];
+  const outboxListeners = new Set<() => void>();
+  const catchUpSession = {
+    ...session,
+    outbox: {
+      ...session.outbox,
+      ready: () => hydration.promise,
+      snapshot: () => operations,
+      subscribe: (listener: () => void) => {
+        outboxListeners.add(listener);
+        return () => outboxListeners.delete(listener);
+      },
+    },
+    channels: {
+      ...session.channels,
+      list: () => ({
+        status: "ready" as const,
+        rosterAsOf: 1,
+        channels: [],
+      }),
+    },
+  } as unknown as RelaySession;
+  const open = vi.fn<(target: string) => boolean>(() => true);
+  render(
+    <ToastProvider>
+      <MenuRoot>
+        <MenuTrigger>Message actions</MenuTrigger>
+        <MenuPopup>
+          <AskBestieAction
+            message={message}
+            session={catchUpSession}
+            close={() => {}}
+            canOpen={() => true}
+            open={open}
+          />
+        </MenuPopup>
+      </MenuRoot>
+    </ToastProvider>,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Message actions" }));
+  const item = await screen.findByRole("menuitem", { name: "Catch me up" });
+  expect(item).toHaveAttribute("aria-disabled", "true");
+  expect(open).not.toHaveBeenCalled();
+  expect(readView(scope, `${key}:new-draft`, null)).toBeNull();
+
+  act(() => {
+    operations = [
+      {
+        event: {
+          id: "f".repeat(64),
+          kind: 9007,
+          tags: [["h", channelId]],
+        },
+        delivery: "unknown",
+      },
+    ];
+    for (const listener of outboxListeners) listener();
+    hydration.resolve();
+  });
+  await waitFor(() => expect(item).not.toHaveAttribute("aria-disabled"));
+  fireEvent.click(item);
+
+  expect(open).toHaveBeenCalledOnce();
+  expect(readView(scope, `${key}:started-chat`, null)).toBe(channelId);
+  expect(readView(scope, `${key}:new-draft`, null)).toBeNull();
+  expect(startChat).not.toHaveBeenCalled();
+});
+
 it("skips thread inspection when the roster proves Bestie lacks access", async () => {
   const privateSession = {
     ...session,
@@ -939,6 +1044,40 @@ it("does not move an existing catch-up back after the owner re-files it", async 
   expect(createAndAssign).not.toHaveBeenCalled();
 });
 
+it("preserves any workspace chosen before delayed catch-up filing", async () => {
+  const channelId = crypto.randomUUID();
+  const ensure = vi.fn(async () => {});
+  const assign = vi.fn(async () => {});
+  const createAndAssign = vi.fn(async () => {});
+  const catchUpSession = {
+    ...session,
+    sidebarPreferences: {
+      ...session.sidebarPreferences,
+      ensure,
+      snapshot: () => ({
+        status: "ready" as const,
+        data: {
+          sections: [
+            { id: "catch-ups", name: "Catch me up", order: 0 },
+            { id: "mine", name: "My workspace", order: 1 },
+          ],
+          assignments: { [channelId]: "mine" },
+          starred: [],
+          muted: [],
+        },
+      }),
+      assign,
+      createAndAssign,
+    },
+  } as unknown as RelaySession;
+
+  await fileCatchUpChat(catchUpSession, channelId);
+
+  expect(ensure).toHaveBeenCalledOnce();
+  expect(assign).not.toHaveBeenCalled();
+  expect(createAndAssign).not.toHaveBeenCalled();
+});
+
 it.each([
   {
     label: "deleted",
@@ -1049,13 +1188,14 @@ it("keeps one pending catch-up through a complete roster until its channel arriv
   const sourceId = message.id;
   const key = contextualDraftKey(sourceId, "b".repeat(64));
   const startedKey = `${key}:started-chat`;
+  const filingKey = `${key}:pending-filing`;
   writeView(scope, startedKey, channelId);
-  let operations = [
-    {
-      event: { kind: 9007, tags: [["h", channelId]] },
-      delivery: "unknown",
-    },
-  ];
+  writeView(scope, filingKey, channelId);
+  const hydration = deferred();
+  let operations: {
+    event: { id: string; kind: number; tags: string[][] };
+    delivery: "unknown";
+  }[] = [];
   const outboxListeners = new Set<() => void>();
   let channelSnapshot = {
     status: "ready" as const,
@@ -1065,18 +1205,38 @@ it("keeps one pending catch-up through a complete roster until its channel arriv
       name: string;
       channelType: "solo";
       members: string[];
+      pending?: true;
     }[],
   };
   const channelListeners = new Set<() => void>();
+  const ensure = vi.fn(async () => {});
+  const assign = vi.fn(async () => {});
+  const createAndAssign = vi.fn(async () => {});
   const catchUpSession = {
     ...session,
     outbox: {
       ...session.outbox,
       snapshot: () => operations,
+      ready: () => hydration.promise,
       subscribe: (listener: () => void) => {
         outboxListeners.add(listener);
         return () => outboxListeners.delete(listener);
       },
+    },
+    sidebarPreferences: {
+      ...session.sidebarPreferences,
+      ensure,
+      snapshot: () => ({
+        status: "ready" as const,
+        data: {
+          sections: [{ id: "catch-ups", name: "Catch me up", order: 0 }],
+          assignments: {},
+          starred: [],
+          muted: [],
+        },
+      }),
+      assign,
+      createAndAssign,
     },
     channels: {
       ...session.channels,
@@ -1130,12 +1290,55 @@ it("keeps one pending catch-up through a complete roster until its channel arriv
     </ToastProvider>,
   );
 
-  expect(await screen.findByText("Opening your chat…")).toBeInTheDocument();
+  expect(
+    await screen.findByText("Checking saved deliveries…"),
+  ).toBeInTheDocument();
   expect(readView(scope, startedKey, null)).toBe(channelId);
+  expect(readView(scope, filingKey, null)).toBe(channelId);
   expect(startChat).not.toHaveBeenCalled();
 
   act(() => {
+    operations = [
+      {
+        event: {
+          id: "f".repeat(64),
+          kind: 9007,
+          tags: [["h", channelId]],
+        },
+        delivery: "unknown",
+      },
+    ];
+    for (const listener of outboxListeners) listener();
+    hydration.resolve();
+  });
+
+  expect(await screen.findByText("Opening your chat…")).toBeInTheDocument();
+  expect(readView(scope, startedKey, null)).toBe(channelId);
+  expect(readView(scope, filingKey, null)).toBe(channelId);
+
+  act(() => {
     operations = [];
+    channelSnapshot = {
+      ...channelSnapshot,
+      channels: [
+        {
+          id: channelId,
+          name: "Saved catch-up",
+          channelType: "solo",
+          members: [viewer, "b".repeat(64)],
+          pending: true,
+        },
+      ],
+    };
+    for (const listener of channelListeners) listener();
+    for (const listener of outboxListeners) listener();
+  });
+
+  expect(await screen.findByText(/With Pollen/)).toBeInTheDocument();
+  expect(ensure).not.toHaveBeenCalled();
+  expect(assign).not.toHaveBeenCalled();
+
+  act(() => {
     channelSnapshot = {
       ...channelSnapshot,
       channels: [
@@ -1148,12 +1351,197 @@ it("keeps one pending catch-up through a complete roster until its channel arriv
       ],
     };
     for (const listener of channelListeners) listener();
-    for (const listener of outboxListeners) listener();
   });
 
-  expect(await screen.findByText(/With Pollen/)).toBeInTheDocument();
+  await waitFor(() =>
+    expect(assign).toHaveBeenCalledWith(channelId, "catch-ups"),
+  );
+  expect(ensure).toHaveBeenCalledOnce();
+  expect(createAndAssign).not.toHaveBeenCalled();
+  expect(readView(scope, startedKey, null)).toBe(channelId);
+  expect(readView(scope, filingKey, null)).toBeNull();
+  expect(startChat).not.toHaveBeenCalled();
+});
+
+it("keeps a saved catch-up when Outbox hydration fails", async () => {
+  const channelId = crypto.randomUUID();
+  const sourceId = message.id;
+  const key = contextualDraftKey(sourceId, "b".repeat(64));
+  const startedKey = `${key}:started-chat`;
+  writeView(scope, startedKey, channelId);
+  const hydration = deferred();
+  const channelSnapshot = {
+    status: "ready" as const,
+    rosterAsOf: 1,
+    channels: [],
+  };
+  const catchUpSession = {
+    ...session,
+    outbox: {
+      ...session.outbox,
+      ready: () => hydration.promise,
+    },
+    channels: {
+      ...session.channels,
+      list: () => channelSnapshot,
+      subscribeList: () => () => {},
+    },
+  } as unknown as RelaySession;
+  const none: readonly never[] = [];
+  const contributions = { snapshot: () => none, subscribe: () => () => {} };
+  render(
+    <ToastProvider>
+      <ContextualAskPanel
+        target={contextualCatchUpTarget({
+          thread: sourceId,
+          agent: "b".repeat(64),
+        })}
+        close={() => {}}
+        relay={relayFor(catchUpSession)}
+        host={{} as never}
+        extensions={{ tools: contributions, inline: contributions }}
+      />
+    </ToastProvider>,
+  );
+  expect(
+    await screen.findByText("Checking saved deliveries…"),
+  ).toBeInTheDocument();
+
+  act(() => hydration.reject(new Error("Saved journal unavailable")));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Saved journal unavailable",
+  );
   expect(readView(scope, startedKey, null)).toBe(channelId);
   expect(startChat).not.toHaveBeenCalled();
+});
+
+it("clears refused filing intent without assigning a workspace", async () => {
+  const channelId = crypto.randomUUID();
+  const sourceId = message.id;
+  const key = contextualDraftKey(sourceId, "b".repeat(64));
+  const startedKey = `${key}:started-chat`;
+  const filingKey = `${key}:pending-filing`;
+  writeView(scope, startedKey, channelId);
+  writeView(scope, filingKey, channelId);
+  const assign = vi.fn(async () => {});
+  const createAndAssign = vi.fn(async () => {});
+  const operations = [
+    {
+      event: {
+        id: "f".repeat(64),
+        kind: 9007,
+        tags: [["h", channelId]],
+      },
+      delivery: "failed" as const,
+      refused: true as const,
+    },
+  ];
+  const channelSnapshot = {
+    status: "ready" as const,
+    rosterAsOf: 1,
+    channels: [],
+  };
+  const catchUpSession = {
+    ...session,
+    outbox: {
+      ...session.outbox,
+      snapshot: () => operations,
+    },
+    channels: {
+      ...session.channels,
+      list: () => channelSnapshot,
+      subscribeList: () => () => {},
+    },
+    sidebarPreferences: {
+      ...session.sidebarPreferences,
+      assign,
+      createAndAssign,
+    },
+  } as unknown as RelaySession;
+  const relay = relayFor(catchUpSession);
+  const none: readonly never[] = [];
+  const contributions = { snapshot: () => none, subscribe: () => () => {} };
+
+  render(
+    <ToastProvider>
+      <ContextualAskPanel
+        target={contextualCatchUpTarget({
+          thread: sourceId,
+          agent: "b".repeat(64),
+        })}
+        close={() => {}}
+        relay={relay}
+        host={{} as never}
+        extensions={{ tools: contributions, inline: contributions }}
+      />
+    </ToastProvider>,
+  );
+
+  await waitFor(() => expect(readView(scope, startedKey, null)).toBeNull());
+  expect(readView(scope, filingKey, null)).toBeNull();
+  expect(assign).not.toHaveBeenCalled();
+  expect(createAndAssign).not.toHaveBeenCalled();
+});
+
+it("offers the existing Outbox retry for a restored failed create", async () => {
+  const channelId = crypto.randomUUID();
+  const sourceId = message.id;
+  const key = contextualDraftKey(sourceId, "b".repeat(64));
+  writeView(scope, `${key}:started-chat`, channelId);
+  const retry = vi.fn();
+  const operations = [
+    {
+      event: {
+        id: "f".repeat(64),
+        kind: 9007,
+        tags: [["h", channelId]],
+      },
+      delivery: "failed" as const,
+    },
+  ];
+  const channelSnapshot = {
+    status: "ready" as const,
+    rosterAsOf: 1,
+    channels: [],
+  };
+  const catchUpSession = {
+    ...session,
+    outbox: {
+      ...session.outbox,
+      snapshot: () => operations,
+      retry,
+    },
+    channels: {
+      ...session.channels,
+      list: () => channelSnapshot,
+      subscribeList: () => () => {},
+    },
+  } as unknown as RelaySession;
+  const none: readonly never[] = [];
+  const contributions = { snapshot: () => none, subscribe: () => () => {} };
+  render(
+    <ToastProvider>
+      <ContextualAskPanel
+        target={contextualCatchUpTarget({
+          thread: sourceId,
+          agent: "b".repeat(64),
+        })}
+        close={() => {}}
+        relay={relayFor(catchUpSession)}
+        host={{} as never}
+        extensions={{ tools: contributions, inline: contributions }}
+      />
+    </ToastProvider>,
+  );
+
+  expect(
+    await screen.findByText(/This saved chat was not sent/),
+  ).toBeInTheDocument();
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "Retry opening chat" }));
+  expect(retry).toHaveBeenCalledWith("f".repeat(64));
 });
 
 it("does not resume a former Bestie's chat for the same source", async () => {
@@ -1267,7 +1655,7 @@ it("presents the linked source as an editable unsent draft in the side panel", a
       />
     </ToastProvider>,
   );
-  expect(screen.getByLabelText("Pollen")).toBeInTheDocument();
+  expect(await screen.findByLabelText("Pollen")).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "Close chat with Pollen" }),
   ).toBeNull();
