@@ -66,11 +66,14 @@ export type UnreadSnapshot = Readonly<{
     attentionCount: number;
     /** Threads with unread replies the row still shows. */
     threadCount: number;
+    /** Ordinary messages the row counts because each was marked unread:
+     * that intent shows even where mute quiets ordinary arrivals. */
+    markedCount: number;
   }>;
 }>;
 /** Whether a channel's sidebar row shows unread. Opening a channel quiets
- * its row (`row`); a muted channel still shows its mentions, and a muted DM
- * still shows. */
+ * its row (`row`); a muted channel still shows its mentions and messages
+ * marked unread, and a muted DM still shows. */
 export function rowUnread(
   snapshot: UnreadSnapshot,
   dm: boolean,
@@ -79,6 +82,7 @@ export function rowUnread(
   const { observedCount, attentionCount } = snapshot.row ?? snapshot;
   return (
     snapshot.manual !== "none" ||
+    !!snapshot.row?.markedCount ||
     ((observedCount ?? 0) > 0 && (dm || !muted || (attentionCount ?? 0) > 0))
   );
 }
@@ -1260,7 +1264,8 @@ export function createUnread({
     let count = 0,
       attention = 0,
       rowCount = 0,
-      rowAttention = 0;
+      rowAttention = 0,
+      rowMarked = 0;
     const rowThreads = new Set<string>();
     const dm = isDm(target.channelId);
     indexEvidence();
@@ -1292,6 +1297,7 @@ export function createUnread({
         continue;
       rowCount++;
       if (category(entry, dm)) rowAttention++;
+      else if (reads.localUnread(`msg:${event.id}`)) rowMarked++;
       if (entry.rootId && activityEvidence(entry)) rowThreads.add(entry.rootId);
     }
     const manual = reads.localUnread(key)
@@ -1331,6 +1337,7 @@ export function createUnread({
               observedCount: rowCount,
               attentionCount: rowAttention,
               threadCount: rowThreads.size,
+              markedCount: rowMarked,
             }),
           }
         : {}),
@@ -1346,6 +1353,7 @@ export function createUnread({
     a.row?.observedCount === b.row?.observedCount &&
     a.row?.attentionCount === b.row?.attentionCount &&
     a.row?.threadCount === b.row?.threadCount &&
+    a.row?.markedCount === b.row?.markedCount &&
     a.coverage === b.coverage &&
     a.freshness === b.freshness &&
     a.manual === b.manual &&
@@ -3759,12 +3767,20 @@ export function createUnread({
       };
       if (!valid()) throw new Error("Unread target unavailable");
       if (target.kind === "message") refuseAgentCoordination(target.messageId);
+      // A message marked while shown counts as read through everything the
+      // conversation held then: that visit's own reading keeps it, and
+      // reading anything newer, or a later visit, ends it.
+      let through: number | undefined;
       if (target.kind === "message") {
         indexEvidence();
         const holders = new Set<object>();
         for (const [visit, shown] of shownBy)
           if (shown.has(target.messageId)) holders.add(visit);
-        if (holders.size) markedWhileShown.set(target.messageId, holders);
+        if (holders.size) {
+          markedWhileShown.set(target.messageId, holders);
+          for (const { event } of byChannel.get(target.channelId) ?? [])
+            through = Math.max(through ?? -1, event.created_at);
+        }
       }
       if (target.kind === "thread") {
         const holders = new Set<object>();
@@ -3787,6 +3803,7 @@ export function createUnread({
                       ? UNRESOLVED_ROOT
                       : undefined))
                   : undefined,
+              through,
             },
       );
       endCoveredLocal();

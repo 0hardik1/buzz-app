@@ -333,7 +333,10 @@ timeline and the thread being read, without reading unopened threads' replies.
   root loads takes the thread's mark when the root resolves as that baseline.
   A message marked while a reader shows it is not cleared by that reader's
   display until its visit measures the row away or ends (unmount, retarget,
-  a hidden window or pane); another pane's visit is independent.
+  a hidden window or pane); another pane's visit is independent. Its saved
+  mark counts as reaching the conversation's newest message then, so that
+  visit's own reading of what it already held keeps it; reading a newer
+  arrival advances past it and clears it, as any advance does.
   A thread marked while its pane presents it, whether or not any row fits
   fully on screen, keeps its mark through that visit's catch-ups until the
   visit ends; a later visit's catch-up clears it, and an advance of its mark
@@ -362,7 +365,8 @@ The sidebar separates ordinary unread from directed attention. Ordinary backlog
 or local manual intent strengthens the channel label; protected attention alone
 retains its dot without bolding a caught-up, unmuted channel. Confirmed-muted channels
 suppress ordinary automatic unread styling and offscreen cues without clearing
-unread evidence; explicit manual unread can still strengthen the label.
+unread evidence; explicit manual unread, including an ordinary message marked
+unread on its own, can still strengthen the label.
 Pending or failed mute changes do not suppress these cues. Muted DMs also suppress
 automatic unread bolding. Confirmed-muted destinations, including DMs and Solo chats,
 do not contribute to “N unread” offscreen counts or avatar previews, even for

@@ -16,6 +16,7 @@ import {
 import { eventDto, type RelayEvent } from "./events";
 import {
   createUnread,
+  rowUnread,
   type ThreadActivitySnapshot,
   type UnreadCapability,
   type UnreadSnapshot,
@@ -508,7 +509,12 @@ it("promotes mentions and participating-thread replies, broadcasts only in the v
   expect(h.snapshot()).toMatchObject({
     observedCount: 7,
     attentionCount: 3,
-    row: { observedCount: 7, attentionCount: 3, threadCount: 1 },
+    row: {
+      observedCount: 7,
+      attentionCount: 3,
+      threadCount: 1,
+      markedCount: 0,
+    },
   });
   expect(
     h.session.unread.activity("room").items?.map((item) => item.rootId),
@@ -530,7 +536,12 @@ it("promotes mentions and participating-thread replies, broadcasts only in the v
   expect(h.snapshot()).toMatchObject({
     observedCount: 7,
     attentionCount: 3,
-    row: { observedCount: 7, attentionCount: 3, threadCount: 1 },
+    row: {
+      observedCount: 7,
+      attentionCount: 3,
+      threadCount: 1,
+      markedCount: 0,
+    },
   });
   expect(
     h.session.unread.activity("room").items?.map((item) => item.rootId),
@@ -559,7 +570,12 @@ it("a broadcast in a thread the viewer started outside the retained window earns
   expect(h.snapshot()).toMatchObject({
     observedCount: 1,
     attentionCount: 0,
-    row: { observedCount: 1, attentionCount: 0, threadCount: 0 },
+    row: {
+      observedCount: 1,
+      attentionCount: 0,
+      threadCount: 0,
+      markedCount: 0,
+    },
   });
   // Unknown only because its root is not retained yet, as before this rule.
   const before = h.session.unread.attention("room", broadcast.id);
@@ -569,7 +585,12 @@ it("a broadcast in a thread the viewer started outside the retained window earns
     expect(h.snapshot()).toMatchObject({
       observedCount: 1,
       attentionCount: 1,
-      row: { observedCount: 1, attentionCount: 1, threadCount: 1 },
+      row: {
+        observedCount: 1,
+        attentionCount: 1,
+        threadCount: 1,
+        markedCount: 0,
+      },
     }),
   );
   expect(h.session.unread.attention("room", broadcast.id)).toMatchObject({
@@ -7329,13 +7350,23 @@ it("opening a channel quiets its row while its messages and threads stay unread"
   expect(h.snapshot()).toMatchObject({
     observedCount: 3,
     attentionCount: 2,
-    row: { observedCount: 3, attentionCount: 2, threadCount: 1 },
+    row: {
+      observedCount: 3,
+      attentionCount: 2,
+      threadCount: 1,
+      markedCount: 0,
+    },
   });
   const revision = h.session.unread.revision();
 
   // Opening quiets the row at once, before the visit is ready.
   const entered = h.session.unread.enterChannel("room");
-  const quiet = { observedCount: 0, attentionCount: 0, threadCount: 0 };
+  const quiet = {
+    observedCount: 0,
+    attentionCount: 0,
+    threadCount: 0,
+    markedCount: 0,
+  };
   expect(h.snapshot()).toMatchObject({ observedCount: 3, row: quiet });
   await entered;
   // What arrives during the visit is seen too.
@@ -7368,6 +7399,7 @@ it("opening a channel quiets its row while its messages and threads stay unread"
     observedCount: 1,
     attentionCount: 1,
     threadCount: 1,
+    markedCount: 0,
   });
 });
 
@@ -7449,7 +7481,12 @@ it.each([
         [`seen:msg:${mention.id}`]: seen,
       }),
     );
-    const quiet = { observedCount: 0, attentionCount: 0, threadCount: 0 };
+    const quiet = {
+      observedCount: 0,
+      attentionCount: 0,
+      threadCount: 0,
+      markedCount: 0,
+    };
     expect(h.snapshot().row).toEqual(quiet);
     // An ordinary message at the cut stays quiet: only a timestamp says so.
     h.emit([message(h.alice, "room", "late ordinary", delivered)]);
@@ -8404,10 +8441,92 @@ it("a DM message marked unread while shown stays unread through that visit's rea
     channelId: "room",
     messageId: first.id,
   });
+  // Its own first dwell advances the read mark past it; the queued writes
+  // that follow must keep the mark.
   await lease.observe([first.id]);
+  await flush();
   expect(unread.attention("room", first.id).unread).toBe(true);
   lease.dispose();
+  await flush();
   expect(unread.attention("room", first.id).unread).toBe(true);
+  expect(h.journal()?.localUnread[`msg:${first.id}`]).toBeDefined();
+
+  // The next visit reads it.
+  await unread.enterChannel("room");
+  const back = unread.reading("room");
+  await back.observe([first.id]);
+  back.dispose();
+  await flush();
+  expect(unread.attention("room", first.id).unread).toBe(false);
+});
+
+it("a DM message marked unread while shown outlasts dwells at its position, not a newer read", async () => {
+  const h = setup();
+  h.grant("room");
+  h.emit([channelMetadata(h, "dm")]);
+  const first = message(h.alice, "room", "first", 11);
+  h.emit([first]);
+  const unread = h.session.unread;
+  const visit = {};
+  const lease = unread.reading("room", undefined, visit);
+  lease.view([first.id], () => true);
+  await lease.observe([first.id]);
+  await flush();
+  await unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: first.id,
+  });
+  // Another dwell at the unchanged position keeps the mark.
+  const again = unread.reading("room", undefined, visit);
+  again.view([first.id], () => true);
+  await again.observe([first.id]);
+  again.dispose();
+  await flush();
+  expect(unread.attention("room", first.id).unread).toBe(true);
+
+  // Reading a newer arrival in the same visit covers it, which ends it.
+  const second = message(h.alice, "room", "second", 12);
+  h.emit([second]);
+  const next = unread.reading("room", undefined, visit);
+  next.view([first.id, second.id], () => true);
+  await next.observe([second.id]);
+  next.dispose();
+  lease.dispose();
+  unread.leave(visit);
+  await vi.waitFor(() =>
+    expect(h.journal()?.localUnread[`msg:${first.id}`]).toBeUndefined(),
+  );
+  expect(unread.attention("room", first.id).unread).toBe(false);
+});
+
+it("a channel message marked unread keeps its row lit in a muted channel", async () => {
+  const h = setup();
+  h.grant("room");
+  const plain = message(h.alice, "room", "plain", 11);
+  h.emit([plain]);
+  const unread = h.session.unread;
+  const lease = unread.reading("room");
+  await lease.catchUp(plain.id);
+  lease.dispose();
+  expect(rowUnread(h.snapshot(), false, true)).toBe(false);
+
+  await unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: plain.id,
+  });
+  expect(h.snapshot()).toMatchObject({
+    manual: "none",
+    row: { observedCount: 1, attentionCount: 0, markedCount: 1 },
+  });
+  // Mute still quiets an ordinary arrival.
+  const arrival = message(h.alice, "room", "arrival", 12);
+  h.emit([arrival]);
+  expect(rowUnread(h.snapshot(), false, true)).toBe(true);
+  await unread.markMessageRead("room", plain.id);
+  expect(h.snapshot().row).toMatchObject({ observedCount: 1, markedCount: 0 });
+  expect(rowUnread(h.snapshot(), false, true)).toBe(false);
 });
 
 it("a channel message marked unread lights its row but stays out of Activity", async () => {
