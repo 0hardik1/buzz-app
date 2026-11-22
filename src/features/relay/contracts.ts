@@ -417,7 +417,7 @@ export interface ChannelQueries {
     channelId: string,
     options?: ChannelReadOptions,
   ): Promise<boolean>;
-  /** Lists a Solo chat this device is creating, as `pending`, until the
+  /** Lists a chat this device is creating, as `pending`, until the
    * relay's signed metadata and roster for it arrive. It has no history to
    * read meanwhile. Local display and intent only; never saved. */
   start?(
@@ -427,6 +427,8 @@ export interface ChannelQueries {
       members: readonly string[];
       labels: readonly string[];
       ttlSeconds?: number | undefined;
+      /** A conversation with people lists as a stream; otherwise Solo. */
+      channelType?: "solo" | "stream" | undefined;
     }>,
   ): void;
   /** Drops a started chat the relay did not confirm. */
