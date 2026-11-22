@@ -86,6 +86,11 @@ entry has a unique `id`, a `label`, and an `onSelect` callback.
 heading. With `placement: "team-row"`, the channel group uses the native
 Team menu and ignores these entries.
 
+`ui.Workspace` also takes `submitTarget` and `submitDraftKeys`, which let a
+page's own target answer the channel composer's Send. Check
+`ctx.conversation.workspaceSlots?.submitTarget === true` first; an older host
+ignores both. Read the types for the fields.
+
 For `ctx.agents.ui.Transcript`, give each turn a unique `turnId` that stays the same across reads. Return a new turn when it changes. Leave previously returned turns and their items untouched.
 
 ## Migration writes
