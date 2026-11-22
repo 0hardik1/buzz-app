@@ -36,8 +36,6 @@ import type { ChannelSearchStatus, FinderSync } from "./sync";
 
 export type FinderScope = "channel" | "buzz";
 
-/** Device results fill the page with every typed word, so relay hits could
- * only land below them. */
 const PAGE = 50;
 
 /** About `width` characters of `text` around its first match, with the
@@ -249,8 +247,7 @@ function LocalResults(props: Contents) {
   );
 }
 
-/** Words a row must contain for the relay to add nothing above it: the
- * typed words, without `!exclusions` and `'` markers. */
+/** The typed words, without `!exclusions` and `'` markers. */
 const wordsOf = (query: string) =>
   query
     .toLowerCase()
@@ -284,32 +281,33 @@ function AllResults(props: Contents & { session: RelaySession }) {
       ? kept.current.results
       : fresh;
   kept.current = { query, session, results: local };
-  const words = wordsOf(query);
-  const covered =
-    local.hits.length >= PAGE &&
-    local.hits.every(({ doc }) => {
-      const text = `${doc.author} ${doc.place} ${doc.text}`.toLowerCase();
-      return words.every((word) => text.includes(word));
-    });
-  const search = useSearchMessages(session, covered ? "" : query);
+  // Always asked: a page of device rows with every word can still rank below
+  // an unindexed message that has them together.
+  const search = useSearchMessages(session, query);
   const [previous, setPrevious] = useState<{
     session: RelaySession;
+    query: string;
     messages: typeof search.messages;
   }>();
   // biome-ignore lint/correctness/useExhaustiveDependencies: the hook projects a new array each render; IDs identify its completed page.
   useEffect(() => {
     if (!search.loading && !search.error && !search.tooShort) {
-      setPrevious({ session, messages: search.messages });
+      setPrevious({ session, query, messages: search.messages });
     }
   }, [
     session,
+    query,
     search.loading,
     search.error,
     search.tooShort,
     search.messages.map((message) => message.id).join(","),
   ]);
+  // Only this text's rows stay through a reload or retry; another text's
+  // could be opened by mistake while this one loads.
   const messages =
-    (search.loading || search.error) && previous?.session === session
+    (search.loading || search.error) &&
+    previous?.session === session &&
+    previous.query === query
       ? previous.messages
       : search.messages;
   const shown = new Set(local.hits.map(({ doc }) => doc.id));
@@ -362,7 +360,7 @@ function AllResults(props: Contents & { session: RelaySession }) {
         .map((doc) => ({ doc, score: 0, positions: [] })),
     ],
   };
-  const asked = !covered && !search.tooShort && !!query.trim();
+  const asked = !search.tooShort && !!query.trim();
   holding.current = asked && (search.loading || relay.hits.length > 0);
   const retry = search.error ? search.retry : search.loadMore;
   const error = search.error || search.moreError;

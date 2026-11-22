@@ -52,10 +52,10 @@ Settings → Shortcuts.
   relay, which searches every message you can read, including public channels
   you haven't joined. Those hits appear below, under **More from all of Buzz**,
   ranked the same way. Rows you're looking at never move: once relay rows show,
-  the device rows above them hold still until you change the text. When a full
-  page of device matches already contains every word you typed, it doesn't ask
-  the relay, since nothing it found could rank above them. Use **Retry** after a
-  failed read, or **More messages** for the next page.
+  the device rows above them hold still until you change the text. Relay rows
+  for earlier text clear as soon as you change it, so Enter can't open one
+  while the new search loads. Use **Retry** after a failed read, or **More
+  messages** for the next page.
 
 Older channel messages stay in the index for this session. Relay hits from
 joined channels join it when you close Finder. Public previews stay out; their

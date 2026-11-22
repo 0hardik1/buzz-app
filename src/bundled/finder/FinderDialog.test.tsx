@@ -230,29 +230,32 @@ test("All of Buzz shows device matches at once, then relay hits below them, aski
   expect(reads).toHaveLength(1);
 });
 
-test("skips the relay when a full page of device matches has every word", async () => {
+test("asks the relay even when a full page of device matches has every word apart", async () => {
   const { Finder, reads, corpus } = await fixture();
   corpus.add(
-    Array.from({ length: 50 }, (_, n) => local(`d${n}`, `api draft ${n}`)),
+    Array.from({ length: 50 }, (_, n) =>
+      local(`d${n}`, `api unrelated unrelated draft ${n}`),
+    ),
   );
   render(<Finder />);
   type("api draft");
   await tick(SEARCH_DEBOUNCE_MS);
-  expect(reads).toHaveLength(0);
-  expect(
-    screen.queryByRole("group", { name: "More from all of Buzz" }),
-  ).not.toBeInTheDocument();
-  type("api release");
-  await tick(SEARCH_DEBOUNCE_MS);
   expect(reads).toHaveLength(1);
+  // The exact phrase, older than the index, would outrank every device row.
+  expect(options("More from all of Buzz")).toEqual([
+    expect.stringContaining("api draft"),
+  ]);
 });
 
-test("adds relay hits to the index on close, keeps public previews out, and retains results through loading and retry", async () => {
-  const { Finder, control, corpus, root } = await fixture();
+test("adds relay hits to the index on close, keeps public previews out, and drops the previous text's hits while the next loads", async () => {
+  const { Finder, control, corpus, root, props } = await fixture();
   const view = render(<Finder />);
   type("API");
   await tick(SEARCH_DEBOUNCE_MS);
-  const relayed = () => options("More from all of Buzz");
+  const relayed = () =>
+    within(screen.getByRole("group", { name: "More from all of Buzz" }))
+      .queryAllByRole("option")
+      .map((row) => row.textContent);
   expect(relayed()).toHaveLength(3);
   let release = () => {};
   control.hold = new Promise<void>((resolve) => {
@@ -261,7 +264,10 @@ test("adds relay hits to the index on close, keeps public previews out, and reta
   try {
     type("missing");
     await tick(SEARCH_DEBOUNCE_MS);
-    expect(relayed()).toHaveLength(3);
+    // "API release" can't be opened while "missing" loads.
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Enter" });
+    expect(props.openMessage).not.toHaveBeenCalled();
+    expect(relayed()).toEqual([]);
     expect(screen.queryByText("Searching Buzz…")).not.toBeInTheDocument();
     await tick(1000);
     expect(screen.getByRole("status")).toHaveTextContent("Searching Buzz…");
@@ -270,7 +276,7 @@ test("adds relay hits to the index on close, keeps public previews out, and reta
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Messages could not load.",
     );
-    expect(relayed()).toHaveLength(3);
+    expect(relayed()).toEqual([]);
     control.fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await tick(SEARCH_DEBOUNCE_MS);
