@@ -3698,6 +3698,7 @@ function Composer({
           },
           capturedAttachments,
           async (uploaded) => {
+            recheckLabels();
             // Report a synchronous publication before the new row can render.
             const result = publish(uploaded);
             const sent = typeof result === "string" ? result : await result;

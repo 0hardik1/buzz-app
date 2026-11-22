@@ -19024,6 +19024,73 @@ it("a group whose label a member's new verified name breaks while a detached win
     tags: [mj.pubkey, wes.pubkey],
   });
 });
+it("a group whose label a member's new verified name breaks while the main window uploads its file is not sent, and the next Send sends it as its members", async () => {
+  const mj = { ...first, name: "MJ" };
+  const result = deferred<ReturnType<typeof uploadDescriptor>>();
+  const started = deferred<void>();
+  const upload = () => {
+    started.resolve();
+    return result.promise;
+  };
+  const h = mount();
+  h.setProfiles(
+    new Map([
+      [mj.pubkey, { name: "MJ" }],
+      [wes.pubkey, { name: "Wes" }],
+    ]),
+  );
+  h.retarget({
+    session: {
+      ...h.session,
+      attachments: { upload },
+    } as unknown as RelaySession,
+  });
+  h.fill("!Crew");
+  offerCrew(h, [mj, wes], "Mary crew");
+  await h.user.keyboard("{Enter}hi");
+  attachByPaste(h.input(), attachmentFile());
+  await act(() => started.promise);
+  h.submit();
+  await waitFor(() => expect(h.input().value).toBe(""));
+  h.setProfiles(
+    new Map([
+      [
+        mj.pubkey,
+        {
+          name: "MJ",
+          verified: {
+            displayName: "Mary",
+            username: "mary",
+            fullName: "Mary",
+            issuerLabel: "Example",
+            verifiedAt: 1,
+            status: "checked" as const,
+            multipleIssuers: false,
+          },
+        },
+      ],
+      [wes.pubkey, { name: "Wes" }],
+    ]),
+  );
+  await act(async () => result.resolve(uploadDescriptor()));
+  const form = within(h.container).getByRole("form");
+  await waitFor(() =>
+    expect({
+      sent: h.messages.send.mock.calls.map(([, content]) => content),
+      draft: h.input().value,
+      file: within(form).queryAllByText("notes.txt").length > 0,
+      line:
+        within(form).queryAllByText(
+          "A member's name changed while sending. Send again.",
+        ).length > 0,
+    }).toEqual({ sent: [], draft: "@Mary crew hi", file: true, line: true }),
+  );
+  expect(await sentGroups(h)).toEqual({
+    groups: 1,
+    content: "@MJ @Wes hi",
+    tags: [mj.pubkey, wes.pubkey],
+  });
+});
 it("a group picked with a label that starts with the name a member set on their own profile is sent as its members", async () => {
   const mj = { ...first, name: "MJ" };
   const h = mount();
