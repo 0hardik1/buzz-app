@@ -126,6 +126,11 @@ export function policyRelay({
       socket.onmessage?.({ data: JSON.stringify(frame) });
   }
   const api = {
+    /** Answer each HTTP read, publication and EOSE `ms` late, like a remote relay. */
+    latency(ms) {
+      latencyMs = ms;
+      eoseMs = ms;
+    },
     startupQuota(limit, setupLatencyMs = 40) {
       wsLimit = limit;
       eoseMs = setupLatencyMs;

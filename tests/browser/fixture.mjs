@@ -123,6 +123,7 @@ export const test = base.extend({
   fixedKeys: [false, { option: true }],
   channelIds: [channels, { option: true }],
   developmentReact: [false, { option: true, scope: "worker" }],
+  clientMetrics: [false, { option: true, scope: "worker" }],
   builderlabLogin: [false, { option: true, scope: "worker" }],
   // An FI build with no native host: the Builderlab plugin applies, signed out.
   federatedIdentity: [false, { option: true, scope: "worker" }],
