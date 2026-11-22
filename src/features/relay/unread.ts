@@ -3778,8 +3778,20 @@ export function createUnread({
           if (shown.has(target.messageId)) holders.add(visit);
         if (holders.size) {
           markedWhileShown.set(target.messageId, holders);
-          for (const { event } of byChannel.get(target.channelId) ?? [])
-            through = Math.max(through ?? -1, event.created_at);
+          // Only its own conversation: its thread, a whole DM, or a
+          // channel's top-level messages. Newer posts elsewhere do not
+          // shield it from reading a newer arrival here.
+          const rows = byChannel.get(target.channelId) ?? [];
+          const marked = byId.get(target.messageId);
+          const root = marked?.rootId;
+          const dm = isDm(target.channelId);
+          for (const row of rows)
+            if (
+              root
+                ? row.event.id === root || row.rootId === root
+                : dm || !row.parentId || row.broadcast
+            )
+              through = Math.max(through ?? -1, row.event.created_at);
         }
       }
       if (target.kind === "thread") {

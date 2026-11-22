@@ -8500,6 +8500,36 @@ it("a DM message marked unread while shown outlasts dwells at its position, not 
   expect(unread.attention("room", first.id).unread).toBe(false);
 });
 
+it("a reply marked unread while shown ends when a newer reply in its thread is read, despite newer posts elsewhere", async () => {
+  const h = setup();
+  h.grant("room");
+  const root = message(h.alice, "room", "root", 10);
+  const reply = message(h.alice, "room", "reply", 11, [
+    ["e", root.id, "", "reply"],
+  ]);
+  const elsewhere = message(h.alice, "room", "elsewhere", 100);
+  h.emit([root, reply, elsewhere]);
+  const unread = h.session.unread;
+  const visit = {};
+  const lease = unread.reading("room", root.id, visit);
+  lease.view([root.id, reply.id], () => true);
+  await unread.markUnreadLocal({
+    kind: "message",
+    channelId: "room",
+    messageId: reply.id,
+  });
+  const newer = message(h.alice, "room", "newer reply", 20, [
+    ["e", root.id, "", "reply"],
+  ]);
+  h.emit([newer]);
+  await lease.catchUp(newer.id, root.id);
+  lease.dispose();
+  unread.leave(visit);
+  await vi.waitFor(() =>
+    expect(h.journal()?.localUnread[`msg:${reply.id}`]).toBeUndefined(),
+  );
+});
+
 it("a channel message marked unread keeps its row lit in a muted channel", async () => {
   const h = setup();
   h.grant("room");
