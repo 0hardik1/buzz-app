@@ -2993,6 +2993,7 @@ export function createRelaySession(
       searchProfiles,
       () => profiles.queries.verifiedAuthority?.(),
       profiles.queries,
+      details.capability,
     ),
     unread: unread.capability,
     sidebarPreferences: sidebarPreferences.queries,
