@@ -141,6 +141,7 @@ fn leaf_links_special_files_and_busy_locks_refuse_but_home_aliases_work() {
             let held = File::open(&path).unwrap();
             held.lock().unwrap();
             refused(&env);
+            held.unlock().unwrap();
             drop(held);
             assert_eq!(inspect(&env).unwrap(), 1);
         }
@@ -975,13 +976,16 @@ fn reviewed_credential_admission_requires_both_retained_grant_and_exact_enrollme
         }
         let reads = env.store.reads.load(Ordering::SeqCst);
         let entered = AtomicUsize::new(0);
+        // Terminal, not an earlier unrelated Busy, must refuse each change.
         assert!(
-            env.manager
-                .with_reviewed_secret(&prepared, &grant, &witness, || {
-                    entered.fetch_add(1, Ordering::SeqCst);
-                    Ok(())
-                })
-                .is_err(),
+            matches!(
+                env.manager
+                    .try_reviewed_secret(&prepared, &grant, &witness, || {
+                        entered.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    }),
+                Err(Refusal::Terminal(_))
+            ),
             "{change}"
         );
         assert_eq!(entered.load(Ordering::SeqCst), 0, "{change}");
@@ -1035,11 +1039,13 @@ fn reviewed_admission_is_busy_only_while_another_holder_has_a_metadata_lock() {
             UNREADABLE,
             "{path:?}"
         );
+        held.unlock().unwrap();
         drop(held);
         // Every earlier lock was released when the attempt refused.
         for earlier in &locks {
             let probe = File::open(earlier).unwrap();
             probe.try_lock().unwrap();
+            probe.unlock().unwrap();
         }
     }
     assert_eq!(entered.load(Ordering::SeqCst), 0);

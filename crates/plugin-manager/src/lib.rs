@@ -1202,6 +1202,15 @@ pub struct Manager {
     policy_signer: Option<String>,
     secrets: secrets::Storage,
 }
+/// Releases the registry flock explicitly: a descriptor duplicated into a spawned
+/// child shares the lock, so closing ours alone would not release it.
+struct RegistryLock(File);
+impl Drop for RegistryLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 impl Manager {
     /// Host control-plane location that protected workers must not modify.
     pub fn storage_root(&self) -> &std::path::Path {
@@ -1327,7 +1336,7 @@ impl Manager {
             };
         }
     }
-    fn lock(&self) -> Result<File> {
+    fn lock(&self) -> Result<RegistryLock> {
         fs::create_dir_all(&self.root).map_err(err)?;
         let file = OpenOptions::new()
             .create(true)
@@ -1337,7 +1346,7 @@ impl Manager {
             .open(self.root.join("registry.lock"))
             .map_err(err)?;
         file.lock().map_err(err)?;
-        Ok(file)
+        Ok(RegistryLock(file))
     }
     fn read(&self) -> Result<Registry> {
         let path = self.root.join("registry.json");
@@ -3847,5 +3856,25 @@ mod tests {
                 assert_eq!(manifest.validate().is_ok(), valid);
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_released_registry_lock_admits_while_a_duplicated_descriptor_survives() {
+        let home = tempfile::tempdir().unwrap();
+        let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
+        let guard = manager.lock().unwrap();
+        // A child spawned while the lock is held shares this descriptor until it execs.
+        let inherited = guard.0.try_clone().unwrap();
+        let path = manager.root.join("registry.lock");
+        assert!(matches!(
+            fs::File::open(&path).unwrap().try_lock(),
+            Err(fs::TryLockError::WouldBlock)
+        ));
+        drop(guard);
+        let reacquired = fs::File::open(&path).unwrap();
+        reacquired.try_lock().unwrap();
+        reacquired.unlock().unwrap();
+        drop(inherited);
     }
 }
