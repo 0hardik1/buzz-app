@@ -2410,6 +2410,9 @@ function Timeline({
                       day={day}
                       onOpenLink={onOpenLink}
                       canOpenLink={canOpenLink}
+                      conversationName={(id) =>
+                        queries.channels.get?.(id)?.name
+                      }
                     />
                   ) : (
                     renderMessage(row)
