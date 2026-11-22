@@ -387,8 +387,7 @@ function createArranger(initial: ComposerAccessoryProps) {
   const reachesAll = () =>
     sort === "top" || filter !== "" || props.session.windowNewer !== true;
   const enough = () =>
-    scanned ||
-    (!reachesAll() && (forward === null || readRows() >= windowEnd()));
+    scanned || (!reachesAll() && forward !== null && readRows() >= windowEnd());
   const load = (signal: AbortSignal) =>
     reachesAll() ? scanAll(signal) : scanForward(signal);
 
@@ -455,8 +454,8 @@ function createArranger(initial: ComposerAccessoryProps) {
       const c = costOf(row);
       if (
         chosen.length >= limits.rows ||
-        count + c.events > spare.events ||
-        bytes + c.bytes > spare.bytes
+        (chosen.length > 0 &&
+          (count + c.events > spare.events || bytes + c.bytes > spare.bytes))
       )
         break;
       chosen.push(row);
@@ -512,6 +511,7 @@ function createArranger(initial: ComposerAccessoryProps) {
   }
 
   function fail(error: unknown, next: Sort) {
+    if (phase.state === "scanning") phase.abort.abort();
     phase = {
       state: "failed",
       sort: next,

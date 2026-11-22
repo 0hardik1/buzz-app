@@ -469,6 +469,9 @@ export function createRelaySession(
       if (event) return event;
     }
   }
+  function heldEvents() {
+    return [...holds].flatMap((held) => [...held.values()]);
+  }
   function retainedEvent(id: string) {
     return retainedThreadEvent(id) ?? retainedChannelEvent(id) ?? heldEvent(id);
   }
@@ -3152,6 +3155,7 @@ export function createRelaySession(
               ...recent.entries().map(([, item]) => item.event),
               ...retainedThreadEvents(),
               ...retainedChannelEvents(),
+              ...heldEvents(),
             ]
               .filter((event) =>
                 event.tags.some(

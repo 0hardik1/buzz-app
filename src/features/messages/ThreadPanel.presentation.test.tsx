@@ -58,8 +58,16 @@ vi.mock("./MessageRow", () => ({
   ),
 }));
 vi.mock("./MessageComposer", () => ({
-  MessageComposer: ({ replyParentId, replyContext }: MessageComposerProps) => (
-    <section aria-label="Composer" data-parent={replyParentId}>
+  MessageComposer: ({
+    replyParentId,
+    replyContext,
+    editMessages,
+  }: MessageComposerProps) => (
+    <section
+      aria-label="Composer"
+      data-parent={replyParentId}
+      data-edit-messages={editMessages?.map((row) => row.content).join(",")}
+    >
       {replyContext}
     </section>
   ),
@@ -787,4 +795,32 @@ it("unmounts the reader and revokes its present when the view drops its root, as
   h.publish({ status: "idle", root: undefined, replies: [] });
   expect(screen.queryByText("bar")).toBeNull();
   expect(present?.({ ids: [a.id], events: [a] })).toBe("retired");
+});
+
+it("keeps editMessages chronological, suppresses arrival counts, and settles reading while presented", () => {
+  const h = mount({
+    replies: [a, b],
+    snapshot: { direction: "forward", canLoadMore: true },
+  });
+  expect(readingProps.at(-1)?.settled.current).toBe(false);
+  h.present({ ids: [c.id, b.id, a.id], place: "start" });
+  expect(readingProps.at(-1)?.settled.current).toBe(true);
+  expect(screen.getByLabelText("Composer")).toHaveAttribute(
+    "data-edit-messages",
+    "root,a,b,c",
+  );
+  h.publish({
+    replies: h.rowsOf([root, a, b, d]).slice(1),
+    canLoadMore: false,
+  });
+  h.publish({
+    replies: h.rowsOf([root, a, b, c, d]).slice(1),
+    canLoadMore: false,
+  });
+  scrolled = 150;
+  h.withdraw();
+  expect(
+    screen.getByRole("button", { name: "Jump to latest" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /new message/i })).toBeNull();
 });

@@ -13,8 +13,10 @@ import { listByteSize } from "../relay/budget";
 import type { ChannelMessage } from "../relay/contracts";
 import type { EventData, RelayEvent } from "../relay/events";
 import type { LiveBatch } from "../relay/incoming";
+import { channelRowKind } from "../relay/membership";
 import { shareMessageRows } from "../relay/row-identity";
 import type { RelaySession } from "../relay/session";
+import { threadReference } from "../relay/thread-reference";
 import { AUX, growAux, inChannel } from "../relay/threads";
 
 /** A reader accessory, by identity. */
@@ -32,20 +34,229 @@ export type Display = Readonly<{
   /** Changes with each presentation, not with live updates of its rows. */
   revision: number;
 }>;
-type Hold = ReturnType<RelaySession["retain"]>;
-type Evidence = {
-  readonly hold: Hold;
-  readonly ids: readonly string[];
-  readonly events: Map<string, EventData>;
-  readonly live: Map<string, RelayEvent>;
-  rows: readonly ChannelMessage[];
-};
+/** Pure evidence state for one presentation. `root` and visibility
+ * `dependencies` stay outside `tracked` so live auxiliaries on the header or
+ * unpresented targets never grow the presentation's budget. */
+export type EvidenceState = Readonly<{
+  ids: readonly string[];
+  tracked: ReadonlyMap<string, EventData>;
+  dependencies: ReadonlyMap<string, EventData>;
+  root: EventData | undefined;
+  live: ReadonlyMap<string, RelayEvent>;
+}>;
+type Scope = Readonly<{
+  channelId: string;
+  rootId?: string | undefined;
+  limits: PresentationLimits;
+}>;
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const exceeds = (
   events: ReadonlyMap<string, EventData>,
   l: PresentationLimits,
 ) => events.size > l.events || listByteSize([...events.values()]) > l.bytes;
+
+/** Canonical event set passed to `session.retain().set(...)` and `foldRows`. */
+export function allEvidence(state: EvidenceState) {
+  const all = new Map<string, EventData>(state.tracked);
+  for (const [id, event] of state.dependencies)
+    if (!all.has(id)) all.set(id, event);
+  if (state.root && !all.has(state.root.id)) all.set(state.root.id, state.root);
+  return all;
+}
+
+function collectDependencies(
+  tracked: ReadonlyMap<string, EventData>,
+  pool: ReadonlyMap<string, EventData>,
+  rootId: string | undefined,
+  initial?: ReadonlyMap<string, EventData>,
+) {
+  const dependencies = new Map(initial);
+  let frontier = [...tracked.values()].filter((event) => AUX.has(event.kind));
+  for (let hop = 0; hop < 2 && frontier.length; hop++) {
+    const next: EventData[] = [];
+    for (const event of frontier)
+      for (const [name, targetId] of event.tags) {
+        if (
+          name !== "e" ||
+          !targetId ||
+          targetId === rootId ||
+          tracked.has(targetId) ||
+          dependencies.has(targetId)
+        )
+          continue;
+        const target = pool.get(targetId);
+        if (!target) continue;
+        dependencies.set(targetId, target);
+        if (AUX.has(target.kind)) next.push(target);
+      }
+    frontier = next;
+  }
+  return dependencies;
+}
+
+function inReaderScope(
+  event: EventData,
+  channelId: string,
+  rootId: string | undefined,
+) {
+  if (
+    !channelRowKind(event.kind) ||
+    event.id === rootId ||
+    !inChannel(event, channelId)
+  )
+    return false;
+  const ref = threadReference(event);
+  return rootId !== undefined
+    ? ref?.rootId === rootId
+    : !ref ||
+        event.tags.some(
+          ([name, value]) => name === "broadcast" && value === "1",
+        );
+}
+
+/** Validate a presentation and build its pure evidence closure. */
+export function selectEvidence(
+  presentation: ConversationPresentation,
+  priorLive: ReadonlyMap<string, RelayEvent>,
+  { channelId, rootId, limits }: Scope,
+) {
+  if (!isObject(presentation)) return "invalid" as const;
+  const { ids, events, parents, open, complete, place } = presentation;
+  if (
+    !Array.isArray(ids) ||
+    !Array.isArray(events) ||
+    ids.some((id) => typeof id !== "string") ||
+    new Set(ids).size !== ids.length ||
+    (parents !== undefined && !isObject(parents)) ||
+    (open !== undefined && !Array.isArray(open)) ||
+    (complete !== undefined && typeof complete !== "boolean") ||
+    (place !== undefined &&
+      place !== "keep" &&
+      place !== "start" &&
+      !(isObject(place) && typeof place.id === "string"))
+  )
+    return "invalid" as const;
+  if (ids.length > limits.rows) return "limit" as const;
+  const wanted = new Set(ids);
+  const pool = new Map<string, EventData>();
+  for (const event of [...events, ...priorLive.values()])
+    if (AUX.has(event.kind) || inChannel(event, channelId))
+      pool.set(event.id, event);
+  const tracked = new Map<string, EventData>();
+  for (const event of pool.values())
+    if (
+      wanted.has(event.id) &&
+      event.id !== rootId &&
+      !AUX.has(event.kind) &&
+      event.kind !== 39007
+    )
+      tracked.set(event.id, event);
+  growAux([...pool.values()], tracked);
+  const evidence: EvidenceState = {
+    ids: [...ids],
+    tracked,
+    dependencies: collectDependencies(tracked, pool, rootId),
+    root: rootId ? pool.get(rootId) : undefined,
+    live: new Map([...priorLive].filter(([id]) => tracked.has(id))),
+  };
+  const all = allEvidence(evidence);
+  if (exceeds(all, limits)) return "limit" as const;
+  return {
+    evidence,
+    all,
+    parents: parents
+      ? new Map(
+          Object.entries(parents).filter(
+            ([, parent]) => typeof parent === "string",
+          ),
+        )
+      : undefined,
+    open: [...(open ?? [])],
+    complete: complete === true,
+    place: place ?? "keep",
+  };
+}
+
+/** Admit live events into an active presentation: verified echoes of named
+ * pending rows, two-hop auxiliaries of tracked rows only (never `root`), their
+ * multi-target dependencies, and completeness downgrade on new unpresented rows. */
+export function applyLiveEvents(
+  state: EvidenceState,
+  complete: boolean,
+  batch: readonly RelayEvent[],
+  replay: boolean,
+  { channelId, rootId, limits }: Scope,
+) {
+  const wanted = new Set(state.ids);
+  const tracked = new Map(state.tracked);
+  const live = new Map(state.live);
+  let nextComplete = complete;
+  let trackedChanged = false;
+  for (const event of batch) {
+    if (
+      wanted.has(event.id) &&
+      event.id !== rootId &&
+      !tracked.has(event.id) &&
+      !AUX.has(event.kind) &&
+      event.kind !== 39007 &&
+      inChannel(event, channelId)
+    ) {
+      tracked.set(event.id, event);
+      live.set(event.id, event);
+      trackedChanged = true;
+    } else if (
+      nextComplete &&
+      !replay &&
+      !wanted.has(event.id) &&
+      inReaderScope(event, channelId, rootId)
+    )
+      nextComplete = false;
+  }
+  const addedAux = growAux(batch, tracked);
+  for (const event of addedAux) live.set(event.id, event);
+  const dependencies = addedAux.length
+    ? collectDependencies(
+        tracked,
+        new Map(batch.map((event) => [event.id, event])),
+        rootId,
+        state.dependencies,
+      )
+    : state.dependencies;
+  const refold =
+    trackedChanged ||
+    addedAux.length > 0 ||
+    dependencies.size !== state.dependencies.size;
+  if (!refold && nextComplete === complete) return { kind: "noop" as const };
+  const evidence: EvidenceState = { ...state, tracked, dependencies, live };
+  const all = allEvidence(evidence);
+  if (refold && exceeds(all, limits)) return { kind: "exceeded" as const };
+  return {
+    kind: "updated" as const,
+    evidence,
+    all,
+    complete: nextComplete,
+    refold,
+  };
+}
+
+/** Derived host-behavior switches for a reader while a presentation shows. */
+export function readerMode(display: Display | undefined) {
+  const presented = display !== undefined;
+  return {
+    presented,
+    chronologicalChrome: !presented,
+    hostNavigation: !presented,
+    partialReading: presented && !display.complete,
+  } as const;
+}
+
+type Hold = ReturnType<RelaySession["retain"]>;
+type ActivePresentation = {
+  readonly hold: Hold;
+  evidence: EvidenceState;
+  rows: readonly ChannelMessage[];
+};
 
 export type Arrangement = ReturnType<typeof createArrangement>;
 export function createArrangement({
@@ -59,10 +270,11 @@ export function createArrangement({
   rootId?: string | undefined;
   limits: PresentationLimits;
 }>) {
+  const scope: Scope = { channelId, rootId, limits };
   let phase: "live" | "leaving" | "retired" = "live";
   const lanes = new Map<ArrangementLane, "held" | "ended">();
   let shown: ArrangementLane | undefined;
-  let evidence: Evidence | undefined;
+  let active: ActivePresentation | undefined;
   let display: Display | undefined;
   let revision = 0;
   let stopWatching: (() => void) | undefined;
@@ -71,48 +283,16 @@ export function createArrangement({
   const emit = () => {
     for (const listener of [...listeners]) listener();
   };
-  function select(
-    presentation: ConversationPresentation,
-    live: Iterable<EventData>,
+  function fold(
+    current: ActivePresentation,
+    all = allEvidence(current.evidence),
   ) {
-    if (!isObject(presentation)) return "invalid";
-    const { ids, events, parents, open, complete, place } = presentation;
-    if (
-      !Array.isArray(ids) ||
-      !Array.isArray(events) ||
-      ids.some((id) => typeof id !== "string") ||
-      new Set(ids).size !== ids.length ||
-      (parents !== undefined && !isObject(parents)) ||
-      (open !== undefined && !Array.isArray(open)) ||
-      (complete !== undefined && typeof complete !== "boolean") ||
-      (place !== undefined &&
-        place !== "keep" &&
-        place !== "start" &&
-        !(isObject(place) && typeof place.id === "string"))
-    )
-      return "invalid";
-    if (ids.length > limits.rows) return "limit";
-    const wanted = new Set(ids);
-    const pool = new Map<string, EventData>();
-    for (const event of [...events, ...live])
-      if (AUX.has(event.kind) || inChannel(event, channelId))
-        pool.set(event.id, event);
-    const held = new Map<string, EventData>();
-    for (const event of pool.values())
-      if (wanted.has(event.id) && !AUX.has(event.kind) && event.kind !== 39007)
-        held.set(event.id, event);
-    growAux([...pool.values()], held);
-    const root = pool.get(rootId ?? "");
-    if (root) held.set(root.id, root);
-    return exceeds(held, limits) ? "limit" : { events: held };
-  }
-  function fold(current: Evidence) {
     const folded = new Map(
       session
-        .foldRows(channelId, [...current.events.values()], rootId)
+        .foldRows(channelId, [...all.values()], rootId)
         .map((row) => [row.id, row]),
     );
-    const rows = current.ids.flatMap((id) =>
+    const rows = current.evidence.ids.flatMap((id) =>
       id === rootId ? [] : (folded.get(id) ?? []),
     );
     return shareMessageRows(current.rows, rows);
@@ -129,8 +309,8 @@ export function createArrangement({
     };
   }
   function release() {
-    evidence?.hold.dispose();
-    evidence = undefined;
+    active?.hold.dispose();
+    active = undefined;
     shown = undefined;
     display = undefined;
     stopWatching?.();
@@ -139,43 +319,37 @@ export function createArrangement({
     cancelFrame = undefined;
   }
   function show(lane: ArrangementLane, presentation: ConversationPresentation) {
-    const picked = select(presentation, evidence?.live.values() ?? []);
+    const picked = selectEvidence(
+      presentation,
+      active?.evidence.live ?? new Map(),
+      scope,
+    );
     if (typeof picked === "string") return picked;
-    let hold = evidence?.hold;
+    let hold = active?.hold;
     try {
       hold ??= session.retain();
-      hold.set([...picked.events.values()]);
+      hold.set([...picked.all.values()]);
     } catch {
-      if (!evidence) hold?.dispose();
+      if (!active) hold?.dispose();
       return "limit";
     }
-    const live = new Map(
-      [...(evidence?.live ?? [])].filter(([id]) => picked.events.has(id)),
-    );
-    evidence = {
+    const next: ActivePresentation = {
       hold,
-      ids: [...presentation.ids],
-      ...picked,
-      live,
-      rows: evidence?.rows ?? [],
+      evidence: picked.evidence,
+      rows: active?.rows ?? [],
     };
-    evidence.rows = fold(evidence);
+    next.rows = fold(next, picked.all);
+    active = next;
     cancelFrame?.();
     cancelFrame = undefined;
     shown = lane;
     revision += 1;
     display = Object.freeze({
-      rows: evidence.rows,
-      parents: presentation.parents
-        ? new Map(
-            Object.entries(presentation.parents).filter(
-              ([, parent]) => typeof parent === "string",
-            ),
-          )
-        : undefined,
-      open: [...(presentation.open ?? [])],
-      complete: presentation.complete === true,
-      place: presentation.place ?? "keep",
+      rows: next.rows,
+      parents: picked.parents,
+      open: picked.open,
+      complete: picked.complete,
+      place: picked.place,
       revision,
     });
     watch();
@@ -188,27 +362,39 @@ export function createArrangement({
     emit();
   }
   const end = () => free(shown);
-  function onLive({ events }: LiveBatch) {
-    const current = evidence;
-    if (!current) return;
-    const added = growAux(events, current.events);
-    if (!added.length) return;
-    for (const event of added) current.live.set(event.id, event);
-    if (exceeds(current.events, limits)) return end();
-    try {
-      current.hold.set([...current.events.values()]);
-    } catch {
-      return end();
+  function onLive({ events, replay }: LiveBatch) {
+    const current = active;
+    if (!current || !display) return;
+    const result = applyLiveEvents(
+      current.evidence,
+      display.complete,
+      events,
+      replay === true,
+      scope,
+    );
+    if (result.kind === "noop") return;
+    if (result.kind === "exceeded") return end();
+    if (result.refold) {
+      try {
+        current.hold.set([...result.all.values()]);
+      } catch {
+        return end();
+      }
     }
-    refold();
+    current.evidence = result.evidence;
+    if (result.complete !== display.complete) {
+      display = Object.freeze({ ...display, complete: result.complete });
+      emit();
+    }
+    if (result.refold) refold();
   }
   function refold() {
-    const current = evidence;
+    const current = active;
     if (!current || cancelFrame) return;
     const id = requestAnimationFrame(() => {
       cancelFrame = undefined;
       const rows = fold(current);
-      if (current !== evidence || !display || rows === current.rows) return;
+      if (current !== active || !display || rows === current.rows) return;
       current.rows = rows;
       display = Object.freeze({ ...display, rows });
       emit();
@@ -230,7 +416,11 @@ export function createArrangement({
       }
       const held = shown !== undefined && shown !== lane;
       const picked = held
-        ? select(presentation, evidence?.live.values() ?? [])
+        ? selectEvidence(
+            presentation,
+            active?.evidence.live ?? new Map(),
+            scope,
+          )
         : show(lane, presentation);
       if (typeof picked === "string") return picked;
       if (held) lanes.set(lane, "held");

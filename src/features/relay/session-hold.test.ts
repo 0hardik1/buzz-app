@@ -342,3 +342,29 @@ it("reports the relay's buzz-window-newer capability", () => {
     expect(owner.session.windowNewer).toBe(windowNewer === true);
   }
 });
+
+it("deletes a held-only sent-to-channel copy when deleting its original reply", async () => {
+  const published: RelayEvent[] = [];
+  const { session } = setup(async (event) => {
+    published.push(event);
+  });
+  await session.outbox?.ready();
+  const root = proven(message(other, "c", "root", 10));
+  const original = proven(reply(viewer, root, 11, "mine"));
+  const copy = proven(
+    message(viewer, "c", "mine", 12, [["buzz:copy-of", original.id]]),
+  );
+  const hold = session.retain();
+  hold.set([root, original, copy]);
+  session.messages.remove([original.id]);
+  await flush();
+  await flush();
+  const deletedTargets = published
+    .filter((event) => event.kind === 5)
+    .flatMap((event) =>
+      event.tags.flatMap(([name, id]) => (name === "e" && id ? [id] : [])),
+    );
+  expect(deletedTargets).toContain(original.id);
+  expect(deletedTargets).toContain(copy.id);
+  hold.dispose();
+});

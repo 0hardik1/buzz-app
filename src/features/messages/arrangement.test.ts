@@ -14,10 +14,13 @@ import {
   type Key,
 } from "../relay/testing";
 import {
+  applyLiveEvents,
   createArrangement,
   createPlace,
   nearestShown,
   placeIntent,
+  readerMode,
+  selectEvidence,
 } from "./arrangement";
 import { replyTree } from "./reply-tree";
 
@@ -597,4 +600,141 @@ it("maps a presentation's place to an intent, keeping the anchor by default", ()
     kind: "reveal",
     id: "b",
   });
+});
+
+it("keeps live reactions on the thread root out of the reply presentation budget", () => {
+  const { root, replies, events } = thread(1);
+  const [a] = replies;
+  const { arrangement, receive } = host({
+    rootId: root.id,
+    limits: { rows: 10, events: 2, bytes: 4 << 20 },
+  });
+  const first = lane("a");
+  expect(arrangement.present(first, { ids: [a.id], events })).toBe("shown");
+  receive([reaction(other, root, 30), reaction(viewer, root, 31)], live);
+  expect(arrangement.status(first)).toBe("shown");
+  expect(ids(arrangement.snapshot()?.rows)).toEqual([a.id]);
+});
+
+it("preserves non-presented target evidence so a multi-target deletion still hides a presented row", () => {
+  const { root, replies, events } = thread(2);
+  const [a, b] = replies;
+  const both = deletion(other, [a.id, b.id], 30);
+  const { arrangement } = host({ rootId: root.id });
+  expect(
+    arrangement.present(lane("one"), {
+      ids: [a.id],
+      events: [...events, both],
+    }),
+  ).toBe("shown");
+  expect(arrangement.snapshot()?.rows).toEqual([]);
+});
+
+it("admits a named pending own send's verified echo so live reactions attach to it", async () => {
+  const { root } = thread(0);
+  let resolvePublish!: () => void;
+  let published!: RelayEvent;
+  const { arrangement, session, receive, frame } = host({
+    rootId: root.id,
+    publish: (event) => {
+      published = event;
+      return new Promise<void>((resolve) => {
+        resolvePublish = resolve;
+      });
+    },
+  });
+  receive([root]);
+  await session.outbox?.ready();
+  session.messages.reply("c", root.id, "mine");
+  const pendingId = session.outbox?.snapshot()[0]?.event.id ?? "";
+  arrangement.present(lane("one"), { ids: [pendingId], events: [root] });
+  await flush();
+  resolvePublish();
+  await flush();
+  receive([published], live);
+  receive([reaction(other, published, published.created_at + 1)], live);
+  frame();
+  expect(arrangement.snapshot()?.rows[0]).toMatchObject({
+    id: pendingId,
+    content: "mine",
+  });
+  expect(arrangement.snapshot()?.rows[0]?.reactions).toHaveLength(1);
+});
+
+it("downgrades complete when a new live in-scope row arrives, keeping revision and ignoring replays", () => {
+  const { root, replies, events } = thread(1);
+  const [a] = replies;
+  const { arrangement, receive } = host({ rootId: root.id });
+  arrangement.present(lane("one"), {
+    ids: [a.id],
+    events,
+    complete: true,
+  });
+  const before = arrangement.snapshot();
+  expect(before?.complete).toBe(true);
+  const replayed = reply(other, root, 40, "replayed");
+  receive([replayed], { phase: "replay", channelId: "c" });
+  expect(arrangement.snapshot()?.complete).toBe(true);
+  const outside = proven(message(other, "c", "top-level", 41));
+  receive([outside], live);
+  expect(arrangement.snapshot()?.complete).toBe(true);
+  const arriving = reply(other, root, 42, "late");
+  receive([arriving], live);
+  expect(arrangement.snapshot()?.complete).toBe(false);
+  expect(arrangement.snapshot()?.revision).toBe(before?.revision);
+});
+
+it("selectEvidence, applyLiveEvents and readerMode stay pure over plain values", () => {
+  const { root, replies, events } = thread(1);
+  const [a] = replies;
+  const scope = { channelId: "c", rootId: root.id, limits: wide };
+  const picked = selectEvidence(
+    { ids: [a.id], events, complete: true },
+    new Map(),
+    scope,
+  );
+  expect(typeof picked).toBe("object");
+  if (typeof picked === "string") throw new Error("expected selection");
+  const rootReaction = reaction(other, root, 50);
+  expect(
+    applyLiveEvents(picked.evidence, true, [rootReaction], false, scope),
+  ).toEqual({ kind: "noop" });
+  const late = reply(other, root, 51, "new");
+  const next = applyLiveEvents(picked.evidence, true, [late], false, scope);
+  expect(next).toMatchObject({
+    kind: "updated",
+    complete: false,
+    refold: false,
+  });
+  expect(readerMode(undefined)).toEqual({
+    presented: false,
+    chronologicalChrome: true,
+    hostNavigation: true,
+    partialReading: false,
+  });
+  expect(
+    readerMode({
+      rows: [],
+      parents: undefined,
+      open: [],
+      complete: false,
+      place: "keep",
+      revision: 1,
+    }),
+  ).toEqual({
+    presented: true,
+    chronologicalChrome: false,
+    hostNavigation: false,
+    partialReading: true,
+  });
+  expect(
+    readerMode({
+      rows: [],
+      parents: undefined,
+      open: [],
+      complete: true,
+      place: "keep",
+      revision: 1,
+    }).partialReading,
+  ).toBe(false);
 });

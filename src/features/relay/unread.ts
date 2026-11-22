@@ -1243,8 +1243,28 @@ export function createUnread({
     if (closed || !allowed(channelId)) return unknown;
     indexEvidence();
     const event = events.get(messageId);
-    if (!event || channelOf(event) !== channelId || !contentKind(event))
-      return unknown;
+    if (!event || channelOf(event) !== channelId || !contentKind(event)) {
+      const held = evidence?.(messageId);
+      if (
+        !held ||
+        channelOf(held) !== channelId ||
+        !contentKind(held) ||
+        deleted(held)
+      )
+        return unknown;
+      return Object.freeze({
+        status: "ineligible",
+        unread: false,
+        forced:
+          !agentAudience(held) &&
+          (forcedMessages.get(channelId)?.has(messageId) ?? false),
+        viewing: [...views.values()].some(
+          (view) =>
+            view.channelId === channelId &&
+            view.visible(messageId, view.ids.has(messageId)),
+        ),
+      });
+    }
     const entry = byChannel
       .get(channelId)
       ?.find((row) => row.event.id === messageId);
@@ -1308,9 +1328,12 @@ export function createUnread({
           const event =
             target.kind === "thread"
               ? structural(target.rootId)
-              : events.get(target.messageId);
+              : knownEvent(target.messageId);
           return (
             !!event &&
+            (target.kind === "thread" ||
+              events.has(target.messageId) ||
+              !deleted(event)) &&
             channelOf(event) === target.channelId &&
             contentKind(event)
           );
@@ -3000,7 +3023,11 @@ export function createUnread({
    * message or a reply in another thread): one frontier cannot skip that
    * message, so the thread's later replies stay unread too. Per-message unread
    * intent never stops it, since an advance leaves that message unread. */
-  function dmCut(channelId: string, rootId: string | undefined) {
+  function dmCut(
+    channelId: string,
+    rootId: string | undefined,
+    witnessAt = -1,
+  ) {
     indexEvidence();
     const rows = byChannel.get(channelId) ?? [];
     const state = reads.state();
@@ -3015,7 +3042,10 @@ export function createUnread({
         afterFrontier(row, state, true)
           ? Math.min(cut, row.event.created_at - 1)
           : cut,
-      rows.reduce((newest, row) => Math.max(newest, row.event.created_at), -1),
+      rows.reduce(
+        (newest, row) => Math.max(newest, row.event.created_at),
+        witnessAt,
+      ),
     );
   }
   // Capture evidence and time once per click, including every channel in a sweep.
@@ -3245,7 +3275,7 @@ export function createUnread({
           } catch {
             continue;
           }
-          const cut = dmCut(channelId, rootId);
+          const cut = dmCut(channelId, rootId, event.created_at);
           dmRead =
             (reads.state().frontiers[channelId] ?? -1) < cut ||
             manual(channelId)

@@ -24,7 +24,7 @@ import { DayDivider } from "./MessageTimestamp";
 import { ComposerAccessories } from "../conversation/ComposerAccessories";
 import type { ConversationExtensions } from "../conversation/contracts";
 import { CHANNEL_LIMITS } from "../relay/store";
-import { useArrangement, usePlace } from "./arrangement";
+import { readerMode, useArrangement, usePlace } from "./arrangement";
 import type { RelaySession } from "../relay/session";
 import type { MessageAttention } from "../relay/unread";
 import {
@@ -309,9 +309,9 @@ function Timeline({
     limits: CHANNEL_LIMITS,
     channel: !transient,
   });
-  const arranged = !!display;
-  const arrangedNow = useRef(false);
-  arrangedNow.current = arranged;
+  const mode = readerMode(display);
+  const modeNow = useRef(mode);
+  modeNow.current = mode;
   const shownIntro = (
     display
       ? display.complete
@@ -346,7 +346,11 @@ function Timeline({
     // A bottom place restores at the latest message; its row is noise.
     const place = position?.bottom ? { bottom: true } : position;
     const revision = JSON.stringify(place);
-    if (transient || arrangedNow.current || revision === written.current)
+    if (
+      transient ||
+      !modeNow.current.hostNavigation ||
+      revision === written.current
+    )
       return;
     if (writeView(scope, `scroll:${channelId}`, place))
       written.current = revision;
@@ -786,7 +790,7 @@ function Timeline({
       });
   }
   const newMessageBoundaryId =
-    !arranged &&
+    mode.chronologicalChrome &&
     boundaryMatchesVisit &&
     newMessageBoundary.captured &&
     messageVisit?.active === true &&
@@ -813,7 +817,7 @@ function Timeline({
         return next;
       });
   }, []);
-  const foldable = arranged ? NO_ROWS : chronologicalRows;
+  const foldable = mode.chronologicalChrome ? chronologicalRows : NO_ROWS;
   const presentation = useActivityPresentation(
     foldable,
     queries.agentActivity,
@@ -856,7 +860,7 @@ function Timeline({
       ? navigation.target.messageId
       : undefined);
   const targetHidden =
-    arranged &&
+    mode.presented &&
     !!requestedId &&
     renderedRowIndex(rows, shownRows, requestedId) < 0;
   const targetId = targetHidden ? undefined : requestedId;
@@ -975,7 +979,8 @@ function Timeline({
   // history edge does not repeat the reason. Recovery does not retry older
   // history, and paging stops on a failed read, so Retry stays either way.
   const { recovering } = useRecovery(queries.recovery);
-  const edgeError = recovering || arranged ? undefined : window.error;
+  const edgeError =
+    recovering || !mode.chronologicalChrome ? undefined : window.error;
   // Keep pagination space through EOF so removing its control cannot change
   // Virtua's start margin in the same measurement cycle as a prepend.
   const [reserveHistorySpace, setReserveHistorySpace] = useState(false);
@@ -1355,7 +1360,7 @@ function Timeline({
     )
       return;
     return () => {
-      if (savedPosition.current && !arrangedNow.current)
+      if (savedPosition.current && modeNow.current.hostNavigation)
         navigation.savePosition(TIMELINE_PLACE, savedPosition.current);
     };
   }, [navigation, presented]);
@@ -1385,7 +1390,7 @@ function Timeline({
           !row.replyParentId,
       )
       .at(-1)?.id,
-    partial: !!display && !display.complete,
+    partial: mode.partialReading,
     controls: readerBar,
     // Reading before the entry boundary settles would erase the evidence it
     // waits for: catch-up reads every loaded row and observe the unread ones,
@@ -1821,6 +1826,7 @@ function Timeline({
     };
     if (
       arrivals > 0 &&
+      mode.hostNavigation &&
       !swapped &&
       previousIds.size > 0 &&
       !follow.current &&
@@ -2038,6 +2044,7 @@ function Timeline({
     newMessageBoundaryId,
     swapped,
     owner,
+    mode.hostNavigation,
   ]);
   // After positioning reads it: a load that ends without rows lands no page.
   useLayoutEffect(() => {
@@ -2047,7 +2054,7 @@ function Timeline({
     (element: HTMLElement, resume = false) => {
       olderDemand.current = false;
       if (
-        arranged ||
+        !mode.hostNavigation ||
         !handle.current ||
         !userScrolled.current ||
         window.status !== "ready" ||
@@ -2075,7 +2082,7 @@ function Timeline({
         !after.historyLimited &&
         !after.error;
     },
-    [window, queries, channelId, arranged],
+    [window, queries, channelId, mode.hostNavigation],
   );
   useLayoutEffect(() => {
     if (olderDemand.current && scroller.current)
@@ -2091,7 +2098,7 @@ function Timeline({
     const element = scroller.current;
     if (
       !element ||
-      arranged ||
+      !mode.hostNavigation ||
       !settled.current ||
       !follow.current ||
       pendingRestore.current === intent.current ||
@@ -2121,7 +2128,7 @@ function Timeline({
     targetId,
     targetSignal,
     revealedSignal,
-    arranged,
+    mode.hostNavigation,
   ]);
   // After positioning's frame, and again once Virtua measures estimated rows.
   const scheduleFill = useCallback(() => {
@@ -2183,7 +2190,9 @@ function Timeline({
       data-channel-timeline={channelId}
       data-activity-history-scope=""
       data-buzz-launch-pending={launchPending ? "settling" : undefined}
-      data-jump-visible={(!arranged && showJumpToLatest) || undefined}
+      data-jump-visible={
+        (mode.chronologicalChrome && showJumpToLatest) || undefined
+      }
       onWheel={(event) => gesture(event.deltaY < 0 && !event.ctrlKey)}
       onTouchStart={(event) => {
         touchY.current = event.touches[0]?.clientY;
@@ -2283,7 +2292,7 @@ function Timeline({
       >
         {shownIntro}
         {edgeError && <span role="alert">{edgeError}</span>}
-        {arranged ? null : window.historyLimited ? (
+        {!mode.chronologicalChrome ? null : window.historyLimited ? (
           <span>History window limit reached</span>
         ) : window.hasMore && queries.channels.cachedOnly ? (
           <span>You can load older messages once Buzz reconnects.</span>
@@ -2309,7 +2318,7 @@ function Timeline({
         ) : null}
       </div>
       <JumpToLatestButton
-        visible={!arranged && showJumpToLatest}
+        visible={mode.chronologicalChrome && showJumpToLatest}
         newMessageCount={newMessageCount}
         onClick={jumpToLatest}
       />
@@ -2358,7 +2367,7 @@ function Timeline({
                 ? rows[index + 1]
                 : publicMessageNeighbor(rows, index, 1);
             const day =
-              !arranged &&
+              mode.chronologicalChrome &&
               (index === 0 ||
                 calendarDay(rows[index - 1]?.createdAt ?? 0) !==
                   calendarDay(row.createdAt));
@@ -2394,7 +2403,7 @@ function Timeline({
                   )}
                   stackPrevious={
                     inside ||
-                    (!arranged &&
+                    (mode.chronologicalChrome &&
                       !!previousRow &&
                       !foldedActivity.has(previousRow.id) &&
                       continuesMessageGroup(previousRow, row))
@@ -2402,12 +2411,12 @@ function Timeline({
                   stackNext={
                     inside ||
                     presentation.bubbleAnchors.has(row.id) ||
-                    (!arranged &&
+                    (mode.chronologicalChrome &&
                       row.id === lastPublicMessage?.id &&
                       row.audience !== "agents" &&
                       !row.membership &&
                       row.authorId === liveAgents[0]) ||
-                    (!arranged &&
+                    (mode.chronologicalChrome &&
                       !!nextRow &&
                       !foldedActivity.has(nextRow.id) &&
                       continuesMessageGroup(row, nextRow))
@@ -2524,7 +2533,7 @@ function Timeline({
           })}
         </Virtualizer>
       )}
-      {!arranged &&
+      {mode.chronologicalChrome &&
         !rows.length &&
         !shownIntro &&
         !window.hasMore &&
@@ -2554,7 +2563,9 @@ function Timeline({
           session={queries}
           channelId={channelId}
           previousAuthor={
-            !arranged && lastPublicMessage && !lastPublicMessage.membership
+            mode.chronologicalChrome &&
+            lastPublicMessage &&
+            !lastPublicMessage.membership
               ? lastPublicMessage.authorId
               : undefined
           }

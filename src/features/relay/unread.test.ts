@@ -9019,7 +9019,23 @@ it("reads and marks unread a held-only message, never counting or caching it", a
   await handle.observe([held.id]);
   expect(h.journal()?.state.frontiers).toEqual({ [`msg:${held.id}`]: 12 });
   await h.session.unread.markMessageUnread("room", held.id);
+  expect(h.session.unread.attention("room", held.id).forced).toBe(true);
+  expect(
+    h.session.unread.snapshot({
+      kind: "message",
+      channelId: "room",
+      messageId: held.id,
+    }).manual,
+  ).toBe("local-only");
   await h.session.unread.markMessageRead("room", held.id);
+  expect(h.session.unread.attention("room", held.id).forced).toBe(false);
+  expect(
+    h.session.unread.snapshot({
+      kind: "message",
+      channelId: "room",
+      messageId: held.id,
+    }).manual,
+  ).toBe("none");
   const root = eventDto(message(h.alice, "room", "root", 20));
   const reply = eventDto(
     message(h.alice, "room", "reply", 21, [["e", root.id, "", "reply"]]),
@@ -9066,4 +9082,21 @@ it("a hold gives a counted reply no conversation: its root is still fetched", as
       ),
     ).toContain(root.id),
   );
+});
+
+it("complete DM reading advances the DM frontier through a held-only witness newer than counted rows", async () => {
+  const h = setup();
+  h.grant("dm");
+  h.emit([metadata(h.relay, "dm", "DM", 11, [["t", "dm"]])]);
+  const counted = message(h.alice, "dm", "older", 20);
+  h.emit([counted]);
+  await h.session.unread.ensure();
+  const heldNewer = eventDto(message(h.alice, "dm", "newer-held", 50));
+  const hold = h.session.retain();
+  hold.set([heldNewer]);
+  const handle = h.session.unread.reading("dm");
+  await handle.observe([heldNewer.id]);
+  expect(h.journal()?.state.frontiers.dm).toBe(50);
+  handle.dispose();
+  hold.dispose();
 });
