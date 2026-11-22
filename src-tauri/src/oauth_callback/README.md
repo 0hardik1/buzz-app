@@ -103,7 +103,7 @@ from whether a focus return is armed, never from the platform it was built for:
   any provider error, which retires an armed return. The link opens bare
   `buzz://`, which brings Buzz to the front, opens nothing, shows no notice and
   never displaces a link waiting to open (see
-  [OS deep links](../../../docs/deep-links.md#accepted-links)). The page carries
+  [the deep-link owner](../../../src/features/navigation/deep-links.ts)). The page carries
   no script, no `script-src`, no close delay and no spinner or closing text, so
   nothing can close it before the person uses the link and nothing reserves
   space for a countdown: under the link it shows only **You can close this
