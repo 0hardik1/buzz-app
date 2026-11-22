@@ -8,15 +8,30 @@ export type OpenTrigger = "click" | "keyboard" | "route";
 /** Where the first painted rows came from. `disk-late` means the open waited,
  * then a disk restore landed before the network read did. */
 export type OpenSource = "memory" | "disk" | "disk-late" | "network";
+/** When each part of an open's first screen was ready, in ms from its start.
+ * Absent when it never happened during the open. */
+export type OpenSteps = Readonly<{
+  /** The conversation pane switched to the channel. */
+  pane?: number;
+  /** Its rows were painted in the DOM, possibly while the screen was hidden. */
+  rows?: number;
+  /** The New messages line was decided: placed, or none for this visit. */
+  line?: number;
+  /** Every name on the rows was known. */
+  names?: number;
+  /** The first screen was shown. */
+  shown?: number;
+}>;
 export type ChannelOpen = Readonly<{
   channel: string;
   trigger: OpenTrigger;
   source: OpenSource;
-  /** Input event (or mount) to the frame after first rows were committed. */
+  /** Input event (or mount) to the first painted frame that shows its rows. */
   ms: number;
   /** Until the store held rows for the channel: a disk read or relay request.
    * Zero when the rows were already there. The rest of `ms` is rendering. */
   waitMs: number;
+  steps: OpenSteps;
   at: number;
   phase: number;
 }>;
@@ -79,8 +94,19 @@ const distribution = (values: readonly number[]) => ({
 });
 /** Totals plus medians of the wait/render split. Medians of the parts need
  * not add up to the median total. */
+const STEPS = ["pane", "rows", "line", "names", "shown"] as const;
 const loads = (list: readonly ChannelOpen[]) => ({
   ...distribution(list.map((open) => open.ms)),
+  /** Median time from the start to each step, over the opens that had it. */
+  steps: Object.fromEntries(
+    STEPS.map((step) => [
+      step,
+      percentile(
+        list.flatMap((open) => open.steps[step] ?? []),
+        50,
+      ),
+    ]),
+  ) as Record<(typeof STEPS)[number], number | undefined>,
   waitP50: percentile(
     list.map((open) => open.waitMs),
     50,
@@ -137,6 +163,14 @@ export function createClientMetrics({
         dataAt?: number;
         dataOrigin?: "disk" | "network";
         rendered?: boolean;
+        mountAt?: number;
+        rowsAt?: number;
+        lineAt?: number;
+        namesAt?: number;
+        shownAt?: number;
+        /** The timeline reported its first screen hidden, so the open ends
+         * only once it is shown. */
+        held?: boolean;
       }
     | undefined;
   let shown: string | undefined;
@@ -216,6 +250,21 @@ export function createClientMetrics({
         source,
         ms: at - open.start,
         waitMs: Math.max(0, (open.dataAt ?? open.start) - open.start),
+        steps: Object.freeze(
+          Object.fromEntries(
+            (
+              [
+                ["pane", open.mountAt],
+                ["rows", open.rowsAt],
+                ["line", open.lineAt],
+                ["names", open.namesAt],
+                ["shown", open.shownAt],
+              ] as const
+            ).flatMap(([step, t]) =>
+              t === undefined ? [] : [[step, Math.max(0, t - open.start)]],
+            ),
+          ),
+        ),
         at: open.start,
         phase: phase(),
       }),
@@ -275,6 +324,7 @@ export function createClientMetrics({
       shown = channel;
       if (pending?.channel !== channel)
         pending = { channel, trigger: "route", start: now() };
+      pending.mountAt ??= now();
     }),
     /** The pane stopped showing a channel (switched, or replaced by another
      * page). Returning to it is a new open, and its unfinished open is dropped
@@ -312,8 +362,11 @@ export function createClientMetrics({
         let frames = 0;
         const check = () => {
           if (pending !== open || shown !== channel) return;
-          if (visible()) finishOpen();
-          else if (++frames < PAINT_FRAMES) afterPaint(check);
+          if (visible()) {
+            open.rowsAt = now();
+            // A hidden first screen ends the open when it is shown.
+            if (!open.held || open.shownAt !== undefined) finishOpen();
+          } else if (++frames < PAINT_FRAMES) afterPaint(check);
           else {
             // Recording now would time the fallback, not the paint.
             pending = undefined;
@@ -321,6 +374,32 @@ export function createClientMetrics({
           }
         };
         afterPaint(check);
+      },
+    ),
+    /** The timeline's first screen: whether its line is decided, its names
+     * are known and it is shown. Reported from its first commit, before the
+     * pane reports rendered rows, so a hidden screen holds the open. */
+    channelScreen: active(
+      (
+        channel: string,
+        screen: { line: boolean; names: boolean; shown: boolean },
+      ) => {
+        const open = pending;
+        if (open?.channel !== channel) return;
+        const at = now();
+        if (screen.line) open.lineAt ??= at;
+        if (screen.names) open.namesAt ??= at;
+        if (!screen.shown) {
+          open.held ??= true;
+          return;
+        }
+        if (open.shownAt !== undefined) return;
+        open.shownAt = at;
+        // Rows already painted hidden: the open ends with the next paint.
+        if (open.rowsAt !== undefined)
+          afterPaint(() => {
+            if (pending === open && shown === channel) finishOpen();
+          });
       },
     ),
     /** The channel settled with nothing to paint (empty or failed), so its
@@ -464,7 +543,10 @@ export type ClientMetrics = ReturnType<typeof createClientMetrics>;
 
 /** Development builds only; production and unit tests get a no-op recorder. */
 export const clientMetrics = createClientMetrics({
-  enabled: import.meta.env?.DEV === true && import.meta.env?.MODE !== "test",
+  enabled:
+    (import.meta.env?.DEV === true ||
+      import.meta.env?.VITE_BUZZ_CLIENT_METRICS === "1") &&
+    import.meta.env?.MODE !== "test",
 });
 if (clientMetrics.enabled)
   (globalThis as { __buzzClientMetrics?: ClientMetrics }).__buzzClientMetrics =

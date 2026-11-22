@@ -150,6 +150,12 @@ type Opening = {
   settling: boolean;
   shown: boolean;
 };
+/** The parts of a visit's first screen that are ready, for timing an open. */
+export type FirstScreen = Readonly<{
+  line: boolean;
+  names: boolean;
+  shown: boolean;
+}>;
 /** What the reader had in front of them when the window lost attention. */
 type AwayBaseline = {
   token: object;
@@ -248,6 +254,8 @@ export type ChannelTimelineProps = {
   onOpenLink(url: string, origin?: MessageLinkOrigin): boolean;
   canOpenLink?: ((target: string) => boolean) | undefined;
   revealMessageId?: string | undefined;
+  /** Each change to the first screen's progress, from its first commit. */
+  onFirstScreen?: ((screen: FirstScreen) => void) | undefined;
   /** Root of the thread currently displayed beside this conversation. */
   openThreadRootId?: string | undefined;
   /** One inline exact visit: focus the verified mounted row, without a page
@@ -301,6 +309,7 @@ function Timeline({
   onOpenLink,
   canOpenLink,
   revealMessageId,
+  onFirstScreen,
   openThreadRootId,
   inlineTarget,
   transient = false,
@@ -833,13 +842,16 @@ function Timeline({
     laidOut.current = epoch;
   }, [epoch]);
   let complete = false;
+  let lineDecided = true;
+  let namesKnown = true;
   if (!firstScreenShown) {
-    const lineDecided =
+    lineDecided = !!(
       !ownsMessageVisit ||
       (messageVisit?.active !== true && !settling) ||
       messageVisit?.failed ||
-      (boundaryMatchesVisit && newMessageBoundary.captured);
-    const namesKnown = window.rows.every((row) =>
+      (boundaryMatchesVisit && newMessageBoundary.captured)
+    );
+    namesKnown = window.rows.every((row) =>
       rowProfileIds(row).every((id) => profiles.has(id) || unnamed.has(id)),
     );
     complete = lineDecided && namesKnown;
@@ -857,6 +869,14 @@ function Timeline({
       channelId,
       captured: true,
     });
+  const hasRows = window.rows.length > 0;
+  useLayoutEffect(() => {
+    onFirstScreen?.({
+      line: lineDecided,
+      names: namesKnown && hasRows,
+      shown: firstScreenShown,
+    });
+  }, [onFirstScreen, lineDecided, namesKnown, hasRows, firstScreenShown]);
   useEffect(() => {
     if (!complete || firstScreenShown) return;
     const frame = requestAnimationFrame(() =>
