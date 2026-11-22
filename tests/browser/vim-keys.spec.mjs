@@ -62,7 +62,8 @@ test("Vim keys select messages, act on them with go, and leave the composer", as
   await page.keyboard.press("o");
   const menu = page.getByRole("menu");
   const reply = menu.getByRole("menuitem", { name: "Reply", exact: true });
-  await expect(reply).toHaveAttribute("aria-keyshortcuts", "r");
+  // Its key is the message's own: t replies, r reacts.
+  await expect(reply).toHaveAttribute("aria-keyshortcuts", "t");
   await expect(
     menu.getByRole("menuitem", { name: "Copy message", exact: true }),
   ).toHaveAttribute("aria-keyshortcuts", /^[a-z0-9]$/);
@@ -76,7 +77,7 @@ test("Vim keys select messages, act on them with go, and leave the composer", as
   // next key still reaches the menu.
   await page.keyboard.press(" ");
   await expect(page.locator("[data-vim-which-key]")).toHaveCount(0);
-  await page.keyboard.press("r");
+  await page.keyboard.press("t");
   await expect(menu).toHaveCount(0);
   await expect(
     page.getByRole("region", { name: "Thread messages", exact: true }),
@@ -312,22 +313,23 @@ test.describe("the cursor", () => {
     // Escape on the message stays on it; i types and Escape comes back.
     await page.keyboard.press("Escape");
     await expect(box(page, 38)).toBeFocused();
+    // The cursor is where focus is: typing, the sidebar and the which-key
+    // menu leave the message unmarked, and Escape comes back to it.
     await page.keyboard.press("i");
     await expect(composer(page, "Alpha")).toBeFocused();
-    await expect.poll(() => painted(box(page, 38))).toBe(true);
+    await expect(cursor(page)).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(box(page, 38)).toBeFocused();
 
-    // The sidebar and the which-key menu leave it marked; Escape comes back.
     await page.keyboard.press("\\");
     const nav = page.getByRole("navigation", { name: "Subscribed channels" });
     await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
-    await expect.poll(() => painted(box(page, 38))).toBe(true);
+    await expect(cursor(page)).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(box(page, 38)).toBeFocused();
     await page.keyboard.press(" ");
     await expect(page.locator("[data-vim-which-key]")).toBeVisible();
-    await expect.poll(() => painted(box(page, 38))).toBe(true);
+    await expect(cursor(page)).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(page.locator("[data-vim-which-key]")).toHaveCount(0);
     await expect(box(page, 38)).toBeFocused();
@@ -579,9 +581,20 @@ test("j, k, gg, G and Ctrl-d walk Settings without opening its choices", async (
     .toBe(true);
 });
 
+// A thread opens beside the conversation in a side panel with its own
+// message box and list, and its tab's own Escape; that handoff needs a browser.
 test.describe("with a thread", () => {
   test.use({ readState: true, threadUnread: true, productionBroker: true });
-  test("Enter opens the selected message's thread", async ({ page, app }) => {
+  const panel = (page) => page.locator("[data-panel-workspace]");
+  const marked = (page) => page.locator("[data-message-cursor]");
+  /** Where focus is, as a message's text, or null outside a message. */
+  const focusedText = (page) =>
+    page.evaluate(
+      () =>
+        document.activeElement?.closest("[data-message-id]")?.textContent ??
+        null,
+    );
+  async function enterThread(page, app) {
     await open(page, app);
     await enableVimKeys(page);
     const root = app.histories
@@ -594,10 +607,127 @@ test.describe("with a thread", () => {
     await expect(message).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(
-      page
-        .locator("[data-panel-workspace]")
-        .getByRole("tab", { name: "Thread root 1", exact: true }),
+      panel(page).getByRole("tab", { name: "Thread root 1", exact: true }),
     ).toBeVisible();
+    // The thread's newest message has taken focus from its message box.
+    await expect.poll(() => focusedText(page)).toContain("Unread reply 1");
+    return message;
+  }
+
+  test("Enter enters the thread at its newest message, and Escape from its message box comes back", async ({
+    page,
+    app,
+  }) => {
+    await enterThread(page, app);
+    const reply = panel(page)
+      .locator("[data-message-id] > [data-layout]")
+      .filter({ hasText: "Unread reply 1" });
+    await expect(reply).toBeFocused();
+    const box = panel(page).getByRole("textbox");
+    // j and k move in the thread; they never type into its message box.
+    await page.keyboard.press("k");
+    await expect.poll(() => focusedText(page)).toContain("Thread root 1");
+    expect(
+      await page.evaluate(
+        () => !!document.activeElement?.closest("[data-panel-workspace]"),
+      ),
+    ).toBe(true);
+    await page.keyboard.press("j");
+    await expect(reply).toBeFocused();
+    await expect(box).toHaveText("");
+    // Escape from the message box returns to the thread's message and keeps
+    // the thread and the draft.
+    await page.keyboard.press("i");
+    await expect(box).toBeFocused();
+    await page.keyboard.type("hello");
+    await page.keyboard.press("Escape");
+    await expect(reply).toBeFocused();
+    await expect(
+      panel(page).getByRole("tab", { name: "Thread root 1", exact: true }),
+    ).toBeVisible();
+    await expect(box).toHaveText("hello");
+  });
+
+  test("there is only ever one cursor, and it is where focus is", async ({
+    page,
+    app,
+  }) => {
+    const root = await enterThread(page, app);
+    const one = () =>
+      expect
+        .poll(() =>
+          page.evaluate(() => {
+            const marks = document.querySelectorAll("[data-message-cursor]");
+            return (
+              marks.length === 1 && !!marks[0]?.contains(document.activeElement)
+            );
+          }),
+        )
+        .toBe(true);
+    await one();
+    await page.keyboard.press("k");
+    await expect.poll(() => focusedText(page)).toContain("Thread root 1");
+    await one();
+    // The conversation's own selection stays put while the thread moves.
+    await expect(root).not.toHaveAttribute("data-message-cursor");
+    // Moving to the conversation takes the cursor there, and back again.
+    await page.keyboard.press(apple ? "Control+h" : "Alt+h");
+    await expect(root).toBeFocused();
+    await one();
+    await page.keyboard.press(apple ? "Control+l" : "Alt+l");
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => !!document.activeElement?.closest("[data-panel-workspace]"),
+        ),
+      )
+      .toBe(true);
+    await expect.poll(() => focusedText(page)).toContain("Thread root 1");
+    await one();
+    // In the message box, a menu or the sidebar, no message is marked.
+    await page.keyboard.press("i");
+    await expect(panel(page).getByRole("textbox")).toBeFocused();
+    await expect(marked(page)).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await one();
+    await page.keyboard.press("\\");
+    await expect(marked(page)).toHaveCount(0);
+    // A window without focus shows no cursor; it comes back with focus.
+    await page.keyboard.press("Escape");
+    await one();
+    await page.evaluate(() => {
+      document.hasFocus = () => false;
+      window.dispatchEvent(new FocusEvent("blur"));
+    });
+    await expect(marked(page)).toHaveCount(0);
+    await page.evaluate(() => {
+      delete document.hasFocus;
+      window.dispatchEvent(new FocusEvent("focus"));
+    });
+    await one();
+  });
+
+  test("go offers React on r, and r opens the reaction picker", async ({
+    page,
+    app,
+  }) => {
+    const root = await enterThread(page, app);
+    await page.keyboard.press(apple ? "Control+h" : "Alt+h");
+    await expect(root).toBeFocused();
+    await page.keyboard.press("g");
+    await page.keyboard.press("o");
+    const react = page
+      .getByRole("menu")
+      .getByRole("menuitem", { name: "Add reaction", exact: true });
+    await expect(react).toHaveAttribute("aria-keyshortcuts", "r");
+    await page.keyboard.press("r");
+    await expect(page.locator("em-emoji-picker")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("em-emoji-picker")).toHaveCount(0);
+    await expect(root).toBeFocused();
+    // Buzz's own r on the selected message opens it too.
+    await page.keyboard.press("r");
+    await expect(page.locator("em-emoji-picker")).toBeVisible();
   });
 });
 

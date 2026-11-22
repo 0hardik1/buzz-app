@@ -215,15 +215,19 @@ test("right-clicking a message timestamp offers its ⋯ actions and copies its l
   const menu = page.getByRole("menu");
   await expect(menu).toBeVisible();
   expect(await prevented(page)).toEqual([true]);
-  // The same list as ⋯, plus the toolbar's Reply.
+  // The same list as ⋯, plus the toolbar's Add reaction and Reply.
   expect(await items(page).allInnerTexts()).toEqual(
-    [...more.slice(0, more.indexOf("Copy message") + 1), "Reply"].concat(
-      more.slice(more.indexOf("Copy message") + 1),
-    ),
+    [
+      ...more.slice(0, more.indexOf("Copy message") + 1),
+      "Add reaction",
+      "Reply",
+    ].concat(more.slice(more.indexOf("Copy message") + 1)),
   );
   const box = await menu.boundingBox();
   expect(Math.abs(box.x - point.x)).toBeLessThan(16);
-  expect(Math.abs(box.y - point.y)).toBeLessThan(16);
+  // At the press, moved up only as far as it needs to fit the window.
+  const fits = page.viewportSize().height - box.height - 8;
+  expect(Math.abs(box.y - Math.min(point.y, fits))).toBeLessThan(16);
   await menu.getByRole("menuitem", { name: "Copy link", exact: true }).click();
   await expect(menu).toHaveCount(0);
   await expect

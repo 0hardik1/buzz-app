@@ -5,7 +5,7 @@ import {
   type MessageList,
 } from "../../features/messages/message-selection";
 import type { ChannelMessage } from "../../features/relay/contracts";
-import { CURSOR, trackCursor } from "./cursor";
+import { CURSOR, currentCursor, trackCursor } from "./cursor";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -79,7 +79,7 @@ test("an opened conversation selects and focuses its newest message, kept mounte
   expect(pins).toEqual(["three"]);
 });
 
-test("focus and clicks move it; typing, scrolling and focus elsewhere keep it", async () => {
+test("focus and clicks move it; typing, scrolling and focus elsewhere keep it, unmarked", async () => {
   const { list, box, composer, marked, pins } = conversation();
   cleanups.push(trackCursor());
   await frame();
@@ -93,12 +93,14 @@ test("focus and clicks move it; typing, scrolling and focus elsewhere keep it", 
   composer?.focus();
   list.dispatchEvent(new Event("scroll"));
   await frame();
-  expect(marked()).toEqual(["one"]);
+  // The cursor is where focus is; the message is only remembered.
+  expect(marked()).toEqual([]);
+  expect(currentCursor()?.dataset.messageId).toBe("one");
   expect(document.activeElement).toBe(composer);
 
   box("two").dispatchEvent(new Event("pointerdown", { bubbles: true }));
   await frame();
-  expect(marked()).toEqual(["two"]);
+  expect(currentCursor()?.dataset.messageId).toBe("two");
 });
 
 test("focus that falls to nothing, or a click in the timeline, returns to it", async () => {

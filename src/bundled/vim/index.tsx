@@ -31,10 +31,11 @@ import {
   top,
   focused,
   typing,
+  SIDEBAR,
   stepPart,
   threadSummary,
 } from "./motion";
-import { trackCursor } from "./cursor";
+import { claim, newestRow, trackCursor } from "./cursor";
 import { createPending, SHOW_AFTER_MS, WHICH_KEY } from "./pending";
 import { LEADER, type Sequence, type SequenceGroup } from "./sequences";
 import { WhichKey } from "./WhichKey";
@@ -174,6 +175,26 @@ export const apply: PluginModule["apply"] = (ctx) => {
         event.stopPropagation();
         return;
       }
+      // Escape leaves a side panel's composer, whose tab closes on Escape,
+      // unless a suggestion list or an edit has it; and leaves the sidebar
+      // before marking the conversation read takes it.
+      const leaves =
+        event.key === "Escape" &&
+        !event.shiftKey &&
+        !event.isComposing &&
+        (origin?.matches("[data-tab-focus]")
+          ? !!origin.closest(
+              "[data-panel-workspace] [data-composer-surface]",
+            ) &&
+            !origin.hasAttribute("aria-controls") &&
+            !origin.closest("[data-editing]")
+          : !!origin?.closest(SIDEBAR) && !typing() && !inMenu());
+      if (leaves) {
+        leave();
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const row = origin?.closest<HTMLElement>("[data-message-id]");
       if (!origin || !row || typing() || !messageListOf(row)) return;
       if (event.key === "Tab") stepPart(!event.shiftKey);
@@ -305,7 +326,12 @@ export const apply: PluginModule["apply"] = (ctx) => {
     "open-thread",
     "Open the selected message's thread",
     { key: "Enter" },
-    () => threadSummary()?.click(),
+    () => {
+      threadSummary()?.click();
+      // The thread's newest message, not its message box, takes focus, also
+      // as its replies load.
+      claim(() => newestRow(document.querySelector("[data-panel-workspace]")));
+    },
     { when: () => !!threadSummary() },
   );
   key(

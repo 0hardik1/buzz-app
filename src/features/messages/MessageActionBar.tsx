@@ -20,6 +20,7 @@ import {
   LinkIcon,
   ForwardIcon,
   QuotesIcon,
+  SmileyPlusIcon,
 } from "../../shared/design-system/icons";
 import { behindActiveOverlay } from "../../shared/design-system/overlayLayer";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
@@ -80,6 +81,8 @@ type Props = {
   menuTriggerRef?: RefObject<HTMLButtonElement | null>;
   onSendToChannel?: (() => void) | undefined;
   onReply?: (() => void) | undefined;
+  /** Opens the reaction picker, as the toolbar's Add reaction does. */
+  onReact?: (() => void) | undefined;
   onForward?: (() => void) | undefined;
   replyDisabled?: boolean | undefined;
   link?: string | undefined;
@@ -191,6 +194,7 @@ function MessageActionBarControls({
   withToolbar,
   onSendToChannel,
   onReply,
+  onReact,
   onForward,
   replyDisabled,
   link,
@@ -403,8 +407,24 @@ function MessageActionBarControls({
             Send to channel
           </MenuItem>
         )}
+        {children && onReact && (
+          // The same key as the message's own React shortcut.
+          <MenuItem
+            letter="r"
+            onClick={() => {
+              setHandingOffFocus(true);
+              afterClose.current = onReact;
+            }}
+          >
+            <MenuIcon>
+              <SmileyPlusIcon />
+            </MenuIcon>
+            Add reaction
+          </MenuItem>
+        )}
         {children && onReply && (
           <MenuItem
+            letter="t"
             disabled={replyDisabled}
             onClick={() => {
               setHandingOffFocus(true);

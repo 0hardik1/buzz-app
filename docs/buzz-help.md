@@ -427,7 +427,7 @@ Quitting Buzz also turns it off.
   More. Keyboard focus also reveals these actions; touch layouts keep actions
   inline.
 - Right-click a message, including its timestamp, to open its More actions with
-  **Reply** added; Shift+F10 or the Menu key opens it from a focused control in
+  **Add reaction** and **Reply** added; Shift+F10 or the Menu key opens it from a focused control in
   the message. Links keep their own menu; uploaded images and videos have media
   actions. Other media and text you already selected keep the system menu.
   Touch long-press keeps text selection.
@@ -1044,18 +1044,19 @@ Quitting Buzz also turns it off.
   by"; change one of them to choose which fires. In the Mac app, **Buzz →
   Settings…** in the menu bar also opens Settings.
 - **Vim keys** is an optional plugin, off by default; turn it on in
-  **Settings → Plugins**. Each conversation then always has one selected
-  message, starting with the newest, which keeps focus unless you are typing
-  or using the sidebar, a menu or a dialog. `j`/`k` or a click move it, and
-  the view follows it; scrolling with a mouse or trackpad leaves it where it
-  is. The same keys move the focus in the sidebar, menus, Settings and other
+  **Settings → Plugins**. There is then one cursor, wherever focus is, and
+  only the message holding it is marked. Each conversation and thread
+  remembers its message and returns to it, starting with the newest. `j`/`k`
+  or a click move it, and the view follows it; scrolling with a mouse or
+  trackpad leaves it where it is. The same keys move the focus in the sidebar, menus, Settings and other
   dialogs: `j`/`k` go to the next or previous row or control, skipping text
   fields and passing over choice menus without opening them, and `h`/`l`
   reach controls on the same line. `gg`/`G` go to the first or last item, or
   the oldest loaded or newest message, and `Ctrl-d`/`Ctrl-u` move half a page.
-  Enter opens the selected message's thread, and `go` opens the selected
-  message's, person's or conversation's actions, each with a key that runs it;
-  while it is on, every menu shows those keys. `Tab` switches between the
+  Enter enters the selected message's thread at its newest message, and
+  Escape in the thread's message box returns to it. `go` opens the selected
+  message's, person's or conversation's actions, each with a key that runs it,
+  such as `r` to react; while it is on, every menu shows those keys. `Tab` switches between the
   selected message and its author, links, files and reactions, without
   entering their cards, and Escape returns to the message. Space starts leader
   keys and shows what can follow: `Space /` searches where you are and

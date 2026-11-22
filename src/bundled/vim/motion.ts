@@ -31,7 +31,7 @@ const UNAVAILABLE = '[hidden], [inert], [aria-hidden="true"]';
 const TYPING =
   'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
 const LINE = 64;
-const SIDEBAR = 'aside[aria-label="Sidebar"]';
+export const SIDEBAR = 'aside[aria-label="Sidebar"]';
 /** What j and k can walk to; `walkable` drops fields, so j never types. */
 const ITEM = "a[href], button, summary, input, [tabindex]";
 /** Arrows here open a popup or change a value, so j and k step past it. */

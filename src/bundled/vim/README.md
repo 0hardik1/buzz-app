@@ -6,9 +6,9 @@ fire while you type in a field or a terminal.
 ## Getting started
 
 1. Turn on **Vim keys** in **Settings → Plugins**.
-2. Each conversation always has one selected message, starting with the
-   newest. Press `j` and `k` to move it, or click a message. The view follows
-   the selection.
+2. There is one cursor: wherever focus is. In a conversation it starts on the
+   newest message. Press `j` and `k` to move it, or click a message. The view
+   follows it.
 3. Press `go` to open the selected item's actions. Each action shows its key;
    press it to run the action.
 4. Press Space to see the leader keys, such as `Space /` to search where you
@@ -47,22 +47,27 @@ readable.
 
 | Keys | Action |
 | --- | --- |
-| `Enter` | Open the selected message's thread, if it has one |
+| `Enter` | Enter the selected message's thread, at its newest message, if it has one |
 | `l` | Reply in a thread |
 | `go` | The selected message's actions |
 | `Tab` / `Shift-Tab` | Switch between the message and its author, links, files and reactions |
 | `i` | Type a message |
 | `Escape` (`Ctrl-[` on Mac) | Back to the selected message; on the message, mark the conversation read |
 
-The selected message keeps focus except while you type after `i`, or while
-you use the sidebar, a menu or a dialog; it stays marked meanwhile. Opening a
-conversation focuses its selected message, not the message box, and each
-conversation remembers its selection. Scrolling with a mouse or trackpad moves
-the view but not the selection; the next move brings the view back. If the
-selected message is deleted, the next one is selected.
+The cursor is always where focus is, so only one message is ever marked, and
+only in the window you are using. While you type after `i`, or use the
+sidebar, a menu or a dialog, no message is marked; Escape brings the cursor
+back to the message you left. Each conversation and each thread remembers its
+own message. Opening a conversation or entering a thread puts the cursor on a
+message, not the message box. In a thread's message box, Escape returns to
+the thread's message and keeps the thread open. Scrolling with a mouse or
+trackpad moves the view but not the cursor; the next move brings the view
+back. If the selected message is deleted, the next one is selected.
 
 Tab and Shift-Tab never move into a part's card or menu: use `go` for a part's
-actions and Escape to return to the message.
+actions and Escape to return to the message. In a message's `go` menu, `r`
+adds a reaction and `t` replies, as on the message itself; closing the
+reaction picker returns to the message.
 
 Buzz's own message keys still act on the selected message: `e` edits, `r`
 reacts, `t` replies in thread, `u` marks unread and Delete deletes your own
@@ -116,5 +121,5 @@ Escape in a field always returns to the selected message first, after the
 field's own use of Escape, such as closing a suggestion list. An open tooltip
 takes the first Escape.
 
-The plugin marks the selected message with `data-message-cursor`, which Buzz
-paints like a selected message.
+The plugin marks the message holding the cursor with `data-message-cursor`,
+which Buzz paints like a selected message.

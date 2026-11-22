@@ -158,6 +158,27 @@ export function reactionTrigger(element: HTMLElement) {
   );
 }
 
+const nextFrame = () =>
+  new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+/**
+ * Opens the reaction picker of the message holding `element`. Selecting it
+ * mounts its action bar, so the picker's trigger gets a few frames.
+ */
+export async function openReactionPicker(element: Element | null | undefined) {
+  const row = element?.closest<HTMLElement>(ROW);
+  if (!row) return;
+  if (selectedMessage()?.element !== row) selectMessage(row);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const trigger = reactionTrigger(row);
+    if (trigger) {
+      trigger.click();
+      return;
+    }
+    await nextFrame();
+  }
+}
+
 /** The selected row's own Reply control, which opens or answers its thread. */
 export function replyTrigger(element: HTMLElement) {
   return Array.from(

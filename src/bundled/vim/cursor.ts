@@ -1,9 +1,12 @@
 /*
- * Vim's cursor: each conversation always has one selected message, marked with
- * `data-message-cursor`, which the host paints like a selected message. Only
- * a move or a click changes it; scrolling never does. Outside a field, focus
- * stays on it: an opened conversation, a click in the timeline or sidebar and
- * focus falling to nothing all return focus to it, without scrolling.
+ * Vim's cursor is where focus is, so there is only ever one. Each message
+ * list remembers its selected message, so focus can return to it; only a move
+ * or a click changes it, and scrolling never does. The message holding focus
+ * in a focused window is marked with `data-message-cursor`, which the host
+ * paints like a selected message; a remembered one elsewhere is not. Outside
+ * a field, focus stays on a message: an opened conversation, a click in the
+ * timeline or sidebar and focus falling to nothing all return focus to it,
+ * without scrolling.
  */
 import { CONVERSATION_LIST_LABEL } from "../channels/conversation-rows";
 import {
@@ -47,8 +50,10 @@ export const messageRows = (list: HTMLElement) =>
 
 function keyOf(list: HTMLElement) {
   const workspace = list.closest<HTMLElement>(WORKSPACE);
+  // A side panel's thread has its own cursor, not the conversation's.
   const outermost =
     workspace &&
+    !list.closest("[data-panel-workspace]") &&
     !messageListElements().some(
       (other) =>
         other !== list && other.contains(list) && workspace.contains(other),
@@ -68,9 +73,24 @@ function place(list: HTMLElement, owner: MessageList, id: string) {
   return next;
 }
 
-/** The marked cursor message in a list or pane. */
-export const cursorRow = (root: ParentNode | null | undefined) =>
-  root?.querySelector(`[${CURSOR}]`)?.closest<HTMLElement>(ROW) ?? undefined;
+/** The list's remembered message, when it is rendered. */
+function remembered(list: HTMLElement) {
+  const id = cursors.get(keyOf(list))?.id;
+  return id
+    ? messageRows(list).find((row) => row.dataset.messageId === id)
+    : undefined;
+}
+
+/** The remembered message in a list or pane, preferring the last moved in. */
+export function cursorRow(root: Node | null | undefined) {
+  if (!root) return;
+  const lists = messageListElements().filter((list) => root.contains(list));
+  if (lastList && lists.includes(lastList)) lists.unshift(lastList);
+  for (const list of lists) {
+    const row = remembered(list);
+    if (row) return row;
+  }
+}
 
 /** The cursor of the list last moved in, else of the open conversation. */
 export function currentCursor() {
@@ -78,9 +98,28 @@ export function currentCursor() {
     `#main-content ${WORKSPACE}`,
   );
   return (
-    (lastList?.isConnected ? cursorRow(lastList) : undefined) ?? cursorRow(main)
+    (lastList?.isConnected ? remembered(lastList) : undefined) ??
+    cursorRow(main)
   );
 }
+
+/** The newest rendered message of the first list in `root`. */
+export function newestRow(root: Node | null | undefined) {
+  const list = messageListElements().find((list) => root?.contains(list));
+  const id = list && messageListOf(list)?.list.newest();
+  return id
+    ? messageRows(list).find((row) => row.dataset.messageId === id)
+    : undefined;
+}
+
+let claimFocus: ((find: () => HTMLElement | undefined) => void) | undefined;
+/**
+ * Give focus to what `find` returns once it renders, and keep it there until
+ * the reader's next key or click: an opened thread's message, say, rather
+ * than its message box.
+ */
+export const claim = (find: () => HTMLElement | undefined) =>
+  claimFocus?.(find);
 
 const overlayOpen = () => !!document.querySelector(OVERLAY);
 const isNowhere = () =>
@@ -115,11 +154,15 @@ function mark() {
     const rows = messageRows(list);
     const index = rows.findIndex((row) => row.dataset.messageId === cursor.id);
     const row = rows[index];
-    const box = row && focusTarget(row);
     if (row) {
       cursor.before = rows[index - 1]?.dataset.messageId;
       cursor.after = rows[index + 1]?.dataset.messageId;
     }
+    // Only where focus is: not a nested list's row, a menu or another window.
+    const box =
+      row && document.hasFocus() && document.activeElement?.closest(ROW) === row
+        ? focusTarget(row)
+        : undefined;
     for (const stale of list.querySelectorAll(`[${CURSOR}]`))
       if (stale !== box && messageListOf(stale)?.element === list)
         stale.removeAttribute(CURSOR);
@@ -130,31 +173,50 @@ function mark() {
 /** Track and mark cursors, and keep focus on them, until cleanup runs. */
 export function trackCursor() {
   let frame = 0;
-  /** A conversation just opened: its cursor takes focus from the composer. */
-  let claim: string | undefined;
+  /** What takes focus until the reader's own input, such as a just-opened
+   * conversation's cursor rather than its composer. */
+  let claimed: (() => HTMLElement | undefined) | undefined;
   let shown: string | undefined;
   let clicked = false;
+  /** The reader's last input was the pointer, which may use the toolbar. */
+  let pointing = false;
   const sync = () => {
     frame = 0;
+    // Place each list's cursor, move focus, then mark where focus ended up.
     mark();
+    settle();
+    mark();
+  };
+  const settle = () => {
     const workspace = document.querySelector<HTMLElement>(
       `#main-content ${WORKSPACE}`,
     );
     const open = workspace?.dataset.channelWorkspace || undefined;
-    if (open !== shown) claim = shown = open;
+    if (open !== shown) {
+      shown = open;
+      claimed = open ? () => cursorRow(workspace) : undefined;
+    }
     if (overlayOpen()) return;
     const active = document.activeElement;
     const nowhere = isNowhere();
     const typing = !!active?.matches(TYPING);
     const inMessage = !!active?.closest(ROW);
-    if (claim && claim === open) {
-      const row = cursorRow(workspace);
+    if (claimed) {
+      const row = claimed();
       if (row) {
         // Kept until the reader's own input, so a late handoff (a dialog's
         // return focus, the composer's) cannot take focus after it.
         focusMessage(row);
         return;
       }
+    }
+    // A message's hover toolbar is not a stop: focus a closing picker or
+    // menu returns there by keyboard goes to the message instead.
+    const toolbar = active?.closest(`${ROW} [role="group"]`);
+    if (toolbar && !pointing) {
+      const row = toolbar.closest<HTMLElement>(ROW);
+      if (row) focusMessage(row);
+      return;
     }
     const afterClick = clicked;
     clicked = false;
@@ -186,11 +248,16 @@ export function trackCursor() {
     schedule();
   };
   /** Input outside a dialog chooses where focus goes; in one, it is the dialog's. */
-  const choose = () => {
-    if (!overlayOpen()) claim = undefined;
+  const choose = (event: Event) => {
+    pointing = event.type === "pointerdown";
+    if (!overlayOpen()) claimed = undefined;
+  };
+  claimFocus = (find) => {
+    claimed = find;
+    schedule();
   };
   const pointerdown = (event: PointerEvent) => {
-    choose();
+    choose(event);
     focusin(event);
   };
   const click = (event: MouseEvent) => {
@@ -210,6 +277,8 @@ export function trackCursor() {
   document.addEventListener("pointerdown", pointerdown, true);
   document.addEventListener("click", click, true);
   addEventListener("keydown", choose, true);
+  addEventListener("focus", schedule);
+  addEventListener("blur", schedule);
   schedule();
   return () => {
     cancelAnimationFrame(frame);
@@ -219,6 +288,9 @@ export function trackCursor() {
     document.removeEventListener("pointerdown", pointerdown, true);
     document.removeEventListener("click", click, true);
     removeEventListener("keydown", choose, true);
+    removeEventListener("focus", schedule);
+    removeEventListener("blur", schedule);
+    claimFocus = undefined;
     for (const cursor of cursors.values()) cursor.release?.();
     cursors.clear();
     lastList = undefined;
