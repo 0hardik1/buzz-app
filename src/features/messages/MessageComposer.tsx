@@ -3188,10 +3188,13 @@ function Composer({
     const retirementCursor = draftRetirementCursor(scope, draftKey);
     let retiredByOwner = false;
     const typed = valueRef.current;
-    const captured = sentDraft(
-      typed,
-      boundNames(routing ? recipientsNow : typed.recipients),
-    );
+    const bind = () =>
+      sentDraft(typed, boundNames(routing ? recipientsNow : typed.recipients));
+    const captured = bind();
+    const recheckLabels = () => {
+      if (composerMarkdown(bind()) !== composerMarkdown(captured))
+        throw new Error("A member's name changed while sending. Send again.");
+    };
     const explicit =
       human && ownerProvenance
         ? captured.recipients
@@ -3458,6 +3461,7 @@ function Composer({
         }
         if (!current()) return;
       }
+      recheckLabels();
       // Every prompt passed, so this message goes out to who was declined.
       oldAgents.decline(declinedImports);
       // Destination and content are fixed here; a background send never retargets.
@@ -3673,6 +3677,7 @@ function Composer({
           reportConflict();
           return;
         }
+        recheckLabels();
         id = await publish(uploaded);
       } else if (capturedAttachments.length) {
         // The revision acceptance saves; remembered agents are not a draft.

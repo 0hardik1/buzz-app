@@ -18865,6 +18865,165 @@ it.each([
     });
   },
 );
+it("a group whose label a member's new verified name breaks while link sharing checks a linked chat is not sent, and the next Send sends it as its members", async () => {
+  const mj = { ...first, name: "MJ" };
+  const link = "[Session: Work](buzz://channel/session-id)";
+  const list = {
+    status: "ready" as const,
+    channels: [
+      {
+        id: "channel",
+        name: "general",
+        channelType: "stream",
+        members: [mj.pubkey, wes.pubkey],
+      },
+      {
+        id: "session-id",
+        name: "Work",
+        channelType: "solo",
+        creator: "viewer",
+        members: ["viewer"],
+      },
+    ],
+  };
+  const details = { visibility: "public", joinRole: "member" };
+  const held = deferred<typeof details>();
+  const asked = deferred<void>();
+  let loads = 0;
+  const load = () => {
+    asked.resolve();
+    return loads++ ? Promise.resolve(details) : held.promise;
+  };
+  const h = mount({}, undefined, "viewer");
+  h.setProfiles(
+    new Map([
+      [mj.pubkey, { name: "MJ" }],
+      [wes.pubkey, { name: "Wes" }],
+    ]),
+  );
+  h.retarget({
+    session: {
+      ...h.session,
+      channels: {
+        ...h.session.channels,
+        list: () => list,
+        get: (id: string) => list.channels.find((channel) => channel.id === id),
+      },
+      channelDetails: { snapshot: () => undefined, load },
+    } as unknown as RelaySession,
+  });
+  h.fill("!Crew");
+  offerCrew(h, [mj, wes], "Mary crew");
+  await h.user.keyboard("{Enter}hi ");
+  act(() => h.input().insertText(link));
+  h.submit();
+  await act(() => asked.promise);
+  h.setProfiles(
+    new Map([
+      [
+        mj.pubkey,
+        {
+          name: "MJ",
+          verified: {
+            displayName: "Mary",
+            username: "mary",
+            fullName: "Mary",
+            issuerLabel: "Example",
+            verifiedAt: 1,
+            status: "checked" as const,
+            multipleIssuers: false,
+          },
+        },
+      ],
+      [wes.pubkey, { name: "Wes" }],
+    ]),
+  );
+  await act(async () => held.resolve(details));
+  await waitFor(() =>
+    expect({
+      sent: h.messages.send.mock.calls.map(([, content]) => content),
+      draft: h.input().value,
+      line:
+        screen.queryAllByText(
+          "A member's name changed while sending. Send again.",
+        ).length > 0,
+    }).toEqual({ sent: [], draft: `@Mary crew hi ${link}`, line: true }),
+  );
+  expect(await sentGroups(h)).toEqual({
+    groups: 1,
+    content: `@MJ @Wes hi ${link}`,
+    tags: [mj.pubkey, wes.pubkey],
+  });
+});
+it("a group whose label a member's new verified name breaks while a detached window uploads its file is not sent, and the next Send sends it as its members", async () => {
+  const mj = { ...first, name: "MJ" };
+  const result = deferred<ReturnType<typeof uploadDescriptor>>();
+  const started = deferred<void>();
+  const upload = () => {
+    started.resolve();
+    return result.promise;
+  };
+  const h = mount();
+  h.setProfiles(
+    new Map([
+      [mj.pubkey, { name: "MJ" }],
+      [wes.pubkey, { name: "Wes" }],
+    ]),
+  );
+  const { unread: _full, ...detached } = h.session;
+  h.retarget({
+    session: {
+      ...detached,
+      attachments: { upload },
+    } as unknown as RelaySession,
+  });
+  h.fill("!Crew");
+  offerCrew(h, [mj, wes], "Mary crew");
+  await h.user.keyboard("{Enter}hi");
+  attachByPaste(h.input(), attachmentFile());
+  await act(() => started.promise);
+  h.submit();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled(),
+  );
+  h.setProfiles(
+    new Map([
+      [
+        mj.pubkey,
+        {
+          name: "MJ",
+          verified: {
+            displayName: "Mary",
+            username: "mary",
+            fullName: "Mary",
+            issuerLabel: "Example",
+            verifiedAt: 1,
+            status: "checked" as const,
+            multipleIssuers: false,
+          },
+        },
+      ],
+      [wes.pubkey, { name: "Wes" }],
+    ]),
+  );
+  await act(async () => result.resolve(uploadDescriptor()));
+  await waitFor(() =>
+    expect({
+      sent: h.messages.send.mock.calls.map(([, content]) => content),
+      draft: h.input().value,
+      file: screen.queryAllByText("notes.txt").length > 0,
+      line:
+        screen.queryAllByText(
+          "A member's name changed while sending. Send again.",
+        ).length > 0,
+    }).toEqual({ sent: [], draft: "@Mary crew hi", file: true, line: true }),
+  );
+  expect(await sentGroups(h)).toEqual({
+    groups: 1,
+    content: "@MJ @Wes hi",
+    tags: [mj.pubkey, wes.pubkey],
+  });
+});
 it("a group picked with a label that starts with the name a member set on their own profile is sent as its members", async () => {
   const mj = { ...first, name: "MJ" };
   const h = mount();
