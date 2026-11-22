@@ -19,6 +19,7 @@ import { useReferenceDirectory } from "./ReferenceText";
 import {
   readComposerSnapshot,
   composerMarkdownContext,
+  tokenRecipients,
 } from "./composer-document";
 import { messageLinkParts } from "./message-link-parts";
 import { parseBuzzLink } from "../navigation/buzz-links";
@@ -401,22 +402,23 @@ export function RichComposerInput({
         const preview = gifPreviews.get(start);
         if (preview && preview.end === end && !mention)
           return { start, end, editAsText: false, content: preview.content };
-        const people = draft.recipients.filter(
-          (item) => item.start === start && item.label !== undefined,
+        const { group } = tokenRecipients(
+          draft.recipients,
+          draft.text.slice(start, end),
+          { start, end },
         );
-        const group = people[0]?.label;
-        if (group !== undefined && draft.text.slice(start, end) === `@${group}`)
+        if (group)
           return {
             start,
             end,
             editAsText: false,
             content: (
               <GroupChip
-                label={group}
-                names={people
+                label={group.label}
+                names={group.members
                   .map((item) => labels.get(item.pubkey) ?? item.name)
                   .join(", ")}
-                count={people.length}
+                count={group.members.length}
               />
             ),
           };

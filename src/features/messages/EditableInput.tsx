@@ -54,6 +54,7 @@ import {
   brokenResources,
   resourceBlockingMarks,
   composerGroup,
+  groupKeeping,
   tokenRecipients,
   type ComposerGroup,
 } from "./composer-document";
@@ -1405,11 +1406,12 @@ export function EditableInput({
           token.node.attrs.group,
           token.node.attrs.source,
         );
-        const members = group?.members.filter((m) => requested.has(m.pubkey));
-        if (group && members && members.length < group.members.length)
+        const kept =
+          group && groupKeeping(group, (pubkey) => requested.has(pubkey));
+        if (kept !== group)
           tr.setNodeMarkup(token.from, undefined, {
             ...token.node.attrs,
-            group: members.length ? { label: group.label, members } : null,
+            group: kept,
           });
       }
       for (const person of [...source.draft.recipients].reverse()) {
@@ -3090,13 +3092,10 @@ export function EditableInput({
                 recipient: null,
               });
             const group = composerGroup(node.attrs.group, node.attrs.source);
-            if (group?.members.some((m) => m.pubkey === pubkey)) {
-              const members = group.members.filter((m) => m.pubkey !== pubkey);
-              tr.setNodeMarkup(pos, undefined, {
-                ...node.attrs,
-                group: members.length ? { label: group.label, members } : null,
-              });
-            }
+            const kept =
+              group && groupKeeping(group, (member) => member !== pubkey);
+            if (kept !== group)
+              tr.setNodeMarkup(pos, undefined, { ...node.attrs, group: kept });
             const mark = composerSchema.marks.recipient.isInSet(node.marks);
             if (mark?.attrs.pubkey === pubkey)
               tr.removeMark(pos, pos + node.nodeSize, mark);

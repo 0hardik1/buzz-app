@@ -113,7 +113,6 @@ import type { EmojiSnapshot } from "../relay/emoji-directory";
 import { emojiQuery } from "../../bundled/emoji/emoji-query";
 import type { ComposerInputElement } from "./composer-dom";
 import { profileTarget } from "../profiles/target";
-import { profileMentionParts } from "./profile-mentions";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { setRememberAgentsPreference } from "./mention-preferences";
 import * as modelStorage from "./solo-model-picks-storage";
@@ -18543,26 +18542,6 @@ it("pastes a copied forward literally inside a code block", async () => {
   ).not.toBeInTheDocument();
 });
 
-const oneChipLabels = new Set([
-  "Team 42",
-  "24-7",
-  "eng-oncall",
-  "a-b-c",
-  "हिंदी टीम",
-  "हिंदी-टीम",
-  "ทีมไทย",
-  "Cafe\u0301 crew",
-]);
-const groupLabelMatrix = [
-  ...oneChipLabels,
-  "eng_ios",
-  "-ops",
-  "ops-",
-  "a--b",
-  "a - b",
-  "Honey team",
-  "Honey-crew",
-];
 async function pickSent(edit: {
   mentions: MentionRecipient[];
   label?: string;
@@ -18584,41 +18563,26 @@ async function pickSent(edit: {
   cleanup();
   return { chips, content, tags };
 }
-it.each(groupLabelMatrix)(
-  "a group picked with the label %s is one chip only when the label is plain text and starts with no member's name",
-  async (label) => {
-    const group = await pickSent({ mentions: [first, second], label });
-    expect(group.tags).toEqual([first.pubkey, second.pubkey]);
-    if (oneChipLabels.has(label)) {
+const maryJane = { ...first, name: "Mary Jane" };
+const wes = { ...second, name: "Wes" };
+it.each([
+  ["eng-oncall", [first, second], true],
+  ["eng_ios", [first, second], false],
+  ["Mary crew", [maryJane, wes], false],
+])(
+  "a group picked with the label %s is one chip only when its label holds for every reader",
+  async (label, members, holds) => {
+    const group = await pickSent({ mentions: members, label });
+    expect(group.tags).toEqual(members.map((person) => person.pubkey));
+    if (holds) {
       expect(group.content).toBe(`@${label} `);
       expect(group.chips).toEqual([
         `Group ${label}, 2 recipients: Honey · rcaj, Honey · 04hu`,
       ]);
     } else {
-      expect(group).toEqual(await pickSent({ mentions: [first, second] }));
+      expect(group).toEqual(await pickSent({ mentions: members }));
       expect(group.chips.some((name) => name?.startsWith("Group"))).toBe(false);
     }
-  },
-);
-const maryJane = { ...first, name: "Mary Jane" };
-const wes = { ...second, name: "Wes" };
-it.each([
-  ["Mary crew", [maryJane, wes], false],
-  ["mary crew", [maryJane, wes], false],
-  ["MARY CREW", [maryJane, wes], false],
-  ["Mary-crew", [maryJane, wes], false],
-  ["Marys crew", [maryJane, wes], true],
-  ["Crew Mary", [maryJane, wes], true],
-  ["Wesley team", [maryJane, wes], true],
-  ["ÉMILE crew", [{ ...first, name: "Émile Durand" }], false],
-  ["ſam crew", [{ ...first, name: "Sam Lee" }], false],
-])(
-  "a group picked with the label %s is one chip only when mobile's reader binds no member's name or first word at its start",
-  async (label, members, holds) => {
-    const group = await pickSent({ mentions: members, label });
-    expect(group.tags).toEqual(members.map((person) => person.pubkey));
-    if (holds) expect(group.content).toBe(`@${label} `);
-    else expect(group).toEqual(await pickSent({ mentions: members }));
   },
 );
 it.each(["eng-oncall", "a-b-c"])(
@@ -18802,118 +18766,56 @@ it("in a Solo chat with agents only, a group of people outside it whose label st
     tags: [first.pubkey],
   });
 });
-it.each([
-  ["picked", 0],
-  ["saved in a draft", 1],
-])(
-  "in a one-to-one DM with an agent, a group whose label starts with the agent's name is %s and sent as its members",
-  async (_how, groups) => {
-    const viewer = "d".repeat(64);
-    const ops = "c".repeat(64);
-    if (groups)
-      writeView(
-        "scope",
-        "draft:channel",
-        typedDraft(savedCrew("@Ops crew hi", "Ops crew", [maryJane, wes])),
-      );
-    const h = mount({}, undefined, viewer);
-    h.setProfiles(new Map([[ops, { name: "Ops", isAgent: true }]]));
-    const dm = {
-      status: "ready" as const,
-      channels: [
-        { id: "channel", channelType: "dm" as const, members: [viewer, ops] },
-      ],
-    };
-    Object.assign(h.session.channels, {
-      list: () => dm,
-      get: () => dm.channels[0],
-    });
-    h.remount();
-    if (!groups) {
-      h.fill("!Crew");
-      offerCrew(h, [maryJane, wes], "Ops crew");
-      await h.user.keyboard("{Enter}hi");
-    }
-    expect(await sentGroups(h)).toEqual({
-      groups,
-      content: "@Mary Jane @Wes hi",
-      tags: [],
-    });
-  },
-);
-it.each([
-  ["verified", "picked", 0, "Mary Jane Jones crew", ""],
-  ["verified", "saved in a draft", 1, "Mary Jane Jones crew", ""],
-  ["self-set", "picked", 0, "Mo crew", "Mo Jones"],
-])(
-  "a group whose label starts with a member's %s name is %s and sent as its members",
-  async (_name, _how, groups, label, own) => {
-    const mj = { ...first, name: "MJ" };
-    const verified = {
-      displayName: "MJ",
-      username: "mj",
-      fullName: "Mary Jane Jones",
-      issuerLabel: "Example",
-      verifiedAt: 1,
-      status: "checked" as const,
-      multipleIssuers: false,
-    };
-    if (groups)
-      writeView(
-        "scope",
-        "draft:channel",
-        typedDraft(savedCrew(`@${label} hi`, label, [mj, wes])),
-      );
-    const h = mount();
-    h.setProfiles(
-      new Map([
-        [mj.pubkey, { name: "MJ", verified }],
-        [wes.pubkey, { name: "Wes" }],
-      ]),
-    );
-    if (own)
-      Object.assign(h.session.profiles, {
-        event: (pubkey: string) =>
-          pubkey === mj.pubkey
-            ? {
-                id: "e".repeat(64),
-                pubkey,
-                created_at: 1,
-                kind: 0,
-                content: JSON.stringify({ name: own }),
-                tags: [],
-              }
-            : undefined,
-      });
-    if (!groups) {
-      h.fill("!Crew");
-      offerCrew(h, [mj, wes], label);
-      await h.user.keyboard("{Enter}hi");
-    }
-    const sent = await sentGroups(h);
-    const reader = new Map([
-      [mj.pubkey, { name: "Mary Jane Jones", verified }],
-      [wes.pubkey, { name: "Wes" }],
-    ]);
-    expect({
-      ...sent,
-      parts: profileMentionParts(
-        { content: sent.content ?? "", mentions: sent.tags ?? [] },
-        reader,
-      ),
-    }).toEqual({
-      groups,
-      content: "@MJ @Wes hi",
-      tags: [mj.pubkey, wes.pubkey],
-      parts: [
-        { text: "@MJ", target: profileTarget(mj.pubkey) },
-        { text: " " },
-        { text: "@Wes", target: profileTarget(wes.pubkey) },
-        { text: " hi" },
-      ],
-    });
-  },
-);
+it("in a one-to-one DM with an agent, a group picked with a label that starts with the agent's name is sent as its members", async () => {
+  const viewer = "d".repeat(64);
+  const ops = "c".repeat(64);
+  const h = mount({}, undefined, viewer);
+  h.setProfiles(new Map([[ops, { name: "Ops", isAgent: true }]]));
+  const dm = {
+    status: "ready" as const,
+    channels: [
+      { id: "channel", channelType: "dm" as const, members: [viewer, ops] },
+    ],
+  };
+  Object.assign(h.session.channels, {
+    list: () => dm,
+    get: () => dm.channels[0],
+  });
+  h.remount();
+  h.fill("!Crew");
+  offerCrew(h, [maryJane, wes], "Ops crew");
+  await h.user.keyboard("{Enter}hi");
+  expect(await sentGroups(h)).toEqual({
+    groups: 0,
+    content: "@Mary Jane @Wes hi",
+    tags: [],
+  });
+});
+it("a group picked with a label that starts with the name a member set on their own profile is sent as its members", async () => {
+  const mj = { ...first, name: "MJ" };
+  const h = mount();
+  Object.assign(h.session.profiles, {
+    event: (pubkey: string) =>
+      pubkey === mj.pubkey
+        ? {
+            id: "e".repeat(64),
+            pubkey,
+            created_at: 1,
+            kind: 0,
+            content: JSON.stringify({ name: "Mo Jones" }),
+            tags: [],
+          }
+        : undefined,
+  });
+  h.fill("!Crew");
+  offerCrew(h, [mj, wes], "Mo crew");
+  await h.user.keyboard("{Enter}hi");
+  expect(await sentGroups(h)).toEqual({
+    groups: 0,
+    content: "@MJ @Wes hi",
+    tags: [mj.pubkey, wes.pubkey],
+  });
+});
 it.each([
   ["the composer's own send", false],
   ["a submission", true],

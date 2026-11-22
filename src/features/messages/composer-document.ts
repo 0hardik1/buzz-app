@@ -14,7 +14,10 @@ import type {
   PendingMention,
 } from "./mention-draft";
 import type { ComposerResource } from "../conversation/contracts";
-import { profileMentionParts } from "./profile-mentions";
+import { profileMentionNames, profileMentionParts } from "./profile-mentions";
+import { foldProfiles } from "../relay/profiles";
+import type { Profile } from "../relay/contracts";
+import type { EventData } from "../relay/events";
 import {
   chipLabel,
   composerToken,
@@ -298,6 +301,16 @@ export function composerGroup(value: unknown, source: unknown) {
     return null;
   return value as ComposerGroup;
 }
+/** `group` with only the members `keep` admits: itself when it loses none,
+ * `null` when none are left. */
+export function groupKeeping(
+  group: ComposerGroup,
+  keep: (pubkey: string) => boolean,
+) {
+  const members = group.members.filter((member) => keep(member.pubkey));
+  if (members.length === group.members.length) return group;
+  return members.length ? { label: group.label, members } : null;
+}
 /** Whether `@label` reads as one group to whoever gets it: letters, digits
  * and spaces, a hyphen only between two of them, in which no reader binds
  * any of `people`. This app's reader matches a whole name; mobile's matches
@@ -331,6 +344,37 @@ export function groupLabelHolds(
       ),
     )
   );
+}
+/** Every name a reader may bind to each of `people`, and to a 1:1 DM's agent
+ * partner, whom the relay tags: the shown name, the verified names and the
+ * name set on their own profile, never a fallback name. */
+export function readerNames(
+  people: readonly MentionRecipient[],
+  profiles: ReadonlyMap<string, Profile>,
+  ownProfile: (pubkey: string) => EventData | undefined,
+  viewer?: string,
+  dmMembers: readonly string[] = [],
+) {
+  const partners =
+    viewer && dmMembers.length === 2 && dmMembers.includes(viewer)
+      ? dmMembers.flatMap((pubkey) => {
+          const profile = profiles.get(pubkey);
+          return pubkey !== viewer && profile?.isAgent
+            ? [{ pubkey, name: profile.name }]
+            : [];
+        })
+      : [];
+  return [...people, ...partners].flatMap(({ pubkey, name }) => {
+    const event = ownProfile(pubkey);
+    const own = event && foldProfiles([event]).get(pubkey);
+    return [
+      ...new Set([
+        name,
+        ...profileMentionNames(profiles.get(pubkey)),
+        own && !own.nameIsFallback ? own.name : undefined,
+      ]),
+    ].flatMap((each) => (each ? [{ pubkey, name: each }] : []));
+  });
 }
 /** A source token's recipient attributes from the draft's recipients on its
  * range: every labelled one as a group, else the one recipient. */

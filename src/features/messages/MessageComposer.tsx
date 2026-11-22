@@ -53,13 +53,12 @@ import {
   composerMarkdownContext,
   markdownRanges,
   groupLabelHolds,
+  readerNames,
 } from "./composer-document";
 import { useMessageEdit, lastEditableMessage } from "./useMessageEdit";
 import { editMentionText } from "./message-edit";
 import type { ChannelMessage } from "../relay/contracts";
 import { useListedChannel } from "../relay/listed-channel";
-import { foldProfiles } from "../relay/profiles";
-import { profileMentionNames } from "./profile-mentions";
 import { FileDropOverlay } from "./FileDropOverlay";
 import { useFileDrop } from "./use-file-drop";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -1153,32 +1152,14 @@ function Composer({
           ]),
         ]
       : pubkeys;
-  const dmAgents = () => {
-    const viewer = session.viewer;
-    const profiles = session.profiles.snapshot();
-    return viewer && dmMembers?.length === 2 && dmMembers.includes(viewer)
-      ? dmMembers.flatMap((pubkey) => {
-          const profile = profiles.get(pubkey);
-          return pubkey !== viewer && profile?.isAgent
-            ? [{ pubkey, name: profile.name }]
-            : [];
-        })
-      : [];
-  };
-  const boundNames = (people: readonly MentionRecipient[]) => {
-    const profiles = session.profiles.snapshot();
-    return [...people, ...dmAgents()].flatMap(({ pubkey, name }) => {
-      const event = session.profiles.event?.(pubkey);
-      const own = event && foldProfiles([event]).get(pubkey);
-      return [
-        ...new Set([
-          name,
-          ...profileMentionNames(profiles.get(pubkey)),
-          own && !own.nameIsFallback ? own.name : undefined,
-        ]),
-      ].flatMap((each) => (each ? [{ pubkey, name: each }] : []));
-    });
-  };
+  const boundNames = (people: readonly MentionRecipient[]) =>
+    readerNames(
+      people,
+      session.profiles.snapshot(),
+      (pubkey) => session.profiles.event?.(pubkey),
+      session.viewer,
+      dmMembers,
+    );
   // Read at send time: inline mentions win, else the toolbar's agents. A
   // reference addresses nobody, so it goes along with the toolbar's agents.
   const sendRecipients = () => {
@@ -3206,13 +3187,13 @@ function Composer({
     const savedRevision = revision.current;
     const retirementCursor = draftRetirementCursor(scope, draftKey);
     let retiredByOwner = false;
-    const attempt = new AbortController();
-    sendAttempt.current = attempt;
     const typed = valueRef.current;
     const captured = sentDraft(
       typed,
       boundNames(routing ? recipientsNow : typed.recipients),
     );
+    const attempt = new AbortController();
+    sendAttempt.current = attempt;
     const explicit =
       human && ownerProvenance
         ? captured.recipients
