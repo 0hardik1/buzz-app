@@ -314,7 +314,8 @@ export function groupKeeping(
 /** Whether `@label` reads as one group to whoever gets it: letters, digits
  * and spaces, a hyphen only between two of them, in which no reader binds
  * any of `people`. This app's reader matches a whole name; mobile's matches
- * a name or its first word at the start, in any case, where a word ends. */
+ * a name or its first word, as written or trimmed, at the start, in any
+ * case, where a word ends. */
 export function groupLabelHolds(
   label: string,
   people: readonly MentionRecipient[],
@@ -334,14 +335,16 @@ export function groupLabelHolds(
       ).some((part) => part.target),
     ) &&
     !people.some((person) =>
-      [person.name, person.name.split(/\s+/)[0]].some(
-        (name) =>
-          !!name &&
-          new RegExp(
-            `^${name.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&")}(?![\\p{L}\\p{M}\\p{N}])`,
-            "iu",
-          ).test(label),
-      ),
+      [person.name, person.name.replace(/^[\s\u0085]+|[\s\u0085]+$/g, "")]
+        .flatMap((name) => [name, name.split(/\s+/)[0]])
+        .some(
+          (name) =>
+            !!name &&
+            new RegExp(
+              `^${name.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&")}(?![\\p{L}\\p{M}\\p{N}])`,
+              "iu",
+            ).test(label),
+        ),
     )
   );
 }
@@ -357,8 +360,8 @@ function mobileName(content: string) {
 }
 /** Every name a reader may bind to each of `people`, and to a 1:1 DM's agent
  * partner, whom the relay tags: the shown name, the verified names, the name
- * set on their own profile and, as mobile reads it, that profile's raw
- * `display_name` or else `name`; never a fallback name. */
+ * set on their own profile or the key prefix shown when it sets none and, as
+ * mobile reads it, that profile's raw `display_name` or else `name`. */
 export function readerNames(
   people: readonly MentionRecipient[],
   profiles: ReadonlyMap<string, Profile>,
@@ -382,7 +385,7 @@ export function readerNames(
       ...new Set([
         name,
         ...profileMentionNames(profiles.get(pubkey)),
-        own && !own.nameIsFallback ? own.name : undefined,
+        own?.name,
         event && mobileName(event.content),
       ]),
     ].flatMap((each) => (each ? [{ pubkey, name: each }] : []));

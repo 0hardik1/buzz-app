@@ -872,6 +872,8 @@ it.each([
   ["ÉMILE crew", [{ pubkey: "a".repeat(64), name: "Émile Durand" }], false],
   ["ſam crew", [{ pubkey: "a".repeat(64), name: "Sam Lee" }], false],
   ["Ann team", [{ pubkey: "a".repeat(64), name: "Ann\tLee" }], false],
+  ["Ann team", [{ pubkey: "a".repeat(64), name: " Ann\tLee" }], false],
+  ["Ann team", [{ pubkey: "a".repeat(64), name: "Ann\u0085" }], false],
   ["Rene\u0301 fans", [{ pubkey: "a".repeat(64), name: "Rene" }], false],
 ])(
   "the group label %s holds only when it is plain text and no reader binds a member's name or first word at its start",
@@ -985,7 +987,16 @@ it.each<
       [mary, "Mo Jones"],
     ],
   ],
-  ["no fallback name", {}, { about: "no name" }, {}, [[mary, "Mary"]]],
+  [
+    "the fallback name",
+    {},
+    { about: "no name" },
+    {},
+    [
+      [mary, "Mary"],
+      [mary, "aaaaaaaaaa"],
+    ],
+  ],
   [
     "the raw name mobile reads",
     {},
@@ -1004,6 +1015,7 @@ it.each<
     {},
     [
       [mary, "Mary"],
+      [mary, "aaaaaaaaaa"],
       [mary, "Ann Lee\u200e"],
     ],
   ],
@@ -1070,4 +1082,21 @@ it.each<
       dm.members,
     ).map(({ pubkey, name }) => [pubkey, name]),
   ).toEqual(entries);
+});
+
+it("a group label that starts with a member's fallback name doesn't hold", () => {
+  const own = {
+    id: "e".repeat(64),
+    pubkey: mary,
+    created_at: 1,
+    kind: 0,
+    content: JSON.stringify({ about: "no name" }),
+    tags: [],
+  };
+  const people = readerNames(
+    [{ pubkey: mary, name: "Mary" }],
+    new Map(),
+    (pubkey) => (pubkey === mary ? own : undefined),
+  );
+  expect(groupLabelHolds("aaaaaaaaaa team", people)).toBe(false);
 });
