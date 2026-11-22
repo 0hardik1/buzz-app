@@ -720,8 +720,11 @@ test.describe("with a thread", () => {
       .getByRole("menu")
       .getByRole("menuitem", { name: "Add reaction", exact: true });
     await expect(react).toHaveAttribute("aria-keyshortcuts", "r");
+    // Focus can reach a just-opened menu late; its keys are already its own.
+    await root.focus();
     await page.keyboard.press("r");
     await expect(page.locator("em-emoji-picker")).toBeVisible();
+    await expect(page.getByRole("menu")).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(page.locator("em-emoji-picker")).toHaveCount(0);
     await expect(root).toBeFocused();

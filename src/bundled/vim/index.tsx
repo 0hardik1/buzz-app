@@ -25,6 +25,7 @@ import {
   inSidebar,
   leave,
   openActions,
+  press,
   revealConversation,
   sideways,
   step,
@@ -161,6 +162,26 @@ export const apply: PluginModule["apply"] = (ctx) => {
       )
         return;
       const origin = focused();
+      // A just-opened menu owns its keys before focus reaches it, so an
+      // item's key typed at once (go, then r) runs that item.
+      const opening = [
+        ...document.querySelectorAll<HTMLElement>('[role="menu"][data-open]'),
+      ].find((menu) => !menu.closest(`[${WHICH_KEY}]`));
+      if (
+        opening &&
+        event.key.length === 1 &&
+        !pending.snapshot() &&
+        !typing() &&
+        !opening.contains(origin ?? null)
+      ) {
+        opening.focus();
+        const move = menuMoves[event.key];
+        if (move) move();
+        else press(opening, event.key);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       // A menu's typeahead stops keys it does not use, so they start here.
       const menuMove = menuMoves[event.key];
       if (
