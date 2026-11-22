@@ -2474,7 +2474,7 @@ function ChannelWorkspace({
             workspace={
               filed && fresh
                 ? {
-                    preferences: queries.soloPreferences,
+                    preferences: queries.sidebarPreferences,
                     choose: (id) =>
                       void filed
                         .file(id || undefined)
@@ -2501,6 +2501,9 @@ function ChannelWorkspace({
       data-channel-workspace={currentId ?? ""}
       data-reading-thread={readingThread ? "" : undefined}
       data-companion={companion ? "" : undefined}
+      // Entering a channel shows its own dock without animating the split, so
+      // its new timeline measures its final width and reuses saved geometry.
+      data-instant-split={continuingVisit ? undefined : ""}
       ref={split.ref}
       style={split.style}
       className={`${styles.board} ${panelStyles.splitMotion}`}
@@ -2559,6 +2562,7 @@ function ChannelWorkspace({
           {composingMessage ? (
             <LiveNewMessage
               intent={messageDraft?.intent}
+              workspace={messageDraft?.workspace}
               host={{ relay, panels, navigation: navigator }}
               session={queries}
               scope={scope}
