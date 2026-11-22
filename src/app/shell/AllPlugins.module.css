@@ -1,0 +1,124 @@
+/* The popup has no padding of its own: the header stays put while the body
+   scrolls within the space the popover was given. */
+.frame {
+  display: flex;
+  max-height: var(--available-height);
+  flex-direction: column;
+}
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--border-standard);
+}
+.body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-2) var(--space-3);
+}
+.list,
+.grid {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.list {
+  display: flex;
+  flex-direction: column;
+}
+/* Columns follow the room available: three at full size, then two, then one
+   at narrow widths. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(13.5rem, 100%), 1fr));
+  column-gap: var(--space-1);
+}
+.tile {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  border-radius: var(--radius-row);
+}
+.tile > :last-child {
+  min-width: 0;
+  flex: 1;
+}
+.tile[data-dragging] {
+  opacity: 0.4;
+}
+.tile[data-drop-target] {
+  box-shadow: inset 0 2px 0 var(--border-focus);
+}
+.handle {
+  display: inline-flex;
+  width: var(--size-control-sm);
+  flex: none;
+  justify-content: center;
+  color: var(--text-metadata);
+}
+.controls {
+  display: inline-flex;
+  min-height: var(--size-row);
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  padding-inline-end: var(--space-2);
+}
+.icon {
+  display: inline-flex;
+  width: 1rem;
+  flex: none;
+  justify-content: center;
+}
+/* A plugin that can't be opened here: its name in the row's own geometry. */
+.static {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+.label {
+  display: inline-flex;
+  min-width: 0;
+  min-height: var(--size-row);
+  flex: 1;
+  align-items: center;
+  gap: var(--space-row-gap);
+  padding: var(--space-1) var(--space-control-inset);
+  color: var(--text-standard);
+}
+.static[data-off] .label {
+  color: var(--text-subtle);
+}
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reason {
+  display: inline-flex;
+}
+.empty {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--text-subtle);
+  text-align: center;
+}
+.dragOverlay {
+  @apply text-body-sm;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: max-content;
+  max-width: 20rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-standard);
+  border-radius: var(--radius-control);
+  background: var(--surface-popover);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-standard);
+  cursor: grabbing;
+}
