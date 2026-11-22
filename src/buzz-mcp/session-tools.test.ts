@@ -12,6 +12,10 @@ import {
 } from "./session-tools";
 import { TOOLS } from "./tools";
 import type { ProtectionAction } from "../features/agent-protection/service";
+import {
+  createToolOperation,
+  nativeToolClient,
+} from "../features/agents/tool-operation";
 
 const tool = (name: string, description = "Does it."): AddedTool => ({
   name,
@@ -368,4 +372,34 @@ it("gives a structurally forged client no sender to lend", async () => {
   ]);
   expect(call.mock.calls[0]).toEqual([forged, { channel: "a" }, {}]);
   expect(AppInvocation.is({ ...real, key: "bot" })).toBe(false);
+});
+
+it("never hands a plugin's tool or operation the owner's workspaces", async () => {
+  const client = {
+    workspaces: {},
+  } as unknown as import("./client").BuzzClient;
+  const seen: object[] = [];
+  const call = vi.fn(async (plugin: object) => {
+    seen.push(plugin);
+    return "done";
+  });
+  await callSessionTool(client, {}, "plugin_write", {}, [
+    { ...tool("plugin_write"), call },
+  ]);
+  // Registers the client as a live native call, as a run does.
+  nativeToolClient(client, {
+    signal: new AbortController().signal,
+    check: () => {},
+  });
+  const provider = createToolOperation("example/op", () => ({
+    viewer: "a".repeat(64),
+    community: "https://relay.example.test",
+    check: () => {},
+    release: () => {},
+  }));
+  await callSessionTool(client, {}, "plugin_op", {}, [
+    { ...tool("plugin_op"), operation: provider.operation, call },
+  ]);
+  expect(seen).toHaveLength(2);
+  for (const plugin of seen) expect(plugin).not.toHaveProperty("workspaces");
 });
