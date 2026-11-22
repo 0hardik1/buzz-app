@@ -876,6 +876,7 @@ it.each([
   ["Ann squad", [{ pubkey: "a".repeat(64), name: "Ann\u0085" }], false],
   [" ann pals", [{ pubkey: "a".repeat(64), name: " Ann" }], false],
   ["Rene\u0301 fans", [{ pubkey: "a".repeat(64), name: "Rene" }], false],
+  ["Crew", [{ pubkey: "a".repeat(64), name: "C++" }], true],
 ])(
   "the group label %s holds only when it is plain text and no reader binds a member's name or first word at its start",
   (label, people, holds) => {
