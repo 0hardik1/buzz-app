@@ -372,8 +372,9 @@ export function AppearanceSettings({
           <PreferenceRow
             title="Emoji size"
             subtitle="Large shows emoji-only messages and reactions bigger."
-            trailing={
+            trailing={(control) => (
               <Select
+                describedBy={control["aria-describedby"]}
                 variant="compact"
                 label="Emoji size"
                 value={emojiSize}
@@ -391,7 +392,7 @@ export function AppearanceSettings({
                     appearance.setEmojiSize(value);
                 }}
               />
-            }
+            )}
           />
           <AppearancePreview
             messageWidth={messageWidth}
