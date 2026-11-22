@@ -71,35 +71,39 @@ export function ReplyBranch({
       ]);
     };
   }, []);
-  const recoverFromBranchControl = useCallback((button: HTMLButtonElement) => {
-    if (document.activeElement !== button) return;
-    const branch = button.closest<HTMLElement>("[data-depth]");
-    recoverFocus(button, [
-      branch?.querySelector<HTMLElement>("[data-message-id]"),
-      branch?.parentElement
-        ?.closest("[data-depth]")
-        ?.querySelector<HTMLElement>("[data-message-id]"),
-      threadHistory(button),
-    ]);
+  const summaryRef = useCallback((button: HTMLButtonElement | null) => {
+    summaryButton.current = button;
+    if (!button) return;
+    return () => {
+      if (summaryButton.current === button) summaryButton.current = null;
+      if (document.activeElement !== button) return;
+      const branch = button.closest<HTMLElement>("[data-depth]");
+      recoverFocus(button, [
+        messageBox(branch?.querySelector<HTMLElement>("[data-message-id]")),
+        messageBox(
+          branch?.parentElement
+            ?.closest("[data-depth]")
+            ?.querySelector<HTMLElement>("[data-message-id]"),
+        ),
+        threadHistory(button),
+      ]);
+    };
   }, []);
-  const summaryRef = useCallback(
-    (button: HTMLButtonElement | null) => {
-      summaryButton.current = button;
-      if (!button) return;
-      return () => {
-        if (summaryButton.current === button) summaryButton.current = null;
-        recoverFromBranchControl(button);
-      };
-    },
-    [recoverFromBranchControl],
-  );
-  const collapseRef = useCallback(
-    (button: HTMLButtonElement | null) => {
-      if (!button) return;
-      return () => recoverFromBranchControl(button);
-    },
-    [recoverFromBranchControl],
-  );
+  // The thread line vanishes when live updates remove its replies or branch.
+  const collapseRef = useCallback((button: HTMLButtonElement | null) => {
+    if (!button) return;
+    return () => {
+      if (document.activeElement !== button) return;
+      const branch = button.closest<HTMLElement>("[data-depth]");
+      recoverFocus(button, [
+        branch?.querySelector<HTMLElement>("[data-message-id]"),
+        branch?.parentElement
+          ?.closest("[data-depth]")
+          ?.querySelector<HTMLElement>("[data-message-id]"),
+        threadHistory(button),
+      ]);
+    };
+  }, []);
   return (
     <div
       className={styles.replyBranch}
@@ -159,6 +163,10 @@ function threadHistory(element: HTMLElement) {
   return element.closest<HTMLElement>('[aria-label="Thread messages"]');
 }
 
+function messageBox(row: HTMLElement | null | undefined) {
+  return row?.querySelector<HTMLElement>(":scope > [data-layout]") ?? row;
+}
+
 /** Moves focus lost with a removed element to the first surviving target. */
 function recoverFocus(
   removed: HTMLElement,
@@ -176,10 +184,7 @@ function recoverFocus(
     if (removed.isConnected || !dropped) return;
     const target = targets.find((element) => element?.isConnected);
     if (!target || target.closest("[inert]")) return;
-    const focusable = target.hasAttribute("data-message-id")
-      ? (target.querySelector<HTMLElement>(":scope > [data-layout]") ?? target)
-      : target;
-    if (!focusable.hasAttribute("tabindex")) focusable.tabIndex = -1;
-    focusable.focus({ preventScroll: true });
+    if (!target.hasAttribute("tabindex")) target.tabIndex = -1;
+    target.focus({ preventScroll: true });
   });
 }
