@@ -4450,9 +4450,10 @@ export function createRelaySession(
         for (const view of artifactSyncs) view.restart();
         recent.clear();
         resumes.clear();
+        // Before unread restarts its repair, whose first read starts at once.
+        requests.invalidate();
         unread.clear();
         inboxFeed.clear();
-        requests.invalidate();
         retireBackoffs();
         repositories.clearHomes();
         profiles.clear();
