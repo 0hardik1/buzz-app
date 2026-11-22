@@ -267,10 +267,21 @@ export function termsMatch(
   return true;
 }
 
+/** Two or more words typed together, as they would appear in a message. */
+function phraseOf(terms: readonly Term[]) {
+  const words = terms.filter((term) => !term.negate);
+  if (words.length < 2) return undefined;
+  return {
+    text: words.map((term) => term.text).join(" "),
+    caseSensitive: words.some((term) => term.caseSensitive),
+    bonus: scoreMatch * words.length,
+  };
+}
+
 /** The best score `matchTerms` can give these terms: each one whole, at the
- * start of a word after a space. */
+ * start of a word after a space, and all of them together as typed. */
 export function bestScore(terms: readonly Term[]) {
-  let total = 0;
+  let total = phraseOf(terms)?.bonus ?? 0;
   for (const term of terms)
     if (!term.negate)
       total +=
@@ -280,7 +291,9 @@ export function bestScore(terms: readonly Term[]) {
 }
 
 /** Scores `text` (with `lower`, its lowercase form) against every term, or
- * undefined when any fails. Negated terms add nothing. */
+ * undefined when any fails. Negated terms add nothing. The words typed
+ * together score higher, and are what's underlined. ponytail: single spaces
+ * only; a line break between the words isn't a phrase. */
 export function matchTerms(
   terms: readonly Term[],
   text: string,
@@ -299,6 +312,18 @@ export function matchTerms(
     }
     if (found === undefined) return undefined;
     total += found;
+  }
+  const phrase = phraseOf(terms);
+  const at = phrase
+    ? (phrase.caseSensitive ? text : lower).indexOf(phrase.text)
+    : -1;
+  if (phrase && at >= 0) {
+    total += phrase.bonus;
+    if (positions) {
+      positions.length = 0;
+      for (let i = 0; i < phrase.text.length; i++)
+        if (phrase.text[i] !== " ") positions.push(at + i);
+    }
   }
   return total;
 }

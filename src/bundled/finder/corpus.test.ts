@@ -66,6 +66,26 @@ test("finds the words typed, not letters picked across a long message", () => {
   ]);
 });
 
+test("words typed together rank first and are what's underlined", () => {
+  const corpus = createCorpus();
+  // Newer messages hold the same words apart; newest wins ties otherwise.
+  corpus.add([
+    doc("this one: can we delete this channel"),
+    doc("delete it? this is a channel for drafts"),
+    doc("this channel is where we delete old drafts"),
+  ]);
+  expect(texts(corpus, "delete this channel")[0]).toBe(
+    "this one: can we delete this channel",
+  );
+  // Even when only one result is kept, the scan doesn't stop before it.
+  const [hit] = corpus.search("delete this chan", 1).hits;
+  expect(hit?.doc.text).toBe("this one: can we delete this channel");
+  // Only the phrase, not the first "this".
+  expect(hit?.positions).toEqual(
+    [..."delete this chan"].flatMap((char, i) => (char === " " ? [] : 17 + i)),
+  );
+});
+
 test("every term must match, in the text or who and where it was said", () => {
   const corpus = createCorpus();
   corpus.add([

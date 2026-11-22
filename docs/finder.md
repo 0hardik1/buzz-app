@@ -119,7 +119,10 @@ export function apply(ctx) {
 - With nothing typed, the finder lists your newest messages.
 
 Results are scored the way fzf scores them: letters at the start of a word,
-and letters next to each other, score higher. Ties go to the newer message.
+and letters next to each other, score higher. Words typed together score
+higher still when the message has them together, so "delete this channel"
+finds that phrase before messages that only mention each word. Ties go to the
+newer message.
 
 Matching differs from fzf in two ways, because chat messages are long
 sentences, not file names:
