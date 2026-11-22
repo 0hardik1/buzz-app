@@ -28,8 +28,9 @@ import {
 } from "../../features/relay/session";
 import type { RelayData } from "../../features/relay/service";
 import { matchesEvent } from "../../features/relay/projection";
-import type { RelayEvent } from "../../features/relay/events";
+import type { ReadFilter, RelayEvent } from "../../features/relay/events";
 import {
+  bounds,
   keypair,
   metadata,
   roster,
@@ -48,8 +49,47 @@ import { BrowserHostView } from "../../features/browser/BrowserHostView";
 import { BrowserSessions } from "../../features/browser/sessions";
 import type { BrowserPlatform } from "../../features/browser/platform";
 
+const highlighted = vi.hoisted(() => ({
+  root: undefined as string | undefined,
+}));
+// Observe the page → timeline boundary; jsdom does not lay out virtual rows.
+vi.mock("./ChannelBody", async (original) => {
+  const actual = await original<typeof import("./ChannelBody")>();
+  return {
+    ...actual,
+    ChannelBody(
+      props: import("react").ComponentProps<typeof actual.ChannelBody>,
+    ) {
+      highlighted.root = props.openThreadRootId;
+      return <actual.ChannelBody {...props} />;
+    },
+  };
+});
+
 composerDOMFixture();
 
+/** The relay's answer: matching events, and each history page's bounds. */
+function relayQuery(
+  authority: ReturnType<typeof keypair>,
+  events: readonly RelayEvent[],
+  filters: readonly ReadFilter[],
+) {
+  return [
+    ...events.filter((event) =>
+      filters.some((filter) => matchesEvent(event, filter)),
+    ),
+    ...filters.flatMap((filter) =>
+      filter.top_level
+        ? (filter["#h"] ?? []).map((channel) =>
+            bounds(authority, channel, "head", {
+              has_more: false,
+              next_cursor: null,
+            }),
+          )
+        : [],
+    ),
+  ];
+}
 const owners: ReturnType<typeof createRelaySession>[] = [];
 const visitSnapshot = { entry: { id: "visit" }, attempt: {} };
 const threadVisitSnapshot = { entry: { id: "thread-visit" }, attempt: {} };
@@ -82,7 +122,7 @@ async function page(
   navigator?: Navigation,
   routed = false,
   appComponent?: RegisteredPanel["component"],
-  soloPreferences?: RelaySession["soloPreferences"],
+  sidebarPreferences?: RelaySession["sidebarPreferences"],
 ) {
   const viewer = keypair(),
     authority = keypair();
@@ -112,10 +152,7 @@ async function page(
       viewer: viewer.pubkey,
       relayAuthor: authority.pubkey,
       media: () => undefined,
-      query: async (filters) =>
-        events.filter((event) =>
-          filters.some((filter) => matchesEvent(event, filter)),
-        ),
+      query: async (filters) => relayQuery(authority, events, filters),
       writer: {
         sign: async (template) => signed(viewer, template),
         publish: async () => {},
@@ -144,12 +181,12 @@ async function page(
     scope,
     viewer: viewer.pubkey,
     // The real session and its stores are frozen; a test may replace one.
-    session: soloPreferences
+    session: sidebarPreferences
       ? (Object.defineProperty(
           Object.create(owner.session),
-          "soloPreferences",
+          "sidebarPreferences",
           {
-            value: soloPreferences,
+            value: sidebarPreferences,
           },
         ) as typeof owner.session)
       : owner.session,
@@ -190,6 +227,7 @@ async function page(
   const available = [panel, app];
   let handleOpen: ((request: PanelOpenRequest) => boolean) | undefined;
   const panels: Panels = {
+    ui: { Workspace: () => null, useSplit: vi.fn() },
     snapshot: () => available,
     subscribe: () => () => {},
     resolve: (target) => available.find((entry) => entry.matches(target)),
@@ -262,6 +300,39 @@ async function page(
     present: (request: PageNavigation) => mounted.rerender(view(request)),
   };
 }
+
+it("passes only the visible side thread's root to the timeline and clears it when hidden or moved", async () => {
+  const h = await page("stream", undefined, true);
+  await screen.findByRole("tab", { name: "Initiating thread" });
+  const tabs = renderHook(() => useChannelTabState(h.session, "alpha"));
+  expect(highlighted.root).toBe(h.root);
+  const id = tabs.result.current.tabs.find((tab) => tab.kind === "thread")?.id;
+  if (!id || !h.root) throw new Error("Missing thread tab");
+  const root = h.root;
+
+  act(() => tabs.result.current.setPaneOpen(false));
+  expect(highlighted.root).toBeUndefined();
+  act(() => tabs.result.current.setPaneOpen(true));
+  expect(highlighted.root).toBe(h.root);
+
+  await h.open();
+  expect(highlighted.root).toBeUndefined();
+  act(() => tabs.result.current.select(id));
+  expect(highlighted.root).toBe(h.root);
+
+  act(() => tabs.result.current.moveTab(id, "main", 0));
+  expect(highlighted.root).toBeUndefined();
+  act(() => tabs.result.current.moveTab(id, "side", 0));
+  expect(highlighted.root).toBe(h.root);
+
+  // Retained tabs belonging to another conversation never mark this one.
+  act(() => tabs.result.current.openThreadTab("beta", root, root));
+  expect(highlighted.root).toBeUndefined();
+  act(() => tabs.result.current.select(id));
+  expect(highlighted.root).toBe(h.root);
+  act(() => tabs.result.current.setTabs(() => []));
+  expect(highlighted.root).toBeUndefined();
+});
 
 it.each([
   { link: "channel", direction: "Back" },
@@ -424,10 +495,7 @@ function workspace(
       viewer: viewer.pubkey,
       relayAuthor: authority.pubkey,
       media: () => undefined,
-      query: async (filters) =>
-        events.filter((event) =>
-          filters.some((filter) => matchesEvent(event, filter)),
-        ),
+      query: async (filters) => relayQuery(authority, events, filters),
       writer: {
         sign: async (template) => signed(viewer, template),
         publish: async () => {},
@@ -459,6 +527,7 @@ function workspace(
   };
   const none: RegisteredPanel[] = [];
   const panels: Panels = {
+    ui: { Workspace: () => null, useSplit: vi.fn() },
     snapshot: () => none,
     subscribe: () => () => {},
     resolve: () => undefined,
@@ -1053,7 +1122,7 @@ it("keeps a side tab's failed move recoverable after switching tabs", async () =
       starred: [],
       muted: [],
     },
-  } as unknown as ReturnType<RelaySession["soloPreferences"]["snapshot"]>;
+  } as unknown as ReturnType<RelaySession["sidebarPreferences"]["snapshot"]>;
   let current = base;
   const listeners = new Set<() => void>();
   const publish = (next: typeof current) => {
@@ -1094,7 +1163,7 @@ it("keeps a side tab's failed move recoverable after switching tabs", async () =
         throw new Error("Relay unavailable");
       }),
       retryMove,
-    } as unknown as RelaySession["soloPreferences"],
+    } as unknown as RelaySession["sidebarPreferences"],
   );
   const tabs = renderHook(() => useChannelTabState(h.session, "alpha"));
   act(() =>
@@ -1141,7 +1210,7 @@ it("keeps a newer header move recoverable after an earlier one succeeds", async 
       starred: [],
       muted: [],
     },
-  } as unknown as ReturnType<RelaySession["soloPreferences"]["snapshot"]>;
+  } as unknown as ReturnType<RelaySession["sidebarPreferences"]["snapshot"]>;
   let current = base;
   const listeners = new Set<() => void>();
   const publish = (next: typeof current) => {
@@ -1187,7 +1256,7 @@ it("keeps a newer header move recoverable after an earlier one succeeds", async 
       },
       assign,
       retryMove: vi.fn(() => new Promise<never>(() => {})),
-    } as unknown as RelaySession["soloPreferences"],
+    } as unknown as RelaySession["sidebarPreferences"],
   );
   const tabs = renderHook(() => useChannelTabState(h.session, "alpha"));
   act(() =>

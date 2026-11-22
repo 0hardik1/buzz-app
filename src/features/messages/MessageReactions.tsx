@@ -11,6 +11,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { SmileyIcon } from "../../shared/design-system/icons";
+import { useReadyImage } from "../../shared/design-system/useReadyImage";
 import { Button } from "../../shared/design-system/ui/Button";
 import { PreviewCard } from "../../shared/design-system/ui/PreviewCard";
 import { ReactionDelivery, ReactionTool } from "../conversation/ReactionTool";
@@ -131,17 +132,40 @@ function ReactionGlyph({
 }) {
   const emoji = useReactionEmoji(reaction, session);
   const source = emoji ? session.media(emoji.url) : undefined;
-  const [failed, setFailed] = useState<string>();
-  if (source && source !== failed)
-    return (
-      <img
-        className={styles.reactionCustomEmoji}
-        src={source}
-        alt=""
-        draggable={false}
-        onError={() => setFailed(source)}
-      />
-    );
+  return source ? (
+    <ReactionImage key={source} source={source} reaction={reaction} />
+  ) : (
+    <ReactionText reaction={reaction} />
+  );
+}
+
+function ReactionImage({
+  source,
+  reaction,
+}: {
+  source: string;
+  reaction: MessageReaction;
+}) {
+  const { status, failing, image } = useReadyImage(source, "eager");
+  // A source that failed keeps the placeholder until a retry loads.
+  const placeholder = failing && status !== "loaded";
+  return (
+    <>
+      {placeholder && <ReactionText reaction={reaction} />}
+      {status !== "failed" && (
+        <img
+          {...image}
+          className={styles.reactionCustomEmoji}
+          alt=""
+          draggable={false}
+          hidden={placeholder}
+        />
+      )}
+    </>
+  );
+}
+
+function ReactionText({ reaction }: { reaction: MessageReaction }) {
   // A shortcode is never a reaction's visible content: refused, failed and
   // unknown images get a neutral glyph, and the shortcode stays in the label.
   if (isReactionShortcode(reaction.content))
@@ -334,8 +358,11 @@ function ReactionEmoji({
         authorId.slice(0, 10));
   const revealName = () => {
     if (reaction.emoji) return;
-    void import("./reaction-name").then(({ reactionName }) =>
-      setName(reactionName(reaction.content)),
+    // A failed load keeps the raw content; the next hover or focus tries
+    // again (see use-reaction-name.ts: only a new document refetches).
+    void import("./reaction-name").then(
+      ({ reactionName }) => setName(reactionName(reaction.content)),
+      (error) => console.warn("The reaction name table didn't load", error),
     );
   };
   return (
@@ -475,6 +502,17 @@ export function MessageReactions(
       data-populated={(active && reactions.length > 0) || undefined}
       role="group"
       aria-label="Reactions"
+      // Copies keep each reaction and how many people chose it.
+      data-copy-text={
+        active
+          ? reactions
+              .map(
+                ({ reaction, authorIds }) =>
+                  `${reaction.content} ${authorIds.length}`,
+              )
+              .join(", ")
+          : ""
+      }
       onMouseEnter={() => setPointerInRow(true)}
       onMouseLeave={() => {
         setPointerInRow(false);
