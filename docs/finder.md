@@ -25,7 +25,7 @@ The finder is off by default. Enable it in Settings → Plugins.
 | All of Buzz | Done: this device at once, then the relay after a typing pause |
 | Reading ahead in the channels you use most | Done, with tests and a model of how much it finds |
 | Saving the index between launches | Not started: it is rebuilt each launch |
-| Clear cache empties the index at once | Not yet: it empties on the next reconnect or restart |
+| Clear cache empties the index | Not yet: it empties on restart or sign-out |
 | Edited messages | Not yet: the finder shows the original text |
 | A commands list (run any Buzz shortcut) | Not started: Buzz can't run a shortcut by its ID yet |
 
@@ -106,17 +106,22 @@ The index starts with three sources:
 Channels you haven't joined, which you can preview, stay out.
 
 The index lives in memory on this device. It is never sent anywhere. Scoped
-searches can add older messages. Signing out or changing session drops it.
-**Clear cache** drops it on the next reconnect or restart. When you lose access
-to a channel, its messages leave the index.
+searches can add older messages. A reconnect keeps it. Signing out, being
+refused by the community, or switching to another account or community drops
+it. **Clear cache** doesn't; restarting does. When you lose access to a
+channel, its messages leave the index. A deleted message leaves it too, and
+stays out if a later read brings it back.
 
 ## How it stays current
 
 The first time it runs, the finder reads your history from the relay in pages
 of 500, newest first, with pauses between pages, until it reaches 90 days back.
-That happens each time the session starts, followed by the read-ahead. After
-that it adds messages the app already receives while it's open, plus messages
-found in the two scopes.
+That happens once per launch, followed by the read-ahead. After a reconnect it
+reads only what is newer than its last read, from 5 minutes before it, then any
+older pages the first read hadn't reached: usually one page for each of your
+messages, mentions, direct-message and thread reads. Channels already read
+ahead aren't read again. After that it adds messages the app already receives
+while it's open, plus messages found in the two scopes.
 It does not poll.
 
 Because the first fill can read a lot of messages, the plugin starts **off** for now. That

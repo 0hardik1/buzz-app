@@ -15,11 +15,21 @@ import type { PluginModule } from "../../plugins/api";
 import { PluginRuntime } from "../../plugins/runtime";
 import * as finderPlugin from "./index";
 import { topInterest } from "./interest";
+import { queryEvents } from "../../../tests/fixtures/finder-data";
+import type { RelayEvent } from "../../features/relay/events";
+import { createRelaySession } from "../../features/relay/session";
+import {
+  keypair,
+  message,
+  metadata,
+  roster,
+} from "../../features/relay/testing";
 
 const viewer = "a".repeat(64);
 const communityOrigin = "https://relay.example.org";
 const scope = `${communityOrigin}:${viewer}`;
 const contexts: Context[] = [];
+const sessions: (() => void)[] = [];
 beforeEach(() => {
   vi.stubGlobal("matchMedia", () => ({
     matches: true,
@@ -42,12 +52,19 @@ beforeEach(() => {
 afterEach(async () => {
   cleanup();
   for (const ctx of contexts.splice(0)) await ctx.fiber.dispose();
+  for (const dispose of sessions.splice(0)) dispose();
+  vi.restoreAllMocks();
   localStorage.clear();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
 });
 
-async function mount() {
+async function mount(
+  relay: unknown = {
+    snapshot: () => ({ status: "connecting" }),
+    subscribe: () => () => {},
+  },
+) {
   const ctx = new Context();
   contexts.push(ctx);
   const modules: Record<string, PluginModule> = { "buzz.finder": finderPlugin };
@@ -67,10 +84,7 @@ async function mount() {
   // The real dispatcher, so typing guards apply as in the app.
   const shortcuts = new ShortcutsService(ctx, window);
   let Overlay: ComponentType = () => null;
-  ctx.provide("relay", {
-    snapshot: () => ({ status: "connecting" }),
-    subscribe: () => () => {},
-  } as never);
+  ctx.provide("relay", relay as never);
   ctx.provide("navigation", {
     open: vi.fn(async () => ({ status: "opened" })),
     snapshot: () => snapshot,
@@ -219,4 +233,60 @@ test("This channel follows the conversation on screen, keeping the text", async 
   act(() => visit("v2", "lab"));
   expect(await selectedTab()).toBe("This channel");
   expect(screen.getByRole("combobox")).toHaveValue("ap");
+});
+
+test("a reconnect keeps the index; another account drops it", async () => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  const me = keypair();
+  const relayKey = keypair();
+  const events = [
+    metadata(relayKey, "crew", "crew"),
+    roster(relayKey, "crew", [me.pubkey]),
+    message(me, "crew", "Quartz plans", Math.floor(Date.now() / 1000) - 60),
+  ];
+  const connect = (viewer: string, found: readonly RelayEvent[]) => {
+    const owner = createRelaySession({
+      viewer,
+      relayAuthor: relayKey.pubkey,
+      media: () => undefined,
+      query: async (filters) => queryEvents(found, filters),
+    });
+    sessions.push(owner.dispose);
+    return owner.session;
+  };
+  const listeners = new Set<() => void>();
+  let snapshot: Record<string, unknown> = { status: "connecting" };
+  const publish = (next: Record<string, unknown>) => {
+    snapshot = next;
+    for (const listener of listeners) listener();
+  };
+  const ready = (viewer: string, generation: number, found = events) => ({
+    status: "ready",
+    generation,
+    viewer,
+    scope: `${communityOrigin}:${viewer}`,
+    session: connect(viewer, found),
+  });
+  const { show } = await mount({
+    snapshot: () => snapshot,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+  });
+  act(() => publish(ready(me.pubkey, 1)));
+  show();
+  fireEvent.keyDown(document.body, { key: "p", code: "KeyP", ctrlKey: true });
+  type("quartz");
+  await screen.findByRole("option", { name: /Quartz plans/ });
+  // The new session's relay has nothing; the row is the kept index's.
+  act(() => publish({ status: "connecting", generation: 2 }));
+  act(() => publish(ready(me.pubkey, 2, events.slice(0, 2))));
+  expect(screen.getByRole("option", { name: /Quartz plans/ })).toBeVisible();
+  act(() => publish(ready(keypair().pubkey, 3, [])));
+  await vi.waitFor(() =>
+    expect(
+      screen.queryByRole("option", { name: /Quartz plans/ }),
+    ).not.toBeInTheDocument(),
+  );
 });

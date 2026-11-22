@@ -1,6 +1,11 @@
 import { searchText } from "../../app/shell/useSearchMessages";
 import type { ChannelSummary } from "../../features/relay/contracts";
-import type { ReadFilter, RelayEvent } from "../../features/relay/events";
+import type {
+  EventData,
+  ReadFilter,
+  RelayEvent,
+} from "../../features/relay/events";
+import { deletionApplies } from "../../features/relay/fold";
 import type { RelaySession } from "../../features/relay/session";
 import { threadReference } from "../../features/relay/thread-reference";
 import type { FinderCorpus, FinderDoc } from "./corpus.ts";
@@ -18,6 +23,9 @@ const BACKOFF_CAP_MS = 60_000;
  * are for recent messages (src/bundled/finder/readahead-bench.ts). */
 const WARM_CHANNELS = 16;
 const WARM_PAGES = 1;
+/** How far before the last fill a resumed one reads again, for clock skew
+ * between this device and the relay. */
+const RESUME_SLACK_S = 300;
 
 export type FinderSyncStatus = Readonly<{
   phase: "waiting" | "filling" | "ready" | "error";
@@ -46,6 +54,32 @@ type ChannelProgress = {
   reading?: Promise<unknown>;
 };
 
+type FillProgress = {
+  /** When the last read of this filter that reached the present started. */
+  top?: number;
+  /** The oldest page read so far, until the horizon is reached. */
+  cursor?: ChannelCursor;
+  complete: boolean;
+};
+
+/** What the index knows, kept across reconnects of one account in one
+ * community, so a new session resumes from its cursors instead of reading
+ * 90 days again. Another account or community starts a new one. */
+export function createFinderState() {
+  return {
+    docs: new Map<string, FinderDoc>(),
+    /** The indexed events without their text, to judge later deletions. */
+    signed: new Map<string, EventData>(),
+    /** Deletions seen, by the ID they name. */
+    tombstones: new Map<string, EventData[]>(),
+    cursors: new Map<string, ChannelProgress>(),
+    fills: new Map<string, FillProgress>(),
+    /** Threads the viewer took part in, by root id. */
+    roots: new Set<string>(),
+  };
+}
+export type FinderState = ReturnType<typeof createFinderState>;
+
 const sleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
     signal.throwIfAborted();
@@ -73,9 +107,12 @@ export function startFinderSync({
   corpus,
   changed,
   warm = () => [],
+  state = createFinderState(),
 }: {
   session: RelaySession;
   corpus: FinderCorpus;
+  /** Carried over from this account's previous session in this community. */
+  state?: FinderState;
   /** The corpus or the status changed. */
   changed: () => void;
   /** Channel ids worth reading ahead, most wanted first. */
@@ -86,8 +123,7 @@ export function startFinderSync({
   const controller = new AbortController();
   const { signal } = controller;
   const since = Math.floor(Date.now() / 1000) - DAYS * 86_400;
-  const docs = new Map<string, FinderDoc>();
-  const cursors = new Map<string, ChannelProgress>();
+  const { docs, signed, tombstones, cursors, fills, roots } = state;
   const progressOf = (channelId: string) => {
     let progress = cursors.get(channelId);
     if (!progress) {
@@ -96,8 +132,6 @@ export function startFinderSync({
     }
     return progress;
   };
-  // Threads the viewer took part in, by root id.
-  const roots = new Set<string>();
   let status: FinderSyncStatus = { phase: "waiting", indexed: 0 };
   const publish = (patch: Partial<FinderSyncStatus>) => {
     status = { ...status, ...patch, indexed: corpus.size };
@@ -139,14 +173,40 @@ export function startFinderSync({
       (!found.readOnly || found.viewerRole === "guest")
     );
   };
-  const remember = (added: readonly FinderDoc[]) => {
+  /** A deletion seen for `event` removes it, now or when it arrives later. */
+  const deleted = (event: EventData) =>
+    !!tombstones
+      .get(event.id)
+      ?.some((deletion) =>
+        deletionApplies(deletion, event, session.relayAuthor),
+      );
+  const remember = (
+    added: readonly FinderDoc[],
+    events: ReadonlyMap<string, EventData> = new Map(),
+  ) => {
     if (signal.aborted || !added.length) return;
+    // Relay hits carry no event; judge them as their author's message.
+    const eventOf = (doc: FinderDoc): EventData => {
+      const event = events.get(doc.id);
+      return {
+        id: doc.id,
+        kind: event?.kind ?? 9,
+        pubkey: event?.pubkey ?? doc.authorId,
+        created_at: doc.createdAt,
+        content: "",
+        tags: event?.tags ?? [],
+      };
+    };
     // The search hook has no thread root. Keep fuller observed documents.
     const joined = added.filter(
-      (doc) => relevant(doc.channelId) && !docs.has(doc.id),
+      (doc) =>
+        relevant(doc.channelId) && !docs.has(doc.id) && !deleted(eventOf(doc)),
     );
     if (!joined.length) return;
-    for (const doc of joined) docs.set(doc.id, doc);
+    for (const doc of joined) {
+      docs.set(doc.id, doc);
+      signed.set(doc.id, eventOf(doc));
+    }
     corpus.add(joined);
     void session.profiles
       .ensure([...new Set(joined.map((doc) => doc.authorId))], "background")
@@ -155,16 +215,18 @@ export function startFinderSync({
   };
   const take = (events: readonly RelayEvent[], older = false) => {
     const added: FinderDoc[] = [];
+    const byId = new Map<string, EventData>();
     for (const event of events) {
       if (!KINDS.includes(event.kind) || (!older && event.created_at < since))
         continue;
-      if (docs.has(event.id)) continue;
+      if (docs.has(event.id) || deleted(event)) continue;
       const doc = docOf(event);
       if (event.pubkey === viewer && doc.threadRootId)
         roots.add(doc.threadRootId);
       added.push(doc);
+      byId.set(event.id, event);
     }
-    remember(added);
+    remember(added, byId);
   };
 
   /** The next older page of one channel, into the index. */
@@ -285,15 +347,19 @@ export function startFinderSync({
     };
   };
 
-  /** Every page of `filter` back to the horizon, newest first. */
-  async function readAll(filter: Omit<ReadFilter, "limit">) {
-    let cursor: { until: number; before_id: string } | undefined;
+  /** Pages of `filter` newest first, from `cursor` back to `from`. */
+  async function readPages(
+    filter: Omit<ReadFilter, "limit">,
+    from: number,
+    cursor?: ChannelCursor,
+    reached: (cursor: ChannelCursor) => void = () => {},
+  ) {
     let delay = BACKOFF_MS;
     for (;;) {
       let page: readonly RelayEvent[];
       try {
         page = await session.readRemote(
-          [{ ...filter, since, limit: PAGE, ...cursor }],
+          [{ ...filter, since: from, limit: PAGE, ...cursor }],
           { signal, priority: "background" },
         );
       } catch (error) {
@@ -309,8 +375,27 @@ export function startFinderSync({
       )[0];
       if (!oldest || page.length < PAGE) return;
       cursor = { until: oldest.created_at, before_id: oldest.id };
+      reached(cursor);
       await sleep(PACE_MS, signal);
     }
+  }
+
+  /** Every page of `filter` back to the horizon. After a reconnect, only
+   * what is newer than the last read, then any older pages it didn't reach. */
+  async function readAll(filter: Omit<ReadFilter, "limit">) {
+    const key = JSON.stringify(filter);
+    const progress = fills.get(key) ?? { complete: false };
+    fills.set(key, progress);
+    const started = Math.floor(Date.now() / 1000);
+    // Roots by ID don't change, so one complete read is enough.
+    if (progress.top !== undefined && !filter.ids)
+      await readPages(filter, Math.max(since, progress.top - RESUME_SLACK_S));
+    progress.top = started;
+    if (progress.complete) return;
+    await readPages(filter, since, progress.cursor, (cursor) => {
+      progress.cursor = cursor;
+    });
+    progress.complete = true;
   }
 
   async function fill() {
@@ -342,6 +427,8 @@ export function startFinderSync({
     );
     for (const id of wanted.slice(0, WARM_CHANNELS)) {
       const progress = progressOf(id);
+      // Read ahead before this reconnect; This channel reads deeper.
+      if (progress.cursor) continue;
       for (let n = 0; n < WARM_PAGES && !progress.complete; n++) {
         await sleep(PACE_MS + Math.random() * PACE_MS, signal);
         try {
@@ -356,22 +443,28 @@ export function startFinderSync({
 
   // New messages the session receives anyway: live traffic and other reads.
   const live = session.observe([{ kinds: [...KINDS, 5], limit: PAGE }]);
+  // Deletions are applied before the messages beside them are taken, and
+  // kept, so a page read later can't add a deleted message back.
   const stopLive = live.subscribe(() => {
     const events = live.snapshot().events as readonly RelayEvent[];
-    const deleted = new Set(
-      events
-        .filter((event) => event.kind === 5)
-        .flatMap((event) =>
-          event.tags.flatMap(([name, value]) =>
-            name === "e" && value && docs.get(value)?.authorId === event.pubkey
-              ? [value]
-              : [],
-          ),
-        ),
-    );
-    if (deleted.size) {
-      for (const id of deleted) docs.delete(id);
-      corpus.remove((doc) => deleted.has(doc.id));
+    const gone = new Set<string>();
+    for (const event of events) {
+      if (event.kind !== 5) continue;
+      for (const [name, id] of event.tags) {
+        if (name !== "e" || !id) continue;
+        const known = tombstones.get(id) ?? [];
+        if (known.some((deletion) => deletion.id === event.id)) continue;
+        tombstones.set(id, [...known, event]);
+        const target = signed.get(id);
+        if (target && deleted(target)) gone.add(id);
+      }
+    }
+    if (gone.size) {
+      for (const id of gone) {
+        docs.delete(id);
+        signed.delete(id);
+      }
+      corpus.remove((doc) => gone.has(doc.id));
       publish({});
     }
     take(events);
@@ -388,7 +481,10 @@ export function startFinderSync({
       );
       if (gone.size) {
         for (const [id, doc] of docs)
-          if (gone.has(doc.channelId)) docs.delete(id);
+          if (gone.has(doc.channelId)) {
+            docs.delete(id);
+            signed.delete(id);
+          }
         corpus.remove((doc) => gone.has(doc.channelId));
         for (const id of gone) cursors.delete(id);
       }
@@ -429,7 +525,6 @@ export function startFinderSync({
       live.dispose();
       stopList();
       stopProfiles();
-      corpus.clear();
     },
   };
 }

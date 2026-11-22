@@ -29,8 +29,9 @@ where it was said.
 - `'word` matches those exact letters together, `!word` leaves out messages
   with that word, and a capital letter makes a word match case.
 - The index is kept in memory on this device and never sent anywhere. It is
-  built again each time Buzz starts. Signing out or switching community starts
-  it over. Clear cache takes effect at the next reconnect or restart.
+  built again each time Buzz starts. Signing out or switching account or
+  community starts it over; a reconnect keeps it and reads only what is
+  newer. Clear cache takes effect at restart.
 - **This channel**: with fewer than 20 matches, it reads older pages, up to 5,000 messages per
   opening. **Keep going** allows another 5,000. It remembers its place for this
   session and stops when you close or switch scope. Join a public preview to

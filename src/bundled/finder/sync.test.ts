@@ -6,9 +6,14 @@ import {
   message,
   metadata,
   roster,
+  signed,
 } from "../../features/relay/testing";
 import { createCorpus } from "./corpus";
-import { type ChannelSearchStatus, startFinderSync } from "./sync";
+import {
+  type ChannelSearchStatus,
+  createFinderState,
+  startFinderSync,
+} from "./sync";
 
 const viewer = keypair();
 const author = keypair();
@@ -86,7 +91,7 @@ async function fixture(
     expect(sync.status().phase).toBe("ready");
     reads.length = 0;
   }
-  return { corpus, sync, reads, channelReads, control };
+  return { corpus, sync, reads, channelReads, control, owner };
 }
 
 test("reads ten pages, keeps its cursor and budget across edits and scope switches, and resumes on Keep going", async () => {
@@ -272,4 +277,169 @@ test("reads ahead one page per channel", async () => {
   });
   await vi.advanceTimersByTimeAsync(10_000);
   expect(channelReads).toHaveLength(1);
+});
+
+test("a deletion removes its message, now and from pages read later, only by deletions that apply", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const live = message(author, "crew", "Live quartz", now - 10);
+  const kept = message(author, "lab", "Kept quartz", now - 10);
+  const older = message(author, "crew", "Older quartz", 1_700_000_000);
+  const stranger = keypair();
+  const deletions = [
+    signed(author, {
+      kind: 5,
+      content: "",
+      created_at: now,
+      tags: [
+        ["h", "crew"],
+        ["e", live.id],
+        ["k", "9"],
+      ],
+    }),
+    signed(author, {
+      kind: 5,
+      content: "",
+      created_at: now,
+      tags: [
+        ["h", "crew"],
+        ["e", older.id],
+        ["k", "9"],
+      ],
+    }),
+    // Neither the author's nor naming a message kind: it removes nothing.
+    signed(stranger, {
+      kind: 5,
+      content: "",
+      created_at: now,
+      tags: [
+        ["h", "lab"],
+        ["e", kept.id],
+      ],
+    }),
+  ];
+  const { corpus, sync, owner } = await fixture([
+    live,
+    kept,
+    older,
+    ...deletions,
+  ]);
+  const found = () =>
+    corpus
+      .search("quartz")
+      .hits.map(({ doc }) => doc.text)
+      .sort();
+  await owner.session.read([{ ids: [live.id, kept.id], limit: 2 }]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(found()).toEqual(["Kept quartz", "Live quartz"]);
+  await owner.session.read([{ kinds: [5], limit: 10 }]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(found()).toEqual(["Kept quartz"]);
+  // The app received the older message with its deletion, then a page of
+  // history brings it again.
+  await owner.session.read([
+    { ids: [older.id], limit: 1 },
+    { kinds: [5], "#e": [older.id], limit: 1 },
+  ]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(found()).toEqual(["Kept quartz"]);
+  const reader = sync.searchChannel(
+    "crew",
+    () => true,
+    () => {},
+  );
+  dispose.push(reader.dispose);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(found()).toEqual(["Kept quartz"]);
+  // Nor can a relay search hit held by Finder.
+  sync.remember([
+    {
+      id: older.id,
+      channelId: "crew",
+      authorId: author.pubkey,
+      createdAt: older.created_at,
+      author: "Sam",
+      place: "#crew",
+      text: older.content,
+    },
+  ]);
+  expect(found()).toEqual(["Kept quartz"]);
+});
+
+test("a reconnect keeps the index and reads only what is newer, then the pages it hadn't reached", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const mine = Array.from({ length: 1200 }, (_, n) =>
+    message(viewer, "crew", `Mine ${n}`, now - 3600 - n),
+  );
+  const events = [...discovery, ...mine];
+  const reads: { since?: number; before_id?: string }[] = [];
+  const connect = async () => {
+    const owner = createRelaySession({
+      viewer: viewer.pubkey,
+      relayAuthor: relay.pubkey,
+      media: () => undefined,
+      async query(filters) {
+        for (const filter of filters)
+          if (
+            filter.authors?.includes(viewer.pubkey) &&
+            filter.kinds?.includes(9)
+          )
+            reads.push(filter);
+        return queryEvents(events, filters);
+      },
+    });
+    dispose.push(owner.dispose);
+    await owner.session.channels.ensureList();
+    return owner;
+  };
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  const corpus = createCorpus();
+  const state = createFinderState();
+  let owner = await connect();
+  let sync = startFinderSync({
+    session: owner.session,
+    corpus,
+    state,
+    changed() {},
+  });
+  // Only the newest page before the connection drops.
+  await vi.advanceTimersByTimeAsync(0);
+  expect(reads).toHaveLength(1);
+  sync.dispose();
+  owner.dispose();
+  expect(corpus.size).toBe(500);
+  events.push(message(viewer, "crew", "Mine while away", now + 60));
+  reads.length = 0;
+  owner = await connect();
+  sync = startFinderSync({
+    session: owner.session,
+    corpus,
+    state,
+    changed() {},
+  });
+  dispose.push(sync.dispose);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(sync.status().phase).toBe("ready");
+  // One page newer than the first read, then the two older ones it hadn't
+  // reached, from its cursor.
+  expect(reads).toHaveLength(3);
+  expect(reads[0]?.since).toBeGreaterThanOrEqual(now - 300);
+  expect(reads[0]?.before_id).toBeUndefined();
+  expect(reads[1]?.before_id).toBe(mine[499]?.id);
+  expect(corpus.size).toBe(1201);
+  // A later reconnect reads only the newer page.
+  sync.dispose();
+  owner.dispose();
+  reads.length = 0;
+  owner = await connect();
+  sync = startFinderSync({
+    session: owner.session,
+    corpus,
+    state,
+    changed() {},
+  });
+  dispose.push(sync.dispose);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(reads).toHaveLength(1);
+  expect(corpus.size).toBe(1201);
 });

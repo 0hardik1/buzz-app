@@ -7,6 +7,8 @@ import { createCorpus } from "./corpus.ts";
 import { noteInterest, topInterest } from "./interest";
 import type { FinderScope } from "./FinderDialog";
 import {
+  createFinderState,
+  type FinderState,
   type FinderSync,
   type FinderSyncStatus,
   startFinderSync,
@@ -100,15 +102,31 @@ export const apply: PluginModule["apply"] = (ctx) => {
     return ctx.navigation.subscribe(visited);
   });
 
-  // One index per connected session: a new community, account, reconnect
-  // generation or Clear cache starts over, and the old one is dropped.
+  // One reader per connected session, and one index per account in a
+  // community: a reconnect resumes the index from its cursors. Signing out,
+  // a refusal, or another account or community drops it.
   ctx.effect(() => {
     let current: { key: string; dispose(): void } | undefined;
+    let kept: { scope: string; state: FinderState } | undefined;
+    const drop = () => {
+      current?.dispose();
+      current = undefined;
+      kept = undefined;
+      corpus.clear();
+    };
     const sync = () => {
       const snapshot = relay.snapshot();
+      const scope = snapshot.scope ?? "";
+      if (
+        kept &&
+        (snapshot.status === "disconnected" ||
+          snapshot.denied ||
+          (scope && scope !== kept.scope))
+      )
+        drop();
       const key =
         snapshot.status === "ready" && !snapshot.cached
-          ? `${snapshot.scope}:${snapshot.generation}`
+          ? `${scope}:${snapshot.generation}`
           : "";
       if (key === current?.key) return;
       current?.dispose();
@@ -120,9 +138,11 @@ export const apply: PluginModule["apply"] = (ctx) => {
           sync: undefined,
           revision: state.revision + 1,
         });
+      if (!kept) kept = { scope, state: createFinderState() };
       const running = startFinderSync({
         session: snapshot.session,
         corpus,
+        state: kept.state,
         changed: () =>
           set({ revision: state.revision + 1, status: running.status() }),
         warm: () => (snapshot.scope ? topInterest(snapshot.scope, 24) : []),
@@ -139,7 +159,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     sync();
     return () => {
       stop();
-      current?.dispose();
+      drop();
     };
   });
 
