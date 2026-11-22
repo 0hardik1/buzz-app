@@ -49,8 +49,9 @@ type PopoverPopupProps = Omit<
   > & {
     /** Preserve an explicitly themed surface across the portal. */
     colorMode?: "light" | "dark" | undefined;
-    /** Compact account/action surfaces use 8px corners as well as a narrower width. */
-    size?: "compact" | "default" | "wide";
+    /** Compact account/action surfaces use 8px corners as well as a narrower width.
+     * Large holds a browsable collection, such as a grid of choices. */
+    size?: "compact" | "default" | "wide" | "large";
     /** Embedded pickers own their internal spacing. */
     padding?: "content" | "list" | "none";
   };

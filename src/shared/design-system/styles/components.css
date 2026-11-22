@@ -2851,6 +2851,10 @@
   .buzz-popover-popup[data-size="wide"] {
     width: 24rem;
   }
+  /* A browsable collection; max-width still yields to the available space. */
+  .buzz-popover-popup[data-size="large"] {
+    width: 46rem;
+  }
   .buzz-popover-popup[data-padding="list"] .navigation-item {
     border-radius: var(--floating-inner-radius);
   }
