@@ -205,6 +205,17 @@ mentions still work.
 - **Refused by a community**: the notice says what to do, such as sign in,
   switch accounts, or ask an admin for access.
 
+### A conversation change didn't send
+
+- Retry a failed reaction with **Retry reaction** on its message.
+- For an expired member invitation, add the person again from **People**.
+- If a chat shows **Chat admin setup didn’t finish**, use **Retry** on its
+  opening message or **Abandon admin setup** in the notice above the composer.
+  Abandon keeps the chat and its current roles; then retry the opening message,
+  or send a new one if it expired.
+
+Diagnostics and Outbox are developer tools, not available in release builds.
+
 ### Keychain prompts (macOS)
 
 Buzz keeps your key, your agents' keys and saved API keys in the Keychain.
