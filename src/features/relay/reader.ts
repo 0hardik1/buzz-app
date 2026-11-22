@@ -6,6 +6,7 @@ import type { ReadFilter, RelayEvent } from "./events";
 import type { ReadTransport } from "./transport";
 import { byteSize } from "./budget";
 import { ReadError } from "./errors";
+import { placeServed } from "./placement";
 import type { AgentLibrary } from "../agents/library";
 
 export type Priority = "foreground" | "background";
@@ -219,6 +220,7 @@ export function createRelayReader(
               transport.viewer,
               transport.relayAuthor,
             );
+            placeServed(job.filters, events);
             finish(job, Object.freeze([...events]));
           })
           .catch((error) => failed(job, error));
