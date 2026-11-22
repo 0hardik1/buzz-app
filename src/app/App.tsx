@@ -34,7 +34,9 @@ import { MediaMenuDownloadNotice } from "../features/messages/MediaDownloadActio
 import { CreationReview } from "../bundled/agents/CreationReview";
 import { UpdateReview } from "../bundled/agents/UpdateReview";
 import { TeamUpdateReview } from "../bundled/agents/TeamUpdateReview";
+import { AppOverlays } from "../features/pages/AppOverlays";
 import { InterruptedNotice } from "../features/agents/InterruptedNotice";
+import { ShellNotices } from "../features/notices/ShellNotices";
 import {
   useCallback,
   useEffect,
@@ -375,6 +377,7 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
           void services.navigation.open({ version: 1, kind: "settings" });
         },
         true,
+        () => services.communities.reload(),
       ),
     [services],
   );
@@ -829,10 +832,12 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
             relay={services.relay}
           />
           <InterruptedNotice agents={services.agents} />
+          <ShellNotices notices={services.notices} plugins={plugins} />
           <MediaMenuDownloadNotice />
           <CreationReview agents={services.agents} />
           <UpdateReview agents={services.agents} />
           <TeamUpdateReview agents={services.agents} />
+          <AppOverlays pages={services.pages} />
           {!settings && startup === "recovery" ? (
             <RecoveryScreen plugins={plugins} />
           ) : !settings &&
