@@ -143,9 +143,7 @@ export function step(down: boolean, settled = false) {
   }
   // Sidebar rows are Tab stops without arrow keys; step between them.
   if (origin && sidebar()?.contains(origin)) {
-    const rows = conversationRows().filter(
-      (row) => row.getClientRects().length,
-    );
+    const rows = sidebarRows();
     const after = (row: HTMLElement) =>
       !!(
         origin.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING
@@ -153,14 +151,38 @@ export function step(down: boolean, settled = false) {
     const next = down
       ? rows.find(after)
       : rows.filter((row) => row !== origin && !after(row)).at(-1);
-    if (next) {
-      next.scrollIntoView({ block: "nearest" });
-      return focusKeyboardTarget(next);
-    }
+    if (next) focusItem(next);
     return;
   }
   // Past what is rendered, scrolling loads more.
   scroller()?.scrollBy({ top: down ? LINE : -LINE });
+}
+
+/** The sidebar's conversations that are showing. */
+const sidebarRows = () =>
+  conversationRows().filter((row) => row.getClientRects().length);
+
+/** Focus a sidebar conversation, bringing it into view. */
+function focusItem(
+  item: HTMLElement,
+  block: ScrollLogicalPosition = "nearest",
+) {
+  item.scrollIntoView?.({ block });
+  focusKeyboardTarget(item);
+}
+
+/** Of `items`, the first about `distance` px past `from`, or the last. */
+function halfPageFrom(
+  items: HTMLElement[],
+  from: HTMLElement,
+  distance: number,
+  down: boolean,
+) {
+  const goal = from.getBoundingClientRect().top + (down ? distance : -distance);
+  const top = (item: HTMLElement) => item.getBoundingClientRect().top;
+  return down
+    ? (items.find((item) => top(item) >= goal) ?? items.at(-1))
+    : (items.filter((item) => top(item) <= goal).at(-1) ?? items[0]);
 }
 
 /** `h` / `l`: left or right in lists and trees; → on a message opens its thread. */
@@ -189,11 +211,33 @@ function besideNeighbor(row: HTMLElement, down: boolean) {
 }
 
 /**
- * `gg` / `G`: the newest message, or the oldest loaded one, once scrolling
- * there has rendered it. Without a message, just scroll.
+ * `gg` / `G`: the first or last sidebar conversation, menu or list item, or
+ * the oldest loaded or newest message once scrolling there has rendered it.
+ * Without any of those, just scroll.
  */
 function edge(down: boolean) {
-  const row = resume()?.closest<HTMLElement>(ROW);
+  const origin = resume();
+  if (origin && inSidebar()) {
+    const rows = sidebarRows();
+    const next = down ? rows.at(-1) : rows[0];
+    if (next) focusItem(next);
+    return;
+  }
+  const menu = origin?.closest<HTMLElement>('[role="menu"]');
+  if (menu) {
+    const items = [
+      ...menu.querySelectorAll<HTMLElement>('[role^="menuitem"]'),
+    ].filter(
+      (item) =>
+        item.closest('[role="menu"]') === menu &&
+        item.getAttribute("aria-disabled") !== "true",
+    );
+    (down ? items.at(-1) : items[0])?.focus();
+    return;
+  }
+  const row = origin?.closest<HTMLElement>(ROW);
+  // A list moves its own selection to its first or last item.
+  if (!row && origin && press(origin, down ? "End" : "Home")) return;
   const target = scroller();
   if (!target) return;
   const list = row && messageListOf(row)?.element;
@@ -216,24 +260,26 @@ export const top = () => edge(false);
 export const bottom = () => edge(true);
 
 /**
- * `<C-d>` / `<C-u>`: the message half a page below or above, centred
- * (Neovim's `<C-d>zz`). Without a message, half a page of scrolling.
+ * `<C-d>` / `<C-u>`: the message or sidebar conversation half a page below
+ * or above, centred (Neovim's `<C-d>zz`); a list's own page keys; else half
+ * a page of scrolling.
  */
 export function halfPage(down: boolean) {
-  const row = resume()?.closest<HTMLElement>(ROW);
-  const target = row ? scrollable(row) : scroller();
-  if (!target) return;
-  const distance = target.clientHeight / 2;
-  if (!row) return target.scrollBy({ top: down ? distance : -distance });
-  const goal =
-    focusTarget(row).getBoundingClientRect().top +
-    (down ? distance : -distance);
-  const rows = listRows(row);
-  const top = (candidate: HTMLElement) =>
-    focusTarget(candidate).getBoundingClientRect().top;
-  const next = down
-    ? (rows.find((candidate) => top(candidate) >= goal) ?? rows.at(-1))
-    : (rows.filter((candidate) => top(candidate) <= goal).at(-1) ?? rows[0]);
+  const origin = resume();
+  const half = (element: Element | null | undefined) =>
+    (scrollable(element)?.clientHeight ?? innerHeight) / 2;
+  if (origin && inSidebar()) {
+    const next = halfPageFrom(sidebarRows(), origin, half(origin), down);
+    if (next) focusItem(next, "center");
+    return;
+  }
+  const row = origin?.closest<HTMLElement>(ROW);
+  if (!row) {
+    if (origin && press(origin, down ? "PageDown" : "PageUp")) return;
+    const target = scroller();
+    return target?.scrollBy({ top: (down ? 1 : -1) * half(target) });
+  }
+  const next = halfPageFrom(listRows(row), row, half(row), down);
   if (!next) return;
   selectMessage(next);
   focusTarget(next).scrollIntoView?.({ block: "center" });

@@ -12,6 +12,7 @@ import { open, wheel } from "./timeline.mjs";
 // focus return need a browser; key tables and letters are unit-tested.
 test.use({ historyCounts: { alpha: 4, beta: 1 } });
 
+const apple = process.platform === "darwin";
 const composer = (page, name) =>
   page.getByRole("textbox", { name: `Message #${name}`, exact: true });
 
@@ -417,6 +418,45 @@ test.describe("the cursor", () => {
     await expect(box(page, 39)).toBeInViewport();
   });
 
+  test("gg, G and Ctrl-d move the selection in the sidebar and in menus too", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await enableVimKeys(page);
+    await expect(box(page, 39)).toBeFocused();
+    const nav = page.getByRole("navigation", { name: "Subscribed channels" });
+    await page.keyboard.press("\\");
+    await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
+    await page.keyboard.press("Shift+G");
+    await expect(nav.getByRole("button", { name: "Beta" })).toBeFocused();
+    await page.keyboard.press("g");
+    await page.keyboard.press("g");
+    await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
+    await page.keyboard.press("Control+d");
+    await expect(nav.getByRole("button", { name: "Beta" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(box(page, 39)).toBeFocused();
+
+    // In a menu, g is not an item's letter: gg and G reach its ends.
+    await page.keyboard.press("g");
+    await page.keyboard.press("o");
+    const items = page.getByRole("menu").getByRole("menuitem");
+    await expect(items.first()).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(() => !!document.activeElement?.closest('[role="menu"]')),
+      )
+      .toBe(true);
+    await page.keyboard.press("Shift+G");
+    await expect(items.last()).toBeFocused();
+    await page.keyboard.press("g");
+    await page.keyboard.press("g");
+    await expect(items.first()).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(box(page, 39)).toBeFocused();
+  });
+
   test("Tab switches between a message's parts and never enters them", async ({
     page,
     app,
@@ -454,5 +494,39 @@ test.describe("the cursor", () => {
     await expect(box(page, 38)).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(box(page, 38)).toBeFocused();
+  });
+});
+
+// Escape in the composer competes with Buzz's Escape for marking an unread
+// conversation read, which needs live delivery to the open conversation.
+test.describe("with an unread conversation", () => {
+  test.use({
+    historyCounts: { alpha: 4, beta: 1 },
+    readState: true,
+    productionBroker: true,
+    soloAgentNames: ["Robo"],
+  });
+  test("Escape leaves the message box for the selection before marking read", async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await enableVimKeys(page);
+    const selected = page.locator("[data-message-cursor]");
+    await expect(selected).toBeFocused();
+    await page.keyboard.press("i");
+    const alpha = composer(page, "Alpha");
+    await expect(alpha).toBeFocused();
+    await page.keyboard.type("hello");
+    app.soloAgentMessage("alpha", "A new message arrives");
+    await expect(page.getByText("A new message arrives")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(selected).toBeFocused();
+    await expect(alpha).toHaveText("hello");
+    // So the pane keys work again, rather than editing the draft.
+    await page.keyboard.press(apple ? "Control+h" : "Alt+h");
+    const nav = page.getByRole("navigation", { name: "Subscribed channels" });
+    await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
+    await expect(alpha).toHaveText("hello");
   });
 });

@@ -23,8 +23,8 @@ fire while you type in a field or a terminal.
 | --- | --- |
 | `j` / `k` | Next / previous message, sidebar conversation or item |
 | `h` / `l` | Left / right in lists; `l` on a message opens its thread |
-| `gg` / `G` | Oldest loaded / newest message |
-| `Ctrl-d` / `Ctrl-u` | The message half a page down / up, centred |
+| `gg` / `G` | Oldest loaded / newest message; first / last sidebar conversation or menu item |
+| `Ctrl-d` / `Ctrl-u` | The message or sidebar conversation half a page down / up, centred |
 | `go` | Actions for the selected message, person or conversation |
 | `Tab` / `Shift-Tab` | Switch between the selected message and its parts: its author, links, files and reactions |
 | `]b` / `[b` | Next / previous conversation |
@@ -32,7 +32,7 @@ fire while you type in a field or a terminal.
 | `H` / `L` | Back / forward |
 | `\` | Show the open conversation in the sidebar |
 | `i` | Type a message |
-| `Escape` (`Ctrl-[` on Mac) | Back to the selected message, from the message box, the sidebar or a part |
+| `Escape` (`Ctrl-[` on Mac) | Back to the selected message, from the message box, the sidebar or a part; on the message, mark the conversation read |
 | `Ctrl-h` / `Ctrl-l` | Pane to the left / right |
 | `Ctrl-j` / `Ctrl-k` | Message box / messages |
 | `Space /` | Search where you are: the sidebar's conversations, or this conversation |
@@ -50,12 +50,14 @@ The first key of each sequence (`g`, `]`, `[`, Space) and every single key is
 listed in **Settings → Shortcuts**, where you can change it. After a short
 pause in a sequence, a menu shows the keys that can follow; Escape cancels.
 While Vim keys is on, every menu shows a key beside each item. `j`, `k`, `h`
-and `l` keep moving in menus.
+and `l` keep moving in menus, and `gg` / `G` reach their ends.
 
 Space on a focused button starts the leader instead of pressing it; press
 Enter to press the button. Checkboxes, switches and options keep Space. When
-another shortcut uses the same key, such as Escape for marking a conversation
-read, Settings → Shortcuts marks it "Also used by"; change one to choose.
+another shortcut uses the same key, Settings → Shortcuts marks it "Also
+used by"; change one to choose. Escape in a field always returns to the
+selected message first, after the field's own use of Escape, such as closing
+a suggestion list. `j`, `k`, `h`, `l` and `g` are never a menu item's key.
 
 The selected message keeps focus except while you type after `i`, or while
 you use the sidebar, a menu or a dialog; it stays marked meanwhile.

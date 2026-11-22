@@ -10,7 +10,10 @@ import type {
   Shortcut,
 } from "../../features/shortcuts/service";
 import type { PluginModule } from "../../plugins/api";
-import { messageListOf } from "../../features/messages/message-selection";
+import {
+  focusTarget,
+  messageListOf,
+} from "../../features/messages/message-selection";
 import { enableMenuLetters } from "../../shared/design-system/ui/menu-letters";
 import { stepConversation } from "../channels/conversation-rows";
 import {
@@ -31,7 +34,7 @@ import {
   stepPart,
 } from "./motion";
 import { trackCursor } from "./cursor";
-import { createPending, SHOW_AFTER_MS } from "./pending";
+import { createPending, SHOW_AFTER_MS, WHICH_KEY } from "./pending";
 import { LEADER, type Sequence, type SequenceGroup } from "./sequences";
 import { WhichKey } from "./WhichKey";
 
@@ -58,6 +61,16 @@ export const apply: PluginModule["apply"] = (ctx) => {
     });
   };
 
+  /** Escape on a message still marks the conversation read, as without Vim keys. */
+  const markRead = () => {
+    const entry = shortcuts
+      .snapshot()
+      .find(
+        (shortcut) =>
+          shortcut.pluginId === "buzz.channels" && shortcut.id === "mark-read",
+      );
+    if (entry && (!entry.when || entry.when())) void entry.run();
+  };
   const searchHere = () => {
     if (inSidebar() || !shortcuts.runHost(CONVERSATION_SEARCH_ID))
       shortcuts.runHost(SEARCH_ID);
@@ -144,7 +157,8 @@ export const apply: PluginModule["apply"] = (ctx) => {
   );
 
   ctx.effect(() => {
-    const release = enableMenuLetters("hjkl");
+    // g is kept for gg and G, which reach a menu's first and last item.
+    const release = enableMenuLetters("hjklg");
     const stopCursor = trackCursor();
     // Tab and Escape on a message beat its parts' own handlers, such as a
     // preview card's Tab into the card and the list's Escape to the composer.
@@ -157,6 +171,19 @@ export const apply: PluginModule["apply"] = (ctx) => {
       )
         return;
       const origin = focused();
+      // A menu stops keys it does not use, so g and G start here in one.
+      if (
+        !pending.snapshot() &&
+        (event.key === "g" || event.key === "G") &&
+        origin?.closest('[role="menu"]') &&
+        !origin.closest(`[${WHICH_KEY}]`)
+      ) {
+        if (event.key === "G") bottom();
+        else pending.start("g");
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const row = origin?.closest<HTMLElement>("[data-message-id]");
       if (!origin || !row || typing() || !messageListOf(row)) return;
       if (event.key === "Tab") stepPart(!event.shiftKey);
@@ -165,13 +192,34 @@ export const apply: PluginModule["apply"] = (ctx) => {
         event.key === "Escape" &&
         !inMenu() &&
         !origin.hasAttribute("data-menu-origin")
-      )
-        leave();
-      else return;
+      ) {
+        if (origin === focusTarget(row)) markRead();
+        else leave();
+      } else return;
       event.preventDefault();
       event.stopPropagation();
     };
     addEventListener("keydown", messageKeys, true);
+    // Escape in a field leaves it for the selected message before any
+    // shortcut on Escape, such as marking the conversation read, takes it;
+    // the field's own Escape (closing a suggestion list) still comes first.
+    const fieldEscape = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.key !== "Escape" ||
+        event.shiftKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        !typing() ||
+        focused()?.closest('.xterm, [aria-modal="true"], dialog[open]')
+      )
+        return;
+      event.preventDefault();
+      leave();
+    };
+    document.addEventListener("keydown", fieldEscape);
     const host = document.createElement("div");
     const live = document.createElement("p");
     live.setAttribute("role", "status");
@@ -195,6 +243,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
         release();
         stopCursor();
         removeEventListener("keydown", messageKeys, true);
+        document.removeEventListener("keydown", fieldEscape);
         root.unmount();
         host.remove();
         live.remove();

@@ -1048,7 +1048,8 @@ Quitting Buzz also turns it off.
   message, starting with the newest, which keeps focus unless you are typing
   or using the sidebar, a menu or a dialog. `j`/`k` or a click move it, and
   the view follows it; scrolling with a mouse or trackpad leaves it where it
-  is. `gg`/`G` go to the oldest loaded or newest message, and `go` opens the
+  is. `gg`/`G` go to the oldest loaded or newest message, or to the first or
+  last sidebar conversation or menu item, and `go` opens the
   selected message's, person's or conversation's actions, each with a key
   that runs it; while it is on, every menu shows those keys. `Tab` switches
   between the selected message and its author, links, files and reactions,
@@ -1057,7 +1058,8 @@ Quitting Buzz also turns it off.
   `Space /` searches where you are, `Space Space` switches conversation and
   `Space s k` opens Settings → Shortcuts. `]b`/`[b` step through
   conversations, `H`/`L` go back and forward, `i` starts typing and Escape
-  returns to the selected message. Apart from that Escape, its keys never fire while you type in a field
+  returns to the selected message; Escape on the message marks the
+  conversation read. Apart from that Escape, its keys never fire while you type in a field
   or terminal. `Ctrl-h`/`Ctrl-l` move between panes (`Alt` on Windows and
   Linux). The plugin's README in Settings → Plugins lists every key.
 - **Message width**: choose **Narrow** or **Wide** in **Settings → Appearance →
