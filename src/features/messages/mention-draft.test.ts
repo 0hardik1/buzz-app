@@ -314,6 +314,43 @@ it("a sent group whose label no longer holds is one chip per member, each keepin
     { ...wes, start: 6, end: 10 },
   ]);
 });
+const crewMary = { pubkey: "5".repeat(64), name: "Mary" };
+const crewWes = { pubkey: "6".repeat(64), name: "Wes" };
+it.each([
+  [
+    false,
+    "@crew hi",
+    [crewMary, crewWes].map((person) => ({
+      ...person,
+      label: "crew",
+      start: 0,
+      end: 5,
+    })),
+  ],
+  [
+    true,
+    "@Mary @Wes hi",
+    [
+      { ...crewMary, start: 0, end: 5 },
+      { ...crewWes, start: 6, end: 10 },
+    ],
+  ],
+])(
+  "a sent group whose label holds is one chip, or one chip per member when every group is split (every: %s)",
+  (every, text, recipients) => {
+    const saved = typedDraft({
+      text: "@crew hi",
+      recipients: [crewMary, crewWes].map((person) => ({
+        ...person,
+        label: "crew",
+        start: 0,
+        end: 5,
+      })),
+    });
+    const sent = sentDraft(saved, saved.recipients, every);
+    expect([sent.text, sent.recipients]).toEqual([text, recipients]);
+  },
+);
 it("a saved group whose label has a control character, which no chip holds, is sent as text that tags nobody", () => {
   const text = "@crew\u0007 hi";
   const saved = mentionDraft({

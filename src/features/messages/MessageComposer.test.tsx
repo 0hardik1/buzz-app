@@ -64,7 +64,7 @@ import { MENTION_RESOLVE_TIMEOUT_MS } from "../conversation/completion";
 import { bundledContribution } from "../../plugins/provenance";
 import { mentionQuery } from "../../bundled/mentions/mention-query";
 import { MentionCompletion } from "../../bundled/mentions/MentionCompletion";
-import type { MentionRecipient } from "./mention-draft";
+import type { MentionDraft, MentionRecipient } from "./mention-draft";
 import type { AgentLibrarySnapshot } from "../agents/library";
 import { createAgentChoices } from "../agents/choices";
 import type { LocalAgents } from "../agents/local";
@@ -105,6 +105,7 @@ import {
 } from "../../shared/view-state";
 import { clearDraft } from "../drafts-sent/drafts";
 import { followupDraft } from "./mention-draft";
+import { followUpStorage } from "./follow-up-storage";
 import { emojiMatches, type CustomEmoji } from "../relay/emoji";
 import { CustomEmoji as CustomEmojiImage } from "../../bundled/emoji/CustomEmoji";
 import { EmojiCompletion } from "../../bundled/emoji/EmojiCompletion";
@@ -19090,6 +19091,189 @@ it("a group whose label a member's new verified name breaks while the main windo
     content: "@MJ @Wes hi",
     tags: [mj.pubkey, wes.pubkey],
   });
+  expect(h.messages.send.mock.calls[0]?.[3]).toEqual([uploadDescriptor()]);
+});
+const maryVerified = {
+  displayName: "Mary",
+  username: "mary",
+  fullName: "Mary",
+  issuerLabel: "Example",
+  verifiedAt: 1,
+  status: "checked" as const,
+  multipleIssuers: false,
+};
+function queueChat(
+  agents: readonly MentionRecipient[],
+  people: readonly MentionRecipient[] = [],
+) {
+  localStorage.setItem("buzz-follow-up-behavior.v1", "queue");
+  const h = mount();
+  h.setLibrary(agents.map(({ pubkey, name }) => ({ pubkey, name })));
+  const rename = (verified?: typeof maryVerified) =>
+    h.setProfiles(
+      new Map([
+        ...agents.map(({ pubkey, name }, index) => [
+          pubkey,
+          {
+            name,
+            isAgent: true,
+            ...(index === 0 && verified ? { verified } : {}),
+          },
+        ]),
+        ...people.map(({ pubkey, name }) => [pubkey, { name }]),
+      ] as [string, Profile][]),
+    );
+  rename();
+  const listeners = new Set<() => void>();
+  let activity = {
+    status: "unavailable",
+    records: [],
+    turns: [],
+    typing: [],
+    local: agents.slice(0, 1).map(({ pubkey }) => ({
+      agent: pubkey,
+      channelId: "channel",
+      messageId: "previous",
+      state: "working",
+      scope: "scope",
+      threadRootId: "",
+      startedAt: 1,
+    })),
+  };
+  const chat = {
+    id: "channel",
+    channelType: "solo",
+    creator: "viewer",
+    members: ["viewer", ...[...agents, ...people].map(({ pubkey }) => pubkey)],
+  };
+  const channelList = { status: "ready", channels: [chat] };
+  h.retarget({
+    ownSoloConversation: true,
+    requireMention: true,
+    session: {
+      ...h.session,
+      viewer: "viewer",
+      channels: {
+        ...h.session.channels,
+        list: () => channelList,
+      },
+      channelWrites: {
+        refreshMembership: async () => chat,
+        addAgents: vi.fn(),
+      },
+      agentActivity: {
+        activate: () => () => {},
+        snapshot: () => activity,
+        subscribe(listener: () => void) {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+    } as unknown as RelaySession,
+  });
+  return {
+    h,
+    rename,
+    finish() {
+      activity = {
+        ...activity,
+        local: activity.local.map((row) => ({ ...row, state: "done" })),
+      };
+      act(() => {
+        for (const listener of listeners) listener();
+      });
+    },
+  };
+}
+async function sendCrew(
+  h: ReturnType<typeof mount>,
+  members: readonly MentionRecipient[],
+  label: string,
+) {
+  await choicesLoaded();
+  h.fill("!Crew");
+  offerCrew(h, members, label);
+  await h.user.keyboard("{Enter}hi");
+  h.submit();
+}
+it("a group in a Solo follow-up that waits in the queue is sent as its members, as named when it was sent", async () => {
+  const mj = { ...first, name: "MJ" };
+  const chat = queueChat([mj, wes]);
+  await sendCrew(chat.h, [mj, wes], "Mary crew");
+  await screen.findByRole("region", { name: "Queued follow-ups" });
+  expect(chat.h.messages.send).not.toHaveBeenCalled();
+  chat.rename(maryVerified);
+  chat.finish();
+  await waitFor(() => expect(chat.h.messages.send).toHaveBeenCalledOnce());
+  expect(chat.h.messages.send.mock.calls[0]?.slice(1, 3)).toEqual([
+    "@MJ @Wes hi",
+    [mj.pubkey, wes.pubkey],
+  ]);
+});
+it("a group in a queued Solo follow-up is saved as its members and sent as its members after a restart", async () => {
+  const mj = { ...first, name: "MJ" };
+  const before = queueChat([mj, wes]);
+  await sendCrew(before.h, [mj, wes], "Mary crew");
+  await screen.findByRole("region", { name: "Queued follow-ups" });
+  expect(
+    followUpStorage("scope")
+      .load()
+      .map(({ text, recipients }) => ({ text, recipients })),
+  ).toEqual([{ text: "@MJ @Wes hi", recipients: [mj.pubkey, wes.pubkey] }]);
+  cleanup();
+  const after = queueChat([mj, wes]);
+  after.rename(maryVerified);
+  const queued = await screen.findByRole("region", {
+    name: "Queued follow-ups",
+  });
+  await within(queued).findByText("Saved before restart. Send when ready.");
+  await after.h.user.click(
+    within(queued).getByRole("button", { name: "Send" }),
+  );
+  await waitFor(() => expect(after.h.messages.send).toHaveBeenCalledOnce());
+  expect(after.h.messages.send.mock.calls[0]?.slice(1, 3)).toEqual([
+    "@MJ @Wes hi",
+    [mj.pubkey, wes.pubkey],
+  ]);
+  expect(before.h.messages.send).not.toHaveBeenCalled();
+});
+it("a group in a Solo send that goes out at once with the follow-up setting on queue is also sent as its members", async () => {
+  const guest = { pubkey: "d".repeat(64), name: "Guest" };
+  const chat = queueChat([first], [guest]);
+  await sendCrew(chat.h, [first, guest], "Crew");
+  await waitFor(() => expect(chat.h.messages.send).toHaveBeenCalledOnce());
+  expect(chat.h.messages.send.mock.calls[0]?.slice(1, 3)).toEqual([
+    "@Honey @Guest hi",
+    [first.pubkey, guest.pubkey],
+  ]);
+  expect(
+    screen.queryByRole("region", { name: "Queued follow-ups" }),
+  ).toBeNull();
+});
+it("a new Solo chat's first send with the follow-up setting on queue keeps a group as one chip", async () => {
+  localStorage.setItem("buzz-follow-up-behavior.v1", "queue");
+  const submit = vi.fn();
+  const h = mount({
+    ownSoloConversation: true,
+    submission: {
+      draftKey: "new-draft",
+      locked: false,
+      disabled: false,
+      submit,
+    },
+  });
+  h.setLibrary([first, second].map(({ pubkey, name }) => ({ pubkey, name })));
+  await choicesLoaded();
+  h.fill("!Crew");
+  offerCrew(h, [first, second], "Crew");
+  await h.user.keyboard("{Enter}hi");
+  h.submit();
+  await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+  const sent = submit.mock.calls[0]?.[0] as MentionDraft;
+  expect([sent.text, sent.recipients.map(({ label }) => label)]).toEqual([
+    "@Crew hi",
+    ["Crew", "Crew"],
+  ]);
 });
 it("a group picked with a label that starts with the name a member set on their own profile is sent as its members", async () => {
   const mj = { ...first, name: "MJ" };

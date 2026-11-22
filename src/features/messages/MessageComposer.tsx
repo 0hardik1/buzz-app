@@ -3188,8 +3188,18 @@ function Composer({
     const retirementCursor = draftRetirementCursor(scope, draftKey);
     let retiredByOwner = false;
     const typed = valueRef.current;
+    const queueable =
+      !!host &&
+      ownSoloConversation &&
+      !submission &&
+      !threadRootId &&
+      followUpBehaviorPreference() === "queue";
     const bind = () =>
-      sentDraft(typed, boundNames(routing ? recipientsNow : typed.recipients));
+      sentDraft(
+        typed,
+        boundNames(routing ? recipientsNow : typed.recipients),
+        queueable,
+      );
     const captured = bind();
     const recheckLabels = () => {
       if (composerMarkdown(bind()) !== composerMarkdown(captured))
@@ -3225,11 +3235,6 @@ function Composer({
     const fromPill =
       routing &&
       captured.recipients.every((person) => referenced(person.pubkey));
-    const queueable =
-      !!host &&
-      ownSoloConversation &&
-      !threadRootId &&
-      followUpBehaviorPreference() === "queue";
     const attempt = new AbortController();
     sendAttempt.current = attempt;
     try {
