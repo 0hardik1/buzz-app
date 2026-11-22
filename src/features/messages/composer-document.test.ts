@@ -998,6 +998,16 @@ it.each<
     ],
   ],
   [
+    "the raw name mobile reads with no display name",
+    {},
+    { name: "Ann Lee\u200e" },
+    {},
+    [
+      [mary, "Mary"],
+      [mary, "Ann Lee\u200e"],
+    ],
+  ],
+  [
     "each name once",
     {
       [mary]: { name: "Mary", verified: { ...verified, displayName: "Mary" } },
