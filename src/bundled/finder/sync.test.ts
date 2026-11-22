@@ -443,3 +443,121 @@ test("a reconnect keeps the index and reads only what is newer, then the pages i
   expect(reads).toHaveLength(1);
   expect(corpus.size).toBe(1201);
 });
+
+test.each([
+  ["after", false],
+  ["with", true],
+])(
+  "a deletion the app received %s its message, before Finder started, keeps it out",
+  async (_, together) => {
+    const now = Math.floor(Date.now() / 1000);
+    const gone = message(author, "crew", "Gone quartz", now - 10);
+    const kept = message(author, "crew", "Kept quartz", now - 10);
+    const deletion = signed(author, {
+      kind: 5,
+      content: "",
+      created_at: now,
+      tags: [
+        ["h", "crew"],
+        ["e", gone.id],
+        ["k", "9"],
+      ],
+    });
+    const owner = createRelaySession({
+      viewer: viewer.pubkey,
+      relayAuthor: relay.pubkey,
+      media: () => undefined,
+      query: async (filters) =>
+        queryEvents([...discovery, gone, kept, deletion], filters),
+    });
+    dispose.push(owner.dispose);
+    await owner.session.channels.ensureList();
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    // Let the channel list settle, as the app does before you search.
+    await vi.advanceTimersByTimeAsync(1000);
+    const messages = { ids: [gone.id, kept.id], limit: 2 };
+    const deletions = { kinds: [5], limit: 10 };
+    if (together) await owner.session.read([messages, deletions]);
+    else {
+      await owner.session.read([messages]);
+      await owner.session.read([deletions]);
+    }
+    const corpus = createCorpus();
+    const sync = startFinderSync({
+      session: owner.session,
+      corpus,
+      changed() {},
+    });
+    dispose.push(sync.dispose);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sync.status().phase).toBe("ready");
+    expect(corpus.search("quartz").hits.map(({ doc }) => doc.text)).toEqual([
+      "Kept quartz",
+    ]);
+  },
+);
+
+test("losing a channel drops its messages; rejoining reads its history again", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const old = message(viewer, "lab", "Old lab quartz", now - 86_400);
+  const other = message(viewer, "crew", "Crew quartz", now - 86_400);
+  const reads: { "#h"?: readonly string[] }[] = [];
+  const connect = async (member: boolean) => {
+    const owner = createRelaySession({
+      viewer: viewer.pubkey,
+      relayAuthor: relay.pubkey,
+      media: () => undefined,
+      async query(filters) {
+        for (const filter of filters)
+          if (
+            filter.authors?.includes(viewer.pubkey) &&
+            filter.kinds?.includes(9)
+          )
+            reads.push(filter);
+        const lab = [
+          metadata(relay, "lab", "lab"),
+          roster(relay, "lab", member ? [viewer.pubkey] : [author.pubkey]),
+        ];
+        // The relay withholds the channel's messages while access is gone.
+        const events = [other, ...lab, ...(member ? [old] : [])];
+        return queryEvents([...discovery.slice(0, 2), ...events], filters);
+      },
+    });
+    dispose.push(owner.dispose);
+    await owner.session.channels.ensureList();
+    return owner;
+  };
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  const corpus = createCorpus();
+  const state = createFinderState();
+  const found = () =>
+    corpus
+      .search("quartz")
+      .hits.map(({ doc }) => doc.text)
+      .sort();
+  const run = async (member: boolean) => {
+    const owner = await connect(member);
+    const sync = startFinderSync({
+      session: owner.session,
+      corpus,
+      state,
+      changed() {},
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(sync.status().phase).toBe("ready");
+    sync.dispose();
+    owner.dispose();
+  };
+  await run(true);
+  expect(found()).toEqual(["Crew quartz", "Old lab quartz"]);
+  await run(false);
+  expect(found()).toEqual(["Crew quartz"]);
+  reads.length = 0;
+  await run(true);
+  expect(found()).toEqual(["Crew quartz", "Old lab quartz"]);
+  // Only the rejoined channel is read from the start.
+  expect(reads.filter((filter) => !filter["#h"])).toHaveLength(1);
+  expect(reads.filter((filter) => filter["#h"]?.[0] === "lab")).toHaveLength(1);
+});

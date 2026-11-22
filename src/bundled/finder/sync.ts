@@ -76,6 +76,9 @@ export function createFinderState() {
     fills: new Map<string, FillProgress>(),
     /** Threads the viewer took part in, by root id. */
     roots: new Set<string>(),
+    /** Channels whose messages left with lost access; the first fill after
+     * rejoining reads their history again. */
+    revoked: new Set<string>(),
   };
 }
 export type FinderState = ReturnType<typeof createFinderState>;
@@ -123,7 +126,7 @@ export function startFinderSync({
   const controller = new AbortController();
   const { signal } = controller;
   const since = Math.floor(Date.now() / 1000) - DAYS * 86_400;
-  const { docs, signed, tombstones, cursors, fills, roots } = state;
+  const { docs, signed, tombstones, cursors, fills, roots, revoked } = state;
   const progressOf = (channelId: string) => {
     let progress = cursors.get(channelId);
     if (!progress) {
@@ -398,25 +401,39 @@ export function startFinderSync({
     progress.complete = true;
   }
 
-  async function fill() {
-    // Start at a random moment, so a fleet reconnecting at once spreads out.
-    await sleep(Math.random() * 3000, signal);
-    await session.channels.ensureList?.();
-    // What the app already loaded before the finder started.
-    take(live.snapshot().events as readonly RelayEvent[]);
-    publish({ phase: "filling" });
-    await readAll({ kinds: KINDS, authors: [viewer] });
-    await readAll({ kinds: KINDS, "#p": [viewer] });
+  /** Your messages, mentions, direct messages and threads, in one channel
+   * when `channelId` is given. */
+  async function readHistory(channelId?: string) {
+    const scope = channelId ? { "#h": [channelId] } : {};
+    await readAll({ kinds: KINDS, authors: [viewer], ...scope });
+    await readAll({ kinds: KINDS, "#p": [viewer], ...scope });
     const dms = session.channels
       .list()
-      .channels.filter((c) => c.channelType === "dm")
+      .channels.filter(
+        (c) => c.channelType === "dm" && (!channelId || c.id === channelId),
+      )
       .map((c) => c.id);
     for (const ids of chunks(dms, 50))
       await readAll({ kinds: KINDS, "#h": ids });
     // Replies in threads you replied in, and the roots themselves.
     for (const ids of chunks([...roots], 100)) {
-      await readAll({ kinds: KINDS, "#e": ids });
-      await readAll({ kinds: KINDS, ids });
+      await readAll({ kinds: KINDS, "#e": ids, ...scope });
+      await readAll({ kinds: KINDS, ids, ...scope });
+    }
+  }
+
+  async function fill() {
+    // Start at a random moment, so a fleet reconnecting at once spreads out.
+    await sleep(Math.random() * 3000, signal);
+    await session.channels.ensureList?.();
+    // What the app already loaded before the finder started, deletions first.
+    observed();
+    publish({ phase: "filling" });
+    await readHistory();
+    // Rejoined channels get back what lost access removed.
+    for (const id of [...revoked].filter(relevant)) {
+      await readHistory(id);
+      revoked.delete(id);
     }
     publish({ phase: "ready" });
     // ponytail: a failed read ends the read-ahead; it is a head start, and
@@ -445,7 +462,7 @@ export function startFinderSync({
   const live = session.observe([{ kinds: [...KINDS, 5], limit: PAGE }]);
   // Deletions are applied before the messages beside them are taken, and
   // kept, so a page read later can't add a deleted message back.
-  const stopLive = live.subscribe(() => {
+  const observed = () => {
     const events = live.snapshot().events as readonly RelayEvent[];
     const gone = new Set<string>();
     for (const event of events) {
@@ -468,7 +485,8 @@ export function startFinderSync({
       publish({});
     }
     take(events);
-  });
+  };
+  const stopLive = live.subscribe(observed);
 
   // Lost access drops the channel's messages; names arriving relabel rows.
   const relabel = () => {
@@ -486,7 +504,13 @@ export function startFinderSync({
             signed.delete(id);
           }
         corpus.remove((doc) => gone.has(doc.channelId));
-        for (const id of gone) cursors.delete(id);
+        for (const id of gone) {
+          cursors.delete(id);
+          revoked.add(id);
+          // A later rejoin reads this channel's history from the start.
+          for (const key of fills.keys())
+            if (key.includes(`"#h":[${JSON.stringify(id)}]`)) fills.delete(key);
+        }
       }
     }
     const relabeled = [...docs.values()].map((doc) => ({

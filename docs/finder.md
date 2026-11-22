@@ -109,8 +109,9 @@ The index lives in memory on this device. It is never sent anywhere. Scoped
 searches can add older messages. A reconnect keeps it. Signing out, being
 refused by the community, or switching to another account or community drops
 it. **Clear cache** doesn't; restarting does. When you lose access to a
-channel, its messages leave the index. A deleted message leaves it too, and
-stays out if a later read brings it back.
+channel, its messages leave the index; if you rejoin it, the next reconnect
+reads your history in that channel again. A deleted message leaves the index
+too, and stays out if a later read brings it back.
 
 ## How it stays current
 
