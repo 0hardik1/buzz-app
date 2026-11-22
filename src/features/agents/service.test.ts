@@ -19217,6 +19217,42 @@ it("dismisses a plugin's pending agent requests when the plugin unloads", async 
   expect(service.creationRequests()).toEqual([]);
 });
 
+it("dismisses a request whose plugin unloads during an approval that fails", async () => {
+  const { service, native, plugin } = await setup();
+  let caller!: Context;
+  const scope = plugin.plugin((ctx) => {
+    caller = ctx;
+  });
+  await scope.await();
+  const { requestId, outcome } = caller.agents.requestCreation({
+    type: "example/echo",
+    name: "Helper",
+  });
+  native.create.mockImplementationOnce(async () => {
+    await scope.dispose();
+    throw new Error("create failed");
+  });
+  await expect(
+    service.approveCreation(requestId, {
+      type: "example/echo",
+      name: "Helper",
+    }),
+  ).rejects.toThrow("create failed");
+  await expect(outcome).resolves.toEqual({ status: "dismissed" });
+  expect(service.creationRequests()).toEqual([]);
+});
+
+it("keeps one owner's dismissal from making a plugin wait for another owner", async () => {
+  const { service, plugin, switchViewer, signIn } = await setup();
+  const ask = () =>
+    plugin.agents.requestCreation({ type: "example/echo", name: "Helper" });
+  service.dismissCreation(ask().requestId);
+  expect(ask).toThrow("ask again later");
+  switchViewer("e".repeat(64));
+  signIn("e".repeat(64));
+  await vi.waitFor(() => expect(ask().requestId).toEqual(expect.any(String)));
+});
+
 it("refuses agent creation through a stale handle or an unavailable type", async () => {
   const { service, native, plugin, connect, ctx } = await setup();
   ctx

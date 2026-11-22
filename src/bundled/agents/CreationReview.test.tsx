@@ -131,3 +131,24 @@ it("dismisses an unsaved request when the owner closes its review", async () => 
   expect(agents.approveCreation).not.toHaveBeenCalled();
   expect(agents.create).not.toHaveBeenCalled();
 });
+
+it("waits for the owner to pick a harness when the requested one is gone", async () => {
+  const user = userEvent.setup();
+  const agents = fixture({ type: "gone/harness" });
+  await screen.findByDisplayValue("Child");
+  expect(screen.getByText(/gone\/harness isn’t available here/)).toBeVisible();
+  const create = screen.getByRole("button", { name: /^Create agent$/ });
+  expect(create).toBeDisabled();
+  const harness = screen.getByRole("combobox", { name: "Harness" });
+  expect(harness).toBeEnabled();
+  await user.click(harness);
+  await user.click(await screen.findByRole("option", { name: "Echo" }));
+  await waitFor(() => expect(create).toBeEnabled());
+  await user.click(create);
+  await waitFor(() =>
+    expect(agents.approveCreation).toHaveBeenCalledWith(
+      "draft",
+      expect.objectContaining({ type: "test/echo" }),
+    ),
+  );
+});

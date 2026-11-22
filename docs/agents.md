@@ -209,8 +209,10 @@ the available operations and arguments. Agent tools do not expose draft approval
 An installed plugin can ask the same way with
 `ctx.agents.requestCreation({ type, name, instructions? })`. It uses the same
 checks and the same 16-request limit, and one plugin may have at most 4
-requests pending. After the owner dismisses one, that plugin can't ask again
-for a minute, and its pending requests are dismissed when it unloads. The review form says the plugin asked (for example,
+requests pending. After the owner dismisses one, that plugin can't ask that
+owner again for a minute, and its pending requests are dismissed when it
+unloads. If the requested harness is no longer available, the review waits for
+the owner to pick another. The review form says the plugin asked (for example,
 "my.plugin plugin requested this agent"), and only the owner's review can
 create or dismiss it: a plugin calling `approveCreation` or `dismissCreation`
 gets an error. Each request opens the form, so call it from a user action. It returns
