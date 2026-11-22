@@ -72,12 +72,18 @@ import { type ConfigAgent, fields } from "./community-config";
 import type { Mode } from "./agent-start";
 import { channelTemplates } from "../channel-templates/local";
 import { eventDto, type ReadFilter, type RelayEvent } from "../relay/events";
-import { keypair, message, signed } from "../relay/testing";
+import {
+  flush,
+  keypair,
+  message,
+  scriptedTransport,
+  signed,
+} from "../relay/testing";
 import { readSubthread } from "../relay/subthread";
 import { threadReference } from "../relay/thread-reference";
 import { createRelayReader } from "../relay/reader";
 import type { LiveBatch } from "../relay/incoming";
-import type { RelaySession } from "../relay/session";
+import { createRelaySession, type RelaySession } from "../relay/session";
 import { huddleDescription } from "../huddle/lifecycle";
 import type { AgentIdentity } from "./native";
 import {
@@ -6672,6 +6678,57 @@ describe("an agent in several communities", () => {
       );
       expect(branch.events.map(({ id }) => id)).toEqual([task.id, posted.id]);
       expect(read).not.toHaveBeenCalled();
+      // The real source-thread and task views both fold that exact event.
+      const wire = scriptedTransport(viewerKey, keypair().pubkey);
+      const relay = createRelaySession({
+        ...wire.transport,
+        subscribe: () => ({ update() {}, retry() {}, dispose() {} }),
+      });
+      try {
+        const delivered = {
+          id: posted.id,
+          threadRootId: source.id,
+          attachments: [
+            {
+              url: `https://relay.example.test/media/${prepared}.mp4`,
+              kind: "video",
+              mime: "video/mp4",
+            },
+          ],
+        };
+        const sourceView = relay.session.thread("a", source.id);
+        const sourceLoad = sourceView.refresh();
+        wire.next().respond([source]);
+        await flush();
+        wire.next().respond([source, task, posted]);
+        await flush();
+        // Every read the view made is answered: no repair read is outstanding.
+        expect(wire.pending).toHaveLength(0);
+        await sourceLoad;
+        expect(sourceView.snapshot()).toMatchObject({
+          root: { id: source.id },
+        });
+        expect(
+          sourceView.snapshot().replies.find(({ id }) => id === posted.id),
+        ).toMatchObject(delivered);
+        const taskView = relay.session.thread("a", task.id, {
+          exact: true,
+          subthread: true,
+        });
+        const taskLoad = taskView.refresh();
+        wire.next().respond([task]);
+        await flush();
+        wire.next().respond([]);
+        await flush();
+        wire.next().respond([source, task, posted]);
+        await flush();
+        expect(wire.pending).toHaveLength(0);
+        await taskLoad;
+        expect(taskView.snapshot().root?.id).toBe(task.id);
+        expect(taskView.snapshot().replies).toMatchObject([delivered]);
+      } finally {
+        relay.dispose();
+      }
       for (const { receipt } of [home, sib, awayTurn, routed])
         expect(receipt).toMatchObject({
           outcome: "unknown",
