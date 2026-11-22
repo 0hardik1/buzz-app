@@ -23,6 +23,7 @@ import {
   conversationRows,
   CONVERSATION_LIST_LABEL,
 } from "../channels/conversation-rows";
+import { lineItem, sameLine } from "./lines";
 
 const ROW = "[data-message-id]";
 const MODAL = '[aria-modal="true"], dialog[open]';
@@ -30,6 +31,13 @@ const UNAVAILABLE = '[hidden], [inert], [aria-hidden="true"]';
 const TYPING =
   'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
 const LINE = 64;
+const SIDEBAR = 'aside[aria-label="Sidebar"]';
+/** What j and k can walk to; `walkable` drops fields, so j never types. */
+const ITEM = "a[href], button, summary, input, [tabindex]";
+/** Arrows here open a popup or change a value, so j and k step past it. */
+const NO_ARROWS =
+  '[aria-haspopup]:not([role^="menuitem"]), [role="combobox"], [role="radio"], [role="slider"], [role="spinbutton"], input[type="radio"], input[type="range"]';
+const arrows = (origin: HTMLElement) => !origin.matches(NO_ARROWS);
 
 export const focused = () => {
   const element = document.activeElement;
@@ -109,7 +117,7 @@ function scroller() {
  */
 function resume(parts = false) {
   const origin = focused();
-  if (origin?.closest(`${MODAL}, [role="menu"]`) || (origin && inSidebar()))
+  if (origin?.closest(`${MODAL}, [role="menu"], [role="dialog"], ${SIDEBAR}`))
     return origin;
   const row = origin?.closest<HTMLElement>(ROW) ?? currentCursor();
   if (!row) return origin;
@@ -125,7 +133,12 @@ export function step(down: boolean, settled = false) {
   const selected = selectedMessage();
   // A selection scrolled away is rendered alone; bring it back and let its
   // neighbors render, so the move reaches the message beside it.
-  if (selected && !settled && !besideNeighbor(selected.element, down)) {
+  if (
+    selected &&
+    !settled &&
+    origin === focusTarget(selected.element) &&
+    !besideNeighbor(selected.element, down)
+  ) {
     focusTarget(selected.element).scrollIntoView?.({ block: "nearest" });
     let frames = 30;
     const wait = () => {
@@ -136,33 +149,71 @@ export function step(down: boolean, settled = false) {
     requestAnimationFrame(wait);
     return;
   }
-  if (origin && press(origin, down ? "ArrowDown" : "ArrowUp")) {
+  if (
+    origin &&
+    arrows(origin) &&
+    press(origin, down ? "ArrowDown" : "ArrowUp")
+  ) {
     // Down past the newest message stays on it rather than typing.
     if (selected && typing()) selectMessage(selected.element);
     return;
   }
-  // Sidebar rows are Tab stops without arrow keys; step between them.
-  if (origin && sidebar()?.contains(origin)) {
-    const rows = sidebarRows();
-    const after = (row: HTMLElement) =>
-      !!(
-        origin.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING
-      );
-    const next = down
-      ? rows.find(after)
-      : rows.filter((row) => row !== origin && !after(row)).at(-1);
-    if (next) focusItem(next);
-    return;
-  }
-  // Past what is rendered, scrolling loads more.
-  scroller()?.scrollBy({ top: down ? LINE : -LINE });
+  const next = origin && lineFrom(origin, down);
+  if (next && !farOff(next, down)) return focusItem(next);
+  // Text before the next item, or past what is rendered: scroll a line.
+  (scrollable(next) ?? scroller())?.scrollBy({ top: down ? LINE : -LINE });
 }
 
-/** The sidebar's conversations that are showing. */
-const sidebarRows = () =>
-  conversationRows().filter((row) => row.getClientRects().length);
+/**
+ * What j and k walk from `origin`, in document order: the items of the
+ * nav in a dialog that holds it, else the dialog's other items, else a
+ * popover's, the sidebar's, or a pane's. Undefined in messages and menus,
+ * which have their own moves.
+ */
+function walkable(origin: HTMLElement | undefined) {
+  if (!origin || origin.closest(`${ROW}, [role="menu"]`)) return;
+  const modal = topModal();
+  const inModal = !!modal?.contains(origin);
+  const nav = inModal ? origin.closest("nav") : undefined;
+  const root = inModal
+    ? (nav ?? modal)
+    : (origin.closest<HTMLElement>(`[role="dialog"], ${SIDEBAR}`) ??
+      currentPane());
+  if (!root) return;
+  return [...root.querySelectorAll<HTMLElement>(ITEM)].filter(
+    (item) =>
+      item.tabIndex >= 0 &&
+      !item.matches(`${TYPING}, :disabled, [aria-disabled="true"]`) &&
+      !item.closest(`${ROW}, ${UNAVAILABLE}`) &&
+      item.getClientRects().length > 0 &&
+      (!inModal || item.closest("nav") === nav),
+  );
+}
 
-/** Focus a sidebar conversation, bringing it into view. */
+const box = (element: Element) => element.getBoundingClientRect();
+
+/** The first item on the line below or above the focus. */
+function lineFrom(origin: HTMLElement, down: boolean) {
+  const items = walkable(origin);
+  if (!items) return;
+  const own = box(origin);
+  // Not an item itself, such as a focused section: start from its edge.
+  const edge = down ? own.top : own.bottom;
+  const from = items.includes(origin) ? own : { top: edge, bottom: edge };
+  return items[lineItem(items.map(box), from, down)];
+}
+
+/** More than a line out of view, so a move would skip what is between. */
+function farOff(item: HTMLElement, down: boolean) {
+  const { top, bottom } = scrollable(item)?.getBoundingClientRect() ?? {
+    top: 0,
+    bottom: innerHeight,
+  };
+  const near = box(item);
+  return down ? near.top > bottom + LINE : near.bottom < top - LINE;
+}
+
+/** Focus an item, bringing it into view. */
 function focusItem(
   item: HTMLElement,
   block: ScrollLogicalPosition = "nearest",
@@ -185,10 +236,21 @@ function halfPageFrom(
     : (items.filter((item) => top(item) <= goal).at(-1) ?? items[0]);
 }
 
-/** `h` / `l`: left or right in lists and trees; → on a message opens its thread. */
+/**
+ * `h` / `l`: left or right in lists and trees (→ on a message opens its
+ * thread), else the item before or after on the same line.
+ */
 export function sideways(right: boolean) {
   const origin = focused();
-  if (origin) press(origin, right ? "ArrowRight" : "ArrowLeft");
+  if (!origin || press(origin, right ? "ArrowRight" : "ArrowLeft")) return;
+  const items = walkable(origin) ?? [];
+  const index = items.indexOf(origin);
+  if (index < 0) return;
+  const line = items.filter((item) => sameLine(box(item), box(origin)));
+  const next = right
+    ? line.find((item) => items.indexOf(item) > index)
+    : line.filter((item) => items.indexOf(item) < index).at(-1);
+  if (next) focusItem(next);
 }
 
 /** The list a message belongs to, with its rendered messages. */
@@ -211,18 +273,12 @@ function besideNeighbor(row: HTMLElement, down: boolean) {
 }
 
 /**
- * `gg` / `G`: the first or last sidebar conversation, menu or list item, or
- * the oldest loaded or newest message once scrolling there has rendered it.
- * Without any of those, just scroll.
+ * `gg` / `G`: the first or last menu, list or walked item (see `walkable`),
+ * or the oldest loaded or newest message once scrolling there has rendered
+ * it. Without any of those, just scroll.
  */
 function edge(down: boolean) {
   const origin = resume();
-  if (origin && inSidebar()) {
-    const rows = sidebarRows();
-    const next = down ? rows.at(-1) : rows[0];
-    if (next) focusItem(next);
-    return;
-  }
   const menu = origin?.closest<HTMLElement>('[role="menu"]');
   if (menu) {
     const items = [
@@ -237,7 +293,11 @@ function edge(down: boolean) {
   }
   const row = origin?.closest<HTMLElement>(ROW);
   // A list moves its own selection to its first or last item.
-  if (!row && origin && press(origin, down ? "End" : "Home")) return;
+  if (!row && origin && arrows(origin) && press(origin, down ? "End" : "Home"))
+    return;
+  const items = walkable(origin);
+  const end = down ? items?.at(-1) : items?.[0];
+  if (end) return focusItem(end);
   const target = scroller();
   if (!target) return;
   const list = row && messageListOf(row)?.element;
@@ -260,22 +320,24 @@ export const top = () => edge(false);
 export const bottom = () => edge(true);
 
 /**
- * `<C-d>` / `<C-u>`: the message or sidebar conversation half a page below
- * or above, centred (Neovim's `<C-d>zz`); a list's own page keys; else half
- * a page of scrolling.
+ * `<C-d>` / `<C-u>`: the message or walked item half a page below or above,
+ * centred (Neovim's `<C-d>zz`); a list's own page keys; else half a page of
+ * scrolling.
  */
 export function halfPage(down: boolean) {
   const origin = resume();
   const half = (element: Element | null | undefined) =>
     (scrollable(element)?.clientHeight ?? innerHeight) / 2;
-  if (origin && inSidebar()) {
-    const next = halfPageFrom(sidebarRows(), origin, half(origin), down);
-    if (next) focusItem(next, "center");
-    return;
-  }
   const row = origin?.closest<HTMLElement>(ROW);
   if (!row) {
-    if (origin && press(origin, down ? "PageDown" : "PageUp")) return;
+    if (origin && arrows(origin) && press(origin, down ? "PageDown" : "PageUp"))
+      return;
+    const items = walkable(origin);
+    const next =
+      origin && items?.length
+        ? halfPageFrom(items, origin, half(origin), down)
+        : undefined;
+    if (next && next !== origin) return focusItem(next, "center");
     const target = scroller();
     return target?.scrollBy({ top: (down ? 1 : -1) * half(target) });
   }
@@ -307,6 +369,16 @@ export function messageStops() {
   return parts.length
     ? { row, stops: [focusTarget(row), ...parts] }
     : undefined;
+}
+
+/** Enter: the focused message's "View thread" button, when it has one. */
+export function threadSummary() {
+  const origin = focused();
+  const row = origin?.closest<HTMLElement>(ROW);
+  if (!row || origin !== focusTarget(row)) return;
+  return [
+    ...row.querySelectorAll<HTMLElement>("button[data-thread-summary]"),
+  ].find((summary) => summary.closest(ROW) === row);
 }
 
 /** Tab / Shift-Tab: the message's next or previous part, wrapping to itself. */

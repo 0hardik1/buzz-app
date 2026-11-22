@@ -110,21 +110,15 @@ test("the leader shows what can follow and runs Buzz's own actions by id", async
   const whichKey = page.locator("[data-vim-which-key]");
   await expect(whichKey).toBeVisible();
   await expect(
-    whichKey.getByRole("menuitem", { name: "Search…", exact: true }),
-  ).toHaveAttribute("aria-keyshortcuts", "s");
-  // A message always has focus, so there is no focus toggle.
+    whichKey.getByRole("menuitem", { name: "Settings", exact: true }),
+  ).toHaveAttribute("aria-keyshortcuts", ",");
+  // No items that only repeat another leader key, and no focus toggle.
   await expect(
-    whichKey.getByRole("menuitem", { name: "Toggle…", exact: true }),
+    whichKey.getByRole("menuitem", { name: /^(Search|Toggle)…$/ }),
   ).toHaveCount(0);
-  await page.keyboard.press("s");
-  await expect(
-    whichKey.getByRole("menuitem", { name: "Keyboard shortcuts", exact: true }),
-  ).toBeVisible();
-  await page.keyboard.press("k");
+  await page.keyboard.press(",");
   await expect(whichKey).toHaveCount(0);
-  await expect(
-    page.getByRole("region", { name: "Shortcuts", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
   await closeSettings(page);
 
   // Escape cancels a sequence without acting.
@@ -426,15 +420,43 @@ test.describe("the cursor", () => {
     await enableVimKeys(page);
     await expect(box(page, 39)).toBeFocused();
     const nav = page.getByRole("navigation", { name: "Subscribed channels" });
+    const sidebar = page.locator('aside[aria-label="Sidebar"]');
     await page.keyboard.press("\\");
     await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
+    // Headings are stops too; h and l reach their buttons on the same line.
+    await page.keyboard.press("k");
+    const team = nav.locator("summary").filter({ hasText: "Team" });
+    await expect(team).toBeFocused();
+    await page.keyboard.press("l");
+    await expect(
+      nav.getByRole("button", { name: "More actions for Team" }),
+    ).toBeFocused();
+    await page.keyboard.press("h");
+    await expect(team).toBeFocused();
+    // The whole sidebar, from Activity at the top to New at the bottom.
     await page.keyboard.press("Shift+G");
-    await expect(nav.getByRole("button", { name: "Beta" })).toBeFocused();
+    await expect(
+      sidebar.getByRole("button", { name: "New options" }),
+    ).toBeFocused();
     await page.keyboard.press("g");
     await page.keyboard.press("g");
-    await expect(nav.getByRole("button", { name: "Alpha" })).toBeFocused();
+    const activity = sidebar.getByRole("button", { name: /^Activity/ });
+    await expect(activity).toBeFocused();
+    await page.keyboard.press("j");
+    await expect(nav.locator("summary").first()).toBeFocused();
     await page.keyboard.press("Control+d");
-    await expect(nav.getByRole("button", { name: "Beta" })).toBeFocused();
+    await expect
+      .poll(() =>
+        sidebar.evaluate(
+          (element) =>
+            element.contains(document.activeElement) &&
+            document.activeElement?.tagName !== "SUMMARY",
+        ),
+      )
+      .toBe(true);
+    // An open tooltip takes the first Escape, so leave once it has gone.
+    await page.keyboard.press("\\");
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(box(page, 39)).toBeFocused();
 
@@ -449,6 +471,11 @@ test.describe("the cursor", () => {
       )
       .toBe(true);
     await page.keyboard.press("Shift+G");
+    await expect(items.last()).toBeFocused();
+    // The menu's typeahead does not take j and k from Vim keys.
+    await page.keyboard.press("k");
+    await expect(items.nth((await items.count()) - 2)).toBeFocused();
+    await page.keyboard.press("j");
     await expect(items.last()).toBeFocused();
     await page.keyboard.press("g");
     await page.keyboard.press("g");
@@ -494,6 +521,83 @@ test.describe("the cursor", () => {
     await expect(box(page, 38)).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(box(page, 38)).toBeFocused();
+  });
+});
+
+// Settings has no arrow keys of its own: its section list and its controls
+// are Tab stops, so moves walk them by line.
+test("j, k, gg, G and Ctrl-d walk Settings without opening its choices", async ({
+  page,
+  app,
+}) => {
+  await open(page, app);
+  await enableVimKeys(page);
+  await openSettings(page);
+  await selectSettingsSection(page, "Notifications");
+  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  const notifications = sections.getByRole("button", {
+    name: "Notifications",
+    exact: true,
+  });
+  await notifications.focus();
+  await page.keyboard.press("j");
+  await expect(
+    sections.getByRole("button", { name: "Shortcuts", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("k");
+  await expect(notifications).toBeFocused();
+  await page.keyboard.press("Shift+G");
+  await expect(sections.getByRole("button").last()).toBeFocused();
+  await page.keyboard.press("g");
+  await page.keyboard.press("g");
+  await expect(sections.getByRole("button").first()).toBeFocused();
+
+  // The section's own controls, staying out of the section list.
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await dialog.getByRole("switch", { name: "Mentions" }).focus();
+  await page.keyboard.press("j");
+  await expect(
+    dialog.getByRole("switch", { name: "Direct messages" }),
+  ).toBeFocused();
+  await page.keyboard.press("Shift+G");
+  const last = dialog.getByRole("combobox").last();
+  await expect(last).toBeFocused();
+  // j and k step over a choice without opening it.
+  await page.keyboard.press("k");
+  await expect(dialog.getByRole("combobox").nth(-2)).toBeFocused();
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await page.keyboard.press("Control+u");
+  await expect(dialog.getByRole("combobox").nth(-2)).not.toBeFocused();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          !!document.activeElement?.closest('[role="dialog"]') &&
+          !document.activeElement.closest("nav"),
+      ),
+    )
+    .toBe(true);
+});
+
+test.describe("with a thread", () => {
+  test.use({ readState: true, threadUnread: true, productionBroker: true });
+  test("Enter opens the selected message's thread", async ({ page, app }) => {
+    await open(page, app);
+    await enableVimKeys(page);
+    const root = app.histories
+      .get("primary/alpha")
+      .find((event) => event.content === "Thread root 1");
+    const message = page.locator(
+      `[data-channel-timeline] [data-message-id="${root.id}"] > [data-layout]`,
+    );
+    await message.getByText("Thread root 1").click();
+    await expect(message).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(
+      page
+        .locator("[data-panel-workspace]")
+        .getByRole("tab", { name: "Thread root 1", exact: true }),
+    ).toBeVisible();
   });
 });
 

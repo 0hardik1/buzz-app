@@ -32,6 +32,7 @@ import {
   focused,
   typing,
   stepPart,
+  threadSummary,
 } from "./motion";
 import { trackCursor } from "./cursor";
 import { createPending, SHOW_AFTER_MS, WHICH_KEY } from "./pending";
@@ -113,26 +114,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
       run: () => shortcuts.runHost(SEARCH_ID),
     },
     {
-      keys: `${LEADER}s/`,
-      title: "Search Buzz",
-      run: () => shortcuts.runHost(SEARCH_ID),
-    },
-    {
-      keys: `${LEADER}sc`,
-      title: "Search this conversation",
-      run: () => shortcuts.runHost(CONVERSATION_SEARCH_ID),
-    },
-    {
-      keys: `${LEADER}sk`,
-      title: "Keyboard shortcuts",
-      run: () =>
-        void navigation.open({
-          version: 1,
-          kind: "settings",
-          section: "shortcuts",
-        }),
-    },
-    {
       keys: `${LEADER},`,
       title: "Settings",
       run: () => void navigation.open({ version: 1, kind: "settings" }),
@@ -145,7 +126,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ];
   const groups: readonly SequenceGroup[] = [
     { keys: LEADER, title: "Leader" },
-    { keys: `${LEADER}s`, title: "Search" },
     { keys: "g", title: "Go" },
     { keys: "]", title: "Next" },
     { keys: "[", title: "Previous" },
@@ -155,6 +135,15 @@ export const apply: PluginModule["apply"] = (ctx) => {
     () => sequences,
     (typed) => (typed.startsWith(LEADER) ? 0 : SHOW_AFTER_MS),
   );
+
+  const menuMoves: Record<string, () => void> = {
+    j: () => step(true),
+    k: () => step(false),
+    h: () => sideways(false),
+    l: () => sideways(true),
+    g: () => pending.start("g"),
+    G: bottom,
+  };
 
   ctx.effect(() => {
     // g is kept for gg and G, which reach a menu's first and last item.
@@ -171,15 +160,16 @@ export const apply: PluginModule["apply"] = (ctx) => {
       )
         return;
       const origin = focused();
-      // A menu stops keys it does not use, so g and G start here in one.
+      // A menu's typeahead stops keys it does not use, so they start here.
+      const menuMove = menuMoves[event.key];
       if (
+        menuMove &&
         !pending.snapshot() &&
-        (event.key === "g" || event.key === "G") &&
+        !typing() &&
         origin?.closest('[role="menu"]') &&
         !origin.closest(`[${WHICH_KEY}]`)
       ) {
-        if (event.key === "G") bottom();
-        else pending.start("g");
+        menuMove();
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -311,6 +301,13 @@ export const apply: PluginModule["apply"] = (ctx) => {
   key("pane-composer", "Focus the message box", control("j"), focusComposer);
   key("pane-messages", "Focus the messages", control("k"), focusMessages);
   key("insert", "Type a message", { key: "i" }, focusComposer);
+  key(
+    "open-thread",
+    "Open the selected message's thread",
+    { key: "Enter" },
+    () => threadSummary()?.click(),
+    { when: () => !!threadSummary() },
+  );
   key(
     "leave",
     "Leave the field or control",

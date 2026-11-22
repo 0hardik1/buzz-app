@@ -1,5 +1,5 @@
 /*
- * Multi-key sequences such as `gg`, `]b` and `<leader>sk`. The first key is a
+ * Multi-key sequences such as `gg`, `]b` and `<leader>/`. The first key is a
  * registered shortcut (listed and rebindable in Settings → Shortcuts); the
  * keys after it are read here while the sequence is pending. Keys are spelled
  * as typed, with the leader as " ".
