@@ -46,7 +46,6 @@ import {
   type SidebarSectionRemovalMutator,
   type SidebarStarMutator,
   type SidebarSortMutator,
-  type SidebarFilterMutator,
   type SidebarDecoder,
   type SidebarMuteMutator,
   type SidebarPreferences,
@@ -164,7 +163,6 @@ export interface ReadTransport {
   readonly decodeSidebarPreferences?: SidebarDecoder;
   readonly workspaceMigration?: true;
   readonly writeSidebarSort?: SidebarSortMutator;
-  readonly writeSidebarFilter?: SidebarFilterMutator;
   readonly readState?: ReadStateHost;
   /** Purpose-bound NIP-ER codec; never a general NIP-44 or signing primitive. */
   readonly reminders?: ReminderHost;
@@ -500,6 +498,18 @@ async function readResponseError(response: Response) {
     response.status === 401 || response.status === 403
       ? "denied"
       : "unavailable",
+    failure.error,
+    response.status,
+    failure.retryAfterMs,
+  );
+}
+
+/** A failed relay read. Only the relay's own 401/403 is a denial; an edge or
+ * proxy page with that status (a VPN still reconnecting) is an outage. */
+async function relayReadError(response: Response) {
+  const failure = await readApiFailure(response);
+  return new ReadError(
+    failure.denied ? "denied" : "unavailable",
     failure.error,
     response.status,
     failure.retryAfterMs,
@@ -1140,54 +1150,6 @@ export async function connectBrokerTransport(
           },
         }
       : {}),
-    ...(session.sidebarFilterWrites
-      ? {
-          async writeSidebarFilter(
-            group,
-            mode,
-            sectionIds,
-            signal,
-            activeWindowSeconds,
-          ) {
-            const result = await fetch(`${endpoint}/sidebar-filter`, {
-              method: "POST",
-              credentials: "same-origin",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                group,
-                mode,
-                sectionIds,
-                activeWindowSeconds,
-              }),
-              signal,
-            });
-            if (!result.ok) {
-              const failure = await readApiFailure(result);
-              throw new Error(failure.error);
-            }
-            const value = (await result.json()) as {
-              groups?: unknown;
-              activeWindowSeconds?: unknown;
-            };
-            const projected = projectSidebarPreferences(
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              sectionIds,
-              {
-                version: 1,
-                groups: value.groups,
-                activeWindowSeconds: value.activeWindowSeconds,
-              },
-            );
-            return {
-              filters: projected.filters ?? {},
-              activeWindowSeconds: projected.activeWindowSeconds ?? {},
-            };
-          },
-        }
-      : {}),
     ...(session.sidebarMuteWrites
       ? {
           async writeSidebarMute(intent, signal) {
@@ -1419,7 +1381,7 @@ export async function connectBrokerTransport(
                 ),
                 signal,
               });
-              if (!result.ok) throw httpReadError(result.status);
+              if (!result.ok) throw await relayReadError(result);
               return parseEvents(
                 JSON.parse(sized(await result.text())),
                 verify,
@@ -1467,15 +1429,7 @@ export async function connectBrokerTransport(
           body: JSON.stringify(filters),
           signal: signal ?? null,
         });
-        if (!result.ok) {
-          const failure = await readApiFailure(result);
-          throw new ReadError(
-            failure.denied ? "denied" : "unavailable",
-            failure.error,
-            result.status,
-            failure.retryAfterMs,
-          );
-        }
+        if (!result.ok) throw await relayReadError(result);
         recordServerTiming(result, profiling, requestId);
         return profiling.measureAsync("read.verify", requestId, async () =>
           parseEvents(JSON.parse(sized(await result.text())), verify, signal),
@@ -1674,15 +1628,7 @@ export async function connectSignedTransport(
           principal().api,
           priority,
         );
-        if (!result.ok) {
-          const failure = await readApiFailure(result);
-          throw new ReadError(
-            failure.denied ? "denied" : "unavailable",
-            failure.error,
-            result.status,
-            failure.retryAfterMs,
-          );
-        }
+        if (!result.ok) throw await relayReadError(result);
         recordServerTiming(result, profiling, requestId);
         return profiling.measureAsync("read.verify", requestId, async () =>
           parseEvents(JSON.parse(sized(await result.text())), verify, signal),

@@ -411,9 +411,7 @@ export function SoloInventory({
           finalFocus={trigger}
           onCreated={async (id) => {
             if (!current() || !trigger.current?.isConnected) return;
-            if (await soloNavigationFor(session)?.openCreatedWorkspace(id))
-              return;
-            if (trigger.current?.isConnected) newChat(id);
+            await soloNavigationFor(session)?.openCreatedWorkspace(id);
           }}
         />
       )}
@@ -499,6 +497,7 @@ export function SoloInventory({
   return (
     <nav
       className={styles.sidebarContents}
+      data-sidebar-card-group=""
       aria-label={`${regions.regions.find((region) => region.source && !region.hidden)?.title ?? "Solo"} conversations`}
     >
       {renderContents ? (
