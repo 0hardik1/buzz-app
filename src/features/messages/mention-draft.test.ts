@@ -314,3 +314,17 @@ it("a sent group whose label no longer holds is one chip per member, each keepin
     { ...wes, start: 6, end: 10 },
   ]);
 });
+it("a saved group whose label has a control character, which no chip holds, is sent as text that tags nobody", () => {
+  const text = "@crew\u0007 hi";
+  const saved = mentionDraft({
+    text,
+    recipients: [first, second].map((person) => ({
+      ...person,
+      label: "crew\u0007",
+      start: 0,
+      end: 6,
+    })),
+  });
+  const sent = sentDraft(saved, saved.recipients);
+  expect([sent.text, sent.recipients]).toEqual([text, []]);
+});

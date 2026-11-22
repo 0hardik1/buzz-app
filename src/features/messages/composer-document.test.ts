@@ -4,6 +4,7 @@ import {
   groupKeeping,
   groupLabelHolds,
   readerNames,
+  tokenRecipients,
   composerSchema as schema,
   projectComposerDocument,
   readComposerDocument,
@@ -12,7 +13,7 @@ import {
 import { composerMarkdown } from "./composer-markdown";
 import { profileMentionParts } from "./profile-mentions";
 import { profileTarget } from "../profiles/target";
-import { mentionDraft } from "./mention-draft";
+import { mentionDraft, type DraftRecipient } from "./mention-draft";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmStrikethroughFromMarkdown } from "mdast-util-gfm-strikethrough";
 import { gfmStrikethrough } from "micromark-extension-gfm-strikethrough";
@@ -838,10 +839,9 @@ it("a person chip keeps `explicit` when it is rebuilt from the draft text", () =
   ).toEqual([[ann.pubkey, true]]);
 });
 
-const honey = [
-  { pubkey: "a".repeat(64), name: "Honey" },
-  { pubkey: "b".repeat(64), name: "Honey" },
-];
+const honeyA = { pubkey: "a".repeat(64), name: "Honey" };
+const honeyB = { pubkey: "b".repeat(64), name: "Honey" };
+const honey = [honeyA, honeyB];
 const maryJaneAndWes = [
   { pubkey: "a".repeat(64), name: "Mary Jane" },
   { pubkey: "b".repeat(64), name: "Wes" },
@@ -871,6 +871,8 @@ it.each([
   ["Wesley team", maryJaneAndWes, true],
   ["ÉMILE crew", [{ pubkey: "a".repeat(64), name: "Émile Durand" }], false],
   ["ſam crew", [{ pubkey: "a".repeat(64), name: "Sam Lee" }], false],
+  ["Ann team", [{ pubkey: "a".repeat(64), name: "Ann\tLee" }], false],
+  ["Rene\u0301 fans", [{ pubkey: "a".repeat(64), name: "Rene" }], false],
 ])(
   "the group label %s holds only when it is plain text and no reader binds a member's name or first word at its start",
   (label, people, holds) => {
@@ -891,6 +893,54 @@ it.each<[string, string[], ReturnType<typeof groupKeeping>]>([
   const kept = groupKeeping(crew, (pubkey) => keep.includes(pubkey));
   expect(kept).toEqual(expected);
   expect(kept === crew).toBe(expected === crew);
+});
+
+const onCrew = (person: typeof honeyA, label = "Crew") => ({
+  ...person,
+  label,
+  start: 0,
+  end: label.length + 1,
+});
+it.each<[string, DraftRecipient[], string, ReturnType<typeof tokenRecipients>]>(
+  [
+    [
+      "one recipient",
+      [{ ...honeyA, start: 0, end: 6 }],
+      "@Honey",
+      { recipient: { ...honeyA, start: 0, end: 6 }, group: null },
+    ],
+    [
+      "a labelled group",
+      [onCrew(honeyA), onCrew(honeyB)],
+      "@Crew",
+      { recipient: null, group: { label: "Crew", members: honey } },
+    ],
+    [
+      "the same person twice counts once",
+      [onCrew(honeyA), onCrew(honeyA), onCrew(honeyB)],
+      "@Crew",
+      { recipient: null, group: { label: "Crew", members: honey } },
+    ],
+    [
+      "a label that fails composerGroup gives neither",
+      [onCrew(honeyA, "Crew\u0007"), onCrew(honeyB, "Crew\u0007")],
+      "@Crew\u0007",
+      { recipient: null, group: null },
+    ],
+    [
+      "a recipient with another start or end is not on the range",
+      [
+        { ...honeyA, start: 0, end: 11 },
+        { ...honeyB, start: 1, end: 6 },
+      ],
+      "@Honey",
+      { recipient: null, group: null },
+    ],
+  ],
+)("a source token's recipients: %s", (_case, recipients, source, expected) => {
+  expect(
+    tokenRecipients(recipients, source, { start: 0, end: source.length }),
+  ).toStrictEqual(expected);
 });
 
 const viewer = "c".repeat(64);
@@ -936,6 +986,17 @@ it.each<
     ],
   ],
   ["no fallback name", {}, { about: "no name" }, {}, [[mary, "Mary"]]],
+  [
+    "the raw name mobile reads",
+    {},
+    { display_name: "Ann Lee\u200e", name: "alee" },
+    {},
+    [
+      [mary, "Mary"],
+      [mary, "alee"],
+      [mary, "Ann Lee\u200e"],
+    ],
+  ],
   [
     "each name once",
     {

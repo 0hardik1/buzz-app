@@ -1,6 +1,7 @@
 import { Fragment, Slice } from "prosemirror-model";
 import { forwardReference, type ForwardReference } from "./forward-clipboard";
 import { canonicalChatCard } from "./chat-cards";
+import { chipLabel } from "./composer-token";
 import {
   composerSchema,
   groupLabelHolds,
@@ -135,8 +136,7 @@ export function mentionDraft(value: unknown): MentionDraft {
           /^[0-9a-f]{64}$/.test(item.pubkey) &&
           typeof item.name === "string" &&
           !!item.name.trim() &&
-          (item.label === undefined ||
-            (typeof item.label === "string" && !!item.label.trim())) &&
+          (item.label === undefined || chipLabel(item.label)) &&
           Number.isInteger(item.start) &&
           Number.isInteger(item.end) &&
           item.start >= 0 &&

@@ -3192,8 +3192,6 @@ function Composer({
       typed,
       boundNames(routing ? recipientsNow : typed.recipients),
     );
-    const attempt = new AbortController();
-    sendAttempt.current = attempt;
     const explicit =
       human && ownerProvenance
         ? captured.recipients
@@ -3229,6 +3227,8 @@ function Composer({
       ownSoloConversation &&
       !threadRootId &&
       followUpBehaviorPreference() === "queue";
+    const attempt = new AbortController();
+    sendAttempt.current = attempt;
     try {
       if (captured !== typed && composerMarkdown(captured).length > 16000) {
         const groups = new Set(typed.recipients.map((item) => item.label));

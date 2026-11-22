@@ -345,9 +345,20 @@ export function groupLabelHolds(
     )
   );
 }
+function mobileName(content: string) {
+  try {
+    const body = JSON.parse(content) as Record<string, unknown> | null;
+    const name =
+      typeof body?.display_name === "string" ? body.display_name : body?.name;
+    return typeof name === "string" ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
 /** Every name a reader may bind to each of `people`, and to a 1:1 DM's agent
- * partner, whom the relay tags: the shown name, the verified names and the
- * name set on their own profile, never a fallback name. */
+ * partner, whom the relay tags: the shown name, the verified names, the name
+ * set on their own profile and, as mobile reads it, that profile's raw
+ * `display_name` or else `name`; never a fallback name. */
 export function readerNames(
   people: readonly MentionRecipient[],
   profiles: ReadonlyMap<string, Profile>,
@@ -372,6 +383,7 @@ export function readerNames(
         name,
         ...profileMentionNames(profiles.get(pubkey)),
         own && !own.nameIsFallback ? own.name : undefined,
+        event && mobileName(event.content),
       ]),
     ].flatMap((each) => (each ? [{ pubkey, name: each }] : []));
   });
