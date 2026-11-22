@@ -113,6 +113,7 @@ import type { EmojiSnapshot } from "../relay/emoji-directory";
 import { emojiQuery } from "../../bundled/emoji/emoji-query";
 import type { ComposerInputElement } from "./composer-dom";
 import { profileTarget } from "../profiles/target";
+import { profileMentionParts } from "./profile-mentions";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { setRememberAgentsPreference } from "./mention-preferences";
 import * as modelStorage from "./solo-model-picks-storage";
@@ -18802,6 +18803,65 @@ it.each([
       groups,
       content: "@Mary Jane @Wes hi",
       tags: [],
+    });
+  },
+);
+it.each([
+  ["picked", 0],
+  ["saved in a draft", 1],
+])(
+  "a group whose label starts with a member's verified name is %s and sent as its members",
+  async (_how, groups) => {
+    const mj = { ...first, name: "MJ" };
+    const label = "Mary Jane Jones crew";
+    const verified = {
+      displayName: "MJ",
+      username: "mj",
+      fullName: "Mary Jane Jones",
+      issuerLabel: "Example",
+      verifiedAt: 1,
+      status: "checked" as const,
+      multipleIssuers: false,
+    };
+    if (groups)
+      writeView(
+        "scope",
+        "draft:channel",
+        typedDraft(savedCrew(`@${label} hi`, label, [mj, wes])),
+      );
+    const h = mount();
+    h.setProfiles(
+      new Map([
+        [mj.pubkey, { name: "MJ", verified }],
+        [wes.pubkey, { name: "Wes" }],
+      ]),
+    );
+    if (!groups) {
+      h.fill("!Crew");
+      offerCrew(h, [mj, wes], label);
+      await h.user.keyboard("{Enter}hi");
+    }
+    const sent = await sentGroups(h);
+    const reader = new Map([
+      [mj.pubkey, { name: "Mary Jane Jones", verified }],
+      [wes.pubkey, { name: "Wes" }],
+    ]);
+    expect({
+      ...sent,
+      parts: profileMentionParts(
+        { content: sent.content ?? "", mentions: sent.tags ?? [] },
+        reader,
+      ),
+    }).toEqual({
+      groups,
+      content: "@MJ @Wes hi",
+      tags: [mj.pubkey, wes.pubkey],
+      parts: [
+        { text: "@MJ", target: profileTarget(mj.pubkey) },
+        { text: " " },
+        { text: "@Wes", target: profileTarget(wes.pubkey) },
+        { text: " hi" },
+      ],
     });
   },
 );
