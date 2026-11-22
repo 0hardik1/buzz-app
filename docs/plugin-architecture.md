@@ -14,8 +14,9 @@ across versions yet, and the author types are `0.0.0-preview.1`.
 - **Steady:** the plugin envelope (manifest, `inject`/`apply`, `ctx.effect`
   cleanup) and capability services: host grants, `addTool` (the tool's shape, not
   the whole client passed to `call`), shortcuts, notifications, settings cards, and
-  navigation `open` for plugin pages, Home and Settings. Owning a whole page or
-  panel is steady, but placement is not.
+  navigation `open` for plugin pages, Home and Settings, and the `ui`
+  [host controls](#host-controls). Owning a whole page or panel is steady, but
+  placement is not.
 - **Borderline:** decisions, and link and code-block renderers.
 - **Likely to break:** the relay session read model; conversation contributions;
   sidebar sections and rows, the Solo region and backdrops; agent hooks, execution
@@ -104,8 +105,9 @@ have separate boundaries. A page sidebar is isolated by the same owned-contribut
 boundary, so a failure falls back to a concise alert without taking down the page,
 Settings, or shell. The host owns the slot, collapse state, labels, and narrow drawer;
 the page owns its sidebar content and local interaction state. Sidebar presentation
-helpers remain importable from `bundled/channels`; the conversation sidebar also
-exposes a versioned section contribution for plugins.
+helpers live in `features/channel-navigation`; the global host selects a bundled
+preview context, and adapts `Page.sidebar` through the same section engine. Messages
+contributes its conversation sidebar rather than being part of the host.
 
 Channels is the page-authoring example, not a thin registration wrapper over a
 host-owned product page. Keep page-specific components, styles, interactions and tests
@@ -323,6 +325,22 @@ session-owned. The standard composer remains shared host UI, independent of any
 example plugin. Automated tests use source-only external consumer and tool fixtures
 to exercise component reuse and contribution lifecycle.
 
+### Agent model selections
+
+A plugin that injects `agents` can feature-detect
+`ctx.agents.readModelSettings?.(agentKey)`. This async read returns the same
+safe `modelSettings` projection as `agent_read`, without instructions or raw
+configuration. It accepts a local membership key from the agent service.
+Missing, unreadable or unsupported settings return `{ unavailable: "…" }`.
+Each supported field retains its saved policy and can include a resolved
+selection with provenance. A remote execution target never inherits this
+device's defaults. See [model read semantics](agents.md#creating-and-changing-agents-from-a-conversation)
+for field shapes and unresolved states. The read uses existing resolver state;
+it never starts model discovery, launches a harness or changes an agent.
+The result describes a current selection, not an existing session's override.
+Older hosts lack the method. A missing method or unresolved value does not
+establish a model; consumers must preserve that distinction.
+
 ## Plugin module contract
 
 `src/bundled/channels` is a bundled example. External projects have `manifest.json`
@@ -367,7 +385,32 @@ external source project with `pnpm exec tsc` in that directory.
 The host owns navigation, Settings, loading errors, and render error boundaries.
 Settings controls and CLI management do not depend on plugin activation. Updates are detected while the app
 is running. A selected page remounts when its revision changes; its local React
-state resets. Plugin-specific persistent data has no host API yet; bundled plugins such as Reminders and Focus keep small device-local state in namespaced `localStorage` keys.
+state resets. Use [Seen](#remembering-one-time-experiences) to remember one-time
+experiences. Bundled plugins such as Reminders and Focus keep other device-local
+state in namespaced `localStorage` keys.
+
+### Remembering one-time experiences
+
+Get Seen with `const seen = ctx.reflect.get("seen")`. Leave it out of the
+required `inject` list so your plugin still activates on older Buzz hosts.
+Skip the hint when the service is unavailable.
+
+Choose a key in the form `<plugin-id>/<name>`, up to 96 Unicode code points.
+Use your plugin's ID as the prefix to avoid collisions. For an invalid key or
+before sign-in, `has()` returns `undefined` and `mark()` has no effect. Keys
+belong to the signed-in identity and are shared across communities on this
+device.
+
+Show the hint only when `seen?.has(key) === false`. A result of `true` means
+the experience already happened. A result of `undefined` means Buzz does not
+know yet. Once you have the service, a React component can use
+`useSyncExternalStore(seen.subscribe, () => seen.has(key))` to rerender when
+the answer changes.
+
+Call `seen?.mark(key)` when the experience happens. Repeated marks are safe.
+Use a new key to show an updated experience again. If device storage cannot
+save a mark, it stays active in the current window while that identity is
+signed in.
 
 Plugins are trusted code executing in the app's JavaScript context. They are not
 sandboxed: infinite loops, global changes, and external side effects cannot be
@@ -380,6 +423,33 @@ See [foundation status and open gates](status.md) for maintained decisions,
 remaining acceptance work and historical evidence.
 
 ## Starting contracts
+
+### Host controls
+
+External plugins cannot import app source, so the host provides its own
+controls. Read the optional `ui` service with `ctx.reflect.get("ui")`; it is
+`undefined` on older hosts. It offers `Button`, `Input`, `Field`, `Switch` and
+`Dialog`, rendered by the host with its React instance, theme, focus handling
+and overlay layer. The props are `PluginButtonProps`, `PluginInputProps`,
+`PluginFieldProps`, `PluginSwitchProps` and `PluginDialogProps` in
+`@buzz/author` (`src/features/plugin-ui/contract.ts`).
+
+Each control forwards only its documented props: other props are ignored and
+an unsupported value uses the default, so internal and migrating variants never
+become plugin behavior. Change handlers receive plain values (`onValueChange(value)`,
+`onCheckedChange(checked)`, `onOpenChange(open)`); `onClick` receives nothing.
+The host owns appearance. Like the other services, the set is a preview; the
+narrow props keep later changes small. Shared primitives belong in `ui`;
+feature components stay with the service that owns them, such as
+`conversation.ui`. A component reads the same on every
+access, so it is safe to use as a React element type. Plugin page state stays
+in the plugin's components; unmounting a page with an open `Dialog` removes its
+portal and scroll lock.
+
+For styling beyond these controls, rely on the `core` roles in the token
+registry and the classes the authoring guide names (`ui-card`,
+`shell-sidebar-default`). Control class names and `data-*` attributes are
+internal.
 
 ### Subject lift
 
@@ -773,22 +843,67 @@ ctx.reflect.get("sidebarSections")?.register({
 });
 ```
 
+#### Bundled section components (internal preview)
+
+The service also has bundled-only previews, `registerContext` and version-2
+`registerSource`. A context declares its id, target matcher, optional navigation
+page owner and component. The host resolves the applicable context and supplies
+its frame and section renderer; replacing a context unmounts its sources. A
+source must name its context's full `<pluginId>/<contextId>` key. The source
+props are neutral: target, live ownership check and publication callback;
+Messages-specific state stays in the Messages contribution. Peer visibility,
+source customization and opening these previews to ordinary plugins are deferred.
+
+The preview is likely to change and is type-visible through the author API's exported
+`SidebarSections` type. Registration is supported only for bundled owners;
+the runtime rejects non-bundled owners. Version-1 registration and snapshots
+remain unchanged; plugin-development introspection currently lists only
+version-1 sections.
+
+A source runs once and supplies live `{ id, defaultPosition, element, title? }`
+sections through its `render` callback. Use stable component types and opaque,
+stable section ids. The shell names each slot `<pluginId>/<sectionId>`, orders
+slots by rank and then ordinal key, and drops invalid or duplicate descriptors.
+Slot ids do not replace saved collapse, sort, filter or drag keys. Team ranks
+follow the existing saved group order, with version-1 contributions trailing in
+their existing saved order; there is no new order record or migration.
+
+Sources run beside the shell and portal their content into keyed containers.
+Only structure and committed keys cross the shell's store; current content stays
+in the source's React render. Team sources mount inside the shared Team drag
+context. Solo sources stay outside it and retain their existing nested drag
+context. Keep any context or synthetic-event owner needed by portaled content
+above its source, since React events follow the source ancestry.
+
+Each slot has its own error boundary and Retry. A source failure replaces its
+slots with one unavailable-and-Retry placeholder; a source returning no
+publication settles empty. Registrations and publications are fenced by owner
+incarnation, so disabling or replacing a source retires its old content.
+The Messages context mounts one inventory for workspace preferences, rows and
+actions. The built-in source publishes the workspace and home sections. Solo
+region sources publish their own region content. A primary region can compose
+ordinary chats in its task view. Starred and mixed workspaces keep their unified
+placement. Both bundled sources activate with the required Channels plugin.
+
+The viewport waits for every current section key to commit before consuming a
+saved scroll position. Container refs and portal publication settle during layout,
+before paint. Browser tests must still verify scrolling, group spacing, focus and
+drag hit testing: a DOM emulator cannot establish their geometry.
+
 ### Solo-only sidebar
 
-`sidebarScope.restrict({ id, scope: "solo", banner })` shows only the Solo
-inventory while it is registered. The All/Solo/Team tabs and page destinations
-give way to the plugin's `banner` component, and the person's saved tab returns
-when the last restriction is removed. It returns a remover; disable, replacement
-and teardown remove it too, so a restriction can never outlive its plugin. A
-banner that throws renders nothing and leaves the sidebar usable. It changes
-only the sidebar: links, search and alert clicks still open any conversation.
-Focus is the first caller and registers its restriction only while Focus is on.
+`sidebarScope.restrict({ id, scope: "solo", banner })` filters the sidebar to
+Solo-labelled chats across sections. Empty sections, Team contributions and
+pinned page destinations are hidden. The banner is isolated from the sidebar by
+an error boundary. Links, search and alert clicks can still open conversations.
+The call returns a remover. Disable, replacement and teardown remove the
+restriction. Focus registers it while active.
 
 ### Decorating host sidebar rows and adding sort modes
 
 `ctx.reflect.get("sidebarRows")` is an optional version-1 capability for host
 Team channel, direct-message and ordinary Solo rows, including rows moved into
-custom Team groups or Solo workspaces. Plugin-owned Solo regions render their
+personal workspaces. Plugin-owned Solo regions render their
 own rows and are not decorated here. Use the reflective lookup rather than
 required `inject` so the plugin still activates on older hosts.
 
@@ -937,11 +1052,34 @@ it goes. `systemPrompt` and `turnPrompt` give Buzz's prompts, `turnPrompt`
 showing what the session has not seen and taking plugins' notes. Its
 `cursor` is opaque: save it with the session and give it to the next
 `turnPrompt`, which keeps a mark for each thread of a channel conversation.
+Give `systemPrompt` the `conversation` so that a type with
+`conversationSections` gets the base prompt sections a plugin replaced there,
+and so that the prompt says whether the session is one thread or a whole
+conversation.
+A type whose turns take those notes declares `notes: true`, so that a plugin
+can tell before it leaves one.
 `reply` posts as the agent there. `tools(agent, conversation, { read })`
 answers the Buzz tools over MCP for `ctx.host.serveMcp`, so the manifest
 declares `host.mcp`; `read` is the plugin's own file access (`host.files`),
 which uploads of local files use. The kit grants nothing `ctx.agents` and
 `ctx.host` do not already give the plugin.
+
+An agent type can list `skillFolders`: up to eight folders, each absolute,
+`~/…`, or starting with `$CODEX_HOME`; `register()` refuses more than eight.
+When a message addresses one local agent of that type, the composer's `/` offers
+each folder's `<name>/SKILL.md` skills, reading `name` and an optional
+`description` from each file's front matter. A chosen skill travels as a token
+in the message's `buzz-tokens-v1` tag, whose value is a JSON array of 1 to 32
+unique tokens at most 16 KiB in size: a folder token is
+`{ kind: "folder", id, label }`, where `id` is the folder's absolute path, and a
+skill token is `{ kind: "skill", id, label, target }`, where `id` is the
+`SKILL.md` path and `target` is the hex pubkey of the agent the skill was chosen
+for. Tokens can carry other fields, such as `description` and `location`; ignore
+them. Because anyone in a chat can sign a `buzz-tokens-v1` tag, a harness reads
+chips only when the message's author is the agent's owner, takes a skill token
+only when its `target` is the agent's pubkey (telling the agent to read each
+`SKILL.md`), and takes a folder token only while `ctx.host.repositoryFolders`
+lists its `id`.
 
 A plugin, bundled or installed, can add a tab to the settings of agents
 running here or hosted, whatever their type, with
@@ -1034,9 +1172,87 @@ gives one of the owner's local agents standing instructions in one
 conversation, at most 8192 UTF-8 bytes after trimming; empty text clears them.
 Each of that agent's turns there shows them in an `<owner-instructions
 source="…">` section after the plugin instructions, escaped the same way, and
-the base prompt ranks them below the owner's messages and above a Solo chat's
-Canvas. They are kept on this device for now. `conversationInstructions(agent,
+the base prompt ranks them below its own sections and above a Solo chat's
+Canvas that an agent wrote. They are kept on this device for now. `conversationInstructions(agent,
 place)` resolves with the text. See [Agents](agents.md).
+
+A bundled plugin can give this launch's recommended agent setup in place of
+the build's `BUZZ_RECOMMENDED_AGENT` with
+`ctx.agents.recommend(source)`; see [Recommended agent](configuration.md#recommended-agent).
+Call it while the plugin starts. Buzz calls `source(signal)` once, as soon as
+the plugin registers it. Its answer has the setting's shape, `{recommendedBy?,
+description?, candidates}`, and Buzz checks it with `setRuntimeRecommendation`
+like the setting, replacing attribution, description and candidates together.
+Finds and picks wait until the answer comes, or until every plugin
+has started with none calling `recommend`, but never more than five seconds
+(`SOURCE_MS`) from when the agents service started. After that the setup is
+final for the launch: a late answer is dropped, so nothing already found would
+be found again. No answer (`undefined`, `null` or no candidates), a throw, or an
+invalid setup keeps the build's. `signal` aborts when the wait ends. Only the first
+plugin to call it in a launch is asked; later calls only log. Views that read
+the setup before it is final, such as whether a harness offers Automatic, see
+the build's. Turning the plugin off stops it answering from the next launch.
+
+A bundled plugin can also decide which harnesses use the build's agent
+gateway, in place of the gateway access check's `harnesses`, with
+`ctx.agents.gatewayHarnesses(source)`; see [Agent gateway](configuration.md#agent-gateway).
+Call it while the plugin starts. Buzz calls `source(signal)` once, as soon as
+the plugin registers it, and expects at most 32 harness names (lowercase
+letters, digits and hyphens), the names agent types declare. The list applies
+to every gateway membership for the launch. Access checks wait for the call
+only until bundled plugins have started (installed plugins don't hold them
+back), and never more than five seconds (`SOURCE_MS`) from when the agents
+service started. Once called, they wait for its answer, again at most five
+seconds, timed from the call, so a plugin that registers late still gets the
+whole answer budget. Neither timer lengthens a turn's own wait: a turn still
+waits at most 5 seconds for both the list and its access check, and a harness
+the list leaves out stops waiting as soon as the list is known. An empty list, a
+late answer, a throw or anything but such a list enables no harness: then
+Buzz sends the gateway nothing, not even the access check, and every agent
+keeps its own configuration with no notice. Otherwise the access check still
+decides whether a route is eligible, including 401/403 refusals. With no plugin calling it once every
+bundled plugin has started, the access check's list stands. Only the first plugin to
+call it in a launch is asked; later calls only log. A conversation whose
+saved session ran through the gateway still compacts through it when a
+non-empty list leaves its harness out, while its route is eligible; an
+empty list sends the gateway nothing, so such a conversation can't compact
+until a launch's list is non-empty.
+
+Bundled plugins also get the building blocks to move agents onto
+Automatic themselves, with their own rules and wording. Each throws for any
+other plugin:
+
+- `ctx.agents.isReady()` is true once plugin start-up is over, the agent list
+  has loaded and the recommended setup is final; `subscribe` hears when it
+  changes, and `whenReady(signal?)` resolves the first time it is. Don't
+  await it in `apply`: start-up isn't over until `apply` returns.
+- `switchable(agent)` says whether an agent could run on Automatic here: not
+  hosted nor bound to another execution target, of a type registered on this device and not remote, whose harness
+  the setup has a candidate for. An agent of a type this device doesn't know
+  isn't. `switchableAgents()` lists the person's, one per agent.
+- `switchToAutomatic(agent, {note?})` puts it on Automatic and resolves with
+  the `model`, `provider` and `effort` it had; `restoreSettings(agent,
+  previous, {note?})` undoes that while the agent is still on Automatic. Both
+  save its settings from the copy passed in, so a copy that changed since it
+  was read, here or by sync, is refused, and only for an agent set up on
+  this computer whose synced settings have arrived. Where a community can't
+  sync agent settings, they always refuse.
+- `readNote(agent)` and `setNote(agent, note | null)` keep a small note per
+  plugin in the agent's synced settings (`pluginNotes`, by plugin id), so it
+  follows the agent to every device and settings history never reverts it:
+  `{data, tag?}`, with JSON `data` of at most 1 KB. A note is known only once
+  the agent's synced settings have arrived (`configBase.settings` is a
+  string). Any other save, such as from a settings form, keeps notes as they
+  are. Each settings revision
+  carries a tagged note as `["note", pluginId, tag]` beside the `preset`
+  tag. `switchToAutomatic` and `restoreSettings` take the note too, to save
+  it in the same revision.
+- `ctx.pages.registerOverlay({id, component})` mounts a component once in
+  the app shell, beside the app's own notices, while the plugin is on, such
+  as a notice or a dialog; it places itself. It renders inside the app's
+  toast host, so the design system's toasts work there.
+  For focus and visibility, read `document.hasFocus()` and
+  `document.visibilityState`.
 
 ### Agent operation proofs
 
@@ -1305,13 +1521,14 @@ destination, roster, audio or controls.
 Every plugin surface in a channel or thread can open a target, such as a panel
 URL, with the same `canOpen(target)` / `open(target)` pair (`TargetOpener`):
 panels (`context`), channel-header launchers, composer tools and accessories,
-message renderers, message ⋯ action components, attachment renderers and inline
-renderers. The conversation host decides placement: in Channels a panel target
-opens as a side-pane tab, as if the user clicked a link to it in that message or
-composer. `canOpen` is presentation only. `open` re-resolves at click time and
-returns false outside a conversation host, after the contribution is removed or
-after its mount retires. Link renderers keep host-owned link activation;
-reaction choosers and message markers get no opener.
+message renderers, message ⋯ action components, attachment renderers, inline
+renderers and link preview cards (`opener`). The conversation host decides
+placement: in Channels a panel target opens as a side-pane tab, as if the user
+clicked a link to it in that message or composer. `canOpen` is presentation
+only. `open` re-resolves at click time and returns false outside a conversation
+host, after the contribution is removed or after its mount retires. Link
+renderers keep host-owned link activation; reaction choosers and message markers
+get no opener.
 
 ### Resolution order
 
@@ -1365,7 +1582,7 @@ contracts with their own layout and local navigation.
 ### Bundled defaults
 
 **Channels is the only required bundled plugin.** Usage, Reminders,
-Workflows, Changesets, Shared compute, Charts and File viewer are off by default for fresh installs. Bestie,
+Workflows, Changesets, Shared compute and Charts are off by default for fresh installs. Bestie,
 Feedback, Diff viewer, Identity Naming, Agent Activity, Terminal, Links, GitHub, Inbox,
 Repositories, Agents, Claude, Codex, Builderlab,
 Membership, and Moderation are on by default, but optional. Both browser and
@@ -1413,6 +1630,28 @@ signed-in `gh` account. That allows any query or mutation the account may make;
 the token stays inside `gh`. Without `gh` it reads public data only. Unsupported
 URLs retain ordinary link behavior. A host-owned GitHub connection with narrower scopes, and agent
 execution, remain future shared capabilities.
+
+### Organization plugins
+
+An organization that packages its own build of Buzz can bundle its own plugins
+without changing any other file. `src/bundled/org.json` lists each one's
+manifest and whether it starts on, as
+`[{ "manifest": { … }, "enabledByDefault": true }]`, and `src/bundled/org.ts`
+gives each one's code (its module) by manifest id. Both are empty in
+open-source builds; a packager replaces both at build time. The web build reads
+them through `orgPlugins`, which `bundledPlugins` lists after the rest, and the
+desktop app's native catalog (`crates/plugin-manager`) compiles `org.json` in,
+so both agree on the list, the defaults, and the host access each manifest
+declares. A listed plugin without code is left out and logged; the native catalog still
+lists it, so it shows as failing to load. Like any
+bundled plugin it shows in Settings → Plugins, where the person can turn it
+off, and it needs no README. Its declared network origins are granted without
+an access review, as for every bundled plugin: the packager chose them.
+Choose ids no other plugin uses, such as one under the organization's domain.
+
+The same packager can ship the build's agent gateway descriptors in
+`src/bundled/org-gateways.json`, also `[]` in open-source builds; see
+[Packaged gateway descriptors](configuration.md#packaged-gateway-descriptors).
 
 ### Optional channel menu panels
 
@@ -1495,8 +1734,10 @@ Builderlab.
 
 `ctx.conversation.registerAccessory({ id, title, order?, component })` contributes
 read-only contextual UI above the shared composer. The host passes
-`{ session, scope, channelId, threadRootId?, canOpen, open }`: no editor commands,
-new socket, or implied access grant. Channels supplies target resolution and panel
+`{ session, scope, channelId, threadRootId?, canOpen, open, onFocusedRemoval? }`:
+no editor commands, new socket, or implied access grant. A conversation composer
+passes `onFocusedRemoval()`, which returns focus to its editor when a focused
+accessory control goes away. Channels supplies target resolution and panel
 placement; other composer consumers can omit navigation and return unavailable.
 The shared renderer owns deterministic order, error isolation and command
 revocation on removal/unmount. Composer destination keys fence session/channel/
@@ -1556,11 +1797,11 @@ are also deferred; opt in when the contribution's static title is sufficient unt
 selection.
 
 A plugin panel, which cannot import host modules, names its tab with
-`ctx.panels.useTabTitle(label)`, a React hook called in the panel component (for
+`ctx.panels.useTabTitle(label, icon?)`, a React hook called in the panel component (for
 example `ctx.panels.useTabTitle("#12554892")` for a build opened from a link). The
 label replaces the static `title` while the component is mounted and the static
-`title` returns when it unmounts; outside a panel tab the call does nothing. It
-takes a label only, no icon. Hosts that predate it lack the hook, so plugins that
+`title` returns when it unmounts; outside a panel tab the call does nothing. The
+optional `icon` is a React node. Hosts that predate it lack the hook, so plugins that
 support them test `typeof ctx.panels.useTabTitle === "function"` first.
 
 Channels keeps layout and channel/thread selection. The Terminal plugin binds its
@@ -1902,6 +2143,39 @@ limited PATH and passes that search path to the command.
 Plugins parse and retain their own credentials; the host has no provider registry
 or credential store.
 
+A plugin that gives agents its own rules in the chats it manages declares the
+sections of the base instructions it can replace:
+
+```json
+{ "host": { "agentPromptSections": ["working-location", "progress"] } }
+```
+
+The base instructions are what Buzz tells every agent before the agent's own
+instructions, as named sections. A plugin can declare `callbacks`, `routing`,
+`publishing`, `progress`, `working-location` and `autonomy`; the manifest is
+refused when it names any other section, such as one that is always on. The
+access review lists each declared section by its title, and an update that adds
+one needs **Review permissions**. **Settings → Agent setup → Base
+instructions** names the plugins that are on and declare a section, and warns
+that the owner's own choice for a section also applies in those plugins' chats.
+`ctx.pluginOwner.agentPromptSections` holds the plugin's declared IDs, empty
+when it declares none. Hosts that do not support this field reject manifests
+that declare it. The plugin registry also records the field, even for a plugin
+that is off, so an older host rejects that profile's whole plugin catalog and
+may offer settings recovery. Before you open the profile in an older build,
+remove the declaring plugin, or roll it back to a version without the field,
+in the newer build.
+
+`ctx.agents.setConversationSections(agent, { channelId, root? }, sections)`
+gives one of the owner's local agents the plugin's text for declared sections
+in one conversation, which the plugin then manages; an empty set clears them.
+Each turn's base instructions there show the text in a `<plugin-section
+id="…" plugin="…">` wrapper in place of the section's default text. One plugin
+manages a conversation at a time, the owner's own choice for a section wins
+over the plugin's text, and a protected agent uses none.
+`conversationSections(agent, place)` resolves with the plugin's set and
+whether a prompt uses each text. See [Agents](agents.md).
+
 A plugin that needs a long-lived program, such as an agent CLI that speaks a
 JSON protocol on stdin and stdout, declares it under `host.processes`:
 
@@ -1997,7 +2271,8 @@ renderer reads the preference and passes it to native code, which checks the
 `files` grant before any filesystem work. The app's own `!` folder chips use
 the same listing through a command for the trusted app renderer. A sent
 message carries its chips in one `buzz-tokens-v1` tag that only the app's
-composers sign; trust a chip only as far as you trust the message's author.
+composers and `ctx.conversation.publish` sign; trust a chip only as far as you
+trust the message's author.
 
 Bundled host grants use the effective compiled manifest at revision `bundled` and
 require the plugin to be enabled in the native catalog. External grants require the
@@ -2245,8 +2520,96 @@ refuse. Only the verified fixed ownership file is excluded.
 The shared root permits at most 64 MiB and 16 artifact files. Any plugin can fill
 it; there is no per-plugin quota or fairness promise. A full root refuses before
 another file is created, without evicting unexpired files. Failures remove output
-best-effort; residue remains counted. There is no index, sidecar, recovery adoption,
-content deduplication or temporary-to-final file service.
+best-effort; residue remains counted. There is no persistent index, sidecar,
+recovery adoption, content deduplication or temporary-to-final file service.
+The optional after-send policy below uses only a bounded in-memory consent map.
+
+#### Opt-in temporary attachment release
+
+A compatible desktop frontend/native pair accepts
+`await host.saveBytes(bytes, {sha256, releaseAfterSend: true})`. The flag defaults
+to off; false/omission preserves ordinary saves. Require the returned
+`releaseAfterSend === true` acknowledgement. An older native host may save while
+ignoring the option: missing/false acknowledgement rejects as unsupported and
+**possibly saved**, never permission to retry. Establish a compatible released
+pair before enabling a consumer; method detection alone is not evidence.
+No new grant, caller path/account, deletion callback or release command exists.
+
+Native captures the saving **human Nostr owner**, not a plugin ID or federated
+login account. Opt-in saves may refuse if identity is unavailable, closed or busy
+at the final commit. Consent insertion and identity close share a short native
+fence; ordinary saves remain identity-independent. Native command timeout/drop
+before commit prevents consent. Renderer disposal/page retirement/lost IPC replies
+are not native cancellation signals: they can leave a possibly saved file and
+committed consent even before the renderer learns the result. Never automatically
+save again to recover an unknown outcome.
+
+The app's shared attachment tools collect bounded local hints after read/upload,
+using the bytes' exact SHA256/size and a matching upload descriptor. These hints
+travel outside signed event tags and tool arguments. They do not create deletion
+authority. Only after the **full native evidence-wrapped publication** succeeds
+with the relay accepting that exact signed kind-9 event ID does native attempt
+release. Upload, local event insertion, renderer claims and an unconfirmed receipt
+are insufficient. This is not recipient delivery/read or permanent remote storage.
+The trusted app supplies read/upload mapping; no independent cryptographic native
+provenance or malicious-plugin sandbox is claimed. Standalone/browser clients do
+not gain a local deletion implementation.
+
+A different runtime plugin may send the saving plugin's source for the same human
+owner. Native requires its process-local save consent, exact direct-child path,
+saver digest, private no-link file identity, content hash/size, and the confirmed
+event's URL/hash/size together in one imeta. Saver update/disable and later UI or
+federated-session changes do not retarget previously committed consent. Unknown,
+legacy, replaced, aliased, unmarked or other-owner files never acquire consent
+from filenames or tool hints. Platforms without safely verifiable file identity
+retain the source. Public explicit deletion retains its existing grant/owner rules.
+
+One bounded best-effort attempt per distinct source uses the shared byte permit,
+root writer and reader exclusion, with **one shared 30-second cleanup-entry budget
+for the whole message**, including scheduling and queue wait. The confirmed send
+returns immediately without awaiting cleanup; cleanup runs detached on the app's
+native runtime, not the runner lifetime. Runner disposal does not cancel it.
+The deadline is captured before spawning, and actual blocking work keeps its
+byte/root/reader guards until completion. App shutdown need not drain cleanup:
+undispatched work can be lost and sources retained; dispatched unlink may finish
+with an unknown outcome. No work is durable or required to outlive the app.
+Failure/refusal never changes a confirmed send into an error or repost.
+Active app-wide readers refuse cleanup;
+while cleanup verifies content, new direct/process reads instead promptly refuse
+with `File reads are busy; try again later`, without spawning/reading or silently
+retrying. A stalled hash can outlive the response budget; dispatched work retains
+admission/exclusion through real completion and its unlink outcome can be unknown.
+
+| Outcome | Source and caller behavior |
+| --- | --- |
+| Read/upload/body/mention/emoji failure, or native-unconfirmed publish | Keep sources; no cleanup or automatic resend. Earlier uploads may exist remotely. |
+| Confirmed native publish, cleanup succeeds | Local source removed and quota reclaimed; posted message/media unchanged. |
+| Confirmed publish, busy reader/root/queue, mismatch or cleanup error | Send still succeeds; source may remain indefinitely, without a cleanup retry. |
+| Dispatched cleanup exceeds the shared deadline | Send succeeds; local cleanup outcome unknown and actual work may finish late. |
+| Second sequential send of a released path | Normal missing-file failure before upload; reuse the posted link, not the old source. |
+| Concurrent send with bytes already read | It may finish from its snapshot even after the first confirmed send releases the source. Future reads are not reserved. |
+| Restart/crash/different process | Consent is lost, never adopted from a filename; files may remain indefinitely. |
+
+**Cleanup may never happen automatically; expiry only makes a file eligible for removal during a later save.**
+There is no durable/cross-process consent, background sweep, completion callback
+or eventual-erasure guarantee. Only this new after-send path requires confirmed
+publish; owner deletion, lazy expiry sweeping, erasure and disk loss remain
+independent. Save acknowledgement is not a publication/deletion receipt;
+`sent <id>` confirms publication, not local deletion.
+
+When returning an opted-in path, explain: “Temporary attachment source: send this
+file once. After a confirmed post, the host may release the local copy; keep the
+posted link for reuse. Failed or uncertain sends are not safe to repeat
+automatically.” Also disclose that cleanup refusal may retain it indefinitely.
+
+The bundled Codex and Claude Code runtimes suppress managed-attachment hints
+when their active reader is backed by an execution target. Those attachments
+still publish normally through the same tools, but cannot trigger desktop-local
+managed cleanup through these two guarded readers. No remote deletion is added.
+The shared app client otherwise forwards hints by default; custom-reader harness
+integrations retain their existing trusted-reader contract and must not treat
+this scoped guard as universal source provenance. Managed release remains local,
+bounded by the same consent/identity/path/content checks above.
 
 Optional `host.deleteManagedFile(path)` requires `host.managedFiles` and the current
 enabled plugin revision, not `host.files`. It accepts only a direct, host-generated
@@ -2605,6 +2968,38 @@ not generation. Reactive filtered reads use `session.observe`;
 writes use `session.outbox` or the `session.messages` convenience methods. Reads,
 live traffic and local events share reconciliation, with no separately injected
 write service. Dispose owned views when their plugin or session scope ends.
+
+`session.ownerMentions` is an optional, read-only capability. On a host with
+`version === 1`, call `latest({ channelId, rootId })` to read the latest confirmed
+explicit mention in that source. Use `null` for the channel level, a message ID
+for the thread it starts, or the reply target ID for an ordinary nested branch.
+For sends from an invocation composer, use the invocation anchor ID, including
+when the composer replies to a message inside it. Those sends update only that
+invocation. A top-level message also starts its own thread.
+The result has `eventId`, `createdAtMs`, and `recipientIds` in editor order.
+Pass up to 128 eligible recipient IDs as the second argument to find the
+latest retained mention of any of them. This also limits the returned
+`recipientIds` to that set.
+Subscribe once with `subscribe(listener)` and reread `latest` before using a
+result from asynchronous work. Bind to the current session on reconnect.
+
+Call `confirmedOwnerSends({ channelId, rootId }, eventIds)` with up to 128
+candidate message IDs from the same conversation. It returns confirmed human
+owner IDs in input order, including messages without explicit mentions. The
+host retains up to 4,096 confirmed IDs per viewer and community. An empty result
+means there is no positive proof for the candidates.
+
+The host records evidence from a human Send through its built-in channel and
+thread composers, media review replies, new direct messages and Solo chats,
+and main-window Huddle composer. It exposes the evidence after relay
+acknowledgement or verified history readback. The detached Huddle composer
+uses a send proxy, so its sends have unknown provenance, as do older messages
+and raw writes. Automatic recipients leave the last explicit mention in place.
+The bounded index is local to the running app and its viewer and community.
+It survives a transient reconnect and session replacement. A community access
+refusal clears the retained evidence. `null` means evidence or access is
+unavailable. This reader performs no relay queries and returns no message text.
+
 For kind 30177 publication, follow the
 [managed-agent registration guidance](relay-queries.md#managed-agent-registration-kind-30177).
 
@@ -2811,7 +3206,12 @@ credential-free HTTP(S) and supported Buzz links. Markdown labels preserve their
 formatting, escaped pasted wrappers are normalized outside code, and paired `<…>`
 autolink wrappers are hidden in display. Buzz links use known channel names with corresponding icons, falling back
 to Channel, Message or Thread when that name is unavailable in the current community;
-the full destination remains on the anchor. A raw message or thread link in a listed
+the full destination remains on the anchor. A channel link whose label is only `#` and a channel name, as `#` completion
+writes it, shows the channel's current name once known, so it follows a rename, and selection copy takes that
+name; until then, and for a withheld channel, DM or Solo chat, the written label shows. A channel name may hold
+spaces, so `[#weekly sync](buzz://channel/<id>)` is such a label whoever typed it. Any other label, such as text
+without the `#`, longer than a channel name's 120 characters or with formatting, and `#name` prose stay as written. A
+message shows an image written in a link's text as an attachment, so the text beside it is judged alone. A raw message or thread link in a listed
 channel reads as “<author> in #<channel>” once its author has a name, and a workflow’s
 as “Workflow in #<channel>”; DMs, Solo chats, authored labels and drafts keep the channel
 name. So does a message the lookup cannot find or read, whether deleted or not yet
@@ -2849,11 +3249,15 @@ lowest-`order` match draws its card under the panel
 [resolution order](#resolution-order), so a plugin claims its own URLs by
 registering below the default web card's catch-all band; a component that
 renders nothing leaves that link without a card. Components receive
-`{ url, messageId, open }`; `open()` routes `url` through the host's link
-handler, as clicking the link does, and returns false once the contribution or
-message has retired. Cards sit between the message bubble and its attachments.
-After three, the rest fold behind "Show N more previews". A render failure drops
-only that card. Registration follows the existing plugin lifetime.
+`{ url, messageId, open, opener }`;
+`open()` routes `url` through the host's link handler, as clicking the link
+does, and returns false once the contribution or message has retired. `opener`
+is the message's [`TargetOpener`](#opening-targets-from-channel-plugins), so a
+card can open a different target, such as its plugin's panel, while clicking the
+link itself still does what it always did. Hosts that predate it omit `opener`.
+Cards sit between the message bubble and its attachments. After three, the rest
+fold behind "Show N more previews". A render failure drops only that card.
+Registration follows the existing plugin lifetime.
 
 `registerCodeBlock({ id, title, matches, component, action? })` contributes optional
 presentation for a fenced code block. `matches(language)` receives the fence's
@@ -2880,22 +3284,6 @@ tooltips and anything else that fetches or injects. Marks use the four
 `chart-series` roles, with extra version 1 series summed into Other. Its action
 opens the chart in an expanded dialog, and invalid JSON shows the error with the
 source. The host's Copy action copies the fenced JSON.
-The bundled **File viewer** plugin (`buzz.file-viewer`, off by default) claims
-file cards for PDFs, Markdown, code, text, CSV and TSV at `order: 100`, the
-bundled catch-all band, so a plugin registered at a lower order for the same
-files takes them over. The
-card's preview opens a `buzz-file:?url=…&name=…&mime=…&time=…` panel target,
-which other plugins may also open. The panel reads only `/media/` URLs on the
-current community's origin, through the session's media proxy, and caps text at
-20 MB and PDFs at 100 MB; tables stop at 50,000 cells. Markdown, code and text
-are indexed once and shown in parts of at most 12,500 characters, mounted near
-the view and dropped away from it. Markdown renders through the shared `MarkdownDocument` with the document profile,
-which the viewer extends with heading ids, code highlighting, in-document `#`
-links and images, which load only from the same community media. PDFs use
-[PDF.js](https://mozilla.github.io/pdf.js/) in a worker, loaded on the first
-PDF, and draw only the pages near the viewport. Its CMaps, standard fonts and
-image decoders are bundled assets served through a `BinaryDataFactory`, so
-PDFs need no network access beyond the file.
 
 The conversation preview exposes top-level `registerTool`, `registerCompletion` and `registerInline`
 methods and stable `conversation.ui.Composer` / `.Message` / `.Thread` / `.Conversation` /
@@ -3096,6 +3484,31 @@ Before the first publication the menu is also hidden: syntax matching is not evi
 of loading. Providers must publish an explicit status for actual pending work. Escape
 still revokes unpublished work, without exposing ARIA controls for a missing listbox.
 
+A provider registered with `ctx.conversation.registerCompletionSupplement(provider)`
+never owns the caret. Hosts without supplements lack that method, so a plugin
+calls it with `?.` and adds nothing on them. `registerCompletion` refuses
+`supplement`, so that method is the only way to register one. It mounts
+beside the winner when its own match has the same start, with its own query, and
+it never opens a menu alone. Each provider's rows form a section, and sections
+follow `order`, then the contribution key, with the winner among them. A
+supplement's section sits under a host-drawn heading with its `title`, and so
+does the winner's when another section comes first and the winner draws no
+heading of its own. The first row is selected by default, so Enter and Tab take a
+supplement row ordered above the winner's; a terminator still accepts only the
+winner's exact match. A supplement that publishes later with a lower `order`
+moves the default row until the user moves the selection, which then stays on
+its row while that row exists. Each row keeps its provider: a row is identified by
+provider and ID, and acceptance, `canSelect`, `disabled`, retry and status go to
+the provider that published it. Each provider keeps its own 50-row cap. A
+supplement decides no exact match. The host ignores its `spaceId`, `spacePending`,
+`agent` and `group`. Its `holdAutoSelect: true` says that its whole source, not only its
+shown rows, has or extends the typed name, or is still loading. Then a typed
+terminator never accepts the winner's exact match and types as text. Only a
+published hold holds: a supplement that has published nothing for this query
+holds nothing, so one that is still loading publishes `holdAutoSelect: true`
+in its mount effect, for every query. One that fails drops only its own section
+and holds nothing. A hold has no time limit.
+
 Providers receive immutable observation/range evidence and `publish(result)`—not
 DOM, focus or replacement commands. Results contain stable IDs, labels, optional
 detail/decorative previews, an optional `agent` flag (marked and announced only
@@ -3151,7 +3564,7 @@ channel metadata, which the store reuses while the viewer types. While the next
 lookup runs, the previous one's still-matching rows stay. Names match by the
 channel pickers' rule (`matchName`): exact, prefix, word start, substring,
 then letter runs that each begin a word (`tlp` for `team-launch-planning`), with
-alphabetical ties. Its last rank, letters merely in order, is left out, because
+alphabetical ties. Its last rank, typed words in any order, is left out, because
 Enter and Tab pick the first row while the viewer writes prose. The same rule
 applies to open channels from the lookup. Open channels follow joined ones, as in
 Command-K, so a late search result never moves the first row; when joined
@@ -3184,8 +3597,9 @@ The existing native and browser upload adapters prepare `voice-note-*.wav` files
 as the old Buzz H.264/AAC MP4 envelope. Voice Notes adds no uploader, signer or
 outbox. Files upload on Send, retain the shared progress/recovery behavior, and
 carry bounded duration and waveform metadata through ordinary `imeta` tags.
-Recordings stop at five minutes. Pending files have the same tab-local lifetime
-and limits as other attachment drafts; they do not survive app restart.
+Recordings stop at five minutes. Pending files have the same lifetime and limits
+as other attachment drafts: uploaded files survive app restart with the draft;
+files still uploading do not.
 
 The player loads audio on Play, supports seeking and playback speed, and pauses
 when its conversation is hidden. Existing voice notes are recognized from signed
@@ -3297,9 +3711,80 @@ real runtime. Native WebKit right-click selection and context-menu behavior,
 screen reader announcement of `aria-invalid`, and IME composition in the
 desktop app are not exercised there.
 
+### Send gates
+
+`ctx.conversation.registerSendGate({ id, hold })` lets a plugin take a
+message that a conversation composer is about to publish, for example to hold it
+until an agent is free. The host asks gates after its prompts, uploads and
+Solo's own queue, and only for a message it would otherwise publish now. Only a
+main-window composer with a full relay session asks gates; a detached composer,
+such as the Huddle pop-out, publishes at once. A message with a pasted forward is
+never offered to gates either: it publishes at once, and `{ refuse }` doesn't
+apply to it. `hold` gets a deeply frozen copy of the `OutgoingMessage` (channel,
+thread, text, recipients as sent, references, uploaded attachments, model picks
+and chips) and the session, and answers at once:
+
+- `true` keeps the message. The host clears the draft as sent and forgets the
+  message. Save it before you return `true`: the plugin owns it from then on.
+- `{ refuse: reason }`, with a non-blank `reason`, sends nothing. The draft
+  stays as it is, and the composer shows `reason` where it shows a send error.
+  A message whose attachments were uploading in the background comes back to
+  the composer with `reason` in its failure notice.
+- Any other answer, such as `false`, a blank `reason`, a promise from an
+  `async` `hold`, or a throw, leaves the message to the next gate. When no gate
+  keeps or refuses it, the host publishes it now as before.
+
+Gates are asked in contribution-key order; the first `true` or `{ refuse }`
+decides. A disabled or reloaded plugin's gate stops being asked, and the host
+never publishes or drops what a gate kept. Decide what a held message does after
+a reload yourself, for example by showing it paused until the user sends it.
+
+`ctx.conversation.publish(session, message)` publishes a kept message as the
+same event the composer would have sent, chips included, and resolves to its
+event id. It signs the chips it is given, so publish only a message your gate
+kept. It doesn't repeat the composer's checks, such as agent compaction,
+membership and channel availability; make those yourself before you call it. It
+holds no state: call it when your rule says the message should go.
+
+```ts
+import type { Context } from "@buzz/author";
+export const inject = ["conversation"];
+export function apply(ctx: Context) {
+  ctx.conversation.registerSendGate({
+    id: "example",
+    hold: () => false,
+  });
+}
+```
+
 ## Desktop browser
 
 Plugins can render the host-provided [`browser.View` component](browser.md) inside a panel. It opens HTTP(S) pages beside the conversation on macOS desktop. The host owns website rendering, navigation controls, and native session cleanup. Remote pages receive no Buzz IPC bridge; plugin JavaScript remains trusted same-process code. The [capability guide](browser.md#try-the-capability-with-a-local-plugin) includes a complete local-plugin example and installation steps.
+
+## GitHub pull request states
+
+While the bundled GitHub plugin is on, it provides `ctx.githubPulls`: the pull
+request states the app already holds, read-only. Links in messages, the panel
+and agents' watches read pull requests; `ctx.githubPulls` never reads GitHub, so
+using it costs nothing against GitHub's limits.
+
+`prState(url, { details })` gives what the agent tool `github_pr_state` gives,
+built by the same code: `state` (`"open"`, `"draft"`, `"merged"` or
+`"closed"`), with a `gh` read also `checks`, `failed`, `settled`, `conflicts`
+and `head`, then `read_at`, `age_seconds`, `source` and, when reading it again
+failed, `last_read_failed`. With `details: true` it adds the panel's `details`
+once something read them. Where the tool would read GitHub, `prState` gives
+undefined instead: the app holds no state for it (not read, could not be read,
+or forgotten after nobody showed it for a while), or `url` is not a pull
+request's. `subscribe(listener)` calls back after a read records a changed
+state, or when `last_read_failed` changes: reading again starts failing, fails
+for another reason, or works again. A read that finds the same state only moves
+`read_at` and `age_seconds` and is not announced, so show freshness from your
+own clock; a state the app forgets is not announced either. The report is a
+copy: changing it changes nothing the app holds.
+The service goes away when the GitHub plugin is turned off, so take it with
+`ctx.inject(["githubPulls"], (child) => …)` rather than a top-level `inject`, which
+would keep the plugin from starting without it.
 
 ## Decisions
 
