@@ -36,7 +36,10 @@ Normal and modified clicks are unchanged. In Messages, `buzz://` message links
 expose **Open link** and **Copy link** the same ways. **Open link** opens the
 linked thread as a tab in the current channel's workspace without navigating;
 another channel's thread uses the side pane. When that channel isn't readable
-there, it opens as a click would. Other internal `buzz://` links and links outside
+there, it opens as a click would. When the linked channel is withheld from the
+reader, the link, its preview card and **Open link** don't open anything, while
+**Copy link** and selection copy keep the URL; the link opens again once a recheck
+admits the reader. Other internal `buzz://` links and links outside
 message content retain their existing behavior. Copy failures show a dismissible
 notice and can be retried from the link menu.
 
@@ -148,10 +151,20 @@ coordinates must satisfy the recipe contract.
 
 Enabled sidebar pages such as Activity stay fixed above the scrolling conversation
 list. When the pinned rows run out of vertical space, scroll their area to see
-the rest. The conversation sections default to **Starred**, personal
-workspaces, **Solo**, **Team**, **Forums**, and **Direct messages**. Reorder them
-by dragging their headings or using **Move up** and **Move down**. The saved
-order syncs with workspace placement.
+the rest. The conversation sections default to **Solo**, **Starred**,
+workspaces, **Team** (channels and forums), and **Direct messages**. After an
+upgrade from the separate Solo and Team sidebars, the previous Solo workspaces come first,
+then **Solo**, **Starred**, the previous Team workspaces and **Team**.
+Reorder them by dragging their headings or using **Move up** and **Move down**.
+The saved order syncs with workspace placement.
+
+**Solo** and the workspaces listed in the legacy Solo record start capped at
+their newest 7 rows. **Show more** reveals the next hidden rows, up to 10;
+**Show fewer** returns to 7. Other sections, including workspaces created after
+the upgrade, start fully listed and offer **Show fewer** past 7 rows. The open
+chat, unread chats and chats an agent is working in stay listed past the cap.
+Limits are device-local view state; a Solo workspace's starting limit is saved
+there once the legacy Solo record has been read, with any step v1.0.5 saved.
 
 Drag a chat, channel, forum or DM into any workspace, into Starred, or back to
 its home section. The row’s **Move to…** menu offers the same destinations.
@@ -175,8 +188,8 @@ palette; legacy sidebar filters are ignored. Each section's ellipsis menu offers
 manually marked unread messages or unread thread activity. Muted channels with
 retained unread backlog remain eligible even when their ordinary sidebar cues
 are quiet: mute does not mark messages read. Active opens the compact
-**Active in the last** dialog with 1-, 7-, 30-, and 90-day text-only radio tiles
-in two columns.
+**Active in the last** dialog with 1-, 3-, 7-, 30-, and 90-day text-only radio
+tiles in two columns; the odd last tile spans the row.
 Apply saves the selected rolling window and activates the filter;
 Cancel leaves the saved choice unchanged. The dialog retains its draft after a
 failed save, and the menu shows the selected window. Activity uses verified timestamps, including your own messages once the relay accepts them. Channels with unknown activity remain visible until their activity is read. Activity applies in one update when a read finishes; a read that fails partway still applies what it read, and channels it did not reach stay available alongside the activity Retry warning. These filters are encrypted account preferences on the current relay, using a
@@ -186,9 +199,10 @@ Filtered sections with no visible channels show only their header, retaining the
 The currently open channel remains visible in its section regardless of its filter,
 however it was opened. Navigating away removes that exception. When a filter hides
 channels, the **Filter** submenu appends those eligible channels below its three
-options and a separator, in the existing section order; choosing one opens
-the section and channel without changing the filter. Choices reuse the sidebar's
-channel-type icons, unread emphasis, attention/thread dots and working-agent
+options and a separator, in the existing section order. Choosing a Solo chat
+opens the chat and preserves the section's disclosure. Choosing another channel
+opens both the section and channel. The filter stays in place. Choices reuse
+the sidebar's channel-type icons, unread emphasis, attention/thread dots and working-agent
 indicators. The temporarily visible open channel is excluded. Empty filtered sections retain
 their header and menu so the filter can be changed or a hidden row opened.
 Read-only hosts disable the filter choices while keeping hidden-channel navigation available. The saved-groups
@@ -238,7 +252,8 @@ A–Z writes a null register and removes that group's legacy override.
 Filters use the same bounded group-register shape in a separate `channel-workspace-filter`
 coordinate: Unreads is `unreads`, Active is `active`, and All
 writes a null reset tombstone. An optional top-level `activeWindowSeconds` map
-stores each group’s duration in whole-day seconds; absence means 30 days. Presets
+stores each group’s duration in whole-day seconds; absence means 30 days. The
+Active dialog offers 1, 3, 7, 30 and 90 days. Presets
 and custom values share this representation. Apply publishes mode and duration
 in one encrypted update, and both hosts confirm both values on readback. Other
 modes preserve the last duration; section removal clears it. Older fixed-window
@@ -252,8 +267,12 @@ Like sorting, this is whole-record last-write-wins; another client sees changes
 when it loads or refreshes preferences, without a new automatic reconciliation loop.
 
 Workspaces use a compact encrypted `channel-workspaces` record with sections,
-assignments, section order, and removal markers. The first edit saves the
-combined legacy projection. Older desktop and mobile clients read their
+assignments, section order, and removal markers. Until that record exists,
+the sidebar shows the combined legacy projection, in the upgrade order above.
+The first edit of any kind saves that projection, including its section
+order, so the order no longer depends on the legacy records. Loading never
+saves. A saved record without a section order, such as one saved by an earlier
+build, uses the default order. Older desktop and mobile clients read their
 original coordinates. Their writes cannot replace the unified record. An
 upgraded client can import previously unseen workspaces and filings. A saved
 unified placement or removal of a known legacy entry takes precedence, even
@@ -889,7 +908,10 @@ preserved while private; explicitly choosing Public or View only selects the
 corresponding admission default without a metadata migration.
 
 Readers see General access as plain text from verified channel discovery metadata,
-without calling the editing capability. Guests and readers of Guest-default channels
+without calling the editing capability. Owners and admins see the editable policy
+from the live channel summary the same way, with no read when the dialog opens;
+choosing a change reads fresh signed details before the confirmation, and saving
+verifies their version. Guests and readers of Guest-default channels
 see “Viewing only. Ask an owner or admin to participate.” A nonmember previewing a
 Member-default channel instead sees “New people can participate. People already in
 the channel keep their access.” Other previews identify defaults that could not be
@@ -992,8 +1014,10 @@ to its underlying conversation/message without that panel.
 
 The header **Access** button opens the one access dialog every conversation uses.
 It is titled **Channel access** in channels and **Chat access** in a Solo chat (see
-[Sharing a Solo chat](solo/sharing.md)). A Solo chat owner can remove people and
-agents there but cannot change roles.
+[Sharing a Solo chat](solo/sharing.md)). A Solo chat owner can remove current
+non-owner members. In a Private Solo chat on a relay that supports role updates,
+the owner can lower their access, restore participation for verified agents,
+and grant Admin to their own verified agents.
 One search field, with an accessible name but no visible label, filters current
 members and lists people, agents and Teams to invite under **Not in this channel**.
 With an empty query, channels and Solo chats show invitations only when the viewer is
@@ -1250,18 +1274,21 @@ disposal, but cannot retract a request already sent. Unsent work is canceled;
 recovery is in-memory, not durable across session disposal or restart.
 
 The development broker and native transport advertise a separate
-`memberAdministration` capability and admit only exact `9000` Admin/Member/Guest
-changes, the signer's own ownership transfer or `9001` other-member removals
-through purpose-bound routes. Generic
-invitation signing is unchanged; the relay still enforces the authoritative ACL.
+`memberAdministration` capability. Its purpose-bound routes admit ordinary
+channel `9000` Admin/Member/Guest changes and the signer's own ownership transfer,
+as well as `9001` other-member removals. The relay enforces the authoritative ACL.
 Hosts without this writer can read verified roles but expose no management controls.
 Native support requires a rebuilt binary; no unrestricted writer fallback is used.
 
-**Accepted protocol limitation:** role commands are existing relay upserts, not
-conditional updates. A departure after final preflight can be undone by the role
-command re-adding the target; a concurrent role edit can be overwritten. Client
-checks/readback reduce uncertainty but do not provide atomic conflict rejection.
-Preventing these races requires separately scoped relay support.
+In Private Solo chats, the writer uses kind `9050` for role changes when the
+relay advertises `buzz-solo-member-role` in its NIP-11 information document.
+The command includes the target's expected current role. The relay updates an
+existing member only if that role still matches, so it rejects the edit if the
+member left or their role changed before the write.
+
+Ordinary channel `9000` role changes are unconditional relay upserts. A command
+can re-add a member who departed after the final preflight or overwrite a
+concurrent role edit. Client checks and readback reduce uncertainty.
 
 Regression coverage lives in `administration.test.ts`,
 `MemberAdministration.test.tsx`, `native.test.ts`, and `browser-host/relay-broker-api.test.mjs`;
@@ -1304,8 +1331,10 @@ The port retains the prepared-store implementation and its behavior tests:
   an open mention menu re-ranks a large roster once instead of per page. The
   channel avatar preview reads at most the first 1,024 members; only the mention
   menu reads a whole large roster. Narrow row profile selectors,
-  and request-warmed avatars (fetched and decoded, nothing retained; disabled
-  under the Save-Data preference). Signature verification yields in batches.
+  and request-warmed avatars (up to eight fetched and decoded at once, nothing
+  retained; a warmed avatar then mounts eagerly, so WebKit reuses its memory
+  cache; disabled under the Save-Data preference). Signature verification
+  yields in batches.
 - Account/relay-scoped IndexedDB: 64 records / 8 MiB global disk budget, 24-hour
   expiry. Signed cached events are reverified before display. The same database
   stores account/relay-scoped startup discovery and sidebar organization (a separate
@@ -1337,6 +1366,12 @@ The relay service restores a read-only session from the account/relay-scoped cac
 concurrently with the real connection handshake. Saved groups, stars and channel
 names are display data, not a confirmed preference mutation base. No cache means
 the ordinary cold connection flow; unavailable/corrupt storage never grants access.
+The read-only session maps media URLs as the connection will, so restored avatars,
+emoji and thumbnails show their images on the first frame instead of after the
+handshake. On desktop they load through `buzz-media`, usually from its saved
+images; on web, relay media waits for the connection's proxy and only external
+`https` images show before it. Because the URLs stay the same, an image that
+failed while offline is requested again once the connection comes up.
 
 With no saved selection, Messages opens the first channel the relay flags
 `auto_join` (its starter channel for new members), then the first non-Solo

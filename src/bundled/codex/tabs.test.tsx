@@ -2241,7 +2241,7 @@ it("separates identity fields from runtime settings without changing the stored 
     screen.queryByRole("button", { name: "Huddle voice" }),
   ).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("Sessions")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Session scope")).not.toBeInTheDocument();
   expect(screen.queryByText("Runtime diagnostics")).not.toBeInTheDocument();
   view.rerender(<Settings {...props} settingsSection="runtime" />);
   expect(
@@ -2250,7 +2250,7 @@ it("separates identity fields from runtime settings without changing the stored 
     "Determines which voice your agent speaks with in Huddles (Codex only). Codex default",
   );
   expect(screen.getByLabelText("Workspace")).toBeInTheDocument();
-  expect(screen.getByLabelText("Sessions")).toBeInTheDocument();
+  expect(screen.getByLabelText("Session scope")).toBeInTheDocument();
   expect(screen.queryByText("Runtime diagnostics")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Instructions")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
@@ -2666,7 +2666,7 @@ it.each([true, false])(
     const agent = "a".repeat(64);
     const root = "e".repeat(64);
     const place = JSON.stringify(["channel", root]);
-    const prefix = `buzz.codex.sessions.v18:test:${agent}`;
+    const prefix = `buzz.codex.sessions.v19:test:${agent}`;
     const items = new Map([
       [
         prefix,
@@ -2754,7 +2754,7 @@ it.each([false, true])(
       JSON.stringify({ key: "old-session", intent: "existing" }),
     );
     await storage.set(
-      `buzz.codex.sessions.v18:test:${agent}:session:old-session`,
+      `buzz.codex.sessions.v19:test:${agent}:session:old-session`,
       JSON.stringify({
         [place]: { threadId: "old-thread", workspace: "/guest" },
       }),

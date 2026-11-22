@@ -107,6 +107,8 @@ function prompt(
   };
 }
 
+export { withNotices } from "../../features/agents/activity-transcript";
+
 /** Transcript lines as turns, each opened by a prompt. Claude Code records
  * some Buzz steers as queued-command attachments within the active turn. */
 export function claudeTurns(
