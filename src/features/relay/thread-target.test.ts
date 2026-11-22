@@ -3,6 +3,7 @@ import { createRelaySession } from "./session";
 import { createThreadView } from "./threads";
 import { ReadError } from "./errors";
 import type { ReadFilter, RelayEvent } from "./events";
+import type { Priority } from "./reader";
 import type { LiveCallbacks } from "./live";
 import {
   bounds,
@@ -29,9 +30,15 @@ const aux = (kind: number, target: RelayEvent, content = "", time = 10001) =>
   signed(alice, { kind, content, created_at: time, tags: [["e", target.id]] });
 function setup(id = reply.id, subthread = false) {
   const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
+  // Each read's priority, by its filters.
+  const priorities = new Map<readonly ReadFilter[], Priority | undefined>();
   let traffic!: LiveCallbacks;
   const owner = createRelaySession({
     ...wire.transport,
+    query(filters, signal, id, priority) {
+      priorities.set(filters, priority);
+      return wire.transport.query(filters, signal, id, priority);
+    },
     subscribe(callbacks) {
       traffic = callbacks;
       return { update() {}, retry() {}, dispose() {} };
@@ -41,6 +48,7 @@ function setup(id = reply.id, subthread = false) {
   return {
     ...wire,
     ...owner,
+    priorities,
     traffic,
     view: owner.session.thread("a", id, { exact: true, subthread }),
   };
@@ -124,8 +132,14 @@ it("admits passive label lookups in the background, so an opened thread's read s
   const held = labels.map((label) => label.refresh());
   await flush();
   const ids = () => h.pending.map((wire) => wire.filters[0]?.ids);
-  // Background reads run one at a time; the other two wait their turn.
-  expect(ids()).toEqual([[linked[0]?.id]]);
+  // Background reads share free slots: each label's target and overlay reads
+  // run at once, at background priority.
+  const labelIds = linked.flatMap((target) => [[target.id], undefined]);
+  expect(ids()).toEqual(labelIds);
+  const labelReads = [...h.pending];
+  expect(labelReads.map(({ filters }) => h.priorities.get(filters))).toEqual(
+    labelReads.map(() => "background"),
+  );
   expect(labels.map((label) => label.snapshot().status)).toEqual([
     "loading",
     "loading",
@@ -142,8 +156,13 @@ it("admits passive label lookups in the background, so an opened thread's read s
   };
   const opened = h.view.refresh();
   await flush();
-  // The overlay read starts with the target read.
-  expect(ids()).toEqual([[linked[0]?.id], [reply.id], undefined]);
+  // The overlay read starts with the target read, both in the foreground.
+  expect(ids()).toEqual([...labelIds, [reply.id], undefined]);
+  expect(
+    h.pending
+      .slice(labelReads.length)
+      .map(({ filters }) => h.priorities.get(filters)),
+  ).toEqual(["foreground", "foreground"]);
   take((filter) => filter.ids?.[0] === reply.id).respond([reply]);
   await flush();
   take((filter) => filter["#e"]?.[0] === reply.id).respond([]);
@@ -154,7 +173,7 @@ it("admits passive label lookups in the background, so an opened thread's read s
     targetStatus: "ready",
     target: { id: reply.id },
   });
-  expect(ids()).toEqual([[linked[0]?.id]]);
+  expect(ids()).toEqual(labelIds);
   for (const label of labels) label.dispose();
   await Promise.all(held);
 });

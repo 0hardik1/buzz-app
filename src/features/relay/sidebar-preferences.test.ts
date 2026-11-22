@@ -485,13 +485,16 @@ it.each([false, true])(
             )
             .catch(() => {})
         : Promise.resolve();
-      const heldProfile = labels ? wire.next() : undefined;
-      if (heldProfile) expect(heldProfile.filters[0]?.kinds).toEqual([0]);
+      // All three profile pages run at once, in background slots.
+      const heldProfiles = wire.pending.splice(0);
+      expect(heldProfiles).toHaveLength(labels ? 3 : 0);
+      for (const held of heldProfiles)
+        expect(held.filters[0]?.kinds).toEqual([0]);
       // Actual hook entry point, with the same already-running background work as replay/Retry.
       const preferences = owner.session.sidebarPreferences.read();
       const request = wire.next();
       expect(request.filters[0]?.kinds).toEqual([30078]);
-      expect(wire.pending).toHaveLength(0); // Remaining profile batches still yield.
+      expect(wire.pending).toHaveLength(0);
 
       // Sidebar state must not consume the capacity reserved for opening a conversation.
       const conversation = owner.session.read([
@@ -505,7 +508,7 @@ it.each([false, true])(
       request.respond([]);
       await expect(preferences).resolves.toEqual(expected);
       expect(decode).toHaveBeenCalledOnce();
-      if (heldProfile) expect(heldProfile.signal?.aborted).toBe(false);
+      for (const held of heldProfiles) expect(held.signal?.aborted).toBe(false);
       owner.dispose();
       await names;
     } finally {

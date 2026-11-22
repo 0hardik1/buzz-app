@@ -40,9 +40,9 @@ test("cold opening bypasses held DM labels; warm switching paints without a head
   app.relay.holdProfiles(app.participants);
   app.relay.holdEose("alpha");
   app.relay.holdEose("beta");
-  // Establish a cold target deterministically: let the actual label read own
-  // the background slot before preferences release the roster warmer. Hold the
-  // host decoder, not a reader slot; demand and all production owners stay real.
+  // Establish a cold target deterministically: let the actual label reads
+  // start before preferences release the roster warmer. Hold the host
+  // decoder, not a reader slot; demand and all production owners stay real.
   const preferences = Promise.withResolvers();
   let preferencesPending = false;
   await page.route("**/sidebar-preferences", async (route) => {
@@ -69,8 +69,14 @@ test("cold opening bypasses held DM labels; warm switching paints without a head
       page.locator(`[data-message-id="${missed.alpha.id}"]`),
     ).toBeVisible();
     expect(heads(app, "alpha")).toHaveLength(2);
-    await expect.poll(() => labelReads().length).toBe(1);
-    expect(labelReads()[0].filter.authors).toHaveLength(500);
+    // Background reads share free slots, so all three pages of the 1,001
+    // participants' labels (500 per read) are in flight at once.
+    await expect.poll(() => labelReads().length).toBe(3);
+    expect(
+      labelReads()
+        .map(({ filter }) => filter.authors.length)
+        .sort((a, b) => b - a),
+    ).toEqual([500, 500, 1]);
     expect(app.report.profileHolds.some((held) => held.pending)).toBe(true);
     await expect.poll(() => preferencesPending).toBe(true);
     const decoded = page.waitForResponse(

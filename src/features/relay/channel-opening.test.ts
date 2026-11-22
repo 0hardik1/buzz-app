@@ -2,6 +2,7 @@ import { assert, expect, it, vi } from "vitest";
 import type { RelayEvent } from "./events";
 import { ReadError } from "./errors";
 import type { LiveCallbacks } from "./live";
+import { READ_SLOTS } from "./reader";
 import { createRelaySession } from "./session";
 import {
   bounds,
@@ -207,6 +208,14 @@ it("a rejected catch-up cannot fail a recreated window after cache clear", async
 
 it("selecting an already queued background catch-up promotes it without releasing profiles", async () => {
   const h = setup();
+  const fillers: Promise<void>[] = [];
+  /** Background name reads for strangers, each its own read. */
+  const filler = () =>
+    fillers.push(
+      h.owner.session.profiles
+        .ensure([keypair().pubkey], "background")
+        .catch(() => {}),
+    );
   try {
     const names = h.owner.session.profiles
       .ensure([h.viewer.pubkey], "background")
@@ -219,23 +228,46 @@ it("selecting an already queued background catch-up promotes it without releasin
     await flush();
     h.wire.next().respond([h.empty("a")]);
     await flush();
+    // Background work fills every read slot beside the held names and Z's
+    // head, and two more reads wait: one takes the slot Z's cancelled head
+    // frees, the other stays queued ahead of Z's catch-up.
+    for (let i = 0; i < READ_SLOTS; i++) filler();
+    await flush();
+    expect(h.wire.pending).toHaveLength(READ_SLOTS - 2);
+    const zRead = () =>
+      h.wire.pending.find(({ filters }) => filters[0]?.["#h"]?.[0] === "z");
     h.live.state({ status: "connected", routes: [] });
     h.live.established("z");
     await flush();
     expect(initialZ.signal?.aborted).toBe(true);
-    expect(h.wire.pending).toHaveLength(0); // Z's inactive catch-up is queued behind profiles.
+    expect(h.wire.pending).toHaveLength(READ_SLOTS - 1);
+    expect(zRead()).toBeUndefined(); // Z's inactive catch-up is queued behind background work.
     h.owner.session.channels.ensure("z");
     h.owner.session.channels.ensure("z");
     await flush();
     expect(heldNames.signal?.aborted).toBe(false);
-    expect(h.wire.pending).toHaveLength(1);
-    const selected = h.wire.next();
-    expect(selected.filters[0]?.["#h"]).toEqual(["z"]);
+    expect(zRead()).toBeUndefined(); // Every slot is still busy.
+    // The next free slot goes to the selected catch-up, ahead of the
+    // background read queued before it.
+    const before = new Set(h.wire.pending);
+    h.wire.pending.pop()?.respond([]);
+    await flush();
+    const started = h.wire.pending.filter((entry) => !before.has(entry));
+    expect(started).toHaveLength(1);
+    expect(started[0]?.filters[0]?.["#h"]).toEqual(["z"]);
+    const selected = started[0];
+    assert.exists(selected);
+    h.wire.pending.splice(h.wire.pending.indexOf(selected), 1);
     selected.respond([h.empty("z")]);
     await flush();
     expect(h.owner.session.channels.window("z").status).toBe("ready");
-    expect(h.wire.pending).toHaveLength(0);
+    expect(heldNames.signal?.aborted).toBe(false);
     heldNames.respond([]);
+    for (let i = 0; i < 4 && h.wire.pending.length; i++) {
+      for (const entry of h.wire.pending.splice(0)) entry.respond([]);
+      await flush();
+    }
+    await Promise.all(fillers);
     await names;
   } finally {
     h.owner.dispose();

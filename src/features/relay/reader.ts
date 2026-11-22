@@ -75,6 +75,9 @@ export const RELAY_READ_BYTES = 8 * 1024 * 1024;
  * on every retry rather than finish it. */
 export const LARGE_READ_DEADLINE_MS = 30_000;
 
+/** Reads a session runs at once: the API lane's and the browser broker's
+ * limit (MAX_INFLIGHT). */
+export const READ_SLOTS = 16;
 /** Session-owned scheduling and cancellation. Equal concurrent reads share work;
  * cancelling one consumer never cancels another. Completion releases all request state. */
 export function createRelayReader(
@@ -82,10 +85,13 @@ export function createRelayReader(
   {
     timeoutMs = 10_000,
     maxPending = 128,
+    slots = READ_SLOTS,
     profiling = createRelayProfiler(),
   }: {
     timeoutMs?: number;
     maxPending?: number;
+    /** Reads running at once. */
+    slots?: number;
     profiling?: RelayProfiler;
   } = {},
 ) {
@@ -93,7 +99,9 @@ export function createRelayReader(
     !Number.isFinite(timeoutMs) ||
     !(timeoutMs > 0) ||
     !Number.isInteger(maxPending) ||
-    maxPending < 1
+    maxPending < 1 ||
+    !Number.isInteger(slots) ||
+    slots < 1
   )
     throw new Error("Invalid relay read budget");
   let sequence = 0;
@@ -163,14 +171,12 @@ export function createRelayReader(
     while (!closed && !suspended && !recovering) {
       const active = [...jobs.values()].filter((job) => job.running);
       const queued = [...jobs.values()].filter((job) => !job.running);
-      // Three reads at a time. Sessions on one relay share the browser
-      // broker's six (MAX_INFLIGHT); a seventh is refused.
-      if (active.length >= 3) return;
-      const background = active.some((job) => job.priority === "background");
+      // Urgent reads start first, then foreground, then background.
+      if (active.length >= slots) return;
       const job =
         queued.find((job) => job.urgent) ??
         queued.find((job) => job.priority === "foreground") ??
-        (!background ? queued[0] : undefined);
+        queued[0];
       if (!job) return;
       job.running = true;
       job.queued();

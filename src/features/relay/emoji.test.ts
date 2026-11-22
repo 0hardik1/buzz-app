@@ -10,6 +10,7 @@ import {
   validEmojiSetTemplate,
   validReactionContent,
 } from "./emoji";
+import { READ_SLOTS } from "./reader";
 import { createRelaySession } from "./session";
 import { foldMessages } from "./fold";
 import { PublishRejected } from "./outbox";
@@ -69,6 +70,34 @@ function session(scope = "a", publishSucceeds = false) {
   );
   owners.push(owner);
   return { ...owner, wire, live, sign, publish, query };
+}
+/** Background name reads for strangers, each its own read, as on a busy
+ * channel open. Past READ_SLOTS they wait for a free slot. */
+function busy(target: ReturnType<typeof session>, count = READ_SLOTS) {
+  return Array.from({ length: count }, () =>
+    target.session.profiles
+      .ensure([keypair().pubkey], "background")
+      .catch(() => {}),
+  );
+}
+const profileReads = (target: ReturnType<typeof session>) =>
+  target.wire.pending.filter((p) => p.filters[0]?.kinds?.includes(0));
+/** Answers one running background name read, freeing its slot. */
+function releaseOne(target: ReturnType<typeof session>) {
+  const [read] = profileReads(target);
+  if (!read) throw new Error("No background read to release");
+  target.wire.pending.splice(target.wire.pending.indexOf(read), 1);
+  read.respond([]);
+}
+/** Answers every background name read, including ones still waiting. */
+async function releaseAll(target: ReturnType<typeof session>) {
+  while (profileReads(target).length) {
+    for (const read of profileReads(target)) {
+      target.wire.pending.splice(target.wire.pending.indexOf(read), 1);
+      read.respond([]);
+    }
+    await vi.advanceTimersByTimeAsync(0);
+  }
 }
 it("normalizes first-wins scheme-agnostic emoji tags and leaves URL fragments out of text references", () => {
   const nonHttpsSet = set(member, 1, [
@@ -378,13 +407,13 @@ it("explicit retries jump background traffic that starves the passive catalog lo
   try {
     const catalog = (target: ReturnType<typeof session>) =>
       target.wire.pending.find((p) => p.filters[0]?.kinds?.includes(30030));
-    // Background profile reads hold the background lane, as on channel open.
-    const busy = (target: ReturnType<typeof session>, key: Key) =>
-      void target.session.profiles
-        .ensure([key.pubkey], "background")
-        .catch(() => {});
+    const catalogReads = (target: ReturnType<typeof session>) =>
+      target.query.mock.calls.filter(([filters]) =>
+        filters[0]?.kinds?.includes(30030),
+      );
     const h = session();
-    busy(h, member);
+    // Background profile reads hold every read slot.
+    busy(h);
     void h.session.emoji.ensure();
     // The passive load spends its whole deadline queued, never reaching the relay.
     await vi.advanceTimersByTimeAsync(9_999);
@@ -395,13 +424,20 @@ it("explicit retries jump background traffic that starves the passive catalog lo
       error: expect.stringContaining("Relay read timed out"),
     });
     h.wire.pending.splice(0);
-    busy(h, relay);
+    // Fresh background traffic holds every slot again, and one more read waits.
+    busy(h, READ_SLOTS + 1);
     await vi.advanceTimersByTimeAsync(0);
-    // The refused send's retry dispatches despite the busy lane.
+    expect(profileReads(h)).toHaveLength(READ_SLOTS);
+    // The refused send's retry takes the next free slot, ahead of the waiting
+    // background read.
     expect(() => h.session.messages.send("c", ":party:")).toThrow(
       /isn't ready/,
     );
     await vi.advanceTimersByTimeAsync(0);
+    expect(catalog(h)).toBeUndefined();
+    releaseOne(h);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(profileReads(h)).toHaveLength(READ_SLOTS - 1);
     catalog(h)?.respond([set()]);
     await vi.advanceTimersByTimeAsync(0);
     expect(h.session.emoji.snapshot().status).toBe("ready");
@@ -410,17 +446,24 @@ it("explicit retries jump background traffic that starves the passive catalog lo
       h.session.outbox?.snapshot().find((item) => item.event.id === id)?.event
         .tags,
     ).toContainEqual(["emoji", "party", url]);
+    await releaseAll(h);
     // A retry while the passive load is still queued supersedes it.
     const queued = session("b");
-    busy(queued, member);
+    busy(queued);
     void queued.session.emoji.ensure();
     await vi.advanceTimersByTimeAsync(0);
     expect(catalog(queued)).toBeUndefined();
     const retry = queued.session.emoji.refresh();
     await vi.advanceTimersByTimeAsync(0);
+    releaseOne(queued);
+    await vi.advanceTimersByTimeAsync(0);
     catalog(queued)?.respond([set()]);
     await retry;
     expect(queued.session.emoji.snapshot().status).toBe("ready");
+    // The superseded passive load never reaches the relay, even once every
+    // slot is free.
+    await releaseAll(queued);
+    expect(catalogReads(queued)).toHaveLength(1);
   } finally {
     vi.useRealTimers();
   }
@@ -532,9 +575,8 @@ it("active catalog demand bypasses queued warm-up and recovers a cold failure wi
   vi.useFakeTimers();
   try {
     const h = session();
-    void h.session.profiles
-      .ensure([member.pubkey], "background")
-      .catch(() => {});
+    // Background work holds every read slot, and one more read waits.
+    busy(h, READ_SLOTS + 1);
     void h.session.emoji.ensure();
     await vi.advanceTimersByTimeAsync(0);
     const catalog = () =>
@@ -544,7 +586,14 @@ it("active catalog demand bypasses queued warm-up and recovers a cold failure wi
     expect(catalog()).toBeUndefined();
     const active = h.session.emoji.ensure("foreground");
     await vi.advanceTimersByTimeAsync(0);
+    expect(catalog()).toBeUndefined();
+    // The next free slot goes to the demanded catalog, ahead of the waiting
+    // background read.
+    releaseOne(h);
+    await vi.advanceTimersByTimeAsync(0);
     expect(catalog()).toBeDefined();
+    expect(profileReads(h)).toHaveLength(READ_SLOTS - 1);
+    await releaseAll(h);
     catalog()?.fail(new Error("catalog unavailable"));
     await active;
     expect(h.session.emoji.snapshot().status).toBe("error");

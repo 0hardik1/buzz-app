@@ -247,11 +247,13 @@ type Ticket = {
   reject(error: Error): void;
   abort(): void;
 };
-/** One host/principal API lane, bounded like the broker's six-request ceiling.
+/** Requests one API lane runs at once, like the broker's MAX_INFLIGHT. */
+export const API_ACTIVE_LIMIT = 16;
+/** One host/principal API lane, bounded like the broker's request ceiling.
  * Available capacity dispatches immediately; only server cooldowns pause starts.
  * Cooldowns reject queued work rather than spending a read's 10s deadline. */
 export function createApiAdmission() {
-  const activeLimit = 6;
+  const activeLimit = API_ACTIVE_LIMIT;
   const artifactActiveLimit = 4;
   const queuedLimit = 128;
   const artifactQueuedLimit = 120;

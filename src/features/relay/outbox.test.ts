@@ -322,9 +322,9 @@ it("confirms an accepted send ahead of held author enrichment, but retries in ba
   expect(names.signal?.aborted).toBe(false);
   first.respond([]);
   await vi.advanceTimersByTimeAsync(501);
-  expect(h.pending).toHaveLength(0); // Retry yields to the still-held background name read.
-  names.respond([]);
-  await vi.advanceTimersByTimeAsync(0);
+  // Background reads share free slots, so the retry runs beside the still-held
+  // background name read.
+  expect(names.signal?.aborted).toBe(false);
   for (const delay of [1500, 4000, 10000, null]) {
     const retry = h.next();
     expect(retry.filters).toEqual([{ ids: [id], limit: 1 }]);
@@ -332,6 +332,8 @@ it("confirms an accepted send ahead of held author enrichment, but retries in ba
     retry.respond([]);
     await vi.advanceTimersByTimeAsync(delay ?? 20000);
   }
+  names.respond([]);
+  await vi.advanceTimersByTimeAsync(0);
   expect(h.pending).toHaveLength(0);
   expect(
     h.query.mock.calls.filter(([filters]) => filters[0]?.ids?.includes(id)),

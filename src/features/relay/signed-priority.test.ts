@@ -2,7 +2,8 @@
 
 import { afterEach, expect, it, vi } from "vitest";
 import { connectSignedTransport } from "./transport";
-import { createRelayReader } from "./reader";
+import { API_ACTIVE_LIMIT } from "./http-admission";
+import { createRelayReader, READ_SLOTS } from "./reader";
 import { hostSigner } from "./testing";
 afterEach(() => {
   vi.useRealTimers();
@@ -23,22 +24,23 @@ it("production reader prioritizes queued work at real capacity, not a clock inte
   );
   const r = createRelayReader(t);
   try {
-    const active = [1, 2, 3].map((limit) =>
-      r.reader.read([{ kinds: [0], limit }]),
+    const full = READ_SLOTS;
+    const active = Array.from({ length: full }, (_, i) =>
+      r.reader.read([{ kinds: [0], limit: i + 1 }]),
     );
-    await vi.waitFor(() => expect(calls).toHaveLength(3));
-    const b = r.reader.read([{ kinds: [0], limit: 4 }], {
+    await vi.waitFor(() => expect(calls).toHaveLength(full));
+    const b = r.reader.read([{ kinds: [0], limit: full + 1 }], {
       priority: "background",
     });
-    const f = r.reader.read([{ kinds: [0], limit: 5 }], {
+    const f = r.reader.read([{ kinds: [0], limit: full + 2 }], {
       priority: "foreground",
     });
     release.shift()?.();
-    await vi.waitFor(() => expect(calls).toHaveLength(4));
-    expect(calls.at(-1)).toBe(5);
+    await vi.waitFor(() => expect(calls).toHaveLength(full + 1));
+    expect(calls.at(-1)).toBe(full + 2);
     release.shift()?.();
-    await vi.waitFor(() => expect(calls).toHaveLength(5));
-    expect(calls.at(-1)).toBe(4);
+    await vi.waitFor(() => expect(calls).toHaveLength(full + 2));
+    expect(calls.at(-1)).toBe(full + 1);
     for (const finish of release) finish();
     await Promise.all([...active, b, f]);
   } finally {
@@ -58,28 +60,29 @@ it("signed transport forwards query priority to host request admission", async (
     "https://priority-forwarding.test",
     "relay",
   );
-  const active = [1, 2, 3, 4, 5, 6].map((limit) =>
-    t.query([{ kinds: [0], limit }]),
+  const full = API_ACTIVE_LIMIT;
+  const active = Array.from({ length: full }, (_, i) =>
+    t.query([{ kinds: [0], limit: i + 1 }]),
   );
-  await vi.waitFor(() => expect(calls).toHaveLength(6));
+  await vi.waitFor(() => expect(calls).toHaveLength(full));
   const background = t.query(
-    [{ kinds: [0], limit: 7 }],
+    [{ kinds: [0], limit: full + 1 }],
     undefined,
     "read",
     "background",
   );
   const foreground = t.query(
-    [{ kinds: [0], limit: 8 }],
+    [{ kinds: [0], limit: full + 2 }],
     undefined,
     "read",
     "foreground",
   );
   release.shift()?.();
-  await vi.waitFor(() => expect(calls).toHaveLength(7));
-  expect(calls.at(-1)).toBe(8);
+  await vi.waitFor(() => expect(calls).toHaveLength(full + 1));
+  expect(calls.at(-1)).toBe(full + 2);
   release.shift()?.();
-  await vi.waitFor(() => expect(calls).toHaveLength(8));
-  expect(calls.at(-1)).toBe(7);
+  await vi.waitFor(() => expect(calls).toHaveLength(full + 2));
+  expect(calls.at(-1)).toBe(full + 1);
   for (const finish of release) finish();
   await Promise.all([...active, background, foreground]);
 });

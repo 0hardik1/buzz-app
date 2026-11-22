@@ -15,7 +15,7 @@ function setup(options: Parameters<typeof createRelayReader>[1] = {}) {
     () => new Promise<void>((resolve) => turns.push(resolve)),
   );
   const wire = scriptedTransport("viewer", "relay");
-  const owner = createRelayReader(wire.transport, options);
+  const owner = createRelayReader(wire.transport, { slots: 3, ...options });
   owners.push(owner);
   return { ...wire, ...owner, read: owner.reader.read };
 }
@@ -33,7 +33,8 @@ afterEach(async () => {
 });
 
 it("settles a failed read immediately but fences all dispatch until a host task", async () => {
-  const h = setup();
+  // One slot, so the second read waits in the queue.
+  const h = setup({ slots: 1 });
   const error = new TypeError("Load failed");
   const first = h.read(filter("emoji"), { priority: "background" });
   const caught = first.catch((reason) => reason);
@@ -50,8 +51,9 @@ it("settles a failed read immediately but fences all dispatch until a host task"
   await flush();
   expect(h.pending).toHaveLength(0);
   await nextTurn();
-  expect(h.pending).toHaveLength(2);
+  expect(h.pending).toHaveLength(1);
   h.next().respond([]);
+  await flush();
   h.next().respond([]);
   await Promise.all([queued, retry]);
 });
@@ -59,7 +61,7 @@ it("settles a failed read immediately but fences all dispatch until a host task"
 it.each(["dispose", "invalidate"] as const)(
   "%s cancels queued work before a deferred pump can dispatch it",
   async (action) => {
-    const h = setup();
+    const h = setup({ slots: 1 });
     const first = h
       .read(filter("first"), { priority: "background" })
       .catch(() => {});
@@ -84,7 +86,7 @@ it.each(["dispose", "invalidate"] as const)(
 
 it("retains queued deadlines during recovery and ignores late transport rejection", async () => {
   vi.useFakeTimers();
-  const h = setup({ timeoutMs: 100 });
+  const h = setup({ timeoutMs: 100, slots: 1 });
   const first = h
     .read(filter("first"), { priority: "background" })
     .catch((e) => e);

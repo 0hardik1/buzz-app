@@ -8,6 +8,7 @@ import { logSocketFrame } from "../src/features/developer/traffic.ts";
 import { getLogger, setLogLevel } from "../src/features/developer/logging.ts";
 import { brokerSocket, openBrokerSocket } from "../tests/broker-socket.mjs";
 import { fixtureRelayUrl, fixtureAliases } from "../tests/relay-config.ts";
+import { API_ACTIVE_LIMIT } from "../src/features/relay/http-admission.ts";
 import { createRelayReader } from "../src/features/relay/reader.ts";
 import { createServer, get, request } from "node:http";
 import { createHash, createHmac } from "node:crypto";
@@ -22,7 +23,7 @@ import {
   nip44,
   generateSecretKey,
 } from "nostr-tools";
-import { relayBrokerPlugin } from "./relay-broker.mjs";
+import { MAX_INFLIGHT, relayBrokerPlugin } from "./relay-broker.mjs";
 import {
   CANVAS_MAX_EVENT_BYTES,
   LIVE_CANVAS_BYTES,
@@ -1321,11 +1322,13 @@ test("each community has its own query capacity", async () => {
     return h.post(route, filters, controller.signal);
   };
   try {
-    const primary = Array.from({ length: 6 }, () => post("primary/query"));
-    await vi.waitFor(() => expect(h.calls).toHaveLength(6));
+    const primary = Array.from({ length: MAX_INFLIGHT }, () =>
+      post("primary/query"),
+    );
+    await vi.waitFor(() => expect(h.calls).toHaveLength(MAX_INFLIGHT));
     expect((await h.post("primary/query", filters)).status).toBe(429);
     const secondary = post("secondary/query");
-    await vi.waitFor(() => expect(h.calls).toHaveLength(7));
+    await vi.waitFor(() => expect(h.calls).toHaveLength(MAX_INFLIGHT + 1));
     release();
     for (const response of [...primary, secondary])
       expect((await response).status).toBe(200);
@@ -1347,12 +1350,12 @@ test("local capacity is explicitly unsent, not relay quota; unknown upstream pub
   });
   const controllers = [];
   try {
-    const requests = Array.from({ length: 6 }, () => {
+    const requests = Array.from({ length: MAX_INFLIGHT }, () => {
       const controller = new AbortController();
       controllers.push(controller);
       return h.post("query", filters, controller.signal);
     });
-    await vi.waitFor(() => expect(h.calls).toHaveLength(6));
+    await vi.waitFor(() => expect(h.calls).toHaveLength(MAX_INFLIGHT));
     const refused = await h.post("profile", { name: "Fixture", picture: "" });
     expect(refused.status).toBe(429);
     expect(await refused.json()).toEqual({
@@ -1363,11 +1366,11 @@ test("local capacity is explicitly unsent, not relay quota; unknown upstream pub
     await Promise.all(
       requests.map(async (response) => (await response).text()),
     );
-    expect(h.calls).toHaveLength(6);
+    expect(h.calls).toHaveLength(MAX_INFLIGHT);
     const transport = await connectBrokerTransport(h.base);
     // Generic upstream 503 is not proof of non-delivery (separate fixture below).
     await transport.query(filters);
-    expect(h.calls).toHaveLength(7); // Local capacity did not introduce a relay cooldown.
+    expect(h.calls).toHaveLength(MAX_INFLIGHT + 1); // Local capacity did not introduce a relay cooldown.
   } finally {
     release();
     for (const c of controllers) c.abort();
@@ -1483,15 +1486,14 @@ test("query keeps relay 403 refusals but turns an edge 403 page into a gateway f
 });
 
 test("a queued request's community refusal marks its own response", async () => {
-  // A held sidebar write and five held queries fill the community's six-slot
-  // lane. The next query waits and starts from whichever finishes first, so
+  // A held sidebar write and held queries fill the community's lane. The next query waits and starts from whichever finishes first, so
   // its refusal must mark its own response, not that one's.
   const releases = new Map();
   let holding = true;
   const h = await harness(async (call, count, event) => {
     const filter = call.body?.[0];
     const sidebar = filter?.kinds?.[0] === 30078;
-    if (filter?.limit === 7)
+    if (filter?.limit === 500)
       return new Response("authorization denied\n", { status: 403 });
     if (holding && call.url.endsWith("/query"))
       await new Promise((resolve) =>
@@ -1513,13 +1515,13 @@ test("a queued request's community refusal marks its own response", async () => 
       sectionIds: [],
     });
     await vi.waitFor(() => expect(releases.has("sidebar")).toBe(true));
-    const held = [1, 2, 3, 4, 5].map((limit) =>
-      h.post("query", [{ kinds: [0], limit }]),
+    const held = Array.from({ length: API_ACTIVE_LIMIT - 1 }, (_, i) =>
+      h.post("query", [{ kinds: [0], limit: i + 1 }]),
     );
-    await vi.waitFor(() => expect(releases.size).toBe(6));
-    const queued = h.post("query", [{ kinds: [0], limit: 7 }]);
+    await vi.waitFor(() => expect(releases.size).toBe(API_ACTIVE_LIMIT));
+    const queued = h.post("query", [{ kinds: [0], limit: 500 }]);
     await delay(20);
-    expect(h.calls).toHaveLength(6);
+    expect(h.calls).toHaveLength(API_ACTIVE_LIMIT);
     releases.get(1)();
     const first = await held[0];
     const refused = await queued;

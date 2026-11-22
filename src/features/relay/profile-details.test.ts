@@ -426,22 +426,35 @@ it("retires pending profile reads before reconnect and fences cache clear/dispos
 
 it("promotes a queued background profile read when foreground demand joins it", async () => {
   const wire = scriptedTransport(user.pubkey, keypair().pubkey);
-  const reader = createRelayReader(wire.transport);
+  // One slot, so the profile read queues behind background work.
+  const reader = createRelayReader(wire.transport, { slots: 1 });
   const directory = createProfileDirectory(reader.reader);
   try {
-    // Unrelated background work holds the reader's only background slot.
+    // Unrelated background work holds the slot, and more waits ahead of the
+    // profile read.
     const held = reader.reader.read([{ kinds: [3], limit: 1 }], {
+      priority: "background",
+    });
+    const earlier = reader.reader.read([{ kinds: [10002], limit: 1 }], {
       priority: "background",
     });
     const enrichment = directory.ensure([user.pubkey], "background");
     expect(wire.pending).toHaveLength(1);
     const demanded = directory.ensure([user.pubkey], "foreground");
-    expect(wire.pending).toHaveLength(2);
-    wire.pending[1]?.respond([profile(user, { name: "Mic" })]);
-    await Promise.all([enrichment, demanded]);
-    expect(directory.queries.snapshot().get(user.pubkey)?.name).toBe("Mic");
+    expect(wire.pending).toHaveLength(1);
     wire.next().respond([]);
     await held;
+    // The promoted profile read takes the slot ahead of the earlier
+    // background read.
+    await vi.waitFor(() => expect(wire.pending).toHaveLength(1));
+    expect(wire.pending[0]?.filters[0]?.kinds).toEqual([0]);
+    wire.next().respond([profile(user, { name: "Mic" })]);
+    await Promise.all([enrichment, demanded]);
+    expect(directory.queries.snapshot().get(user.pubkey)?.name).toBe("Mic");
+    await vi.waitFor(() => expect(wire.pending).toHaveLength(1));
+    expect(wire.pending[0]?.filters[0]?.kinds).toEqual([10002]);
+    wire.next().respond([]);
+    await earlier;
   } finally {
     directory.dispose();
     reader.dispose();

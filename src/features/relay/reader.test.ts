@@ -5,7 +5,7 @@ import { flush, scriptedTransport } from "./testing";
 const owners: ReturnType<typeof createRelayReader>[] = [];
 function setup(options: Parameters<typeof createRelayReader>[1] = {}) {
   const scripted = scriptedTransport("viewer", "relay");
-  const owner = createRelayReader(scripted.transport, options);
+  const owner = createRelayReader(scripted.transport, { slots: 3, ...options });
   owners.push(owner);
   return { ...scripted, ...owner, read: owner.reader.read };
 }
@@ -39,18 +39,36 @@ it("shares equivalent concurrent filters but keeps each consumer's cancellation 
   next().respond([]);
   await again;
 });
-it("reserves foreground capacity and promotes an existing queued background read", async () => {
+it("runs background reads in parallel, starts foreground work first and promotes a queued background read", async () => {
   const { read, pending, next } = setup();
-  const a = read(filter("a"), { priority: "background" });
-  const b = read(filter("b"), { priority: "background" });
-  expect(pending).toHaveLength(1);
-  const promoted = read(filter("b"));
-  const c = read(filter("c"));
-  expect(pending).toHaveLength(3);
+  const heads = (): unknown[] =>
+    pending.map(({ filters }) => filters[0]?.["#h"]?.[0]);
+  const running = ["a", "b"].map((id) =>
+    read(filter(id), { priority: "background" }),
+  );
+  const c = read(filter("c"), { priority: "background" });
+  const d = read(filter("d"), { priority: "background" });
+  const promoted = read(filter("d"));
+  expect(heads()).toEqual(["a", "b", "c"]);
   next().respond([]);
-  next().respond([]);
-  next().respond([]);
-  await Promise.all([a, b, c, promoted]);
+  await flush();
+  expect(heads()).toEqual(["b", "c", "d"]);
+  while (pending.length) next().respond([]);
+  await Promise.all([...running, c, d, promoted]);
+});
+it("runs sixteen reads at a time by default", async () => {
+  const scripted = scriptedTransport("viewer", "relay");
+  const owner = createRelayReader(scripted.transport);
+  owners.push(owner);
+  const reads = Array.from({ length: 17 }, (_, i) =>
+    owner.reader.read(filter(String(i)), { priority: "background" }),
+  );
+  expect(scripted.pending).toHaveLength(16);
+  scripted.next().respond([]);
+  await flush();
+  expect(scripted.pending).toHaveLength(16);
+  while (scripted.pending.length) scripted.next().respond([]);
+  await Promise.all(reads);
 });
 it("starts urgent reads ahead of queued work without raising the cap", async () => {
   const { read, pending, next } = setup();
@@ -77,7 +95,8 @@ it("starts urgent reads ahead of queued work without raising the cap", async () 
   await Promise.all([...running, queued, hovered, urgent, opened]);
 });
 it("removes cancelled queued work and rejects late results after invalidation", async () => {
-  const { read, next, pending, invalidate } = setup();
+  // One slot, so the second read waits in the queue.
+  const { read, next, pending, invalidate } = setup({ slots: 1 });
   const old = read(filter("a"), { priority: "background" });
   const wire = next();
   const controller = new AbortController();
@@ -240,7 +259,8 @@ it.each(["success", "failure", "cancellation"] as const)(
   "navigation fences %s completion, new reads and promotion until a resumed render",
   async (outcome) => {
     const page = documentLife();
-    const h = setup();
+    // One slot, so the second read waits in the queue.
+    const h = setup({ slots: 1 });
     const controller = new AbortController();
     const running = h.read(filter("running"), {
       priority: "background",
@@ -265,8 +285,9 @@ it.each(["success", "failure", "cancellation"] as const)(
     expect(h.pending).toHaveLength(0);
     // A cancelled navigation renders the same document again, without pageshow.
     page.render();
-    await vi.waitFor(() => expect(h.pending).toHaveLength(2));
+    await vi.waitFor(() => expect(h.pending).toHaveLength(1));
     h.next().respond([]);
+    await vi.waitFor(() => expect(h.pending).toHaveLength(1));
     h.next().respond([]);
     await Promise.all([queued, retry]);
   },
@@ -313,7 +334,8 @@ it("paused work retains deadlines and cancellation without dispatching on expiry
 
 it("disposal settles paused work and removes lifecycle callbacks and pending renders", async () => {
   const page = documentLife();
-  const h = setup();
+  // One slot, so the second read waits in the queue.
+  const h = setup({ slots: 1 });
   const running = h.read(filter("running"), { priority: "background" });
   const wire = h.next();
   const queued = h.read(filter("queued"), { priority: "background" });

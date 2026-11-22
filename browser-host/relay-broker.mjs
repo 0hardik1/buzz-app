@@ -180,9 +180,10 @@ function validProfilePicture(value) {
   }
 }
 
+/** Queries one community runs upstream at once; the next is refused. */
+export const MAX_INFLIGHT = 16;
 const MAX_FILTERS = 4,
   MAX_LIMIT = 500,
-  MAX_INFLIGHT = 6,
   UPSTREAM_TIMEOUT_MS = 20000,
   KEEPALIVE_MS = 60000;
 
