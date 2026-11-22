@@ -219,7 +219,7 @@ function setup({
         ]);
     }
   };
-  const element = {
+  const element = Object.assign(new EventTarget(), {
     clientWidth: 1124,
     clientHeight: 668,
     scrollHeight: 3706,
@@ -239,7 +239,7 @@ function setup({
           getBoundingClientRect: () => ({ top: y + 32, bottom: y + 80 }),
         }),
       })),
-  };
+  });
   const handle = {
     scrollOffset: 3038,
     scrollSize: 3649.5,

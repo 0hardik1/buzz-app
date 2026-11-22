@@ -213,7 +213,8 @@ export type ConversationPresentation = Readonly<{
    * own pending sends need no events. */
   ids: readonly string[];
   /** Proven events (e.g. from `snapshotRead`); the reader keeps the rows named by
-   * `ids` and their edits, reactions and deletions, and adds live ones itself. */
+   * `ids` and their edits, reactions and deletions, plus other events in `events`
+   * within its limits as deletion evidence, and adds live ones itself. */
   events: readonly EventData[];
   /** Thread only, display only: the earlier presented row each row nests under.
    * Unknown, later or cyclic parents put the row at the top level. Absent: Buzz's branches. */

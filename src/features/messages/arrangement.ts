@@ -3,7 +3,9 @@ import {
   useEffectEvent,
   useLayoutEffect,
   useMemo,
+  useRef,
   useSyncExternalStore,
+  type RefObject,
 } from "react";
 import type {
   ConversationPresentation,
@@ -41,6 +43,7 @@ export type EvidenceState = Readonly<{
   ids: readonly string[];
   tracked: ReadonlyMap<string, EventData>;
   dependencies: ReadonlyMap<string, EventData>;
+  candidates: ReadonlyMap<string, EventData>;
   root: EventData | undefined;
   live: ReadonlyMap<string, RelayEvent>;
 }>;
@@ -56,13 +59,23 @@ const exceeds = (
   l: PresentationLimits,
 ) => events.size > l.events || listByteSize([...events.values()]) > l.bytes;
 
-/** Canonical event set passed to `session.retain().set(...)` and `foldRows`. */
+/** Canonical event set passed to `foldRows`. */
 export function allEvidence(state: EvidenceState) {
   const all = new Map<string, EventData>(state.tracked);
   for (const [id, event] of state.dependencies)
     if (!all.has(id)) all.set(id, event);
   if (state.root && !all.has(state.root.id)) all.set(state.root.id, state.root);
   return all;
+}
+
+/** Event set held in `session.retain()`: active evidence plus bounded
+ * non-presented candidates so live multi-target auxiliaries pass session
+ * visibility without depending on an external plugin hold. */
+export function heldEvidence(state: EvidenceState) {
+  const held = allEvidence(state);
+  for (const [id, event] of state.candidates)
+    if (!held.has(id)) held.set(id, event);
+  return held;
 }
 
 function collectDependencies(
@@ -115,11 +128,49 @@ function inReaderScope(
         );
 }
 
+function candidateLimits(limits: PresentationLimits) {
+  const reserveEvents = Number.isFinite(limits.events)
+    ? Math.min(200, Math.floor(limits.events / 4))
+    : 0;
+  const reserveBytes = Math.min(256 * 1024, Math.floor(limits.bytes / 8));
+  return {
+    rows: limits.rows,
+    events: Math.max(0, limits.events - reserveEvents),
+    bytes: Math.max(0, limits.bytes - reserveBytes),
+  };
+}
+
+function boundCandidates(
+  sources: Iterable<EventData>,
+  exclude: (id: string) => boolean,
+  base: ReadonlyMap<string, EventData>,
+  limits: PresentationLimits,
+) {
+  const candidates = new Map<string, EventData>();
+  const baseCount = base.size;
+  if (baseCount >= limits.events) return candidates;
+  let bytes = listByteSize([...base.values()]);
+  if (bytes >= limits.bytes) return candidates;
+  for (const event of sources) {
+    if (baseCount + candidates.size >= limits.events) break;
+    if (exclude(event.id) || candidates.has(event.id)) continue;
+    const size = listByteSize([event]) - 2;
+    const totalCount = baseCount + candidates.size + 1;
+    const nextBytes = bytes + (totalCount > 1 ? 1 : 0) + size;
+    if (nextBytes > limits.bytes) continue;
+    candidates.set(event.id, event);
+    bytes = nextBytes;
+    if (bytes >= limits.bytes) break;
+  }
+  return candidates;
+}
+
 /** Validate a presentation and build its pure evidence closure. */
 export function selectEvidence(
   presentation: ConversationPresentation,
   priorLive: ReadonlyMap<string, RelayEvent>,
   { channelId, rootId, limits }: Scope,
+  priorHeld?: ReadonlyMap<string, EventData>,
 ) {
   if (!isObject(presentation)) return "invalid" as const;
   const { ids, events, parents, open, complete, place } = presentation;
@@ -153,18 +204,49 @@ export function selectEvidence(
     )
       tracked.set(event.id, event);
   growAux([...pool.values()], tracked);
-  const evidence: EvidenceState = {
+  const hasTrackedAux = [...tracked.values()].some((event) =>
+    AUX.has(event.kind),
+  );
+  const dependencies = hasTrackedAux
+    ? collectDependencies(
+        tracked,
+        priorHeld?.size ? new Map([...priorHeld, ...pool]) : pool,
+        rootId,
+      )
+    : new Map<string, EventData>();
+  const root = rootId ? pool.get(rootId) : undefined;
+  const base: EvidenceState = {
     ids: [...ids],
     tracked,
-    dependencies: collectDependencies(tracked, pool, rootId),
-    root: rootId ? pool.get(rootId) : undefined,
+    dependencies,
+    candidates: new Map(),
+    root,
     live: new Map([...priorLive].filter(([id]) => tracked.has(id))),
   };
-  const all = allEvidence(evidence);
+  const all = allEvidence(base);
   if (exceeds(all, limits)) return "limit" as const;
+  const poolRows: EventData[] = [];
+  const poolAux: EventData[] = [];
+  for (const event of pool.values())
+    (AUX.has(event.kind) ? poolAux : poolRows).push(event);
+  const priorRows: EventData[] = [];
+  const priorAux: EventData[] = [];
+  if (priorHeld?.size)
+    for (const event of priorHeld.values())
+      (AUX.has(event.kind) ? priorAux : priorRows).push(event);
+  const candidates = boundCandidates(
+    priorHeld?.size
+      ? [...poolRows, ...priorRows, ...poolAux, ...priorAux]
+      : [...poolRows, ...poolAux],
+    (id) => id === rootId || all.has(id),
+    all,
+    candidateLimits(limits),
+  );
+  const evidence: EvidenceState = { ...base, candidates };
   return {
     evidence,
     all,
+    held: heldEvidence(evidence),
     parents: parents
       ? new Map(
           Object.entries(parents).filter(
@@ -218,7 +300,10 @@ export function applyLiveEvents(
   const dependencies = addedAux.length
     ? collectDependencies(
         tracked,
-        new Map(batch.map((event) => [event.id, event])),
+        new Map([
+          ...state.candidates,
+          ...batch.map((event) => [event.id, event] as const),
+        ]),
         rootId,
         state.dependencies,
       )
@@ -228,15 +313,30 @@ export function applyLiveEvents(
     addedAux.length > 0 ||
     dependencies.size !== state.dependencies.size;
   if (!refold && nextComplete === complete) return { kind: "noop" as const };
-  const evidence: EvidenceState = { ...state, tracked, dependencies, live };
-  const all = allEvidence(evidence);
-  if (refold && exceeds(all, limits)) return { kind: "exceeded" as const };
+  const base: EvidenceState = { ...state, tracked, dependencies, live };
+  const all = allEvidence(base);
+  if (!refold)
+    return {
+      kind: "updated" as const,
+      evidence: base,
+      all,
+      held: heldEvidence(base),
+      complete: nextComplete,
+      refold: false,
+    };
+  const candidates = new Map<string, EventData>();
+  for (const [id, event] of state.candidates)
+    if (id !== rootId && !all.has(id)) candidates.set(id, event);
+  const evidence: EvidenceState = { ...base, candidates };
+  const held = heldEvidence(evidence);
+  if (exceeds(held, limits)) return { kind: "exceeded" as const };
   return {
     kind: "updated" as const,
     evidence,
     all,
+    held,
     complete: nextComplete,
-    refold,
+    refold: true,
   };
 }
 
@@ -323,12 +423,13 @@ export function createArrangement({
       presentation,
       active?.evidence.live ?? new Map(),
       scope,
+      active ? heldEvidence(active.evidence) : undefined,
     );
     if (typeof picked === "string") return picked;
     let hold = active?.hold;
     try {
       hold ??= session.retain();
-      hold.set([...picked.all.values()]);
+      hold.set([...picked.held.values()]);
     } catch {
       if (!active) hold?.dispose();
       return "limit";
@@ -376,7 +477,7 @@ export function createArrangement({
     if (result.kind === "exceeded") return end();
     if (result.refold) {
       try {
-        current.hold.set([...result.all.values()]);
+        current.hold.set([...result.held.values()]);
       } catch {
         return end();
       }
@@ -592,4 +693,145 @@ export function usePlace(
     return arrangement.subscribe(() => capture(read()));
   }, [arrangement, place]);
   return place;
+}
+
+export function focusRecoveryTarget(
+  previousOrder: readonly string[],
+  removedId: string,
+  nextOrder: readonly string[],
+  mounted: (id: string) => boolean,
+  preferredId?: string,
+) {
+  const neighbor = nearestShown(
+    { id: removedId, top: 0, order: previousOrder },
+    mounted,
+  );
+  if (neighbor !== undefined) return neighbor;
+  if (preferredId !== undefined && mounted(preferredId)) return preferredId;
+  return nextOrder.find(mounted);
+}
+
+function focusMessageRow(row: HTMLElement) {
+  const target =
+    row.querySelector<HTMLElement>(":scope > [data-layout]") ?? row;
+  if (!target.hasAttribute("tabindex")) target.tabIndex = -1;
+  target.focus({ preventScroll: true });
+}
+
+export function usePresentedFocusRecovery(
+  scroller: RefObject<HTMLElement | null>,
+  enabled: boolean,
+  display: Display | undefined,
+  rows: readonly { id: string; membership?: unknown }[],
+) {
+  const focused = useRef<{ id: string; node: HTMLElement } | undefined>(
+    undefined,
+  );
+  const previous = useRef<{
+    presented: boolean;
+    order: readonly string[];
+  }>({ presented: false, order: [] });
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    if (!enabled || !element) {
+      focused.current = undefined;
+      return;
+    }
+    const readRow = (node: EventTarget | null) => {
+      if (!(node instanceof HTMLElement)) return undefined;
+      const message = node.closest<HTMLElement>("[data-message-id]");
+      if (message?.dataset.messageId)
+        return { id: message.dataset.messageId, node: message };
+      const activity = node.closest<HTMLElement>("[data-activity-group-id]");
+      if (activity?.dataset.activityGroupId)
+        return { id: activity.dataset.activityGroupId, node: activity };
+      const branch = node.closest<HTMLElement>("[data-depth]");
+      const branchMessage =
+        branch?.firstElementChild?.querySelector<HTMLElement>(
+          "[data-message-id]",
+        );
+      if (branchMessage?.dataset.messageId)
+        return { id: branchMessage.dataset.messageId, node: branchMessage };
+      return undefined;
+    };
+    const current = element.ownerDocument.activeElement;
+    if (current && element.contains(current))
+      focused.current = readRow(current);
+    const onFocusIn = (event: FocusEvent) => {
+      focused.current = readRow(event.target);
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      const next =
+        event.relatedTarget instanceof Node ? event.relatedTarget : null;
+      if (next) {
+        if (!element.contains(next)) focused.current = undefined;
+        return;
+      }
+      const captured = focused.current;
+      if (!captured) return;
+      queueMicrotask(() => {
+        if (focused.current === captured) focused.current = undefined;
+      });
+    };
+    element.addEventListener("focusin", onFocusIn);
+    element.addEventListener("focusout", onFocusOut);
+    return () => {
+      element.removeEventListener("focusin", onFocusIn);
+      element.removeEventListener("focusout", onFocusOut);
+    };
+  }, [scroller, enabled]);
+  useLayoutEffect(() => {
+    const presented = display !== undefined;
+    const nextOrder = rows.map((row) => row.id);
+    const prior = previous.current;
+    previous.current = { presented, order: nextOrder };
+    if (!enabled || (!prior.presented && !presented)) return;
+    const element = scroller.current;
+    const lost = focused.current;
+    if (!element || !lost || element.closest("[inert]")) return;
+    const doc = element.ownerDocument;
+    const active = doc.activeElement;
+    const dropped =
+      !active ||
+      active === doc.body ||
+      active === doc.documentElement ||
+      !active.isConnected;
+    if (!dropped) {
+      if (!element.contains(active)) focused.current = undefined;
+      return;
+    }
+    if (lost.node.isConnected && !lost.node.closest("[inert], [hidden]")) {
+      focused.current = undefined;
+      return;
+    }
+    const selectableOrder = rows.flatMap((row) =>
+      row.membership ? [] : [row.id],
+    );
+    const selectableIds = new Set(selectableOrder);
+    const mounted = new Map<string, HTMLElement>();
+    for (const node of element.querySelectorAll<HTMLElement>(
+      "[data-message-id]",
+    )) {
+      const id = node.dataset.messageId;
+      if (id && selectableIds.has(id) && !node.closest("[inert], [hidden]"))
+        mounted.set(id, node);
+    }
+    const preferred =
+      typeof display?.place === "object" ? display.place.id : undefined;
+    const nextId = focusRecoveryTarget(
+      prior.order,
+      lost.id,
+      selectableOrder,
+      (id) => mounted.has(id),
+      preferred,
+    );
+    const nextRow = nextId !== undefined ? mounted.get(nextId) : undefined;
+    if (nextId !== undefined && nextRow) {
+      focusMessageRow(nextRow);
+      focused.current = { id: nextId, node: nextRow };
+    } else {
+      focused.current = undefined;
+      element.focus({ preventScroll: true });
+    }
+  }, [scroller, enabled, display, rows]);
 }

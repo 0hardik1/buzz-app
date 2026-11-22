@@ -71,21 +71,35 @@ export function ReplyBranch({
       ]);
     };
   }, []);
-  // The thread line vanishes when live updates remove its replies or branch.
-  const collapseRef = useCallback((button: HTMLButtonElement | null) => {
-    if (!button) return;
-    return () => {
-      if (document.activeElement !== button) return;
-      const branch = button.closest<HTMLElement>("[data-depth]");
-      recoverFocus(button, [
-        branch?.querySelector<HTMLElement>("[data-message-id]"),
-        branch?.parentElement
-          ?.closest("[data-depth]")
-          ?.querySelector<HTMLElement>("[data-message-id]"),
-        threadHistory(button),
-      ]);
-    };
+  const recoverFromBranchControl = useCallback((button: HTMLButtonElement) => {
+    if (document.activeElement !== button) return;
+    const branch = button.closest<HTMLElement>("[data-depth]");
+    recoverFocus(button, [
+      branch?.querySelector<HTMLElement>("[data-message-id]"),
+      branch?.parentElement
+        ?.closest("[data-depth]")
+        ?.querySelector<HTMLElement>("[data-message-id]"),
+      threadHistory(button),
+    ]);
   }, []);
+  const summaryRef = useCallback(
+    (button: HTMLButtonElement | null) => {
+      summaryButton.current = button;
+      if (!button) return;
+      return () => {
+        if (summaryButton.current === button) summaryButton.current = null;
+        recoverFromBranchControl(button);
+      };
+    },
+    [recoverFromBranchControl],
+  );
+  const collapseRef = useCallback(
+    (button: HTMLButtonElement | null) => {
+      if (!button) return;
+      return () => recoverFromBranchControl(button);
+    },
+    [recoverFromBranchControl],
+  );
   return (
     <div
       className={styles.replyBranch}
@@ -99,7 +113,7 @@ export function ReplyBranch({
       {hasReplies && !open && (
         <div className={styles.replyBranchSummary}>
           <Button
-            ref={summaryButton}
+            ref={summaryRef}
             variant="link"
             size="sm"
             data-thread-summary=""
@@ -153,10 +167,19 @@ function recoverFocus(
   queueMicrotask(() => {
     // Exact-link reparenting and explicit collapse restore focus during layout;
     // never override them or a user who has deliberately moved elsewhere.
-    if (removed.isConnected || document.activeElement !== document.body) return;
+    const active = document.activeElement;
+    const dropped =
+      !active ||
+      active === document.body ||
+      active === document.documentElement ||
+      !active.isConnected;
+    if (removed.isConnected || !dropped) return;
     const target = targets.find((element) => element?.isConnected);
     if (!target || target.closest("[inert]")) return;
-    if (!target.hasAttribute("tabindex")) target.tabIndex = -1;
-    target.focus({ preventScroll: true });
+    const focusable = target.hasAttribute("data-message-id")
+      ? (target.querySelector<HTMLElement>(":scope > [data-layout]") ?? target)
+      : target;
+    if (!focusable.hasAttribute("tabindex")) focusable.tabIndex = -1;
+    focusable.focus({ preventScroll: true });
   });
 }

@@ -21,7 +21,12 @@ import { useMessageSelectionCopy } from "./selection-copy";
 import { ReplySummary } from "./ReplySummary";
 import { ReplyBranch } from "./ReplyBranch";
 import { replyTree } from "./reply-tree";
-import { readerMode, useArrangement, usePlace } from "./arrangement";
+import {
+  readerMode,
+  useArrangement,
+  usePlace,
+  usePresentedFocusRecovery,
+} from "./arrangement";
 import { ComposerAccessories } from "../conversation/ComposerAccessories";
 import { useChannelIdentityNames } from "../identity-names/react";
 import { formatPublicKey } from "../../shared/identity/public-key";
@@ -850,6 +855,12 @@ function ThreadMessages({
   const profiles = useRowProfiles(session.profiles, rows);
   const agentPubkeys = useKnownAgentPubkeys(session, profiles);
   const scroller = useRef<HTMLElement>(null);
+  usePresentedFocusRecovery(
+    scroller,
+    arrangement !== undefined,
+    display,
+    shownReplies,
+  );
   const readerBar = useRef<HTMLDivElement>(null);
   const positioned = useRef(false);
   const positionedLatestRequest = useRef<AbortSignal | undefined>(undefined);

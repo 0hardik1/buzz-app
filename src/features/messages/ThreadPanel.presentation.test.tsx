@@ -23,7 +23,13 @@ import { eventDto, type EventData, type RelayEvent } from "../relay/events";
 import type { LiveCallbacks } from "../relay/live";
 import { createRelaySession, type RelaySession } from "../relay/session";
 import type { ThreadSnapshot, ThreadView } from "../relay/threads";
-import { keypair, message, roster, scriptedTransport } from "../relay/testing";
+import {
+  keypair,
+  message,
+  roster,
+  scriptedTransport,
+  signed,
+} from "../relay/testing";
 import type { PageNavigation } from "../navigation/service";
 import type { MessageComposerProps } from "./MessageComposer";
 import type { MessageRowProps } from "./MessageRow";
@@ -50,10 +56,12 @@ vi.mock("./MessageRow", () => ({
       data-day={day || undefined}
       data-stack-previous={stackPrevious || undefined}
     >
-      <span>{row.content}</span>
-      <button type="button" onClick={() => onReply?.(row.id)}>
-        Reply to {row.content}
-      </button>
+      <div data-layout="thread">
+        <span>{row.content}</span>
+        <button type="button" onClick={() => onReply?.(row.id)}>
+          Reply to {row.content}
+        </button>
+      </div>
     </article>
   ),
 }));
@@ -226,7 +234,7 @@ function mount({
       useLayoutEffect(() => {
         onProps?.(accessory);
       });
-      return <span>bar</span>;
+      return <button type="button">bar</button>;
     }),
   ];
   const element = (
@@ -254,6 +262,7 @@ function mount({
     view,
     thread,
     session,
+    receive: callbacks.receive,
     latest,
     rowsOf,
     publish(next: Partial<ThreadSnapshot>) {
@@ -823,4 +832,92 @@ it("keeps editMessages chronological, suppresses arrival counts, and settles rea
     screen.getByRole("button", { name: "Jump to latest" }),
   ).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /new message/i })).toBeNull();
+});
+
+it("transfers focus when a presentation or live deletion removes the focused reply, without stealing focus from reader-bar controls", () => {
+  vi.useFakeTimers();
+  const rowBox = (event: EventData) =>
+    document.querySelector<HTMLElement>(
+      `[data-message-id="${event.id}"] > [data-layout]`,
+    );
+
+  const h = mount({ replies: [a, b, c] });
+  const initial = rowBox(a) as HTMLElement;
+  initial.tabIndex = -1;
+  initial.focus();
+  expect(document.activeElement).toBe(initial);
+
+  h.present({ ids: [b.id, c.id] });
+  expect(document.activeElement).toBe(rowBox(b));
+
+  const dropB = eventDto(
+    signed(other, {
+      kind: 5,
+      content: "",
+      created_at: T + 50,
+      tags: [
+        ["h", "c"],
+        ["e", b.id],
+      ],
+    }),
+  );
+  act(() => {
+    h.receive([dropB], { phase: "live", channelId: "c" });
+  });
+  rowBox(b)?.dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+  );
+  act(() => {
+    vi.advanceTimersToNextFrame();
+  });
+  expect(drawn()).toEqual(["root", "c"]);
+  expect(document.activeElement).toBe(rowBox(c));
+
+  h.present({ ids: [] });
+  expect(document.activeElement).toBe(scroller());
+
+  h.present({ ids: [a.id, c.id] });
+  const barControl = screen.getByRole("button", { name: "bar" });
+  const focusedA = rowBox(a) as HTMLElement;
+  focusedA.tabIndex = -1;
+  focusedA.focus();
+  barControl.focus();
+  h.present({ ids: [c.id] });
+  expect(document.activeElement).toBe(barControl);
+});
+
+it("transfers focus when removing a collapsed reply branch or its nested replies, keeping keyboard selection active", async () => {
+  const rowBox = (event: EventData) =>
+    document.querySelector<HTMLElement>(
+      `[data-message-id="${event.id}"] > [data-layout]`,
+    );
+
+  const h = mount({ replies: [d] });
+  h.present({
+    ids: [a.id, b.id, c.id, d.id],
+    parents: { [b.id]: a.id, [c.id]: a.id },
+  });
+  const summary = screen.getByRole("button", { name: /View 2 replies/ });
+  summary.focus();
+  expect(document.activeElement).toBe(summary);
+  summary.dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+  );
+  h.present({ ids: [d.id] });
+  expect(document.activeElement).toBe(rowBox(d));
+  await Promise.resolve();
+
+  h.present({
+    ids: [a.id, b.id, c.id, d.id],
+    parents: { [b.id]: a.id, [c.id]: a.id },
+  });
+  const branchSummary = screen.getByRole("button", { name: /View 2 replies/ });
+  branchSummary.focus();
+  expect(document.activeElement).toBe(branchSummary);
+  h.present({ ids: [a.id, d.id] });
+  await Promise.resolve();
+  expect(document.activeElement).toBe(rowBox(a));
+
+  fireEvent.keyDown(scroller(), { key: "ArrowDown" });
+  expect(document.activeElement).toBe(rowBox(d));
 });

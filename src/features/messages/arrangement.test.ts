@@ -17,6 +17,7 @@ import {
   applyLiveEvents,
   createArrangement,
   createPlace,
+  focusRecoveryTarget,
   nearestShown,
   placeIntent,
   readerMode,
@@ -737,4 +738,131 @@ it("selectEvidence, applyLiveEvents and readerMode stay pure over plain values",
       revision: 1,
     }).partialReading,
   ).toBe(false);
+});
+
+it("hides a presented row when a delayed live multi-target deletion also names an omitted snapshot reply or root reaction", () => {
+  const { root, replies, events } = thread(2);
+  const [a, b] = replies;
+  const rootReact = reaction(other, root, 25);
+  const { arrangement, receive, frame } = host({ rootId: root.id });
+  const one = lane("one");
+  expect(
+    arrangement.present(one, { ids: [a.id], events: [...events, rootReact] }),
+  ).toBe("shown");
+  expect(ids(arrangement.snapshot()?.rows)).toEqual([a.id]);
+  receive([deletion(other, [a.id, b.id], 30)], live);
+  frame();
+  expect(arrangement.snapshot()?.rows).toEqual([]);
+  expect(arrangement.present(one, { ids: [a.id], events: [root, a] })).toBe(
+    "shown",
+  );
+  expect(arrangement.snapshot()?.rows).toEqual([]);
+  const mixed = host({ rootId: root.id });
+  expect(
+    mixed.arrangement.present(lane("mixed"), {
+      ids: [a.id],
+      events: [root, a, rootReact],
+    }),
+  ).toBe("shown");
+  mixed.receive([deletion(other, [a.id, rootReact.id], 31)], live);
+  mixed.frame();
+  expect(mixed.arrangement.snapshot()?.rows).toEqual([]);
+});
+
+it("keeps a deleted row hidden when a displayed co-target is omitted on same-owner re-present", () => {
+  const { root, replies, events } = thread(2);
+  const [a, b] = replies;
+  const { arrangement, receive, frame } = host({ rootId: root.id });
+  const one = lane("one");
+  expect(arrangement.present(one, { ids: [a.id, b.id], events })).toBe("shown");
+  receive([deletion(other, [a.id, b.id], 30)], live);
+  frame();
+  expect(arrangement.snapshot()?.rows).toEqual([]);
+  expect(arrangement.present(one, { ids: [a.id], events: [root, a] })).toBe(
+    "shown",
+  );
+  expect(arrangement.snapshot()?.rows).toEqual([]);
+});
+
+it("preserves omitted snapshot deletion evidence across same-owner re-presents with slimmer events", () => {
+  const { root, replies, events } = thread(2);
+  const [a, b] = replies;
+  const { arrangement, receive, frame } = host({ rootId: root.id });
+  const one = lane("one");
+  expect(arrangement.present(one, { ids: [a.id], events })).toBe("shown");
+  expect(
+    arrangement.present(one, {
+      ids: [a.id],
+      events: [root, a],
+      place: "start",
+    }),
+  ).toBe("shown");
+  receive([deletion(other, [a.id, b.id], 30)], live);
+  frame();
+  expect(arrangement.snapshot()?.rows).toEqual([]);
+});
+
+it("reserves live headroom when admitting candidates and ends cleanly once held evidence passes limits", () => {
+  const full = thread(3);
+  const fullHost = host({
+    rootId: full.root.id,
+    limits: { rows: 10, events: 4, bytes: 4 << 20 },
+  });
+  const fullLane = lane("full");
+  expect(
+    fullHost.arrangement.present(fullLane, {
+      ids: [full.replies[0].id],
+      events: full.events,
+    }),
+  ).toBe("shown");
+  fullHost.receive([reaction(other, full.replies[0], 30)], live);
+  expect(fullHost.arrangement.status(fullLane)).toBe("shown");
+
+  const { root, replies, events } = thread(2);
+  const [a, b] = replies;
+  const { arrangement, receive } = host({
+    rootId: root.id,
+    limits: { rows: 10, events: 4, bytes: 4 << 20 },
+  });
+  const one = lane("one");
+  expect(arrangement.present(one, { ids: [a.id], events })).toBe("shown");
+  receive([reaction(other, a, 30)], live);
+  expect(arrangement.status(one)).toBe("shown");
+  receive([reaction(viewer, a, 31)], live);
+  expect(arrangement.status(one)).toBe("ended");
+  expect(arrangement.snapshot()).toBeUndefined();
+  expect(arrangement.present(one, { ids: [a.id], events })).toBe("shown");
+  receive([reaction(other, a, 32)], live);
+  expect(arrangement.status(one)).toBe("shown");
+  receive([deletion(other, [a.id, b.id], 33)], live);
+  expect(arrangement.status(one)).toBe("ended");
+  expect(arrangement.snapshot()).toBeUndefined();
+});
+
+it("keeps a re-ranked row and falls back to named placement, first mounted row, or undefined for focus recovery", () => {
+  const mounted = (ids: readonly string[]) => {
+    const set = new Set(ids);
+    return (id: string) => set.has(id);
+  };
+  expect(
+    focusRecoveryTarget(["a", "b"], "b", ["b", "a"], mounted(["b", "a"])),
+  ).toBe("b");
+  expect(
+    focusRecoveryTarget(
+      ["h0", "h1"],
+      "h1",
+      ["p0", "p1"],
+      mounted(["p0", "p1"]),
+      "p1",
+    ),
+  ).toBe("p1");
+  expect(
+    focusRecoveryTarget(
+      ["h0", "h1"],
+      "h1",
+      ["p0", "p1"],
+      mounted(["p0", "p1"]),
+    ),
+  ).toBe("p0");
+  expect(focusRecoveryTarget(["a"], "a", [], mounted([]))).toBeUndefined();
 });

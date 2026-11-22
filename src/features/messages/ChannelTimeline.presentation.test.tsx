@@ -23,7 +23,13 @@ import type { ChannelMessage, ChannelWindow } from "../relay/contracts";
 import { eventDto, type EventData, type RelayEvent } from "../relay/events";
 import type { LiveCallbacks } from "../relay/live";
 import { createRelaySession, type RelaySession } from "../relay/session";
-import { keypair, message, roster, scriptedTransport } from "../relay/testing";
+import {
+  keypair,
+  message,
+  roster,
+  scriptedTransport,
+  signed,
+} from "../relay/testing";
 import { ChannelTimeline, type ChannelTimelineProps } from "./ChannelTimeline";
 import type { MessageRowProps } from "./MessageRow";
 import type { useReading } from "./use-reading";
@@ -273,7 +279,7 @@ function mount({
       useLayoutEffect(() => {
         onProps?.(accessory);
       });
-      return <span>bar</span>;
+      return <button type="button">bar</button>;
     }),
   ];
   const extensions = {
@@ -298,6 +304,7 @@ function mount({
   return {
     ...view,
     session,
+    receive: callbacks.receive,
     loadOlder,
     retained,
     latest,
@@ -791,4 +798,114 @@ it("keeps a presentation through a StrictMode replay", async () => {
   await act(async () => {});
   expect(drawn()).toEqual(["p0"]);
   expect(h.latest.current?.presentation).toBe("shown");
+});
+
+it("transfers focus to a surviving row or history region when a presentation or live update removes the focused row, without stealing focus from reader-bar controls", async () => {
+  const h = mount();
+  const initial = row(h1) as HTMLElement;
+  initial.tabIndex = -1;
+  initial.focus();
+  expect(document.activeElement).toBe(initial);
+
+  initial.dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+  );
+  h.present({ ids: [p0.id, p1.id, p2.id] });
+  expect(document.activeElement).toBe(row(p0));
+
+  const dropP0 = eventDto(
+    signed(other, {
+      kind: 5,
+      content: "",
+      created_at: T + 2000,
+      tags: [
+        ["h", "c"],
+        ["e", p0.id],
+      ],
+    }),
+  );
+  act(() => {
+    h.receive([dropP0], { phase: "live", channelId: "c" });
+  });
+  row(p0)?.dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+  );
+  frame();
+  expect(drawn()).toEqual(["p1", "p2"]);
+  expect(document.activeElement).toBe(row(p1));
+
+  h.present({ ids: [p2.id] });
+  expect(document.activeElement).toBe(row(p2));
+
+  h.present({ ids: [] });
+  expect(document.activeElement).toBe(scroller());
+
+  h.present({ ids: [p1.id, p2.id] });
+  const barControl = screen.getByRole("button", { name: "bar" });
+  const focusedP1 = row(p1) as HTMLElement;
+  focusedP1.tabIndex = -1;
+  focusedP1.focus();
+  barControl.focus();
+  h.present({ ids: [p2.id] });
+  expect(document.activeElement).toBe(barControl);
+
+  const blurredP2 = row(p2) as HTMLElement;
+  blurredP2.tabIndex = -1;
+  blurredP2.focus();
+  blurredP2.blur();
+  await Promise.resolve();
+  expect(document.activeElement).toBe(document.body);
+  h.present({ ids: [p1.id] });
+  expect(document.activeElement).toBe(document.body);
+
+  h.present({ ids: [p1.id, p2.id] });
+  const surviving = row(p2) as HTMLElement;
+  const transient = document.createElement("button");
+  surviving.append(transient);
+  transient.focus();
+  transient.remove();
+  expect(document.activeElement).toBe(document.body);
+  h.present({ ids: [p1.id, p2.id] });
+  expect(document.activeElement).toBe(document.body);
+});
+
+it("skips membership notice rows when recovering focus after a presented row disappears", () => {
+  const notice: ChannelMessage = {
+    id: "join-1",
+    channelId: "c",
+    authorId: other.pubkey,
+    createdAt: T + 1050,
+    content: "",
+    mentions: [],
+    attachments: [],
+    reactions: [],
+    participants: [],
+    replyCount: 0,
+    membership: {
+      type: "member_joined",
+      actor: viewer.pubkey,
+      target: other.pubkey,
+    },
+  };
+  const sample = (h: ReturnType<typeof mount>) => {
+    const [r0, r2] = h.rowsOf([p0, p2]) as [ChannelMessage, ChannelMessage];
+    return [r0, notice, r2];
+  };
+  let rowsToFold: readonly ChannelMessage[] = [];
+  const h = mount({ fold: () => rowsToFold });
+  rowsToFold = sample(h);
+  h.present({ ids: [p0.id, notice.id, p2.id], events: [] });
+  expect(
+    document.querySelector(`[data-message-id="${notice.id}"]`),
+  ).toBeInTheDocument();
+  const focusedP0 = row(p0) as HTMLElement;
+  focusedP0.tabIndex = -1;
+  focusedP0.focus();
+  expect(document.activeElement).toBe(focusedP0);
+
+  h.present({ ids: [notice.id, p2.id], events: [] });
+  expect(document.activeElement).toBe(row(p2));
+
+  h.present({ ids: [notice.id], events: [] });
+  expect(document.activeElement).toBe(scroller());
 });
