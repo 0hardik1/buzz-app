@@ -156,6 +156,9 @@ export function AllPlugins({
     <PopoverRoot
       open={open}
       onOpenChange={(next) => {
+        // The drag preview follows the pointer outside the popup, which reads
+        // as leaving a hover-opened popover; a reorder in progress keeps it.
+        if (!next && dragging) return;
         if (next) {
           opened.current = false;
           setQuery("");
