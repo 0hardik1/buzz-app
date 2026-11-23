@@ -429,7 +429,7 @@ export function SidebarSection({
         >
           {display === "icons" ? (
             // Tiles keep the list's size, rounded up to fill their last row.
-            <div className={styles.cardTiles} data-card-display="icons">
+            <div data-card-display="icons">
               <SidebarCardDisplayContext.Provider value="icons">
                 {heightScope ? (
                   <ResizableRows
