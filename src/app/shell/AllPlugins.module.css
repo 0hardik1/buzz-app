@@ -55,7 +55,6 @@
   flex: none;
   align-items: center;
   padding-inline-end: var(--space-1);
-  color: var(--text-metadata);
 }
 /* Reorder leads the row and pin ends it. Both always show; unpinned rows keep
    the reorder slot empty so every plugin's icon lines up. */
@@ -66,7 +65,6 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  color: var(--text-metadata);
 }
 .icon {
   display: inline-flex;

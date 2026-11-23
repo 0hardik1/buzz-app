@@ -316,6 +316,7 @@ function PluginRow({
               aria-label={`Reorder ${plugin.label}`}
               title="Drag, or use the arrow keys, to reorder"
               size="sm"
+              variant="glyph"
               icon={<GripVerticalIcon size={16} aria-hidden="true" />}
               onKeyDown={(event) => {
                 const to =
@@ -349,6 +350,7 @@ function PluginRow({
             aria-label={`${plugin.pinned ? "Unpin" : "Pin"} ${plugin.label}`}
             aria-pressed={plugin.pinned}
             size="sm"
+            variant="glyph"
             icon={
               plugin.pinned ? (
                 <PinFilledIcon size={16} aria-hidden="true" />
