@@ -241,7 +241,9 @@ export class ClaudeAuth {
     this.own = undefined;
     const own = await this.settled();
     if (own) return own;
-    return (await this.has()) || (await deviceSetsKey()) ? {} : undefined;
+    // Asked together, so the device list adds no wait to the check.
+    const [key, device] = await Promise.all([this.has(), deviceSetsKey()]);
+    return key || device ? {} : undefined;
   }
 
   /** What Settings needs, asked again: whether the person has a setup of
