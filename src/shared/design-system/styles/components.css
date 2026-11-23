@@ -1861,7 +1861,12 @@
   :where([data-sidebar-cards] [data-sidebar-card])
     .navigation-section-heading[data-disclosure]
     .navigation-section-heading-label
-    > :is(button, details > summary) {
+    > button,
+  :where([data-sidebar-cards] [data-sidebar-card])
+    .navigation-section-heading[data-disclosure]
+    .navigation-section-heading-label
+    > details
+    > summary {
     color: var(--text-standard);
   }
 
