@@ -45,6 +45,9 @@ export const huddleAudio = {
   count(stage: string | undefined, counter: string, value = 1) {
     if (developerMode && stage && value) bump(stage, counter, value);
   },
+  measure(stage: string, values: Record<string, number>) {
+    if (developerMode) stages.set(stage, values);
+  },
   report: (): AudioReport =>
     Object.fromEntries([...stages].map(([key, value]) => [key, { ...value }])),
   reset() {

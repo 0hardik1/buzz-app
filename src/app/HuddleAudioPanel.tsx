@@ -44,7 +44,7 @@ export function HuddleAudioPanel() {
         <InlineHeader
           id="huddle-audio-title"
           title="Huddle audio"
-          subtitle="Frames, gaps and drops at each hop of this device’s Huddles, updated every second. Counts only; no audio is kept."
+          subtitle="Frame counts, gaps and decoded Codex channel levels, updated every second. No audio is kept."
           actions={
             <div className={styles.actions}>
               <Button

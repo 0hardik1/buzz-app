@@ -130,9 +130,25 @@ export async function openVoice(
     if (closed) throw new Error("Voice connection closed");
     if (context.sampleRate !== 48000)
       throw new Error("Agent voice requires 48 kHz audio");
-    capture = new AudioWorkletNode(context, "buzz-huddle-capture");
-    capture.port.onmessage = ({ data }: MessageEvent<Float32Array>) => {
+    capture = new AudioWorkletNode(context, "buzz-huddle-capture", {
+      processorOptions: { measureChannels: huddleAudio.enabled },
+    });
+    let decodedChannels: number | undefined;
+    capture.port.onmessage = ({
+      data,
+    }: MessageEvent<Float32Array | Record<string, number>>) => {
       if (closed) return;
+      if (!(data instanceof Float32Array)) {
+        if (data.channels !== decodedChannels) {
+          decodedChannels = data.channels;
+          console.debug(
+            "[huddle audio] Codex decoded channels",
+            decodedChannels,
+          );
+        }
+        huddleAudio.measure("codex decoded channels", data);
+        return;
+      }
       huddleAudio.frame("codex decoded", 50);
       if (local()) return;
       // The Huddle seat owns bounded buffering and serial native sends.
