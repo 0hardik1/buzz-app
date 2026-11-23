@@ -5,15 +5,16 @@ on:
 permissions:
   contents: read
 jobs:
-  artifact-exit:
+  produce:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 3
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Prepare tiny native fixture and verifier
-        shell: bash
+      - name: Prepare fixture
         run: |
           mkdir -p proof-fixture
           cd proof-fixture
@@ -23,6 +24,29 @@ jobs:
           git rev-parse HEAD > revision
           sha256sum fixture-bridge buzzodz > SHA256SUMS
           tar -cf ../browser-fixture.tar fixture-bridge buzzodz revision SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: upload
+        with:
+          name: artifact-exit-proof
+          path: browser-fixture.tar
+          retention-days: 1
+  artifact-exit:
+    needs: produce
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --init --ipc=host
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Prepare verifier
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           cat > "$RUNNER_TEMP/verify-fixture.sh" <<'VERIFY'
           #!/bin/bash
           set -euo pipefail
@@ -35,19 +59,13 @@ jobs:
           test -x buzzodz
           VERIFY
           printf 'setInterval(() => {}, 1000);\n' > "$RUNNER_TEMP/artifact-keepalive.cjs"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        id: upload
-        with:
-          name: artifact-exit-proof
-          path: browser-fixture.tar
-          retention-days: 1
       - name: Normal download
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         id: normal
         timeout-minutes: 1
         continue-on-error: true
         with:
-          artifact-ids: ${{ steps.upload.outputs.artifact-id }}
+          artifact-ids: ${{ needs.produce.outputs.artifact-id }}
           merge-multiple: true
           path: normal
       - name: Verify normal completion
@@ -66,7 +84,7 @@ jobs:
         env:
           NODE_OPTIONS: --require ${{ runner.temp }}/artifact-keepalive.cjs
         with:
-          artifact-ids: ${{ steps.upload.outputs.artifact-id }}
+          artifact-ids: ${{ needs.produce.outputs.artifact-id }}
           merge-multiple: true
           path: lingering
       - name: Verify timeout retains successful download output
