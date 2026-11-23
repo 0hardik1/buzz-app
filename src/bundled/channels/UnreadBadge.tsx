@@ -95,9 +95,11 @@ export function UnreadBadge({
     muted,
   } = useUnreadState(session, channelId, dm);
   const needs = useNeedsYou(session, channelId);
+  // Solo emphasizes every unread message, and needing you is always unread:
+  // a reply you follow can need you before any message is counted.
   const unread =
     labelUnread === "all" || preserveUnread
-      ? manual || (count ?? 0) > 0
+      ? manual || (count ?? 0) > 0 || needs.waiting
       : quietUnread;
   if (!unread && !needs.waiting && label === undefined) return null;
   const unreadLabel = manual

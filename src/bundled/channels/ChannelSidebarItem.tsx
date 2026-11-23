@@ -41,7 +41,10 @@ import { SidebarCardDisplayContext } from "./SidebarCardDisplay";
 import { DmTypingBadge } from "./DmTypingBadge";
 import { usePresenceStatus } from "../../features/presence/react";
 import { UnreadBadge, UnreadCount, ordinaryUnread } from "./UnreadBadge";
-import { useConfirmedMute } from "../../features/relay/useNeedsYou";
+import {
+  useConfirmedMute,
+  useNeedsYou,
+} from "../../features/relay/useNeedsYou";
 import { SoloChatTitle } from "../../features/solo/SoloChatTitle";
 import { useWorkingAgents } from "./useWorkingAgents";
 import { WorkingAgentsBadge } from "./WorkingAgentsBadge";
@@ -124,12 +127,17 @@ export const ChannelSidebarItem = memo(function ChannelSidebarItem(
     channel.id,
     working,
   );
-  const ordinary = useOrdinaryUnread(
+  const solo = channel.channelType === "solo";
+  // Solo is bold for any unread, as a DM is, and for anything that needs you:
+  // its row has no count, so bold is the only cue the edge pill can lead to.
+  const backlog = useOrdinaryUnread(
     session,
     channel.id,
-    channel.channelType === "dm",
+    channel.channelType === "dm" || solo,
     muted,
   );
+  const needs = useNeedsYou(session, channel.id);
+  const ordinary = backlog || (solo && needs.waiting);
   return (
     <ChannelSidebarItemCore
       {...props}
