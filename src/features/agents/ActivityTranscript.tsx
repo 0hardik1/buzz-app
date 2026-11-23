@@ -458,7 +458,9 @@ export function ActivityTranscript({
               <MemoizedTurn
                 turn={turn}
                 state={
-                  turn.endedAt ? "ended" : (state(turn.turnId) ?? "unknown")
+                  turn.endedAt || turn.outcome
+                    ? "ended"
+                    : (state(turn.turnId) ?? "unknown")
                 }
                 agentName={agentName}
                 openConversation={openConversation}
