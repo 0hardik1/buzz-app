@@ -1,4 +1,5 @@
 import { ownerInstructions } from "../../features/agent-harness/plugin-instructions";
+import { answersAtTopLevel } from "../../features/agents/solo-chat";
 import {
   ProjectSource,
   NO_PROJECT,
@@ -779,7 +780,7 @@ export class PiRuntime {
     const solo =
       (await this.reads(agent.key)?.soloChat(agent.owner, channel, signal)) ??
       false;
-    const topLevel = solo || wake?.topLevel === true;
+    const topLevel = answersAtTopLevel(event, solo, wake);
     if (wake && !wakeLands(wake, topLevel)) return ignored?.();
     // Frozen with the policy: a scope change while this waits must not move
     // its prompt to another conversation than the one it is delivered to.
@@ -887,7 +888,7 @@ export class PiRuntime {
         return turnPrompt({
           ...built,
           agent: agent.key,
-          channelLevel: topLevel && !solo,
+          channelLevel: topLevel && !solo && !!wake,
           ...(wake ? { wake: { ...wake, text: wakePrompt ?? wake.text } } : {}),
         });
       };

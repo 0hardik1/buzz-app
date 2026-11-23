@@ -1,4 +1,5 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: The thread region supports keyboard scrolling and Escape.
+import { ReplyPlacementOption, useReplyPlacement } from "./reply-placement";
 import { hostComposerProvenance } from "./mention-draft";
 import { AgentConnectionSetup } from "../agents/AgentConnectionSetup";
 import { TypingIndicator, useLiveConversationAgents } from "./TypingIndicator";
@@ -1966,9 +1967,7 @@ function ThreadMessages({
             extensions={extensions}
             session={session}
             scope={scope}
-            onReply={
-              snapshot.root && !soloConversation ? targetReply : undefined
-            }
+            onReply={snapshot.root ? targetReply : undefined}
             row={row}
             getThreadRoot={getThreadRoot}
             stackPrevious={inside || continuation}
@@ -2219,12 +2218,26 @@ function ThreadMessages({
   // The reply composer, and the activity lane its TypingIndicator needs.
   const composerRoot =
     !preview &&
-    !soloConversation &&
     (!requireReadyRoot ||
       (snapshot.root?.id === messageId && snapshot.targetStatus === "ready"))
       ? snapshot.root
       : undefined;
   const sourceRootId = subthreadId ? composerRoot?.threadRootId : undefined;
+  // "Reply in subthread": off in a thread you started, so agents answer in
+  // it; on in someone else's, so they answer under you. Replying to a reply
+  // already starts a subthread, and inside one there is no deeper level.
+  const ownThread =
+    !!composerRoot &&
+    (composerRoot.workflowOwnerId ?? composerRoot.authorId) === session.viewer;
+  const inSubthread =
+    !!sourceRootId ||
+    (!!selectedParent?.replyParentId &&
+      selectedParent.replyParentId !== selectedParent.threadRootId);
+  const answer = useReplyPlacement(
+    channelId,
+    inSubthread ? "subthread" : "thread",
+    !ownThread,
+  );
   const retryThread = () => {
     if (showOlderPageStatus) {
       if (scroller.current) captureOlderAnchor(scroller.current);
@@ -2353,7 +2366,7 @@ function ThreadMessages({
                 extensions={extensions}
                 session={session}
                 scope={scope}
-                onReply={soloConversation ? undefined : focusReply}
+                onReply={focusReply}
                 stackNext={joinsLive && snapshot.root.id === lastMessage?.id}
                 row={snapshot.root}
                 representedAgents={stableActivity.agents(
@@ -2529,6 +2542,17 @@ function ThreadMessages({
           replyParentId={
             replyParent ?? (sourceRootId ? composerRoot.id : undefined)
           }
+          replyPlacement={replyParent ? "subthread" : answer.placement}
+          sendOption={
+            <ReplyPlacementOption
+              level={answer.level}
+              checked={!!replyParent || answer.checked}
+              onCheckedChange={(checked) => {
+                answer.choose(checked);
+                if (!checked && replyParent) focusReply();
+              }}
+            />
+          }
           disabled={
             disabled ||
             (requireReadyRoot &&
@@ -2577,6 +2601,7 @@ function ThreadMessages({
           onDraftSaved={onDraftSaved}
           onSend={(id) => {
             onSend?.(id);
+            if (!replyParent) answer.sent();
             targetAnchor.current = undefined;
             positioned.current = true;
             follow.current = !selectedParent;

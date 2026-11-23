@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom";
+import type { ReplyPlacement } from "../relay/thread-reference";
 import { ForwardDisclosure } from "./ForwardDisclosure";
 import { pastedForward } from "./forward-clipboard";
 import { ComposerForward, useComposerForward } from "./ComposerForward";
@@ -371,6 +372,8 @@ export type MessageComposerProps = {
   requireMention?: boolean | undefined;
   chatPresentation?: boolean | undefined;
   trailingTool?: ReactNode;
+  /** A control beside Send for how this message goes out, shown while writing. */
+  sendOption?: ReactNode;
   /** Only while the chat is new: `#` then offers its workspaces first. */
   workspace?: WorkspaceCompletionTarget | undefined;
   inviteAgents?: boolean | undefined;
@@ -400,6 +403,8 @@ export type MessageComposerProps = {
    * seedMentions); other composers read their own channel window. */
   threadSeed?: Pick<ChannelMessage, "id" | "mentions"> | undefined;
   replyParentId?: string | undefined;
+  /** Where the agents this message mentions answer; see `replyPlacement`. */
+  replyPlacement?: ReplyPlacement | undefined;
   /** Bind a timecoded reply to the selected gallery attachment. */
   mediaTargetUrl?: string | undefined;
   replyContext?: ReactNode;
@@ -592,6 +597,7 @@ function Composer({
   sourceRootId,
   threadSeed,
   replyParentId,
+  replyPlacement,
   mediaTargetUrl,
   replyContext,
   mediaTimeSeconds,
@@ -609,6 +615,7 @@ function Composer({
   chatPresentation = false,
   inviteAgents = false,
   trailingTool,
+  sendOption,
   workspace,
   ownerProvenance,
 }: OwnedComposerProps) {
@@ -3479,6 +3486,7 @@ function Composer({
               ...(threadRootId ? { rootId: sourceRootId ?? threadRootId } : {}),
               ...(replyParentId ? { parentId: replyParentId } : {}),
               ...(mediaTargetUrl ? { mediaTargetUrl } : {}),
+              ...(replyPlacement ? { placement: replyPlacement } : {}),
               mentions: recipients,
               references,
               attachments: uploaded,
@@ -3493,16 +3501,21 @@ function Composer({
               content,
               recipients,
               uploaded,
-              ...(replyParentId || references.length || tuned || mediaTargetUrl
+              ...(replyParentId ||
+              references.length ||
+              tuned ||
+              mediaTargetUrl ||
+              replyPlacement
                 ? [replyParentId]
                 : []),
-              ...(references.length || tuned || mediaTargetUrl
+              ...(references.length || tuned || mediaTargetUrl || replyPlacement
                 ? [references]
                 : []),
-              ...(tuned || mediaTargetUrl ? [sentPicks] : []),
-              ...(mediaTargetUrl ? [mediaTargetUrl] : []),
+              ...(tuned || mediaTargetUrl || replyPlacement ? [sentPicks] : []),
+              ...(mediaTargetUrl || replyPlacement ? [mediaTargetUrl] : []),
+              ...(replyPlacement ? [replyPlacement] : []),
             )
-          : references.length || tuned
+          : references.length || tuned || replyPlacement
             ? sender.messages.send(
                 channelId,
                 content,
@@ -3510,7 +3523,8 @@ function Composer({
                 uploaded,
                 undefined,
                 references,
-                ...(tuned ? [sentPicks] : []),
+                ...(tuned || replyPlacement ? [sentPicks] : []),
+                ...(replyPlacement ? [replyPlacement] : []),
               )
             : sender.messages.send(channelId, content, recipients, uploaded);
       }
@@ -4416,6 +4430,7 @@ function Composer({
                 )}
               </ComposerFormattingTools>
             )}
+            {active && !editing.target && sendOption}
             {active &&
               !editing.target &&
               (!submission || ownSoloConversation) &&

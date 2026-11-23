@@ -152,6 +152,35 @@ Only verified available descendant chains appear. Paging can scan unrelated
 source replies; a history limit does not establish complete task history.
 The source conversation uses ordinary thread rendering and navigation.
 
+## Reply placement
+
+A kind 9 message can say where the agents it mentions should answer, with one
+tag: `["buzz:reply", <placement>]`. The composer's "Reply in thread" and
+"Reply in subthread" checkbox sets it. Any client or agent runner may read it;
+it grants nothing and changes no permission.
+
+| Placement | Sent on | The agent answers |
+|---|---|---|
+| `top` | A top-level message | At the channel's top level, omitting `reply` |
+| `thread` | A top-level message or a thread reply | In the message's thread |
+| `subthread` | A thread reply | Under that reply, with `reply_in_subthread` |
+
+Levels stop at three: channel, thread and subthread. A message already in a
+subthread keeps its answer in that subthread whatever it asks, and
+`reply_in_subthread` under a subthread message joins that subthread rather
+than nesting below it. `top` on a thread reply is ignored.
+
+A message without the tag, such as one from an older client, falls back to
+the conversation: a Solo chat answers at top level and anything else in
+threads. Wakes keep their own placement.
+
+The composer's defaults: the top-level composer is checked when other people
+are in the conversation or may join and post, and unchecked with only you and
+your agents. A thread's composer is unchecked in a thread you started and
+checked in someone else's. In a subthread the checkbox shows but is disabled.
+Sending after changing it keeps that choice for that level of that
+conversation, on this device.
+
 ## Local lifecycle evidence
 
 `session.agentActivity.snapshot().local` can include `LocalWork.evidence`.

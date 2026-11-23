@@ -19,7 +19,12 @@ import {
   type ChannelMessage,
 } from "./contracts";
 import { messageAuthor } from "./fold";
-import { isThreadContent, threadReference } from "./thread-reference";
+import {
+  isThreadContent,
+  REPLY_PLACEMENT_TAG,
+  type ReplyPlacement,
+  threadReference,
+} from "./thread-reference";
 import { reactionTarget as reactionTargetId } from "./reaction-target";
 import { safeMessageUrl } from "./message-content";
 import type { EventData } from "./events";
@@ -138,6 +143,11 @@ export function createMessages(
       throw new Error("Choose at most 32 valid mention references");
     return [...new Set(pubkeys)].map((key) => ["mention", key]);
   };
+  // Untyped callers can pass anything; only a known placement is signed.
+  const placementTags = (placement: ReplyPlacement | undefined) =>
+    placement === "top" || placement === "thread" || placement === "subthread"
+      ? [[REPLY_PLACEMENT_TAG, placement]]
+      : [];
   const invocationTags = (
     channelId: string,
     rootId: string,
@@ -488,6 +498,8 @@ export function createMessages(
       recovery?: OutboxRecovery,
       references: readonly string[] = [],
       picks: MentionPicks = {},
+      /** Where mentioned agents answer: `top` or `thread`. */
+      placement?: ReplyPlacement,
     ) {
       if (!channelId) throw new Error("A channel is required");
       const message = attachmentMessage(content, attachments, relayOrigin);
@@ -500,6 +512,7 @@ export function createMessages(
             ...mentionTags(channelId, withDmAgents(channelId, mentions)),
             ...referenceTags(references),
             ...pickTags(channelId, mentions, picks),
+            ...placementTags(placement),
             ...emojiTags(content),
             ...message.tags,
             ...signedMessageTokenTags(),
@@ -523,6 +536,7 @@ export function createMessages(
         references?: readonly string[];
         attachments?: readonly UploadedAttachment[];
         picks?: MentionPicks;
+        placement?: ReplyPlacement;
       },
     ) {
       const event = prepareForward(channelId, row, authorName, note);
@@ -568,6 +582,7 @@ export function createMessages(
             : []),
           ...referenceTags(options.references ?? []),
           ...pickTags(channelId, options.mentions ?? [], options.picks ?? {}),
+          ...placementTags(options.placement),
           ...(mediaTarget ? [[MEDIA_TARGET_TAG, mediaTarget]] : []),
           ...emojiTags(note),
           ...caption.tags,
@@ -672,6 +687,8 @@ export function createMessages(
       references: readonly string[] = [],
       picks: MentionPicks = {},
       mediaTargetUrl?: string,
+      /** Where mentioned agents answer: `thread` or `subthread`. */
+      placement?: ReplyPlacement,
     ) {
       if (!channelId) throw new Error("A channel is required");
       if (!/^[0-9a-f]{64}$/.test(rootId))
@@ -700,6 +717,7 @@ export function createMessages(
           ...invocationTags(channelId, rootId, parentId, recipients),
           ...referenceTags(references),
           ...pickTags(channelId, mentions, picks),
+          ...placementTags(placement),
           ...(mediaTarget ? [[MEDIA_TARGET_TAG, mediaTarget]] : []),
           ...emojiTags(content),
           ...message.tags,
