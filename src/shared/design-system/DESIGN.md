@@ -2161,14 +2161,14 @@ existing gateway export for agent mentions, navigation and placeholders; retain
 its inherited color, relative sizing and decorative-by-default semantics. This
 is a specific product-mark exception, not another general icon family.
 
-Named conversations carry one mark that says who is in them and who can read
-them, replacing member counts and the channel `#`. Group means other people are
-members; solo means no people besides the viewer (agents don't count). Group and
-public uses `GlobeIcon`; group and private uses `LockIcon`; solo and private uses
-`ChatCircleIcon`; solo and public uses `ChatGlobeIcon`, a designer-approved custom
-mark that draws Tabler World's latitude and longitude lines inside the MessageCircle
-outline on the same 24-unit canvas, round caps and stroke width of 2. A
-conversation's own picture replaces its mark. DMs keep their faces and counts.
+Named conversations carry one mark that says who is in them, replacing member
+counts and the channel `#`. Group means other people are members; solo means no
+people besides the viewer (agents don't count). Group and public uses `HashIcon`;
+group and private uses `LockIcon`; solo uses `ChatCircleIcon`, the familiar mark
+for a chat with your agents. A solo conversation others in the community can read adds an `EyeIcon` beside
+its name, the same icon access settings use for view-only, with a hint that says
+so; it gives way to unread counts and sits on a tile's corner. A conversation's
+own picture replaces its mark. DMs keep their faces and counts.
 
 OneDrive is a designer-approved custom brand mark: its complete outline is recreated on
 Phosphor’s square canvas, uses the same current-color and sizing behavior, and stays in
