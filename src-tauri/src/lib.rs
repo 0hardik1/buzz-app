@@ -1336,7 +1336,15 @@ pub fn run() {
         // builds keep theirs apart from the installed app.
         .manage(PluginManager(
             Manager::from_env(dirs::data_dir().map(|dir| dir.join(&identifier)))
-                .map(|manager| manager.with_buzz_version(&buzz_version)),
+                // A dev build reports tauri.conf.json's version, not the release
+                // it becomes, so it checks no plugin's minBuzzVersion.
+                .map(|manager| {
+                    if tauri::is_dev() {
+                        manager
+                    } else {
+                        manager.with_buzz_version(&buzz_version)
+                    }
+                }),
         ))
         .invoke_handler({
             let application_commands = commands::<tauri::Wry>();

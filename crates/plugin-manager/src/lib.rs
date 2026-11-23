@@ -1123,8 +1123,8 @@ impl Manager {
             buzz_version: None,
         })
     }
-    /// Refuse to install a plugin, or update or reload one, when its manifest needs
-    /// a newer Buzz than `version`. The desktop passes its own version. Without
+    /// Refuse to install a plugin, or update, reload or roll one back, when its
+    /// manifest needs a newer Buzz than `version`. The desktop passes its own version. Without
     /// one, as in the `buzzodz` CLI, or with one that does not parse, nothing is
     /// refused.
     pub fn with_buzz_version(mut self, version: &str) -> Self {
@@ -1525,6 +1525,7 @@ impl Manager {
                             return Err(SIGNED_ROLLBACK_ERROR.into());
                         }
                         let a = self.artifact(id, &previous, p.previous_signature.as_ref())?;
+                        a.manifest.check_buzz_version(self.buzz_version)?;
                         p.current = previous;
                         p.current_signature = p.previous_signature.take();
                         p.current_source = p.previous_source.take();
@@ -3370,6 +3371,55 @@ mod tests {
         newer.install(&source).unwrap();
         assert_ne!(installed(&newer).unwrap().revision, first);
         assert!(installed(&manager).is_some());
+    }
+
+    #[test]
+    fn a_rollback_to_a_version_that_needs_a_newer_buzz_is_refused() {
+        let temp = tempfile::tempdir().unwrap();
+        let open = |version: &str| {
+            Manager::open(Some(temp.path().into()), "test", false)
+                .unwrap()
+                .with_buzz_version(version)
+        };
+        let source = temp.path().join("build");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("plugin.js"), "export function apply() {}").unwrap();
+        let install = |manager: &Manager, min: &str| {
+            fs::write(
+                source.join("manifest.json"),
+                format!(
+                    r#"{{"id":"example.page","name":"Example","apiVersion":1,"minBuzzVersion":"{min}"}}"#
+                ),
+            )
+            .unwrap();
+            sign_source(&source);
+            manager
+                .install(&source)
+                .unwrap()
+                .plugins
+                .into_iter()
+                .find(|plugin| plugin.manifest.id == "example.page")
+                .unwrap()
+                .revision
+        };
+        // Installed and updated on Buzz 1.5, then rolled back on Buzz 1.4.
+        let newer = open("1.5.0");
+        install(&newer, "1.5.0");
+        let current = install(&newer, "1.0.0");
+        let older = open("1.4.0");
+        let error = older.change("rollback", "example.page").err().unwrap();
+        assert!(error.contains("needs Buzz 1.5.0 or later"), "{error}");
+        let plugin = older
+            .catalog()
+            .unwrap()
+            .plugins
+            .into_iter()
+            .find(|plugin| plugin.manifest.id == "example.page")
+            .unwrap();
+        assert_eq!(plugin.revision, current);
+        assert!(plugin.previous.is_some());
+        // The Buzz it needs can still roll back.
+        newer.change("rollback", "example.page").unwrap();
     }
 
     #[test]
