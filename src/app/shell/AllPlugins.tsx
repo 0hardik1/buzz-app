@@ -306,6 +306,32 @@ function PluginRow({
       data-drop-target={(drop.isOver && !drag.isDragging) || undefined}
     >
       <NavigationCard>
+        <span className={styles.grip}>
+          {move ? (
+            <IconButton
+              ref={drag.setActivatorNodeRef}
+              // Pointer drag only; the button keeps its own semantics and the
+              // arrow keys below are its keyboard path.
+              {...drag.listeners}
+              aria-label={`Reorder ${plugin.label}`}
+              title="Drag, or use the arrow keys, to reorder"
+              size="sm"
+              icon={<GripVerticalIcon size={16} aria-hidden="true" />}
+              onKeyDown={(event) => {
+                const to =
+                  event.key === "ArrowUp"
+                    ? move.previous
+                    : event.key === "ArrowDown"
+                      ? move.next
+                      : undefined;
+                if (!to) return;
+                event.preventDefault();
+                event.stopPropagation();
+                move.reorder(plugin.key, to);
+              }}
+            />
+          ) : null}
+        </span>
         <NavigationItem
           data-plugin-row=""
           label={plugin.label}
@@ -332,30 +358,6 @@ function PluginRow({
             }
             onClick={() => onPinnedChange(plugin.key, !plugin.pinned)}
           />
-          {move && (
-            <IconButton
-              ref={drag.setActivatorNodeRef}
-              // Pointer drag only; the button keeps its own semantics and the
-              // arrow keys below are its keyboard path.
-              {...drag.listeners}
-              aria-label={`Reorder ${plugin.label}`}
-              title="Drag, or use the arrow keys, to reorder"
-              size="sm"
-              icon={<GripVerticalIcon size={16} aria-hidden="true" />}
-              onKeyDown={(event) => {
-                const to =
-                  event.key === "ArrowUp"
-                    ? move.previous
-                    : event.key === "ArrowDown"
-                      ? move.next
-                      : undefined;
-                if (!to) return;
-                event.preventDefault();
-                event.stopPropagation();
-                move.reorder(plugin.key, to);
-              }}
-            />
-          )}
         </span>
       </NavigationCard>
     </div>

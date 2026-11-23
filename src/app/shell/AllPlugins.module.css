@@ -45,17 +45,16 @@
   padding-inline-end: var(--space-1);
   color: var(--text-metadata);
 }
-/* Pin and reorder appear with the row on pointers that can hover; touch keeps
-   them visible. They hold their space, so revealing them moves nothing. */
-@media (hover: hover) and (pointer: fine) {
-  .actions {
-    opacity: 0;
-  }
-  .row:hover .actions,
-  .row:has(:focus-visible) .actions,
-  .row[data-dragging] .actions {
-    opacity: 1;
-  }
+/* Reorder leads the row and pin ends it. Both always show; unpinned rows keep
+   the reorder slot empty so every plugin's icon lines up. */
+.grip {
+  display: inline-flex;
+  width: var(--size-row);
+  min-height: var(--size-row);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-metadata);
 }
 .icon {
   display: inline-flex;
