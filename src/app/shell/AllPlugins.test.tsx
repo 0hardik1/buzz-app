@@ -19,18 +19,14 @@ const entry = (
   key,
   label: (key[0] ?? "").toUpperCase() + key.slice(1),
   icon: null,
-  enabled: true,
   pinned: false,
-  pinnable: true,
   active: false,
-  toggle: { disabled: false },
   ...overrides,
 });
 
 function setup(plugins: AllPluginsEntry[]) {
   const props = {
     onOpen: vi.fn(),
-    onEnabledChange: vi.fn(),
     onPinnedChange: vi.fn(),
     onPinnedOrderChange: vi.fn(),
   };
@@ -50,14 +46,13 @@ it("keeps pinned plugins in the person's order and sorts the rest A–Z", () => 
     entry("delta"),
     entry("alpha", { pinned: true }),
     entry("charlie"),
-    // Off keeps its pin but lists with the rest until it returns.
-    entry("bravo", { pinned: true, enabled: false, pinnable: false }),
+    entry("bravo"),
   ]);
   expect(pinned.map(({ key }) => key)).toEqual(["zebra", "alpha"]);
   expect(rest.map(({ key }) => key)).toEqual(["bravo", "charlie", "delta"]);
 });
 
-it("filters both sections by name", () => {
+it("filters both groups by name", () => {
   const { pinned, rest } = arrangePlugins(
     [entry("reminders", { pinned: true }), entry("repos"), entry("agents")],
     "RE",
@@ -66,8 +61,8 @@ it("filters both sections by name", () => {
   expect(rest.map(({ key }) => key)).toEqual(["repos"]);
 });
 
-it("shows search only once the list passes the threshold", async () => {
-  const few = Array.from({ length: ALL_PLUGINS_SEARCH_THRESHOLD }, (_, i) =>
+it("shows search only once there are enough plugins to need it", async () => {
+  const few = Array.from({ length: ALL_PLUGINS_SEARCH_THRESHOLD - 1 }, (_, i) =>
     entry(`plugin${i}`),
   );
   setup(few);
@@ -83,59 +78,43 @@ it("shows search only once the list passes the threshold", async () => {
   );
 });
 
-it("pins, switches and opens from the popover", async () => {
-  const props = setup([
-    entry("reminders", { pinned: true }),
-    entry("agents"),
-    entry("harness", { pinnable: false }),
-  ]);
+it("opens and pins from the list, without switches", async () => {
+  const props = setup([entry("reminders", { pinned: true }), entry("agents")]);
   const { user, popup } = await openPopover();
-  expect(
-    within(popup).getByRole("heading", { name: "Pinned" }),
-  ).toBeInTheDocument();
+  expect(within(popup).queryByRole("switch")).not.toBeInTheDocument();
 
   await user.click(within(popup).getByRole("button", { name: "Pin Agents" }));
   expect(props.onPinnedChange).toHaveBeenCalledWith("agents", true);
 
-  await user.click(within(popup).getByRole("switch", { name: "Agents" }));
-  expect(props.onEnabledChange).toHaveBeenCalledWith("agents", false);
+  await user.click(
+    within(popup).getByRole("button", { name: "Unpin Reminders" }),
+  );
+  expect(props.onPinnedChange).toHaveBeenCalledWith("reminders", false);
 
-  // A plugin without a page offers its switch only.
-  expect(
-    within(popup).queryByRole("button", { name: /Harness/ }),
-  ).not.toBeInTheDocument();
-  expect(
-    within(popup).getByRole("switch", { name: "Harness" }),
-  ).toBeInTheDocument();
+  await user.click(within(popup).getByRole("button", { name: "Agents" }));
+  expect(props.onOpen).toHaveBeenCalledWith("agents");
+});
 
-  await user.click(within(popup).getByRole("button", { name: "Reminders" }));
-  expect(props.onOpen).toHaveBeenCalledWith("reminders");
+it("moves between plugins with the arrow keys", async () => {
+  setup([entry("reminders", { pinned: true }), entry("agents")]);
+  const { user, popup } = await openPopover();
+  within(popup).getByRole("button", { name: "Reminders" }).focus();
+  await user.keyboard("{ArrowDown}");
+  expect(within(popup).getByRole("button", { name: "Agents" })).toHaveFocus();
 });
 
 it("reorders pinned plugins with the arrow keys on the handle", async () => {
   const props = setup([
     entry("alpha", { pinned: true }),
     entry("bravo", { pinned: true }),
-    // Hidden by being off, but its place in the order is kept.
-    entry("charlie", { pinned: true, enabled: false, pinnable: false }),
+    entry("charlie"),
   ]);
   const { user, popup } = await openPopover();
+  // Unpinned plugins have no handle.
+  expect(
+    within(popup).queryByRole("button", { name: "Reorder Charlie" }),
+  ).not.toBeInTheDocument();
   within(popup).getByRole("button", { name: "Reorder Alpha" }).focus();
   await user.keyboard("{ArrowDown}");
-  expect(props.onPinnedOrderChange).toHaveBeenCalledWith([
-    "bravo",
-    "alpha",
-    "charlie",
-  ]);
-});
-
-it("shows a locked switch's reason", async () => {
-  setup([
-    entry("managed", {
-      toggle: { disabled: true, reason: "Your organization manages this." },
-    }),
-  ]);
-  const { popup } = await openPopover();
-  const toggle = within(popup).getByRole("switch", { name: "Managed" });
-  expect(toggle).toHaveAccessibleDescription("Your organization manages this.");
+  expect(props.onPinnedOrderChange).toHaveBeenCalledWith(["bravo", "alpha"]);
 });

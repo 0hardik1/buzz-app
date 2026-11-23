@@ -10,11 +10,10 @@ import {
 } from "@dnd-kit/core";
 import {
   useCallback,
-  useId,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
+  type KeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -28,30 +27,25 @@ import {
   NavigationCard,
   NavigationItem,
 } from "../../shared/design-system/ui/NavigationItem";
-import { NavigationSection } from "../../shared/design-system/ui/NavigationSection";
 import {
   PopoverPopup,
   PopoverRoot,
-  PopoverTitle,
   PopoverTrigger,
 } from "../../shared/design-system/ui/Popover";
 import { SearchField } from "../../shared/design-system/ui/SearchField";
-import { Switch } from "../../shared/design-system/ui/Switch";
-import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import type { AllPluginsEntry, AllPluginsProps } from "./all-plugins";
 import styles from "./AllPlugins.module.css";
 
 export type { AllPluginsEntry, AllPluginsProps } from "./all-plugins";
 
-/** Search earns its place once the list no longer fits at a glance. */
-export const ALL_PLUGINS_SEARCH_THRESHOLD = 8;
+/** Search earns its place once your own plugins no longer fit at a glance. */
+export const ALL_PLUGINS_SEARCH_THRESHOLD = 20;
 
 const byLabel = (a: AllPluginsEntry, b: AllPluginsEntry) =>
   a.label.localeCompare(b.label, undefined, { sensitivity: "base" }) ||
   a.key.localeCompare(b.key);
 
-/** Pinned plugins that are on lead, in the person's order; everything else
- * follows A–Z. A plugin that is off keeps its pin for when it returns. */
+/** Pinned plugins lead, in the person's order; the rest follow A–Z. */
 export function arrangePlugins(
   plugins: readonly AllPluginsEntry[],
   query = "",
@@ -62,27 +56,47 @@ export function arrangePlugins(
         plugin.label.toLocaleLowerCase().includes(needle),
       )
     : plugins;
-  const pinned = matches.filter((plugin) => plugin.pinned && plugin.pinnable);
-  const rest = matches
-    .filter((plugin) => !(plugin.pinned && plugin.pinnable))
-    .sort(byLabel);
-  return { pinned, rest };
+  return {
+    pinned: matches.filter((plugin) => plugin.pinned),
+    rest: matches.filter((plugin) => !plugin.pinned).sort(byLabel),
+  };
 }
 
 function moveKey(keys: readonly string[], from: string, to: string) {
+  if (!keys.includes(from) || !keys.includes(to)) return keys;
   const next = keys.filter((key) => key !== from);
-  const at = keys.indexOf(to);
-  if (at < 0 || !keys.includes(from)) return keys;
-  next.splice(at, 0, from);
+  next.splice(keys.indexOf(to), 0, from);
   return next;
 }
 
-/** The Plugins card's last row and the large popover it opens: every plugin
- * this device can run, with on/off and pinning in one place. */
+/** Up and Down move between plugins, as in other navigation popovers. */
+function moveFocus(event: KeyboardEvent<HTMLElement>) {
+  if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+  const rows = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>("[data-plugin-row]"),
+  );
+  if (!rows.length) return;
+  const index = rows.findIndex((row) => row.contains(document.activeElement));
+  event.preventDefault();
+  const next =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? rows.length - 1
+        : index < 0
+          ? event.key === "ArrowDown"
+            ? 0
+            : rows.length - 1
+          : (index + (event.key === "ArrowDown" ? 1 : -1) + rows.length) %
+            rows.length;
+  rows[next]?.focus();
+}
+
+/** The Plugins card's last row. Resting on it, or pressing it, opens every
+ * plugin you have on, so one that isn't pinned is a step away. */
 export function AllPlugins({
   plugins,
   onOpen,
-  onEnabledChange,
   onPinnedChange,
   onPinnedOrderChange,
 }: AllPluginsProps) {
@@ -90,14 +104,12 @@ export function AllPlugins({
   const [query, setQuery] = useState("");
   const [dragging, setDragging] = useState<string>();
   const opened = useRef(false);
-  const searchable = plugins.length > ALL_PLUGINS_SEARCH_THRESHOLD;
+  const searchable = plugins.length >= ALL_PLUGINS_SEARCH_THRESHOLD;
   const searching = searchable && query.trim() !== "";
   const { pinned, rest } = useMemo(
     () => arrangePlugins(plugins, searchable ? query : ""),
     [plugins, query, searchable],
   );
-  // The full pinned order, including pins hidden by search or switched off,
-  // so a move never drops a pin it cannot see.
   const pinnedOrder = useMemo(
     () => plugins.filter((plugin) => plugin.pinned).map(({ key }) => key),
     [plugins],
@@ -117,21 +129,20 @@ export function AllPlugins({
     setOpen(false);
     onOpen(key);
   };
-  const tile = (plugin: AllPluginsEntry, reorderable: boolean) => (
-    <PluginTile
+  const row = (plugin: AllPluginsEntry, index: number) => (
+    <PluginRow
       key={plugin.key}
       plugin={plugin}
       move={
-        reorderable && !searching
+        plugin.pinned && !searching && pinned.length > 1
           ? {
-              previous: neighbour(pinned, plugin.key, -1),
-              next: neighbour(pinned, plugin.key, 1),
+              previous: pinned[index - 1]?.key,
+              next: pinned[index + 1]?.key,
               reorder,
             }
           : undefined
       }
       onOpen={openPlugin}
-      onEnabledChange={onEnabledChange}
       onPinnedChange={onPinnedChange}
     />
   );
@@ -148,6 +159,7 @@ export function AllPlugins({
       }}
     >
       <PopoverTrigger
+        openOnHover="preview"
         render={
           <NavigationItem
             label="All plugins"
@@ -161,10 +173,10 @@ export function AllPlugins({
         }
       />
       <PopoverPopup
-        size="large"
         padding="none"
         side="right"
         align="start"
+        aria-label="All plugins"
         // Opening a plugin hands focus to its page, not back to this row.
         finalFocus={() =>
           opened.current
@@ -173,76 +185,81 @@ export function AllPlugins({
         }
       >
         <div className={styles.frame}>
-          <header className={styles.header}>
-            <PopoverTitle>All plugins</PopoverTitle>
-            {searchable && (
+          {searchable && (
+            <div className={styles.search}>
               <SearchField
                 variant="capsule"
                 label="Search plugins"
                 placeholder="Search plugins"
                 value={query}
                 onValueChange={setQuery}
-                autoFocus
+                onKeyDown={(event) => {
+                  if (event.key !== "ArrowDown") return;
+                  event.preventDefault();
+                  event.currentTarget
+                    .closest(`.${styles.frame}`)
+                    ?.querySelector<HTMLElement>("[data-plugin-row]")
+                    ?.focus();
+                }}
               />
-            )}
-          </header>
-          <div className={styles.body}>
+            </div>
+          )}
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: arrow keys move between the rows' own buttons */}
+          <div className={styles.body} onKeyDown={moveFocus}>
             {pinned.length > 0 && (
-              <NavigationSection label="Pinned">
-                <DndContext
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  accessibility={{ container: document.body }}
-                  onDragStart={({ active }) => setDragging(String(active.id))}
-                  onDragCancel={() => setDragging(undefined)}
-                  onDragEnd={({ active, over }) => {
-                    setDragging(undefined);
-                    if (over && over.id !== active.id)
-                      reorder(String(active.id), String(over.id));
-                  }}
-                >
-                  <ul className={styles.list}>
-                    {pinned.map((plugin) => (
-                      <li key={plugin.key}>{tile(plugin, true)}</li>
-                    ))}
-                  </ul>
-                  {createPortal(
-                    // The popover is transformed, which would anchor a fixed
-                    // preview to it, so the preview sits on the body.
-                    <DragOverlay
-                      dropAnimation={null}
-                      style={{ zIndex: "var(--layer-tooltip)" }}
-                    >
-                      {draggingPlugin && (
-                        <div className={styles.dragOverlay}>
-                          <span className={styles.icon} aria-hidden="true">
-                            {draggingPlugin.icon}
-                          </span>
-                          <span>{draggingPlugin.label}</span>
-                        </div>
-                      )}
-                    </DragOverlay>,
-                    document.body,
-                  )}
-                </DndContext>
-              </NavigationSection>
-            )}
-            {rest.length > 0 && (
-              <NavigationSection
-                {...(pinned.length > 0 && { label: "Other plugins" })}
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                accessibility={{ container: document.body }}
+                onDragStart={({ active }) => setDragging(String(active.id))}
+                onDragCancel={() => setDragging(undefined)}
+                onDragEnd={({ active, over }) => {
+                  setDragging(undefined);
+                  if (over && over.id !== active.id)
+                    reorder(String(active.id), String(over.id));
+                }}
               >
-                <ul className={styles.grid}>
-                  {rest.map((plugin) => (
-                    <li key={plugin.key}>{tile(plugin, false)}</li>
+                <ul className={styles.list} aria-label="Pinned">
+                  {pinned.map((plugin, index) => (
+                    <li key={plugin.key}>{row(plugin, index)}</li>
                   ))}
                 </ul>
-              </NavigationSection>
+                {createPortal(
+                  // The popover is transformed, which would anchor a fixed
+                  // preview to it, so the preview sits on the body.
+                  <DragOverlay
+                    dropAnimation={null}
+                    style={{ zIndex: "var(--layer-tooltip)" }}
+                  >
+                    {draggingPlugin && (
+                      <div className={styles.dragOverlay}>
+                        <span className={styles.icon} aria-hidden="true">
+                          {draggingPlugin.icon}
+                        </span>
+                        <span>{draggingPlugin.label}</span>
+                      </div>
+                    )}
+                  </DragOverlay>,
+                  document.body,
+                )}
+              </DndContext>
+            )}
+            {rest.length > 0 && (
+              <ul
+                className={styles.list}
+                data-after-pinned={pinned.length > 0 || undefined}
+                aria-label={pinned.length > 0 ? "Other plugins" : undefined}
+              >
+                {rest.map((plugin, index) => (
+                  <li key={plugin.key}>{row(plugin, index)}</li>
+                ))}
+              </ul>
             )}
             {pinned.length === 0 && rest.length === 0 && (
               <p className={`${styles.empty} text-body-sm`} role="status">
                 {searching
                   ? `No plugins match “${query.trim()}”.`
-                  : "No plugins are installed."}
+                  : "No plugins are on."}
               </p>
             )}
           </div>
@@ -252,24 +269,14 @@ export function AllPlugins({
   );
 }
 
-function neighbour(
-  list: readonly AllPluginsEntry[],
-  key: string,
-  step: -1 | 1,
-): string | undefined {
-  const index = list.findIndex((plugin) => plugin.key === key);
-  return list[index + step]?.key;
-}
-
-function PluginTile({
+function PluginRow({
   plugin,
   move,
   onOpen,
-  onEnabledChange,
   onPinnedChange,
 }: {
   plugin: AllPluginsEntry;
-  /** Present for a reorderable pinned row. */
+  /** Present for a pinned row that can move. */
   move:
     | {
         previous: string | undefined;
@@ -278,138 +285,79 @@ function PluginTile({
       }
     | undefined;
   onOpen: (key: string) => void;
-  onEnabledChange: AllPluginsProps["onEnabledChange"];
   onPinnedChange: AllPluginsProps["onPinnedChange"];
 }) {
-  const reorderable = !!move && (!!move.previous || !!move.next);
-  const drag = useDraggable({ id: plugin.key, disabled: !reorderable });
-  const drop = useDroppable({ id: plugin.key, disabled: !reorderable });
+  const drag = useDraggable({ id: plugin.key, disabled: !move });
+  const drop = useDroppable({ id: plugin.key, disabled: !move });
   const { setNodeRef: setDragRef } = drag;
   const { setNodeRef: setDropRef } = drop;
-  const row = useCallback(
-    (node: HTMLElement | null) => {
-      setDragRef(node);
-      setDropRef(node);
+  const node = useCallback(
+    (element: HTMLElement | null) => {
+      setDragRef(element);
+      setDropRef(element);
     },
     [setDragRef, setDropRef],
   );
-  const openable = plugin.enabled && plugin.pinnable;
-  const icon = (
-    <span className={styles.icon} aria-hidden="true">
-      {plugin.icon}
-    </span>
-  );
-  const pin = openable ? (
-    <Tooltip content={plugin.pinned ? "Unpin" : "Pin to sidebar"}>
-      <IconButton
-        aria-label={`${plugin.pinned ? "Unpin" : "Pin"} ${plugin.label}`}
-        aria-pressed={plugin.pinned}
-        size="sm"
-        icon={
-          plugin.pinned ? (
-            <PinFilledIcon size={16} aria-hidden="true" />
-          ) : (
-            <PinIcon size={16} aria-hidden="true" />
-          )
-        }
-        onClick={() => onPinnedChange(plugin.key, !plugin.pinned)}
-      />
-    </Tooltip>
-  ) : null;
-  const lock = plugin.toggle;
-  const toggle = lock ? (
-    <SwitchWithReason reason={lock.reason}>
-      {(describedBy) => (
-        <Switch
-          aria-label={plugin.label}
-          aria-describedby={describedBy}
-          checked={plugin.enabled}
-          disabled={lock.disabled}
-          onCheckedChange={(checked) => onEnabledChange(plugin.key, checked)}
-        />
-      )}
-    </SwitchWithReason>
-  ) : null;
-  const handle = move ? (
-    <span className={styles.handle}>
-      {reorderable && (
-        <IconButton
-          ref={drag.setActivatorNodeRef}
-          {...drag.listeners}
-          // Pointer drag only; the button keeps its own semantics and the
-          // arrow keys below are its keyboard path.
-          aria-label={`Reorder ${plugin.label}`}
-          title="Drag, or use the arrow keys, to reorder"
-          size="sm"
-          icon={<GripVerticalIcon size={16} aria-hidden="true" />}
-          onKeyDown={(event) => {
-            const to =
-              event.key === "ArrowUp"
-                ? move.previous
-                : event.key === "ArrowDown"
-                  ? move.next
-                  : undefined;
-            if (!to) return;
-            event.preventDefault();
-            move.reorder(plugin.key, to);
-          }}
-        />
-      )}
-    </span>
-  ) : null;
   return (
     <div
-      ref={move ? row : undefined}
-      className={styles.tile}
+      ref={move ? node : undefined}
+      className={styles.row}
       data-dragging={drag.isDragging || undefined}
       data-drop-target={(drop.isOver && !drag.isDragging) || undefined}
     >
-      {handle}
-      {openable ? (
-        <NavigationCard>
-          <NavigationItem
-            label={plugin.label}
-            title={plugin.label}
-            icon={icon}
-            selected={plugin.active}
-            onClick={() => onOpen(plugin.key)}
+      <NavigationCard>
+        <NavigationItem
+          data-plugin-row=""
+          label={plugin.label}
+          title={plugin.label}
+          icon={
+            <span className={styles.icon} aria-hidden="true">
+              {plugin.icon}
+            </span>
+          }
+          selected={plugin.active}
+          onClick={() => onOpen(plugin.key)}
+        />
+        <span className={styles.actions} data-plugin-actions="">
+          <IconButton
+            aria-label={`${plugin.pinned ? "Unpin" : "Pin"} ${plugin.label}`}
+            aria-pressed={plugin.pinned}
+            size="sm"
+            icon={
+              plugin.pinned ? (
+                <PinFilledIcon size={16} aria-hidden="true" />
+              ) : (
+                <PinIcon size={16} aria-hidden="true" />
+              )
+            }
+            onClick={() => onPinnedChange(plugin.key, !plugin.pinned)}
           />
-          <span className={styles.controls}>
-            {pin}
-            {toggle}
-          </span>
-        </NavigationCard>
-      ) : (
-        <div className={styles.static} data-off={!plugin.enabled || undefined}>
-          <span className={styles.label} title={plugin.label}>
-            {icon}
-            <span className={styles.name}>{plugin.label}</span>
-          </span>
-          <span className={styles.controls}>{toggle}</span>
-        </div>
-      )}
+          {move && (
+            <IconButton
+              ref={drag.setActivatorNodeRef}
+              // Pointer drag only; the button keeps its own semantics and the
+              // arrow keys below are its keyboard path.
+              {...drag.listeners}
+              aria-label={`Reorder ${plugin.label}`}
+              title="Drag, or use the arrow keys, to reorder"
+              size="sm"
+              icon={<GripVerticalIcon size={16} aria-hidden="true" />}
+              onKeyDown={(event) => {
+                const to =
+                  event.key === "ArrowUp"
+                    ? move.previous
+                    : event.key === "ArrowDown"
+                      ? move.next
+                      : undefined;
+                if (!to) return;
+                event.preventDefault();
+                event.stopPropagation();
+                move.reorder(plugin.key, to);
+              }}
+            />
+          )}
+        </span>
+      </NavigationCard>
     </div>
-  );
-}
-
-/** A locked switch explains itself on hover and to assistive technology. */
-function SwitchWithReason({
-  reason,
-  children,
-}: {
-  reason: string | undefined;
-  children: (describedBy: string | undefined) => ReactNode;
-}) {
-  const id = useId();
-  if (!reason) return children(undefined);
-  return (
-    <>
-      <Tooltip content={reason}>
-        <span className={styles.reason}>{children(id)}</span>
-      </Tooltip>
-      <span id={id} className="sr-only">
-        {reason}
-      </span>
-    </>
   );
 }
