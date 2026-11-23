@@ -131,6 +131,8 @@ if that desktop app is up and running.
   **Settings → Agent setup → Harness defaults**.
 - **An agent's page** has its identity and instructions, settings, **Memory**,
   **Activity** (its past sessions) and plugin tabs such as **Attention**.
+  Local Claude and Codex transcripts can open on recent activity. Choose
+  **Load earlier activity** to see more history.
 - **Instructions** change how an agent behaves. They don't give it new tools,
   accounts or permissions.
 - **Sessions.** By default an agent starts a fresh conversation for each
