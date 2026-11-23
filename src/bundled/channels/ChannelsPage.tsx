@@ -2516,7 +2516,6 @@ function ChannelWorkspace({
       data-instant-split={continuingVisit ? undefined : ""}
       ref={split.ref}
       style={split.style}
-      data-panel-cards=""
       className={`${styles.board} ${panelStyles.splitMotion}`}
     >
       {current && membersOpen && (
@@ -2541,6 +2540,7 @@ function ChannelWorkspace({
       )}
       <Panel
         as="article"
+        flat
         ref={conversation}
         aria-label="Conversation"
         data-overlay-boundary=""
@@ -2898,7 +2898,7 @@ function ChannelWorkspace({
                 className={styles.retainedPanel}
                 hidden={!!companion && !showingChannelPanel}
               >
-                <Panel as="div">
+                <Panel as="div" flat joined>
                   <PanelWorkspace
                     key={currentId}
                     actions={

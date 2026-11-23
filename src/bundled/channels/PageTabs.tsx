@@ -464,7 +464,6 @@ export function PageTabs({
           ref={split.ref}
           style={split.style}
           data-reading-thread={readingTab ? "" : undefined}
-          data-panel-cards=""
           className={`${styles.board} ${panelStyles.splitMotion}`}
         >
           <div
@@ -475,7 +474,7 @@ export function PageTabs({
             aria-hidden={covered || undefined}
           >
             {/* Each region is its own card on the window's tint. */}
-            <Panel as="div">
+            <Panel as="div" flat joined>
               <PanelWorkspace
                 main
                 tabMenu={tabMenu}
@@ -602,7 +601,7 @@ export function PageTabs({
           >
             {hasTabs && (
               <div className={styles.retainedPanel}>
-                <Panel as="div">
+                <Panel as="div" flat joined>
                   <PanelWorkspace
                     drag={secondary.drag.side}
                     actions={paneToggle(secondary.closePane)}

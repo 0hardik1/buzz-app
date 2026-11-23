@@ -35,8 +35,26 @@ function loadSplit(scope: string | undefined, key: string) {
  * Each page owns its split. The preferred width is saved per community and
  * viewer workspace (`scope`) under the page's `name`, so it survives the dock
  * closing, page switches and restarts; without a scope it stays in memory.
+ *
+ * Built-in splits float their regions apart as flat cards: the container is
+ * marked `data-panel-cards`, and each region renders its own flat Panel.
  */
 export function usePanelSplit(
+  scope: string | undefined,
+  name: string,
+  defaultWidth?: number,
+  min = 316,
+  primary?: { defaultWidth: number; maxRatio: number },
+) {
+  const split = useSplit(scope, name, defaultWidth, min, primary);
+  const { ref } = split;
+  useLayoutEffect(() => {
+    ref.current?.toggleAttribute("data-panel-cards", true);
+  });
+  return split;
+}
+
+function useSplit(
   scope: string | undefined,
   name: string,
   defaultWidth?: number,
@@ -155,9 +173,13 @@ function PanelSplitHandle({
 /** Attach ref to the layout container and render handle beside the secondary pane. */
 export type PanelSplit = ReturnType<typeof usePanelSplit>;
 
-/** Plugin layouts never share persistence keys with built-in page layouts. */
+/**
+ * Plugin layouts never share persistence keys with built-in page layouts, and
+ * keep their own region styling: they opt into floating cards by marking the
+ * container `data-panel-cards` themselves.
+ */
 export const usePluginPanelSplit: typeof usePanelSplit = (
   scope,
   name,
   ...options
-) => usePanelSplit(scope, `plugin:${name}`, ...options);
+) => useSplit(scope, `plugin:${name}`, ...options);

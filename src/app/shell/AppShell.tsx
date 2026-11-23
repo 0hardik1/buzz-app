@@ -21,7 +21,6 @@ import {
 import { isApplePlatform } from "../../features/shortcuts/format";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { SidebarIcon } from "../../shared/design-system/icons";
-import { Panel } from "../../shared/design-system/ui/Panel";
 import { isTauri } from "@tauri-apps/api/core";
 import type { SettingsCards } from "../../features/settings/service";
 import type { RegisteredPage } from "../../features/pages/service";
@@ -435,32 +434,28 @@ function AppShellContent({
                 tabIndex={-1}
                 className="min-h-0 min-w-0 flex-1"
               >
-                {/* The conversation floats as its own card; the sidebar
-                      sits beside it on the window's tint. */}
-                <Panel as="div" flat>
-                  <PanelFrame scope={connection.scope} companion={companion}>
+                <PanelFrame scope={connection.scope} companion={companion}>
+                  <div
+                    id={`shell-page-${owner}`}
+                    className={
+                      fillsWorkspace
+                        ? "buzz-tabs-panel h-full min-h-0"
+                        : "buzz-tabs-panel h-full min-h-0 overflow-y-auto px-2 pt-10 pb-8 sm:px-4 sm:pt-14 sm:pb-10"
+                    }
+                  >
                     <div
-                      id={`shell-page-${owner}`}
                       className={
                         fillsWorkspace
-                          ? "buzz-tabs-panel h-full min-h-0"
-                          : "buzz-tabs-panel h-full min-h-0 overflow-y-auto px-2 pt-10 pb-8 sm:px-4 sm:pt-14 sm:pb-10"
+                          ? "h-full min-h-0"
+                          : "mx-auto w-full max-w-4xl"
                       }
                     >
-                      <div
-                        className={
-                          fillsWorkspace
-                            ? "h-full min-h-0"
-                            : "mx-auto w-full max-w-4xl"
-                        }
-                      >
-                        <OpenCommunitySwitcher value={openSwitcher}>
-                          {children}
-                        </OpenCommunitySwitcher>
-                      </div>
+                      <OpenCommunitySwitcher value={openSwitcher}>
+                        {children}
+                      </OpenCommunitySwitcher>
                     </div>
-                  </PanelFrame>
-                </Panel>
+                  </div>
+                </PanelFrame>
               </main>
             </div>
           </div>

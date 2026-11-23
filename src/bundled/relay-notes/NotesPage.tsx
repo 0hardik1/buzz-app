@@ -98,7 +98,7 @@ function NotesPanel({
   loading?: boolean;
 }) {
   return (
-    <Panel aria-label="Shared notes">
+    <Panel flat aria-label="Shared notes">
       <div className={styles.page}>
         <PanelHeader
           title={
@@ -700,7 +700,6 @@ function NoteCollection({
     <div
       className={styles.split}
       ref={split.ref}
-      data-panel-cards=""
       data-side={readerOpen ? "" : undefined}
     >
       <div className={styles.main}>
@@ -856,7 +855,7 @@ function NoteCollection({
       {readerOpen && (
         <aside className={styles.side} aria-label="Note reader">
           {split.handle}
-          <Panel aria-label="Note details">
+          <Panel flat aria-label="Note details">
             <PanelWorkspace
               label="Open notes"
               value={active}
