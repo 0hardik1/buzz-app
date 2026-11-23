@@ -1,6 +1,7 @@
 import type { ChannelSummary } from "../../features/relay/contracts";
 import {
   isSidebarPluginCardKey,
+  MAX_SIDEBAR_PLUGIN_CARDS,
   SIDEBAR_PAGES_SECTION,
   workspaceSectionOrder,
   type SidebarPreferences,
@@ -77,7 +78,12 @@ export function sidebarCardOrder(
     shown.filter(isSidebarPluginCardKey).map((key) => ({ key })),
     localOrder,
   ).map(({ key }) => key);
-  const order = workspaceSectionOrder(groups, plugins);
+  // Cards past the saved limit stay listed, last, without moving.
+  let cards = 0;
+  const order = workspaceSectionOrder(groups, plugins).filter(
+    (key) =>
+      !isSidebarPluginCardKey(key) || ++cards <= MAX_SIDEBAR_PLUGIN_CARDS,
+  );
   const listed = new Set(shown);
   return {
     order,

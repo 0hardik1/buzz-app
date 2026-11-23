@@ -3,7 +3,6 @@ import {
   DragOverlay,
   PointerSensor,
   type CollisionDetection,
-  type UniqueIdentifier,
   pointerWithin,
   useDndContext,
   useDraggable,
@@ -78,18 +77,17 @@ export const sidebarCollisions: CollisionDetection = (args) => {
           data.current.accepts.includes(args.active.data.current?.rowKind),
       ),
     });
+  // A card moves among its siblings: top-level cards, or the cards composed
+  // inside one card.
   const groups = args.droppableContainers
-    .filter(({ data }) => data.current?.group)
+    .filter(
+      ({ data }) =>
+        data.current?.group &&
+        data.current.within === args.active.data.current?.within,
+    )
     .sort((a, b) => a.data.current?.groupIndex - b.data.current?.groupIndex);
   const pointer = args.pointerCoordinates;
-  // A card composed inside another card is the nearer target.
-  const area = (id: UniqueIdentifier) => {
-    const rect = args.droppableRects.get(id);
-    return rect ? rect.width * rect.height : Number.POSITIVE_INFINITY;
-  };
-  const hit = pointerWithin({ ...args, droppableContainers: groups }).sort(
-    (a, b) => area(a.id) - area(b.id),
-  )[0];
+  const hit = pointerWithin({ ...args, droppableContainers: groups })[0];
   if (hit) {
     // Cards move by their headers, so the target's header decides the side:
     // above its middle lands before the card, anywhere below lands after it.
@@ -436,16 +434,19 @@ export function useSidebarSectionDrag({
   sectionKey,
   reorderable,
   groupIndex,
+  within,
   capturePointerDown = false,
 }: {
   sectionKey: string;
   reorderable: boolean;
   groupIndex: number;
+  /** The card this one is composed inside, if any. */
+  within?: string | undefined;
   capturePointerDown?: boolean;
 }) {
   const drag = useDraggable({
     id: sectionKey,
-    data: { group: true, groupIndex },
+    data: { group: true, groupIndex, within },
     disabled: !reorderable,
   });
   const suppressClick = useRef(false);
