@@ -1066,10 +1066,26 @@ html[data-keyboard-navigation]
    down reveals them. Its own formatting context keeps the last row's margin
    inside the full height. */
 .cardRows {
+  position: relative;
   display: flow-root;
   /* Clip, not hidden: rows past the edge can never be scrolled into view
      inside the card, by focus or otherwise. */
   overflow: clip;
+}
+/* The open conversation, when it sorts past the edge, shows under the last row
+   (or at the start of a new tile line) instead, until another opens. */
+.cardRows [data-card-pinned] {
+  position: absolute;
+  inset-block-start: var(--card-pin-top);
+  inset-inline: 0;
+}
+[data-card-display="icons"] .cardRows [data-card-pinned] {
+  inset-inline-end: auto;
+}
+/* The pinned row takes the place of the first row past the edge, which then
+   shows through only once a drag puts the pinned row back. */
+.cardRows:has([data-card-pinned]) [data-card-clipped] {
+  visibility: hidden;
 }
 /* A card shown as icons: every row as an identity tile, wrapping. Room above
    the first line only, so the grip sits right under the last line, as it sits

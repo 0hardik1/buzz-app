@@ -38,8 +38,11 @@ type Mark = "dm" | "mention" | "channel" | "muted";
 function Card({
   rows,
   marks = {},
+  open,
 }: {
   rows: number;
+  /** The row of the open conversation. */
+  open?: number;
   /** Unread on a row: a DM, a mention of you, ordinary channel backlog, or a
    * mention in a muted channel. */
   marks?: Record<number, Mark>;
@@ -58,6 +61,9 @@ function Card({
             <div key={row} data-card-row="">
               <button
                 type="button"
+                aria-current={
+                  open === Number(row.slice(4)) ? "page" : undefined
+                }
                 data-channel-id={row}
                 data-channel-type={
                   marks[Number(row.slice(4))] === "dm" ? "dm" : "stream"
@@ -416,4 +422,37 @@ it("makes rows past the card's edge inert and lands a saved height on a whole ro
     false,
     false,
   ]);
+});
+
+it("pins the open conversation under the last row while it sorts past the edge", () => {
+  const { rerender } = render(<Card rows={12} open={10} />);
+  const list = layOut();
+  resized();
+  const rows = [...document.querySelectorAll<HTMLElement>("[data-card-row]")];
+  const pinned = rows[10] as HTMLElement;
+  // Seven rows, then the open one, which is neither inert nor clipped.
+  expect(pinned).toHaveAttribute("data-card-pinned");
+  expect(pinned.style.getPropertyValue("--card-pin-top")).toBe(`${7 * ROW}px`);
+  expect(list.style.maxHeight).toBe(`${8 * ROW}px`);
+  expect(pinned.inert).toBe(false);
+  expect(pinned).not.toHaveAttribute("data-card-clipped");
+  expect(rows[7]).toHaveAttribute("data-card-clipped");
+  expect(screen.getByRole("separator")).toHaveAttribute("aria-valuenow", "7");
+  // The size it saves is the card's own, not counting the pinned row.
+  expect(saved()).toEqual({});
+  // Opening one that shows, or none, puts it back.
+  rerender(<Card rows={12} open={2} />);
+  resized();
+  expect(pinned).not.toHaveAttribute("data-card-pinned");
+  expect(pinned).toHaveAttribute("data-card-clipped");
+  expect(list.style.maxHeight).toBe(`${7 * ROW}px`);
+});
+
+it("steps the keyboard from the card's own edge, not the pinned row", () => {
+  render(<Card rows={12} open={10} />);
+  const list = layOut();
+  resized();
+  fireEvent.keyDown(screen.getByLabelText("Resize Work"), { key: "ArrowUp" });
+  expect(saved()).toEqual({ "group:work": 6 });
+  expect(list.style.maxHeight).toBe(`${7 * ROW}px`);
 });

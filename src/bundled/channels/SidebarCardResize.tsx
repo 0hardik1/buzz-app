@@ -130,8 +130,9 @@ export function SidebarCardResize({
     const matters = (node: Node) =>
       node instanceof Element &&
       (node.matches(watched) || !!node.querySelector(watched));
-    // Only rows coming or going, or a row starting or stopping needing you,
-    // change what the card shows; other badges don't.
+    // Only rows coming or going, a row starting or stopping needing you, or
+    // another conversation opening change what the card shows; other badges
+    // don't.
     const added = new MutationObserver((records) => {
       if (
         records.some(
@@ -146,7 +147,7 @@ export function SidebarCardResize({
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["data-channel-needs-you"],
+      attributeFilter: ["data-channel-needs-you", "aria-current"],
     });
     const sized =
       typeof ResizeObserver === "undefined"
@@ -213,33 +214,42 @@ export function SidebarCardResize({
           onKeyDown={(event) => {
             const rows = list.current;
             if (!rows || event.altKey || event.ctrlKey || event.metaKey) return;
-            // Step one whole row from wherever the list ends now.
+            if (event.key === "Enter") {
+              event.preventDefault();
+              return onToggle();
+            }
+            if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+            event.preventDefault();
+            // Step one whole row from where the shown rows end now, not counting
+            // a pinned one.
+            const pinned = unpin(rows);
             const ends = stops(rows);
             const [first, last] = [ends[0], ends.at(-1)];
-            const current = rows.offsetHeight;
             if (first === undefined || last === undefined) return;
-            if (event.key === "Enter") onToggle();
-            else if (event.key === "ArrowUp")
-              onResize(
-                through(
-                  ends,
-                  ends.filter((end) => end < current - 1).at(-1) ?? first,
-                ),
-              );
-            else if (event.key === "ArrowDown")
-              onResize(
-                through(ends, ends.find((end) => end > current + 1) ?? last),
-              );
-            else return;
-            event.preventDefault();
+            const current = pinned
+              ? (ends[shown - 1] ?? rows.offsetHeight)
+              : rows.offsetHeight;
+            const target = through(
+              ends,
+              event.key === "ArrowUp"
+                ? (ends.filter((end) => end < current - 1).at(-1) ?? first)
+                : (ends.find((end) => end > current + 1) ?? last),
+            );
+            if (target === size) apply(rows, size);
+            else onResize(target);
           }}
           onPointerDown={(event) => {
             const rows = list.current;
             if (event.button !== 0 || stop.current || !rows) return;
             event.preventDefault();
             const { pointerId, clientY: startY } = event;
-            const start = rows.offsetHeight;
+            // The drag moves the edge of the shown rows; a pinned row goes back
+            // to its place until the card settles.
+            const pinned = unpin(rows);
             const ends = stops(rows);
+            const start = pinned
+              ? (ends[shown - 1] ?? rows.offsetHeight)
+              : rows.offsetHeight;
             const [min = 0] = ends;
             const max = ends.at(-1) ?? start;
             // Rows sliding under the pointer must not take hover mid-drag. The
@@ -312,6 +322,7 @@ export function SidebarCardResize({
  * the keyboard skip what the card hides. Returns how many rows show.
  */
 function clip(list: HTMLElement, size: number | undefined): number {
+  unpin(list);
   const ends = stops(list);
   const total = ends.length;
   const wanted = Math.min(size ?? DEFAULT_SIZE, total);
@@ -323,19 +334,42 @@ function clip(list: HTMLElement, size: number | undefined): number {
       ? Math.min(through(ends, ends[wanted - 1] ?? 0), total)
       : wanted;
   const clipped = shown < total;
-  setMaxHeight(list, clipped && laidOut ? `${ends[shown - 1] ?? 0}px` : "");
-  list
-    .querySelectorAll<HTMLElement>("[data-card-row]")
-    .forEach((row, index) => {
-      const hidden = index >= shown;
-      // Only undo inertness this clip gave: a row leaving the list keeps its own.
-      // Unchanged writes are skipped, so they don't wake the unread edge cue.
-      if (hidden !== row.hasAttribute("data-card-clipped")) {
-        if (hidden || row.inert) row.inert = hidden;
-        row.toggleAttribute("data-card-clipped", hidden);
-      } else if (hidden && !row.inert) row.inert = true;
-    });
+  const end = ends[shown - 1] ?? 0;
+  const rows = [...list.querySelectorAll<HTMLElement>("[data-card-row]")];
+  // The open conversation never hides past the edge: it shows as one more row
+  // (or tile line) under the last one, until another is opened.
+  const open = rows.findIndex((row) =>
+    row.querySelector('[aria-current="page"]'),
+  );
+  const pinned = clipped && laidOut && open >= shown ? rows[open] : undefined;
+  let room = 0;
+  if (pinned) {
+    const top = list.getBoundingClientRect().top - list.scrollTop;
+    room = (ends[open] ?? 0) - (pinned.getBoundingClientRect().top - top);
+    // Writes only what changed: style and attribute writes wake the unread cue.
+    const at = `${end}px`;
+    if (pinned.style.getPropertyValue("--card-pin-top") !== at)
+      pinned.style.setProperty("--card-pin-top", at);
+    pinned.setAttribute("data-card-pinned", "");
+  }
+  setMaxHeight(list, clipped && laidOut ? `${end + room}px` : "");
+  rows.forEach((row, index) => {
+    const hidden = index >= shown && row !== pinned;
+    // Only undo inertness this clip gave: a row leaving the list keeps its own.
+    // Unchanged writes are skipped, so they don't wake the unread edge cue.
+    if (hidden !== row.hasAttribute("data-card-clipped")) {
+      if (hidden || row.inert) row.inert = hidden;
+      row.toggleAttribute("data-card-clipped", hidden);
+    } else if (hidden && !row.inert) row.inert = true;
+  });
   return shown;
+}
+
+/** Put a pinned row back in its place, so the list measures as it is. */
+function unpin(list: HTMLElement) {
+  const pinned = list.querySelector<HTMLElement>("[data-card-pinned]");
+  pinned?.removeAttribute("data-card-pinned");
+  return !!pinned;
 }
 
 function setMaxHeight(list: HTMLElement, value: string) {
