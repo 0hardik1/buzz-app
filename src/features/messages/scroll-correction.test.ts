@@ -5,13 +5,15 @@ import { correctScrollTop } from "./scroll-correction";
 const stubNavigator = (platform: string, vendor: string, maxTouchPoints = 0) =>
   vi.stubGlobal("navigator", { platform, vendor, maxTouchPoints });
 
-function scroller() {
+function scroller(writes?: number[], end = Number.POSITIVE_INFINITY) {
   const element = document.createElement("section");
   let top = 100;
   Object.defineProperty(element, "scrollTop", {
     get: () => top,
     set: (value: number) => {
-      top = value;
+      // With `writes`, keep whole offsets inside the range, as WebKit does.
+      writes?.push(value);
+      top = writes ? Math.min(end, Math.trunc(value)) : value;
     },
   });
   return element;
@@ -88,4 +90,29 @@ it("ignores a zero correction", () => {
 
   expect(element.scrollTop).toBe(100);
   expect(element.getAttribute("style")).toBeNull();
+});
+
+it("does not write again the fraction a whole-pixel scroller left", () => {
+  const writes: number[] = [];
+  const element = scroller(writes);
+
+  correctScrollTop(element, 40.75);
+  // The reader scrolls on, and the next measurement asks for the same fraction.
+  element.scrollTop = 120;
+  writes.length = 0;
+  correctScrollTop(element, 0.75);
+
+  expect(writes).toEqual([]);
+  correctScrollTop(element, 12.75);
+  expect(element.scrollTop).toBe(132);
+});
+
+it("asks again for a correction the end of the scroll range refused", () => {
+  const writes: number[] = [];
+  const element = scroller(writes, 100);
+
+  correctScrollTop(element, 40);
+  correctScrollTop(element, 40);
+
+  expect(writes).toEqual([140, 140]);
 });
