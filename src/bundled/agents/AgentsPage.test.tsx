@@ -497,6 +497,7 @@ function setup(
       migrated: false,
       different: [],
       extra: [],
+      kept: [],
       skipped: [],
       heads: {},
       names: {},
