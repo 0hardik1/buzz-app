@@ -44,6 +44,7 @@ import {
   setSidebarUnreadsFirst,
   useSidebarUnreadsFirst,
 } from "./SidebarUnreadsFirst";
+import { isChannelSectionKey } from "./sidebar-sections";
 import styles from "./Channels.module.css";
 
 export function SidebarSection({
@@ -193,7 +194,7 @@ export function SidebarSection({
       >
         <NavigationSectionHeading
           disclosure
-          revealActions
+          revealActions={isChannelSectionKey(sectionKey) ? "overlay" : true}
           actions={
             <>
               {showMenu && (

@@ -26,7 +26,7 @@
   z-index: 1;
 }
 /* The row's trailing buttons share the sidebar's action slot (SidebarFrame). */
-.row [data-solo-row-action],
+.row :is([data-channel-row-action], [data-solo-row-action]),
 .row [data-solo-shared] {
   flex-shrink: 0;
   width: var(--sidebar-row-action-size);
@@ -40,34 +40,48 @@
   );
 }
 @media (hover: hover) and (pointer: fine) {
-  .row [data-solo-row-action] {
+  .row :is([data-channel-row-action], [data-solo-row-action]) {
+    position: absolute;
+    inset-inline-end: var(--sidebar-row-action-end);
     opacity: 0;
+  }
+  .row [data-channel-row-action] {
     pointer-events: none;
   }
-  .row:hover [data-solo-row-action],
-  .row:has(:focus-visible) [data-solo-row-action],
-  .row [data-solo-row-action][aria-expanded="true"] {
+  .row:hover [data-channel-row-action],
+  .row [data-solo-row-action]:hover,
+  :where(html[data-keyboard-navigation])
+    .row:has(:focus-visible)
+    :is([data-channel-row-action], [data-solo-row-action]),
+  .row
+    :is(
+      [data-channel-row-action],
+      [data-solo-row-action]
+    )[aria-expanded="true"] {
     opacity: 1;
     pointer-events: auto;
   }
+  /* Shared keeps its hit area when the menu appears beside it. */
+  .row:has([data-solo-shared])
+  :is([data-channel-row-action], [data-solo-row-action]) {
+    inset-inline-end: calc(
+      var(--sidebar-row-action-end) +
+      var(--sidebar-row-action-size)
+    );
+  }
   /* Keep badges in their usual column until the trailing menu appears.
      Move the badge visually so the title's layout stays fixed. */
-  .row:has([data-solo-row-action]) {
-    & [data-solo-row-action] {
-      position: absolute;
-      inset-inline-end: var(--sidebar-row-action-end);
-    }
-    /* Shared keeps its hit area when the menu appears beside it. */
-    &:has([data-solo-shared]) [data-solo-row-action] {
-      inset-inline-end: calc(
-        var(--sidebar-row-action-end) +
-        var(--sidebar-row-action-size)
-      );
-    }
+  .row:has(:is([data-channel-row-action], [data-solo-row-action])) {
     &:is(
-        :hover,
-        :has(:focus-visible),
-        :has([data-solo-row-action][aria-expanded="true"])
+        :hover:has([data-channel-row-action]),
+        :has([data-solo-row-action]:hover),
+        html[data-keyboard-navigation] .row:has(:focus-visible),
+        :has(
+          :is(
+              [data-channel-row-action],
+              [data-solo-row-action]
+            )[aria-expanded="true"]
+        )
       ) {
       & .badges {
         position: relative;

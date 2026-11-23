@@ -1,5 +1,12 @@
 import { expect } from "@playwright/test";
 
+export async function clickSidebarHeadingAction(action) {
+  // The heading must reveal its actions before the pointer can enter them.
+  const section = action.locator("xpath=ancestor::*[@data-sidebar-section][1]");
+  await section.locator("summary").first().hover();
+  await action.click();
+}
+
 export async function pageChoices(page, query = "") {
   await page.getByRole("button", { name: "Search Buzz", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Search Buzz", exact: true });
@@ -295,9 +302,7 @@ export function openMenu(page, name) {
  * choices and Unreads first. Choosing in it keeps the menus open. */
 export async function openSortMenu(page, title, scope = page) {
   const name = "Sort";
-  const button = moreActionsButton(scope, title);
-  await button.focus();
-  await button.click();
+  await clickSidebarHeadingAction(moreActionsButton(scope, title));
   await expect(openMenu(page, `More actions for ${title}`)).toBeVisible();
   await page
     .getByRole("menuitem", { name, exact: true })
