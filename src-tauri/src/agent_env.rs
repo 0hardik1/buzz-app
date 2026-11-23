@@ -1,12 +1,13 @@
 //! Environment variables local agents start with: one list for every agent on
 //! this device, and one for each agent. Native code owns them: each list is
 //! kept in the OS credential store under Buzz's own item, never synced, and no
-//! command returns a value. They are added to the processes of Buzz's
-//! harnesses that ask for them and run a local, unprotected agent (a bundled
-//! plugin's process declared `agentEnv`, `for_spawn`): the device list, then
-//! the named agent's own, so its variable wins, after the login shell's and before the harness's own, so a harness's
-//! variable wins. A saved list reaches processes started after the save;
-//! running ones keep the list they started with until the agent restarts.
+//! command returns a value. They are added to the processes of Buzz's harnesses
+//! that ask for them and run a local, unprotected agent (a bundled plugin's
+//! process declared `agentEnv`, `for_spawn`): the device list, then the named
+//! agent's own, so its variable wins, after the login shell's and before the
+//! harness's own, so a harness's variable wins. A saved list reaches processes
+//! started after the save; running ones keep the list they started with until
+//! the agent restarts.
 //!
 //! Like the Claude key (`claude_key.rs`), a value reaches every command the
 //! agent runs, and this trusts installed plugin code.

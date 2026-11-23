@@ -566,25 +566,15 @@ pub(crate) async fn plugin_host_process_spawn<R: tauri::Runtime>(
             }
         }
     }
-    for secret in secrets {
-        if secret == crate::agent_env::SECRET {
-            continue;
-        }
-        if secret != crate::claude_key::SECRET
-            || !crate::claude_key::may_have(&plugin, &declared.id)
-        {
-            return Err("That secret is not available to this process".into());
-        }
-        let shared = match agent_env.key() {
-            Some(_) => None,
-            None => app.state::<crate::claude_key::ClaudeKey>().key().await?,
-        };
-        set_claude_key(
-            &mut command,
-            &agent_env,
-            shared.as_deref().map(|key| &**key),
-        );
-    }
+    grant_secrets(
+        &mut command,
+        &secrets,
+        &plugin,
+        &declared.id,
+        &agent_env,
+        &app.state(),
+    )
+    .await?;
     if let Some(mcp) = mcp {
         command.env(
             "BUZZ_AGENT_CONNECTION",
@@ -700,9 +690,35 @@ pub(crate) fn set_environment(
     Ok(())
 }
 
+/// Sets the native-held `secrets` process `process_id` of `plugin` asks for,
+/// refusing any it may not have. `agent_env`'s lists are already set.
+pub(crate) async fn grant_secrets(
+    command: &mut Command,
+    secrets: &[String],
+    plugin: &str,
+    process_id: &str,
+    agent_env: &crate::agent_env::Lists,
+    shared: &crate::claude_key::ClaudeKey,
+) -> Result<(), String> {
+    for secret in secrets {
+        if secret == crate::agent_env::SECRET {
+            continue;
+        }
+        if secret != crate::claude_key::SECRET || !crate::claude_key::may_have(plugin, process_id) {
+            return Err("That secret is not available to this process".into());
+        }
+        let shared = match agent_env.key() {
+            Some(_) => None,
+            None => shared.key().await?,
+        };
+        set_claude_key(command, agent_env, shared.as_deref().map(|key| &**key));
+    }
+    Ok(())
+}
+
 /// Sets the Anthropic key for a launch granted `claude_key::SECRET`: the
 /// agent's own list's, then the device list's, then `shared`.
-pub(crate) fn set_claude_key(
+fn set_claude_key(
     command: &mut Command,
     agent_env: &crate::agent_env::Lists,
     shared: Option<&str>,
