@@ -1064,14 +1064,15 @@ html[data-keyboard-navigation]
      inside the card, by focus or otherwise. */
   overflow: clip;
 }
-/* Holds the rows and the line for unread past the edge. A card gives them
-   breathing room inside its body, in list and icon view alike, so the grip
-   below stays on the card's bottom edge and the measured rows stay unpadded. */
+/* A card shown as icons: every row as an identity tile, wrapping. Room above
+   the first line only, so the grip sits right under the last line, as it sits
+   under the last row of a list card. */
+.cardTiles {
+  padding-block-start: var(--space-half);
+}
+/* Holds the rows and the line for unread past the edge. */
 .cardBody {
   display: flow-root;
-}
-[data-sidebar-cards] .cardBody {
-  padding-block: var(--space-half);
 }
 /* Unread that waits on you past the edge: its own centered line under the last row
    that shows, so it reads as the card's, not a row's. It only comes and goes
