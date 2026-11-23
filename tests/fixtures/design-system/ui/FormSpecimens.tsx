@@ -170,6 +170,17 @@ export function TextareaExamples() {
   return (
     <div className="component-specimen-stack">
       <FormExample
+        title="Editable heading"
+        description="Use a multiline field when an editable title needs room to wrap."
+        code={`<Field label="Title" labelVisibility="hidden">
+  <Textarea appearance="heading" rows={2} defaultValue="Field notes" />
+</Field>`}
+      >
+        <Field label="Title" labelVisibility="hidden">
+          <Textarea appearance="heading" rows={2} defaultValue="Field notes" />
+        </Field>
+      </FormExample>
+      <FormExample
         title="Textarea states"
         description="Multiple lines of prose retain manual vertical resizing. The resize grip sits inside the rounded corner. Code uses the existing mono variant."
         code={`<Field
@@ -271,10 +282,11 @@ export function SearchExamples() {
         title="Search with a trailing action"
         description="Search and its filter action share one frame; Clear remains separate."
         code={
-          '<SearchField value={query} onValueChange={setQuery} trailing={<IconButton aria-label="Filter" icon={<Filter2Icon />} />} />'
+          '<SearchField variant="capsule" value={query} onValueChange={setQuery} trailing={<IconButton aria-label="Filter" icon={<Filter2Icon />} />} />'
         }
       >
         <SearchField
+          variant="capsule"
           value={query}
           onValueChange={setQuery}
           trailing={
@@ -528,6 +540,27 @@ export function SelectExamples() {
           variant="compact"
           appearance="glass-ghost"
           leading={<CodeIcon size={16} aria-hidden="true" />}
+          value={inline}
+          onValueChange={setInline}
+          groups={workspaceGroups}
+        />
+      </FormExample>
+      <FormExample
+        title="Subtle compact select"
+        description="Use the subtle button fill for a compact choice alongside other actions."
+        code={`<Select
+  label="Filled workspace choice"
+  variant="compact"
+  appearance="subtle"
+  value={inline}
+  onValueChange={setInline}
+  groups={workspaceGroups}
+/>`}
+      >
+        <Select
+          label="Filled workspace choice"
+          variant="compact"
+          appearance="subtle"
           value={inline}
           onValueChange={setInline}
           groups={workspaceGroups}
