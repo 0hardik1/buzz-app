@@ -392,7 +392,6 @@ function ConnectedAppContent({ services }: { services: AppServices }) {
   const workspace = route.workspace;
   const pluginNavigation = usePluginNavigation({
     plugins,
-    adminAccess: services.adminAccess,
     pages: startup === "ready" ? route.pages : noPages,
     selected: workspace.selected,
     onSelect: select,

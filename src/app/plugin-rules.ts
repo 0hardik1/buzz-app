@@ -1,13 +1,9 @@
-import type {
-  AdminAccessReader,
-  AdminAccessState,
-} from "../bundled/admin-access";
+import type { AdminAccessState } from "../bundled/admin-access";
 import performanceDiagnosticsManifest from "../bundled/performance-diagnostics/manifest.json";
-import type { PluginManager } from "../plugins/manager";
 import type { PluginInfo } from "../plugins/types";
 
-// The rules for listing and switching plugins, shared by Settings → Plugins
-// and the sidebar's All plugins popover so the two never disagree.
+// Which plugins Settings → Plugins lists, and which of them can be switched
+// on or off right now.
 
 /** Channels is the app's sidebar; it has no enable/disable control. */
 export function isRequiredPlugin(plugin: PluginInfo) {
@@ -24,7 +20,7 @@ export function listedPlugin(plugin: PluginInfo) {
 }
 
 /** Bundled plugins that need community or relay access to turn on. */
-export const RESTRICTED_PLUGINS = ["buzz.moderation", "buzz.relay-staff"];
+const RESTRICTED_PLUGINS = ["buzz.moderation", "buzz.relay-staff"];
 export function restrictedPlugin(plugin: PluginInfo) {
   return (
     plugin.source === "bundled" &&
@@ -60,31 +56,4 @@ export function pluginToggleDisabled(
     busy ||
     (!plugin.enabled && restrictedPlugin(plugin) && access !== "allowed")
   );
-}
-
-/** The access a restricted plugin needs; others are always allowed. */
-export function pluginAccess(
-  plugin: PluginInfo,
-  adminAccess: Pick<AdminAccessReader, "status"> | undefined,
-): AdminAccessState {
-  return restrictedPlugin(plugin)
-    ? (adminAccess?.status(plugin.manifest.id) ?? "unavailable")
-    : "allowed";
-}
-
-/** Turn a plugin on or off, unless the rules above block it. Returns whether
- * a change was requested. */
-export function togglePlugin(
-  plugins: Pick<PluginManager, "change">,
-  plugin: PluginInfo,
-  access: AdminAccessState,
-  busy: boolean,
-) {
-  if (isRequiredPlugin(plugin) || pluginToggleDisabled(plugin, access, busy))
-    return false;
-  void plugins.change(
-    plugin.enabled ? "disable" : "enable",
-    plugin.manifest.id,
-  );
-  return true;
 }
