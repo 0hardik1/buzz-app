@@ -9,6 +9,7 @@ import type { RelayData, RelaySnapshot } from "../relay/service";
 import type { HuddleBridge, HuddleDestination, HuddleUpdate } from "./bridge";
 import type { HuddleAudio, OpenHuddleAudio } from "./audio";
 import { huddleAudio } from "./diagnostics";
+import type { PlayoutEvent } from "./playout";
 import type { Context } from "@deepseek-ai/cordis";
 
 export type HuddleSnapshot = Readonly<{
@@ -37,7 +38,10 @@ type Attempt = {
   stopAccess?: () => void;
   stopAudioSettings?: () => void;
   sender: ReturnType<typeof createPcmSender>;
+  playoutEvents?: { peer: string; event: PlayoutEvent }[];
 };
+const playoutWindowMs = 60_000;
+const maxPlayoutEvents = 256;
 const idle: HuddleSnapshot = { phase: "idle", muted: false, participants: [] };
 const message = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -282,10 +286,14 @@ export function createHuddles(
         : undefined;
     const id = crypto.randomUUID();
     const abort = new AbortController();
+    const playoutEvents: Attempt["playoutEvents"] = huddleAudio.enabled
+      ? []
+      : undefined;
     const attempt: Attempt = {
       id,
       connection,
       abort,
+      playoutEvents,
       sender: createPcmSender(
         (samples) => bridge.send(id, samples),
         abort.signal,
@@ -437,6 +445,13 @@ export function createHuddles(
             );
         },
         attempt.abort.signal,
+        playoutEvents &&
+          ((peer, event) => {
+            if (!valid(attempt) || snapshot.phase !== "connected") return;
+            if (playoutEvents.length === maxPlayoutEvents)
+              playoutEvents.shift();
+            playoutEvents.push({ peer, event });
+          }),
       );
       if (!valid(attempt)) {
         audio.close();
@@ -504,6 +519,32 @@ export function createHuddles(
     };
   return {
     snapshot: () => snapshot,
+    recentPlayout(room: string | undefined, peer: string) {
+      if (
+        !room ||
+        snapshot.room !== room ||
+        snapshot.phase !== "connected" ||
+        !snapshot.participants.includes(peer) ||
+        !current?.playoutEvents
+      )
+        return undefined;
+      const readAtMs = Date.now();
+      const events = current.playoutEvents
+        .filter(
+          (entry) =>
+            entry.peer === peer &&
+            entry.event.detectedAtMs >= readAtMs - playoutWindowMs,
+        )
+        .map((entry) => entry.event);
+      return {
+        readAtMs,
+        windowMs: playoutWindowMs,
+        events: events.slice(-40),
+        truncated:
+          current.playoutEvents.length === maxPlayoutEvents ||
+          events.length > 40,
+      };
+    },
     voiceListening: voiceSeat("listening"),
     voiceThinking: voiceSeat("thinking"),
     remoteVoiceError(error: string) {

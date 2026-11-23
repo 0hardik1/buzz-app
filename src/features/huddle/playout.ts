@@ -1,5 +1,15 @@
 import { huddleAudio } from "./diagnostics";
 
+export type PlayoutEvent = Readonly<
+  {
+    detectedAtMs: number;
+    durationMs: number;
+  } & (
+    | { kind: "queue-limit"; queuedMs: number }
+    | { kind: "underrun"; estimatedGapStartMs: number }
+  )
+>;
+
 /**
  * Plays 48 kHz mono PCM frames back to back into `output`. The first frame
  * starts `lead` seconds out; after a true underrun playback re-anchors 20 ms
@@ -11,6 +21,7 @@ export function createPlayout(
   output: AudioNode,
   lead: number,
   stage?: string,
+  report?: (event: PlayoutEvent) => void,
 ) {
   const sources = new Set<AudioBufferSourceNode>();
   let next: number | undefined;
@@ -18,11 +29,27 @@ export function createPlayout(
     play(samples: readonly number[]) {
       const now = context.currentTime;
       if (!samples.length || samples.length > 5760) return;
-      if ((next ?? 0) > now + 0.2)
+      if (next !== undefined && next > now + 0.2) {
+        report?.({
+          kind: "queue-limit",
+          detectedAtMs: Date.now(),
+          durationMs: samples.length / 48,
+          queuedMs: Math.round((next - now) * 1000),
+        });
         return huddleAudio.count(stage, "dropped ahead");
+      }
       if (next === undefined) next = now + lead;
       else if (next < now) {
-        if (now - next < 1) huddleAudio.count(stage, "underruns");
+        if (now - next < 1) {
+          huddleAudio.count(stage, "underruns");
+          const detectedAtMs = Date.now();
+          report?.({
+            kind: "underrun",
+            detectedAtMs,
+            estimatedGapStartMs: detectedAtMs - Math.round((now - next) * 1000),
+            durationMs: Math.round((now + 0.02 - next) * 1000),
+          });
+        }
         next = now + 0.02;
       }
       const buffer = context.createBuffer(1, samples.length, 48000);

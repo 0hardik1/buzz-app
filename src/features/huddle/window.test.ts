@@ -31,6 +31,7 @@ function harness() {
     voiceListening() {},
     voiceThinking() {},
     snapshot: () => snapshot,
+    recentPlayout: () => undefined,
     subscribe(fn) {
       listeners.add(fn);
       return () => {
