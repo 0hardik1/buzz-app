@@ -11710,6 +11710,55 @@ it("releases cancelled Codex community wakes before earlier work finishes", asyn
   }
 });
 
+it("steers a community DM into an active Huddle voice turn", async () => {
+  vi.stubGlobal("RTCPeerConnection", class {});
+  const f = fixture();
+  const d = f.delivery("@Codex change that");
+  const { config } = scoped(d);
+  const acknowledged = vi.fn();
+  f.snapshot.session.channels.list = () => ({
+    status: "ready",
+    channels: [{ id: "channel", name: "DM", channelType: "dm" }],
+  });
+  if (d.trigger.type !== "mention") throw new Error("Expected a mention");
+  d.trigger.event.tags = [["h", "channel"]];
+  const connection = await join(f, d);
+  try {
+    f.emit({
+      method: "turn/started",
+      params: { threadId: "thread-1", turn: { id: "spoken" } },
+    });
+    await f.runtime.run({
+      ...d,
+      config,
+      model: "test-model",
+      effort: "low",
+      acknowledged,
+    });
+    expect(
+      f.sent.find((wire) => wire.method === "turn/steer")?.params,
+    ).toMatchObject({ threadId: "thread-1", expectedTurnId: "spoken" });
+    expect(f.starts()).toHaveLength(0);
+    expect(acknowledged).toHaveBeenCalledWith({ steering: true });
+    f.emit({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "spoken", status: "completed" },
+      },
+    });
+    await vi.waitFor(() =>
+      expect(
+        f.sent.find((wire) => wire.method === "thread/inject_items")?.params,
+      ).toMatchObject({ threadId: "thread-1" }),
+    );
+    expect(f.starts()).toHaveLength(0);
+  } finally {
+    f.runtime.dispose();
+    await connection.close();
+  }
+});
+
 it("replaces community source policies on voice startup and adopted speech", async () => {
   vi.stubGlobal("RTCPeerConnection", class {});
   const f = fixture();
