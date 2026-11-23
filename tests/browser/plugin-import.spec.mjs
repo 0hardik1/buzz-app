@@ -2770,6 +2770,49 @@ test("document formatting floats over scrollable content", async ({
   }
 });
 
+test("an installed document can restore its caret without scrolling the pane", async ({
+  page,
+  app,
+}) => {
+  await page.setViewportSize({ width: 800, height: 520 });
+  const reader = await installedDocumentReader(page, app);
+  await reader.getByRole("tab", { name: "Reference", exact: true }).click();
+  const panel = reader.getByRole("tabpanel", {
+    name: "Reference",
+    exact: true,
+  });
+  await button(panel, "Edit Reference").click();
+  const scroll = panel.getByRole("region", { name: "Document scroll area" });
+  const editor = panel.getByRole("textbox", { name: "Document body" });
+  const restore = button(panel, "Restore opening caret");
+  await editor.evaluate((field) => {
+    field.focus();
+    const end = field.value.length;
+    field.setSelectionRange(end, end);
+    field.blur();
+  });
+  await scroll.evaluate((area) => {
+    area.scrollTop = 128;
+  });
+  // The plugin restores the caret programmatically. A pointer click would
+  // scroll the fixture control into view before the editor handles focus.
+  await restore.evaluate((control) => control.click());
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveJSProperty("selectionStart", 0);
+  await expect(editor).toHaveJSProperty("selectionEnd", 0);
+  await expect(scroll).toHaveJSProperty("scrollTop", 128);
+
+  await button(panel, "Markdown source").click();
+  const source = panel.getByRole("textbox", { name: "Markdown" });
+  await source.evaluate((field) => {
+    field.setSelectionRange(field.value.length, field.value.length);
+  });
+  await restore.evaluate((control) => control.click());
+  await expect(source).toBeFocused();
+  await expect(source).toHaveJSProperty("selectionStart", 0);
+  await expect(source).toHaveJSProperty("selectionEnd", 0);
+});
+
 // Browser-only boundary: an external blob module uses the host React tree,
 // host styles, focus targets and durable split across a real document reload.
 test("installed documents reuse host Markdown, workspace tabs and persisted split", async ({

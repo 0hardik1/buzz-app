@@ -82,6 +82,7 @@ export function apply(ctx: Context) {
   const editor: DocumentEditorProps = { ref: editorRef, value: "**Hello**", onChange(value) { void value.length; }, editing: true, source: false, onSourceChange() {}, linkOpen: false, onLinkOpenChange() {}, onSave() {}, maxLength: 32768, destinations: [{label: "Reference", href: "buzz://plugin?id=example.plugin"}] };
   createElement(ctx.conversation.ui.DocumentEditor, editor);
   editorRef.current?.focusSelection(selection);
+  editorRef.current?.focusSelection(selection, { preventScroll: true });
   // @ts-expect-error Source mode must be controlled with a boolean.
   const invalidEditor: DocumentEditorProps = { ...editor, source: "Markdown" };
   void invalidEditor;

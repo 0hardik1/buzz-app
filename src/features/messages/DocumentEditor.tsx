@@ -1,4 +1,11 @@
 import {
+  AnimatePresence,
+  motion,
+  useIsPresent,
+  usePresenceData,
+  useReducedMotion,
+} from "motion/react";
+import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -109,7 +116,11 @@ export type DocumentEditorSelection = {
 export type DocumentEditorHandle = {
   focusEnd(): void;
   selection(): DocumentEditorSelection | undefined;
-  focusSelection(selection: DocumentEditorSelection): void;
+  /** Restores a selection in the active mode, with optional scroll preservation. */
+  focusSelection(
+    selection: DocumentEditorSelection,
+    options?: FocusOptions,
+  ): void;
 };
 
 export type DocumentEditorProps = {
@@ -130,6 +141,38 @@ export type DocumentEditorProps = {
   source: boolean;
   onSourceChange(source: boolean): void;
 };
+
+function DocumentFormattingToolbar({
+  surfaceRef,
+  children,
+}: {
+  surfaceRef: Ref<HTMLFieldSetElement>;
+  children: ReactNode;
+}) {
+  const present = useIsPresent();
+  const instant: boolean = usePresenceData();
+  const hidden = { opacity: 0, y: instant ? "0rem" : "0.75rem" };
+  return (
+    <div className={styles.toolbarAnchor}>
+      <motion.fieldset
+        ref={surfaceRef}
+        className={styles.editorToolbar}
+        aria-label="Document formatting"
+        aria-hidden={!present || undefined}
+        inert={!present}
+        initial={instant ? false : hidden}
+        animate={{ opacity: 1, y: "0rem" }}
+        exit={hidden}
+        transition={{
+          duration: instant ? 0 : 0.22,
+          ease: [0.645, 0.045, 0.355, 1],
+        }}
+      >
+        {children}
+      </motion.fieldset>
+    </div>
+  );
+}
 
 /** A document body using the composer's editing engine, without chat behavior. */
 export function DocumentEditor({
@@ -163,11 +206,14 @@ export function DocumentEditor({
         if (!field?.contains(document.activeElement)) return;
         return { start: field.selectionStart, end: field.selectionEnd, source };
       },
-      focusSelection(selection) {
+      focusSelection(selection, options) {
         if (!editing || disabled) return;
         const field = source ? sourceInput.current : input.current;
-        field?.focus();
-        field?.setSelectionRange(selection.start, selection.end);
+        if (!field) return;
+        // Set the caret first when preserving scroll so focus cannot reveal its old position.
+        if (!options?.preventScroll) field.focus(options);
+        field.setSelectionRange(selection.start, selection.end);
+        if (options?.preventScroll) field.focus(options);
       },
       focusEnd() {
         if (!editing || disabled) return;
@@ -274,31 +320,39 @@ export function DocumentEditor({
   }, [showFormatting]);
   const revealAboveToolbar = (bottom: number) => {
     const toolbar = toolbarSurface.current;
-    if (!toolbar) return;
-    const overlap = bottom - toolbar.getBoundingClientRect().top;
+    const anchor = toolbar?.parentElement;
+    if (!toolbar || !anchor) return;
+    // Clear the toolbar's resting position while it slides into place.
+    const top =
+      anchor.getBoundingClientRect().bottom -
+      toolbar.getBoundingClientRect().height;
+    const overlap = bottom - top;
     if (overlap <= 0) return;
     const scroller = updateEditorScroller.current?.();
     if (scroller) scroller.scrollTop += Math.ceil(overlap);
   };
-  const toolbar = showFormatting && (
-    <div className={styles.toolbarAnchor}>
-      <fieldset
-        ref={toolbarSurface}
-        className={styles.editorToolbar}
-        aria-label="Document formatting"
-      >
-        <ComposerFormattingTools
-          persistent
-          markdownMode="document"
-          disabled={disabled}
-          activeFormats={formats}
-          toggleFormat={(format) => input.current?.toggleFormat(format)}
-          editLink={() => editLink()}
-        >
-          {null}
-        </ComposerFormattingTools>
-      </fieldset>
-    </div>
+  const reduceMotion = useReducedMotion();
+  const instant =
+    !!reduceMotion ||
+    (typeof document !== "undefined" &&
+      document.documentElement.hasAttribute("data-keyboard-navigation"));
+  const toolbar = (
+    <AnimatePresence custom={instant}>
+      {showFormatting && (
+        <DocumentFormattingToolbar surfaceRef={toolbarSurface}>
+          <ComposerFormattingTools
+            persistent
+            markdownMode="document"
+            disabled={disabled}
+            activeFormats={formats}
+            toggleFormat={(format) => input.current?.toggleFormat(format)}
+            editLink={() => editLink()}
+          >
+            {null}
+          </ComposerFormattingTools>
+        </DocumentFormattingToolbar>
+      )}
+    </AnimatePresence>
   );
   return (
     <div
@@ -306,7 +360,10 @@ export function DocumentEditor({
       className={`${styles.stack} ${editing && source ? styles.sourceEditor : ""}`}
       data-formatting={showFormatting || undefined}
     >
-      <section className={styles.editorBody} aria-label="Document content">
+      <section
+        className={`${styles.editorBody} text-message`}
+        aria-label="Document content"
+      >
         <div hidden={!editing}>
           {source ? (
             <Textarea
@@ -329,7 +386,7 @@ export function DocumentEditor({
               }}
             />
           ) : (
-            <div className={`text-body ${markdownStyles.documentScale}`}>
+            <div className={markdownStyles.documentScale}>
               <EditableInput
                 ref={input}
                 draft={draft}
@@ -424,8 +481,7 @@ export function DocumentEditor({
         </div>
         {!editing && children}
       </section>
-      {toolbar &&
-        (toolbarTarget ? createPortal(toolbar, toolbarTarget) : toolbar)}
+      {toolbarTarget ? createPortal(toolbar, toolbarTarget) : toolbar}
       {editing && linkOpen && link && (
         <ComposerLinkDialog
           edit={link}

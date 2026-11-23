@@ -5,7 +5,7 @@ export function documentPlugin(ctx, clipGuide = false) {
   function Reader({ name, session }) {
     ctx.panels.useTabTitle(name);
     const [content, setContent] = React.useState(
-      `## ${name}\n\n**Host Markdown**\n\n| Status | Detail |\n| :--- | ---: |\n| Open | A long value with enough words to overflow in the narrow document pane |\n\n![Tracking image](https://tracker.example/p.gif)\n\n[Unsafe](javascript:alert%281%29)\n\n<buzz://channel/alpha>\n\n[the **alpha** room](buzz://channel/alpha)\n\n\`\`\`ts\n${Array.from({ length: 40 }, (_, line) => `const line${line} = ${line};`).join("\n")}\n\`\`\``,
+      `## ${name}\n\n**Host Markdown**\n\nBefore you publish:\n\n- Confirm the scope\n- Check the links\n\n| Status | Detail |\n| :--- | ---: |\n| Open | A long value with enough words to overflow in the narrow document pane |\n\n![Tracking image](https://tracker.example/p.gif)\n\n[Unsafe](javascript:alert%281%29)\n\n<buzz://channel/alpha>\n\n[the **alpha** room](buzz://channel/alpha)\n\n\`\`\`ts\n${Array.from({ length: 40 }, (_, line) => `const line${line} = ${line};`).join("\n")}\n\`\`\``,
     );
     const [editing, setEditing] = React.useState(false);
     const [source, setSource] = React.useState(false);
@@ -14,7 +14,6 @@ export function documentPlugin(ctx, clipGuide = false) {
     const [toolbarTarget, setToolbarTarget] = React.useState(null);
     const editor = React.useRef(null);
     const documentEditor = h(ctx.conversation.ui.DocumentEditor, {
-      key: editing ? "edit" : "read",
       ref: editor,
       value: content,
       onChange: setContent,
@@ -74,6 +73,19 @@ export function documentPlugin(ctx, clipGuide = false) {
             onClick: () => setContent("External **replacement**"),
           },
           "Replace document",
+        ),
+      editing &&
+        h(
+          "button",
+          {
+            type: "button",
+            onClick: () =>
+              editor.current?.focusSelection(
+                { start: 0, end: 0, source },
+                { preventScroll: true },
+              ),
+          },
+          "Restore opening caret",
         ),
       clipGuide && name === "Guide"
         ? h(
