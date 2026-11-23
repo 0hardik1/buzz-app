@@ -313,6 +313,8 @@ import TablerPlayIcon from "@tabler/icons-react/dist/esm/icons/IconPlayerPlay.mj
 export const PlayIcon = defineIcon("tabler", TablerPlayIcon);
 import TablerPlugIcon from "@tabler/icons-react/dist/esm/icons/IconPlug.mjs";
 export const PlugIcon = defineIcon("tabler", TablerPlugIcon);
+import TablerPuzzleIcon from "@tabler/icons-react/dist/esm/icons/IconPuzzle.mjs";
+export const PuzzleIcon = defineIcon("tabler", TablerPuzzleIcon);
 import TablerGripVerticalIcon from "@tabler/icons-react/dist/esm/icons/IconGripVertical.mjs";
 export const GripVerticalIcon = defineIcon("tabler", TablerGripVerticalIcon);
 import TablerPinIcon from "@tabler/icons-react/dist/esm/icons/IconPin.mjs";

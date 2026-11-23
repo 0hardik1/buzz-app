@@ -20,7 +20,8 @@ import {
   GripVerticalIcon,
   PinFilledIcon,
   PinIcon,
-  SquaresFourIcon,
+  CaretRightIcon,
+  PuzzleIcon,
 } from "../../shared/design-system/icons/index";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
@@ -166,9 +167,10 @@ export function AllPlugins({
             variant="row"
             icon={
               <span className="shell-page-icon">
-                <SquaresFourIcon size={16} strokeWidth={2.5} />
+                <PuzzleIcon size={16} strokeWidth={2.5} />
               </span>
             }
+            trailing={<CaretRightIcon size={16} aria-hidden="true" />}
           />
         }
       />
@@ -315,7 +317,7 @@ function PluginRow({
               {...drag.listeners}
               aria-label={`Reorder ${plugin.label}`}
               title="Drag, or use the arrow keys, to reorder"
-              size="sm"
+              size="xs"
               variant="glyph"
               icon={<GripVerticalIcon size={16} aria-hidden="true" />}
               onKeyDown={(event) => {

@@ -60,7 +60,8 @@
    the reorder slot empty so every plugin's icon lines up. */
 .grip {
   display: inline-flex;
-  width: var(--size-row);
+  width: var(--space-5);
+  margin-inline-start: var(--space-1);
   min-height: var(--size-row);
   flex: none;
   align-items: center;
