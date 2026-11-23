@@ -33,6 +33,7 @@ import { useDroppable } from "@dnd-kit/core";
 import {
   ChannelSidebarDnd,
   DraggableChannel,
+  useSidebarCardOrder,
   useSidebarSectionDrag,
 } from "../../features/channel-navigation/ChannelSidebarDnd";
 import { WorkspaceSettings } from "../../features/solo/WorkspaceSettings";
@@ -291,6 +292,8 @@ export function SoloWorkspaces({
     name: string;
   }>();
   const order = workspaceSectionOrder(snapshot.data);
+  // Composed workspaces are cards of the sidebar's one card order.
+  const cardOrder = useSidebarCardOrder()?.order ?? order;
   const sections = snapshot.data?.sections ?? [];
   const groups = snapshot.data?.sectionOrder
     ? order.flatMap((key) => sections.filter(({ id }) => key === `group:${id}`))
@@ -307,7 +310,7 @@ export function SoloWorkspaces({
   const moveProject = (id: string, to: number) => {
     if (workspaceComposition) {
       const key = workspaceSectionKey(id);
-      const next = order.filter((section) => section !== key);
+      const next = cardOrder.filter((section) => section !== key);
       next.splice(to, 0, key);
       void preferences.reorderSections(key, next).catch(() => {});
       return;
@@ -575,9 +578,10 @@ export function SoloWorkspaces({
       ? workspaceSectionKey(project.id)
       : DROP + project.id;
     const groupIndex = workspaceComposition
-      ? order.indexOf(projectKey)
+      ? cardOrder.indexOf(projectKey)
       : groups.findIndex((group) => group.id === project.id);
-    const lastIndex = (workspaceComposition ? order.length : groups.length) - 1;
+    const lastIndex =
+      (workspaceComposition ? cardOrder.length : groups.length) - 1;
     const reorderable = !!project.id && orderWritable;
     const open =
       !collapsed.includes(project.id) || renamingProject === project.id;

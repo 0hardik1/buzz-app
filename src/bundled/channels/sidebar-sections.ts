@@ -1,10 +1,12 @@
 import type { ChannelSummary } from "../../features/relay/contracts";
 import {
+  isSidebarPluginCardKey,
   SIDEBAR_PAGES_SECTION,
   workspaceSectionOrder,
   type SidebarPreferences,
 } from "../../features/relay/sidebar-preferences";
 import { defaultSidebarSort } from "../../features/relay/sidebar-sort";
+import type { SidebarCardOrder } from "../../features/channel-navigation/ChannelSidebarDnd";
 
 export function isChannelSectionKey(key: string) {
   return key === "channels" || key.startsWith("group:");
@@ -59,6 +61,36 @@ export function orderContributedSidebarSections<T extends { key: string }>(
         a.index - b.index,
     )
     .map(({ section }) => section);
+}
+
+/** The sidebar's one card order over the cards shown, given in their default
+ * order. Saved cards keep their places; this device's earlier plugin order
+ * ranks plugin cards the synced order hasn't saved. */
+export function sidebarCardOrder(
+  groups: Pick<SidebarPreferences, "sections" | "sectionOrder"> | undefined,
+  shown: readonly string[],
+  localOrder: readonly string[],
+  writable: boolean,
+  save: (key: string, order: readonly string[]) => Promise<unknown>,
+): SidebarCardOrder {
+  const plugins = orderContributedSidebarSections(
+    shown.filter(isSidebarPluginCardKey).map((key) => ({ key })),
+    localOrder,
+  ).map(({ key }) => key);
+  const order = workspaceSectionOrder(groups, plugins);
+  const listed = new Set(shown);
+  return {
+    order,
+    shown: order.filter((key) => listed.has(key)),
+    writable,
+    reorder(key: string, overKey: string) {
+      const to = order.indexOf(overKey);
+      if (to < 0 || !order.includes(key)) return;
+      const next = order.filter((id) => id !== key);
+      next.splice(to, 0, key);
+      void save(key, next).catch(() => {});
+    },
+  };
 }
 
 function compareName(a: ChannelSummary, b: ChannelSummary) {
