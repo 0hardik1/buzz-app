@@ -15,6 +15,13 @@ export async function notificationLevels(page, menu) {
   await expect(
     menu.getByRole("menuitem", { name: "Move to…", exact: true }),
   ).toBeVisible();
+  // A pointer left by an earlier click can rest where the trigger opens. WebKit
+  // hovers it late, after focus has entered the submenu, and pulls focus back.
+  // Park it off the menu and let any submenu it opened close first.
+  await page.mouse.move(0, 0);
+  await expect(
+    page.getByRole("menu", { name: /^Notifications for / }),
+  ).toHaveCount(0);
   // Keyboard, not hover: a pointer already resting on the trigger cannot reopen it.
   await menu
     .getByRole("menuitem", { name: "Notifications", exact: true })
