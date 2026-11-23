@@ -609,9 +609,8 @@ Quitting Buzz also turns it off.
   from someone with permission.
 - **Workspaces** can hold any mix of chats, channels, forums and DMs. Use **Move to…**
   in a conversation’s menu or drag the row to a workspace. Unfiled items appear
-  in **Chats** (conversations you started, posted in or kept), **DMs**, or
-  **Shared with you** (conversations someone else added you to that you have
-  not engaged with yet; it only shows while it has something in it). Reorder
+  in **Messages** (every named conversation, including ones someone else
+  added you to) or **DMs**. Reorder
   any section, including **Favorites**, by dragging its heading or using **Move up** and
   **Move down** in its **…** menu. Escape cancels a drag.
   The arrow beside a workspace’s creation icon offers **New chat**, **New channel**
@@ -1229,11 +1228,11 @@ Quitting Buzz also turns it off.
   and use the Left/Right arrow keys. Double-click the handle to reset the width.
   Messages and plugin pages share the saved width within the same community
   and identity; narrow windows use a navigation drawer instead.
-- **Sidebar sections** default to **Plugins**, **Chats**, **Favorites**, your
-  workspaces, **Shared with you**, then **DMs**. After an upgrade
+- **Sidebar sections** default to **Plugins**, **Messages**, **Favorites**, your
+  workspaces, then **DMs**. After an upgrade
   from the separate Solo and Team sidebars, Buzz keeps their order: workspaces
-  from the previous Solo sidebar, **Chats**, **Favorites**, workspaces from the previous
-  Team sidebar, then **Shared with you**. A saved section order takes precedence.
+  from the previous Solo sidebar, **Messages**, **Favorites**, then workspaces
+  from the previous Team sidebar. A saved section order takes precedence.
   Sections collapse independently through their headings. Buzz
   remembers collapsed sections for each community and identity. Unread messages
   or thread replies highlight the headings of collapsed sections. Muted
@@ -1244,11 +1243,7 @@ Quitting Buzz also turns it off.
   sidebar preferences.
 - **Moving conversations** works by dragging or choosing **Move to…** from the
   row’s menu. Workspaces and **Favorites** accept any type. Unfiled conversations
-  return to **Chats** (or **Shared with you** if you have not engaged with them),
-  or **DMs** for direct messages. **Shared with you** takes no drops; drag a row
-  to **Chats**, or choose **Chats** in its **Move to…** menu, to keep it there.
-  Posting in a conversation, or starting it, also moves it to **Chats**. Kept
-  conversations are remembered on this device only.
+  return to **Messages**, or **DMs** for direct messages.
 - Saved workspaces, Favorites, mutes and sorting update while connected in
   hosts that support saved sidebar preferences. Moving a conversation out of
   Favorites to a workspace or home section from the sidebar removes it from

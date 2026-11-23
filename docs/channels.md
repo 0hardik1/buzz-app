@@ -150,15 +150,11 @@ sidebar coordinates must match what the sidebar signer produces, and recipe
 coordinates must satisfy the recipe contract.
 
 The sidebar defaults to **Plugins** (apps and sidebar pages such as Activity),
-**Chats**, **Favorites**, personal workspaces, **Shared with you** and
-**DMs**. **Chats** lists named conversations (Solo chats, channels and forums)
-the viewer started, posted in or kept; **Shared with you** holds the ones
-someone else added them to until they engage, and is hidden while empty. The
-session's `ownPosts` store (one read of the viewer's recent own messages, then
-live additions) supplies "posted in"; kept conversations are device-local view
-state. After an upgrade from the separate Solo and Team
-sidebars, the previous Solo workspaces come first, then **Chats**,
-**Favorites**, the previous Team workspaces and **Shared with you**. Each section is its
+**Messages**, **Favorites**, personal workspaces and **DMs**. **Messages**
+lists every unfiled named conversation (Solo chats, channels and forums),
+including ones someone else added the viewer to. After an upgrade from the
+separate Solo and Team sidebars, the previous Solo workspaces come first, then
+**Messages**, **Favorites** and the previous Team workspaces. Each section is its
 own card. Reorder cards by dragging
 their header or using **Move up** and **Move down**. The saved order syncs with
 workspace placement. Double-click a workspace's header to rename it in place.
