@@ -67,11 +67,13 @@ export function MarkAllReadShortcut({
         (session.channels
           .list()
           .channels.some(({ id }) => channelHasUnread(session.unread, id)) ||
-          // Activity also holds mentions from public channels not joined.
+          // Activity also holds mentions from public channels not joined,
+          // and threads marked unread by hand whose messages are read.
           session.unread
             .inbox()
-            .items.some(({ channelId }) =>
-              channelHasUnread(session.unread, channelId),
+            .items.some(
+              ({ channelId, manual }) =>
+                manual || channelHasUnread(session.unread, channelId),
             )),
       run: () => setAsking({ unread: session.unread, name }),
     });

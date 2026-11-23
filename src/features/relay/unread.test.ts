@@ -8477,6 +8477,36 @@ it("a thread dwell at its bottom in a channel the viewer has not joined clears i
   lease.dispose();
 });
 
+it("a thread dwell outside a joined channel whose bottom reply's root is unresolved reads that reply without failing", async () => {
+  const h = setup();
+  const { root, reply } = outsideReply(h, "lobby", 20);
+  h.query.mockImplementation(async () => []);
+  h.emit([reply]);
+  const lease = h.session.unread.reading("lobby", root.id);
+  await expect(lease.catchUp(reply.id, root.id)).resolves.toBeUndefined();
+  expect(h.session.unread.attention("lobby", reply.id).unread).toBe(false);
+  lease.dispose();
+});
+
+it("a channel dwell outside a joined channel reads its bottom broadcast reply, not the top-level post it cuts off at", async () => {
+  const h = setup();
+  const { root } = outsideReply(h, "lobby", 20);
+  const top = message(h.alice, "lobby", "top mention", 30, [
+    ["p", h.viewer.pubkey],
+  ]);
+  const broadcast = message(h.alice, "lobby", "broadcast mention", 31, [
+    ["e", root.id, "", "reply"],
+    ["broadcast", "1"],
+    ["p", h.viewer.pubkey],
+  ]);
+  h.emit([top, broadcast]);
+  const lease = h.session.unread.reading("lobby");
+  await lease.catchUp(top.id, undefined, broadcast.id);
+  expect(h.session.unread.attention("lobby", broadcast.id).unread).toBe(false);
+  expect(h.session.unread.attention("lobby", top.id).unread).toBe(true);
+  lease.dispose();
+});
+
 it("read outside mentions in one thread group under its root after a restart", async () => {
   const h = setup({}, true, (journal) => ({
     ...journal,

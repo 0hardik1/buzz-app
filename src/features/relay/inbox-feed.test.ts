@@ -1813,6 +1813,42 @@ it("after leaving a public stream, its mentions list again once its metadata is 
   expect(h.session.unread.attention("lobby", plain.id).status).toBe("unknown");
   expect(metadataReads(h)).toHaveLength(1);
 });
+it("leaving a public stream with a confirmed preview keeps its mentions but not a diff message mention", async () => {
+  const h = setup();
+  h.admit([h.viewer.pubkey]);
+  const members = [h.viewer.pubkey, h.alice.pubkey];
+  outside(h, "lobby", PUBLIC_STREAM, members);
+  outside(h, "lobby", PUBLIC_STREAM, [h.alice.pubkey], 30);
+  const left = mentionIn(h, "lobby", "mention after leaving", 40);
+  const work = h.session.inboxFeed.ensure();
+  (await take(h, 9)).resolve([left]);
+  (await take(h, 39000)).resolve([
+    metadata(h.relay, "lobby", "lobby", 30, PUBLIC_STREAM),
+  ]);
+  await work;
+  outside(h, "lobby", PUBLIC_STREAM, members, 50);
+  // Addressed history never asks for kind 40008, so nothing would list it again.
+  const diff = signed(h.alice, {
+    kind: 40008,
+    content: "--- a\n+++ b",
+    created_at: 60,
+    tags: [
+      ["h", "lobby"],
+      ["p", h.viewer.pubkey],
+    ],
+  });
+  const mention = mentionIn(h, "lobby", "mention joined again", 61);
+  h.live.receive([diff, mention], { phase: "live", channelId: "lobby" });
+  expect(rows(h).flatMap((row) => row.messageIds)).toEqual(
+    expect.arrayContaining([diff.id, mention.id]),
+  );
+  outside(h, "lobby", PUBLIC_STREAM, [h.alice.pubkey], 70);
+  expect(h.session.channels.get?.("lobby")?.members).toEqual([h.alice.pubkey]);
+  expect(rows(h).flatMap((row) => row.messageIds)).toEqual([
+    mention.id,
+    left.id,
+  ]);
+});
 it("an unlisted public stream the viewer has not joined is not outside, so its mentions list nothing", () => {
   const h = setup();
   h.admit([h.viewer.pubkey]);
@@ -1979,6 +2015,28 @@ it("a retained outside mention stays incomplete while its recheck runs and after
     incomplete: [mention.id],
   });
 });
+it("a retained outside mention is incomplete while the addressed read runs and after it fails", async () => {
+  const h = setup();
+  h.admit([h.viewer.pubkey]);
+  outside(h, "lobby", PUBLIC_STREAM);
+  const mention = mentionIn(h, "lobby", "outside mention", 20);
+  const first = h.session.inboxFeed.ensure();
+  (await take(h, 9)).resolve([mention]);
+  await first;
+  expect(h.session.inboxFeed.snapshot().incomplete).toEqual([]);
+  const again = h.session.inboxFeed.refresh();
+  const read = await take(h, 9);
+  expect(h.session.inboxFeed.snapshot()).toMatchObject({
+    status: "loading",
+    incomplete: [mention.id],
+  });
+  read.reject(new Error("relay unavailable"));
+  await again;
+  expect(h.session.inboxFeed.snapshot()).toMatchObject({
+    status: "error",
+    incomplete: [mention.id],
+  });
+});
 it("rechecking many retained outside mentions splits the overlay reads under the request budget", async () => {
   const h = setup();
   h.admit([h.viewer.pubkey]);
@@ -2020,9 +2078,22 @@ it("a deep outside edit chain with repeated targets settles without walking each
       }),
     );
   }
-  const started = performance.now();
-  h.live.receive([...chain].reverse(), liveIn("lobby"));
-  expect(performance.now() - started).toBeLessThan(2000);
+  // Each edit's tags are read a bounded number of times, never once per path
+  // (2^24 reads here). A thrown read ends a regression at once.
+  const limit = chain.length * 40;
+  let reads = 0;
+  const counted = chain.map(
+    (event) =>
+      new Proxy(event, {
+        get(target, key, receiver) {
+          if (key === "tags" && ++reads > limit)
+            throw new Error("Walked each path");
+          return Reflect.get(target, key, receiver);
+        },
+      }),
+  );
+  h.live.receive([...counted].reverse(), liveIn("lobby"));
+  expect(reads).toBeLessThanOrEqual(limit);
   expect(rows(h).map((row) => row.messageId)).toEqual([mention.id]);
 });
 it("hiding an outside channel during a running repair runs the repair again", async () => {

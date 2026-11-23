@@ -16,6 +16,7 @@ function setup({
   capability = "frontier-sync",
   unreadChannels = ["one"],
   activityChannels = [] as string[],
+  manualActivityChannels = [] as string[],
   selected = origin as string | null,
   connected = origin,
 }: {
@@ -23,6 +24,8 @@ function setup({
   unreadChannels?: string[];
   /** Channels of Activity rows, which can be outside the channel list. */
   activityChannels?: string[];
+  /** Channels of Activity rows marked unread by hand, their messages read. */
+  manualActivityChannels?: string[];
   selected?: string | null;
   /** The community the relay session is actually connected to. */
   connected?: string;
@@ -36,7 +39,13 @@ function setup({
     }),
     activity: () => ({ items: [] }),
     inbox: () => ({
-      items: activityChannels.map((channelId) => ({ channelId })),
+      items: [
+        ...activityChannels.map((channelId) => ({ channelId, manual: false })),
+        ...manualActivityChannels.map((channelId) => ({
+          channelId,
+          manual: true,
+        })),
+      ],
     }),
     markAllChannelsRead,
   };
@@ -105,6 +114,14 @@ it("is available when the only unread is a mention in a public channel the viewe
   // That channel is not in the channel list; only Activity holds it.
   expect(
     setup({ unreadChannels: ["lobby"], activityChannels: ["lobby"] })
+      .shortcut()
+      ?.when?.(),
+  ).toBe(true);
+});
+
+it("is available when the only unread is a thread marked unread by hand in a public channel the viewer has not joined", () => {
+  expect(
+    setup({ unreadChannels: [], manualActivityChannels: ["lobby"] })
       .shortcut()
       ?.when?.(),
   ).toBe(true);

@@ -188,15 +188,6 @@ export function createInboxFeed({
           },
         );
         if (closed || generation !== epoch) return;
-        // A retained outside mention the page may omit, since it was deleted,
-        // is unchecked like the page's own rows until its overlays settle.
-        const retained = retainedOutsideIds();
-        if (retained.length)
-          publish({
-            incomplete: Object.freeze([
-              ...new Set([...snapshot.incomplete, ...retained]),
-            ]),
-          });
         // Retry older failed targets even when newer addressed rows pushed them
         // beyond the latest page; never clear an unchecked exact ID.
         const targets = [
@@ -239,8 +230,22 @@ export function createInboxFeed({
         work = undefined;
       }
     });
-    if (generation === epoch && controller === owned)
-      publish({ status: "loading", error: undefined });
+    if (generation === epoch && controller === owned) {
+      // A retained outside mention the page may omit, since it was deleted,
+      // is unchecked like the page's own rows until its overlays settle.
+      const retained = retainedOutsideIds();
+      publish({
+        status: "loading",
+        error: undefined,
+        ...(retained.length
+          ? {
+              incomplete: Object.freeze([
+                ...new Set([...snapshot.incomplete, ...retained]),
+              ]),
+            }
+          : {}),
+      });
+    }
     return work;
   }
   function clear(incomplete: readonly string[] = []) {

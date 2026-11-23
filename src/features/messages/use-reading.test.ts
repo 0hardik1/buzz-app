@@ -697,9 +697,11 @@ it("a broadcast reply as the bottom row earns dwell but catches up through the t
   h.mutation();
   vi.advanceTimersToNextFrame();
   await vi.advanceTimersByTimeAsync(300);
+  // The bottom row also goes along: outside a joined channel, only it is read.
   expect(h.dwelled()?.catchUp).toHaveBeenCalledExactlyOnceWith(
     "top",
     undefined,
+    "broadcast",
   );
 });
 it("without the broadcast bottom row fully shown, there is no catch-up through the top-level post", async () => {

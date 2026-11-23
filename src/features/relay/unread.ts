@@ -171,8 +171,9 @@ export type ReadingHandle = Readonly<{
   /** Only message IDs actually visible to the active consumer; no caller timestamps. */
   observe(messageIds: readonly string[]): Promise<void>;
   /** Bottom dwell through verified evidence; channel catch-up reads the
-   * timeline's mentions and broadcasts by message, never other replies. */
-  catchUp(messageId: string, rootId?: string): Promise<void>;
+   * timeline's mentions and broadcasts by message, never other replies.
+   * `bottomId` is the bottom row when it is not `messageId`. */
+  catchUp(messageId: string, rootId?: string, bottomId?: string): Promise<void>;
   dispose(): void;
 }>;
 export interface UnreadCapability {
@@ -653,16 +654,17 @@ export function createUnread({
           channel.id === id && !channel.cached && member(channel.members),
       ) || outside(id);
   /** Outside a channel, only its mentions of the viewer are evidence, in the
-   * kinds Activity reads again (not diffs, 40008). A batch read newest first
-   * carries an edit or deletion before its target; `decided` keeps shared
-   * targets from being walked once per path. */
+   * kinds Activity reads again (not diffs, 40008). */
+  const outsideMention = (event: RelayEvent) =>
+    event.kind !== 40008 && mentionsViewer(event);
+  /** A batch read newest first carries an edit or deletion before its target;
+   * `decided` keeps shared targets from being walked once per path. */
   const outsideEvidence = (
     event: RelayEvent,
     incoming: ReadonlyMap<string, RelayEvent>,
     decided: Map<string, boolean>,
   ): boolean => {
-    if (contentKind(event))
-      return event.kind !== 40008 && mentionsViewer(event);
+    if (contentKind(event)) return outsideMention(event);
     const known = decided.get(event.id);
     if (known !== undefined) return known;
     const result = event.tags.every(([name, id = ""]) => {
@@ -2233,7 +2235,7 @@ export function createUnread({
         [...channels].some((channel) => !allowed(channel)) ||
         (contentKind(event) &&
           [...channels].some(outside) &&
-          !mentionsViewer(event))
+          !outsideMention(event))
       )
         events.delete(id);
     }
@@ -3393,23 +3395,26 @@ export function createUnread({
             if (!shown.has(id) && holders.delete(stay) && !holders.size)
               markedWhileShown.delete(id);
         },
-        async catchUp(id: string, rootId?: string) {
+        async catchUp(cutoff: string, rootId?: string, bottom = cutoff) {
           if (!valid()) return;
           const target = rootId
             ? { kind: "thread" as const, channelId, rootId }
             : { kind: "channel" as const, channelId };
-          const dm = readDm([{ target, id }]);
+          const dm = readDm([{ target, id: cutoff }]);
           if (dm) {
             await dm;
             return;
           }
           // Outside a channel, a dwell reads only what it shows: the bottom row
           // it reached, exactly, and never a mark. Only a retained bottom row
-          // (a mention) places a thread's bottom, to clear its reply reminders.
+          // (a mention) in a verified thread places that thread's bottom, to
+          // clear its reply reminders.
           const away = outside(channelId);
+          const id = away ? bottom : cutoff;
           if (away) {
             await this.observe([id]);
-            if (!rootId || !events.has(id)) return;
+            const shown = events.get(id);
+            if (!rootId || !shown || root(shown) !== rootId) return;
           }
           const event = requireMessage(target, id);
           // A broadcast reply is shown in the channel but never its cutoff.
