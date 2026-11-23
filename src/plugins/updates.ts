@@ -769,6 +769,7 @@ export function createPluginUpdates(
           update.error =
             reason instanceof Error ? reason.message : String(reason);
         }
+        if (closed) return;
         if (!current(update)) continue;
         checked.set(id, { identity, at: Date.now() });
         if (
@@ -779,7 +780,6 @@ export function createPluginUpdates(
           )
         ) {
           prune();
-          continue;
         }
       }
       if (closed) return;

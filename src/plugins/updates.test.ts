@@ -552,6 +552,7 @@ it("discards late discovery after disposal or removal and prevents overlapping c
   await pending;
   await retried;
   expect(updates.snapshot()).toEqual([]);
+  expect(sharedPluginUpdateChecks(f.manager.imports).snapshot()).toEqual({});
 });
 
 it("checks a saved Git source after its recommendation is removed", async () => {
