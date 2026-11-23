@@ -5,6 +5,21 @@ import { developerMode } from "../developer/mode";
 export type AgentPlayback = "relay" | "local";
 export type AudioReport = Record<string, Record<string, number>>;
 
+export type VoiceDiagnostic = Readonly<
+  { detectedAtMs: number } & (
+    | {
+        kind: "codex-webrtc";
+        fromMs: number;
+        packetsLost: number;
+        concealmentEvents: number;
+        concealedMs: number;
+      }
+    | { kind: "codex-decoded-gap"; durationMs: number }
+    | { kind: "agent-send-drop" }
+    | { kind: "native-relay"; packetsSkipped: number; jitterRejected: number }
+  )
+>;
+
 const stages = new Map<string, Record<string, number>>();
 const arrivals = new Map<string, number>();
 const listeners = new Set<() => void>();

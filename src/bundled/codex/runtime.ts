@@ -2183,6 +2183,7 @@ export class CodexRuntime {
             thinking();
           },
           settings.voice,
+          seat.diagnostic,
         );
         signal.throwIfAborted();
         if (settings.scope === "community")

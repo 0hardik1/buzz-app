@@ -112,6 +112,8 @@ pub(crate) struct Call {
     /// An agent of `viewer` to seat in the existing `room`, signing as itself.
     #[serde(default)]
     agent: Option<String>,
+    #[serde(default)]
+    diagnostics: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -127,6 +129,13 @@ pub(crate) enum Update {
     Audio {
         peer: String,
         samples: Vec<f32>,
+    },
+    Diagnostic {
+        peer: String,
+        #[serde(rename = "packetsSkipped")]
+        packets_skipped: u64,
+        #[serde(rename = "jitterRejected")]
+        jitter_rejected: u64,
     },
     Ended {
         error: Option<String>,
@@ -510,7 +519,7 @@ async fn seat_agent(
             participants: connection.peers.values().cloned().collect(),
         })
         .map_err(|_| "Huddle view closed")?;
-    audio::run(connection, pcm, stop.clone(), updates, &touched).await
+    audio::run(connection, pcm, stop.clone(), updates, &touched, false).await
 }
 
 async fn run(
@@ -582,6 +591,7 @@ async fn run(
             stop.clone(),
             updates,
             &touched,
+            call.diagnostics,
         )
         .await
     }.await;
@@ -672,6 +682,7 @@ mod tests {
             parent: uuid::Uuid::new_v4().to_string(),
             room: None,
             agent: None,
+            diagnostics: false,
         };
         let _ = admit_membership(&community.host, &community.fi, &call).await;
         let heads = server.heads().await;
@@ -776,6 +787,7 @@ mod tests {
             parent: uuid::Uuid::new_v4().to_string(),
             room: None,
             agent: None,
+            diagnostics: false,
         };
         let updates = Channel::new(|_| panic!("Cancelled admission must not connect"));
         let (stop, cancelled) = watch::channel(false);
@@ -968,6 +980,7 @@ mod tests {
             parent: uuid::Uuid::new_v4().to_string(),
             room: Some(uuid::Uuid::new_v4().to_string()),
             agent: Some(agent.pubkey.clone()),
+            diagnostics: false,
         };
         validate(&call).unwrap();
         let (_stop, stop) = watch::channel(false);
@@ -1021,6 +1034,7 @@ mod tests {
             parent: uuid::Uuid::new_v4().to_string(),
             room: None,
             agent: None,
+            diagnostics: false,
         };
         assert!(validate(&call).is_ok());
         call.community = "https://relay.example/other".into();

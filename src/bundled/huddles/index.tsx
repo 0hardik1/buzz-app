@@ -47,6 +47,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
       if (remoteVoices.snapshot().id === call) huddles.remoteVoiceError(error);
       else huddles.voiceError(call, error);
     },
+    huddles.voiceDiagnostic,
   );
   provideHuddleStatus(ctx, huddles);
   const stopRing = createHuddleRing(huddles);

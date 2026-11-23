@@ -8,7 +8,7 @@ import { discoverHuddles } from "./discovery";
 import type { RelayData, RelaySnapshot } from "../relay/service";
 import type { HuddleBridge, HuddleDestination, HuddleUpdate } from "./bridge";
 import type { HuddleAudio, OpenHuddleAudio } from "./audio";
-import { huddleAudio } from "./diagnostics";
+import { huddleAudio, type VoiceDiagnostic } from "./diagnostics";
 import type { PlayoutEvent } from "./playout";
 import type { Context } from "@deepseek-ai/cordis";
 
@@ -39,6 +39,7 @@ type Attempt = {
   stopAudioSettings?: () => void;
   sender: ReturnType<typeof createPcmSender>;
   playoutEvents?: { peer: string; event: PlayoutEvent }[];
+  voiceEvents?: { peer: string; event: VoiceDiagnostic }[];
 };
 const playoutWindowMs = 60_000;
 const maxPlayoutEvents = 256;
@@ -68,6 +69,18 @@ export function createHuddles(
   let closing: Promise<void> | undefined;
   const listeners = new Set<() => void>();
   const unavailable = new Set<string>();
+  function voiceDiagnostic(call: string, peer: string, event: VoiceDiagnostic) {
+    const voiceEvents = current?.voiceEvents;
+    if (
+      !voiceEvents ||
+      snapshot.id !== call ||
+      snapshot.phase !== "connected" ||
+      !snapshot.participants.includes(peer)
+    )
+      return;
+    if (voiceEvents.length === maxPlayoutEvents) voiceEvents.shift();
+    voiceEvents.push({ peer, event });
+  }
   const update = (next: HuddleSnapshot) => {
     snapshot = next;
     if (next.phase !== "incoming") requests?.resetSelection();
@@ -293,7 +306,7 @@ export function createHuddles(
       id,
       connection,
       abort,
-      ...(playoutEvents && { playoutEvents }),
+      ...(playoutEvents && { playoutEvents, voiceEvents: [] }),
       sender: createPcmSender(
         (samples) => bridge.send(id, samples),
         abort.signal,
@@ -383,6 +396,15 @@ export function createHuddles(
           requests?.dismiss(room);
         }
         void leave(event.error ?? undefined, true);
+        return;
+      }
+      if (event.type === "diagnostic") {
+        voiceDiagnostic(attempt.id, event.peer, {
+          kind: "native-relay",
+          detectedAtMs: Date.now(),
+          packetsSkipped: event.packetsSkipped,
+          jitterRejected: event.jitterRejected,
+        });
         return;
       }
       if (event.type === "audio") {
@@ -519,6 +541,7 @@ export function createHuddles(
     };
   return {
     snapshot: () => snapshot,
+    voiceDiagnostic,
     recentPlayout(room: string | undefined, peer: string) {
       if (
         !room ||
@@ -536,10 +559,22 @@ export function createHuddles(
             entry.event.detectedAtMs >= readAtMs - playoutWindowMs,
         )
         .map((entry) => entry.event);
+      const voiceEvents = (current.voiceEvents ?? [])
+        .filter(
+          (entry) =>
+            entry.peer === peer &&
+            entry.event.detectedAtMs >= readAtMs - playoutWindowMs,
+        )
+        .map(({ event }) => event)
+        .sort((a, b) => a.detectedAtMs - b.detectedAtMs);
       return {
         readAtMs,
         windowMs: playoutWindowMs,
         events: events.slice(-40),
+        voiceEvents: voiceEvents.slice(-40),
+        voiceEventsTruncated:
+          current.voiceEvents?.length === maxPlayoutEvents ||
+          voiceEvents.length > 40,
         truncated:
           current.playoutEvents.length === maxPlayoutEvents ||
           events.length > 40,

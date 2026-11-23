@@ -13,7 +13,7 @@ export function registerHuddlePlayoutTool(
   agents.addTool({
     name: huddlePlayoutToolName,
     description:
-      "Read recent relay playback discards and underruns for your own voice on your owner's device in this active Huddle. Times are Unix milliseconds. An underrun estimates a gap in scheduled playback. A queue-limit event marks when audio was discarded. Events have no word alignment or audio.",
+      "Read the last minute of audio diagnostics for your own voice in your owner's active Huddle. events lists relay playback underruns and queue discards. voiceEvents lists gaps in decoded Codex frames, WebRTC loss and audio concealment, sender queue drops, and native relay sequence skips and jitter rejections. Times are Unix milliseconds. The report includes the active playback mode and carries timing and counts only.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -47,7 +47,7 @@ export function registerHuddlePlayoutTool(
         throw new Error(
           "Playback events are unavailable for your seat in this Huddle.",
         );
-      return JSON.stringify(report);
+      return JSON.stringify({ ...report, playback: huddleAudio.playback() });
     },
   });
 }

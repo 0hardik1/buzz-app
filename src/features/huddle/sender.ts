@@ -9,6 +9,7 @@ export function createPcmSender(
   signal: AbortSignal,
   failed: (error: unknown) => void,
   stage?: string,
+  dropped?: () => void,
 ) {
   const pending: number[][] = [];
   let sending = false;
@@ -24,6 +25,7 @@ export function createPcmSender(
       if (pending.length === 4) {
         pending.shift();
         huddleAudio.count(stage, "dropped");
+        dropped?.();
       }
       pending.push(samples);
       if (sending) return;

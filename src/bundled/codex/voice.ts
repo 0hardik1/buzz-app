@@ -1,5 +1,8 @@
 import captureUrl from "../../features/huddle/capture.worklet.js?url&no-inline";
-import { huddleAudio } from "../../features/huddle/diagnostics";
+import {
+  huddleAudio,
+  type VoiceDiagnostic,
+} from "../../features/huddle/diagnostics";
 import { createPlayout } from "../../features/huddle/playout";
 import type { AppServer } from "./rpc";
 
@@ -13,6 +16,7 @@ export async function openVoice(
   instructions: string,
   thinking?: (active: boolean) => void,
   voice?: string,
+  diagnostic?: (event: VoiceDiagnostic) => void,
 ) {
   signal.throwIfAborted();
   const peer = new RTCPeerConnection();
@@ -44,34 +48,75 @@ export async function openVoice(
   const offPlayback = huddleAudio.subscribe(() => {
     if (decoder) decoder.muted = !local();
   });
-  const stats = huddleAudio.enabled
-    ? setInterval(() => void receiveStats().catch(() => {}), 1000)
-    : undefined;
-  const totals: Record<string, number> = {};
+  let readingStats = false;
+  let stats: ReturnType<typeof setInterval> | undefined;
+  const totals = new Map<
+    string,
+    {
+      atMs: number;
+      packets: number;
+      packetsLost: number;
+      concealmentEvents: number;
+      concealedSamples: number;
+    }
+  >();
   async function receiveStats() {
-    for (const report of (await peer.getStats()).values()) {
-      if (report.type !== "inbound-rtp" || report.kind !== "audio") continue;
-      for (const [counter, value] of [
-        ["packets", report.packetsReceived],
-        ["packets lost", report.packetsLost],
-        ["concealments", report.concealmentEvents],
-        [
-          "concealed ms",
-          ((report.concealedSamples ?? 0) -
-            (report.silentConcealedSamples ?? 0)) /
-            48,
-        ],
-      ] as const) {
-        if (typeof value !== "number") continue;
+    if (readingStats) return;
+    readingStats = true;
+    try {
+      const reports = await peer.getStats();
+      if (closed) return;
+      const atMs = Date.now();
+      for (const [id, report] of reports.entries()) {
+        if (report.type !== "inbound-rtp" || report.kind !== "audio") continue;
+        const next = {
+          atMs,
+          packets: report.packetsReceived ?? 0,
+          packetsLost: report.packetsLost ?? 0,
+          concealmentEvents: report.concealmentEvents ?? 0,
+          concealedSamples:
+            (report.concealedSamples ?? 0) -
+            (report.silentConcealedSamples ?? 0),
+        };
+        const previous = totals.get(id);
+        totals.set(id, next);
+        if (!previous) continue;
+        const packetsLost = Math.max(
+          0,
+          next.packetsLost - previous.packetsLost,
+        );
+        const concealmentEvents = Math.max(
+          0,
+          next.concealmentEvents - previous.concealmentEvents,
+        );
+        const concealedMs = Math.max(
+          0,
+          Math.round((next.concealedSamples - previous.concealedSamples) / 48),
+        );
         huddleAudio.count(
           "codex webrtc",
-          counter,
-          Math.round(value - (totals[counter] ?? value)),
+          "packets",
+          next.packets - previous.packets,
         );
-        totals[counter] = value;
+        huddleAudio.count("codex webrtc", "packets lost", packetsLost);
+        huddleAudio.count("codex webrtc", "concealments", concealmentEvents);
+        huddleAudio.count("codex webrtc", "concealed ms", concealedMs);
+        if (packetsLost || concealmentEvents || concealedMs)
+          diagnostic?.({
+            kind: "codex-webrtc",
+            fromMs: previous.atMs,
+            detectedAtMs: atMs,
+            packetsLost,
+            concealmentEvents,
+            concealedMs,
+          });
       }
+    } finally {
+      readingStats = false;
     }
   }
+  if (huddleAudio.enabled || diagnostic)
+    stats = setInterval(() => void receiveStats().catch(() => {}), 1000);
   let rejectConnected!: (error: Error) => void;
   const close = () => {
     if (closed) return closing;
@@ -134,6 +179,7 @@ export async function openVoice(
       processorOptions: { measureChannels: huddleAudio.enabled },
     });
     let decodedChannels: number | undefined;
+    let lastFrame: number | undefined;
     capture.port.onmessage = ({
       data,
     }: MessageEvent<Float32Array | Record<string, number>>) => {
@@ -150,6 +196,17 @@ export async function openVoice(
         return;
       }
       huddleAudio.frame("codex decoded", 50);
+      if (diagnostic) {
+        const now = performance.now();
+        const gap = now - (lastFrame ?? now);
+        lastFrame = now;
+        if (gap > 50 && gap <= 1000)
+          diagnostic({
+            kind: "codex-decoded-gap",
+            detectedAtMs: Date.now(),
+            durationMs: Math.round(gap),
+          });
+      }
       if (local()) return;
       // The Huddle seat owns bounded buffering and serial native sends.
       void output(Array.from(data)).catch(fail);
