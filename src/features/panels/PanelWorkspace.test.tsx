@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { StrictMode, useRef, useState } from "react";
+import { StrictMode, useMemo, useRef, useState } from "react";
 import {
   act,
   cleanup,
@@ -104,7 +104,8 @@ function Fixture({
 const tabs = () => screen.getByRole("tablist", { name: "Panel tabs" });
 const tab = (name: string) => within(tabs()).getByRole("tab", { name });
 
-test("a plugin panel names its tab with panels.useTabTitle, and renders without one outside a tab", () => {
+test("a mounted plugin panel supplies its tab title and context-menu actions", async () => {
+  const user = userEvent.setup();
   const ctx = new Context();
   ctx.provide("pluginStatus", {
     isActive: () => true,
@@ -112,26 +113,45 @@ test("a plugin panel names its tab with panels.useTabTitle, and renders without 
   });
   const { useTabTitle } = new PanelsService(ctx);
   function Build({ id }: { id: string }) {
-    useTabTitle?.(`#${id}`);
-    return <p>Build {id}</p>;
+    const [showLogs, setShowLogs] = useState(false);
+    const actions = useMemo(
+      () => [{ label: "Show logs", run: () => setShowLogs(true) }],
+      [],
+    );
+    useTabTitle?.(`#${id}`, undefined, actions);
+    return <p>{showLogs ? `Logs for build ${id}` : `Build ${id}`}</p>;
   }
-  const { rerender } = render(
+  const workspace = (id?: string) => (
     <PanelWorkspace
       value="ci"
       select={() => {}}
-      items={[{ id: "ci", label: "CI", content: <Build id="1" /> }]}
-    />,
+      items={[
+        {
+          id: "ci",
+          label: "CI",
+          actions: [{ label: "Open in browser", run() {} }],
+          content: id ? <Build id={id} /> : <p>No build selected</p>,
+        },
+      ]}
+    />
   );
+  const { rerender } = render(workspace("1"));
   expect(tab("#1")).toBeInTheDocument();
-  rerender(
-    <PanelWorkspace
-      value="ci"
-      select={() => {}}
-      items={[{ id: "ci", label: "CI", content: <Build id="2" /> }]}
-    />,
-  );
-  expect(tab("#2")).toBeInTheDocument();
-  expect(within(tabs()).queryByRole("tab", { name: "CI" })).toBeNull();
+  rerender(workspace("2"));
+
+  await user.pointer({ keys: "[MouseRight]", target: tab("#2") });
+  expect(
+    await screen.findByRole("menuitem", { name: "Open in browser" }),
+  ).toBeVisible();
+  await user.click(screen.getByRole("menuitem", { name: "Show logs" }));
+  expect(await screen.findByText("Logs for build 2")).toBeVisible();
+
+  rerender(workspace());
+  await user.pointer({ keys: "[MouseRight]", target: tab("CI") });
+  expect(
+    await screen.findByRole("menuitem", { name: "Open in browser" }),
+  ).toBeVisible();
+  expect(screen.queryByRole("menuitem", { name: "Show logs" })).toBeNull();
   cleanup();
   render(<Build id="3" />);
   expect(screen.getByText("Build 3")).toBeInTheDocument();

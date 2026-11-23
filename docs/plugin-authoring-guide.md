@@ -77,6 +77,11 @@ Each line is the main call. Read the types for every field.
 | `ui` (optional) | The host's own controls | `Button`, `Input`, `Field`, `Switch`, `Dialog`. Fall back to plain elements when missing. |
 | `host` | Commands, HTTPS, processes, files | Needs `manifest.host`, below |
 
+In a mounted panel, `ctx.panels.useTabTitle?.(label, icon, actions)` sets the
+tab's live title and optional icon. Pass an optional stable array of
+`{ label, run }` entries to add actions to that tab's context menu. Older hosts
+that support the title hook may ignore the actions argument.
+
 Agent tool names match `/^[a-z][a-z0-9_]{0,63}$/` and are unique across plugins; prefix them with your plugin. Changing a tool's name, description or schema restarts some agent sessions. `addInstructions` text is sent on every turn, so keep it short.
 
 In a Solo region, check `ui.headerMenuActions === true` before passing
