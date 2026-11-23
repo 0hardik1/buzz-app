@@ -4,12 +4,19 @@ import type { PluginManager } from "../../plugins/manager";
 import { AllPlugins } from "./AllPlugins";
 import type { AllPluginsEntry } from "./all-plugins";
 import { PageIcon } from "./PageIcon";
-import { savePluginPins, useSavedPluginPins } from "./plugin-pins";
+import {
+  type PluginPinSort,
+  savePluginPinSort,
+  savePluginPins,
+  useSavedPluginPinSort,
+  useSavedPluginPins,
+} from "./plugin-pins";
 import {
   orderPages,
   pagePlacement,
   pagePresentation,
   resolvePluginPins,
+  sortPinsByLabel,
 } from "./presentation";
 
 /** The Plugins card's pins and its All plugins row, which lists every plugin
@@ -34,6 +41,7 @@ export function usePluginNavigation({
       ? configuration.catalog.plugins
       : undefined;
   const saved = useSavedPluginPins();
+  const sort = useSavedPluginPinSort();
 
   const sidebarPages = useMemo(
     () => orderPages(pages.filter((page) => pagePlacement(page) === "sidebar")),
@@ -47,12 +55,15 @@ export function usePluginNavigation({
             .map((plugin) => plugin.manifest.id),
         )
       : undefined;
-    return resolvePluginPins(
+    const resolved = resolvePluginPins(
       saved,
       sidebarPages,
       builtIn && ((id) => builtIn.has(id)),
     );
-  }, [catalog, saved, sidebarPages]);
+    return resolved && sort === "alphabetical"
+      ? sortPinsByLabel(resolved, sidebarPages)
+      : resolved;
+  }, [catalog, saved, sort, sidebarPages]);
 
   const entries = useMemo((): readonly AllPluginsEntry[] => {
     const pinned = new Map((pins ?? []).map((id, index) => [id, index]));
@@ -97,6 +108,16 @@ export function usePluginNavigation({
       // or not installed here keep their places after them.
       const shown = new Set(ids);
       savePluginPins([...ids, ...(pins ?? []).filter((id) => !shown.has(id))]);
+      savePluginPinSort("custom");
+    },
+    [pins],
+  );
+  const changeSort = useCallback(
+    (next: PluginPinSort) => {
+      // Custom starts from the order on screen, so switching changes nothing
+      // until a pin moves.
+      if (next === "custom" && pins) savePluginPins(pins);
+      savePluginPinSort(next);
     },
     [pins],
   );
@@ -115,9 +136,11 @@ export function usePluginNavigation({
           onOpen={open}
           onPinnedChange={pin}
           onPinnedOrderChange={reorder}
+          sort={sort}
+          onSortChange={changeSort}
         />
       ) : undefined,
-    [pins, entries, open, pin, reorder],
+    [pins, entries, open, pin, reorder, sort, changeSort],
   );
   return { pins, allPlugins };
 }

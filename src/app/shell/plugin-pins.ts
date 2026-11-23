@@ -45,3 +45,29 @@ const subscribe = (listener: () => void) => subscribeView(SCOPE, listener, KEY);
 export function useSavedPluginPins() {
   return useSyncExternalStore(subscribe, savedPluginPins, savedPluginPins);
 }
+
+/** How pinned plugins are ordered: A–Z until the person moves one, then in
+ * their own order until they choose A–Z again. */
+export type PluginPinSort = "alphabetical" | "custom";
+const SORT_KEY = "plugin-pin-sort";
+
+export function savedPluginPinSort(): PluginPinSort {
+  return viewRevision(SCOPE, SORT_KEY) === JSON.stringify("custom")
+    ? "custom"
+    : "alphabetical";
+}
+
+export function savePluginPinSort(sort: PluginPinSort) {
+  writeView(SCOPE, SORT_KEY, sort);
+}
+
+const subscribeSort = (listener: () => void) =>
+  subscribeView(SCOPE, listener, SORT_KEY);
+
+export function useSavedPluginPinSort() {
+  return useSyncExternalStore(
+    subscribeSort,
+    savedPluginPinSort,
+    savedPluginPinSort,
+  );
+}

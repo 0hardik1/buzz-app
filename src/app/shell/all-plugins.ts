@@ -20,4 +20,7 @@ export type AllPluginsProps = {
   onPinnedChange: (key: string, pinned: boolean) => void;
   /** The complete pinned order after a move. */
   onPinnedOrderChange: (keys: readonly string[]) => void;
+  /** How pinned plugins are ordered; moving one makes it custom. */
+  sort: "alphabetical" | "custom";
+  onSortChange: (sort: "alphabetical" | "custom") => void;
 };

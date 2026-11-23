@@ -7,6 +7,11 @@
   max-height: var(--available-height);
   flex-direction: column;
 }
+/* "Your plugins" and the pin sort sit above the list; the header's own bottom
+   margin is the gap. */
+.header {
+  padding: var(--space-2) var(--space-2) 0 var(--space-3);
+}
 .search {
   padding: var(--space-2) var(--space-2) 0;
 }

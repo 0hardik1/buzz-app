@@ -13,6 +13,7 @@ import {
   pagePresentation,
   pinnedPages,
   resolvePluginPins,
+  sortPinsByLabel,
 } from "./presentation";
 
 function page(key: string, title: string, icon?: string): RegisteredPage {
@@ -248,6 +249,15 @@ describe("plugin pins", () => {
       "fixture.notes",
     ]);
     expect(resolvePluginPins([], pages, builtIn)).toEqual([]);
+  });
+
+  test("A–Z sorts pins by label and keeps pins without a page last", () => {
+    expect(
+      sortPinsByLabel(
+        ["buzz.reminders", "gone.plugin", "fixture.notes", "buzz.inbox"],
+        pages,
+      ),
+    ).toEqual(["buzz.inbox", "fixture.notes", "buzz.reminders", "gone.plugin"]);
   });
 
   test("unknown built-ins leave pins unresolved", () => {

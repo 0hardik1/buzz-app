@@ -79,6 +79,26 @@ export function resolvePluginPins(
   ];
 }
 
+/** Pins A–Z by their page's label; pins without a page here (off or not
+ * installed) keep their saved order after them. */
+export function sortPinsByLabel(
+  pins: readonly string[],
+  pages: readonly RegisteredPage[],
+): readonly string[] {
+  const labels = new Map<string, string>();
+  for (const page of pages)
+    if (!labels.has(page.pluginId))
+      labels.set(page.pluginId, pagePresentation(page).label);
+  const shown = pins.filter((id) => labels.has(id));
+  shown.sort(
+    (a, b) =>
+      (labels.get(a) ?? "").localeCompare(labels.get(b) ?? "", undefined, {
+        sensitivity: "base",
+      }) || a.localeCompare(b),
+  );
+  return [...shown, ...pins.filter((id) => !labels.has(id))];
+}
+
 /** The card's rows: pinned plugins' pages in pin order, then the open page
  * while it isn't pinned, so the open destination always shows. Without pins,
  * every page. */

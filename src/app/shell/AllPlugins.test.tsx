@@ -29,6 +29,8 @@ function setup(plugins: AllPluginsEntry[]) {
     onOpen: vi.fn(),
     onPinnedChange: vi.fn(),
     onPinnedOrderChange: vi.fn(),
+    sort: "custom" as const,
+    onSortChange: vi.fn(),
   };
   render(<AllPlugins plugins={plugins} {...props} />);
   return props;
@@ -117,4 +119,15 @@ it("reorders pinned plugins with the arrow keys on the handle", async () => {
   within(popup).getByRole("button", { name: "Reorder Alpha" }).focus();
   await user.keyboard("{ArrowDown}");
   expect(props.onPinnedOrderChange).toHaveBeenCalledWith(["bravo", "alpha"]);
+});
+
+it("offers A–Z or custom order for pinned plugins under Your plugins", async () => {
+  const props = setup([entry("alpha", { pinned: true })]);
+  const { user, popup } = await openPopover();
+  expect(within(popup).getByText("Your plugins")).toBeInTheDocument();
+  await user.click(
+    within(popup).getByRole("combobox", { name: "Sort pinned plugins" }),
+  );
+  await user.click(await screen.findByRole("option", { name: "A–Z" }));
+  expect(props.onSortChange).toHaveBeenCalledWith("alphabetical");
 });

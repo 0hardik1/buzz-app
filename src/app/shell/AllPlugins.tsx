@@ -23,6 +23,7 @@ import {
   CaretRightIcon,
   PuzzleIcon,
 } from "../../shared/design-system/icons/index";
+import { InlineHeader } from "../../shared/design-system/ui/Header";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
   NavigationCard,
@@ -34,6 +35,7 @@ import {
   PopoverTrigger,
 } from "../../shared/design-system/ui/Popover";
 import { SearchField } from "../../shared/design-system/ui/SearchField";
+import { Select } from "../../shared/design-system/ui/Select";
 import type { AllPluginsEntry, AllPluginsProps } from "./all-plugins";
 import styles from "./AllPlugins.module.css";
 
@@ -100,6 +102,8 @@ export function AllPlugins({
   onOpen,
   onPinnedChange,
   onPinnedOrderChange,
+  sort,
+  onSortChange,
 }: AllPluginsProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -187,6 +191,32 @@ export function AllPlugins({
         }
       >
         <div className={styles.frame}>
+          <div className={styles.header}>
+            <InlineHeader
+              title="Your plugins"
+              actions={
+                <Select
+                  variant="compact"
+                  size="xs"
+                  align="end"
+                  label="Sort pinned plugins"
+                  value={sort}
+                  groups={[
+                    {
+                      label: "Sort pinned plugins",
+                      options: [
+                        { value: "alphabetical", label: "A–Z" },
+                        { value: "custom", label: "Custom" },
+                      ],
+                    },
+                  ]}
+                  onValueChange={(value) =>
+                    onSortChange(value === "custom" ? "custom" : "alphabetical")
+                  }
+                />
+              }
+            />
+          </div>
           {searchable && (
             <div className={styles.search}>
               <SearchField
