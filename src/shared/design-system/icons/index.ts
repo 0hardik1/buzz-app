@@ -315,8 +315,6 @@ import TablerPlugIcon from "@tabler/icons-react/dist/esm/icons/IconPlug.mjs";
 export const PlugIcon = defineIcon("tabler", TablerPlugIcon);
 import TablerGripVerticalIcon from "@tabler/icons-react/dist/esm/icons/IconGripVertical.mjs";
 export const GripVerticalIcon = defineIcon("tabler", TablerGripVerticalIcon);
-import TablerLayoutGridIcon from "@tabler/icons-react/dist/esm/icons/IconLayoutGrid.mjs";
-export const LayoutGridIcon = defineIcon("tabler", TablerLayoutGridIcon);
 import TablerPinIcon from "@tabler/icons-react/dist/esm/icons/IconPin.mjs";
 export const PinIcon = defineIcon("tabler", TablerPinIcon);
 import TablerPinFilledIcon from "@tabler/icons-react/dist/esm/icons/IconPinFilled.mjs";

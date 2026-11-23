@@ -19,9 +19,9 @@ import {
 import { createPortal } from "react-dom";
 import {
   GripVerticalIcon,
-  LayoutGridIcon,
   PinFilledIcon,
   PinIcon,
+  SquaresFourIcon,
 } from "../../shared/design-system/icons/index";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
@@ -154,7 +154,7 @@ export function AllPlugins({
             variant="row"
             icon={
               <span className="shell-page-icon">
-                <LayoutGridIcon size={16} strokeWidth={2.5} />
+                <SquaresFourIcon size={16} strokeWidth={2.5} />
               </span>
             }
           />
