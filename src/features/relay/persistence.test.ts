@@ -120,3 +120,40 @@ it("swallows a follow-up request thrown by a browser-initiated abort", async () 
   expect(tx.abort).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it("measures only this viewer and relay's saved records", async () => {
+  const answer = (result: unknown) => ({
+    result,
+    set onsuccess(handler: () => void) {
+      handler();
+    },
+  });
+  const startup: Record<string, { bytes: number }> = {
+    "viewer:relay": { bytes: 5 },
+    "viewer:relay:profiles": { bytes: 7 },
+    "viewer:other": { bytes: 100 },
+  };
+  const store = {
+    get: (key: string) => answer(startup[key]),
+    getAll: () =>
+      answer([
+        { scope: "viewer:relay", head: { bytes: 11 } },
+        { scope: "viewer:other", head: { bytes: 13 } },
+      ]),
+  };
+  const tx = {
+    objectStore: () => store,
+    set oncomplete(complete: () => void) {
+      queueMicrotask(complete);
+    },
+  };
+  const request = {
+    onsuccess: () => {},
+    result: { transaction: () => tx, close: vi.fn() },
+  };
+  vi.stubGlobal("indexedDB", { open: () => request });
+  vi.stubGlobal("IDBKeyRange", { lowerBound: () => ({}) });
+  const usage = createHeadPersistence("viewer", "relay").usage?.();
+  request.onsuccess();
+  await expect(usage).resolves.toBe(23);
+});
