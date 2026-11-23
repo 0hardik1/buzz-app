@@ -233,6 +233,18 @@ Choose **Always Allow**. Prompts come back after the app is replaced by a
 differently signed build. On Linux, unlock a secret service such as GNOME
 Keyring.
 
+### Notifications aren't appearing (macOS)
+
+Buzz shows the system permission prompt the first time you are in the app with
+a community and the Buzz window is in front. It asks this way only once on a
+Mac. Alerts that arrive while the prompt is up appear if you allow within a
+minute. If that prompt is declined, or left unanswered for a minute, those
+alerts are dropped, macOS reports notifications as off and Buzz cannot ask
+again: turn them on in macOS **System Settings → Notifications → Buzz**. In
+Buzz, **Settings → Notifications → Allow notifications** works only while
+macOS has never been asked. Windows and Linux have no permission prompt, and a
+browser asks only from Settings.
+
 ### Huddle voice isn't working
 
 Check microphone permission (macOS: **System Settings → Privacy & Security →
