@@ -42,6 +42,7 @@ import type { RelaySession } from "../relay/session";
 import { NewMessage } from "./NewMessage";
 import { createAgentChoices } from "../agents/choices";
 import type { LocalAgentsSnapshot } from "../agents/local";
+import { writeView } from "../../shared/view-state";
 
 composerDOMFixture();
 
@@ -495,7 +496,7 @@ it("starts a conversation named from the first message", async () => {
     undefined,
     false,
     undefined,
-    { solo: false },
+    { solo: false, visibility: "private" },
   );
   const id = t.channelWrites.start.mock.calls[0]?.[0];
   expect(t.messages.send).toHaveBeenCalledOnce();
@@ -503,6 +504,22 @@ it("starts a conversation named from the first message", async () => {
   expect(t.messages.send.mock.calls[0]?.[1]).toBe("Plan the offsite");
   expect(t.onStarted).toHaveBeenCalledWith(id, "d".repeat(64));
   expect(t.directMessages.open).not.toHaveBeenCalled();
+});
+
+it("starts a conversation public when that's the default", async () => {
+  writeView(scope, "solo:default-visibility", "public");
+  const t = setup();
+  const [one] = people;
+  assert(one);
+  t.mount();
+  await pick(t, one.name);
+  await t.user.type(composer(), "Open to all");
+  await t.user.click(send());
+  await waitFor(() => expect(t.onStarted).toHaveBeenCalledOnce());
+  expect(t.channelWrites.start.mock.calls[0]?.[6]).toEqual({
+    solo: false,
+    visibility: "public",
+  });
 });
 
 it("names the conversation by the typed title instead of the message", async () => {
@@ -524,7 +541,7 @@ it("names the conversation by the typed title instead of the message", async () 
     undefined,
     false,
     undefined,
-    { solo: false },
+    { solo: false, visibility: "private" },
   );
   expect(t.messages.send.mock.calls[0]?.[1]).toBe("First thoughts");
   expect(t.directMessages.open).not.toHaveBeenCalled();
@@ -589,7 +606,7 @@ it("finds a hosted agent by its owned name and sends without local custody", asy
     undefined,
     false,
     undefined,
-    { solo: false },
+    { solo: false, visibility: "private" },
   );
   expect(t.messages.send).toHaveBeenCalledOnce();
 });
@@ -1331,7 +1348,7 @@ it("addresses the draft to the person it was opened from, starting a conversatio
     undefined,
     false,
     undefined,
-    { solo: false },
+    { solo: false, visibility: "private" },
   );
   expect(t.directMessages.open).not.toHaveBeenCalled();
   expect(t.messages.send).toHaveBeenCalledOnce();
@@ -1696,7 +1713,7 @@ it("holds Send while the To field has text that is not a recipient", async () =>
     undefined,
     false,
     undefined,
-    { solo: false },
+    { solo: false, visibility: "private" },
   );
   expect(t.directMessages.open).not.toHaveBeenCalled();
 });
@@ -2539,7 +2556,7 @@ it("labels people by verified identity, never an editable handle, and starts wit
     undefined,
     false,
     undefined,
-    { solo: false },
+    { solo: false, visibility: "private" },
   );
 });
 

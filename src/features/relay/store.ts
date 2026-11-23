@@ -3828,6 +3828,7 @@ export function createChannelStore(
         ...(channel.ttlSeconds !== undefined
           ? { ttlSeconds: channel.ttlSeconds }
           : {}),
+        ...(channel.visibility ? { visibility: channel.visibility } : {}),
       });
       setList({ ...list, channels: discovery.channels() }, true);
     },

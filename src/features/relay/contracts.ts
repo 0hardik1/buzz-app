@@ -429,6 +429,7 @@ export interface ChannelQueries {
       ttlSeconds?: number | undefined;
       /** A conversation with people lists as a stream; otherwise Solo. */
       channelType?: "solo" | "stream" | undefined;
+      visibility?: "private" | "public" | undefined;
     }>,
   ): void;
   /** Drops a started chat the relay did not confirm. */
