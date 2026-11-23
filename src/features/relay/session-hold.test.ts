@@ -331,18 +331,6 @@ it("passes snapshotRead priority to the reader, so a background scan queues behi
   await Promise.all([next, foreground]);
 });
 
-it("reports the relay's buzz-window-newer capability", () => {
-  const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
-  for (const windowNewer of [true, undefined]) {
-    const owner = createRelaySession({
-      ...wire.transport,
-      ...(windowNewer ? { windowNewer } : {}),
-    });
-    owners.push(owner);
-    expect(owner.session.windowNewer).toBe(windowNewer === true);
-  }
-});
-
 it("deletes a held-only sent-to-channel copy when deleting its original reply", async () => {
   const published: RelayEvent[] = [];
   const { session } = setup(async (event) => {

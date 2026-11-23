@@ -28,27 +28,16 @@ export function threadAuthority(origin: string) {
     .replace(/\.$/, "");
 }
 
-const requestCursor = (filter: ReadFilter) =>
-  filter.direction === "newer"
-    ? filter.after === undefined
-      ? undefined
-      : { created_at: filter.after, id: filter.after_id ?? "" }
-    : filter.until === undefined
-      ? undefined
-      : { created_at: filter.until, id: filter.before_id ?? "" };
-
-/** NIP-CW thread-mode v1, identical to buzz-core::thread_window::Request::binding.
- * Default options keep the original array, so older bindings are unchanged. */
+/** NIP-CW thread-mode v1, identical to buzz-core::thread_window::Request::binding. */
 export async function threadBinding(
   filter: ReadFilter,
   origin: string,
   viewer: string,
 ) {
-  const cursor = requestCursor(filter);
   const canonical = JSON.stringify([
     "tw",
     1,
-    filter.direction ?? "older",
+    "older",
     threadAuthority(origin),
     viewer,
     filter["#h"]?.[0],
@@ -56,7 +45,7 @@ export async function threadBinding(
     filter.limit,
     filter.depth_limit ?? 100,
     [...new Set(filter.kinds)].sort((a, b) => a - b),
-    cursor ? [cursor.created_at, cursor.id] : null,
+    filter.until === undefined ? null : [filter.until, filter.before_id],
     filter.include_aux ?? false,
   ]);
   const digest = await crypto.subtle.digest(
@@ -71,25 +60,14 @@ export async function threadBinding(
   );
 }
 
-/** Relay window order, oldest first: `created_at ASC, id DESC`. Older pages
- * run its exact reverse. */
-export function relayOrder(a: ThreadCursor, b: ThreadCursor) {
-  return (
-    a.created_at - b.created_at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
-  );
-}
-
-export function threadBounds(
-  event: RelayEvent,
-  direction: "older" | "newer" = "older",
-): {
+export function threadBounds(event: RelayEvent): {
   hasMore: boolean;
   cursor: ThreadCursor | null;
 } {
   const body = objectBody(event.content);
   if (
     body?.version !== 1 ||
-    body.direction !== direction ||
+    body.direction !== "older" ||
     typeof body.has_more !== "boolean"
   )
     throw invalid();
@@ -167,10 +145,14 @@ export async function verifyThreadWindows(
       )
     )
       throw invalid();
-    const newer = filter.direction === "newer";
-    const { cursor } = threadBounds(bound, newer ? "newer" : "older");
-    const from = requestCursor(filter);
-    if (cursor && from && relayOrder(cursor, from) * (newer ? 1 : -1) <= 0)
+    const { cursor } = threadBounds(bound);
+    if (
+      cursor &&
+      filter.until !== undefined &&
+      (cursor.created_at > filter.until ||
+        (cursor.created_at === filter.until &&
+          cursor.id <= (filter.before_id ?? "")))
+    )
       throw invalid();
   }
 }

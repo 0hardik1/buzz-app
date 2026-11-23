@@ -620,6 +620,26 @@ it("hides Jump to latest and skips newer-page loads for a detached window while 
   expect(h.newerLoads).toEqual(["c"]);
 });
 
+it("does not follow new pages after an end withdraw into a detached window", () => {
+  const h = mount({ window: { hasNewer: true } });
+  frame();
+  h.present({ ids: [p0.id, p1.id, p2.id] });
+  frame();
+  viewport.scrollToIndex.mockClear();
+  h.withdraw();
+  frame();
+  expect(viewport.scrollToIndex).toHaveBeenCalledTimes(1);
+  expect(placed()).toEqual([5, { align: "end" }]);
+  expect(scroller()).toHaveAttribute("data-jump-visible", "true");
+  viewport.scrollToIndex.mockClear();
+  h.setWindow({
+    rows: [...h.rowsOf(hostEvents), ...h.rowsOf([p0])],
+    hasNewer: true,
+  });
+  frame();
+  expect(viewport.scrollToIndex).not.toHaveBeenCalled();
+});
+
 it("holds the anchor row where it was when a presentation shows it", () => {
   const h = mount();
   frame();

@@ -18,10 +18,7 @@ import type {
 } from "../../../src/features/relay/live";
 import type { ReadTransport } from "../../../src/features/relay/transport";
 import { threadReference } from "../../../src/features/relay/thread-reference";
-import {
-  relayOrder,
-  threadBinding,
-} from "../../../src/features/relay/thread-window";
+import { threadBinding } from "../../../src/features/relay/thread-window";
 import {
   keypair,
   roster,
@@ -95,7 +92,8 @@ const auxKinds = new Set([REACTION, EDIT, DELETION, 9005]);
 const WINDOW_ROWS = 8192;
 const targetsOf = (event: EventData) =>
   event.tags.flatMap(([name, id]) => (name === "e" && id ? [id] : []));
-const ascending = (a: EventData, b: EventData) => relayOrder(a, b);
+const ascending = (a: EventData, b: EventData) =>
+  a.created_at - b.created_at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 
 /** The world a relay serves: proven events, indexed. */
 export function createWorld(events: readonly RelayEvent[] = []) {
@@ -148,16 +146,6 @@ export function createWorld(events: readonly RelayEvent[] = []) {
 export type World = ReturnType<typeof createWorld>;
 
 function after(rows: readonly RelayEvent[], filter: ReadFilter) {
-  if (filter.direction === "newer") {
-    const at = filter.after;
-    return at === undefined
-      ? rows
-      : rows.filter(
-          (e) =>
-            e.created_at > at ||
-            (e.created_at === at && e.id < (filter.after_id ?? "")),
-        );
-  }
   const until = filter.until;
   const newestFirst = [...rows].reverse();
   return until === undefined
@@ -223,7 +211,6 @@ export function createRelay(options: {
       const shown = rows.slice(0, page);
       const more = rows.length > shown.length;
       const last = shown.at(-1);
-      const newer = filter.direction === "newer";
       const binding = await threadBinding(filter, ORIGIN, viewer.pubkey);
       return [
         ...shown,
@@ -238,7 +225,7 @@ export function createRelay(options: {
           ],
           body: {
             version: 1,
-            direction: newer ? "newer" : "older",
+            direction: "older",
             has_more: more,
             next_cursor:
               more && last
@@ -253,13 +240,8 @@ export function createRelay(options: {
       const shown = rows.slice(0, page);
       const more = rows.length > shown.length;
       const last = shown.at(-1);
-      const newer = filter.direction === "newer";
-      const lane = newer ? "newer:" : "";
-      const cursor = newer
-        ? filter.after === undefined
-          ? "head"
-          : `${filter.after}:${filter.after_id}`
-        : filter.until === undefined
+      const cursor =
+        filter.until === undefined
           ? "head"
           : `${filter.until}:${filter.before_id}`;
       return [
@@ -268,7 +250,7 @@ export function createRelay(options: {
         ...(await bounds(39006, filter, {
           tags: [
             ["h", CHANNEL],
-            ["d", `${CHANNEL}:${lane}${cursor}`],
+            ["d", `${CHANNEL}:${cursor}`],
           ],
           body: {
             has_more: more,
@@ -276,7 +258,6 @@ export function createRelay(options: {
               more && last
                 ? { created_at: last.created_at, id: last.id }
                 : null,
-            ...(newer ? { direction: "newer" } : {}),
           },
         })),
       ];
@@ -346,7 +327,6 @@ export function createRelay(options: {
 /** A session on a fixture relay, with a writer whose publication the test releases. */
 export function openSession(options: {
   world: World;
-  windowNewer?: boolean;
   viewer?: Key;
   relay?: Key;
   hold?: (filters: readonly ReadFilter[]) => Promise<void> | undefined;
@@ -367,7 +347,6 @@ export function openSession(options: {
   const owner = createRelaySession(
     {
       ...fixture.transport,
-      ...(options.windowNewer === false ? {} : { windowNewer: true as const }),
       writer: {
         sign: async (template) => signed(viewer, template),
         publish: (event) =>

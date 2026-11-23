@@ -1479,13 +1479,15 @@ function Timeline({
           ? 0
           : rows.findIndex((row) => row.id === at.id);
     const y = at === "start" ? size.edgeHeight : at === "end" ? 0 : at.top;
+    const followEnd =
+      at === "end" && !(owner === undefined && detached.current);
     intent.current++;
     savedPosition.current =
       at === "end"
-        ? { bottom: true }
+        ? { bottom: followEnd }
         : { bottom: false, anchor: { id: rows[index]?.id ?? "", y } };
     pendingRestore.current = at === "end" ? undefined : intent.current;
-    follow.current = at === "end";
+    follow.current = followEnd;
     settled.current = false;
     restoredAnchor.current = undefined;
     measuredPosition.current = null;

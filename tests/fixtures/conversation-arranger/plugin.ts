@@ -13,7 +13,6 @@ export const inject = ["react", "conversation"];
 
 type Sort = "top" | "oldest";
 type Cursor = { created_at: number; id: string };
-type Lane = "older" | "newer";
 type Hold = ReturnType<RelaySession["retain"]>;
 
 const PAGE = 200;
@@ -111,7 +110,6 @@ function createArranger(initial: ComposerAccessoryProps) {
   let hold: Hold | undefined;
   let closureRefused: string | undefined;
   let scanned = false;
-  let forward: Cursor | null | undefined;
   let walkStart: number | undefined;
   let shown = 0;
   let taken = 0;
@@ -166,7 +164,6 @@ function createArranger(initial: ComposerAccessoryProps) {
   function forget() {
     events.clear();
     scanned = false;
-    forward = undefined;
     walkStart = undefined;
     lost = false;
     hold?.dispose();
@@ -240,16 +237,12 @@ function createArranger(initial: ComposerAccessoryProps) {
     await replyAux(fresh, signal);
   }
 
-  async function pages(
-    lanes: readonly (readonly [Lane, Cursor | undefined])[],
-    signal: AbortSignal,
-  ) {
+  async function page(cursor: Cursor | undefined, signal: AbortSignal) {
     const root = rootId();
     let closure = !root || closureRefused !== root;
-    const windows = () =>
-      lanes.map(([lane, cursor]) => {
-        const newer = lane === "newer";
-        return {
+    const window = () =>
+      [
+        {
           "#h": [props.channelId],
           kinds: [9],
           limit: PAGE,
@@ -257,62 +250,54 @@ function createArranger(initial: ComposerAccessoryProps) {
           ...(root
             ? { thread_window: true, "#e": [root], depth_limit: 100 }
             : { top_level: true }),
-          ...(newer ? { direction: "newer" as const } : {}),
-          ...(cursor
-            ? newer
-              ? { after: cursor.created_at, after_id: cursor.id }
-              : { until: cursor.created_at, before_id: cursor.id }
-            : {}),
-        };
-      });
+          ...(cursor ? { until: cursor.created_at, before_id: cursor.id } : {}),
+        },
+      ] satisfies ReadFilter[];
     let answer: readonly RelayEvent[];
     const requested = Math.floor(Date.now() / 1000);
     try {
-      answer = await read(windows(), signal);
+      answer = await read(window(), signal);
     } catch (error) {
       if (!root || !closure || (error as { status?: unknown }).status !== 503)
         throw error;
       closure = false;
-      answer = await read(windows(), signal);
+      answer = await read(window(), signal);
     }
     const stamped = answer.filter((event) => event.kind === kindOfBounds());
-    if (stamped.length !== lanes.length) throw invalidBounds();
+    if (stamped.length !== 1) throw invalidBounds();
     const threadBoundsVerifiedByHost = Boolean(root);
-    const bounds = lanes.map(([lane, cursor]) => {
-      const at = cursor ? `${cursor.created_at}:${cursor.id}` : "head";
-      const d = `${props.channelId}:${lane === "newer" ? "newer:" : ""}${at}`;
-      const matching = stamped.flatMap((event) => {
-        if (
-          event.pubkey !== props.session.relayAuthor ||
-          (!threadBoundsVerifiedByHost &&
-            !exactTags(event, [
-              ["d", d],
-              ["h", props.channelId],
-            ]))
-        )
-          return [];
-        const body = parsed(event.content);
-        return (body.direction ?? "older") === lane ? [{ event, body }] : [];
-      });
-      const [bound] = matching;
+    const at = cursor ? `${cursor.created_at}:${cursor.id}` : "head";
+    const d = `${props.channelId}:${at}`;
+    const matching = stamped.flatMap((event) => {
       if (
-        matching.length !== 1 ||
-        !bound ||
-        typeof bound.body.has_more !== "boolean"
+        event.pubkey !== props.session.relayAuthor ||
+        (!threadBoundsVerifiedByHost &&
+          !exactTags(event, [
+            ["d", d],
+            ["h", props.channelId],
+          ]))
       )
-        throw invalidBounds();
-      const to = cursorOrNull(bound.body.next_cursor);
-      if (
-        bound.body.has_more !== (to !== null) ||
-        (to && cursor && inOrder(to, cursor) * (lane === "newer" ? 1 : -1) <= 0)
-      )
-        throw invalidBounds();
-      return { event: bound.event, to };
+        return [];
+      const body = parsed(event.content);
+      return (body.direction ?? "older") === "older" ? [{ event, body }] : [];
     });
+    const [bound] = matching;
+    if (
+      matching.length !== 1 ||
+      !bound ||
+      typeof bound.body.has_more !== "boolean"
+    )
+      throw invalidBounds();
+    const to = cursorOrNull(bound.body.next_cursor);
+    if (
+      bound.body.has_more !== (to !== null) ||
+      (to && cursor && inOrder(to, cursor) >= 0)
+    )
+      throw invalidBounds();
     walkStart = Math.min(
       walkStart ?? requested,
       requested,
-      ...bounds.map(({ event }) => event.created_at),
+      bound.event.created_at,
     );
     keep(answer);
     if (!closure) {
@@ -324,7 +309,7 @@ function createArranger(initial: ComposerAccessoryProps) {
       );
       closureRefused = root;
     }
-    return bounds.map(({ to }) => to);
+    return to;
   }
   const rootRead = (signal: AbortSignal) => {
     const root = rootId();
@@ -337,28 +322,10 @@ function createArranger(initial: ComposerAccessoryProps) {
 
   async function scanAll(signal: AbortSignal) {
     await rootRead(signal);
-    if (rootId() && props.session.windowNewer === true) {
-      let older: Cursor | null | undefined;
-      let newer: Cursor | null | undefined;
-      for (;;) {
-        const [o, n] = await pages(
-          [
-            ["older", older ?? undefined],
-            ["newer", newer ?? undefined],
-          ],
-          signal,
-        );
-        older = o;
-        newer = n;
-        emit();
-        if (!o || !n || inOrder(n, o) >= 0) break;
-      }
-    } else {
-      let cursor: Cursor | null | undefined;
-      while (cursor !== null) {
-        [cursor] = await pages([["older", cursor ?? undefined]], signal);
-        emit();
-      }
+    let cursor: Cursor | null | undefined;
+    while (cursor !== null) {
+      cursor = await page(cursor, signal);
+      emit();
     }
     await overlap(signal);
     scanned = true;
@@ -367,29 +334,8 @@ function createArranger(initial: ComposerAccessoryProps) {
   const countRows = () =>
     [...events.values()].filter((e) => e.kind === 9 && e.id !== rootId())
       .length;
-  const windowEnd = () => offset() + size;
-  const reached = (row: ChannelMessage) =>
-    scanned ||
-    forward === null ||
-    (forward !== undefined && inOrder(cursorOf(row), forward) <= 0);
-  const readRows = () =>
-    rows().filter((row) => !pending(row) && reached(row)).length;
-  async function scanForward(signal: AbortSignal) {
-    await rootRead(signal);
-    while (forward !== null && readRows() < windowEnd()) {
-      [forward] = await pages([["newer", forward ?? undefined]], signal);
-      emit();
-    }
-    if (forward !== null) return;
-    await overlap(signal);
-    scanned = true;
-  }
-  const reachesAll = () =>
-    sort === "top" || filter !== "" || props.session.windowNewer !== true;
-  const enough = () =>
-    scanned || (!reachesAll() && forward !== null && readRows() >= windowEnd());
-  const load = (signal: AbortSignal) =>
-    reachesAll() ? scanAll(signal) : scanForward(signal);
+  const enough = () => scanned;
+  const load = (signal: AbortSignal) => scanAll(signal);
 
   function arrange(place?: ConversationPresentation["place"]) {
     const { present, limits } = props;
@@ -401,7 +347,7 @@ function createArranger(initial: ComposerAccessoryProps) {
       ? folded.filter((row) => row.content.toLowerCase().includes(needle))
       : folded;
     const mine = matching.filter(pending);
-    const rest = matching.filter((row) => !pending(row) && reached(row));
+    const rest = matching.filter((row) => !pending(row));
     const scores = new Map(
       sort === "top" ? rest.map((row) => [row.id, score(row)]) : [],
     );
@@ -688,8 +634,7 @@ function createArranger(initial: ComposerAccessoryProps) {
       };
     },
     snapshot() {
-      const more = !!sort && scanned === false && forward !== null;
-      const next = offset() + taken < total || more;
+      const next = offset() + taken < total;
       cached ??= Object.freeze({
         phase: phase.state,
         sort,

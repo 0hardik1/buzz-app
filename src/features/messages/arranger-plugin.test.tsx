@@ -159,7 +159,6 @@ const reactionTo = async (
 type Mount = {
   fixture: Fixture;
   rootId?: string | undefined;
-  windowNewer?: boolean;
   probe?: boolean;
   windowRows?: number;
   namedOnly?: boolean;
@@ -169,7 +168,6 @@ type Mount = {
 async function mount({
   fixture,
   rootId,
-  windowNewer,
   probe,
   windowRows,
   namedOnly,
@@ -179,7 +177,6 @@ async function mount({
   const world = createWorld(fixture.events);
   const relay = openSession({
     world,
-    ...(windowNewer === undefined ? {} : { windowNewer }),
     ...(windowRows === undefined ? {} : { windowRows }),
     ...(namedOnly === undefined ? {} : { namedOnly }),
     ...(hold === undefined ? {} : { hold }),
@@ -368,17 +365,14 @@ it("ranks a 2,000-reply thread by Top from background reads, leaving the host's 
   await ready(h);
 
   const reads = h.scanReads(before);
-  expect(reads).toHaveLength(8);
+  expect(reads).toHaveLength(13);
   expect(reads.every(({ priority }) => priority === "background")).toBe(true);
   const windows = reads
     .flatMap(({ filters }) => filters)
     .filter((filter) => filter.thread_window);
-  expect(windows).toHaveLength(12);
-  expect(windows.filter((filter) => filter.direction === "newer")).toHaveLength(
-    6,
-  );
+  expect(windows).toHaveLength(11);
   const pages = h.answers.filter((page) => page.some((e) => e.kind === 39007));
-  expect(pages).toHaveLength(6);
+  expect(pages).toHaveLength(11);
   expect(h.answers.flat().every(hasEventProof)).toBe(true);
 
   expect(h.shown()).toEqual(idsOf(want.top.slice(0, 200)));
@@ -434,7 +428,7 @@ it("reads a heavy root's replies' reactions by id once the relay refuses its pag
   const h = await mount({
     fixture: heavy,
     rootId: root.id,
-    windowRows: 1200,
+    windowRows: 600,
     namedOnly: true,
     hold: (filters) =>
       !release &&
@@ -489,12 +483,9 @@ it("reads a heavy root's replies' reactions by id once the relay refuses its pag
   const windows = filters.filter((filter) => filter.thread_window);
   expect(windows.map((filter) => filter.include_aux)).toEqual([
     true,
-    true,
-    ...windows.slice(2).map(() => false),
+    ...windows.slice(1).map(() => false),
   ]);
-  expect(windows.slice(0, 2)).toEqual(
-    windows.slice(2, 4).map((filter) => ({ ...filter, include_aux: true })),
-  );
+  expect(windows[0]).toEqual({ ...windows[1], include_aux: true });
   const pages = h.answers.filter((answer) =>
     answer.some((e) => e.kind === 39007),
   );
@@ -649,7 +640,7 @@ it("filters every row by its edited text, in any case, whatever the scan had rea
 
   h.click("Oldest");
   await ready(h);
-  expect(h.status()).toMatch(/\+$/);
+  expect(h.status()).toBe(replies(1, 200, want.rows.length));
   const gizmo = want.matching(want.oldest, "gizmo");
   expect(gizmo.length).toBeGreaterThan(50);
   expect(gizmo.length).toBeLessThan(200);
@@ -682,7 +673,7 @@ it("filters every row by its edited text, in any case, whatever the scan had rea
   await statusIs(h, replies(1, 200, want.rows.length));
 });
 
-it("reaches the last reply of an Oldest list by Next, reading forward as it goes", async () => {
+it("reaches the last reply of an Oldest list by Next from the scanned replies", async () => {
   const { events, root } = thread;
   const want = oracle(events, root.id);
   const total = want.rows.length;
@@ -690,20 +681,18 @@ it("reaches the last reply of an Oldest list by Next, reading forward as it goes
   h.click("Oldest");
   await ready(h);
   h.click("More");
-  await waitFor(() => expect(h.shown()).toHaveLength(460));
-  expect(h.status()).toMatch(/\+$/);
+  await statusIs(h, replies(1, 460, total));
+  const afterScan = h.reads.length;
   for (const from of [461, 921, 1381]) {
     h.click("Next");
-    await statusIs(
-      h,
-      new RegExp(`^Replies ${count(from)}–[\\d,]+ of [\\d,]+\\+?$`),
-    );
+    await statusIs(h, replies(from, from + 459, total));
     expect(h.shown()).toEqual(idsOf(want.oldest.slice(from - 1, from + 459)));
   }
   h.click("Next");
   await statusIs(h, replies(1841, total, total));
   expect(h.shown()).toEqual(idsOf(want.oldest.slice(1840)));
   expect(h.shown().at(-1)).toBe(want.oldest.at(-1)?.id);
+  expect(h.reads).toHaveLength(afterScan);
   expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
 });
 
@@ -774,7 +763,7 @@ it("keeps the viewer's own reply in view from sending to seen, then ranks it as 
   expect(h.shown()).toHaveLength(200);
 });
 
-it("paints Oldest first from the reads its first window needs and pages forward from where it stopped", async () => {
+it("sorts a 2,000-reply thread Oldest first from older thread windows and grows the window on More", async () => {
   const { events, root } = thread;
   const want = oracle(events, root.id);
   const h = await mount({ fixture: thread, rootId: root.id });
@@ -782,42 +771,22 @@ it("paints Oldest first from the reads its first window needs and pages forward 
   h.click("Oldest");
   await ready(h);
   const reads = h.scanReads(before);
-  expect(reads).toHaveLength(3);
-  const [page] = reads[1]?.filters ?? [];
-  expect(page).toMatchObject({
-    thread_window: true,
-    direction: "newer",
-  });
-  expect(page?.after).toBeUndefined();
+  expect(reads).toHaveLength(12);
+  const [firstPage] = reads[1]?.filters ?? [];
+  expect(firstPage).toMatchObject({ thread_window: true, limit: 200 });
+  expect(firstPage?.until).toBeUndefined();
+  const [secondPage] = reads[2]?.filters ?? [];
+  expect(secondPage?.until).toBeDefined();
+  expect(secondPage?.before_id).toBeDefined();
   expect(reads.every(({ priority }) => priority === "background")).toBe(true);
   expect(h.shown()).toEqual(idsOf(want.oldest.slice(0, 200)));
   expect(h.arrangement.snapshot()?.complete).toBe(false);
 
+  const afterScan = h.reads.length;
   h.click("More");
   await waitFor(() => expect(h.shown()).toHaveLength(460));
   expect(h.shown()).toEqual(idsOf(want.oldest.slice(0, 460)));
-  const next = h.scanReads(before).at(-1)?.filters[0];
-  expect(next).toMatchObject({ direction: "newer" });
-  expect(next?.after).toBeDefined();
-  expect(next?.after_id).toBeDefined();
-});
-
-it("reads a thread through older pages alone when the relay has no newer windows", async () => {
-  const { events, root } = thread;
-  const want = oracle(events, root.id);
-  const h = await mount({
-    fixture: thread,
-    rootId: root.id,
-    windowNewer: false,
-  });
-  const before = h.reads.length;
-  h.click("Top");
-  await ready(h);
-  const reads = h.scanReads(before);
-  expect(reads).toHaveLength(12);
-  const filters = reads.flatMap(({ filters }) => filters);
-  expect(filters.some((f) => f.direction === "newer")).toBe(false);
-  expect(h.shown()).toEqual(idsOf(want.top.slice(0, 200)));
+  expect(h.reads).toHaveLength(afterScan);
 });
 
 it("keeps the reader's place when the filter changes, and starts a new sort at the top", async () => {
@@ -1115,7 +1084,7 @@ async function hostChannel(h: Harness) {
   expect(h.unread().observedCount).toBeGreaterThan(0);
 }
 
-it("paints a channel from the start after one read", async () => {
+it("sorts a 5,000-row channel Oldest first from verified older windows", async () => {
   const want = oracle(channel.events);
   const h = await mount({ fixture: channel });
   await hostChannel(h);
@@ -1123,12 +1092,10 @@ it("paints a channel from the start after one read", async () => {
   h.click("Oldest");
   await ready(h);
   const reads = h.scanReads(before);
-  expect(reads).toHaveLength(1);
-  expect(reads[0]?.priority).toBe("background");
-  expect(reads[0]?.filters).toMatchObject([
-    { top_level: true, direction: "newer", limit: 200 },
-  ]);
-  expect(reads[0]?.filters[0]?.after).toBeUndefined();
+  expect(reads).toHaveLength(26);
+  expect(reads.every(({ priority }) => priority === "background")).toBe(true);
+  expect(reads[0]?.filters).toMatchObject([{ top_level: true, limit: 200 }]);
+  expect(reads[0]?.filters[0]?.until).toBeUndefined();
   expect(h.shown()).toEqual(idsOf(want.oldest.slice(0, 200)));
   expect(h.arrangement.snapshot()?.complete).toBe(false);
 });

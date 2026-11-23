@@ -361,9 +361,6 @@ async function relayAuthority(fetch, relay) {
     searchSort:
       Array.isArray(nip11.supported_extensions) &&
       nip11.supported_extensions.includes("buzz-search-sort"),
-    windowNewer:
-      Array.isArray(nip11.supported_extensions) &&
-      nip11.supported_extensions.includes("buzz-window-newer"),
     // NIP-PM is not advertised: a relay without it refuses the commands. Its
     // lists are verified by `self`, so without it no pin can be shown.
     pins: nip11.self === author,
